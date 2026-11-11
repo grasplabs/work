@@ -61,6 +61,8 @@ export interface AccountState {
   fullBuckets: Set<string>;
   /** Each bucket's lifecycle rules, by name, as the last PUT set them. */
   lifecycles: Map<string, Json>;
+  /** Each bucket's objects put through the API, by bucket name, then key. */
+  objects: Map<string, Map<string, Uint8Array<ArrayBuffer>>>;
   /**
    * The jurisdiction R2 reports for every bucket, whatever it's in: a test
    * of an API that answers other than asked.

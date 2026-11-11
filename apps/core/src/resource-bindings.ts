@@ -88,12 +88,12 @@ import type { PlatformAction } from "./resource-platform.ts";
 //   sealed it (`declarationHash`), and resolves only for a release whose
 //   declaration hashes the same. A later version that widens it (another
 //   contract, more actions or collections, another output) gets
-//   `resource.unavailable` until an admin approves again.
+//   `permission.unavailable` until an admin approves again.
 // - A provider's contract drifts: a row pins the contract its target served
 //   at approval (`contractId`, `fingerprint`), and each request asks the
 //   adapter what the target serves now; any difference, or a target the
 //   App may no longer bind (a permission revoked, a model the deployment
-//   no longer allows), refuses the request (`resource.unavailable`).
+//   no longer allows), refuses the request (`permission.unavailable`).
 // - Revocation between calls: nothing is resolved once per invocation.
 //   Each resource request reads the row and asks its adapter again, and
 //   each adapter goes through the live grant (the permission check, the
@@ -225,11 +225,11 @@ const bindingOf = (row: Row): ResourceBinding | undefined => {
     : undefined;
 };
 
-/** `row` as the API returns it, or `resource.binding_not_found` when it can't be read. */
+/** `row` as the API returns it, or `permission.binding_not_found` when it can't be read. */
 const toBinding = (row: Row): ResourceBinding => {
   const binding = bindingOf(row);
   if (binding === undefined) {
-    throw resourceBindingErrors.create("resource.binding_not_found");
+    throw resourceBindingErrors.create("permission.binding_not_found");
   }
   return binding;
 };
@@ -305,7 +305,7 @@ const requireModelAnswers = (
 ): void => {
   const maxTokens = longestAsk(declaration);
   if (!modelAnswers(model, maxTokens)) {
-    throw resourceBindingErrors.create("resource.model_too_small", {
+    throw resourceBindingErrors.create("permission.model_too_small", {
       maxTokens,
       usableTokens: usableAnswerTokens(model) ?? 0,
     });
@@ -326,7 +326,7 @@ export const approveResourceBinding = async (
 ): Promise<ResourceBinding> => {
   requireMemberAdmin(by);
   const { app, alias, target, reviewed } = resourceBindingErrors.parse(
-    "resource.binding_invalid",
+    "permission.binding_invalid",
     bindingApprovalSchema,
     input
   );
@@ -337,11 +337,11 @@ export const approveResourceBinding = async (
   const release = await loadRelease(env, found.id, reviewed.version);
   const declaration = actionPermission(release.app, alias);
   if (declaration === undefined || targetKindOf(declaration) !== target.kind) {
-    throw resourceBindingErrors.create("resource.undeclared");
+    throw resourceBindingErrors.create("permission.undeclared");
   }
   const served = await boundBy(env, found.id, declaration, target);
   if (served === undefined) {
-    throw resourceBindingErrors.create("resource.target_invalid");
+    throw resourceBindingErrors.create("permission.target_invalid");
   }
   // A model the deployment allows, which can serve the declaration only
   // when it can give the answers it asks for.
@@ -456,7 +456,7 @@ export const revokeResourceBinding = async (
       : undefined;
   // One whose target no longer parses is no binding the API shows.
   if (found === undefined || bindingOf(found) === undefined) {
-    throw resourceBindingErrors.create("resource.binding_not_found");
+    throw resourceBindingErrors.create("permission.binding_not_found");
   }
   const db = drizzle(env.DB);
   const [revoked] = await auditedBatch(env, db, [
@@ -970,7 +970,7 @@ export const reviewResourceBindings = async (
  * `caller` (see the header): on every request, the alias's active binding,
  * if it was approved for exactly this declaration and its target still
  * serves exactly the contract it served then; undefined otherwise, which
- * the function host answers as `resource.unavailable`.
+ * the function host answers as `permission.unavailable`.
  */
 export const resourceBindingsFor = (
   env: Env,
@@ -1028,7 +1028,7 @@ export const resourceBindingsFor = (
 };
 
 /** A held call its binding no longer serves. */
-const notServed = () => functionErrors.create("resource.unavailable");
+const notServed = () => functionErrors.create("permission.unavailable");
 
 /**
  * Refuses a held call of App `app` through binding `pin` unless the
@@ -1039,7 +1039,7 @@ const notServed = () => functionErrors.create("resource.unavailable");
  * resolves as a live request's would (its target serving exactly the
  * contract pinned), and that contract still names the call's tool. A
  * binding revoked or replaced since, a version that widened the
- * declaration, a drifted contract or a lost grant: `resource.unavailable`, and nothing runs.
+ * declaration, a drifted contract or a lost grant: `permission.unavailable`, and nothing runs.
  */
 export const requireHeldBinding = async (
   env: Env,

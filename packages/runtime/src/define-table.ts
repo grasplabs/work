@@ -1,3 +1,5 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { seal } from "./descriptor-seal.ts";
 import { refuse } from "./schema-error.ts";
 import { checkedIndexFields, checkedSearchFields } from "./schema-indexes.ts";
@@ -5,7 +7,7 @@ import { checkedName, checkUnique, schemaLimits } from "./schema-limits.ts";
 import type { AnyTable, TableDefinition, TableState } from "./schema-types.ts";
 import { fieldDescriptors } from "./sealed-descriptors.ts";
 import { checkedAccess } from "./table-access.ts";
-import { descriptorVersion, isPlainObject } from "./value-descriptor.ts";
+import { descriptorVersion } from "./value-descriptor.ts";
 import type { ValueShape } from "./value-types.ts";
 
 /**

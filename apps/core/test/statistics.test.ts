@@ -253,7 +253,7 @@ const answerSchema = z.object({
 
 /** What a refused use of a resource answers: its code, and which bound. */
 const limited = (limit: "call" | "minute" | "day", at?: number) => ({
-  error: "resource.limit_reached",
+  error: "permission.limit_reached",
   details: {
     limit,
     ...(limit === "minute" && at !== undefined
@@ -399,13 +399,13 @@ describe("the platform's functions", { timeout: 60_000 }, () => {
           },
         },
       ],
-      unbound: { error: "resource.unavailable" },
-      unnamed: "resource.target_invalid",
-      asApp: "resource.binding_invalid",
+      unbound: { error: "permission.unavailable" },
+      unnamed: "permission.target_invalid",
+      asApp: "permission.binding_invalid",
       byBuilder: "role.forbidden",
       bound: [],
       write: { error: "failed" },
-      revoked: { error: "resource.unavailable" },
+      revoked: { error: "permission.unavailable" },
     });
   });
 
@@ -613,11 +613,11 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
         },
       ],
       one: [{ dimensions: {}, count: 2, sum: 2, min: 1, max: 1 }],
-      builder: { error: "resource.item_not_found" },
-      noApp: { error: "resource.invalid_args" },
-      unbound: { error: "resource.unavailable" },
+      builder: { error: "permission.item_not_found" },
+      noApp: { error: "permission.invalid_args" },
+      unbound: { error: "permission.unavailable" },
       reservedName: "permission.invalid",
-      unknownDimension: { error: "resource.invalid_args" },
+      unknownDimension: { error: "permission.invalid_args" },
       audited: [
         {
           actor: { type: "app", appId: reader, part: "server" },
@@ -629,8 +629,8 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           },
         },
       ],
-      othersGrant: "resource.target_invalid",
-      revoked: { error: "resource.unavailable" },
+      othersGrant: "permission.target_invalid",
+      revoked: { error: "permission.unavailable" },
     });
   });
 
@@ -802,8 +802,8 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           unavailable: 1,
         },
       ],
-      oneAndApps: { error: "resource.invalid_args" },
-      oneGone: { error: "resource.item_not_found" },
+      oneAndApps: { error: "permission.invalid_args" },
+      oneGone: { error: "permission.item_not_found" },
     });
   });
 
@@ -1203,12 +1203,12 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
         })),
     }).toStrictEqual({
       results: {
-        invalid: { error: "resource.invalid_args" },
+        invalid: { error: "permission.invalid_args" },
         // A measure the platform doesn't publish: refused as it is read,
         // and audited as every refused read is.
-        unknown: { error: "resource.invalid_args" },
-        notPlatform: { error: "resource.invalid_args" },
-        notAQuery: { error: "resource.not_allowed" },
+        unknown: { error: "permission.invalid_args" },
+        notPlatform: { error: "permission.invalid_args" },
+        notAQuery: { error: "permission.not_allowed" },
         limited: limited("call"),
         limitedAgain: limited("call"),
         nextMinute: limited("call"),

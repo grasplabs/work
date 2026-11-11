@@ -1,12 +1,8 @@
 import type { AnyRouter } from "@tanstack/react-router";
 import type { RpcStub } from "capnweb";
 
-import type {
-  PreviewLoad,
-  PageBridge,
-  PageHooks,
-  PageStart,
-} from "./page-runtime.ts";
+import type { PageBridge, PreviewLoad } from "./page-bridge.ts";
+import type { PageHooks, PageStart } from "./page-runtime.ts";
 /**
  * What runs a chat's preview of a draft in its frame: the
  * page runtime (page-runtime.ts) with React Fast Refresh. The preview

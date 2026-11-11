@@ -1,8 +1,9 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { snapshot, tableStates } from "./define-table.ts";
 import { refuse } from "./schema-error.ts";
 import { checkedName, checkUnique, schemaLimits } from "./schema-limits.ts";
 import type { AnyTable, SchemaDefinition, TableState } from "./schema-types.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { Infer, ValueShape } from "./value-types.ts";
 

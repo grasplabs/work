@@ -1,4 +1,5 @@
 import { appFilesPath, fileLimits } from "@grasp-os/shared/app-file-limits";
+import { isPlainObject } from "@grasp-os/shared/json";
 import {
   pageLeaseHeader,
   pagePersonHeader,
@@ -8,7 +9,6 @@ import { refusal, retryDelay, sleep } from "./client-shared.ts";
 import { readState } from "./file-answers.ts";
 import type { UploadState } from "./file-answers.ts";
 import { following, stallWatch } from "./stall-watch.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // How the file channel (file-channel.ts) sends its requests to core: each
 // under the page's lease and for its person, none waiting forever, and a

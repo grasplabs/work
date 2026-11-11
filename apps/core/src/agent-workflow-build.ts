@@ -27,6 +27,10 @@ import type { Acting } from "./auth/identity.ts";
 import { workspace } from "./durable-objects.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
+import {
+  httpCatalogContract,
+  httpReadCatalogContract,
+} from "./release-contracts.ts";
 import { catalogContractTerms } from "./workflow-catalog.ts";
 import type { CatalogContractTerms } from "./workflow-catalog.ts";
 import {
@@ -588,8 +592,8 @@ const workflowBuildDeclaration = `/**
  * has no contract for such a step, say which one (its kind, input and output) an admin
  * should publish.
  * An outside API is reached only through an HTTP connection an admin approved
- * (\`env.connections.available()\`, \`forAppsOnly\`): declare \`connections: { api: { contract: "grasp/http" } }\`
- * (\`get\` and \`send\`; \`"grasp/http-read"\` for \`get\` alone, on a connection that allows no change) and
+ * (\`env.connections.available()\`, \`forAppsOnly\`): declare \`connections: { api: { contract: "${httpCatalogContract}" } }\`
+ * (\`get\` and \`send\`; \`"${httpReadCatalogContract}"\` for \`get\` alone, on a connection that allows no change) and
  * call it with a \`call\` step, \`action: "get"\` (a read: \`{ path, method?: "GET" | "HEAD", headers? }\`)
  * or \`"send"\` (a change: \`{ method: "POST" | "PUT" | "PATCH" | "DELETE", path, headers?, body? }\`, body
  * as text: \`body: { "$expr": "JSON.stringify(args.invoice)" }\`). It answers

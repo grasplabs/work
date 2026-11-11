@@ -1,6 +1,6 @@
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { appMaxFunctions } from "@grasp-os/shared/function-limits";
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 
 import { AppDefinitionError } from "./app-definition-error.ts";
 import type { AppConfig, AppManifest } from "./app-types.ts";
@@ -14,7 +14,6 @@ import { readSchemaManifest } from "./schema-manifest-read.ts";
 import type { FunctionKind, Visibility } from "./server-function.ts";
 import { builderNames } from "./server-modules.ts";
 import { serverModule } from "./server.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";

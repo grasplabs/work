@@ -104,4 +104,4 @@ export type {
   SchemaFormOptions,
   SubmitPhase,
   TextFieldName,
-} from "./form.ts";
+} from "./form-types.ts";

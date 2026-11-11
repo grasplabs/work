@@ -1,9 +1,7 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { seal } from "./descriptor-seal.ts";
-import {
-  isPlainObject,
-  ValueDefinitionError,
-  valueLimits,
-} from "./value-descriptor.ts";
+import { ValueDefinitionError, valueLimits } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
 // Reading a descriptor of unknown origin back into a sealed one: a stored

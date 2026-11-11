@@ -635,6 +635,29 @@ const signedPosts: ReadonlyMap<
   [aiStatusReportPath, answerAiStatus],
 ]);
 
+/**
+ * The objects of the bucket a call names, in the jurisdiction it names;
+ * undefined when the account has no such bucket.
+ */
+const bucketObjects = (
+  account: AccountState,
+  call: ApiCall,
+  params: Record<string, string>
+): Map<string, Uint8Array<ArrayBuffer>> | undefined => {
+  const name = params.name ?? "";
+  const exists = account.buckets.some(
+    (bucket) =>
+      bucket.name === name && bucket.jurisdiction === jurisdictionOf(call)
+  );
+  if (!exists) {
+    return undefined;
+  }
+  const objects =
+    account.objects.get(name) ?? new Map<string, Uint8Array<ArrayBuffer>>();
+  account.objects.set(name, objects);
+  return objects;
+};
+
 /** What each account holds, at the paths the API serves it. */
 const accountRoutes: Route[] = [
   {
@@ -735,6 +758,66 @@ const accountRoutes: Route[] = [
       return envelope(null);
     },
   },
+  // A bucket's objects under a prefix, as R2's API lists them, on one page.
+  {
+    method: "GET",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/objects$/u,
+    answer: ({ account, call, params }) => {
+      const objects = bucketObjects(account, call, params);
+      if (objects === undefined) {
+        return notFound();
+      }
+      const prefix = call.query.get("prefix") ?? "";
+      return envelope(
+        [...objects]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, bytes]) => ({ key, size: bytes.byteLength })),
+        { is_truncated: false }
+      );
+    },
+  },
+  // An object, as R2's API serves it: its bytes, or "not found" in the
+  // envelope; a put answers its key and size.
+  {
+    method: "GET",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/objects\/(?<key>.+)$/u,
+    answer: ({ account, call, params }) => {
+      const objects = bucketObjects(account, call, params);
+      const bytes = objects?.get(params.key ?? "");
+      if (bytes === undefined) {
+        return refusal(404, 10_007, "The specified key does not exist.");
+      }
+      return new Response(bytes, {
+        headers: { "content-length": String(bytes.byteLength) },
+      });
+    },
+  },
+  {
+    method: "PUT",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/objects\/(?<key>.+)$/u,
+    answer: ({ account, call, params }) => {
+      const objects = bucketObjects(account, call, params);
+      if (objects === undefined || !(call.body instanceof Uint8Array)) {
+        return objects === undefined
+          ? notFound()
+          : refusal(400, 10_040, "No body");
+      }
+      objects.set(params.key ?? "", new Uint8Array(call.body));
+      return envelope({ key: params.key, size: call.body.byteLength });
+    },
+  },
+  {
+    method: "DELETE",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/objects\/(?<key>.+)$/u,
+    answer: ({ account, call, params }) => {
+      const objects = bucketObjects(account, call, params);
+      if (objects === undefined) {
+        return notFound();
+      }
+      objects.delete(params.key ?? "");
+      return envelope(null);
+    },
+  },
   {
     method: "PUT",
     path: /^\/r2\/buckets\/(?<name>[^/]+)\/lifecycle$/u,
@@ -813,6 +896,8 @@ export type Failure =
   | 503
   | "network"
   | "lost"
+  /** The connection lost partway through the request's body (`failNext` only). */
+  | "mid-body"
   | "statement-failed"
   | { retryAfter: string };
 
@@ -821,7 +906,7 @@ const lostConnection = (): never => {
 };
 
 const failed = (failure: Exclude<Failure, "lost">): Response => {
-  if (failure === "network") {
+  if (failure === "network" || failure === "mid-body") {
     return lostConnection();
   }
   if (failure === "statement-failed") {
@@ -879,6 +964,9 @@ const readBody = async (request: Request): Promise<unknown> => {
   if (type.startsWith("multipart/form-data")) {
     return await request.formData();
   }
+  if (type.startsWith("application/octet-stream")) {
+    return new Uint8Array(await request.arrayBuffer());
+  }
   return request.body === null ? undefined : await request.text();
 };
 
@@ -935,6 +1023,7 @@ export const fakeCloudflareApi = (token: string) => {
       buckets: [],
       fullBuckets: new Set(),
       lifecycles: new Map(),
+      objects: new Map(),
       scripts: new Map(),
       namespaces: new Map(),
       assets: new Map(),
@@ -1078,13 +1167,28 @@ export const fakeCloudflareApi = (token: string) => {
 
   const answer = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
-    const call: ApiCall = {
+    const unread: ApiCall = {
       method: request.method,
       path: url.pathname.slice(new URL(base).pathname.length),
       query: url.searchParams,
       headers: request.headers,
-      body: await readBody(request),
+      body: undefined,
     };
+    // The connection lost partway through the request's body: its first
+    // piece read, the rest cancelled, as workerd's fetch cancels a body it
+    // can't send, and no answer.
+    const cut = matched.findIndex(
+      ({ matches, failure }) => failure === "mid-body" && matches(unread)
+    );
+    if (cut !== -1) {
+      matched.splice(cut, 1);
+      calls.push(unread);
+      const reader = request.body?.getReader();
+      await reader?.read();
+      await reader?.cancel(new TypeError("Network connection lost."));
+      return lostConnection();
+    }
+    const call: ApiCall = { ...unread, body: await readBody(request) };
     calls.push(call);
     const match = matched.findIndex(({ matches }) => matches(call));
     const [picked] = match === -1 ? [] : matched.splice(match, 1);

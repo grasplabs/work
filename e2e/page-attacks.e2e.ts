@@ -100,6 +100,17 @@ const releaseApp = async (
 /** The full page of `app` at its route `path`, `""` for its `/`. */
 const pagePath = (app: string, path = ""): string => `/apps/${app}/full${path}`;
 
+/**
+ * Opens `path` on `page`, waiting only for Grasp's page to arrive. A
+ * page's `load` waits for its frames too, here an attack, and what each
+ * test checks it waits for itself. In Firefox, waiting for `load` now and
+ * then never ended, and the test timed out on it (in CI, and in 1 of about
+ * 430 runs on a Mac, November 2026).
+ */
+const open = async (page: Page, path: string): Promise<void> => {
+  await page.goto(path, { waitUntil: "commit" });
+};
+
 /** The page's frame for a page, emptied or not. */
 const frameOf = (page: Page) => page.locator("iframe");
 
@@ -137,7 +148,7 @@ test("a page reaches nothing but its own App's functions", async ({
   page.on("popup", (popup) => {
     popups.push(popup.url());
   });
-  await page.goto(pagePath(probing));
+  await open(page, pagePath(probing));
   const appPage = page.frameLocator('iframe[title="App"]');
   // The first open builds the page before the frame shows anything.
   await expect(appPage.getByRole("heading", { name: "Notes" })).toBeVisible({
@@ -286,7 +297,7 @@ test("a page runs its build and nothing else: no handler, inline script, data: o
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  await page.goto(pagePath(injecting));
+  await open(page, pagePath(injecting));
   const appPage = page.frameLocator('iframe[title="App"]');
   // Its own modules run: it renders, and reads its App's query.
   await expect(appPage.getByRole("heading", { name: "Injecting" })).toBeVisible(
@@ -348,12 +359,12 @@ test("a page imports no module but its build's: not another App's, a file's or o
   const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
   // Another App's build, as its own frame names it, valid token and all.
-  await page.goto(pagePath(probing));
+  await open(page, pagePath(probing));
   const other = new URL(await frameEntry(page));
   const { scope = "", file = "" } =
     /^\/page-modules\/(?<scope>[^/]+)\/(?<file>[^/]+)$/u.exec(other.pathname)
       ?.groups ?? {};
-  await page.goto(pagePath(injecting));
+  await open(page, pagePath(injecting));
   const own = new URL(await frameEntry(page));
   const directory = new URL("./", own).href;
   const { origin } = own;
@@ -415,7 +426,7 @@ test("a page imports no module but its build's: not another App's, a file's or o
 test("a page can't send its frame to another origin", async ({ pageOf }) => {
   const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
-  await page.goto(pagePath(attacking, "/leaving"));
+  await open(page, pagePath(attacking, "/leaving"));
 
   // A sandboxed frame may navigate itself, and nothing in its own policy
   // says where. The page's does: it frames this origin only. A request
@@ -436,7 +447,7 @@ test("a page that loads another document in its frame is stopped", async ({
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  await page.goto(pagePath(attacking, "/wandering"));
+  await open(page, pagePath(attacking, "/wandering"));
 
   await expect(page.getByText(left)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
@@ -448,7 +459,7 @@ test("a page that sends more than its port takes is stopped, and the page says s
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  await page.goto(pagePath(attacking, "/oversized"));
+  await open(page, pagePath(attacking, "/oversized"));
 
   await expect(page.getByText(disconnected)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
@@ -475,7 +486,7 @@ test("a frame that never says it is ready is given up on after ten seconds", asy
       </script>`,
     });
   });
-  await page.goto(pagePath(probing));
+  await open(page, pagePath(probing));
   await expect(page.frameLocator("iframe").locator("html")).toHaveAttribute(
     "data-forged",
     "4"
@@ -505,7 +516,7 @@ test("a page that never renders is given up on after ten seconds, whatever it sa
 }) => {
   const page = await pageOf(builder);
   await page.clock.install();
-  await page.goto(pagePath(attacking, "/stuck"));
+  await open(page, pagePath(attacking, "/stuck"));
   // Its module ran, and told the page it had mounted, six ways.
   await expect(page.frameLocator("iframe").locator("body")).toHaveAttribute(
     "data-forged",
@@ -525,10 +536,14 @@ test("a page that never renders is given up on after ten seconds, whatever it sa
 
 test("a page another site opened keeps no handle on that site, so its pages can post it nothing", async ({
   pageOf,
+  baseURL,
 }) => {
   const page = await pageOf(builder);
-  await page.goto(pagePath(attacking, "/turn"));
-  const address = page.url();
+  // Straight to the attacker's site. Leaving Grasp's page while it still
+  // loaded, Firefox failed the route's module, and the page left loading
+  // itself again for the missing file cancelled the visit here
+  // (NS_BINDING_ABORTED), in 5 of 12 tries (November 2026).
+  const address = new URL(pagePath(attacking, "/turn"), baseURL).href;
   // The attacker's site opens Grasp, as a link with a target would.
   await page.goto(attacker.url);
   const [opened] = await Promise.all([
@@ -537,7 +552,7 @@ test("a page another site opened keeps no handle on that site, so its pages can 
       window.open(url);
     }, address),
   ]);
-  await opened.waitForLoadState();
+  // Not its `load`, which waits for the attack's frame too (`open`).
   const appPage = opened.frameLocator('iframe[title="App"]');
   await expect(
     appPage.getByRole("status", { name: "Nested documents" })
@@ -559,7 +574,7 @@ test("a page makes no document of its own and reaches no network, WebRTC or a na
   const frameDocument = page.waitForResponse((response) =>
     response.url().includes("/page-frame?")
   );
-  await page.goto(pagePath(attacking, "/turn"));
+  await open(page, pagePath(attacking, "/turn"));
   // No name the page writes is looked up ahead of time.
   const served = await frameDocument;
   expect(served.headers()["x-dns-prefetch-control"]).toBe("off");
@@ -642,7 +657,7 @@ test("markup pasted or dropped into a page's editable fields becomes text, never
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  await page.goto(pagePath(attacking, "/pasting"));
+  await open(page, pagePath(attacking, "/pasting"));
   const appPage = page.frameLocator('iframe[title="App"]');
   const field = appPage.getByRole("textbox", { name: "Paste here" });
   await expect(field).toBeVisible({ timeout: 30_000 });

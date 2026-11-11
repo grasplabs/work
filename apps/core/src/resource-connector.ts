@@ -48,10 +48,10 @@ import type {
 //   an outcome connect couldn't confirm stays `effect.outcome_unknown`;
 // - is held by connect for the person when it has a side effect and the
 //   person is there (or the App read restricted data): App code gets
-//   `resource.awaiting_confirmation`, and the same call made again finds
+//   `permission.awaiting_confirmation`, and the same call made again finds
 //   the same held action, or its answer once the person confirmed it. A
 //   workflow run's side effect connect holds without an answer
-//   (`connect.held`): App code gets `resource.awaiting_confirmation` all
+//   (`connect.held`): App code gets `permission.awaiting_confirmation` all
 //   the same, and the run's step waits for the person's decision
 //   (`BindingCaller.held`), then makes the same call again;
 // - has its answer checked against the contract's return descriptor, and
@@ -327,18 +327,18 @@ const refusalOf = (error: unknown): unknown => {
     code === "connect.not_owner" ||
     code === "connect.action_not_found"
   ) {
-    return functionErrors.create("resource.unavailable");
+    return functionErrors.create("permission.unavailable");
   }
   if (code === "connect.declined") {
-    return functionErrors.create("resource.declined");
+    return functionErrors.create("permission.declined");
   }
   // An HTTP connection's request off what an admin approved (its paths,
   // methods, headers, a redirect elsewhere).
   if (code === "connect.http_refused") {
-    return functionErrors.create("resource.not_allowed");
+    return functionErrors.create("permission.not_allowed");
   }
   if (code === "connect.idempotency_conflict") {
-    return functionErrors.create("resource.idempotency_conflict");
+    return functionErrors.create("permission.idempotency_conflict");
   }
   return error;
 };
@@ -356,11 +356,11 @@ const callAction = async (
   const [name, input] = args;
   const action = typeof name === "string" ? actions.get(name) : undefined;
   if (action === undefined) {
-    throw functionErrors.create("resource.not_allowed");
+    throw functionErrors.create("permission.not_allowed");
   }
   const valid = checked(action.args, input, false);
   if (valid === undefined) {
-    throw functionErrors.create("resource.invalid_args");
+    throw functionErrors.create("permission.invalid_args");
   }
   let answered: Awaited<ReturnType<Env["CONNECT"]["call"]>>;
   try {
@@ -391,12 +391,12 @@ const callAction = async (
       caller.held !== undefined
     ) {
       caller.held(context.idempotencyKey);
-      throw functionErrors.create("resource.awaiting_confirmation");
+      throw functionErrors.create("permission.awaiting_confirmation");
     }
     throw refusalOf(error);
   }
   if (answered.pending !== undefined) {
-    throw functionErrors.create("resource.awaiting_confirmation");
+    throw functionErrors.create("permission.awaiting_confirmation");
   }
   caller.sources.noteConnection(
     grant.connection.connectionId,
@@ -406,11 +406,11 @@ const callAction = async (
   try {
     output = JSON.parse(answered.output);
   } catch {
-    throw functionErrors.create("contract.invalid_resource_result");
+    throw functionErrors.create("contract.invalid_permission_result");
   }
   const answer = checked(action.returns, output, true);
   if (answer === undefined) {
-    throw functionErrors.create("contract.invalid_resource_result");
+    throw functionErrors.create("contract.invalid_permission_result");
   }
   return answer;
 };

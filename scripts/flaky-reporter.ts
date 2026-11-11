@@ -88,7 +88,7 @@ export interface RetriedModule {
 
 /**
  * The flakes in `testModules`, read from Vitest's state when the run ends
- * rather than from each test's result event: vitest-pool-workers can lose
+ * rather than from each test's result event: the Workers test pool can lose
  * a batch of those events while the results still reach the state (see
  * stall-reporter.ts).
  */

@@ -1,4 +1,6 @@
-import { deepFreeze, refuser } from "./declaration.ts";
+import { deepFreeze } from "@grasp-os/shared/json";
+
+import { refuser } from "./declaration.ts";
 import { flag, kindBody } from "./descriptor-bodies.ts";
 import { requiredChild, sealed } from "./sealed-descriptors.ts";
 import type { DescriptorDraft } from "./sealed-descriptors.ts";

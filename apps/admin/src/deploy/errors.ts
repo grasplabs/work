@@ -19,6 +19,10 @@ export const deployErrorCodes = [
   "bucket_outside_eu",
   /** A D1 migration failed to apply. */
   "d1_migration_failed",
+  /** The release names model files but binds no one bucket for them. */
+  "model_files_unbound",
+  /** The client's models bucket answered other than with a file or "not there". */
+  "model_files_unreadable",
   /** Another runner took the client over while the deploy ran: a rollback. */
   "runner_replaced",
   /** The account's script ran a Durable Object migration the release doesn't have. */

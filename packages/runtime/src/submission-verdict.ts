@@ -1,4 +1,4 @@
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isPlainObject } from "@grasp-os/shared/json";
 
 import type { Settled } from "./call-answers.ts";
 import { clientError, GraspError } from "./client-error.ts";
@@ -8,7 +8,6 @@ import {
   nothingRanCodes,
   refusedBeforeCallCodes,
 } from "./refusals.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /**
  * How long a submission refused with a nothing-ran code (its budget used

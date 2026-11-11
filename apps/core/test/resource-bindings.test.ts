@@ -68,7 +68,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       sentUnbound,
       bound: outcomeOf(bound),
     }).toStrictEqual({
-      unbound: { failed: "resource.unavailable" },
+      unbound: { failed: "permission.unavailable" },
       sentUnbound: 0,
       bound: "A short draft.",
     });
@@ -123,7 +123,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       tagged: outcomeOf(tagged),
       sent: provider.requests.map(({ body }) => body),
     }).toStrictEqual({
-      refused: "resource.model_too_small",
+      refused: "permission.model_too_small",
       bound: 0,
       tagged: { tags: ["launch"] },
       sent: [expect.objectContaining({ max_completion_tokens: 32_768 })],
@@ -169,7 +169,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       fitted: { tags: ["launch", "plans"] },
       // Two answers that never fit: the contract the provider broke.
-      neverFitted: { failed: "contract.invalid_resource_result" },
+      neverFitted: { failed: "contract.invalid_permission_result" },
     });
     // The declared 300 tokens bound the App's request as a whole: each of
     // its two attempts may take half.
@@ -208,7 +208,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     expect({
       outcome: outcomeOf(result),
       sent: provider.requests.length,
-    }).toStrictEqual({ outcome: "first|resource.unavailable", sent: 1 });
+    }).toStrictEqual({ outcome: "first|permission.unavailable", sent: 1 });
   });
 
   it("serve only the declaration an admin approved", async () => {
@@ -233,7 +233,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       sentBefore,
       after: outcomeOf(after),
     }).toStrictEqual({
-      before: { failed: "resource.unavailable" },
+      before: { failed: "permission.unavailable" },
       sentBefore: 0,
       after: "Longer.",
     });
@@ -252,7 +252,10 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     expect({
       outcome: outcomeOf(result),
       sent: provider.requests.length,
-    }).toStrictEqual({ outcome: { failed: "resource.unavailable" }, sent: 0 });
+    }).toStrictEqual({
+      outcome: { failed: "permission.unavailable" },
+      sent: 0,
+    });
   });
 
   it("are approved by admins only, never staff or builders", async () => {
@@ -292,9 +295,9 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       }),
       notCurrent: await refusal({ reviewed: { version: 2 } }),
     }).toStrictEqual({
-      undeclared: "resource.undeclared",
-      otherKind: "resource.undeclared",
-      notAllowed: "resource.target_invalid",
+      undeclared: "permission.undeclared",
+      otherKind: "permission.undeclared",
+      notAllowed: "permission.target_invalid",
       notCurrent: "app.conflict",
     });
   });
@@ -371,7 +374,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       listed: [binding.id],
       undeclared: [],
-      revoked: "resource.binding_not_found",
+      revoked: "permission.binding_not_found",
     });
   });
 
@@ -442,7 +445,10 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     expect({
       outcome: outcomeOf(result),
       sent: provider.requests.length,
-    }).toStrictEqual({ outcome: { failed: "resource.unavailable" }, sent: 0 });
+    }).toStrictEqual({
+      outcome: { failed: "permission.unavailable" },
+      sent: 0,
+    });
   });
 
   it("keep one active binding when two approvals of an alias race", async () => {
@@ -670,7 +676,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
         title: "Leave",
         text: "# Leave\nAsk your lead before you take leave.",
       },
-      unbound: { failed: "resource.item_not_found" },
+      unbound: { failed: "permission.item_not_found" },
     });
     // The handbook alone was read: nothing sensitive in the answer.
     expect(opened.provenance).toStrictEqual({
@@ -709,7 +715,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
         truncated: false,
       },
       // As a document that doesn't exist.
-      opened: { failed: "resource.item_not_found" },
+      opened: { failed: "permission.item_not_found" },
     });
   });
 
@@ -765,7 +771,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     await revokePermission(env, admin, permissions.salaries);
     const found = await answerOf(sealed, "help.find", { text: "leave" });
     expect(outcomeOf(found.result)).toStrictEqual({
-      failed: "resource.unavailable",
+      failed: "permission.unavailable",
     });
   });
 
@@ -787,9 +793,9 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       extra: await refusal({ ...permissions, more: permissions.handbook }),
       anotherApps: await refusal(permissions, other),
     }).toStrictEqual({
-      missing: "resource.target_invalid",
-      extra: "resource.target_invalid",
-      anotherApps: "resource.target_invalid",
+      missing: "permission.target_invalid",
+      extra: "permission.target_invalid",
+      anotherApps: "permission.target_invalid",
     });
   });
 });
