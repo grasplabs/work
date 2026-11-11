@@ -4,12 +4,17 @@ import {
   comparable,
   compareRuns,
   estimate,
+  questionResultSchema,
+  report,
   signTest,
   summarize,
 } from "./brain-eval-scoring.ts";
 import type { QuestionResult } from "./brain-eval-scoring.ts";
 
-/** An answerable Dutch question over a Dutch source, found at the ranks given. */
+/**
+ * An answerable Dutch question over a Dutch source of one passage, found
+ * at the ranks given (its source first returned there too).
+ */
 const result = (
   id: string,
   brainRank: number | null,
@@ -22,10 +27,35 @@ const result = (
   sourceLanguage: "nl",
   expects: "answer",
   way: "words",
-  brain: { rank: brainRank, returned: 10, leaks: [], ms: 3 },
-  grep: { rank: grepRank, returned: 10 },
+  long: false,
+  lookalike: false,
+  brain: {
+    rank: brainRank,
+    sourceRank: brainRank,
+    returned: 10,
+    leaks: [],
+    ms: 3,
+  },
+  grep: { rank: grepRank, sourceRank: grepRank, returned: 10 },
   ...overrides,
 });
+
+/**
+ * An answerable question over a long document: the passage that answers
+ * at `rank`, the first passage of its source at `sourceRank`, per arm.
+ */
+const overLong = (
+  id: string,
+  brain: { rank: number | null; sourceRank: number | null },
+  grep: { rank: number | null; sourceRank: number | null },
+  overrides: Partial<QuestionResult> = {}
+): QuestionResult =>
+  result(id, brain.rank, grep.rank, {
+    long: true,
+    brain: { ...brain, returned: 10, leaks: [], ms: 3 },
+    grep: { ...grep, returned: 10 },
+    ...overrides,
+  });
 
 const many = (count: number, rank: number | null, prefix = "q") =>
   Array.from({ length: count }, (_, index) =>
@@ -87,6 +117,125 @@ describe("the Brain evaluation's scoring", () => {
     expect(group(results, "Way: words")?.questions).toBe(1);
   });
 
+  it("scores questions over long documents in their own groups and keeps them out of every other", () => {
+    const results = [
+      result("dutch", 1),
+      overLong(
+        "dutch-handbook",
+        { rank: null, sourceRank: null },
+        { rank: null, sourceRank: null }
+      ),
+      overLong(
+        "dutch-on-english-minutes",
+        { rank: 1, sourceRank: 1 },
+        { rank: 1, sourceRank: 1 },
+        { sourceLanguage: "en", way: "paraphrase" }
+      ),
+    ];
+    for (const name of ["All answerable", "Same language", "Way: words"]) {
+      expect(group(results, name)).toMatchObject({ questions: 1 });
+      expect(group(results, name)?.brain.recall?.mean).toBe(1);
+    }
+    expect(group(results, "Dutch (written in Dutch)")?.questions).toBe(1);
+    expect(group(results, "Across languages")?.questions).toBe(0);
+    expect(group(results, "Way: paraphrase")?.questions).toBe(0);
+    const long = group(results, "Long documents");
+    expect(long?.questions).toBe(2);
+    expect(long?.brain.recall?.mean).toBe(0.5);
+  });
+
+  it("scores answers with a look-alike passage in a group of their own among the long documents", () => {
+    const results = [
+      overLong("plain", { rank: 1, sourceRank: 1 }, { rank: 1, sourceRank: 1 }),
+      overLong(
+        "lookalike",
+        { rank: null, sourceRank: 1 },
+        { rank: 2, sourceRank: 1 },
+        { lookalike: true }
+      ),
+      result("short-lookalike-free", 1),
+    ];
+    const lookalike = group(results, "Long documents: look-alike");
+    expect(lookalike?.questions).toBe(1);
+    expect(lookalike?.brain.recall?.mean).toBe(0);
+    expect(lookalike?.grep.recall?.mean).toBe(1);
+    expect(group(results, "Long documents")?.questions).toBe(2);
+  });
+
+  it("counts how often each arm returned the right source within the budget but not the passage that answers", () => {
+    const results = [
+      overLong(
+        "other-passage",
+        { rank: null, sourceRank: 2 },
+        { rank: 1, sourceRank: 1 }
+      ),
+      overLong(
+        "answer-below-budget",
+        { rank: 7, sourceRank: 3 },
+        { rank: null, sourceRank: null }
+      ),
+      overLong(
+        "answer-first",
+        { rank: 1, sourceRank: 1 },
+        { rank: null, sourceRank: 4 }
+      ),
+      overLong(
+        "source-below-budget",
+        { rank: null, sourceRank: 6 },
+        { rank: null, sourceRank: null }
+      ),
+    ];
+    const long = group(results, "Long documents");
+    expect(long?.brain.sourceNotPassage?.mean).toBe(0.5);
+    expect(long?.grep.sourceNotPassage?.mean).toBe(0.25);
+  });
+
+  it("reads a result written before long documents as over a source of one passage", () => {
+    const before = questionResultSchema.parse({
+      id: "nl-verlof",
+      digest: "abc",
+      language: "nl",
+      sourceLanguage: "nl",
+      expects: "answer",
+      way: "words",
+      brain: { rank: 2, returned: 10, leaks: [], ms: 4 },
+      grep: { rank: null, returned: 10 },
+    });
+    expect(before).toMatchObject({
+      long: false,
+      lookalike: false,
+      brain: { rank: 2, sourceRank: null },
+      grep: { rank: null, sourceRank: null },
+    });
+    expect(group([before], "All answerable")?.questions).toBe(1);
+  });
+
+  it("reports long documents in a table of their own, with how often only the source was returned", () => {
+    const text = report(
+      summarize([
+        result("short", 1),
+        overLong(
+          "other-passage",
+          { rank: null, sourceRank: 1 },
+          { rank: 1, sourceRank: 1 }
+        ),
+      ]),
+      null
+    );
+    const lines = text.split("\n");
+    const [oneSourceHeader] = lines;
+    expect(oneSourceHeader).not.toContain("source, not passage");
+    expect(
+      lines.some((line) => line.startsWith("All answerable "))
+    ).toBeTruthy();
+    const longHeader = lines.find((line) =>
+      line.includes("Brain source, not passage")
+    );
+    expect(longHeader).toContain("grep source, not passage");
+    const longRow = lines.find((line) => line.startsWith("Long documents "));
+    expect(longRow).toMatch(/1\.00 ±0\.00\s+0\.00 ±0\.00\s*$/u);
+  });
+
   it("judges the Brain against grep by the questions only one of them found", () => {
     const scored = group(
       [
@@ -110,12 +259,18 @@ describe("the Brain evaluation's scoring", () => {
         expects: "absent",
         way: null,
         sourceLanguage: null,
-        brain: { rank: null, returned: 0, leaks: [], ms: 1 },
+        brain: { rank: null, sourceRank: null, returned: 0, leaks: [], ms: 1 },
       }),
       result("hidden", null, null, {
         expects: "hidden",
         way: null,
-        brain: { rank: null, returned: 2, leaks: ["secret:3.980"], ms: 1 },
+        brain: {
+          rank: null,
+          sourceRank: null,
+          returned: 2,
+          leaks: ["secret:3.980"],
+          ms: 1,
+        },
       }),
     ]);
     expect(summary.groups[0]?.questions).toBe(1);
@@ -168,11 +323,27 @@ describe("the Brain evaluation's scoring", () => {
     expect(all).toMatchObject({ gained: 30, lost: 0, judged: false });
   });
 
-  it("compares runs only on the same set, result limit and result budget", () => {
-    const measure = { setDigest: "set", recallLimit: 10, resultBudget: 5 };
+  it("compares runs only on the same set, cut the same way, result limit and result budget", () => {
+    const measure = {
+      setDigest: "set",
+      passagesDigest: "cut",
+      recallLimit: 10,
+      resultBudget: 5,
+    };
     expect(comparable(measure, { ...measure })).toBeTruthy();
     expect(comparable(measure, { ...measure, setDigest: "other" })).toBeFalsy();
+    expect(
+      comparable(measure, { ...measure, passagesDigest: "recut" })
+    ).toBeFalsy();
     expect(comparable(measure, { ...measure, recallLimit: 20 })).toBeFalsy();
     expect(comparable(measure, { ...measure, resultBudget: 3 })).toBeFalsy();
+  });
+
+  it("never judges against a run that doesn't record how the set was cut", () => {
+    const measure = { setDigest: "set", recallLimit: 10, resultBudget: 5 };
+    expect(
+      comparable(measure, { ...measure, passagesDigest: "cut" })
+    ).toBeFalsy();
+    expect(comparable(measure, { ...measure })).toBeFalsy();
   });
 });
