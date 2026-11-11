@@ -105,6 +105,36 @@ const modelFileSchema = fileRef.refine(
 /** A model file a release names. */
 export type ModelFileRef = z.infer<typeof modelFileSchema>;
 
+/** What a bucket reports of a stored model file: its size, and the SHA-256 (hex) it kept, if any. */
+export interface StoredModelFile {
+  size: number;
+  sha256?: string;
+}
+
+/**
+ * Why `stored` isn't `file` as a release may name it, or undefined when it
+ * is: there, at its size, with the SHA-256 R2 computed and kept when it
+ * was stored. The one rule CI's publish and the admin's import hold a
+ * model file to, so a release that publishes always imports. One kept
+ * without its SHA-256 fails, whatever its bytes: the import never reads
+ * 100 MB to find out.
+ */
+export const storedModelFileProblem = (
+  file: Pick<ModelFileRef, "sha256" | "size">,
+  stored: StoredModelFile | null
+): string | undefined => {
+  if (stored === null) {
+    return "is missing";
+  }
+  if (stored.size !== file.size) {
+    return `is ${stored.size} bytes, not ${file.size}`;
+  }
+  if (stored.sha256 === undefined) {
+    return "was stored without its SHA-256";
+  }
+  return stored.sha256 === file.sha256 ? undefined : "doesn't match its hash";
+};
+
 const workerEntrySchema = z.strictObject({
   /** The Worker's name in every client account. */
   name: workerNameSchema,

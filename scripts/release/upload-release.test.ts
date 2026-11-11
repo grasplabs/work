@@ -148,6 +148,26 @@ const answeredListing = (
   return true;
 };
 
+/**
+ * A HEAD's headers, as R2 answers one: the object's length, and the
+ * SHA-256 it was stored with when checksum mode asks.
+ */
+const headHeaders = (
+  bucket: Bucket,
+  key: string,
+  request: IncomingMessage
+): Record<string, string | number> => {
+  const stored = bucket.objects.get(key);
+  const checksum = bucket.checksums.get(key);
+  return {
+    ...(stored === undefined ? {} : { "content-length": stored.byteLength }),
+    ...(checksum !== undefined &&
+    request.headers["x-amz-checksum-mode"] === "ENABLED"
+      ? { "x-amz-checksum-sha256": checksum }
+      : {}),
+  };
+};
+
 const handle = async (
   bucket: Bucket,
   request: IncomingMessage,
@@ -165,14 +185,10 @@ const handle = async (
   }
   const stored = bucket.objects.get(key);
   if (request.method === "HEAD") {
-    const checksum = bucket.checksums.get(key);
-    const reportChecksum =
-      checksum !== undefined &&
-      request.headers["x-amz-checksum-mode"] === "ENABLED";
     response
       .writeHead(
         stored === undefined ? HTTP_NOT_FOUND : HTTP_OK,
-        reportChecksum ? { "x-amz-checksum-sha256": checksum } : {}
+        headHeaders(bucket, key, request)
       )
       .end();
     const other = bucket.writtenAfterHead.get(key);
@@ -339,18 +355,43 @@ describe("publishing a release", () => {
   it("publishes nothing when a model file the release names isn't in the bucket", async () => {
     bucket.objects.delete(firstModelFile().r2Key);
     await expect(upload()).rejects.toThrow(
-      /isn't in the bucket.*nothing published/u
+      /is missing: put it there with release:model-files; nothing published/u
     );
     expect(bucket.puts).toStrictEqual([]);
   });
 
   it("publishes nothing when the bucket holds other bytes at a model file's key", async () => {
     const { r2Key } = firstModelFile();
-    const other = Buffer.from("other weights");
+    // Other bytes of the same size: the hash gives them away.
+    const other = Buffer.alloc(bucket.objects.get(r2Key)?.byteLength ?? 0, 7);
     bucket.objects.set(r2Key, other);
     bucket.checksums.set(r2Key, sha256Base64(other));
-    await expect(upload()).rejects.toThrow(/isn't the release's bytes/u);
+    await expect(upload()).rejects.toThrow(
+      /doesn't match its hash.*nothing published/u
+    );
     expect(bucket.puts).toStrictEqual([]);
+  });
+
+  it("publishes nothing when a model file is in the bucket with its bytes but without its SHA-256, which the import asks for", async () => {
+    const { r2Key } = firstModelFile();
+    bucket.checksums.delete(r2Key);
+    await expect(upload()).rejects.toThrow(
+      /was stored without its SHA-256: put it there with release:model-files; nothing published/u
+    );
+    expect(bucket.puts).toStrictEqual([]);
+  });
+
+  it("puts a carried model file found without its SHA-256 again with it, then publishes", async () => {
+    const { r2Key } = firstModelFile();
+    bucket.checksums.delete(r2Key);
+    mkdirSync(path.join(dir, "blobs/models"), { recursive: true });
+    for (const { sha256, file } of fixtureModelFiles) {
+      writeFileSync(path.join(dir, modelBlobKey(sha256)), readFileSync(file));
+    }
+    await upload();
+    expect(bucket.puts.filter((key) => key === r2Key)).toHaveLength(1);
+    expect(bucket.checksums.has(r2Key)).toBeTruthy();
+    expect(bucket.puts.at(-1)).toBe(published);
   });
 
   it("uploads the model files a release directory carries, checked by hash, to a bucket without them", async () => {

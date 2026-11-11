@@ -62,10 +62,16 @@ const sha256 = (bytes: Buffer | undefined): string | undefined =>
 /** Each bucket's objects, by key. */
 type Buckets = Map<string, Map<string, Buffer>>;
 
+/** SHA-256, base64: the form of R2's `x-amz-checksum-sha256`. */
+const sha256Base64 = (bytes: Buffer): string =>
+  createHash("sha256").update(bytes).digest("base64");
+
 describe("promoting a release from staging's bucket to production's", () => {
   let dir = "";
   let server: Server | undefined;
   let buckets: Buckets = new Map();
+  /** The SHA-256 each object was stored with, as R2 keeps it, by bucket and key. */
+  let checksums = new Map<string, string>();
   let endpoint = "";
 
   const envFor = (bucket: string): NodeJS.ProcessEnv => ({
@@ -87,7 +93,13 @@ describe("promoting a release from staging's bucket to production's", () => {
     const built = path.join(dir, "built");
     writeRelease(built, manifest, fixture);
     // Staging's bucket holds the model files, put there once
-    // (upload-model-files.ts); production's doesn't yet.
+    // (upload-model-files.ts) with their SHA-256; production's doesn't yet.
+    checksums = new Map(
+      fixtureModelFiles.map(({ sha256: hash, file }) => [
+        `${STAGING}/${modelBlobKey(hash)}`,
+        sha256Base64(readFileSync(file)),
+      ])
+    );
     buckets = new Map([
       [
         STAGING,
@@ -101,6 +113,7 @@ describe("promoting a release from staging's bucket to production's", () => {
       [PRODUCTION, new Map()],
     ]);
     const current = buckets;
+    const kept = checksums;
     server = createServer((request, response) => {
       void (async () => {
         const [, bucketName = "", ...rest] = (request.url ?? "").split("/");
@@ -114,8 +127,21 @@ describe("promoting a release from staging's bucket to production's", () => {
           return;
         }
         const stored = objects.get(key);
+        const checksum = kept.get(`${bucketName}/${key}`);
         if (request.method === "HEAD" || request.method === "GET") {
-          response.writeHead(stored === undefined ? HTTP_NOT_FOUND : HTTP_OK);
+          if (stored === undefined) {
+            response.writeHead(HTTP_NOT_FOUND).end();
+            return;
+          }
+          // As R2 answers: its length, and its SHA-256 if it kept one and
+          // checksum mode asks.
+          response.writeHead(HTTP_OK, {
+            "content-length": stored.byteLength,
+            ...(checksum !== undefined &&
+            request.headers["x-amz-checksum-mode"] === "ENABLED"
+              ? { "x-amz-checksum-sha256": checksum }
+              : {}),
+          });
           response.end(request.method === "GET" ? stored : undefined);
           return;
         }
@@ -125,6 +151,12 @@ describe("promoting a release from staging's bucket to production's", () => {
           return;
         }
         objects.set(key, body);
+        const sent = request.headers["x-amz-checksum-sha256"];
+        if (typeof sent === "string") {
+          kept.set(`${bucketName}/${key}`, sent);
+        } else {
+          kept.delete(`${bucketName}/${key}`);
+        }
         response.writeHead(HTTP_OK).end();
       })();
     }).listen(0, "127.0.0.1");
@@ -172,6 +204,29 @@ describe("promoting a release from staging's bucket to production's", () => {
         manifestKey(manifest.releaseId),
         ...manifest.modelFiles.map(({ r2Key }) => r2Key),
       ])
+    );
+  });
+
+  it("puts a model file production holds without its SHA-256 again with it, so the release imports", async () => {
+    const [file] = manifest.modelFiles;
+    if (file === undefined) {
+      throw new Error("expected a model file");
+    }
+    // Put there some other way, without the SHA-256 the import asks for.
+    buckets
+      .get(PRODUCTION)
+      ?.set(
+        file.r2Key,
+        buckets.get(STAGING)?.get(file.r2Key) ?? Buffer.from("")
+      );
+
+    await promote();
+
+    expect(checksums.get(`${PRODUCTION}/${file.r2Key}`)).toBe(
+      Buffer.from(file.sha256, "hex").toString("base64")
+    );
+    expect(Object.keys(contents(PRODUCTION))).toContain(
+      manifestKey(manifest.releaseId)
     );
   });
 

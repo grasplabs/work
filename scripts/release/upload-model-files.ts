@@ -73,21 +73,27 @@ for (const [sha256, bytes] of found) {
     method: "HEAD",
     headers: { "x-amz-checksum-mode": "ENABLED" },
   });
-  if (head.ok) {
-    if (head.headers.get("x-amz-checksum-sha256") !== checksum) {
-      throw new Error(`${key} in R2 isn't this file's bytes`);
-    }
+  if (!head.ok && head.status !== HTTP_NOT_FOUND) {
+    throw new Error(`HEAD ${key}: ${head.status}`);
+  }
+  const stored = head.ok ? head.headers.get("x-amz-checksum-sha256") : null;
+  if (stored === checksum) {
     console.info(`${key}: already there`);
     continue;
   }
-  if (head.status !== HTTP_NOT_FOUND) {
-    throw new Error(`HEAD ${key}: ${head.status}`);
+  if (stored !== null) {
+    throw new Error(`${key} in R2 isn't this file's bytes`);
   }
   // oxlint-disable-next-line no-await-in-loop -- three files, one at a time
   const put = await bucket.fetch(bucket.url(key), {
     method: "PUT",
     body: bytes,
-    headers: { "If-None-Match": "*", "x-amz-checksum-sha256": checksum },
+    // There without a SHA-256 (put some other way): put again over itself,
+    // R2 checking the bytes against the SHA-256 it then keeps.
+    headers: {
+      ...(head.ok ? {} : { "If-None-Match": "*" }),
+      "x-amz-checksum-sha256": checksum,
+    },
   });
   if (!put.ok && put.status !== HTTP_PRECONDITION_FAILED) {
     // oxlint-disable-next-line no-await-in-loop -- three files, one at a time

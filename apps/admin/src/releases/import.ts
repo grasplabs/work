@@ -34,6 +34,7 @@ import {
   manifestKey,
   releaseManifestSchema,
   sha256OfBytes,
+  storedModelFileProblem,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
 import type { Bytes, ReleaseManifest } from "@grasp-os/shared/release";
@@ -212,18 +213,20 @@ const checkModelFiles = async (
   for (const file of manifest.modelFiles) {
     // oxlint-disable-next-line no-await-in-loop -- a few files
     const head = await reader.head(file.r2Key);
-    if (head === null) {
-      throw new Error(
-        `${file.r2Key} (${file.name}) is missing from the release`
-      );
-    }
-    const stored = head.checksums.sha256;
-    if (
-      head.size !== file.size ||
-      stored === undefined ||
-      toHex(new Uint8Array(stored)) !== file.sha256
-    ) {
-      throw new Error(`${file.r2Key} (${file.name}) doesn't match its hash`);
+    const sha256 = head?.checksums.sha256;
+    const problem = storedModelFileProblem(
+      file,
+      head === null
+        ? null
+        : {
+            size: head.size,
+            ...(sha256 === undefined
+              ? {}
+              : { sha256: toHex(new Uint8Array(sha256)) }),
+          }
+    );
+    if (problem !== undefined) {
+      throw new Error(`${file.r2Key} (${file.name}) ${problem}`);
     }
   }
 };

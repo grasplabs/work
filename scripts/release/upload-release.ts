@@ -12,9 +12,11 @@
  *
  * The model files a release names aren't in a build (@grasp-os/shared/
  * release): each must be in the bucket already, put there once by
- * upload-model-files.ts, stored with the SHA-256 the manifest names, or
- * nothing is published. A release directory that holds them (Promote
- * release's download) uploads them as any blob.
+ * upload-model-files.ts, or nothing is published. A release directory
+ * that holds them (Promote release's download) uploads them, and puts one
+ * found without its SHA-256 again with it. Either way the manifest goes
+ * up only once every model file is stored as the admin's import will take
+ * it (`storedModelFileProblem`): at its size, with its SHA-256 kept by R2.
  *
  * The manifest goes up last, to `releases/<id>/manifest.json`: the admin
  * imports only releases whose manifest exists, so an upload that stops
@@ -43,7 +45,12 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-import { commitKey, manifestKey } from "@grasp-os/shared/release";
+import {
+  commitKey,
+  manifestKey,
+  storedModelFileProblem,
+} from "@grasp-os/shared/release";
+import type { StoredModelFile } from "@grasp-os/shared/release";
 import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import { z } from "zod";
 
@@ -124,34 +131,96 @@ const hexToBase64 = (hex: string): string =>
   Buffer.from(hex, "hex").toString("base64");
 
 /**
- * Throws unless the bucket holds every model file the release names and
- * the directory doesn't carry, each stored with the SHA-256 the manifest
- * names: a release whose model isn't there would deploy an embedder with
- * nothing to load.
+ * What R2 reports of the model file at `key`, as the admin's import reads
+ * it: its size and the SHA-256 it kept, never the bytes. Null when absent.
+ */
+const modelFileHead = async (
+  bucket: ReleasesBucket,
+  key: string
+): Promise<StoredModelFile | null> => {
+  const head = await bucket.fetch(bucket.url(key), {
+    method: "HEAD",
+    headers: checksumMode,
+  });
+  if (head.status === HTTP_NOT_FOUND) {
+    return null;
+  }
+  if (!head.ok) {
+    throw new Error(`HEAD ${key}: ${head.status}`);
+  }
+  const checksum = head.headers.get("x-amz-checksum-sha256");
+  return {
+    size: Number(head.headers.get("content-length") ?? "-1"),
+    ...(checksum === null
+      ? {}
+      : { sha256: Buffer.from(checksum, "base64").toString("hex") }),
+  };
+};
+
+/**
+ * Throws unless the bucket holds each of `files` as the admin's import
+ * will take it (`storedModelFileProblem`): a release that publishes
+ * otherwise would never import, and nothing would say why.
  */
 const assertModelFilesStored = async (
-  bucket: ReleasesBucket
+  bucket: ReleasesBucket,
+  files: typeof manifest.modelFiles
 ): Promise<void> => {
-  for (const file of manifest.modelFiles) {
-    if (blobs.has(file.r2Key)) {
-      continue;
-    }
+  for (const file of files) {
     // oxlint-disable-next-line no-await-in-loop -- a few files
-    const stored = await storedSha256(bucket, file.r2Key);
-    if (stored === undefined) {
+    const stored = await modelFileHead(bucket, file.r2Key);
+    const problem = storedModelFileProblem(file, stored);
+    if (problem !== undefined) {
       throw new Error(
-        `Model file ${file.name} isn't in the bucket at ${file.r2Key}: put it there once with release:model-files; nothing published`
+        `Model file ${file.name} at ${file.r2Key} ${problem}: put it there with release:model-files; nothing published`
       );
     }
-    assertStored(file.r2Key, stored, hexToBase64(file.sha256));
   }
 };
+
+/**
+ * Puts a model file the release directory carries in the bucket, stored
+ * with its SHA-256: absent, only if still absent; there without a SHA-256
+ * (put some other way), again over itself, R2 checking the bytes against
+ * the SHA-256 it then keeps. Once: the check after every upload says
+ * whether it took.
+ */
+const uploadModelFile = async (
+  bucket: ReleasesBucket,
+  key: string,
+  bytes: Buffer
+): Promise<"uploaded" | "skipped"> => {
+  const expected = sha256Base64(bytes);
+  const stored = await modelFileHead(bucket, key);
+  if (stored?.sha256 !== undefined) {
+    assertStored(key, hexToBase64(stored.sha256), expected);
+    return "skipped";
+  }
+  const put = await bucket.fetch(bucket.url(key), {
+    method: "PUT",
+    body: bytes,
+    headers: {
+      ...(stored === null ? { "If-None-Match": "*" } : {}),
+      "x-amz-checksum-sha256": expected,
+    },
+  });
+  if (!put.ok && put.status !== HTTP_PRECONDITION_FAILED) {
+    throw new Error(`PUT ${key}: ${put.status} ${await put.text()}`);
+  }
+  return "uploaded";
+};
+
+/** The model files' keys: uploaded by `uploadModelFile`, never by the blobs' rule. */
+const modelKeys = new Set(manifest.modelFiles.map(({ r2Key }) => r2Key));
 
 const uploadBlobs = async (bucket: ReleasesBucket): Promise<void> => {
   const uploadBlob = async (
     key: string,
     bytes: Buffer
   ): Promise<"uploaded" | "skipped"> => {
+    if (modelKeys.has(key)) {
+      return await uploadModelFile(bucket, key, bytes);
+    }
     const expected = sha256Base64(bytes);
     const existing = await storedSha256(bucket, key);
     if (existing !== undefined) {
@@ -345,8 +414,14 @@ if (args["dry-run"]) {
     ? ((await publishedAs(bucket)) ?? (await publishedUnmarked(bucket)))
     : undefined;
   if (earlier === undefined) {
-    await assertModelFilesStored(bucket);
+    // Before anything is uploaded, the files the directory doesn't carry;
+    // after, every one, as the import will check them.
+    await assertModelFilesStored(
+      bucket,
+      manifest.modelFiles.filter(({ r2Key }) => !blobs.has(r2Key))
+    );
     await uploadBlobs(bucket);
+    await assertModelFilesStored(bucket, manifest.modelFiles);
     await (args["assign-id"]
       ? publishWithNextId(bucket)
       : publishAsBuilt(bucket));
