@@ -1,3 +1,4 @@
+import { log } from "@grasp-os/shared/log";
 /**
  * The model files a release names, put in a client's models bucket: the
  * bucket core binds as `modelFilesBinding`, in the client's own inventory,
@@ -31,13 +32,14 @@
  */
 import {
   deployedModelKey,
+  deployedModelKeyPattern,
   deployedModelPrefix,
   modelFilesBinding,
 } from "@grasp-os/shared/release";
 import type { ModelFileRef, ReleaseManifest } from "@grasp-os/shared/release";
 import { z } from "zod";
 
-import { isNotFound } from "../cloudflare/api.ts";
+import { cloudflareApiBase, isNotFound } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import type { ReleaseStore } from "../releases/import.ts";
 import { DeployError } from "./errors.ts";
@@ -83,7 +85,39 @@ export const modelsBucketOf = (
 };
 
 const objectsPath = (bucket: ModelsBucket): string =>
-  `/accounts/${bucket.accountId}/r2/buckets/${bucket.name}/objects`;
+  `/accounts/${encodeURIComponent(bucket.accountId)}/r2/buckets/${encodeURIComponent(bucket.name)}/objects`;
+
+/**
+ * The API path of the object at `key` in `bucket`: each segment of the key
+ * percent-encoded (R2 takes a key's slashes as they are). Refused unless
+ * the path a URL makes of it, once `.` and `..` are resolved, is still
+ * that object's under the bucket's objects: a second guard, behind only
+ * ever acting on keys `isModelKey` takes.
+ */
+const objectPath = (bucket: ModelsBucket, key: string): string => {
+  const objects = objectsPath(bucket);
+  const path = `${objects}/${key.split("/").map(encodeURIComponent).join("/")}`;
+  const resolved = new URL(`${cloudflareApiBase}${path}`);
+  if (
+    resolved.pathname !== `${new URL(cloudflareApiBase).pathname}${path}` ||
+    resolved.search !== "" ||
+    resolved.hash !== ""
+  ) {
+    throw new DeployError(
+      "model_files_unreadable",
+      `A model file key leaves ${bucket.name}'s objects`
+    );
+  }
+  return path;
+};
+
+/**
+ * Whether `key` is a model file's, exactly `deployedModelKey` of a SHA-256:
+ * the only keys the deploy acts on. The listing is untrusted: core can
+ * write to its models bucket, and a key it planted (`..`, an encoded
+ * slash, a query) must never steer a call the deployer's token makes.
+ */
+const isModelKey = (key: string): boolean => deployedModelKeyPattern.test(key);
 
 const headersOf = (bucket: ModelsBucket): Record<string, string> => ({
   "cf-r2-jurisdiction": bucket.jurisdiction,
@@ -118,10 +152,19 @@ const listed = async (
     },
     listedSchema
   );
-  // An object listed without its size is copied again.
+  // An object listed without its size is copied again; one under any key
+  // but a model file's is left alone, counted, its key never logged.
+  const keys = result.flatMap(({ key }) => (key === undefined ? [] : [key]));
+  const foreign = keys.filter((key) => !isModelKey(key)).length;
+  if (foreign > 0) {
+    log.warn("deploy.model_files_foreign_keys", {
+      bucket: bucket.name,
+      count: foreign,
+    });
+  }
   const here = new Map(
     result.flatMap(({ key, size }) =>
-      key === undefined ? [] : [[key, size ?? -1] as const]
+      key === undefined || !isModelKey(key) ? [] : [[key, size ?? -1] as const]
     )
   );
   const next =
@@ -165,12 +208,15 @@ const copy = async (
         return;
       }
       try {
-        // A failure errors this attempt's body, which the call retries.
-        await stream.pipeTo(sized.writable);
+        // The body is ended here, not by the pipe, so a mismatch stops the
+        // call before its body fails: no retry reads the file again.
+        await stream.pipeTo(sized.writable, { preventAbort: true });
       } catch (error) {
         if (isMismatch(error)) {
           mismatch.abort(error);
         }
+        // Anything else fails this attempt's body, which the call retries.
+        await sized.writable.abort(error);
       }
     })();
     return sized.readable;
@@ -178,7 +224,7 @@ const copy = async (
   await context.api.call(
     {
       method: "PUT",
-      path: `${objectsPath(bucket)}/${deployedModelKey(file.sha256)}`,
+      path: objectPath(bucket, deployedModelKey(file.sha256)),
       headers: {
         ...headersOf(bucket),
         "content-type": "application/octet-stream",
@@ -202,7 +248,7 @@ const remove = async (
     await api.call(
       {
         method: "DELETE",
-        path: `${objectsPath(bucket)}/${key}`,
+        path: objectPath(bucket, key),
         headers: headersOf(bucket),
         beforeSend,
       },

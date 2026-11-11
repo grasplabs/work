@@ -177,6 +177,14 @@ describe("a release's model files in each deployment", () => {
     const size = stored?.size ?? 0;
     await stored?.body.cancel();
     await env.RELEASES.put(modelBlobKey(hash), "x".repeat(size));
+    const get = env.RELEASES.get.bind(env.RELEASES);
+    let reads = 0;
+    vi.spyOn(env.RELEASES, "get").mockImplementation(async (key, options) => {
+      if (key === modelBlobKey(hash)) {
+        reads += 1;
+      }
+      return await get(key, options);
+    });
 
     const outcome = await livePlacedClient(cloudflare, release).then(
       () => "live",
@@ -188,6 +196,8 @@ describe("a release's model files in each deployment", () => {
       .from(clientProvisions)
       .where(eq(clientProvisions.releaseId, release));
     expect(outcome).toBe("stopped");
+    // Read once: the mismatch stops the upload before any retry.
+    expect(reads).toBe(1);
     expect(operations).toStrictEqual([
       { error: "release_blob_mismatch", step: "resources" },
     ]);
@@ -319,5 +329,60 @@ describe("a release's model files in each deployment", () => {
 
     expect(heldBy(account, deploymentId)).toStrictEqual({});
     expect(cloudflare.calls.filter(isObjectPut)).toStrictEqual([]);
+  });
+
+  it("never lets a key planted in the models bucket steer a call outside its objects", async () => {
+    const files = model("planted");
+    const first = await placedRelease("feat(core): planted", {
+      modelFiles: files,
+    });
+    const { clientId, account, deploymentId } = await livePlacedClient(
+      cloudflare,
+      first
+    );
+    const bucket = `grasp-${deploymentId}-core-models`;
+    const objectsPath = `/accounts/${account.id}/r2/buckets/${bucket}/objects`;
+    // What a compromised core could write to its own models bucket.
+    const planted = [
+      "embed-models/../../grasp-other-core-files/objects/secret",
+      "embed-models/%2e%2e/%2e%2e/grasp-other-core-files/objects/secret",
+      "embed-models/..%2F..%2Fgrasp-other-core-files%2Fobjects%2Fsecret",
+      "/accounts/other/r2/buckets/grasp-other-core-files/objects/secret",
+      `embed-models/${"a".repeat(64)}?cursor=x`,
+      `embed-models/${"b".repeat(64)}#fragment`,
+      `embed-models/${"C".repeat(64)}`,
+    ];
+    const held = account.objects.get(bucket);
+    for (const key of planted) {
+      held?.set(key, new TextEncoder().encode("planted"));
+    }
+    const second = await placedRelease("feat(core): another model", {
+      modelFiles: model("next"),
+    });
+    const third = await placedRelease("feat(core): a third model", {
+      modelFiles: model("third"),
+    });
+    const before = cloudflare.calls.length;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // The second keeps the first model's files; the third removes them.
+    await deployPlaced(clientId, second);
+    await deployPlaced(clientId, third);
+
+    const objectCalls = cloudflare.calls
+      .slice(before)
+      .filter(({ path }) => path.includes("/r2/buckets/"));
+    const objectPath = new RegExp(
+      `^${objectsPath}/embed-models/[0-9a-f]{64}$`,
+      "u"
+    );
+    const outside = objectCalls.filter(({ method, path }) =>
+      method === "GET" ? path !== objectsPath : !objectPath.test(path)
+    );
+    expect(outside).toStrictEqual([]);
+    expect(
+      objectCalls.filter(({ method }) => method === "DELETE")
+    ).toHaveLength(3);
+    expect(planted.filter((key) => held?.has(key) !== true)).toStrictEqual([]);
   });
 });

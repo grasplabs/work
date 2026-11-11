@@ -90,6 +90,9 @@ export const deployedModelKey = (hash: string): string =>
 /** What every key `deployedModelKey` makes starts with. */
 export const deployedModelPrefix = deployedModelKey("");
 
+/** Exactly the keys `deployedModelKey` makes: its prefix and a SHA-256. */
+export const deployedModelKeyPattern = /^embed-models\/[0-9a-f]{64}$/u;
+
 /** The binding core reads model files through, and the deploy copies them into. */
 export const modelFilesBinding = "MODEL_FILES";
 
