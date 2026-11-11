@@ -18,6 +18,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
+import { dropAgentWakesFor } from "./agent-wakes.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   activeMember,
@@ -494,6 +495,8 @@ const workspaceArea: ErasureStep = {
     // The workflow starts their chats' agents asked them to confirm, with
     // what each was asked to run with, in any workspace.
     await dropHeldStarts(env, { personId: userId });
+    // The wake-ups that worked for them: no agent wakes for someone gone.
+    await dropAgentWakesFor(env, userId);
     const db = drizzle(env.DB);
     // Who was in their chats, kept for each chat's agent (knowledge/
     // access.ts), goes with the chats. Shared chats elsewhere keep them in

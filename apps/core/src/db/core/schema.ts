@@ -3075,6 +3075,48 @@ export const agentReach = sqliteTable("agent_reach", {
 });
 
 /**
+ * An agent's wake-ups (agent-wakes.ts): when it takes a turn nobody asked
+ * for, at the times `cron` names in `time_zone`, for the person
+ * `person_id`, with the opening line an admin wrote as its question. Such
+ * a turn only reads (`AgentScope.unattended`). `next_at` is the next time
+ * it fires, moved on as it fires, so one time fires once; `retry_at` is
+ * set once after a fire that couldn't start. `chat_id` is the chat its
+ * turns are in, in the person's own Workspace object, made at its first
+ * fire. `last_at` and `last_outcome` say how its last fire went: `started`,
+ * or the code of why it didn't.
+ */
+export const agentWakes = sqliteTable(
+  "agent_wakes",
+  {
+    id: text().primaryKey(),
+    agentId: text("agent_id").notNull(),
+    cron: text().notNull(),
+    timeZone: text("time_zone").notNull(),
+    personId: text("person_id").notNull(),
+    opening: text().notNull(),
+    state: text({ enum: ["on", "paused"] }).notNull(),
+    nextAt: timestamp("next_at"),
+    retryAt: timestamp("retry_at"),
+    chatId: text("chat_id"),
+    lastAt: timestamp("last_at"),
+    lastOutcome: text("last_outcome"),
+    madeBy: text("made_by").notNull(),
+    madeAt: timestamp("made_at").notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [
+    index("agent_wakes_agent_idx").on(table.agentId),
+    // Dropping a person's when they are erased.
+    index("agent_wakes_person_idx").on(table.personId),
+    // The clock's read of what is due.
+    index("agent_wakes_next_idx")
+      .on(table.nextAt)
+      .where(sql`${table.nextAt} IS NOT NULL`),
+  ]
+);
+
+/**
  * The places an agent works in that an admin changed (agent-reach.ts):
  * one row per agent and chat platform, by its adapter's name. `who`
  * narrows who reaches the agent there (`asAgent`: as for the agent as a

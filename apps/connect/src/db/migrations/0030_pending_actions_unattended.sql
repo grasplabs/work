@@ -1,0 +1,1 @@
+ALTER TABLE `pending_actions` ADD `unattended` integer DEFAULT false NOT NULL;

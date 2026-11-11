@@ -150,6 +150,7 @@ export type Signed = Partial<
     CapabilityScope,
     | "restricted"
     | "readOnly"
+    | "unattended"
     | "origin"
     | "decision"
     | "heldUntil"
