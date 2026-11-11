@@ -1,5 +1,5 @@
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
-import { actorOf, runActorOf } from "@grasp-os/shared/audit";
+import { actorOf } from "@grasp-os/shared/audit";
 import {
   decisionErrors,
   decisionLimits,
@@ -12,7 +12,6 @@ import type {
   DecisionView,
 } from "@grasp-os/shared/decisions";
 import {
-  appIdSchema,
   identifierSchema,
   runIdSchema,
   workflowIdSchema,
@@ -51,7 +50,6 @@ import type { Member } from "../auth/identity.ts";
 import { tellInChat } from "../channels/reach.ts";
 import { say } from "../channels/words.ts";
 import {
-  apps,
   members,
   teamMembers,
   teams,
@@ -61,7 +59,6 @@ import {
   workflowDecisions,
   workflowResourceRuns,
   workflowResources,
-  workflowRuns,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { takesExactly } from "../workflows/exact-values.ts";
@@ -87,10 +84,10 @@ import type { ReviewContext } from "./confirmations.ts";
 //   that takes the answer (`mayAnswer`), so someone removed, demoted or
 //   taken out of the team since they were asked can't, even mid-request.
 //   Grasp staff never answer a client's decisions.
-// - Nobody answers their own request (R8): the person who started the run
-//   can't answer its decisions, unless the decision names exactly them
-//   (`person:<them>`), which is their own explicit confirmation. A run a
-//   trigger started has no starter, so its App's owner isn't held back.
+// - Nobody answers their own request (R8): the person the run acts for
+//   (`principal_id`) can't answer its decisions, unless the decision names
+//   exactly them (`person:<them>`), which is their own explicit
+//   confirmation.
 // - A decision link is plain (`/decisions/<id>`) and grants nothing: it
 //   only leads there. Whoever opens it must still be signed in and one who
 //   may answer. Every answer is audited under who gave it.
@@ -112,86 +109,38 @@ import type { ReviewContext } from "./confirmations.ts";
 //   page never holds one, and agents never reach this service: it is
 //   answered through a person's session only. A context that changed
 //   since it was reviewed is a `decision.conflict`, never an approval.
-// - An independent workflow's run (a JSON workflow's decision step,
-//   workflows/sealed-run.ts) waits on the same decisions, by the
-//   same rules: its run is `resource_run_id` instead of `run_id`, its
-//   starter the person it acts for (`principal_id`), and it goes on while
-//   it hasn't ended and no cancel or termination of it was admitted. What
-//   the decision is about (`input`) is part of the review context.
+// - A workflow's run (a JSON workflow's decision step,
+//   workflows/sealed-run.ts) is named by `resource_run_id`, and goes on
+//   while it hasn't ended and no cancel or termination of it was
+//   admitted. What the decision is about (`input`) is part of the review
+//   context.
 
 type DecisionRow = typeof workflowDecisions.$inferSelect;
 
-/** An App's run a decision belongs to, as the host serves it. */
-export interface AppDecisionRun {
-  kind?: "app";
-  runId: string;
-  app: string;
-  workflow: string;
-  version: number;
-}
-
 /**
- * An independent workflow's run a decision belongs to (a JSON workflow's
- * `grasp.decision` call): `workflow` is the workflow resource's ID.
+ * The run a decision belongs to (a JSON workflow's `grasp.decision` call):
+ * `workflow` is the workflow resource's ID.
  */
-export interface ResourceDecisionRun {
-  kind: "resource";
+export interface DecisionRun {
   runId: string;
   workflow: string;
   version: number;
 }
 
-/** The run a decision belongs to: an App's, or an independent one's. */
-export type DecisionRun = AppDecisionRun | ResourceDecisionRun;
-
-/** Whether `run` is an independent workflow's. */
-const isResource = (run: DecisionRun): run is ResourceDecisionRun =>
-  run.kind === "resource";
-
 /**
- * Who a run acting on its own is in the audit log: an independent run is
- * the system, the run its events' target (as its other events are).
+ * Who a run acting on its own is in the audit log: the system, the run its
+ * events' target (as its other events are).
  */
-const actorOfRun = (run: DecisionRun): AuditActor =>
-  isResource(run) ? { type: "system" } : runActorOf(run);
+const runActor: AuditActor = { type: "system" };
 
 /** That a decision is `run`'s, as a condition on its row. */
 const ofRun = (run: DecisionRun): SQL =>
-  isResource(run)
-    ? eq(workflowDecisions.resourceRunId, run.runId)
-    : eq(workflowDecisions.runId, run.runId);
-
-/**
- * Tells, for an independent run an App started, the App's connections
- * following its decision queries that it changed.
- */
-const tellRunPages = async (env: Env, run: DecisionRun): Promise<void> => {
-  if (isResource(run)) {
-    await tellDecisionFollowers(env, run.runId);
-  }
-};
+  eq(workflowDecisions.resourceRunId, run.runId);
 
 /** How a decision stands for the run waiting on it. */
 export type DecisionOutcome =
   | { answered: true; approved: boolean; by: string; payload: Json | null }
   | { answered: false };
-
-/**
- * The run's next summary revision (workflows/summary.ts), after the
- * statement before it changed one of its decisions: their audit event,
- * stored only if the decision changed. An independent run keeps no
- * summary revision: for one, it changes nothing.
- */
-const summaryChanged = (db: DrizzleD1Database, run: DecisionRun) =>
-  db
-    .update(workflowRuns)
-    .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
-    .where(
-      and(
-        isResource(run) ? sql`0` : eq(workflowRuns.id, run.runId),
-        sql`changes() > 0`
-      )
-    );
 
 const decisionEventPrefix = "grasp-decision-";
 
@@ -254,9 +203,7 @@ const decisionEntry = (
   action,
   target: { type: "workflow_decision", id: row.id },
   detail: {
-    ...(isResource(run)
-      ? { workflowResource: run.workflow }
-      : { app: run.app, workflow: run.workflow }),
+    workflowResource: run.workflow,
     version: run.version,
     run: run.runId,
     step: row.step,
@@ -296,25 +243,12 @@ const resourceRunGoesOn = (id: SQL | SQLiteColumn | string): SQL => sql`EXISTS (
         AND control.kind = 'cancel' AND control.state <> 'superseded')
 )`;
 
-/**
- * That the decision's run goes on, as a condition: it hasn't ended, and
- * nobody asked to cancel it. A cancel is admitted before the engine
- * stops the run, which shows as running until then; an answer in
- * between would count for a run that never takes it. An App's run or an
- * independent one's, whichever the decision names.
- */
-const runUnended = (): SQL => sql`(EXISTS (
-  SELECT 1 FROM ${workflowRuns}
-  WHERE ${workflowRuns.id} = ${workflowDecisions.runId}
-    AND ${workflowRuns.status} IN ('starting', 'running', 'paused')
-    AND ${workflowRuns.cancelRequestedAt} IS NULL
-) OR ${resourceRunGoesOn(workflowDecisions.resourceRunId)})`;
+/** That the decision's run goes on, as a condition (`resourceRunGoesOn`). */
+const runUnended = (): SQL =>
+  resourceRunGoesOn(workflowDecisions.resourceRunId);
 
 /** That `run` goes on, as a condition: as `runUnended`, for one run. */
-const liveRunOf = (run: DecisionRun): SQL =>
-  isResource(run)
-    ? resourceRunGoesOn(run.runId)
-    : sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.runId} AND ${workflowRuns.cancelRequestedAt} IS NULL AND ${workflowRuns.endedAt} IS NULL)`;
+const liveRunOf = (run: DecisionRun): SQL => resourceRunGoesOn(run.runId);
 
 // Run side: the host (workflows/host.ts) calls these for its run only.
 
@@ -375,8 +309,8 @@ export const openDecision = async (
   const now = Date.now();
   const row: DecisionRow = {
     id: crypto.randomUUID(),
-    runId: isResource(run) ? null : run.runId,
-    resourceRunId: isResource(run) ? run.runId : null,
+    runId: null,
+    resourceRunId: run.runId,
     step: request.step,
     deciders: request.from,
     starterExcluded: request.starterExcluded,
@@ -411,7 +345,7 @@ export const openDecision = async (
     ...recipientsStored(db, row.id, request.recipients ?? [], stands),
     outboxedWhere(
       db,
-      decisionEntry(actorOfRun(run), "workflow.decision.opened", run, row, {
+      decisionEntry(runActor, "workflow.decision.opened", run, row, {
         from: request.from,
         ...(request.recipients === undefined
           ? {}
@@ -419,7 +353,6 @@ export const openDecision = async (
       }),
       stands
     ),
-    summaryChanged(db, run),
   ]);
   const live = await db.get<{ live: number }>(sql`SELECT ${liveRun} AS live`);
   if (live.live === 0) {
@@ -428,7 +361,7 @@ export const openDecision = async (
   // The run now waits for it; a step run again after a crash opened
   // nothing, and tells no one.
   if (inserted) {
-    await tellRunPages(env, run);
+    await tellDecisionFollowers(env, run.runId);
   }
   const opened = await db
     .select({
@@ -590,23 +523,18 @@ const recipientsCondition = (
  * excludes its starter (`starterExcluded`: its reviewer was chosen at run
  * time, perhaps by the starter themselves). The one place these rules
  * live: who is asked, who counts toward the cap, and who may answer all go
- * by it. An independent run's starter is the person it acts for.
+ * by it. A run's starter is the person it acts for.
  */
 const eligibleMembers = (
   deciders: string | SQLiteColumn,
   run: {
     /** The decision's ID: its recipients, if it has more than one. */
     id: string | SQLiteColumn;
-    runId: string | null | SQLiteColumn;
     resourceRunId: string | null | SQLiteColumn;
   },
   starterExcluded: boolean | SQLiteColumn
 ): SQL => {
   const notStarter = sql`NOT EXISTS (
-    SELECT 1 FROM ${workflowRuns}
-    WHERE ${workflowRuns.id} = ${run.runId}
-      AND ${workflowRuns.startedBy} = ${members.userId}
-  ) AND NOT EXISTS (
     SELECT 1 FROM ${workflowResourceRuns}
     WHERE ${workflowResourceRuns.id} = ${run.resourceRunId}
       AND ${workflowResourceRuns.principalId} = ${members.userId}
@@ -655,7 +583,6 @@ export const answerableByNow = (db: DrizzleD1Database, userId: string): SQL =>
             workflowDecisions.deciders,
             {
               id: workflowDecisions.id,
-              runId: workflowDecisions.runId,
               resourceRunId: workflowDecisions.resourceRunId,
             },
             workflowDecisions.starterExcluded
@@ -701,7 +628,6 @@ const mayAnswer = (
               deciders,
               {
                 id: workflowDecisions.id,
-                runId: workflowDecisions.runId,
                 resourceRunId: workflowDecisions.resourceRunId,
               },
               workflowDecisions.starterExcluded
@@ -727,7 +653,7 @@ const recordAsk = async (
   const db = drizzle(env.DB);
   const liveRun = liveRunOf(run);
   const entry = decisionEntry(
-    actorOfRun(run),
+    runActor,
     "workflow.decision.asked",
     run,
     row,
@@ -852,17 +778,11 @@ export const decisionOutcome = async (
         .returning({ id: workflowDecisions.id }),
       outboxedIfChanged(
         db,
-        decisionEntry(
-          actorOfRun(run),
-          "workflow.decision.timed_out",
-          run,
-          found
-        )
+        decisionEntry(runActor, "workflow.decision.timed_out", run, found)
       ),
-      summaryChanged(db, run),
     ]);
     if (closed) {
-      await tellRunPages(env, run);
+      await tellDecisionFollowers(env, run.runId);
     }
   }
   const row = close ? await runDecision(env, run, decision) : found;
@@ -885,9 +805,8 @@ export const decisionOutcome = async (
 /** A decision with what the people who answer it see of it. */
 interface DecisionWithRun {
   decision: DecisionRow;
-  /** Its run: an App's, or an independent workflow's. */
   run: DecisionRun;
-  /** The name of the run's App, or of its independent workflow. */
+  /** The name of the run's workflow. */
   name: string;
   /** Whether its run goes on (`runUnended`): an open one takes answers. */
   goesOn: boolean;
@@ -899,10 +818,6 @@ const decisionRead = async (db: DrizzleD1Database, id: string) =>
   await db
     .select({
       decision: workflowDecisions,
-      appId: workflowRuns.appId,
-      appName: apps.name,
-      workflow: workflowRuns.workflowId,
-      version: workflowRuns.version,
       resourceId: workflowResourceRuns.workflowResourceId,
       resourceName: workflowResources.name,
       resourceVersion: workflowResourceRuns.version,
@@ -910,8 +825,6 @@ const decisionRead = async (db: DrizzleD1Database, id: string) =>
       decidedByName: users.name,
     })
     .from(workflowDecisions)
-    .leftJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
-    .leftJoin(apps, eq(apps.id, workflowRuns.appId))
     .leftJoin(
       workflowResourceRuns,
       eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
@@ -924,22 +837,11 @@ const decisionRead = async (db: DrizzleD1Database, id: string) =>
     .where(eq(workflowDecisions.id, id))
     .get();
 
-/** The run `found` names, with its App's or workflow's name, if it has one. */
+/** The run `found` names, with its workflow's name, if it has one. */
 const runOfRead = (
   found: NonNullable<Awaited<ReturnType<typeof decisionRead>>>
 ): Pick<DecisionWithRun, "run" | "name"> | undefined => {
   const { decision: row } = found;
-  if (row.runId !== null && found.appId !== null && found.version !== null) {
-    return {
-      run: {
-        runId: row.runId,
-        app: found.appId,
-        workflow: found.workflow ?? "",
-        version: found.version,
-      },
-      name: found.appName ?? "",
-    };
-  }
   if (
     row.resourceRunId !== null &&
     found.resourceId !== null &&
@@ -947,7 +849,6 @@ const runOfRead = (
   ) {
     return {
       run: {
-        kind: "resource",
         runId: row.resourceRunId,
         workflow: found.resourceId,
         version: found.resourceVersion,
@@ -1026,8 +927,6 @@ const databaseNow = sql`CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGE
 const contextOf = ({ decision, run }: DecisionWithRun): ReviewContext => ({
   decision: decision.id,
   run: run.runId,
-  // An independent run is of no App: its workflow is the resource.
-  app: isResource(run) ? "" : run.app,
   workflow: run.workflow,
   version: run.version,
   step: decision.step,
@@ -1052,22 +951,13 @@ const statusOf = ({
 const sourceOf = ({
   run,
   name,
-}: DecisionWithRun): Pick<
-  DecisionView,
-  "app" | "workflowResource" | "workflow"
-> =>
-  isResource(run)
-    ? {
-        workflowResource: {
-          id: workflowResourceIdSchema.parse(run.workflow),
-          name,
-        },
-        workflow: workflowIdSchema.parse(name),
-      }
-    : {
-        app: { id: appIdSchema.parse(run.app), name },
-        workflow: workflowIdSchema.parse(run.workflow),
-      };
+}: DecisionWithRun): Pick<DecisionView, "workflowResource" | "workflow"> => ({
+  workflowResource: {
+    id: workflowResourceIdSchema.parse(run.workflow),
+    name,
+  },
+  workflow: workflowIdSchema.parse(name),
+});
 
 const toView = async (
   env: Env,
@@ -1159,9 +1049,9 @@ const waitingScanMax = 2000;
 
 /**
  * The open decisions `by` may answer now, latest first, at most
- * {@link maxWaitingDecisions}: an App's run's and an independent run's
- * alike, so a person asked by a JSON workflow, which has no App code of
- * its own to tell them, finds it waiting for them (their inbox). Read by
+ * {@link maxWaitingDecisions}, so a person asked by a JSON workflow,
+ * which has no App code of its own to tell them, finds it waiting for
+ * them (their inbox). Read by
  * the deciders that could name them (themselves, their role, their teams),
  * a page at a time, then held to who may answer each now (`answerableBy`),
  * as answering is; none for Grasp staff.
@@ -1572,7 +1462,6 @@ export const answerDecision = async (
   const wake: Wake = {
     id: `decision:${row.id}`,
     runId: run.runId,
-    kind: isResource(run) ? "resource" : "app",
     type: decisionEventType(row.id),
   };
   // The row this batch's update wrote: by whoever answered here, now.
@@ -1631,7 +1520,6 @@ export const answerDecision = async (
         viaDetail(via)
       )
     ),
-    summaryChanged(db, run),
     // Owed with this answer only.
     oweWake(db, wake, answeredHere, { now: now.getTime() }),
     // Taken with this answer only: one use, and never without the answer.
@@ -1648,7 +1536,7 @@ export const answerDecision = async (
     return await notTaken(matching);
   }
   await sendWake(env, wake.id);
-  await tellRunPages(env, run);
+  await tellDecisionFollowers(env, run.runId);
   return await toView(env, {
     ...found,
     decision: answered,

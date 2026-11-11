@@ -1,10 +1,9 @@
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The board's weekly weekly, read in one call (`dashboard.report()` in
@@ -35,8 +34,6 @@ const planToday = async (): Promise<void> => {
 };
 
 describe("the board's weekly report", slow, () => {
-  afterEach(endLiveRuns);
-
   // First, before any test here saves a plan.
   it("has no programme without a plan, and still says what ran", async () => {
     const member = await signedInApi(idp, "user");

@@ -552,8 +552,7 @@ describe("an invoice approval's decision", () => {
         status: answered.status,
         input: answered.input,
         description: answered.description,
-        workflowResource: answered.workflowResource?.id,
-        app: answered.app,
+        workflowResource: answered.workflowResource.id,
       },
       row: {
         deciders: row?.deciders,
@@ -571,7 +570,6 @@ describe("an invoice approval's decision", () => {
         input: { amount: 5000 },
         description: "Approve this invoice?",
         workflowResource: workflow.id,
-        app: undefined,
       },
       row: { deciders: `person:${reviewer.userId}`, starterExcluded: 1 },
       end: { status: "completed", output: { status: "approved" } },

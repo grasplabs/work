@@ -137,7 +137,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company: "what an owner or admin did about something Needs you lists",
   },
   "core.agent_held_starts": { erased: "workspace" },
-  "core.preview_fixture_stores": { erased: "removal" },
+  "core.preview_fixture_stores": {
+    none: "nothing writes or reads it; dropped by the next contract migration",
+  },
   "core.run_chat_sources": {
     company: "what a run's chat had read, with the run (D3)",
   },

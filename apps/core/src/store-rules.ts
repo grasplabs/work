@@ -5,7 +5,7 @@ import type { StoreFields } from "@grasp-os/shared/stores";
 import { textExpression } from "./store-expressions.ts";
 import type { Fragment } from "./store-expressions.ts";
 
-// A table's row rules (`defineTable(...).access`, sdk/src/schema.ts) as the
+// A table's row rules (`defineTable(...).access`, runtime/src/define-table.ts) as the
 // SQL a business store runs them as (store-queries.ts for reads,
 // store-host.ts for writes). One function turns a direction's rules and
 // the caller into one condition on a record's document and owner, so a

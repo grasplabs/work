@@ -103,6 +103,15 @@ const aiOf = ({ ready }: { ready: boolean }): AiReadiness => {
   return {
     ready,
     listing: {
+      source: "own",
+      grasp: {
+        available: false,
+        model: {
+          model: "anthropic/claude-sonnet-5-5",
+          name: "Claude Sonnet 5.5",
+        },
+        whereItRuns: "Anthropic, United States",
+      },
       providers: ready
         ? [
             {

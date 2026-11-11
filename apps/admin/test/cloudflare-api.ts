@@ -1,17 +1,3 @@
-/**
- * A stand-in for the Cloudflare REST API: it answers at the real URLs, in
- * the API's envelope, and keeps what each account holds, so the admin's
- * client runs unchanged against it. Only the token it was made with gets
- * in, and only to the accounts it holds. A test can plan failures (the
- * Nth call answers 429 or 500) and read every call it got.
- *
- * It answers in place of `fetch` in the isolate the admin runs in, which
- * is also where its runs' steps run: the tests' isolate, for each test
- * (test/cloudflare-api-mock.ts), and the browser journeys' admin, for its
- * whole run (test/e2e-worker.ts). D1 queries run on real D1 databases, one
- * for each database the fake holds at once (`CLIENT_D1_<n>`,
- * vite.test.config.ts and vite.e2e.config.ts).
- */
 import {
   adminCommandEnvelopeSchema,
   adminCommandPath,
@@ -48,6 +34,21 @@ import {
   platformWorkerName,
   stages,
 } from "@grasp-os/shared/names";
+/**
+ * A stand-in for the Cloudflare REST API: it answers at the real URLs, in
+ * the API's envelope, and keeps what each account holds, so the admin's
+ * client runs unchanged against it. Only the token it was made with gets
+ * in, and only to the accounts it holds. A test can plan failures (the
+ * Nth call answers 429 or 500) and read every call it got.
+ *
+ * It answers in place of `fetch` in the isolate the admin runs in, which
+ * is also where its runs' steps run: the tests' isolate, for each test
+ * (test/cloudflare-api-mock.ts), and the browser journeys' admin, for its
+ * whole run (test/e2e-worker.ts). D1 queries run on real D1 databases, one
+ * for each database the fake holds at once (`CLIENT_D1_<n>`,
+ * vite.test.config.ts and vite.e2e.config.ts).
+ */
+import { defaultFlow } from "@grasp-os/shared/onboarding-flow";
 import {
   onboardingSummaryPath,
   onboardingSummaryPurpose,
@@ -515,7 +516,18 @@ const answerAdmin = async (
   if (core.admin === "garbled") {
     return Response.json({ company: core.name });
   }
-  return Response.json(core.admin ?? emptyAdminSnapshot(core.name));
+  // The flow staff last gave, as core keeps it: all of it until they give one.
+  const given = core.commands.findLast(
+    (command) => command.type === "onboarding.flow"
+  );
+  const flow =
+    given?.type === "onboarding.flow" && given.payload.flow !== null
+      ? { flow: given.payload.flow, changed: true }
+      : { flow: defaultFlow, changed: false };
+  return Response.json({
+    ...(core.admin ?? emptyAdminSnapshot(core.name)),
+    flow,
+  });
 };
 
 /** A kickoff with nothing brought in yet, as core answers it. */

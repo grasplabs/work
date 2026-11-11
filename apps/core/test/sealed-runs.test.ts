@@ -15,11 +15,6 @@ import { z } from "zod";
 
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
-import {
-  exportedWorkflowVersion,
-  publishWorkflowVersion,
-  workflowVersions,
-} from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
@@ -144,25 +139,6 @@ const startOfFirst = async (old: Sealed): Promise<unknown> =>
         { version: 1, args: { who: "Ada" }, key: unique() }
       )
   );
-
-/** A manifest that also binds an App's store operation, as workflows could before. */
-const withOperationBinding = (manifest: string): string => {
-  const parsed = z
-    .looseObject({ bindings: z.array(z.json()) })
-    .parse(JSON.parse(manifest));
-  return JSON.stringify({
-    ...parsed,
-    bindings: [
-      ...parsed.bindings,
-      {
-        alias: "save",
-        kind: "operation",
-        contractId: "requests.add",
-        fingerprint: "0".repeat(64),
-      },
-    ],
-  });
-};
 
 /** How a test's engine ends an activation it evicts. */
 const eviction = (): Error => new Error("The activation was evicted");
@@ -852,7 +828,7 @@ return { before, after: await late };
     });
   });
 
-  it("refuses a version an earlier platform release built, or binding a kind no longer served, as one to publish again, not as one changed", async () => {
+  it("refuses a version an earlier platform release built as one to publish again, not as one changed", async () => {
     // As a version published while builds named a protocol.
     const earlier = await publishedBefore((manifest) =>
       manifest.replace('"build":{', '"build":{"protocol":9,')
@@ -860,55 +836,6 @@ return { before, after: await late };
     await expect(startOfFirst(earlier)).resolves.toBe(
       "workflow.format_unsupported"
     );
-    const operation = await publishedBefore(withOperationBinding);
-    const { workflow, by } = operation;
-    // A new version beside it, published as any is.
-    const first = await env.DB.prepare(
-      "SELECT definition FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-    )
-      .bind(workflow.id)
-      .first<{ definition: string }>();
-    const definition = z
-      .looseObject({ result: z.json() })
-      .parse(JSON.parse(first?.definition ?? "{}"));
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: JSON.stringify({
-        ...definition,
-        result: { status: "done again" },
-      }),
-      basedOn: 1,
-    });
-    const listed = await workflowVersions(env, by, workflow.id);
-    expect({
-      start: await startOfFirst(operation),
-      exported: await codeOf(
-        async () => await exportedWorkflowVersion(env, by, workflow.id, 1)
-      ),
-      // Listed beside the new one, refused, never failing the listing.
-      listed: listed.map(({ version, refused, build }) => ({
-        version,
-        refused: refused?.code,
-        told: refused?.message.includes("publish the workflow again"),
-        built: build !== null,
-      })),
-    }).toStrictEqual({
-      start: "workflow.binding_kind_removed",
-      exported: "workflow.binding_kind_removed",
-      listed: [
-        {
-          version: 2,
-          refused: undefined,
-          told: undefined,
-          built: true,
-        },
-        {
-          version: 1,
-          refused: "workflow.binding_kind_removed",
-          told: true,
-          built: false,
-        },
-      ],
-    });
   });
 });
 

@@ -5,13 +5,19 @@ import {
   kitModules,
   serverSdkModules,
 } from "@grasp-os/compiler";
-import { isFunctionPath } from "@grasp-os/runtime/definition";
+import {
+  definitionSources,
+  isFunctionPath,
+  serverFunctionsIn,
+  undeclaredFunctions,
+} from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
 import {
   contractFingerprints,
   contractsFormatVersion,
   generatedPaths,
   generateModules,
+  ownFiles,
   readSealedWorkflows,
   manifestVersion,
   readAppManifest,
@@ -20,6 +26,7 @@ import {
 } from "@grasp-os/runtime/host";
 import type {
   AppManifest,
+  ServerFunctions,
   WorkflowBindingExtras,
 } from "@grasp-os/runtime/host";
 import {
@@ -67,7 +74,7 @@ import {
 } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { boundWorkflowsOf } from "./bound-workflows.ts";
+import { sealedWorkflowPins } from "./bound-workflows.ts";
 import { checkEvidenceText, evidenceMatches } from "./check-evidence.ts";
 import { appStoreFor, openStore } from "./data-stores.ts";
 import {
@@ -532,7 +539,7 @@ const bindingAgrees = (
  * `version.format_unsupported` or `version.manifest_corrupt` as
  * `loadRelease` says.
  */
-export const checkedManifest = async (
+const checkedManifest = async (
   env: Env,
   app: AppId,
   version: number,
@@ -596,21 +603,6 @@ export const checkedManifest = async (
     throw versionErrors.create("version.manifest_corrupt");
   }
   return { manifest, hash };
-};
-
-/**
- * Refuses `app`'s `version` unless it loads as a release (`loadRelease`'s
- * own manifest checks): sealed, not revoked, its manifest intact
- * (`version.not_sealed`, `version.revoked`, `version.manifest_corrupt`).
- * For what names a release to call later, such as a workflow binding's
- * approval: its artifacts are verified when it is loaded to run.
- */
-export const requireReleaseLoads = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<void> => {
-  await checkedManifest(env, app, version);
 };
 
 /**
@@ -1003,15 +995,51 @@ interface InspectedRelease {
 }
 
 /**
+ * Refuses a release where what its code registers and what its syntax
+ * declares (`functions`) disagree (`undeclaredFunctions`): its pages and
+ * code could never reach those functions as the release has them
+ * (`version.function_undeclared`, naming each).
+ */
+const requireDeclaredFunctions = (
+  manifest: AppManifest,
+  functions: ServerFunctions
+): void => {
+  const undeclared = undeclaredFunctions(manifest, functions);
+  if (undeclared.length > 0) {
+    throw versionErrors.create("version.function_undeclared", {
+      functions: undeclared.slice(0, 50),
+    });
+  }
+};
+
+/**
+ * `files`, a version's or a draft's, as a seal reads them: their config
+ * and schema generated again from `definition`, and nothing of their
+ * `server/_generated/`, which the seal generates once, from them
+ * (`inspectForSeal`). A release never takes the copy: one written by an
+ * earlier generator, or changed in storage, seals as if it were current.
+ * The version's tree stays as it was committed.
+ */
+const sealedSource = (
+  files: Readonly<Record<string, string>>,
+  definition: AppDefinition
+): Record<string, string> => ({
+  ...ownFiles(files),
+  ...definitionSources(definition),
+});
+
+/**
  * `files`, an App's code for release `key`, built and inspected as a seal
  * does (see the header): inspected with symbolic references, then built
- * and type-checked with the modules generated from what it read; then
- * each explicit migration run on its fixtures.
+ * and type-checked with the modules generated from what it read and the
+ * workflow versions it binds, `definition` its definition; then each
+ * explicit migration run on its fixtures.
  */
 const inspectForSeal = async (
   env: Env,
   key: { app: AppId; version: number },
   files: Readonly<Record<string, string>>,
+  definition: AppDefinition,
   /** `preview` for a chat's draft. */
   profile: BuildProfile
 ): Promise<InspectedRelease> => {
@@ -1034,11 +1062,15 @@ const inspectForSeal = async (
   const inspection = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(inspection);
 
-  // The real modules, then the same code built with them: the workflows
-  // it declares as the App binds them now, sealed with it.
+  // The real modules, then the same code built with them: the references
+  // from the functions its syntax declares, each one it registers among
+  // them, and the workflow versions it binds once current, sealed with it.
+  const functions = serverFunctionsIn(files);
+  requireDeclaredFunctions(manifest, functions);
   const generated = await generateModules(
     manifest,
-    await boundWorkflowsOf(env, key.app, manifest)
+    functions,
+    await sealedWorkflowPins(env, key.app, manifest, definition)
   );
   // Type-checked with them, against the SDK's server side: nothing is
   // sealed that doesn't check.
@@ -1225,7 +1257,8 @@ export const sealDraftRelease = async (
   const built = await inspectForSeal(
     env,
     key,
-    Object.fromEntries(files),
+    sealedSource(Object.fromEntries(files), definition),
+    definition,
     "preview"
   );
   const { artifacts, text, hash } = await packaged(env, key, built, {
@@ -1301,11 +1334,12 @@ export const sealRelease = async (
   // Checked against its hash, and refused for a version with none: its
   // release names the definition its schema is applied by (app-schema.ts).
   const { hash: definition, definition: defined } = await readStored(row);
-  const files = await versionFiles(env, app, version);
+  const files = sealedSource(await versionFiles(env, app, version), defined);
   const built = await inspectForSeal(
     env,
     { app, version },
     files,
+    defined,
     "production"
   );
   await requireFunctionIds(env, app, files, defined);

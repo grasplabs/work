@@ -139,6 +139,19 @@ const filesWith = (tests: Record<string, string> = {}): TestApp =>
       permissions: [
         'permission.workflow("approval", {\n  args: v.object({ amount: v.number() }),\n  returns: v.object({ status: v.string() }),\n})',
       ],
+      // Its decision, as the version bound asks it.
+      contracts: {
+        approval: {
+          events: {},
+          listens: {},
+          decisions: {
+            invoiceApproval: {
+              value: response.descriptor,
+              context: v.object({ amount: v.number() }).descriptor,
+            },
+          },
+        },
+      },
     },
     {
       "server/invoices.ts": `import { v } from "@grasp-os/sdk";

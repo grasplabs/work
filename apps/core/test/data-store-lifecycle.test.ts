@@ -13,6 +13,7 @@ import { storeClosingMs } from "../src/store-deletion.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
+import { seedResourceRun } from "./runs.ts";
 import {
   applied,
   manifestHash,
@@ -381,16 +382,18 @@ describe("deleting stores", () => {
     });
 
     const running = await storeOf(owner);
-    const appId = crypto.randomUUID();
-    const runId = crypto.randomUUID();
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Runner', '', ?, ?)"
-      ).bind(appId, owner.userId, Date.now()),
-      env.DB.prepare(
-        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'w', 1, ?, 'running', ?)"
-      ).bind(runId, appId, owner.userId, Date.now()),
-    ]);
+    const workflow = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)"
+    )
+      .bind(workflow, `Runner ${workflow}`, owner.userId, Date.now())
+      .run();
+    const runId = await seedResourceRun({
+      workflow,
+      principal: owner.userId,
+      status: "running",
+      createdAt: Date.now(),
+    });
     await commitNote(running, owner, runId);
     // Past its retention, but its run is live: the sweep keeps it.
     await expireReceipts(running.id);

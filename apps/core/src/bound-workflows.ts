@@ -1,3 +1,7 @@
+import type {
+  AppDefinition,
+  DefinedWorkflowBinding,
+} from "@grasp-os/runtime/definition";
 import {
   declaredPermission,
   declaredPermissions,
@@ -16,6 +20,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { findApp, findVersion, readStored } from "./apps.ts";
 import { boundEventsOf } from "./bound-workflow-events.ts";
 import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
@@ -28,9 +33,9 @@ import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import type { ResolvedCatalogContract } from "./workflow-catalog.ts";
 
 // What the host resolves of the workflows an App declares. A release
-// seals the exact workflow version each declared alias's active binding
-// pins (`boundWorkflowsOf`, app-workflow-bindings.ts): what its pages'
-// reads of a run's history and decisions are held to. The events, listen
+// seals the exact workflow version each declared alias is bound to once
+// its version is current (`sealedWorkflowPins`, app-workflow-bindings.ts):
+// what its pages' reads of a run's history and decisions are held to. The events, listen
 // tasks and decisions the App's references name are the App's own
 // declaration (`permission.workflow`), never resolved from the binding.
 //
@@ -242,15 +247,52 @@ export const versionEventContract = async (
 };
 
 /**
- * The exact workflow version each workflow `manifest` declares that `app`
- * binds now pins, by alias, for a seal or a draft. A declared alias with
- * no active binding, and a binding the App's code doesn't declare,
- * resolve to nothing.
+ * The bindings `definition` records that the definition of `app`'s
+ * current version doesn't (all of them, for an App with none): those the
+ * draft it came from bound (`bindWorkflow`), never those it carries over.
  */
-export const boundWorkflowsOf = async (
+const ownBindings = async (
   env: Env,
   app: AppId,
-  manifest: AppManifest
+  definition: AppDefinition
+): Promise<readonly DefinedWorkflowBinding[]> => {
+  const recorded = definition.workflowBindings ?? [];
+  if (recorded.length === 0) {
+    return [];
+  }
+  const { currentVersion } = await findApp(env, app);
+  let current: readonly DefinedWorkflowBinding[] = [];
+  if (currentVersion !== null) {
+    const stored = await readStored(
+      await findVersion(env, app, currentVersion)
+    );
+    current = stored.definition.workflowBindings ?? [];
+  }
+  return recorded.filter(
+    (bound) =>
+      !current.some(
+        ({ alias, workflowId, version }) =>
+          alias === bound.alias &&
+          workflowId === bound.workflowId &&
+          version === bound.version
+      )
+  );
+};
+
+/**
+ * The exact workflow version each workflow `manifest` declares is bound
+ * to once the version of `app` whose definition is `definition` is
+ * current, by alias, for its seal: what it binds of its own
+ * (`ownBindings`), otherwise what the App binds now. A declared alias
+ * with neither, and a binding the App's code doesn't declare, resolve to
+ * nothing. A claim until the version is made current, which checks each
+ * again (app-workflow-bindings.ts, `versionBindingChanges`).
+ */
+export const sealedWorkflowPins = async (
+  env: Env,
+  app: AppId,
+  manifest: AppManifest,
+  definition: AppDefinition
 ): Promise<WorkflowBindingExtras[]> => {
   if (declaredPermissions(manifest, "workflows").length === 0) {
     return [];
@@ -258,7 +300,7 @@ export const boundWorkflowsOf = async (
   const active = await drizzle(env.DB)
     .select({
       alias: appWorkflowBindings.alias,
-      workflow: appWorkflowBindings.workflowResourceId,
+      workflowId: appWorkflowBindings.workflowResourceId,
       version: appWorkflowBindings.workflowResourceVersion,
     })
     .from(appWorkflowBindings)
@@ -267,15 +309,25 @@ export const boundWorkflowsOf = async (
         eq(appWorkflowBindings.appId, app),
         eq(appWorkflowBindings.status, "active")
       )
-    )
-    .orderBy(asc(appWorkflowBindings.alias));
-  return active
+    );
+  const pins = new Map(
+    active.map(({ alias, workflowId, version }) => [
+      alias,
+      { workflowId, version },
+    ])
+  );
+  for (const { alias, workflowId, version } of await ownBindings(
+    env,
+    app,
+    definition
+  )) {
+    pins.set(alias, { workflowId, version });
+  }
+  return [...pins]
     .filter(
-      ({ alias }) =>
+      ([alias]) =>
         declaredPermission(manifest, alias, "workflows") !== undefined
     )
-    .map(({ alias, workflow, version }) => ({
-      alias,
-      pinned: { workflowId: workflow, version },
-    }));
+    .toSorted(([a], [b]) => (a < b ? -1 : 1))
+    .map(([alias, pinned]) => ({ alias, pinned }));
 };

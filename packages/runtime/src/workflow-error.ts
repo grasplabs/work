@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 import type { ValueSchema } from "./value-descriptor.ts";
 
 const workflowErrorCodes = [
@@ -60,19 +58,6 @@ export class WorkflowError extends Error {
 
 export const invalidCall = (message: string): WorkflowError =>
   new WorkflowError("workflow.invalid_step_call", message);
-
-export const parseOrThrow = <Schema extends z.ZodType>(
-  schema: Schema,
-  value: unknown,
-  code: WorkflowErrorCode,
-  what: string
-): z.output<Schema> => {
-  const result = schema.safeParse(value);
-  if (!result.success) {
-    throw new WorkflowError(code, `${what}: ${z.prettifyError(result.error)}`);
-  }
-  return result.data;
-};
 
 /**
  * What a value's check found wrong, as one line: the first issue, where

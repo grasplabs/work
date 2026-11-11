@@ -24,10 +24,7 @@ import {
   decisionAsks,
   openDecision,
 } from "../decisions/decisions.ts";
-import type {
-  DecisionOutcome,
-  ResourceDecisionRun,
-} from "../decisions/decisions.ts";
+import type { DecisionOutcome, DecisionRun } from "../decisions/decisions.ts";
 import { takesPageAnswers } from "./exact-values.ts";
 import { requireCallAuthority } from "./resource-authority.ts";
 import type {
@@ -109,8 +106,7 @@ export const callDenied = () =>
   workflowResourceErrors.create("workflow.call_denied");
 
 /** The decision run `run` is, as the decision service names it. */
-export const decisionRunOf = (run: CallingRun): ResourceDecisionRun => ({
-  kind: "resource",
+export const decisionRunOf = (run: CallingRun): DecisionRun => ({
   runId: run.runId,
   workflow: run.workflowId,
   version: run.version,

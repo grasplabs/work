@@ -169,6 +169,17 @@ const applyChange = async (
       await store.saveStephen(command.payload.setup, by);
       return;
     }
+    case "onboarding.flow": {
+      // Once the team is told, the interviews stay part of it (the store
+      // checks it in the same transaction as the save).
+      refuseUnless(
+        await store.setFlow(command.payload.flow, by),
+        "onboarding.interviews_kept"
+      );
+      // Links that only waited for an agreement no longer asked go out now.
+      await store.releaseDue();
+      return;
+    }
     default: {
       command satisfies never;
     }

@@ -131,7 +131,6 @@ export type ProblemCode =
   | "workflow.permission_kind"
   | "workflow.duplicate_alias"
   | "workflow.too_many_permissions"
-  | "workflow.no_result"
   | "workflow.retry_nested"
   | "workflow.unreadable"
   | "workflow.sensitive"

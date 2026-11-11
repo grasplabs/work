@@ -18,6 +18,7 @@ import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import type { Agreements } from "@grasp-os/shared/onboarding";
+import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import type { StephenSetup } from "@grasp-os/shared/onboarding-staff";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
@@ -199,4 +200,6 @@ export const adminCommands = (coreEnv: Env = env) => ({
     ),
   saveStephen: async (setup: StephenSetup | null) =>
     await command({ type: "onboarding.stephen", payload: { setup } }, coreEnv),
+  setFlow: async (flow: OnboardingFlow | null) =>
+    await command({ type: "onboarding.flow", payload: { flow } }, coreEnv),
 });

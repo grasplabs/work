@@ -107,7 +107,7 @@ declare function $value<T>(value: T & $NoMethod<T>): Exclude<T, $Function>;
 const refusedArgument = "TS2345";
 
 /**
- * The SDK's value types (`@grasp-os/sdk`'s values.ts), as a scope's types
+ * The SDK's value types (runtime/src/values.ts), as a scope's types
  * name them (`valueTypeOf` writes a file as `FileValue`, say): declared
  * here, since the module imports nothing.
  */

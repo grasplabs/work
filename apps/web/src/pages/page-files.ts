@@ -16,7 +16,7 @@ import { msg } from "@lingui/core/macro";
 
 // The page's side of a page's file port (spec 10.7.5): what the page
 // does with the files the frame hands it, through core's file channel
-// (`FileChannel`, the SDK's file-channel.ts), and what it answers. The
+// (`FileChannel`, runtime/src/file-channel.ts), and what it answers. The
 // frame never gets a URL, a lease or a request of core's: only a file's
 // ID, its description and preview, or a coded refusal.
 //

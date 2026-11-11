@@ -65,6 +65,20 @@ import type {
   OnboardingDocument,
 } from "@grasp-os/shared/onboarding-documents";
 import {
+  defaultFlow,
+  flowAgreements,
+  flowAgreementsOf,
+  flowInterviews,
+  setupPlaceSchema,
+  storedFlowOf,
+  withDone,
+} from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+  SetupStepId,
+} from "@grasp-os/shared/onboarding-flow";
+import {
   drawnWorkSchema,
   orgRulesSchema,
   stephenSetupSchema,
@@ -815,7 +829,7 @@ export class Onboarding extends DurableObject<Env> {
         roster === null
           ? null
           : progressOf(roster, this.#interviews(), this.#counts(), now),
-      agreed: agreementsIn(row.agreements),
+      agreed: agreementsIn(row.agreements, flowAgreementsOf(row.flow)),
       paused: row.pausedAt !== null,
       sponsor: this.#sponsor(),
       context: this.#context(),
@@ -896,7 +910,10 @@ export class Onboarding extends DurableObject<Env> {
   /** Whether interviews may happen now: not paused, and the agreements in. */
   isOpen(): boolean {
     const row = this.#row();
-    return row.pausedAt === null && agreementsIn(row.agreements);
+    return (
+      row.pausedAt === null &&
+      agreementsIn(row.agreements, flowAgreementsOf(row.flow))
+    );
   }
 
   /**
@@ -3579,6 +3596,107 @@ export class Onboarding extends DurableObject<Env> {
       this.#db.select({ person: links.person }).from(links).limit(1).all()
         .length > 0
     );
+  }
+
+  /** Where the company's admin is in their onboarding: the screens they finished. */
+  place(): SetupPlace {
+    const [row] = this.#db
+      .select({ place: onboarding.place })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.place ?? null;
+    if (stored === null) {
+      return { done: [] };
+    }
+    // One kept before a screen was renamed reads as none finished: they go through them again.
+    const read = setupPlaceSchema.safeParse(JSON.parse(stored));
+    return read.success ? read.data : { done: [] };
+  }
+
+  /**
+   * Notes that the admin finished `steps`: added to what they finished
+   * before, never taken away, so going back a screen loses nothing. In
+   * the log and the audit log by the screens' names, only when one is new.
+   */
+  finishSteps(steps: readonly SetupStepId[], by: AuditActor): SetupPlace {
+    const changed = this.ctx.storage.transactionSync(() => {
+      const before = this.place();
+      const next = withDone(before, steps);
+      if (next.done.length === before.done.length) {
+        return false;
+      }
+      this.#db
+        .update(onboarding)
+        .set({ place: JSON.stringify(next) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(by, "onboarding.place.set", {
+        finished: next.done
+          .filter((step) => !before.done.includes(step))
+          .join(" "),
+      });
+      return true;
+    });
+    if (changed) {
+      this.#deliverAudit();
+    }
+    return this.place();
+  }
+
+  /** How much onboarding the company goes through, and whether staff set it. */
+  flow(): { flow: OnboardingFlow; changed: boolean } {
+    const { flow, flowSet } = this.#row();
+    return { flow, changed: flowSet };
+  }
+
+  /**
+   * Sets how much onboarding the company goes through; null takes all of
+   * it back. False, changing nothing, once the team is told and the flow
+   * would take the interviews out: people were told they'd be heard, and
+   * what they said is part of what Grasp knows. Checked and saved in one
+   * transaction, so no link can go out between the two. Nothing a step
+   * kept is removed when it is switched off. In the log and the audit log
+   * by which steps are on, in order, and which of Grasp's own.
+   */
+  setFlow(flow: OnboardingFlow | null, by: AuditActor): boolean {
+    const next = flow ?? defaultFlow;
+    const saved = this.ctx.storage.transactionSync(() => {
+      if (
+        this.#told() &&
+        flowInterviews(this.#row().flow) &&
+        !flowInterviews(next)
+      ) {
+        return false;
+      }
+      this.#db
+        .update(onboarding)
+        .set({ flow: flow === null ? null : JSON.stringify(flow) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(
+        by,
+        flow === null ? "onboarding.flow.reset" : "onboarding.flow.set",
+        flow === null
+          ? {}
+          : {
+              on: flow.on,
+              steps: flow.steps
+                .filter(({ on }) => on)
+                .map(({ id }) => id)
+                .join(" "),
+              kickoff: flow.grasp.kickoff,
+              agreements: flowAgreements
+                .filter((agreement) => flow.grasp.agreements[agreement])
+                .join(" "),
+            }
+      );
+      return true;
+    });
+    if (saved) {
+      this.#deliverAudit();
+    }
+    return saved;
   }
 
   /** How Stephen is set up, and what the kickoff suggests. */
@@ -6546,7 +6664,7 @@ export class Onboarding extends DurableObject<Env> {
       if (row.pausedAt !== null) {
         return refused("interview.paused");
       }
-      if (!agreementsIn(row.agreements)) {
+      if (!agreementsIn(row.agreements, flowAgreementsOf(row.flow))) {
         return refused("interview.not_yet");
       }
     }
@@ -7135,6 +7253,10 @@ export class Onboarding extends DurableObject<Env> {
     plan: Plan | null;
     agreements: Agreements | null;
     pausedAt: string | null;
+    /** How much onboarding the company goes through: staff's, or all of it. */
+    flow: OnboardingFlow;
+    /** Whether staff set the flow. */
+    flowSet: boolean;
   } {
     const [row] = this.#db
       .select()
@@ -7143,6 +7265,7 @@ export class Onboarding extends DurableObject<Env> {
       .all();
     const plan = row?.plan ?? null;
     const agreements = row?.agreements ?? null;
+    const { flow, set: flowSet } = storedFlowOf(row?.flow ?? null);
     return {
       plan: plan === null ? null : planSchema.parse(JSON.parse(plan)),
       agreements:
@@ -7150,6 +7273,8 @@ export class Onboarding extends DurableObject<Env> {
           ? null
           : agreementsSchema.parse(JSON.parse(agreements)),
       pausedAt: row?.pausedAt ?? null,
+      flow,
+      flowSet,
     };
   }
 

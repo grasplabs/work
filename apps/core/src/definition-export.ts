@@ -1,4 +1,8 @@
-import { declaredPermissions, generatedPaths } from "@grasp-os/runtime/host";
+import {
+  declaredPermissions,
+  generatedPaths,
+  ownFiles,
+} from "@grasp-os/runtime/host";
 import type { WorkflowPin } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
@@ -56,6 +60,10 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 //   unresolved under the alias that names it, never by its name. Its
 //   events, listens and decisions travel with the App's declaration,
 //   which is the App's own source (`grasp.config.ts`) its builders read.
+//   The definition names the workflow versions the App's drafts bound
+//   (`workflowBindings`) by ID and number, as the App's builders read
+//   them already: an ID grants nothing, and a destination binds its own.
+//   Kept, so the definition still hashes to `definitionHash`.
 // - An export goes unrecorded: it is in the audit log before anything is
 //   answered, or it fails.
 // - What is exported isn't what was sealed: every part is read back with
@@ -222,8 +230,11 @@ export const exportAppDefinition = async (
       path: "definition",
     });
   }
+  // What the App's builders wrote: what Grasp generates, the package's
+  // destination generates anew.
+  const own = ownFiles(files);
   const budget = textBudget(maxBytesOf(env));
-  budget("app", files);
+  budget("app", own);
   const registration = canonicalText(release.app);
   // Named as the package names it: it is no file of the App's.
   budget(null, { "app.manifest": registration });
@@ -278,7 +289,7 @@ export const exportAppDefinition = async (
         compilerVersion: manifest.compilerVersion,
         generated,
       },
-      files,
+      files: own,
       definition: z.json().parse(JSON.parse(definition.text)),
       manifest: registration,
       store:

@@ -316,4 +316,25 @@ describe("the agreements", () => {
       agreementsIn({ processing: true, assessment: false, council: "none" })
     ).toBeFalsy();
   });
+
+  it("wait only for the ones asked of the company, and for nothing where none is", () => {
+    const onlyProcessing = {
+      processing: true,
+      assessment: false,
+      council: "waiting" as const,
+    };
+    expect({
+      asked: agreementsIn(onlyProcessing, ["processing"]),
+      alsoCouncil: agreementsIn(onlyProcessing, ["processing", "council"]),
+      notTheOne: agreementsIn(onlyProcessing, ["assessment"]),
+      noneAsked: agreementsIn(null, []),
+      noneGiven: agreementsIn(null, ["processing"]),
+    }).toStrictEqual({
+      asked: true,
+      alsoCouncil: false,
+      notTheOne: false,
+      noneAsked: true,
+      noneGiven: false,
+    });
+  });
 });
