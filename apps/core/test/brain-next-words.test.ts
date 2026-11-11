@@ -52,6 +52,9 @@ const recalledAs = async (
   return chunks.map(({ source }) => source);
 };
 
+/** `word` 150 times: a paragraph too long to share a passage with another. */
+const filler = (word: string): string => `${word} `.repeat(150).trim();
+
 /** The Brain's one store, as core reaches it. */
 const store = () => env.BRAIN_STORE.getByName("brain");
 
@@ -100,6 +103,24 @@ const indexesStore = async (term: string): Promise<boolean[]> =>
   );
 
 describe("finding words in their other forms", { timeout: 120_000 }, () => {
+  it("finds the passage of a long document that holds another form of the word, and only that passage", async () => {
+    const reader = await person();
+    const tag = `w${unique()}`;
+    // Paragraphs too long to share a passage: each is a chunk of its own.
+    const passages = [
+      `${filler("magazijn")} ${tag}`,
+      `${filler("rooster")} ${tag}`,
+      `De facturen van maart ${tag} ${filler("leverancier")}`,
+      `${filler("verlof")} ${tag}`,
+    ];
+    const source = await add(passages.join("\n\n"), ownedBy(reader));
+
+    const { chunks } = await recallAs(env, reader, `factuur ${tag}`);
+
+    expect(chunks[0]).toMatchObject({ source, text: passages[2] });
+    expect(chunks).toHaveLength(passages.length);
+  });
+
   it("finds a word by its other forms in English, Dutch, German, French and Spanish, in either direction", async () => {
     const reader = await person();
     const pairs = [
