@@ -4,6 +4,7 @@ import {
   aiKeyErrors,
   aiProviderHost,
   platformHostOf,
+  usualHostProviders,
   aiProviderIds,
   aiProviderKeySaveSchema,
   aiProviders,
@@ -545,7 +546,12 @@ const destinationOf = async (
     // that names any other is sent nowhere, its request's host failing
     // as `endpoint`.
     const key = platformKeyOf(env, provider);
-    const host = platformHostOf(provider);
+    // On a staging deployment set up for it, a provider's usual host
+    // (`PLATFORM_AI_USUAL_HOSTS`): what core routes to, connect pins to.
+    const host = platformHostOf(
+      provider,
+      usualHostProviders(env.PLATFORM_AI_USUAL_HOSTS)
+    );
     return key === undefined || host === undefined
       ? undefined
       : { key, base: new URL(`https://${host}`) };
