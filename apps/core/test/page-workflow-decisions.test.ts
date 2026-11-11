@@ -5,9 +5,9 @@ import {
   generatedPaths,
 } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -460,7 +460,7 @@ const endsRunAfterAdmission = (database: D1Database, runId: string) => {
 };
 
 /** What a call answered, or its refusal's code. */
-const answerOf = (result: OperationResult): unknown =>
+const answerOf = (result: FunctionResult): unknown =>
   result.ok ? result.value : result.error.code;
 
 /**

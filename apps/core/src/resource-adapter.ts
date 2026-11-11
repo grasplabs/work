@@ -2,21 +2,21 @@ import type { AnyPermission } from "@grasp-os/runtime/app";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
+import { functionErrors } from "@grasp-os/shared/functions";
 import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Provenance } from "@grasp-os/shared/knowledge";
-import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type { BindingTarget } from "@grasp-os/shared/resource-bindings";
 
-import type { ResourceContext } from "./operations.ts";
+import type { ResourceContext } from "./function-host.ts";
 
 // How a resource binding reaches its provider (resource-bindings.ts): one
 // adapter per kind of target a permission binds to. An adapter runs in
 // core, never in App code, and reaches its provider only through the
 // platform's own way out: the model gateway, connect, the Brain's delegate
 // reads, the platform's own reads. Whatever it answers is checked again
-// by the operation host against the declaration's contract before App
+// by the function host against the declaration's contract before App
 // code sees it.
 
 /**
@@ -109,11 +109,11 @@ export const invocationSources = (): InvocationSources => {
  * (`isProviderUnreachable`).
  */
 export const providerUnreachable = () =>
-  operationErrors.create("resource.unavailable", { transient: true });
+  functionErrors.create("resource.unavailable", { transient: true });
 
 /** Whether `error` is {@link providerUnreachable}'s. */
 export const isProviderUnreachable = (error: unknown): boolean =>
-  operationErrors.codeOf(error) === "resource.unavailable" &&
+  functionErrors.codeOf(error) === "resource.unavailable" &&
   typeof error === "object" &&
   error !== null &&
   "details" in error &&
@@ -154,7 +154,7 @@ export interface BindingCaller {
   /**
    * The invocation's own gate (`Invocation.authorize`): throws once the
    * caller may no longer act (the release revoked, a role lost, an
-   * agent's permission or a step's lease gone). The operation host runs
+   * agent's permission or a step's lease gone). The function host runs
    * it before each request; an adapter whose request commits later, a
    * shared store's mutation (resource-store.ts), runs it again just
    * before that commit.
@@ -233,7 +233,7 @@ export interface BindingRecord {
 /** A target bound for a request: what it serves now, and how to call it. */
 export interface ServedBinding extends ServedContract {
   /**
-   * One request through the target, for `caller`. The operation host
+   * One request through the target, for `caller`. The function host
    * checked the method and arguments against the declaration already
    * (`allowedRequest`), and checks the answer after.
    */

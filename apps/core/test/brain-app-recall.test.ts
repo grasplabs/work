@@ -1,5 +1,5 @@
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -25,7 +25,7 @@ import type { Fixture } from "./sealed-apps.ts";
 
 // An App's recall of the Brain (GRA-296): a `recall` operation of a
 // knowledge resource, served by the one recall service every caller
-// reaches (@grasp-os/brain/recall), through core's operation host. How it
+// reaches (@grasp-os/brain/recall), through core's function host. How it
 // can fail, and what each test holds it to:
 // 1. Apps start with no Brain: collection grants and an approved binding
 //    alone recall nothing.
@@ -205,8 +205,8 @@ const ask = async (
   { app, owner, release }: Sealed,
   input: { query: string; collections?: string[] }
 ): Promise<FunctionAnswer> => {
-  const operation = release.app.operations["brain.ask"];
-  if (operation === undefined) {
+  const fn = release.app.functions["brain.ask"];
+  if (fn === undefined) {
     throw new Error("No brain.ask");
   }
   return await callAppFunction(
@@ -214,7 +214,7 @@ const ask = async (
     owner,
     app,
     JSON.stringify({
-      reference: { name: "brain.ask", kind: operation.kind },
+      reference: { name: "brain.ask", kind: fn.kind },
       args: input,
     })
   );
@@ -226,7 +226,7 @@ const askedSchema = z.strictObject({
 });
 
 /** What a call answered: the titles it cited, or its error's code. */
-const outcomeOf = (result: OperationResult): Json =>
+const outcomeOf = (result: FunctionResult): Json =>
   result.ok
     ? askedSchema.parse(result.value).cited.toSorted()
     : { failed: result.error.code };

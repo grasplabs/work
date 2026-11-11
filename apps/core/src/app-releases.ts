@@ -119,7 +119,7 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   registration; the host then generates the real modules from what it
 //   read and builds and type-checks the code again with them, which is
 //   what is sealed. It isn't inspected again: the host decides everything
-//   a call may do from the registration read here (operations.ts), never
+//   a call may do from the registration read here (function-host.ts), never
 //   from what the code would register, so code that registered otherwise
 //   with the real modules gains nothing. Nothing symbolic is sealed.
 // - A release is changed after it was sealed: its manifest is canonical
@@ -809,8 +809,8 @@ const needsStore = (app: AppManifest): boolean =>
   Object.keys(app.schema.tables).length > 0;
 
 /** The SHA-256 of the canonical text of the App's functions. */
-const operationManifestHash = async (app: AppManifest): Promise<string> =>
-  await sha256Hex(canonicalText(app.operations));
+const functionManifestHash = async (app: AppManifest): Promise<string> =>
+  await sha256Hex(canonicalText(app.functions));
 
 /** Whether `version` of `app` has a sealed release. */
 export const isSealed = async (
@@ -961,7 +961,7 @@ const boundStore = async (
     storeId: opened.id,
     schemaVersion: manifestVersion,
     schemaHash: schema,
-    operationManifestHash: await operationManifestHash(manifest),
+    functionManifestHash: await functionManifestHash(manifest),
   };
 };
 
@@ -1400,7 +1400,7 @@ export const sealRelease = async (
                 version: sql`COALESCE((SELECT MAX(version) FROM business_store_versions
                   WHERE store_id = ${store.storeId}), 0) + 1`,
                 schemaHash: store.schemaHash,
-                operationManifestHash: store.operationManifestHash,
+                functionManifestHash: store.functionManifestHash,
                 sourceTreeHash: row.tree,
                 createdAt: new Date(),
               })
@@ -1408,7 +1408,7 @@ export const sealRelease = async (
                 target: [
                   businessStoreVersions.storeId,
                   businessStoreVersions.schemaHash,
-                  businessStoreVersions.operationManifestHash,
+                  businessStoreVersions.functionManifestHash,
                 ],
               }),
             db.insert(sdkResourceBindings).values({
@@ -1423,7 +1423,7 @@ export const sealRelease = async (
               manifestHash: hash,
               targetVersion: sql`(SELECT version FROM business_store_versions
                 WHERE store_id = ${store.storeId} AND schema_hash = ${store.schemaHash}
-                  AND operation_manifest_hash = ${store.operationManifestHash})`,
+                  AND operation_manifest_hash = ${store.functionManifestHash})`,
             }),
           ]),
       outboxed(db, {

@@ -303,7 +303,7 @@ const checkedDraftCode = async (
  * `server/`), checked as a check reports it: type
  * errors and every gate a seal holds it to, against the references its
  * seal would generate (`checkedDraftCode`); its registration runs in the
- * sandbox to say what they are, none of its operations (server code with
+ * sandbox to say what they are, none of its functions (server code with
  * no app.ts and schema.ts fails there, saying so); `none` when it has
  * no server code. Never throws, as
  * `buildOnSave`. `inspection` is the one its caller shares with the

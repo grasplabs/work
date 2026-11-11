@@ -1,8 +1,8 @@
 import {
-  appMaxOperations,
-  operationPathMaxLength,
-  operationPathMaxSegments,
-  operationSegmentPattern,
+  appMaxFunctions,
+  functionPathMaxLength,
+  functionPathMaxSegments,
+  functionSegmentPattern,
 } from "@grasp-os/shared/function-limits";
 
 import { AppDefinitionError } from "./app-definition-error.ts";
@@ -47,14 +47,14 @@ const pathProblem = (
 ): string | undefined => {
   const path = segments.join(".");
   const named = segments.every((segment) =>
-    operationSegmentPattern.test(segment)
+    functionSegmentPattern.test(segment)
   );
   if (
     !named ||
-    segments.length > operationPathMaxSegments ||
-    path.length > operationPathMaxLength
+    segments.length > functionPathMaxSegments ||
+    path.length > functionPathMaxLength
   ) {
-    return `${where} doesn't make a function path of up to ${operationPathMaxSegments} identifiers (letters, digits and _, not starting with a digit), each folder and file name included${named ? `: \`${path}\`` : ""}.`;
+    return `${where} doesn't make a function path of up to ${functionPathMaxSegments} identifiers (letters, digits and _, not starting with a digit), each folder and file name included${named ? `: \`${path}\`` : ""}.`;
   }
   const answered = segments.find((segment) => referenceKeys.has(segment));
   if (answered !== undefined) {
@@ -108,8 +108,8 @@ export const exportedFunctions = (modules: unknown): Map<string, unknown> => {
         checkPath([...segments, name], `\`${name}\` of ${where}`),
         value
       );
-      if (found.size > appMaxOperations) {
-        refuse(`An App has at most ${appMaxOperations} functions.`);
+      if (found.size > appMaxFunctions) {
+        refuse(`An App has at most ${appMaxFunctions} functions.`);
       }
     }
   }

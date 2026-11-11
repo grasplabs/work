@@ -87,7 +87,7 @@ describe("an App's function on the on-prem sandbox", () => {
     return outcomeSchema.parse(await response.json());
   };
 
-  it("runs a function through the operation host, its session ending as done", async () => {
+  it("runs a function through the function host, its session ending as done", async () => {
     const { abandoned } = supervisor.stats();
     const outcome = await call("echo");
     expect(outcome).toMatchObject({ ok: true, value: { n: 1 } });

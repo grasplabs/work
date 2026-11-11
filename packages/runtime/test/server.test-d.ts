@@ -89,7 +89,7 @@ type Tables = (typeof schema)["tables"];
 declare const noteId: Id<"notes">;
 declare const anything: unknown;
 
-// The complete Notes operations of spec 9.4 type-check as written.
+// The complete Notes functions of spec 9.4 type-check as written.
 const list = query({
   args: { pagination: paginationOptionsValidator },
   returns: paginationResultValidator(doc("notes")),

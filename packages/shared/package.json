@@ -121,7 +121,7 @@
     "./oauth-relay": "./src/oauth-relay.ts",
     "./onboarding": "./src/onboarding.ts",
     "./function-limits": "./src/function-limits.ts",
-    "./operations": "./src/operations.ts",
+    "./functions": "./src/functions.ts",
     "./org-settings": "./src/org-settings.ts",
     "./organization": "./src/organization.ts",
     "./onboarding-choices": "./src/onboarding-choices.ts",

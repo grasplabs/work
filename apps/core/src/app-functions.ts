@@ -9,20 +9,20 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import {
+  categoryOf,
+  isRetryableCode,
+  functionErrors,
+} from "@grasp-os/shared/functions";
+import type {
+  AppErrorPayload,
+  FunctionResult,
+} from "@grasp-os/shared/functions";
+import {
   agentIdSchema,
   appIdSchema,
   storeIdSchema,
 } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
-import {
-  categoryOf,
-  isRetryableCode,
-  operationErrors,
-} from "@grasp-os/shared/operations";
-import type {
-  AppErrorPayload,
-  OperationResult,
-} from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -31,7 +31,7 @@ import { waitUntil } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { operationRoles } from "./app-access.ts";
+import { functionRoles } from "./app-access.ts";
 import { appPeopleNotifications } from "./app-notifications.ts";
 import {
   answerPeople,
@@ -51,8 +51,8 @@ import {
 import { releaseFunctionsOf, usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { openStore } from "./data-stores.ts";
-import { callOperation } from "./operations.ts";
-import type { Invocation, ProgressSink, UseRefusal } from "./operations.ts";
+import { hostFunctionCall } from "./function-host.ts";
+import type { Invocation, ProgressSink, UseRefusal } from "./function-host.ts";
 import {
   answerWorkflowMutation,
   isWorkflowMutationPath,
@@ -65,7 +65,7 @@ import type {
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
 import { keptSensitiveReads } from "./sensitive-reads.ts";
-import { appWorkflowNotifications } from "./workflow-notifications.ts";
+import { appWorkflowEventSends } from "./workflow-event-sends.ts";
 import {
   callWorkflowQuery,
   isDecisionQueryPath,
@@ -147,7 +147,7 @@ const writeUseRefusal = async (
 /**
  * How a real call of App `app`'s version `version` keeps the evidence of a
  * use its code asked for that its sealed manifest doesn't allow
- * (operations.ts, `Invocation.refusedUse`; GRA-279): `app.use.refused`, as
+ * (function-host.ts, `Invocation.refusedUse`; GRA-279): `app.use.refused`, as
  * the App's server code acting for `principal`, every field core's own.
  * The write is the request's own work until it is kept: the host waits for
  * it only so long (`useEvidenceWaitMs`), and one it stopped waiting for
@@ -199,7 +199,7 @@ export const invocationFor = async (
     appVersion: release.manifest.resourceVersion,
   };
   // Before every protected step: the call starts, each mutation commits
-  // and each resource request (the operation host's one gate, `admit`).
+  // and each resource request (the function host's one gate, `admit`).
   // A release revoked, a role lost or an agent's permission withdrawn
   // meanwhile stops a call already running.
   // The roles the gate read last, which who calls is told (`people`).
@@ -207,7 +207,7 @@ export const invocationFor = async (
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
-    admitted = await operationRoles(env, by, app);
+    admitted = await functionRoles(env, by, app);
     return admitted;
   };
   const bindings = resourceBindingsFor(env, {
@@ -264,20 +264,15 @@ export const invocationFor = async (
     ...(refusalsKept === undefined ? {} : { refusalsKept }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
-    // operation host admits each request through `authorize` first, as it
+    // function host admits each request through `authorize` first, as it
     // admits each commit, so nothing else is checked here.
     resources: bindings,
     // The workflows the App binds, started as the App for the person
     // calling: each start admitted on the App's own grant and the
     // person's role in the App, read again as it is admitted.
     workflows: appWorkflowStarts(env, authority, agent ?? null),
-    // A mutation's notifications of the App's runs, likewise.
-    notifications: appWorkflowNotifications(
-      env,
-      authority,
-      release,
-      agent ?? null
-    ),
+    // The events a mutation sends the App's runs, likewise.
+    eventSends: appWorkflowEventSends(env, authority, release, agent ?? null),
     // The people the App tells, through the platform's notifications, as
     // the App for the person calling.
     notifyPeople: appPeopleNotifications(env, authority, agent ?? null),
@@ -313,17 +308,17 @@ export type FunctionRequest = z.infer<typeof functionRequestSchema>;
  */
 export const readFunctionRequest = (request: unknown): FunctionRequest => {
   if (typeof request !== "string") {
-    throw operationErrors.create("contract.invalid_request");
+    throw functionErrors.create("contract.invalid_request");
   }
   if (isOverBytes(request, functionRequestMaxBytes)) {
-    throw operationErrors.create("contract.input_too_large", {
+    throw functionErrors.create("contract.input_too_large", {
       maxBytes: functionRequestMaxBytes,
     });
   }
   try {
     return functionRequestSchema.parse(JSON.parse(request));
   } catch {
-    throw operationErrors.create("contract.invalid_request");
+    throw functionErrors.create("contract.invalid_request");
   }
 };
 
@@ -338,26 +333,26 @@ export const readFunctionRequest = (request: unknown): FunctionRequest => {
  * functions, with what their own validators accept; a page whose
  * function is gone hears so and switches to the new version.
  */
-export const publicOperationOf = (
+export const publicFunctionOf = (
   release: Release,
   reference: FunctionRequest["reference"]
 ): string => {
-  const operation = Object.hasOwn(release.app.operations, reference.name)
-    ? release.app.operations[reference.name]
+  const fn = Object.hasOwn(release.app.functions, reference.name)
+    ? release.app.functions[reference.name]
     : undefined;
   // An internal function is refused as one that doesn't exist.
-  if (operation === undefined || operation.visibility !== "public") {
-    throw operationErrors.create("function.not_found");
+  if (fn === undefined || fn.visibility !== "public") {
+    throw functionErrors.create("function.not_found");
   }
-  if (operation.kind !== reference.kind) {
-    throw operationErrors.create("function.kind_mismatch");
+  if (fn.kind !== reference.kind) {
+    throw functionErrors.create("function.kind_mismatch");
   }
-  return operation.path;
+  return fn.path;
 };
 
 /** What a call answers (spec 32.6). */
 export interface FunctionAnswer {
-  readonly result: OperationResult;
+  readonly result: FunctionResult;
   /**
    * Where what the call read through its resources comes from, with its
    * classification (spec 32.3): the Knowledge collections, and whether
@@ -439,7 +434,7 @@ const callAllowed = (
 ): FunctionRequest => {
   const call = readFunctionRequest(request);
   if (kind !== undefined && call.reference.kind !== kind) {
-    throw operationErrors.create("contract.invalid_request");
+    throw functionErrors.create("contract.invalid_request");
   }
   return call;
 };
@@ -465,7 +460,7 @@ const referenceIn = (
     };
   }
   return {
-    path: publicOperationOf(release, reference),
+    path: publicFunctionOf(release, reference),
     workflowQuery: undefined,
   };
 };
@@ -501,9 +496,9 @@ const coreAnsweredGate =
       appIdSchema.parse(app),
       release.manifest.resourceVersion
     );
-    await operationRoles(env, by, appIdSchema.parse(app));
+    await functionRoles(env, by, appIdSchema.parse(app));
     if (Date.now() >= deadline) {
-      throw operationErrors.create("function.deadline_exceeded");
+      throw functionErrors.create("function.deadline_exceeded");
     }
   };
 
@@ -593,7 +588,7 @@ const answeredPeople = async (
       memberPeople(env, {
         app,
         userId: by.userId,
-        roles: async () => await operationRoles(env, by, app),
+        roles: async () => await functionRoles(env, by, app),
         declared:
           declaredPermission(release.app, "people", "people") !== undefined,
         // An agent's read is the agent's, for its person; any other is the
@@ -670,7 +665,7 @@ const currentResolution = async (
 
 /**
  * `call` of the public function at `path` of `release` (App `appId`'s),
- * as `callFunction` resolved it, run through the operation host for `by`:
+ * as `callFunction` resolved it, run through the function host for `by`:
  * the tail every call of a function shares, by name or by ID.
  */
 const invokedCall = async (
@@ -724,35 +719,41 @@ const invokedCall = async (
     const submittedCall = call;
     const submittedKey = call.idempotencyKey;
     const submittedApp = appId;
-    const result = await callOperation(hosted, observed, reference, call.args, {
-      ...(call.idempotencyKey === undefined
-        ? {}
-        : { idempotencyKey: call.idempotencyKey }),
-      ...(parentSession === undefined ? {} : { parentSession }),
-      ...(receiptScope === undefined ? {} : { receiptScope }),
-      ...(tellsForm !== true ||
-      submittedCall.reference.kind !== "mutation" ||
-      submittedKey === undefined
-        ? {}
-        : {
-            // Only for a form some webhook would hear: a receipt
-            // whose outbox owes nothing keeps to its own time.
-            // Its values left out when the commit wouldn't hold them.
-            commitIntent: async (startedAt: number) =>
-              (await formHeardBy(env, submittedApp, startedAt))
-                ? formIntents(
-                    formSubmissionOf({
-                      app: submittedApp,
-                      userId: by.userId,
-                      call: submittedCall,
-                      key: submittedKey,
-                      operation: path,
-                      startedAt,
-                    })
-                  )
-                : undefined,
-          }),
-    });
+    const result = await hostFunctionCall(
+      hosted,
+      observed,
+      reference,
+      call.args,
+      {
+        ...(call.idempotencyKey === undefined
+          ? {}
+          : { idempotencyKey: call.idempotencyKey }),
+        ...(parentSession === undefined ? {} : { parentSession }),
+        ...(receiptScope === undefined ? {} : { receiptScope }),
+        ...(tellsForm !== true ||
+        submittedCall.reference.kind !== "mutation" ||
+        submittedKey === undefined
+          ? {}
+          : {
+              // Only for a form some webhook would hear: a receipt
+              // whose outbox owes nothing keeps to its own time.
+              // Its values left out when the commit wouldn't hold them.
+              commitIntent: async (startedAt: number) =>
+                (await formHeardBy(env, submittedApp, startedAt))
+                  ? formIntents(
+                      formSubmissionOf({
+                        app: submittedApp,
+                        userId: by.userId,
+                        call: submittedCall,
+                        key: submittedKey,
+                        path,
+                        startedAt,
+                      })
+                    )
+                  : undefined,
+            }),
+      }
+    );
     return {
       result,
       provenance: sources.snapshot(),
@@ -811,7 +812,7 @@ const callFunction = async (
   const { release, path, appId, workflowQuery } = resolved;
   if (workflowQuery !== undefined) {
     if (isPageOnlyQuery(workflowQuery.name) && options.page !== true) {
-      return refused(operationErrors.create("function.not_found"));
+      return refused(functionErrors.create("function.not_found"));
     }
     return await answeredWorkflowQuery(env, {
       by,
@@ -853,7 +854,7 @@ export const functionById = async (
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: AppId,
   id: string
-): Promise<{ release: Release; operation: FunctionManifest }> => {
+): Promise<{ release: Release; fn: FunctionManifest }> => {
   const found = await usableApp(env, by, app);
   if (found.currentVersion === null) {
     throw versionErrors.create("version.not_sealed");
@@ -861,14 +862,14 @@ export const functionById = async (
   const release = await loadRelease(env, found.id, found.currentVersion);
   const functions = await releaseFunctionsOf(env, release);
   const path = functions.get(id);
-  const operation =
-    path !== undefined && Object.hasOwn(release.app.operations, path)
-      ? release.app.operations[path]
+  const fn =
+    path !== undefined && Object.hasOwn(release.app.functions, path)
+      ? release.app.functions[path]
       : undefined;
-  if (operation?.visibility !== "public") {
-    throw operationErrors.create("function.not_found");
+  if (fn?.visibility !== "public") {
+    throw functionErrors.create("function.not_found");
   }
-  return { release, operation };
+  return { release, fn };
 };
 
 /**
@@ -916,19 +917,19 @@ export const callAppFunctionById = async (
   });
   let resolved: { release: Release; path: string; call: FunctionRequest };
   try {
-    const { release, operation } = await functionById(env, by, app, id);
-    const { path } = operation;
+    const { release, fn } = await functionById(env, by, app, id);
+    const { path } = fn;
     resolved = {
       release,
       path,
       call: {
-        reference: { name: path, kind: operation.kind },
+        reference: { name: path, kind: fn.kind },
         args: input,
         // Only a mutation keeps a receipt to answer a retry from.
-        ...(operation.kind === "mutation" ? { idempotencyKey } : {}),
+        ...(fn.kind === "mutation" ? { idempotencyKey } : {}),
       },
     };
-    await options.running(operation.kind);
+    await options.running(fn.kind);
   } catch (error) {
     return refused(error);
   }
@@ -1000,7 +1001,7 @@ const visitorPeopleOf = (caller: VisitorCaller): PeopleAccess =>
  * store, as no member (no `appMembers` or `appBuilders` table opens to it,
  * and an `owner` table shows only the visitor's own rows), with nothing
  * else bound. No resource (no connection, Knowledge, model, store, other
- * App or template), no workflow started, no notification staged: a
+ * App or template), no workflow started or sent an event, no one told: a
  * function that asks for any of them is refused (`resource.unavailable`),
  * whatever the App holds for its members.
  */
@@ -1103,7 +1104,7 @@ export const callVisitorFunction = async (
       requestId,
       deadline
     );
-    const result = await callOperation(
+    const result = await hostFunctionCall(
       hostedRelease(env, release),
       invocation,
       { path, kind: call.reference.kind },
@@ -1127,7 +1128,7 @@ export const callVisitorFunction = async (
  * is the call as its caller sent it, as text, bounded before it is read.
  * It runs only against the release of the App's current version, and
  * only if its reference names a public function of its kind there
- * (`publicOperationOf`); then through the operation host, which checks
+ * (`publicFunctionOf`); then through the function host, which checks
  * its arguments with the function's own validator and decides the rest.
  * Never throws.
  */
@@ -1296,7 +1297,7 @@ export const evaluateAppQuery = async (
 /**
  * Runs a public action of App `app` for `by` once, for the invocation
  * object that holds it (action-invocation.ts), as `callAppFunction` runs
- * any call: what it returned, or why it failed, and whether the operation
+ * any call: what it returned, or why it failed, and whether the function
  * host was reached at all (a refusal before it ran nothing of the App's). A streaming action
  * (spec 10.7.6) gets `progress`, where its snapshots go, and only one
  * does; `cancelled` stops either. It runs in `version`, the release the
@@ -1324,8 +1325,8 @@ export const invokeAppAction = async (
     readonly deadline: number;
   }
 ): Promise<{
-  readonly result: OperationResult;
-  /** Whether the operation host was reached: App code may have run. */
+  readonly result: FunctionResult;
+  /** Whether the function host was reached: App code may have run. */
   readonly reached: boolean;
   /** How many effects it made, or may have made (`CallOptions.onEffect`). */
   readonly effects: number;
@@ -1348,7 +1349,7 @@ export const invokeAppAction = async (
       throw versionErrors.create("version.mismatch");
     }
     const release = await loadRelease(env, found.id, version);
-    const path = publicOperationOf(release, call.reference);
+    const path = publicFunctionOf(release, call.reference);
     resolved = path;
     const invocation = await invocationFor(env, release, {
       by,
@@ -1356,7 +1357,7 @@ export const invokeAppAction = async (
       deadline,
     });
     reached = true;
-    const result = await callOperation(
+    const result = await hostFunctionCall(
       hostedRelease(env, release),
       invocation,
       { path, kind: call.reference.kind },

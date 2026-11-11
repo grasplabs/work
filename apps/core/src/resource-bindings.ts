@@ -5,6 +5,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -12,7 +13,6 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { bindingSpendListed } from "@grasp-os/shared/models";
 import type { ModelSettings } from "@grasp-os/shared/models";
-import { operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingApprovalSchema,
   bindingTargetSchema,
@@ -42,9 +42,9 @@ import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
 // Each list bound as one parameter: a review may name more permissions or
 // collections than D1's 100 bound parameters.
 import { inList } from "./db/d1.ts";
+import type { BoundResource, ResourceBindings } from "./function-host.ts";
 import { bindingKey, bindingSpendOf } from "./model-spend.ts";
 import { modelSettings, usableAnswerTokens } from "./models.ts";
-import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
   requireMemberAdmin,
   requireStillAdmin,
@@ -105,8 +105,8 @@ import type { PlatformAction } from "./resource-platform.ts";
 //   invocation's authority, the App and the person core resolved.
 // - A binding the review misses: a request resolves only an alias the
 //   release's manifest declares as a permission an action reaches, of the
-//   kind its row was approved for, which the operation host checks first
-//   (operations.ts). The review lists exactly the manifest's
+//   kind its row was approved for, which the function host checks first
+//   (function-host.ts). The review lists exactly the manifest's
 //   declarations, and every active row of an alias it doesn't declare as
 //   `undeclared`, which serves nothing: no binding reaches a version
 //   without being listed with it.
@@ -970,7 +970,7 @@ export const reviewResourceBindings = async (
  * `caller` (see the header): on every request, the alias's active binding,
  * if it was approved for exactly this declaration and its target still
  * serves exactly the contract it served then; undefined otherwise, which
- * the operation host answers as `resource.unavailable`.
+ * the function host answers as `resource.unavailable`.
  */
 export const resourceBindingsFor = (
   env: Env,
@@ -1028,7 +1028,7 @@ export const resourceBindingsFor = (
 };
 
 /** A held call its binding no longer serves. */
-const notServed = () => operationErrors.create("resource.unavailable");
+const notServed = () => functionErrors.create("resource.unavailable");
 
 /**
  * Refuses a held call of App `app` through binding `pin` unless the

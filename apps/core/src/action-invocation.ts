@@ -7,15 +7,15 @@ import {
   streamRetentionMs,
   streamTombstoneMs,
 } from "@grasp-os/shared/function-limits";
+import { jsonOf, functionErrors } from "@grasp-os/shared/functions";
+import type {
+  AppErrorPayload,
+  FunctionResult,
+} from "@grasp-os/shared/functions";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
-import type {
-  AppErrorPayload,
-  OperationResult,
-} from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { submissionErrors } from "@grasp-os/shared/submissions";
@@ -23,7 +23,7 @@ import { DurableObject } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { operationRoles } from "./app-access.ts";
+import { functionRoles } from "./app-access.ts";
 import { invokeAppAction, refusalOf } from "./app-functions.ts";
 import type { FunctionRequest } from "./app-functions.ts";
 import { formSubmissionOf, queueFormSent } from "./app-webhook-queue.ts";
@@ -79,7 +79,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 //   the latest it hasn't seen, when it asks for more (`highWaterMark: 0`).
 //   A gap in sequence numbers is snapshots it was too slow for.
 // - A cancel claims more than it knows: cancellation stops the run as its
-//   deadline does (operations.ts), and the result is `function.cancelled`
+//   deadline does (function-host.ts), and the result is `function.cancelled`
 //   only when nothing the run started was still under way, and the
 //   uncertain `function.outcome_unknown` otherwise. Cancelling answers
 //   only that it was asked while the run was going (`requested`).
@@ -133,7 +133,7 @@ export type InvocationFrame =
   | {
       readonly type: "result";
       readonly seq: number;
-      readonly result: OperationResult;
+      readonly result: FunctionResult;
     }
   /** The route's: the person or the build no longer gets what follows. */
   | { readonly type: "refused"; readonly error: AppErrorPayload };
@@ -195,7 +195,7 @@ type Record =
   | (Started & {
       readonly state: "settled";
       readonly settledAt: number;
-      readonly result: OperationResult;
+      readonly result: FunctionResult;
     })
   | (Started & {
       readonly state: "expired";
@@ -211,7 +211,7 @@ export interface Live {
   /** Which run it is (`Record`'s `runId`). */
   readonly runId: string;
   progress: Snapshot | null;
-  result: OperationResult | undefined;
+  result: FunctionResult | undefined;
   readers: number;
   readonly stop: AbortController;
   /** Set once it was cancelled because no one followed it. */
@@ -245,13 +245,13 @@ const line = (frame: InvocationFrame): Uint8Array =>
   encoder.encode(`${JSON.stringify(frame)}\n`);
 
 /** `error` as a result its reader gets, the request ID its own. */
-export const refused = (error: unknown): OperationResult => ({
+export const refused = (error: unknown): FunctionResult => ({
   ok: false,
   error: refusalOf(error, crypto.randomUUID()),
 });
 
 /** A stream of the one result `result`. */
-export const resultOf = (result: OperationResult): ReadableStream<Uint8Array> =>
+export const resultOf = (result: FunctionResult): ReadableStream<Uint8Array> =>
   new ReadableStream({
     start: (controller) => {
       controller.enqueue(line({ type: "result", seq: 1, result }));
@@ -261,7 +261,7 @@ export const resultOf = (result: OperationResult): ReadableStream<Uint8Array> =>
 
 /**
  * The fingerprint of the access `by` has in `app` now: their organization
- * role, their teams and their role in the App (`operationRoles`, which
+ * role, their teams and their role in the App (`functionRoles`, which
  * refuses someone with none), whatever of it the run's reads depend on.
  */
 export const accessOf = async (
@@ -269,7 +269,7 @@ export const accessOf = async (
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: AppId
 ): Promise<string> => {
-  const roles = await operationRoles(env, by, app);
+  const roles = await functionRoles(env, by, app);
   return await sha256Hex(
     canonicalJson({
       role: by.role,
@@ -358,9 +358,9 @@ export const readerOf = (live: Live): ReadableStream<Uint8Array> => {
  * followed it: a page that comes back sees that, not its own cancel.
  */
 export const withReason = (
-  result: OperationResult,
+  result: FunctionResult,
   unfollowed: boolean
-): OperationResult =>
+): FunctionResult =>
   unfollowed && !result.ok && result.error.code === "function.cancelled"
     ? {
         ok: false,
@@ -386,7 +386,7 @@ const nothingRanCodes: ReadonlySet<string> = new Set([
 
 /** How a run ended, as `invokeAppAction` answers it. */
 interface Outcome {
-  readonly result: OperationResult;
+  readonly result: FunctionResult;
   readonly reached: boolean;
   readonly effects: number;
   /** The public action it ran, as its release resolved it. */
@@ -395,7 +395,7 @@ interface Outcome {
 
 /**
  * Whether `outcome` is kept as the receipt: anything but a refusal before
- * the operation host was reached, or one of `nothingRanCodes` from a run
+ * the function host was reached, or one of `nothingRanCodes` from a run
  * that made no effect.
  */
 export const keepsReceipt = (outcome: Outcome): boolean =>
@@ -423,7 +423,7 @@ export class ActionInvocation extends DurableObject<Env> {
     const input = jsonOf(spec.call.args);
     if (input === undefined && spec.call.args !== undefined) {
       return resultOf(
-        refused(operationErrors.create("contract.invalid_request"))
+        refused(functionErrors.create("contract.invalid_request"))
       );
     }
     // In line from the first await on: a cancel sent after this open is
@@ -495,7 +495,7 @@ export class ActionInvocation extends DurableObject<Env> {
         live?.stop.abort();
         await this.#settle(
           record,
-          refused(operationErrors.create("function.outcome_unknown"))
+          refused(functionErrors.create("function.outcome_unknown"))
         );
         return;
       }
@@ -572,11 +572,11 @@ export class ActionInvocation extends DurableObject<Env> {
       return await this.#start(spec, inputHash);
     }
     if (record.owner !== spec.by.userId) {
-      return resultOf(refused(operationErrors.create("function.not_found")));
+      return resultOf(refused(functionErrors.create("function.not_found")));
     }
     if (record.access !== spec.access) {
       return resultOf(
-        refused(operationErrors.create("function.access_changed"))
+        refused(functionErrors.create("function.access_changed"))
       );
     }
     if (record.inputHash !== inputHash) {
@@ -610,9 +610,7 @@ export class ActionInvocation extends DurableObject<Env> {
     if (live === undefined) {
       // It ran in an earlier life of this object, which ended before it
       // settled: whether it finished is unknown.
-      const result = refused(
-        operationErrors.create("function.outcome_unknown")
-      );
+      const result = refused(functionErrors.create("function.outcome_unknown"));
       await this.#settle(record, result);
       return resultOf(result);
     }
@@ -656,7 +654,7 @@ export class ActionInvocation extends DurableObject<Env> {
         ? platformLimits.serverInvocationWallMs
         : actionInvocationWallMs);
     // The release it runs under: the App's current one, as every page's
-    // call (app-functions.ts, `publicOperationOf`); read before anything
+    // call (app-functions.ts, `publicFunctionOf`); read before anything
     // is held, so a refusal holds nothing. The run gets this version, never
     // a later read of the current one: the record names what ran, so
     // revoking it stops the result. A publish between this read and the
@@ -685,10 +683,10 @@ export class ActionInvocation extends DurableObject<Env> {
       return resultOf(
         refused(
           spec.streaming
-            ? operationErrors.create("function.stream_limit", {
+            ? functionErrors.create("function.stream_limit", {
                 maxRunning: streamMaxRunning,
               })
-            : operationErrors.create("function.action_limit", {
+            : functionErrors.create("function.action_limit", {
                 maxRunning: actionMaxRunning,
               })
         )
@@ -824,7 +822,7 @@ export class ActionInvocation extends DurableObject<Env> {
             userId: record.owner,
             call: form.call,
             key: form.key,
-            operation: outcome.path,
+            path: outcome.path,
             startedAt: record.startedAt,
           })
         : undefined;
@@ -872,7 +870,7 @@ export class ActionInvocation extends DurableObject<Env> {
    */
   async #settle(
     record: Record & { readonly state: "running" },
-    result: OperationResult,
+    result: FunctionResult,
     untold?: FormSubmission
   ): Promise<void> {
     const settledAt = Date.now();

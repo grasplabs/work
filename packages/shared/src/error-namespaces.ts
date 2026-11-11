@@ -7,7 +7,7 @@
 // every module that defines an error family (it finds them by their
 // source) and fails unless this list holds exactly the namespaces their
 // codes use, plus the SDK's own definition namespaces below. Core checks
-// the live registry as well (`isPlatformCode`, operations.ts).
+// the live registry as well (`isPlatformCode`, functions.ts).
 
 /**
  * The namespaces of every error family's codes (`defineErrorFamily`),

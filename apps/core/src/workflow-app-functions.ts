@@ -43,11 +43,11 @@ const callableFunctionsOf = async (
     const release = await loadRelease(env, id, currentVersion);
     const callable = new Map<string, FunctionManifest>();
     for (const [fn, path] of await releaseFunctionsOf(env, release)) {
-      const operation = Object.hasOwn(release.app.operations, path)
-        ? release.app.operations[path]
+      const declared = Object.hasOwn(release.app.functions, path)
+        ? release.app.functions[path]
         : undefined;
-      if (operation?.visibility === "public" && operation.kind !== "action") {
-        callable.set(fn, operation);
+      if (declared?.visibility === "public" && declared.kind !== "action") {
+        callable.set(fn, declared);
       }
     }
     return callable;
@@ -137,9 +137,9 @@ export const withCurrentFunctionNames = async (
     if (!isObject(functions)) {
       continue;
     }
-    for (const [id, operation] of permitted.get(alias) ?? []) {
-      if (Object.hasOwn(functions, id) && functions[id] !== operation.path) {
-        functions[id] = operation.path;
+    for (const [id, fn] of permitted.get(alias) ?? []) {
+      if (Object.hasOwn(functions, id) && functions[id] !== fn.path) {
+        functions[id] = fn.path;
         renamed = true;
       }
     }

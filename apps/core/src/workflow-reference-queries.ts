@@ -4,16 +4,16 @@ import {
   workflowQueryNames,
 } from "@grasp-os/runtime/host";
 import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/runtime/host";
+import {
+  categoryOf,
+  isRetryableCode,
+  functionErrors,
+} from "@grasp-os/shared/functions";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  categoryOf,
-  isRetryableCode,
-  operationErrors,
-} from "@grasp-os/shared/operations";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -206,10 +206,10 @@ export const workflowQueryOf = (
       ? undefined
       : workflowFunctions(bound).queries[query.name];
   if (query === undefined || bound === undefined || fn === undefined) {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   if (reference.kind !== fn.kind) {
-    throw operationErrors.create("function.kind_mismatch");
+    throw functionErrors.create("function.kind_mismatch");
   }
   return {
     alias: query.alias,
@@ -334,7 +334,7 @@ const bindingOf = async (
     )
     .get();
   if (binding === undefined) {
-    throw operationErrors.create("resource.unavailable");
+    throw functionErrors.create("resource.unavailable");
   }
   return binding;
 };
@@ -1183,7 +1183,7 @@ const decisionDetail = async (
 /** The run checked arguments name. */
 const runIdOf = (args: Readonly<Record<string, Json | undefined>>): string => {
   if (typeof args.runId !== "string") {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   return args.runId;
 };
@@ -1272,7 +1272,7 @@ const answerOf = async (
     }
     case "decision": {
       if (typeof args.decisionId !== "string") {
-        throw operationErrors.create("contract.invalid_args");
+        throw functionErrors.create("contract.invalid_args");
       }
       return await decisionDetail(
         env,
@@ -1311,10 +1311,10 @@ export const callWorkflowQuery = async (
   caller: WorkflowQueryCaller,
   query: ResolvedWorkflowQuery,
   input: unknown
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const args = checkedValue(query.args, input, "contract.invalid_args");
   if (!isRecord(args)) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   const answer = await answerOf(env, caller, query, args);
   return {

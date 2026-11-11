@@ -336,13 +336,40 @@ export const buildSummary = (build: SealedBuild): WorkflowVersionBuild => ({
 const manifestBuildSchema = z.object({ build: sealedBuildSchema });
 
 /**
- * The build a version's manifest text seals. One of a shape this host
- * doesn't read is `workflow.format_unsupported`: its manifest is what an
- * earlier platform release published, to be published again, never taken
- * for one that was changed.
+ * The format of a version's manifest, and of a test run's: 2 since the
+ * contract it seals names what a run takes and answers `args` and
+ * `returns`.
+ */
+export const workflowManifestFormat = 2;
+
+/** What a manifest says of its format, before anything else. */
+const manifestFormatSchema = z.object({
+  formatVersion: z.literal(workflowManifestFormat),
+});
+
+/**
+ * Refuses (`workflow.format_unsupported`) a manifest of another format
+ * than this host's: what an earlier platform release published. Read
+ * before the rest of it, so its version is told to be published again,
+ * never read as this format nor taken for one that was changed
+ * (`workflow.version_corrupt`).
+ */
+export const requireManifestFormat = (manifest: unknown): void => {
+  if (!manifestFormatSchema.safeParse(manifest).success) {
+    throw workflowResourceErrors.create("workflow.format_unsupported");
+  }
+};
+
+/**
+ * The build a version's manifest text seals. A manifest of another format
+ * (`requireManifestFormat`), or of a shape this host doesn't read, is
+ * `workflow.format_unsupported`: what an earlier platform release
+ * published, to be published again, never taken for one that was changed.
  */
 export const buildOf = (manifest: string): SealedBuild => {
-  const parsed = manifestBuildSchema.safeParse(JSON.parse(manifest));
+  const read: unknown = JSON.parse(manifest);
+  requireManifestFormat(read);
+  const parsed = manifestBuildSchema.safeParse(read);
   if (!parsed.success) {
     throw workflowResourceErrors.create("workflow.format_unsupported");
   }

@@ -52,7 +52,11 @@ import type {
   ShareDocumentInput,
 } from "@grasp-os/shared/onboarding-documents";
 import { setupPlaceSchema } from "@grasp-os/shared/onboarding-flow";
-import type { SetupPlace, SetupStepId } from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupPlace,
+  SetupStepId,
+} from "@grasp-os/shared/onboarding-flow";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
@@ -80,7 +84,7 @@ import {
   sharePlaceFile,
 } from "./document-places.ts";
 import { shareDocument } from "./documents.ts";
-import { gateView } from "./gate.ts";
+import { gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
@@ -367,6 +371,14 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     });
   }
 
+  async flow(): Promise<OnboardingFlow> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const { flow } = await onboardingStore(this.#env).flow();
+      return flow;
+    });
+  }
+
   async place(): Promise<SetupPlace> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
@@ -382,10 +394,14 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         setupPlaceSchema,
         { done: steps }
       );
-      return await onboardingStore(this.#env).finishSteps(
+      const place = await onboardingStore(this.#env).finishSteps(
         parsed.done,
         actorOf(person)
       );
+      // The last screen of an onboarding that interviews nobody opens the
+      // company's Grasp, as its admin, where it was never opened before.
+      await openAsFlowSays(this.#env, actorOf(person), "finished");
+      return place;
     });
   }
 

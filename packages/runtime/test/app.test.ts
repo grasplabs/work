@@ -20,7 +20,7 @@ import { defineSchema, defineTable, v } from "../src/values.ts";
 // and what inspection makes of them (spec 7.1, 7.4, 7.5): pure checks of
 // a declaration, so unit tests.
 // That the host enforces the result is tested through the host
-// (apps/core/test/operations.test.ts).
+// (apps/core/test/function-host.test.ts).
 
 const schema = defineSchema({
   notes: defineTable({
@@ -170,9 +170,7 @@ describe("what a function may use", () => {
           declared["~permission"],
         ])
       ),
-      operation: Object.keys(
-        manifest.operations["notes.send"] ?? {}
-      ).toSorted(),
+      fn: Object.keys(manifest.functions["notes.send"] ?? {}).toSorted(),
       readBack:
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
         canonicalText(manifest),
@@ -183,7 +181,7 @@ describe("what a function may use", () => {
         followUp: "workflows",
         people: "people",
       },
-      operation: ["args", "kind", "path", "returns", "stream", "visibility"],
+      fn: ["args", "kind", "path", "returns", "stream", "visibility"],
       readBack: true,
     });
   });
@@ -222,12 +220,12 @@ describe("what a function may use", () => {
   test("a manifest read back can't carry a function's own uses or verbs", () => {
     const { manifest } = inspectApp(notes());
     const withExtra = (extra: object): string => {
-      // SAFETY: a plain copy of the manifest, whose operations are objects.
+      // SAFETY: a plain copy of the manifest, whose functions are objects.
       const data = structuredClone(manifest) as {
-        operations: Record<string, object>;
+        functions: Record<string, object>;
       };
-      data.operations["notes.list"] = {
-        ...data.operations["notes.list"],
+      data.functions["notes.list"] = {
+        ...data.functions["notes.list"],
         ...extra,
       };
       return refusal(() => readAppManifest(JSON.stringify(data)));
@@ -403,7 +401,7 @@ describe("inspection", () => {
         manifest,
         manifest.schema,
         manifest.schema.tables.notes?.access,
-        manifest.operations["notes.create"],
+        manifest.functions["notes.create"],
         manifest.permissions,
       ].every((part) => Object.isFrozen(part))
     ).toBeTruthy();
@@ -429,16 +427,16 @@ describe("paths", () => {
         }
       )
     );
-    expect(Object.keys(manifest.operations).toSorted()).toStrictEqual([
+    expect(Object.keys(manifest.functions).toSorted()).toStrictEqual([
       "admin.jobs.secret",
       "notes.create",
       "notes.list",
       "notes.send",
     ]);
-    expect(manifest.operations["admin.jobs.secret"]?.visibility).toBe(
+    expect(manifest.functions["admin.jobs.secret"]?.visibility).toBe(
       "internal"
     );
-    expect(manifest.operations["notes.list"]?.visibility).toBe("public");
+    expect(manifest.functions["notes.list"]?.visibility).toBe("public");
     expect(functions.get("notes.list")).toBe(list);
   });
 
@@ -482,7 +480,7 @@ describe("paths", () => {
     const registered = notes({}, { notes: module });
     expect({
       reads,
-      kind: inspectApp(registered).manifest.operations["notes.list"]?.kind,
+      kind: inspectApp(registered).manifest.functions["notes.list"]?.kind,
       runs: inspectApp(registered).functions.get("notes.list"),
     }).toStrictEqual({ reads: 1, kind: "query", runs: list });
   });
@@ -815,8 +813,8 @@ describe("the App's permissions in a function's context", () => {
     await runFunction(registered, "notes.notify", {}, channel);
     await runFunction(registered, "notes.carried", {}, channel);
     expect(calls).toStrictEqual([
-      ["resource", "followUp", "notify", ["edited", "run1", { title: "a" }]],
-      ["resource", "followUp", "notify", ["edited", "run1", { title: "b" }]],
+      ["resource", "followUp", "sendEvent", ["edited", "run1", { title: "a" }]],
+      ["resource", "followUp", "sendEvent", ["edited", "run1", { title: "b" }]],
     ]);
     const refused = await Promise.all(
       forgedEvents.map(async (_event, which) => {

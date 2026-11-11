@@ -12,8 +12,8 @@ import {
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { isPublished } from "../src/apps.ts";
-import { callOperation } from "../src/operations.ts";
-import type { Runner } from "../src/operations.ts";
+import { hostFunctionCall } from "../src/function-host.ts";
+import type { Runner } from "../src/function-host.ts";
 import {
   leaseRelease,
   pinRelease,
@@ -604,7 +604,7 @@ describe("revocation", { timeout: 120_000 }, () => {
       requestId: crypto.randomUUID(),
       deadline: Date.now() + 60_000,
     });
-    const result = await callOperation(
+    const result = await hostFunctionCall(
       { manifest: second.app, run },
       invocation,
       { path: "notes.touchTwice", kind: "action" },

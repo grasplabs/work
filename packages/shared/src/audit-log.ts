@@ -161,7 +161,7 @@ const typeRules: readonly {
   // read, and an action for one that wrote, or one refused before its
   // access was known.
   // An App's server code refused a use its sealed manifest doesn't allow
-  // (core's src/operations.ts): a function, resource or workflow it
+  // (core's src/function-host.ts): a function, resource or workflow it
   // doesn't list, or a request its declaration doesn't allow.
   { action: "app.use.refused", type: "permission" },
   // An App reading the organization's people for the person using it

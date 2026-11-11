@@ -5,7 +5,7 @@ import {
   appErrorCodeMaxLength,
   appErrorCodePattern,
   appErrorMessageMaxLength,
-  operationPathMaxLength,
+  functionPathMaxLength,
 } from "@grasp-os/shared/function-limits";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
@@ -502,7 +502,7 @@ export const workflowSchema: Schema = {
           propertyNames: ref("functionId"),
           additionalProperties: {
             type: "string",
-            maxLength: operationPathMaxLength,
+            maxLength: functionPathMaxLength,
             pattern: functionPathPattern,
           },
         },

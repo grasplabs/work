@@ -1,4 +1,4 @@
-import { operationErrors } from "@grasp-os/shared/operations";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { describe, expect, it } from "vite-plus/test";
 
 import { inTurn } from "../src/run-sessions.ts";
@@ -24,7 +24,7 @@ describe("a run's calls in turn", () => {
       await Promise.resolve();
     });
     await expect(b).rejects.toThrow(
-      operationErrors.create("function.deadline_exceeded").message
+      functionErrors.create("function.deadline_exceeded").message
     );
     // C, made after B gave up: it waits for A.
     const c = inTurn(key, Date.now() + 10_000, async () => {

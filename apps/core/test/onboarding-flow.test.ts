@@ -220,6 +220,7 @@ describe("where the company's admin is in their onboarding", () => {
     const { api: member } = await signedInApi(idp, "user");
 
     const before = await api.onboarding.place();
+    const flow = await api.onboarding.flow();
     const events = await auditedDuring(async () => {
       await api.onboarding.finishSteps(["welcome", "ai"]);
       // Told again, with the next one: only the new one is new.
@@ -235,6 +236,7 @@ describe("where the company's admin is in their onboarding", () => {
     );
 
     expect({
+      flow,
       before,
       kept,
       shown: snapshot.place,
@@ -243,16 +245,19 @@ describe("where the company's admin is in their onboarding", () => {
         .map(({ detail }) => detail.finished),
       unknown,
       byMember: [
+        await outcome(member.onboarding.flow()),
         await outcome(member.onboarding.place()),
         await outcome(member.onboarding.finishSteps(["welcome"])),
       ],
     }).toStrictEqual({
+      // Its admins read the flow their screens come from: the one staff see.
+      flow: snapshot.flow?.flow,
       before: { done: [] },
       kept: { done: ["welcome", "ai", "about"] },
       shown: { done: ["welcome", "ai", "about"] },
       finished: ["welcome ai", "about"],
       unknown: "onboarding.invalid",
-      byMember: ["role.forbidden", "role.forbidden"],
+      byMember: ["role.forbidden", "role.forbidden", "role.forbidden"],
     });
   });
 });

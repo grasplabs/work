@@ -3,11 +3,11 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
@@ -1595,6 +1595,19 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
+   * The task whose step's failure the run ends with, when `failure` is that
+   * very failure (`failureUntaken`, `runFailure`): the one pending, which
+   * the code threw on or failed past. None for any other: a failure
+   * outside every step (an `if`'s condition, a raise), or one a catch took
+   * before another step ran. A catch's own failure of the pending code,
+   * before any step past it, is taken for the step's rethrown
+   * (`runFailure`): the isolate can't tell the two apart.
+   */
+  endingTask(failure: StepError): string | undefined {
+    return failure === this.#pendingError ? this.#pendingTask?.id : undefined;
+  }
+
+  /**
    * Whether a catch around the task whose step failed may take the
    * failure pending: one the host lets a catch take (`failureOf`), of a
    * task in the list of a `try` whose code filter it has. Which of them
@@ -2802,7 +2815,7 @@ class SealedRun implements SealedRunKind {
       // its sensitive values put in or it is audited, so nothing says a
       // call went out.
       if (calling.fixture === true && !fixtureCalls.has(template.call.name)) {
-        throw operationErrors.create("resource.unavailable");
+        throw functionErrors.create("resource.unavailable");
       }
       const sensitive: Json[] = [];
       let value: Json;
@@ -3092,6 +3105,8 @@ export interface SealedRunKind extends RunKind {
   readonly failureUntaken: StepError | undefined;
   /** What the run fails with when its code fails with `error` (`SealedRun`). */
   runFailure: (error: StepError) => StepError;
+  /** The task whose step's failure `failure` is, if the run ends with it. */
+  endingTask: (failure: StepError) => string | undefined;
 }
 
 /**
