@@ -186,4 +186,21 @@ describe("picking an agent for a chat", setUpTime, () => {
     expect(gateway.requests).toHaveLength(asked);
     await expect(person.api.chats.agents()).resolves.toHaveLength(1);
   });
+
+  it("makes no chat with the first agent while it is paused, and says it is paused", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    await admin.api.connections.setAgentPaused(chatAgentId, true);
+    const { chats } = person.api;
+    const before = await chats.list();
+    await expect(
+      Promise.all([
+        outcome(chats.create("Unnamed")),
+        outcome(chats.create("Named", chatAgentId)),
+      ])
+    ).resolves.toStrictEqual(["agent.paused", "agent.paused"]);
+    await expect(chats.list()).resolves.toStrictEqual(before);
+    await admin.api.connections.setAgentPaused(chatAgentId, false);
+    await expect(outcome(chats.create("Back"))).resolves.toBe("ok");
+  });
 });
