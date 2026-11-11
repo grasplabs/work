@@ -298,13 +298,13 @@ describe("the AI key banner", () => {
     });
   });
 
-  it("is read before the page only for the organization's own admins, and left to the banner when core doesn't answer", async () => {
+  it("is read before the page only for the organization's own admins, and otherwise left to the banner, as when core doesn't answer", async () => {
     const listing = async () => await Promise.resolve(listingWith(refused));
 
     expect({
       member: await failingUpFront(personWith("user"), listing),
       adminOffline: await failingUpFront(personWith("admin"), unreachable),
-    }).toStrictEqual({ member: [], adminOffline: undefined });
+    }).toStrictEqual({ member: undefined, adminOffline: undefined });
   });
 
   it("says nothing of the organization's own key while its AI runs on Grasp's AI", async () => {

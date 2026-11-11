@@ -129,16 +129,17 @@ export const providersOf =
     await readWithin(core, async (session) => await session.aiProviders.list());
 
 /**
- * The failing providers `identity` is shown, read before the page shows:
- * none for anyone but the organization's own admins, unread (undefined)
- * when core doesn't answer in time, which leaves it to the banner.
+ * The failing providers `identity` is shown, read before the page shows.
+ * Unread (undefined), which leaves it to the banner, for anyone but the
+ * organization's own admins (the banner reads at once should they become
+ * one while on the page) and when core doesn't answer in time.
  */
 export const failingUpFront = async (
   identity: Identity,
   providers: () => Promise<AiProvidersListing>
 ): Promise<FailingProvider[] | undefined> => {
   if (!isMemberAdmin(identity)) {
-    return [];
+    return undefined;
   }
   try {
     return failingProviders(await providers());
