@@ -350,21 +350,20 @@ export const reachedOf = (
   );
 
 /**
- * How far core says the admin went: the screen after the furthest one
- * they finished, wherever they finished it; the first, before any. A
+ * How far core says the admin went: the first screen of the path they
+ * haven't finished, wherever they finished the others; the last, once
+ * every one is. So a screen the flow gained, or one moved ahead of where
+ * they were, is the one they go on from, and is never counted as seen. A
  * screen finished that the flow no longer has counts for nothing.
  */
 export const reachedByPlace = (
   place: SetupPlace | null,
   path: SetupPath = steps
-): number =>
-  Math.min(
-    Math.max(
-      0,
-      ...(place?.done ?? []).map((step) => stepIndex(step, path) + 1)
-    ),
-    Math.max(path.length - 1, 0)
-  );
+): number => {
+  const done = place?.done ?? [];
+  const first = path.findIndex((step) => !done.includes(step));
+  return first === -1 ? Math.max(path.length - 1, 0) : first;
+};
 
 /** The screens finished by an admin who went as far as `reached`: every one before it. */
 export const finishedAt = (

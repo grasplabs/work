@@ -351,21 +351,37 @@ describe("the AI step", () => {
 });
 
 describe("how far the admin went, as core keeps it", () => {
-  it("is the screen after the furthest one they finished, wherever they finished it", () => {
+  it("is the first screen they haven't finished, wherever they finished the others", () => {
     expect({
       none: reachedByPlace({ done: [] }),
       unknown: reachedByPlace(null),
       some: reachedByPlace({ done: ["welcome", "ai", "about"] }),
-      // Finished out of order: the furthest one counts.
+      // Finished out of order: they go on from the first one left out.
       apart: reachedByPlace({ done: ["welcome", "leads"] }),
       all: reachedByPlace({ done: [...steps] }),
     }).toStrictEqual({
       none: 0,
       unknown: 0,
       some: stepIndex("company"),
-      apart: stepIndex("team"),
+      apart: stepIndex("ai"),
       all: steps.length - 1,
     });
+  });
+
+  it("goes on from a screen the flow gained, or one moved ahead of where they were", () => {
+    const before: SetupPath = ["welcome", "ai", "company", "documents"];
+    const done = { done: [...before] };
+    expect({
+      gained: reachedByPlace(done, [
+        "welcome",
+        "ai",
+        "about",
+        "company",
+        "documents",
+      ]),
+      moved: reachedByPlace({ done: ["welcome", "ai", "documents"] }, before),
+      same: reachedByPlace(done, before),
+    }).toStrictEqual({ gained: 2, moved: 2, same: before.length - 1 });
   });
 
   it("tells core every screen before the one they reached", () => {

@@ -27,7 +27,13 @@ import {
   redirect,
   useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { DotBrain } from "../brain/dot-brain.tsx";
 import type { BrainScene } from "../brain/dot-brain.tsx";
@@ -223,11 +229,17 @@ const today = (): string => new Date().toISOString().slice(0, 10);
  * settled: the furthest step is remembered as they go, so the dots and the
  * arrow keys go on as far as they went.
  */
-const useKept = (userId: string, index: number) => {
+const useKept = (userId: string, index: number, path: SetupPath) => {
   // How far they went is counted on this company's path, from where core says they are.
   const [kept, setKept] = useState(() => ({ ...readKept(userId), reached: 0 }));
+  // A place counted on another path means nothing on this one: where the
+  // flow changed while they were here, they start from where core says.
+  const [counted, setCounted] = useState(path);
+  if (counted !== path) {
+    setCounted(path);
+  }
   // The furthest step is kept as they go, so going back never lowers it.
-  const now = keptAt(kept, index);
+  const now = keptAt(counted === path ? kept : { ...kept, reached: 0 }, index);
   if (now !== kept) {
     setKept(now);
   }
@@ -402,9 +414,18 @@ const Setup = () => {
   const data = loaded.state === "ready" ? loaded.data : null;
   const { roster, plan, progress, percent, parts, choices } = readOf(data);
   // The screens this company's flow has, in its order; all of them where core can't say.
-  const path: SetupPath = data === null ? steps : flowScreens(data.flow);
-  // How far they went: as core says, on whatever device, or as this browser kept it before core did.
-  const legacy = finishedAt(readKept(identity.userId).reached);
+  // The same list while the flow is the same, so what goes by it runs once per change.
+  const screens: SetupPath = data === null ? steps : flowScreens(data.flow);
+  const [path, setPath] = useState(screens);
+  if (path.join(",") !== screens.join(",")) {
+    setPath(screens);
+  }
+  // How far they went: as core says, on whatever device, or as this browser
+  // kept it before core did, read once: it is written over as they go.
+  const legacy = useMemo(
+    () => finishedAt(readKept(identity.userId).reached),
+    [identity.userId]
+  );
   const told = reachedByPlace(data?.place ?? null, path);
   const placed = reachedByPlace(
     { done: [...(data?.place.done ?? []), ...legacy] },
@@ -414,7 +435,7 @@ const Setup = () => {
   // Opened without a step, it goes on where they were; never past the AI step while no model is ready for calls.
   const step = stepShown(asked, reachedOf(placed, { plan }, path), ai, path);
   const index = Math.max(stepIndex(step, path), 0);
-  const kept = useKept(identity.userId, Math.max(index, placed));
+  const kept = useKept(identity.userId, Math.max(index, placed), path);
   // Core hears of every screen they finished, so they go on from it anywhere, and Grasp sees how far they are.
   const core = useCore();
   useEffect(() => {
