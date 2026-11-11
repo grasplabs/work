@@ -12,11 +12,13 @@
 #
 # The full suite runs once per merge, in the merge queue: there it tests
 # the exact tree that lands (the pull request on top of main and the
-# entries ahead of it), so it is the one gate that matters, and nothing
-# reaches main without it. A pull request's run, draft or not, is fast
-# feedback for review: the fast checks (static, generated, embed-wasm,
-# oxc-wasm), the release build and core on plain workerd, a few minutes on
-# six runners. The test shards, the e2e stack and its parts, and the
+# entries ahead of it), so it is the one gate that matters: only a merge
+# an admin makes outside the queue lands without it. A pull request's run,
+# draft or not, is fast feedback for review: the fast checks (static,
+# generated, embed-wasm, oxc-wasm), the release build and core on plain
+# workerd, a few minutes on six runners. Marking a draft ready runs them
+# again, so its title and description, which become the commit on main,
+# are checked as they stand. The test shards, the e2e stack and its parts, and the
 # admin's journeys run on the merge queue, a run by hand and the nightly
 # run. A full run is 62 jobs and the account runs 60 at once, so a pull
 # request's full run beside the queue's left one of them waiting for
@@ -26,15 +28,15 @@
 # A full run runs everything at once: every test project, every journey,
 # the builds. No job waits for another but `check`: a plan job ahead of
 # the tests (which projects a change reaches) cost 45 s on every run's
-# critical path (November 2026). A nightly run on main runs it all again,
-# for merges an admin makes outside the queue; when it fails, it opens an
-# issue (nightly-alert, below).
+# critical path (November 2026). A nightly run on main runs it all again:
+# the only full run a merge an admin makes outside the queue gets. When it
+# fails, it opens an issue (nightly-alert, below).
 name: CI
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   push:
     branches: [main]
@@ -535,8 +537,8 @@ jobs:
   # (setup-voice.e2e.ts's story), after about a minute of setup and
   # starting the stack (November 2026). Add a parallel part by adding an
   # entry and raising the count in every entry's `part` and in e2e-build's
-  # `--all` (above). Part of the required `check` (above), in the merge
-  # queue too: it is the run that tests the tree that lands.
+  # `--all` (above). Part of the required `check` (above) in the merge
+  # queue, the run that tests the tree that lands.
   #
   # On the runner itself, with Chromium's headless shell from e2e-build's
   # cache: the runner's image has the system packages Chromium needs.
@@ -788,9 +790,9 @@ jobs:
   # Builds a release bundle as main will publish it (core, connect, the
   # frontend's static files and D1 migrations, with its manifest) and checks
   # every blob against the manifest, and builds the admin, which isn't part
-  # of a release. For a pull request or the merge queue, that's all, and
-  # it's the run's only build: part of the required `check` (above). On a
-  # push to main it's the commit's only build too: the bundle
+  # of a release. For a pull request or the merge queue, that's all: part
+  # of the required `check` (above), and a pull request's only build. On a
+  # push to main it's the commit's only build: the bundle
   # is the run's `release` artifact, which publish-release publishes as
   # it is, so the release an admin rolls out is the one CI tested, byte
   # for byte.
@@ -964,9 +966,9 @@ jobs:
       - run: vp run release:upload --release release-out --assign-id
 
   # When the nightly full run fails, an issue says so: nobody watches the
-  # Actions tab at 02:17, and merges an admin makes outside the queue
-  # are tested only on their own, so this run is where a break between two
-  # of them shows. One open issue at a time: a later failure comments on it.
+  # Actions tab at 02:17, and a merge an admin makes outside the queue
+  # gets only a pull request's fast checks, so this run is where its tests
+  # first run. One open issue at a time: a later failure comments on it.
   # Only the nightly run, and not when it was cancelled.
   nightly-alert:
     name: nightly-alert
