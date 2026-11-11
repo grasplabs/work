@@ -72,6 +72,61 @@ describe("stems", () => {
   });
 });
 
+describe("the random permission test's words", () => {
+  // apps/core/test/brain-next-random.test.ts builds its words so that its
+  // brute-force answer knows their forms without stemming: three forms of
+  // each root that match each other, and never another root or one of its
+  // stop words. A stemmer that stems them otherwise fails here, by name.
+  const roots = ["a", "b", "c", "d"];
+  const forms = ["kamp", "kamps", "kampen"];
+  const stopWords = ["de", "het", "the", "und", "les", "los"];
+  // Prefixes as the test makes them: "r" and eight hex digits.
+  const prefixes = Array.from(
+    { length: 64 },
+    (_, index) =>
+      `r${(((index + 1) * 2_654_435_761) % 2 ** 32).toString(16).padStart(8, "0")}`
+  );
+
+  it("matches the forms of one root, and nothing else", () => {
+    const wrong: string[] = [];
+    for (const prefix of prefixes) {
+      const words = roots.map((root) =>
+        forms.map((form) => `${prefix}${root}${form}`)
+      );
+      for (const [index, own] of words.entries()) {
+        for (const one of own) {
+          for (const other of own) {
+            if (!matches(one, other)) {
+              wrong.push(`${one} and ${other} apart`);
+            }
+          }
+          for (const [otherIndex, others] of words.entries()) {
+            for (const other of otherIndex === index ? [] : others) {
+              if (matches(one, other)) {
+                wrong.push(`${one} matches ${other}`);
+              }
+            }
+          }
+          for (const stop of stopWords) {
+            if (matches(one, stop)) {
+              wrong.push(`${one} matches ${stop}`);
+            }
+          }
+        }
+      }
+    }
+    for (const one of stopWords) {
+      for (const other of stopWords) {
+        if (one !== other && matches(one, other)) {
+          wrong.push(`${one} matches ${other}`);
+        }
+      }
+    }
+
+    expect(wrong).toStrictEqual([]);
+  });
+});
+
 describe("folding", () => {
   it("writes letters as the root collation counts them at primary strength", () => {
     const collator = new Intl.Collator("und", { sensitivity: "base" });

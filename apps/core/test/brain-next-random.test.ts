@@ -73,8 +73,11 @@ import { testBinding } from "./test-env.ts";
 // anything shared by a version's chunks shows. What decides between
 // chunks that tie (the newer version, the source's key, the place) is out
 // of its reach, and so is a leak that shows only in how those ties fall.
-// Questions stay under the store's limit of 16 words, so cutting a
-// question short is not part of this specification.
+// Not part of this specification, and so out of its reach: cutting a
+// question short (questions stay under the store's limit of 16 words);
+// words over 64 characters, matched only as written; accented words and
+// the stems of a word as written (every word here is plain ASCII); and
+// ties on length (no two chunks share one).
 //
 // People are signed in for each seed, so the stop words every scenario
 // shares never find another seed's sources.
@@ -235,20 +238,23 @@ const currentOf = ({ versions }: Planned): Version => {
 };
 
 /**
- * Words no other scenario has: each root behind a prefix of its own, and
+ * Words no other scenario has: each root behind its seed's own prefix, and
  * the stop words as they are. Lowercase ASCII letters and digits, which
  * search reads as they are: the brute-force answer compares tokens, never
  * folds or stems.
  */
-const vocabulary = () => {
-  const prefix = `r${crypto.randomUUID().slice(0, 8)}`;
+const vocabulary = (seed: number) => {
+  // From the seed, so a failure that turns on the words comes back with it.
+  const prefix = `r${Math.floor(seededRandom(seed)() * 2 ** 32)
+    .toString(16)
+    .padStart(8, "0")}`;
   return (token: Token): string =>
     isStop(token)
       ? token.slice(stopPrefix.length)
       : `${prefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
 };
 
-/** Characters of the longest word: "r", eight of a UUID, its letter and ending. */
+/** Characters of the longest word: "r", eight hex digits, its letter and ending. */
 const wordLength = 10 + Math.max(...formEndings.map(({ length }) => length));
 
 /** Characters the longest list of words takes, with a space after it. */
@@ -464,7 +470,7 @@ const scenario = (people: readonly string[], seed: number) => {
   );
   const membership: Membership = new Set();
   const history: string[] = [];
-  const wordOf = vocabulary();
+  const wordOf = vocabulary(seed);
   const versionsMost = rounds * addedPerRound;
   /** Lengths for one-paragraph versions, and for long ones: each used once. */
   const shortLengths = Array.from(

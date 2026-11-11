@@ -10,6 +10,9 @@
  *   vp run brain:eval -- --against <file>  compare with that run instead of the last
  *   vp run brain:eval -- --out <dir>       keep results there (default .brain-eval/)
  *
+ * (`node scripts/brain-eval.ts --out <dir>` works alike: the one `--` that
+ * `vp run` passes on is dropped before the options are read.)
+ *
  * It runs apps/core/vite.brain-eval.config.ts: core on workerd, as in the
  * tests, with the evaluation's company (apps/core/test/fixtures/brain-eval/)
  * added through core's own `addSource` and every question asked through
@@ -31,6 +34,7 @@ import { z } from "zod";
 import {
   comparable,
   compareRuns,
+  evalArgs,
   latencyTargetsMs,
   questionResultSchema,
   report,
@@ -42,6 +46,7 @@ import {
 const root = path.join(import.meta.dirname, "..");
 
 const { values: options } = parseArgs({
+  args: evalArgs(process.argv.slice(2)),
   options: {
     out: { type: "string", default: path.join(root, ".brain-eval") },
     against: { type: "string" },

@@ -25,6 +25,14 @@ import {
   brainEvalWays,
 } from "../apps/core/test/fixtures/brain-eval/company.ts";
 
+/**
+ * The evaluation's command-line arguments, as `parseArgs` reads them:
+ * without the one leading `--` that `vp run brain:eval -- --out <dir>`
+ * passes on, which would otherwise make every option after it positional.
+ */
+export const evalArgs = (args: readonly string[]): string[] =>
+  args[0] === "--" ? args.slice(1) : [...args];
+
 /** How many results a reader is counted as looking at. */
 export const resultBudget = 5;
 
