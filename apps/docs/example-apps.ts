@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+import { isUnderGeneratedServerFolder } from "@grasp-os/runtime/host";
 import { z } from "zod";
 
 /** Where the built-in blueprints are. */
@@ -67,7 +68,10 @@ const placeOf = (file: string): number => {
   return at === -1 ? order.length : at;
 };
 
-/** Every file under `dir`, by its path from it, with `/` between names. */
+/**
+ * Every file under `dir`, by its path from it, with `/` between names, but
+ * what Grasp generates from its server code (`server/_generated/`).
+ */
 const filesIn = (dir: string): string[] =>
   readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
@@ -76,7 +80,8 @@ const filesIn = (dir: string): string[] =>
         .relative(dir, path.join(entry.parentPath, entry.name))
         .split(path.sep)
         .join("/")
-    );
+    )
+    .filter((file) => !isUnderGeneratedServerFolder(file));
 
 /** The page of the example `id`, number `order` in the sidebar. */
 export const examplePage = (
@@ -106,7 +111,7 @@ export const examplePage = (
     `  order: ${order}`,
     "---",
     "",
-    `${description} Every file of the App is below, as Grasp installs it: the \`grasp.config.ts\` and \`server/schema.ts\` generated from its definition, its server functions in \`server/\`, and its Pages in \`src/\`.`,
+    `${description} Every file of the App is below, as Grasp installs it: the \`grasp.config.ts\` and \`server/schema.ts\` generated from its definition, its server functions in \`server/\`, and its Pages in \`src/\`; not \`server/_generated/\`, which Grasp generates from them.`,
     "",
     ...sections.flatMap((section) => [section, ""]),
   ].join("\n");

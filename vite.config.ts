@@ -21,6 +21,7 @@ const generated = [
   "**/.grasp/**",
   "apps/core/blueprints/*/files/grasp.config.ts",
   "apps/core/blueprints/*/files/server/schema.ts",
+  "apps/core/blueprints/*/files/server/_generated/**",
   "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
   "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
   // The SDK's connector catalog, from the release's connectors
@@ -80,18 +81,11 @@ export default defineConfig({
       // (the seal strips types without checking them), and
       // builtin-blueprints.test.ts covers what they do at runtime.
       "apps/core/test/fixtures/blueprints/*/files/**",
-      // The front end of a built-in of spec 8's layout, for the same reason:
-      // they import `@server/_generated/api`, generated from the App's manifest. The page
-      // build type-checks them and lints them against the kit, with the
-      // references the host generated (builtin-blueprints.test.ts builds
-      // them). Its server code and workflows are linted here
-      // (each built-in's own tsconfig.json).
-      "apps/core/blueprints/intake/files/src/**",
-      "apps/core/blueprints/workflow-map/files/src/**",
-      "apps/core/blueprints/kanban-board/files/src/**",
-      "apps/core/blueprints/crm/files/src/**",
-      "apps/core/blueprints/approvals/files/src/**",
-      "apps/core/blueprints/dashboard/files/src/**",
+      // A built-in's pages, which need the route tree and the kit a page
+      // build gives them: the build type-checks them as it does
+      // any App's (builtin-blueprints.test.ts). Its config and server code
+      // are checked here (each built-in's own tsconfig.json).
+      "apps/core/blueprints/*/files/src/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
