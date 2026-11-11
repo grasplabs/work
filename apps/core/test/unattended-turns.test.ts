@@ -157,4 +157,27 @@ describe("a turn nobody was there for", setUpTime, () => {
       ends: held?.endsAt === undefined ? "never" : "with the day",
     }).toStrictEqual({ unattended: false, ends: "never" });
   });
+
+  it("offers no workflow to start on a card, in a chat that came through a chat app", async () => {
+    const person = await signedInApi(idp, "user");
+    const chat = await chatOf(
+      person.userId,
+      codeStep(
+        'export default async (self, env) => { try { await env.workflows.offer("workflow-1", {}); return "offered"; } catch (error) { return error.message; } };'
+      ),
+      says("I can't offer that now.")
+    );
+    const inTeams = await chat.stub.createChat(
+      "From Teams",
+      person.userId,
+      chat.id,
+      undefined,
+      "teams"
+    );
+    await chat.stub.askUnattended(inTeams.id, { text: "Start it.", model });
+    const [result] = await codeResults(chat.stub, inTeams.id);
+    expect(result?.text).toBe(
+      "Returned:\nNobody asked for this just now, so the agent can only read. What it wants to change waits for its person."
+    );
+  });
 });

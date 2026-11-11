@@ -457,7 +457,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       // Admitted as it goes to connect, not only as the call began; a
       // refusal here is recorded here, as nothing else records this call.
       // In a turn nobody was there for, connect holds what this changes.
-      await admitEffect(this.env, scope, "connections.call", { held: true });
+      await admitEffect(this.env, scope, "connections.call", {
+        unattended: true,
+      });
     } catch (error) {
       throw forSandbox(error);
     }

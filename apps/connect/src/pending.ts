@@ -623,6 +623,10 @@ export const hold = async (
           sameCaller,
           eq(pendingActions.inputHash, inputHash),
           eq(pendingActions.context, context),
+          // One a person asked for and one a turn nobody was there for
+          // asked for are never the same action: the second ends with the
+          // day and says so, whatever the first does.
+          eq(pendingActions.unattended, claims.unattended),
           or(
             isNull(pendingActions.endsAt),
             gt(pendingActions.endsAt, new Date(heldAt))

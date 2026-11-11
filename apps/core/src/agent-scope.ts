@@ -493,18 +493,21 @@ export const requireOpenRun = async (
  * run's refusals are recorded per refused call, not once per run.
  *
  * In an unattended turn (`AgentScope.unattended`) every effect is refused
- * with `agent.unattended`, but one connect holds for the person (`held`).
+ * with `agent.unattended`, but one its caller admits there
+ * (`unattended`): a read that passes here to check the run is still open,
+ * or a change connect holds for the person.
  */
 export const admitEffect = async (
   env: Env,
   scope: AgentScope,
   method?: string,
-  { held = false }: { held?: boolean } = {}
+  { unattended = false }: { unattended?: boolean } = {}
 ): Promise<void> => {
-  // A turn nobody was there for changes nothing itself: only what connect
-  // holds for its person (`held`) may go on. Refused before anything else,
-  // and recorded when nothing else records the call.
-  if (scope.unattended === true && !held) {
+  // A turn nobody was there for changes nothing itself: only what its
+  // caller says such a turn may have (`unattended`) goes on, a read, or a
+  // change connect holds for its person. Refused before anything else, and
+  // recorded when nothing else records the call.
+  if (scope.unattended === true && !unattended) {
     const refusal = agentErrors.create("agent.unattended");
     if (method !== undefined) {
       await auditToolCall(

@@ -154,7 +154,11 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                 async () => {
                   // The code run still open (not ended, cancelled or closed by a
                   // revocation), and the grant for the call's kind still held.
-                  await admitEffect(this.env, scope);
+                  // A read changes nothing, so a turn nobody was there for
+                  // may make it; a write of its is refused.
+                  await admitEffect(this.env, scope, undefined, {
+                    unattended: action !== "write",
+                  });
                   const now = await grantedPermissions(
                     this.env,
                     chatAuthority(scope)

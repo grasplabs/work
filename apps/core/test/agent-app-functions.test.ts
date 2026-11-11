@@ -10,7 +10,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { commitApp, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { requestGranted } from "./apps.ts";
@@ -154,6 +154,8 @@ interface RunOptions {
    * before or after that is a race. Either way the test's checks hold.
    */
   mayStop?: boolean;
+  /** Nobody asks: the turn is one an agent takes when woken (`askUnattended`). */
+  unattended?: boolean;
 }
 
 /** Asks a chat of the builder's to run `code`, with the agent granted `actions` on the App. */
@@ -161,7 +163,14 @@ const runIn = async (
   { builder, app }: Awaited<ReturnType<typeof notesApp>>,
   code: string,
   actions: ("read" | "write")[],
-  { before, during, personId, alsoGrant = [], mayStop = false }: RunOptions = {}
+  {
+    before,
+    during,
+    personId,
+    alsoGrant = [],
+    mayStop = false,
+    unattended = false,
+  }: RunOptions = {}
 ) => {
   const chat = await chatOf(
     personId ?? builder.userId,
@@ -189,7 +198,12 @@ const runIn = async (
   await before?.(chat);
   const asked = async (): Promise<void> => {
     try {
-      await chat.ask("Use the Notes App.");
+      await (unattended
+        ? chat.stub.askUnattended(chat.chat.id, {
+            text: "Use the Notes App.",
+            model,
+          })
+        : chat.ask("Use the Notes App."));
     } catch (error) {
       if (!mayStop || agentErrors.codeOf(error) !== "agent.history_revoked") {
         throw error;
@@ -326,6 +340,35 @@ describe(
       expect(writing.titles).toStrictEqual({
         ok: true,
         value: ["From the agent"],
+      });
+    });
+
+    it("in a turn nobody was there for, reads, and writes nothing even with a write permission", async () => {
+      const notes = await notesApp();
+      const app = JSON.stringify(notes.app);
+      const create = JSON.stringify(
+        callOf(notes.release, "notes.create", { title: "While you were away" })
+      );
+      const titles = JSON.stringify(callOf(notes.release, "notes.titles", {}));
+      const { returned: result } = await runIn(
+        notes,
+        tryEach({
+          titles: `env.apps.call(${app}, stream(${titles}))`,
+          create: `env.apps.call(${app}, stream(${create}))`,
+          after: `env.apps.call(${app}, stream(${titles}))`,
+        }),
+        ["read", "write"],
+        { unattended: true }
+      );
+      const woken = await result();
+      expect({ titles: woken.titles, after: woken.after }).toStrictEqual({
+        titles: { ok: true, value: [] },
+        // Nothing was written.
+        after: { ok: true, value: [] },
+      });
+      expect(woken.create).toMatchObject({
+        ok: false,
+        error: { code: "agent.unattended" },
       });
     });
 

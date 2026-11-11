@@ -1767,4 +1767,37 @@ describe("a write held from a chat platform", () => {
     );
     expect(server.ran).toHaveLength(1);
   });
+
+  it("never takes an unattended turn's change for one its person asked for before: it is held anew, with its own end", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // No key of the caller's, as a chat's code calls: matched by what it
+    // would do and where it was asked.
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    const asked = await hold(inChat(anna), call);
+    const woken = await hold(inChat(anna), call, {
+      unattended: true,
+      heldUntil: Date.now() + hourMs,
+    });
+    const again = await hold(inChat(anna), call, {
+      unattended: true,
+      heldUntil: Date.now() + hourMs,
+    });
+    const waiting = await waitingFor(anna);
+    const byId = new Map(waiting.map((each) => [each.id, each]));
+    const first = byId.get(asked.pending?.id ?? "");
+    const second = byId.get(woken.pending?.id ?? "");
+    expect({
+      held: waiting.length,
+      // Asked again unattended, it is the same unattended one.
+      repeated: again.pending?.id === woken.pending?.id,
+      first: [first?.unattended, first?.endsAt === undefined],
+      second: [second?.unattended, second?.endsAt === undefined],
+    }).toStrictEqual({
+      held: 2,
+      repeated: true,
+      first: [undefined, true],
+      second: [true, false],
+    });
+  });
 });
