@@ -7,6 +7,8 @@
  * `Authorization` header: never into a log, an error or a returned value
  * (threat model R17, CO3).
  */
+import { apiPath } from "@grasp-os/shared/api-path";
+import type { ApiPath } from "@grasp-os/shared/api-path";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { z } from "zod";
 
@@ -93,8 +95,12 @@ export interface ResultInfo {
 
 export interface ApiCall {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  /** Below the API base, such as `/accounts/<id>/d1/database`. */
-  path: string;
+  /**
+   * Below the API base, such as `/accounts/<id>/d1/database`: made by
+   * `apiPath`, so no value in it (an id from an answer, a stored name)
+   * can move the call to another resource (GRA-1779).
+   */
+  path: ApiPath;
   query?: Record<string, string>;
   headers?: Record<string, string>;
   /** Sent as JSON. */
@@ -350,7 +356,7 @@ export const cloudflareApi = ({
     // A query changes nothing, so it's safe to send again.
     const call: ApiCall = {
       method: "POST",
-      path: "/graphql",
+      path: apiPath("graphql"),
       json: { query, variables },
       idempotent: true,
     };
@@ -417,7 +423,7 @@ const maxPages = 20;
  */
 export const listAll = async <T>(
   api: CloudflareApi,
-  path: string,
+  path: ApiPath,
   schema: z.ZodType<T>,
   query: Record<string, string> = {},
   page = 1

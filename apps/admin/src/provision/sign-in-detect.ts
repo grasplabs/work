@@ -14,6 +14,7 @@
  * that doesn't answer, or answers otherwise, finds nothing: staff choose
  * by hand then. Nothing here is a secret; only the domain leaves.
  */
+import { apiPath } from "@grasp-os/shared/api-path";
 import { z } from "zod";
 
 /** What was found of a domain's sign-in. */
@@ -92,7 +93,7 @@ const entraTenantOf = async (
   fetcher: typeof fetch
 ): Promise<string | undefined> => {
   const response = await fetcher(
-    `${microsoftLogin}/${encodeURIComponent(domain)}/v2.0/.well-known/openid-configuration`,
+    `${microsoftLogin}${apiPath(domain, "v2.0", ".well-known", "openid-configuration")}`,
     { signal: AbortSignal.timeout(lookupTimeoutMs) }
   );
   if (!response.ok) {

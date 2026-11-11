@@ -8,6 +8,7 @@ import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { D1MigrationError } from "../src/cloudflare/d1-migration-error.ts";
 import {
   applyD1Migrations,
+  deleteTargetScript,
   queryD1,
   uploadTargetAssets,
   uploadTargetScript,
@@ -19,6 +20,12 @@ import type {
   WorkerUpload,
 } from "../src/cloudflare/workers.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import {
+  hostileSegments,
+  keptOrRefused,
+  refusedForItsPath,
+  segmentBetween,
+} from "./hostile-segments.ts";
 
 const token = "test-deployer-token-0123456789";
 const cloudflare = mockCloudflareApi(token);
@@ -462,6 +469,91 @@ describe("uploads that fail part way", () => {
     ).rejects.toMatchObject({ status: 500 });
     expect(cloudflare.calls).toHaveLength(3);
   });
+});
+
+describe("a value in a script's path", () => {
+  /** Deletes, then uploads, the script `target` names: whether each was refused for its path. */
+  const deleteThenUpload = async (target: ScriptTarget) => [
+    await refusedForItsPath(async () => {
+      await deleteTargetScript(api, target);
+    }),
+    await refusedForItsPath(async () => {
+      await uploadTargetScript(api, target, release("26.01.1"));
+    }),
+  ];
+
+  it.each(hostileSegments)(
+    "keeps the script name %j one segment under its namespace's scripts, or sends nothing",
+    async (scriptName) => {
+      const account = namespaced();
+      const refused = await deleteThenUpload({
+        accountId: account.id,
+        scriptName,
+        namespace,
+      });
+      const scripts = `/accounts/${account.id}/workers/dispatch/namespaces/${namespace}/scripts`;
+      const expected = keptOrRefused(scriptName);
+      expect({
+        refused,
+        sent: cloudflare.calls.map(({ method, path }) => [
+          method,
+          segmentBetween(path, scripts),
+        ]),
+      }).toStrictEqual({
+        refused: [expected.refused, expected.refused],
+        sent: expected.segments.flatMap((segment) => [
+          ["DELETE", segment],
+          ["PUT", segment],
+        ]),
+      });
+    }
+  );
+
+  it.each(hostileSegments)(
+    "keeps the namespace %j one segment under the account's namespaces, or sends nothing",
+    async (hostile) => {
+      const account = namespaced();
+      const refused = await deleteThenUpload({
+        accountId: account.id,
+        scriptName: "grasp-os-core",
+        namespace: hostile,
+      });
+      const expected = keptOrRefused(hostile);
+      expect({
+        refused,
+        sent: cloudflare.calls.map(({ method, path }) => [
+          method,
+          segmentBetween(
+            path,
+            `/accounts/${account.id}/workers/dispatch/namespaces`,
+            "/scripts/grasp-os-core"
+          ),
+        ]),
+      }).toStrictEqual({
+        refused: [expected.refused, expected.refused],
+        sent: expected.segments.flatMap((segment) => [
+          ["DELETE", segment],
+          ["PUT", segment],
+        ]),
+      });
+    }
+  );
+
+  it.each(hostileSegments)(
+    "keeps the D1 database id %j Cloudflare answered one segment under the account's databases, or sends nothing",
+    async (databaseId) => {
+      const account = cloudflare.addAccount();
+      const refused = await refusedForItsPath(
+        async () => await queryD1(api, account.id, databaseId, "SELECT 1;")
+      );
+      expect({
+        refused,
+        segments: cloudflare.calls.map(({ path }) =>
+          segmentBetween(path, `/accounts/${account.id}/d1/database`, "/query")
+        ),
+      }).toStrictEqual(keptOrRefused(databaseId));
+    }
+  );
 });
 
 describe("D1 migrations", () => {

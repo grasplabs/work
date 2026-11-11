@@ -3,6 +3,7 @@
  * scripts (with their static assets and secrets), reading what is live,
  * and applying D1 migrations.
  */
+import { apiPath } from "@grasp-os/shared/api-path";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { mapConcurrently } from "@grasp-os/shared/release";
@@ -94,9 +95,25 @@ export interface ScriptTarget {
   namespace: string;
 }
 
-/** The API path of the script `target` names. */
-const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
-  `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
+/**
+ * The API path of the script `target` names, or of `...below` it: each of
+ * its names one segment, whatever it holds.
+ */
+const targetPath = (
+  { accountId, scriptName, namespace }: ScriptTarget,
+  ...below: string[]
+) =>
+  apiPath(
+    "accounts",
+    accountId,
+    "workers",
+    "dispatch",
+    "namespaces",
+    namespace,
+    "scripts",
+    scriptName,
+    ...below
+  );
 
 /**
  * The key a file goes up under: its content key (`encodeAsset`) and its
@@ -295,7 +312,6 @@ export const uploadTargetAssets = async (
   options: Pick<ApiCall, "signal" | "beforeSend"> = {}
 ): Promise<string> => {
   const { accountId } = target;
-  const scriptAt = targetPath(target);
   // Named by the key the release manifest gives each file (Wrangler's
   // shape and extension rule, with SHA-256) bound to its type: the account
   // keeps a file it holds under its key with the type it was first
@@ -311,7 +327,7 @@ export const uploadTargetAssets = async (
     {
       ...options,
       method: "POST",
-      path: `${scriptAt}/assets-upload-session`,
+      path: targetPath(target, "assets-upload-session"),
       json: {
         manifest: Object.fromEntries(
           named.map(({ file, hash }) => [file.path, { hash, size: file.size }])
@@ -355,7 +371,7 @@ export const uploadTargetAssets = async (
       {
         ...options,
         method: "POST",
-        path: `/accounts/${accountId}/workers/assets/upload`,
+        path: apiPath("accounts", accountId, "workers", "assets", "upload"),
         query: { base64: "true" },
         bearer: session.jwt,
         // Files are named by their content's hash: sending them again
@@ -467,7 +483,7 @@ export const scriptMigrationState = async (
     const { default_environment: environment } = await api.call(
       {
         method: "GET",
-        path: `/accounts/${accountId}/workers/services/${scriptName}`,
+        path: apiPath("accounts", accountId, "workers", "services", scriptName),
       },
       serviceSchema
     );
@@ -525,7 +541,14 @@ export const queryD1 = async (
   const statements = await api.call(
     {
       method: "POST",
-      path: `/accounts/${accountId}/d1/database/${databaseId}/query`,
+      path: apiPath(
+        "accounts",
+        accountId,
+        "d1",
+        "database",
+        databaseId,
+        "query"
+      ),
       json: { sql },
       ...(beforeSend === undefined ? {} : { beforeSend }),
     },
@@ -812,7 +835,7 @@ export const targetSecretNames = async (
   target: ScriptTarget
 ): Promise<string[]> => {
   const secrets = await api.call(
-    { method: "GET", path: `${targetPath(target)}/secrets` },
+    { method: "GET", path: targetPath(target, "secrets") },
     z.array(z.object({ name: z.string() }))
   );
   return secrets.map(({ name }) => name);
