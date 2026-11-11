@@ -43,7 +43,8 @@ export { WorkError } from "./work-error.ts";
 //    a model fails (`unavailable`: a 5xx, connect or the host out of
 //    reach), or the AI account needs someone (`account`: a key refused, no
 //    model set up or allowed, out of credit). It pauses 60 s, or as long
-//    as the provider asked if longer, at most 30 minutes. An answered call
+//    as the provider asked if longer, at most 30 minutes; for the account,
+//    15 minutes, as a person fixes it. An answered call
 //    ends it early, except a rate limit's: that one lasts as long as the
 //    provider asked, whatever a call already under way answers meanwhile.
 //    An item that asks the model during the pause is put back with
@@ -74,8 +75,9 @@ export { WorkError } from "./work-error.ts";
 //    poisoned item costs at most 3 × 5 attempts.
 // 6. A handler that ignores its signal past its time and a grace is
 //    settled as timed out and left running, holding its key and a slot
-//    (staff see it as overdue); when such handlers hold every slot, the
-//    store restarts, which ends them. Errors are kept as the queue's own
+//    (staff see it as overdue); when such handlers hold every slot, or are
+//    all that keeps an interrupted item from running alone, the store
+//    restarts, which ends them, spending no attempt. Errors are kept as the queue's own
 //    codes (`workErrors`), never as text a handler or a provider wrote.
 //
 // Time: the queue's own time is the tick's (`at`, core's clock's time
@@ -118,6 +120,13 @@ const backoffFirstMs = 60_000;
 /** The queue's pause: at least this, or what the provider asked, at most the most. */
 const pauseLeastMs = 60_000;
 const pauseMostMs = 30 * 60_000;
+
+/**
+ * The queue's pause for the AI account. A person fixes an account (a key,
+ * a model to allow, credit), never a minute's wait: pausing a minute would
+ * send about 3 calls a tick the gateway refuses and audits, for nothing.
+ */
+const pauseAccountMs = 15 * 60_000;
 
 /** Most model calls one attempt may make. */
 export const workCallsMax = 20;
@@ -578,7 +587,8 @@ const pick = (
  * one's attempt, in one synchronous step: so two ticks never claim one
  * item, and a crash in its work still counts it. Nothing while the queue
  * is paused. An interrupted item runs alone: first, once nothing else
- * runs, and nothing else while it does.
+ * runs, and nothing else while it does. When only handlers left running
+ * past their time keep it waiting, the store restarts (rule 6).
  */
 const claim = (
   storage: DurableObjectStorage,
@@ -606,6 +616,12 @@ const claim = (
   } else if (running.length === 0 && state.zombies.size === 0) {
     // Alone: not even beside a handler left running past its time.
     claimed = [alone];
+  } else if (running.length === 0) {
+    // Only handlers past their time stand in its way, and may never end:
+    // the store restarts, which ends them, and claims nothing meanwhile.
+    // The next instance starts with none, so it runs the item alone: a
+    // restart comes at most once for each such wait, spending no attempt.
+    state.restart();
   }
   for (const item of claimed) {
     item.attempts += 1;
@@ -620,7 +636,8 @@ const claim = (
 
 /**
  * Pauses the queue at `at` for `reason` (rule 2): 60 s, or what the
- * provider asked if longer, at most 30 minutes. Returns until when.
+ * provider asked if longer, at most 30 minutes; 15 minutes for the
+ * account. Returns until when.
  */
 const pause = (
   storage: DurableObjectStorage,
@@ -631,7 +648,8 @@ const pause = (
   const db = drizzle(storage);
   const kept = bucketOf(db);
   const keptUntil = kept?.pausedUntil ?? 0;
-  const asked = at + Math.min(pauseMostMs, Math.max(pauseLeastMs, askedMs));
+  const least = reason === "account" ? pauseAccountMs : pauseLeastMs;
+  const asked = at + Math.min(pauseMostMs, Math.max(least, askedMs));
   // The pause keeps the reason that owns its end, the later one: a 5xx
   // within a longer rate limit never relabels it, nor lets an answer end it.
   const keptReason = kept?.pauseReason ?? null;

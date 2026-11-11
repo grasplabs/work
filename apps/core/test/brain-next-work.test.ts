@@ -1606,53 +1606,62 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     }).toStrictEqual({ most: workPerConnection, finished: true });
   });
 
-  it("runs an interrupted item alone, not beside a handler left running past its time", async () => {
+  it("restarts the store when an interrupted item waits on a handler left running past its time, then runs it alone and the rest", async () => {
     reset();
-    const [first, second] = keysOf("alone", 2);
-    if (first === undefined || second === undefined) {
-      throw new Error("Expected two keys");
-    }
-    const live = { running: new Set<string>(), most: 0 };
-    const reached = { first: false, second: false };
-    behaviours.set(first, async () => {
-      if (runsOf(first) === 1) {
-        reached.first = true;
+    const [hung, interrupted, ordinary] = [
+      keyOf("hung-alone"),
+      keyOf("interrupted-next"),
+      keyOf("ordinary-after"),
+    ];
+    const reached = { hung: false, interrupted: false };
+    behaviours.set(hung, async () => {
+      if (runsOf(hung) === 1) {
+        reached.hung = true;
         await pause(60_000);
         return;
       }
-      live.running.add(first);
-      live.most = Math.max(live.most, live.running.size);
-      // Ignores its signal, well past its time and its grace.
-      await pause(quickTimeMs * 4);
-      live.running.delete(first);
-    });
-    behaviours.set(second, async () => {
-      if (runsOf(second) === 1) {
-        reached.second = true;
-        await pause(60_000);
-        return;
+      if (runsOf(hung) === 2) {
+        // Ignores its signal and never returns.
+        await Promise.withResolvers<never>().promise;
       }
-      live.running.add(second);
-      live.most = Math.max(live.most, live.running.size);
-      await brief();
-      live.running.delete(second);
     });
-    await enqueue({ key: first, priority: "asked" }, quickWork);
-    await enqueue({ key: second, priority: "recent" }, quickWork);
+    behaviours.set(interrupted, async () => {
+      if (runsOf(interrupted) === 1) {
+        reached.interrupted = true;
+        await pause(60_000);
+      }
+    });
+    await enqueue({ key: hung, priority: "asked" }, quickWork);
+    await enqueue({ key: interrupted, priority: "recent" }, quickWork);
     // Both under way when the store stops: each is to run alone next.
     const stopped = failed(tick());
-    await until(() => reached.first && reached.second);
+    await until(() => reached.hung && reached.interrupted);
     await killStore();
     await stopped;
-    // The first runs alone and runs past its time; the second waits until
-    // its handler has ended.
-    await tick();
-    await until(() => live.running.size === 0);
+    await enqueue({ key: ordinary, priority: "archive" });
+    // The hung one runs alone, past its time; the interrupted one, due
+    // next, would wait on it for ever: the store restarts instead.
+    const restarted = await failed(tick());
+    const attempts = await runInDurableObject(store(), (_store, state) =>
+      state.storage.sql
+        .exec<{ attempts: number }>(
+          "SELECT attempts FROM work_items WHERE key = ?",
+          interrupted
+        )
+        .toArray()
+        .map((row) => row.attempts)
+    );
     await tick();
     expect({
-      most: live.most,
-      secondFinished: seen.finished.includes(second),
-    }).toStrictEqual({ most: 1, secondFinished: true });
+      restarted,
+      attempts,
+      finished: seen.finished.filter((key) => key !== hung),
+    }).toStrictEqual({
+      restarted: true,
+      // The first stop gave its attempt back; the restart spent none.
+      attempts: [0],
+      finished: [interrupted, ordinary],
+    });
   });
 
   it("pauses for the AI account when Grasp's AI is used up for the month, parking nothing and spending no attempt", async () => {
@@ -1682,22 +1691,31 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
         const item = keyOf("grasp-month");
         behaviours.set(item, asksOnce);
         await enqueue({ key: item, priority: "asked" }, quickWork);
-        // Three ticks a minute and more apart: each asks, and is put back.
-        for (let tickNumber = 0; tickNumber < 3; tickNumber += 1) {
-          // oxlint-disable-next-line no-await-in-loop -- tick after tick
-          await tick(2 * 60_000);
-        }
+        // It asks and is put back; the queue then waits a quarter hour
+        // for a person, asking nothing meanwhile, and then asks again.
+        await tick();
+        const pausedFor = await queue([item]);
+        await tick(5 * 60_000);
+        await tick(5 * 60_000);
+        const runsMeanwhile = runsOf(item);
+        await tick(6 * 60_000);
         const { paused, parked, waiting } = await queue([item]);
         expect({
           reason: paused?.reason,
+          pausedMs:
+            (pausedFor.paused?.until.getTime() ?? 0) -
+            (pausedFor.paused?.since.getTime() ?? 0),
           parked,
           waiting,
+          runsMeanwhile,
           runs: runsOf(item),
         }).toStrictEqual({
           reason: "account",
+          pausedMs: 15 * 60_000,
           parked: [],
           waiting: 1,
-          runs: 3,
+          runsMeanwhile: 1,
+          runs: 2,
         });
       } finally {
         await drizzle(env.DB)
@@ -1724,6 +1742,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       textA: "",
       hashB: "",
       cRefusal: "",
+      hashC: "",
     };
 
     beforeAll(async () => {
@@ -1771,6 +1790,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       // longer ago than an add takes, so the sweep takes it too.
       held.putsHeld = true;
       const textC = `File C an add is writing, ${crypto.randomUUID()}`;
+      swept.hashC = await fileHashOf(textC);
       const writesBefore = held.writes;
       const cAdd = refusalOf(addOf(textC, `person-${crypto.randomUUID()}`));
       await until(() => held.writes > writesBefore);
@@ -1860,8 +1880,19 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       });
     });
 
-    it("refuses an add whose write was under way when its sweep gave up, recording no version", () => {
-      expect(swept.cRefusal).toContain("add it again");
+    it("refuses an add whose write was under way when its sweep gave up, recording no version", async () => {
+      const versions = await runInDurableObject(
+        store(),
+        (_store, state) =>
+          state.storage.sql
+            .exec("SELECT row FROM source_versions WHERE file = ?", swept.hashC)
+            .toArray().length
+      );
+      expect({
+        refused: swept.cRefusal.includes("add it again"),
+        inDoubt: await inDoubtNow(swept.hashC),
+        versions,
+      }).toStrictEqual({ refused: true, inDoubt: true, versions: 0 });
     });
 
     it("sweeps file B, whose late delete never landed, once the doubt has passed, and shows no step failed after it", async () => {

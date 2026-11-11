@@ -90,7 +90,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** This instance's state of its work queue: gone with it. */
   readonly #work = newWorkState(() => {
-    this.ctx.abort("Handlers past their time held every slot of the queue");
+    this.ctx.abort("Handlers past their time held up the queue");
   });
 
   constructor(ctx: DurableObjectState, env: BrainStoreEnv) {
