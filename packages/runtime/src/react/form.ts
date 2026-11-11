@@ -1,15 +1,22 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import { useForm as useTanStackForm } from "@tanstack/react-form";
+import { useEffect, useState } from "react";
 
-import type { ActionReference, MutationReference } from "../client-core.ts";
-import { useGraspForm } from "../form.ts";
+import type {
+  ActionReference,
+  GraspClient,
+  MutationReference,
+} from "../client-core.ts";
+import { bindForm, graspFormOf } from "../form-binding.ts";
 import type {
   DecisionAnswer,
   DecisionFormOptions,
+  FormApiOf,
   FormOptionsInput,
   GraspForm,
   FunctionFormOptions,
   SchemaFormOptions,
-} from "../form.ts";
+} from "../form-types.ts";
 import type { FunctionArgs, FunctionReturn } from "../function-references.ts";
 import type {
   AnyWorkflowDecisionReference,
@@ -38,6 +45,46 @@ interface UseForm {
 }
 
 /**
+ * The form hook, untyped: what `useForm` types by its three ways in.
+ * `client` is the session client.
+ */
+const useGraspForm = (
+  client: GraspClient,
+  target: unknown,
+  options: FormOptionsInput
+): GraspForm<Record<string, unknown>, unknown> => {
+  // One binding for the form's life, never replaced: no setter.
+  // oxlint-disable-next-line react/hook-use-state -- see above
+  const [binding] = useState(() => bindForm(client, target, options));
+  const form: FormApiOf<Record<string, unknown>> = useTanStackForm({
+    defaultValues: binding.initialValues,
+    validators: {
+      onChange: binding.validate,
+      onBlur: binding.validate,
+      onSubmit: binding.validate,
+    },
+    listeners: {
+      onChange: ({ fieldApi }) => {
+        binding.fieldChanged(fieldApi.name);
+      },
+    },
+  });
+  // The form App code holds, made once around its TanStack form.
+  // oxlint-disable-next-line react/hook-use-state -- see above
+  const [graspForm] = useState(() => graspFormOf(binding, form));
+  useEffect(() => {
+    binding.setOptions(options);
+  });
+  useEffect(() => {
+    binding.setMounted(true);
+    return () => {
+      binding.setMounted(false);
+    };
+  }, [binding]);
+  return graspForm;
+};
+
+/**
  * A form, one hook with three ways in:
  *
  * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
@@ -61,7 +108,7 @@ interface UseForm {
  * `form.Field`.
  */
 // SAFETY: one implementation serves the two typed ways in above; it
-// reads which one it was given at run time (form.ts, `targetOf`).
+// reads which one it was given at run time (form-target.ts, `targetOf`).
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 export const useForm = ((target: unknown, options: FormOptionsInput) =>
   useGraspForm(useClient(), target, options)) as UseForm;

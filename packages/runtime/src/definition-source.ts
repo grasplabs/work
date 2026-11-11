@@ -1,14 +1,9 @@
 import { print } from "./code-print.ts";
 import type { Code } from "./code-print.ts";
-import {
-  accessOf,
-  answersOf,
-  canonicalDefinition,
-  generatedFiles,
-  indexFieldNames,
-  peoplePermission,
-} from "./definition.ts";
-import type { AppDefinition, DefinedField } from "./definition.ts";
+import { accessOf, answersOf, indexFieldNames } from "./definition-app.ts";
+import { canonicalDefinition } from "./definition-json.ts";
+import { generatedFiles, peoplePermission } from "./definition-types.ts";
+import type { AppDefinition, DefinedField } from "./definition-types.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
 import type {
   AppPermission,
@@ -19,7 +14,7 @@ import type { RowRule } from "./table-access.ts";
 import { isSemanticKind } from "./value-descriptor.ts";
 import type { SemanticKind, ValueDescriptor } from "./value-descriptor.ts";
 
-// The code an App's definition (definition.ts) generates: its config
+// The code an App's definition (definition-types.ts) generates: its config
 // (`grasp.config.ts`) and its schema (`server/schema.ts`), each built as
 // a syntax tree and printed by code-print.ts, so every name and value is
 // quoted as JavaScript quotes it. What is printed declares exactly what
