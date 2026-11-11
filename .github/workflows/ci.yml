@@ -702,7 +702,15 @@ jobs:
           if [ ${#debs[@]} -gt 0 ]; then
             sudo cp "${debs[@]}" /var/cache/apt/archives/
           fi
-          vp exec playwright install-deps "$BROWSER"
+          # When Ubuntu's mirrors can't be reached and apt wants a newer
+          # version than the cache holds (an update it can't fetch), the
+          # cached files are still a set that installed on this image:
+          # install exactly those, without downloading anything.
+          if ! vp exec playwright install-deps "$BROWSER"; then
+            [ ${#debs[@]} -gt 0 ] || exit 1
+            echo "::warning::Ubuntu's mirrors failed; installing the cached packages instead"
+            sudo apt-get install -y --no-download "${debs[@]}"
+          fi
           rm -f ~/playwright-debs/*.deb
           for deb in /var/cache/apt/archives/*.deb; do
             package=$(dpkg-deb -f "$deb" Package)
