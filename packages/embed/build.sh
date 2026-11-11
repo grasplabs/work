@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds src/embed.wasm from rust/ and writes its SHA-256 to
 # src/wasm-sha256.ts, both committed: `vp run build:wasm` in packages/embed
-# after changing rust/. CI's embed-wasm job runs it again and fails unless
+# after changing rust/. CI's wasm job runs it again and fails unless
 # both come out byte for byte as committed, so the module every deployment
 # runs is this source's. Needs rustup; the toolchain is the one
 # rust/rust-toolchain.toml pins, installed on first use.
