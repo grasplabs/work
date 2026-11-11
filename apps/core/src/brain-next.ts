@@ -1,5 +1,7 @@
 import {
   brainOf,
+  currentReadMax,
+  instructionsMaxLength,
   principalMaxLength,
   sourceIdMaxLength,
   wellFormedString,
@@ -75,7 +77,8 @@ const kindsWithoutColon = <const K extends string>(
 /**
  * Everything that adds sources to the Brain, one kind each. Each producer
  * issue adds its own (GRA-1727: meetings, workflow runs, interviews;
- * GRA-1730: what agents fetch).
+ * GRA-1730: what agents fetch). A kind is never `instructions`, the
+ * instruction files' own (`instructionKeyOf`).
  *
  * A kind is only ever added, never removed or renamed: the Brain keeps
  * every key it was given, and recall reads each key's kind back
@@ -298,6 +301,151 @@ export const readSourceVersionAs = async (
   return read === null
     ? null
     : { source, version, text: read.text, addedAt: read.addedAt };
+};
+
+// Instruction files: what people write for every chat to start with (the
+// company's instructions and lasting facts, a person's own file, an App's
+// and an agent's), each a source of its own under `instructions:`, kept
+// whole and versioned, never indexed, so recall never returns one. A
+// person's file is theirs alone; the shared ones are readable by the
+// whole company, and which of them reaches which chat or run is
+// instruction-files.ts's rule, as is who may write each. The functions
+// here only name them for the Brain.
+
+/** Every current member is in this group, and in no other way. */
+const companyGroup = "company";
+
+/** The longest prefix of an instruction file's key. */
+const instructionKeyPrefixMax = "instructions:person:".length;
+
+/**
+ * The ID in an instruction file's key: never empty, no control
+ * characters, the key in bounds.
+ */
+const instructionIdSchema = producerIdSchema(
+  sourceIdMaxLength - instructionKeyPrefixMax
+);
+
+/**
+ * An instruction file, by its scope: one of the company's two (its
+ * instructions, and its lasting facts), one person's, one App's or one
+ * agent's.
+ */
+export const instructionFileSchema = z.discriminatedUnion("scope", [
+  z.strictObject({
+    scope: z.literal("company"),
+    name: z.enum(["instructions", "facts"]),
+  }),
+  z.strictObject({
+    scope: z.literal("person"),
+    personId: idSchema.pipe(instructionIdSchema),
+  }),
+  z.strictObject({ scope: z.literal("app"), appId: instructionIdSchema }),
+  z.strictObject({ scope: z.literal("agent"), agentId: instructionIdSchema }),
+]);
+
+/** An instruction file, by its scope. */
+export type InstructionFile = z.infer<typeof instructionFileSchema>;
+
+/** The Brain's key for `file`: its scope is part of it. */
+const instructionKeyOf = (file: InstructionFile): SourceId => {
+  switch (file.scope) {
+    case "company": {
+      return `instructions:company:${file.name}`;
+    }
+    case "person": {
+      return `instructions:person:${file.personId}`;
+    }
+    case "app": {
+      return `instructions:app:${file.appId}`;
+    }
+    case "agent": {
+      return `instructions:agent:${file.agentId}`;
+    }
+    default: {
+      throw new Error("Unknown instruction file");
+    }
+  }
+};
+
+/** Who may read `file`: its person alone, or the whole company. */
+const instructionAccessOf = (file: InstructionFile): Access =>
+  file.scope === "person"
+    ? { kind: "owner", person: file.personId }
+    : { kind: "audience", group: companyGroup };
+
+const newInstructionsSchema = z.strictObject({
+  file: instructionFileSchema,
+  change: changeSchema,
+  text: z
+    .string()
+    .regex(/\S/u, { message: "Holds no text" })
+    .max(instructionsMaxLength),
+});
+
+/** A version of an instruction file, whole. */
+export interface InstructionFileVersion {
+  file: InstructionFile;
+  version: number;
+  text: string;
+  addedAt: Date;
+}
+
+/**
+ * Adds `text` as the next version of the instruction file `file`; the one
+ * before stays as history. Refused over `instructionsMaxLength`
+ * characters, or with no text. `change` is as `addSource`'s.
+ *
+ * For instruction-files.ts only, which checks who may write `file` first:
+ * nothing here does.
+ */
+export const addInstructionFile = async (
+  env: BrainEnv,
+  added: { file: InstructionFile; change: string; text: string }
+): Promise<{ file: InstructionFile; version: number }> => {
+  const { file, change, text } = checked(newInstructionsSchema, added);
+  const { version } = await brain(env).addInstructions({
+    source: instructionKeyOf(file),
+    change,
+    text,
+    access: instructionAccessOf(file),
+  });
+  return { file, version };
+};
+
+const instructionFilesSchema = z
+  .array(instructionFileSchema)
+  .max(currentReadMax);
+
+/**
+ * The current version of each of `files` that the member `personId` may
+ * read, whole, in the order given: their own file and the shared ones,
+ * never another person's. A file never written is left out. Refused once
+ * they are no longer a member.
+ *
+ * For instruction-files.ts only, which picks the files a context gets.
+ */
+export const readInstructionFilesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted: InstructionFile[]
+): Promise<InstructionFileVersion[]> => {
+  const files = checked(instructionFilesSchema, wanted);
+  // An instruction file is never a team's, so its reader is the person
+  // and the company: made from core's records, as `readerOf` makes one.
+  const member = await memberOf(env.DB, checked(idSchema, personId));
+  if (member === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
+  const byKey = new Map(files.map((file) => [instructionKeyOf(file), file]));
+  const read = await brain(env).readCurrent({
+    sources: [...byKey.keys()],
+    reader: { person: member.userId, groups: [companyGroup] },
+  });
+  return read.flatMap(({ source, version, text, addedAt }) => {
+    const file = byKey.get(source);
+    return file === undefined ? [] : [{ file, version, text, addedAt }];
+  });
 };
 
 /**
