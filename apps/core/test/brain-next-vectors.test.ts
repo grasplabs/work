@@ -14,7 +14,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { workBrain } from "../src/brain-next.ts";
+import { brainWorkOverview, workBrain } from "../src/brain-next.ts";
 
 // The vector way of the Brain's store (GRA-1766), through the store's
 // contract: codes are put for chunks of current versions, packed in
@@ -760,14 +760,64 @@ describe("the Brain's vector way", () => {
     await workBrain(env, new Date());
     expect({
       enough: before > repackPerTick,
+      // Two ticks reach every marked block, the test's own among them.
+      fitsTwo: before <= 2 * repackPerTick,
       afterOne,
       ran,
       afterTwo: await markedBlocks(),
     }).toStrictEqual({
       enough: true,
+      fitsTwo: true,
       afterOne: before - repackPerTick,
       ran: 1,
-      afterTwo: Math.max(0, before - 2 * repackPerTick),
+      afterTwo: 0,
+    });
+  });
+
+  it("runs the queue in a tick whose repack fails, shows the failure, and clears it once a repack succeeds", async () => {
+    const model = newModel();
+    const person = principal("person");
+    // A marked block of the test's own.
+    const gone = randomly(await sourceOf(owner(person), 600));
+    const kept = randomly(await sourceOf(owner(person), 424));
+    await put(model, [...gone, ...kept]);
+    await newVersionOf(gone[0]?.chunk.source ?? "", owner(person), 1);
+    const before = await markedBlocks();
+    await runInDurableObject(store(), (_store, state) => {
+      enqueueWork(state.storage, tickWork, {
+        key: `tick-${crypto.randomUUID()}`,
+        payload: {},
+        priority: "asked",
+      });
+    });
+    const ranBefore = tickRuns.count;
+    const undo = await breakWith(
+      "brain_test_tick_no_block_deletes",
+      "BEFORE DELETE ON vector_blocks"
+    );
+    const at = new Date();
+    try {
+      await workBrain(env, at);
+    } finally {
+      await undo();
+    }
+    const ran = tickRuns.count - ranBefore;
+    const markedWhileBroken = await markedBlocks();
+    const whileBroken = await brainWorkOverview(env);
+    await workBrain(env, new Date());
+    const fixed = await brainWorkOverview(env);
+    expect({
+      ran,
+      markedWhileBroken,
+      failed: whileBroken.stepsFailed.repack,
+      markedAfter: await markedBlocks(),
+      cleared: fixed.stepsFailed.repack,
+    }).toStrictEqual({
+      ran: 1,
+      markedWhileBroken: before,
+      failed: { at, reason: "failed" },
+      markedAfter: Math.max(0, before - repackPerTick),
+      cleared: null,
     });
   });
 

@@ -340,9 +340,11 @@ export interface WorkOverview {
   overdue: OverdueWork[];
   /**
    * The tick's own steps before its queue, each with its last failure
-   * since the store started, cleared once a later one succeeds: the sweep
-   * of leftover files (sweeping waits a quarter of an hour after one) and
-   * the repack of vector codes (tried again next tick).
+   * since the store started: the sweep of leftover files, cleared once a
+   * later sweep reached R2 and had its answer (one with nothing due
+   * clears nothing; sweeping waits a quarter of an hour after a failure),
+   * and the repack of vector codes, cleared once a later tick's repack
+   * finishes (tried again next tick).
    */
   stepsFailed: { sweep: StepFailure | null; repack: StepFailure | null };
 }

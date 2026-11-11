@@ -1560,6 +1560,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       queued: "",
       inFlight: "",
       reason: "",
+      reasonAfterIdle: "",
       deletesAfter: 0,
       refusalInDoubt: "",
       writesInDoubt: 0,
@@ -1636,6 +1637,11 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       swept.aGoneOnceLanded =
         (await env.BRAIN_OBJECTS.head(`sources/${hashA}`)) === null;
       restore();
+      // Past the quarter hour, a sweep finds nothing due (the kept files
+      // were noted afresh): it never reached R2, so the failure stays.
+      await tick(16 * 60_000);
+      const idle = await brainWorkOverview(env);
+      swept.reasonAfterIdle = idle.stepsFailed.sweep?.reason ?? "";
     }, 60_000);
 
     it("runs the queue's items that tick, within the bound, and leaves an item in flight untouched", () => {
@@ -1652,13 +1658,15 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       });
     });
 
-    it("says the sweep timed out, and sweeps no more within the quarter hour", () => {
+    it("says the sweep timed out, sweeps no more within the quarter hour, and keeps saying so after a sweep with nothing due", () => {
       expect({
         reason: swept.reason,
         deletes: swept.deletesAfter,
+        afterIdle: swept.reasonAfterIdle,
       }).toStrictEqual({
         reason: "timed_out",
         deletes: 1,
+        afterIdle: "timed_out",
       });
     });
 

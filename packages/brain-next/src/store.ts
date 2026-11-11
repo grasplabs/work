@@ -176,7 +176,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * ends this tick's repacking and never reaches the queue: the lowest
    * marked block is taken first, so one that keeps failing would
    * otherwise stop the queue every tick. It is tried again next tick, and
-   * the overview shows when it last failed until one succeeds.
+   * the overview shows when it last failed until one succeeds. So a block
+   * that fails every time holds back the repacking of the blocks behind it
+   * until it is fixed; the queue still runs, searches stay exact (removed
+   * codes are skipped, only kept longer), and staff see it.
    */
   #repack(at: Date): void {
     try {
@@ -214,6 +217,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         return "failed" as const;
       }
     });
+    // Only a sweep that reached R2 and had its answer clears the last
+    // failure; one with nothing due tells nothing of R2.
+    if (outcome === "idle") {
+      return;
+    }
     if (outcome === "swept") {
       this.#stepsFailed.sweep = null;
       return;

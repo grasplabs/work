@@ -153,7 +153,7 @@ export const sweepFiles = async (
   db: DrizzleSqliteDODatabase,
   bucket: R2Bucket,
   at: Date
-): Promise<"swept" | "timed_out"> => {
+): Promise<"swept" | "idle" | "timed_out"> => {
   const asOf = Math.min(at.getTime(), Date.now());
   const unreferenced = and(
     eq(files.refs, 0),
@@ -168,7 +168,7 @@ export const sweepFiles = async (
     .all()
     .map(({ hash }) => hash);
   if (due.length === 0) {
-    return "swept";
+    return "idle";
   }
   // R2 that hangs: the batch is kept, as if R2 refused it, and tried again
   // a grace later. Its deletes may still land after this gave up, so each
