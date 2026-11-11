@@ -86,7 +86,7 @@ export const esLongQuestions: readonly BrainEvalQuestion[] = [
   {
     id: "es-long-reservar-franjas",
     language: "es",
-    question: "¿Cuánto dura cada franja que reservan los proveedores?",
+    question: "¿Cuánto dura cada franja que reserva el proveedor?",
     expects: answer(
       "words",
       "es-manual-recepcion",
