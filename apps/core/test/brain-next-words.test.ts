@@ -162,17 +162,59 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
       ownedBy(reader)
     );
 
+    // The passage with every common word of the question comes after the
+    // one with its words that matter.
     await expect(
       recalledAs(reader, "Wat is het rooster van de zaterdag?")
-    ).resolves.toStrictEqual([roster]);
-    await expect(
-      recalledAs(reader, "what is the roster of the week")
-    ).resolves.toStrictEqual([]);
+    ).resolves.toStrictEqual([roster, common]);
     // A question of common words alone still asks for them.
     await expect(recalledAs(reader, "wat is het")).resolves.toStrictEqual([
       common,
       roster,
     ]);
+  });
+
+  it("still counts a word that is a stop word in another language, after the words that matter", async () => {
+    const reader = await person();
+    const owned = ownedBy(reader);
+    // Each pair: the passage the question means, and a shorter one holding
+    // only its other word, which shorter-first alone would put first.
+    const cases = [
+      // "war" is a German stop word, "door" a Dutch one, "ben" and "de"
+      // Dutch ones; "won't" is cut into "won" and "t".
+      ["war room", "The war room is on the second floor", "Room 4"],
+      ["front door", "The front door code changes on Monday", "Front desk"],
+      ["Ben de Vries", "Ben de Vries leads the sales team", "Anna Vries"],
+      ["won't pay", "Customers who won't pay get a reminder", "Pay slip"],
+    ] as const;
+    const added = [];
+    for (const [, meant, other] of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- one pair at a time
+      added.push([await add(meant, owned), await add(other, owned)] as const);
+    }
+    const found = [];
+    for (const [question] of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- one question at a time
+      const recalled = await recalledAs(reader, question);
+      found.push(recalled.slice(0, 2));
+    }
+
+    expect(found).toStrictEqual(added.map(([meant, other]) => [meant, other]));
+  });
+
+  it("finds what shares only a question's common words after what its other words find, and never what the reader may not read", async () => {
+    const [reader, other] = await Promise.all([person(), person()]);
+    const tag = `w${unique()}`;
+    const telling = await add(`Laptop ${tag} bestellen`, ownedBy(reader));
+    const phrasing = await add(
+      "Wie en wat: de servicedesk, voor wie vastloopt",
+      ownedBy(reader)
+    );
+    await add("Wie en wat: de servicedesk, voor wie vastloopt", ownedBy(other));
+
+    const found = await recalledAs(reader, `Wie helpt bij de laptop ${tag}?`);
+
+    expect(found.slice(0, 2)).toStrictEqual([telling, phrasing]);
   });
 
   it("finds ß by ss, ø, æ and œ by their plain letters, and keeps dotless ı apart", async () => {

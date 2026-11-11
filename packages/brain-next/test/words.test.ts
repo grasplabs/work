@@ -3,68 +3,72 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   foldForSearch,
   indexedOf,
-  languages,
   primaryLetters,
-  stemsOf,
   termsOf,
+  wordsOf,
 } from "../src/words.ts";
 
 // The pure parts of word search: stems, folding and the question's terms.
-// Recall through core, with access, is tested in apps/core.
+// Recall through core, with access and ranking, is tested in apps/core.
 
-/** Whether `one` and `other` share their stem in some language. */
-const shareStem = (one: string, other: string): boolean => {
-  const [a, b] = [stemsOf(foldForSearch(one)), stemsOf(foldForSearch(other))];
-  return languages.some((language) => a[language] === b[language]);
+/** `text`'s words and their stems. */
+const formsOf = (text: string): Set<string> =>
+  new Set(wordsOf(text).flatMap(({ word, stems }) => [word, ...stems]));
+
+/** Whether `one` and `other` match as recall matches words: by a shared stem. */
+const matches = (one: string, other: string): boolean => {
+  const otherForms = formsOf(other);
+  return [...formsOf(one)].some((form) => otherForms.has(form));
 };
 
 describe("stems", () => {
-  it("reduces inflected forms to a shared stem in each of the five languages", () => {
+  it("matches inflected forms in each of the five languages, accented or not", () => {
     const pairs = [
       // English
       ["invoices", "invoice"],
-      ["meetings", "meeting"],
       ["companies", "company"],
-      ["salaries", "salary"],
-      // Dutch
+      ["generalization", "generalize"],
+      // Dutch: plurals, diminutives, past tenses and participles
       ["facturen", "factuur"],
-      ["roosters", "rooster"],
-      ["medewerkers", "medewerker"],
+      ["huizen", "huis"],
+      ["huisje", "huis"],
+      ["kopje", "kop"],
+      ["brieven", "brief"],
+      ["werkte", "werken"],
+      ["gewerkt", "werken"],
       ["vergaderingen", "vergadering"],
-      ["afspraken", "afspraak"],
-      ["bestellingen", "bestelling"],
-      ["kinderen", "kind"],
       // German
       ["Rechnungen", "Rechnung"],
-      ["Mitarbeitern", "Mitarbeiter"],
       ["Verträge", "Vertrag"],
       ["Häuser", "Haus"],
-      // French
+      // French, whose rules turn on the accents
+      ["employée", "employé"],
+      ["arrivée", "arriver"],
       ["factures", "facture"],
-      ["livraisons", "livraison"],
-      ["réalisées", "réaliser"],
       // Spanish
+      ["informaciones", "información"],
+      ["comió", "comer"],
       ["facturas", "factura"],
-      ["pedidos", "pedido"],
-      ["clientes", "cliente"],
+      // Typed without the accents
+      ["employee", "employé"],
+      ["informacion", "informaciones"],
     ] as const;
 
-    expect(
-      pairs.filter(([one, other]) => !shareStem(one, other))
-    ).toStrictEqual([]);
+    expect(pairs.filter(([one, other]) => !matches(one, other))).toStrictEqual(
+      []
+    );
   });
 
   it("keeps apart words that only look alike", () => {
-    expect(shareStem("rooster", "roest")).toBeFalsy();
-    expect(shareStem("invoice", "voice")).toBeFalsy();
+    expect(matches("rooster", "roest")).toBeFalsy();
+    expect(matches("invoice", "voice")).toBeFalsy();
   });
 
   it("matches a word too long for any language only as written", () => {
     const long = "x".repeat(100);
 
-    expect(Object.values(stemsOf(`${long}s`))).toStrictEqual(
-      languages.map(() => `${long}s`)
-    );
+    expect(matches(`${long}s`, long)).toBeFalsy();
+    expect(matches(`${long}s`, `${long}s`)).toBeTruthy();
   });
 });
 
@@ -87,6 +91,10 @@ describe("folding", () => {
     expect(foldForSearch("KILIÇ kılıç")).toBe("kilic kılıc");
     expect(foldForSearch("İstanbul")).toBe("istanbul");
   });
+
+  it("finds no word in marks alone", () => {
+    expect(wordsOf("❤️ ok")).toStrictEqual(wordsOf("ok"));
+  });
 });
 
 describe("what the index holds", () => {
@@ -98,54 +106,58 @@ describe("what the index holds", () => {
     "The suppliers' invoices are paid.",
   ].join("\n");
 
-  it("never holds more in any column than the folded text", () => {
+  it("holds no more words than the folded text, and at most ten stems no longer than each word", () => {
     for (const text of [
       multilingual,
       "ß".repeat(10_000),
       "ﷺ ".repeat(10_000),
       Array.from({ length: 10_000 }, (_, index) => `w${index}ingen`).join(" "),
+      Array.from({ length: 1000 }, (_, index) => `é${index}ées`).join(" "),
     ]) {
-      const { words, stems } = indexedOf(text);
-      const most = foldForSearch(text).length;
-
-      expect(words.length).toBeLessThanOrEqual(most);
-      for (const language of languages) {
-        expect(stems[language].length).toBeLessThanOrEqual(most);
-      }
+      expect(indexedOf(text).words.length).toBeLessThanOrEqual(
+        foldForSearch(text).length
+      );
+      expect(
+        wordsOf(text).filter(
+          ({ word, stems }) =>
+            stems.length > 10 || stems.some((stem) => stem.length > word.length)
+        )
+      ).toStrictEqual([]);
     }
   });
 
-  it("holds each word once, and each stem once per language", () => {
-    const { words, stems } = indexedOf("facturen factuur Facturen");
+  it("indexes a chunk the same way whether or not the add stemmed its words before", () => {
+    const memo = new Map();
+    indexedOf(multilingual, memo);
 
-    expect(words).toBe("facturen factuur");
-    expect(stems.nl).toBe("factur");
+    expect(indexedOf(multilingual, memo)).toStrictEqual(
+      indexedOf(multilingual)
+    );
   });
 });
 
+/** A question's telling words and stop words, as recall asks for them. */
+const wordsAsked = (question: string) => {
+  const { telling, stops } = termsOf(question);
+  return { telling: telling.map(({ exact }) => exact), stops };
+};
+
 describe("a question's terms", () => {
-  it("leaves out stop words when any other word is left", () => {
-    expect(
-      termsOf("Wat is de status van het factuur?").map(({ exact }) => exact)
-    ).toStrictEqual(['"status"', '"factuur"']);
-    expect(
-      termsOf("Où sont les factures de la société").map(({ exact }) => exact)
-    ).toStrictEqual(['"factures"', '"societe"']);
+  it("tells its stop words apart, to rank on them after the others", () => {
+    expect(wordsAsked("Wat is de status van het factuur?")).toStrictEqual({
+      telling: ['"status"', '"factuur"'],
+      stops: ['"wat"', '"is"', '"de"', '"van"', '"het"'],
+    });
   });
 
-  it("keeps a question of stop words alone whole", () => {
-    expect(
-      termsOf("to be or not to be").map(({ exact }) => exact)
-    ).toStrictEqual(['"to"', '"be"', '"or"', '"not"']);
+  it("asks a question of stop words alone for them", () => {
+    expect(wordsAsked("to be or not to be")).toStrictEqual({
+      telling: ['"to"', '"be"', '"or"', '"not"'],
+      stops: [],
+    });
   });
 
-  it("asks for each stem in its own language's column, as quoted words", () => {
-    expect(termsOf("facturen")).toStrictEqual([
-      {
-        exact: '"facturen"',
-        stems:
-          'en : "facturen" OR nl : "factur" OR de : "factur" OR fr : "facturen" OR es : "factur"',
-      },
-    ]);
+  it("keeps the word of an English contraction a word that matters", () => {
+    expect(wordsAsked("won't pay").telling).toStrictEqual(['"won"', '"pay"']);
   });
 });

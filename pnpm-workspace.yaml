@@ -50,9 +50,6 @@ catalog:
   # The chat's agent searches the docs' pages (apps/core), as the docs'
   # own search does (Blume's index is Orama's, this version).
   "@orama/orama": 3.1.18
-  # The Brain's word search stems words in Dutch, German, French and
-  # Spanish with these Snowball stemmers (packages/brain-next).
-  "@orama/stemmers": 3.1.18
   # Signs the release upload to R2's S3 API (scripts/release).
   aws4fetch: 1.0.20
   secretlint: 13.0.5

@@ -1,10 +1,12 @@
 // The Snowball project's stop-word lists for the five languages recall
 // stems (snowballstem.org, each algorithm's stop.txt; BSD licence), word
-// for word: the commonest words of each language, which say nothing
-// about what a passage is about. Recall leaves them out of a question
-// that holds any other word (words.ts `termsOf`). Fixed and public, so
-// what counts as common never depends on what the store holds, rows a
-// reader can't read included.
+// for word, less the English contractions ("don't", "i'm"): a question's
+// words are cut at the apostrophe, so their halves ("don", "t") would
+// count as stop words alone. The commonest words of each language, which
+// say little about what a passage is about: recall ranks on them only
+// after the question's other words (words.ts `termsOf`, recall.ts).
+// Fixed and public, so what counts as common never depends on what the
+// store holds, rows a reader can't read included.
 
 /** Each language's stop words, as Snowball lists them, space-separated. */
 export const stopWordLists = {
@@ -13,12 +15,7 @@ export const stopWordLists = {
     "yourselves he him his himself she her hers herself it its itself",
     "they them their theirs themselves what which who whom this that",
     "these those am is are was were be been being have has had having do",
-    "does did doing would should could ought i'm you're he's she's it's",
-    "we're they're i've you've we've they've i'd you'd he'd she'd we'd",
-    "they'd i'll you'll he'll she'll we'll they'll isn't aren't wasn't",
-    "weren't hasn't haven't hadn't doesn't don't didn't won't wouldn't",
-    "shan't shouldn't can't cannot couldn't mustn't let's that's who's",
-    "what's here's there's when's where's why's how's a an the and but if",
+    "does did doing would should could ought cannot a an the and but if",
     "or because as until while of at by for with about against between",
     "into through during before after above below to from up down in out",
     "on off over under again further then once here there when where why",

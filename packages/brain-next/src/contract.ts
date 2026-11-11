@@ -459,9 +459,10 @@ export interface Brain {
   /**
    * The chunks of current versions the reader may read that hold the
    * question's words in any of their forms, best first: those holding
-   * more of them, then more of them as asked, then shorter, then newer.
-   * The commonest words of English, Dutch, German, French and Spanish
-   * count only in a question of nothing else.
+   * more of them, then more of its commonest words (the stop words of
+   * English, Dutch, German, French and Spanish), then more of them as
+   * asked, then shorter, then newer. Chunks holding only its commonest
+   * words come last, and only when the others are fewer than the limit.
    */
   recall: (request: RecallRequest) => Promise<Recalled>;
   /**

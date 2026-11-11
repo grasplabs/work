@@ -31,6 +31,9 @@ const generated = [
   "apps/core/src/native-tool-classes.gen.ts",
   // The names core's RPC targets give their parameters, from their source.
   "apps/core/src/rpc-param-names.gen.ts",
+  // The Snowball project's own stemmers, as its release ships them
+  // (scripts/brain-snowball.ts).
+  "packages/brain-next/src/snowball/**",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
