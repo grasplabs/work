@@ -86,6 +86,11 @@ const typeRules: readonly {
   { action: "agent.paused", type: "config" },
   { action: "agent.reach.changed", type: "config" },
   { action: "agent.class.changed", type: "config" },
+  // An admin making, pausing or deleting one of an agent's wake-ups
+  // (core's src/agent-wakes.ts).
+  { action: "agent.wake.made", type: "config" },
+  { action: "agent.wake.paused", type: "config" },
+  { action: "agent.wake.deleted", type: "config" },
   // An admin pointing Stephen at a shared mailbox, and for whom.
   { action: "connection.mailbox.pointed", type: "config" },
   // An admin pointing Stephen at a company app, and for whom.

@@ -10,6 +10,7 @@ import {
 import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
 import { retryAccessRevocations } from "./access-revocations.ts";
+import { startDueAgentWakes } from "./agent-wakes.ts";
 import { cancelArchivedRuns } from "./app-status.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
@@ -128,6 +129,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "platform.updates",
     period: "minute",
     run: recordPlatformUpdate,
+  },
+  // The agents' wake-ups that are due (src/agent-wakes.ts).
+  {
+    name: "agents.wakes",
+    period: "minute",
+    run: startDueAgentWakes,
   },
   // Independent schedule triggers' due occurrences
   // (src/workflows/schedule-triggers.ts).
