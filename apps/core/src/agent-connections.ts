@@ -160,13 +160,17 @@ export const connectionGrants = async (
  * chat platform, such as Teams, at midnight of the company's day, for its
  * card scrolls away and its days and values may have moved on, so a press
  * tomorrow never runs yesterday's values (connect declines it as
- * expired). In Grasp's own app, where the person sees it again, never.
+ * expired). In Grasp's own app, where the person sees it again, never,
+ * but for one a turn nobody was there for asked for, which ends with the
+ * day wherever it was asked.
  */
 const heldWritesEnd = async (
   env: Env,
-  { via }: Pick<AgentScope, "via">
+  { via, unattended }: Pick<AgentScope, "via" | "unattended">
 ): Promise<number | undefined> =>
-  via === undefined || via === "web" ? undefined : await endOfCompanyDay(env);
+  (via === undefined || via === "web") && unattended !== true
+    ? undefined
+    : await endOfCompanyDay(env);
 
 /**
  * Tells the chat's watchers a write was held, so the person sees it to
@@ -409,6 +413,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           return {
             authority,
             ...(heldUntil === undefined ? {} : { heldUntil }),
+            ...(scope.unattended === true ? { unattended: true } : {}),
           };
         },
         named,
@@ -451,7 +456,10 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     try {
       // Admitted as it goes to connect, not only as the call began; a
       // refusal here is recorded here, as nothing else records this call.
-      await admitEffect(this.env, scope, "connections.call");
+      // In a turn nobody was there for, connect holds what this changes.
+      await admitEffect(this.env, scope, "connections.call", {
+        unattended: true,
+      });
     } catch (error) {
       throw forSandbox(error);
     }
@@ -535,7 +543,11 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       }
       const { capability, scope: call } = await signedCall(
         this.env,
-        { ...grant, authority: chatAuthority(scope) },
+        {
+          ...grant,
+          authority: chatAuthority(scope),
+          ...(scope.unattended === true ? { unattended: true } : {}),
+        },
         { action: held.action, idempotencyKey: held.idempotencyKey }
       );
       return {

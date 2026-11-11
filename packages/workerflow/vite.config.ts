@@ -1,4 +1,4 @@
-import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defaultExclude, defineProject } from "vite-plus";
 
 // Run objects are Durable Objects, so their tests run in workerd, through

@@ -10,8 +10,8 @@ type Tables = (typeof schema)["tables"];
 /** The App's tables, by name, as `schema.ts` declares them. */
 export type DataModel = Tables;
 /** The names of the App's tables. */
-export type TableName = keyof Tables & string;
+export type TableNames = keyof Tables & string;
 /** The ID of a record of table `Table`. */
-export type Id<Table extends TableName> = SdkId<Table>;
+export type Id<Table extends TableNames> = SdkId<Table>;
 /** A record of table `Table`, as a read returns it. */
-export type Doc<Table extends TableName> = SdkDoc<Tables[Table], Table>;
+export type Doc<Table extends TableNames> = SdkDoc<Tables[Table], Table>;

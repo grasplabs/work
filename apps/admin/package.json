@@ -36,7 +36,7 @@
   "devDependencies": {
     "@babel/core": "catalog:",
     "@cloudflare/vite-plugin": "catalog:cf",
-    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
     "@tailwindcss/vite": "catalog:",

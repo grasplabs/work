@@ -684,6 +684,51 @@ describe("AI providers in connect", () => {
       });
     });
 
+    it("sends a line to ElevenLabs's usual host only on a deployment set up to test there, and then to no other; a provider the setting doesn't name stays at its EU host", async () => {
+      const path = `/v1/text-to-speech/s3TPKV1kjDlVtZbl4Ksh/with-timestamps${speechQuery}`;
+      const usualHost = "api.elevenlabs.io";
+      const testing = connect({
+        ELEVENLABS_API_KEY: elevenLabsKey,
+        OPENAI_API_KEY: "test-platform-openai-key-0001",
+        PLATFORM_AI_USUAL_HOSTS: "elevenlabs, nonsense",
+      });
+
+      const outcomes = [
+        refusalOf(
+          await testing.modelFetch(
+            lineRequest(path, { host: usualHost }),
+            await elevenLabsGrant(usualHost)
+          )
+        ),
+        // Its EU host is no longer where the key goes there.
+        refusalOf(
+          await testing.modelFetch(lineRequest(path), await elevenLabsGrant())
+        ),
+        // OpenAI isn't named: its key still goes to its EU host alone.
+        refusalOf(
+          await testing.modelFetch(
+            modelRequest("https://api.openai.com/v1/responses"),
+            await grantFor({
+              provider: "openai",
+              host: "api.openai.com",
+              credential: "platform",
+            })
+          )
+        ),
+      ];
+
+      expect({
+        outcomes,
+        sent: sent.map(({ host, headers }) => ({
+          host,
+          key: headers["xi-api-key"],
+        })),
+      }).toStrictEqual({
+        outcomes: ["sent", "endpoint", "endpoint"],
+        sent: [{ host: usualHost, key: elevenLabsKey }],
+      });
+    });
+
     it("refuses anything else of ElevenLabs's: another path, voice or host, no query or another, the key in another header, an organization's key, or no key of Grasp's", async () => {
       const voice = "s3TPKV1kjDlVtZbl4Ksh";
       const line = `/v1/text-to-speech/${voice}/with-timestamps${speechQuery}`;

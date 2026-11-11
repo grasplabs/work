@@ -21,7 +21,7 @@ import { routed, signedInApi } from "./sign-in.ts";
 
 // An App's external links (spec 10.7.7, 32.3), through core's link channel
 // as a running page's page reaches it (app-link-route.ts): which URL may
-// open through the App's `resource.links` declaration, for whom, through
+// open through the App's `permission.links` declaration, for whom, through
 // which build, and the record of each opened. From the threat model on
 // GRA-762: adversarial URLs (userinfo, Unicode names and punycode, ports,
 // trailing dots, schemes, private networks, redirects through an allowed
@@ -399,7 +399,9 @@ describe("an App's external links", { timeout: 120_000 }, () => {
 
     expect({
       before,
-      roleLost: /^(?:app\.not_found|permission\.)/u.test(String(roleLost)),
+      roleLost: /^(?:app\.not_found|permission\.denied)$/u.test(
+        String(roleLost)
+      ),
       undeclared,
     }).toStrictEqual({
       before: "opened",

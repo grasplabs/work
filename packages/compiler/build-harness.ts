@@ -10,6 +10,7 @@
  * its scratch directories after each test, with `afterEach(removeScratch)`.
  */
 import { execFileSync, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   cpSync,
@@ -32,6 +33,9 @@ const buildScript = path.join(import.meta.dirname, "build.ts");
 
 const made: string[] = [];
 
+/** The builds `startBuild` started, stopped by `removeScratch`. */
+const running: ChildProcess[] = [];
+
 /** An empty directory of this test's own. */
 export const scratch = (): string => {
   const dir = mkdtempSync(path.join(tmpdir(), "grasp-compiler-"));
@@ -39,8 +43,27 @@ export const scratch = (): string => {
   return dir;
 };
 
-/** Removes the directories `scratch` made. */
-export const removeScratch = (): void => {
+/**
+ * Stops the builds `startBuild` started that still run, then removes the
+ * directories `scratch` made. A test that times out leaves its builds
+ * running: its retry then ran four builds at once instead of two, slower
+ * still, and the old ones went on to write their release into a scratch
+ * directory removed under them, creating it again (a merge-queue run
+ * whose race test timed out twice, November 2026). Killed outright: a
+ * build stuck in its own code would ignore a request to stop, and
+ * nothing it leaves is kept.
+ */
+export const removeScratch = async (): Promise<void> => {
+  await Promise.all(
+    running.splice(0).map(async (child) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+      }
+      const exited = once(child, "exit");
+      child.kill("SIGKILL");
+      await exited;
+    })
+  );
   for (const dir of made.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -115,6 +138,7 @@ export const startBuild = (
   const child = spawn(process.execPath, [buildScript, assets, versionModule], {
     stdio: ["ignore", "ignore", "pipe"],
   });
+  running.push(child);
   const { promise: waiting, resolve: saidWaiting } =
     Promise.withResolvers<true>();
   let said = "";

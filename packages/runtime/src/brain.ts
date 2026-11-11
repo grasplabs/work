@@ -82,7 +82,7 @@ export { brainErrors } from "@grasp-os/brain/contract";
 // again in core, which is what counts.
 
 /**
- * What the host binds a Brain resource as: one method per operation the
+ * What the host binds a Brain permission as: one method per operation the
  * caller was granted. Core builds it; a caller only ever receives it.
  */
 export interface BrainBinding {
@@ -202,7 +202,7 @@ const call = async <Name extends keyof BrainBinding>(
   >;
 };
 
-/** The Brain over `binding`, a Brain resource the host bound. */
+/** The Brain over `binding`, a Brain permission the host bound. */
 export const brain = (binding: BrainBinding): Brain => ({
   recall: async (input) =>
     await call(binding, "recall", checked(recallInputSchema, input)),

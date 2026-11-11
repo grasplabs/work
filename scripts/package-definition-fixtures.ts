@@ -11,7 +11,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -32,6 +31,7 @@ import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
 import { parse } from "yaml";
 import { z } from "zod";
 
+import { filesIn } from "../apps/core/build-blueprints.ts";
 import { hostModules } from "../apps/core/src/host-modules.ts";
 import { oxcWasmModule } from "../packages/compiler/oxc-wasm/wasm.ts";
 import {
@@ -471,20 +471,8 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
 `;
 
 /** A built-in blueprint's App files, by path. */
-export const blueprintFiles = (name: string): Record<string, string> => {
-  const dir = path.join(ROOT, "apps/core/blueprints", name, "files");
-  return Object.fromEntries(
-    readdirSync(dir, { recursive: true, withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => {
-        const file = path.join(entry.parentPath, entry.name);
-        return [
-          path.relative(dir, file).split(path.sep).join("/"),
-          readFileSync(file, "utf-8"),
-        ];
-      })
-  );
-};
+export const blueprintFiles = (name: string): Record<string, string> =>
+  filesIn(path.join(ROOT, "apps/core/blueprints", name, "files"));
 
 /**
  * A definition package of an App of `files` that binds no workflow but

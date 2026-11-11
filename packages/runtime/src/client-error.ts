@@ -1,8 +1,7 @@
 import type { ErrorCategory } from "@grasp-os/shared/error-categories";
+import { isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-
-import { isPlainObject } from "./value-descriptor.ts";
 
 // The structured error a page's queries, mutations and actions fail
 // with: what core answered, as it answered it, or why
@@ -151,7 +150,7 @@ const clientErrors = {
   },
   "file.operation_undeclared": {
     message:
-      "This App doesn't declare that use of these files: add it to the resource's operations.",
+      "This App doesn't declare that use of these files: add it to the files permission's operations.",
     category: "contract",
   },
   "file.upload_active": {
@@ -208,6 +207,11 @@ export const clientError = (
     ...(details === undefined ? {} : { details }),
   });
 
+/** A Standard Schema issue's path segment, a key or `{ key }`, as its key. */
+export const issuePathKey = (
+  segment: PropertyKey | StandardSchemaV1.PathSegment
+): PropertyKey => (typeof segment === "object" ? segment.key : segment);
+
 /**
  * `issues` as a refusal's details carry them: each one's message, its
  * path as keys and indexes, and its code when it has one.
@@ -219,7 +223,7 @@ export const issueDetails = (
     ...(code === undefined ? {} : { code }),
     message,
     path: (path ?? []).map((segment) => {
-      const key = typeof segment === "object" ? segment.key : segment;
+      const key = issuePathKey(segment);
       return typeof key === "number" ? key : String(key);
     }),
   }));
@@ -254,7 +258,7 @@ const receiptLinks = new WeakMap<GraspError, () => Promise<unknown>>();
  * (a decision's answer), with a private link that sends
  * exactly that call again: the same answer to the same decision, never a
  * fresh one. A form keeps it to send the submission again under its
- * identity (form.ts); nothing of it is on the error itself.
+ * identity (form-binding.ts); nothing of it is on the error itself.
  */
 export const withReceiptLink = (
   error: GraspError,

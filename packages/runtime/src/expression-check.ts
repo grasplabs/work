@@ -46,7 +46,7 @@ export { allowedMethods } from "./expression-runtime.ts";
  *   `in` and `instanceof`, which ask about prototypes, are refused. Every
  *   value an expression starts from is JSON copied into frozen objects
  *   with no prototype (the runtime's second layer, `frozenData` in
- *   workflow.ts), so a name the check missed finds nothing inherited, and
+ *   workflow-data.ts), so a name the check missed finds nothing inherited, and
  *   the isolate's frozen intrinsics are a third.
  * - Computed names. A key in brackets is a string or number literal, held
  *   to the same names; `a[b]`, `a[1 + 1]` and template keys are refused,

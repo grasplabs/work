@@ -25,7 +25,7 @@
  *   in the folder (not in `files/`: it is no file of the App), which the
  *   copy binds under its alias and asks to start under its binding name;
  * - `definition.json`: the App's definition (@grasp-os/runtime's
- *   definition.ts), which each copy's first version holds, in the folder
+ *   definition-types.ts), which each copy's first version holds, in the folder
  *   too: it is no file of the App either;
  * - `files/`: the App's files, by path, written against `@grasp-os/sdk`
  *   like any App's, its `grasp.config.ts` and `server/schema.ts` exactly
@@ -55,6 +55,7 @@ import {
   definitionText,
   readDefinition,
 } from "@grasp-os/runtime/definition";
+import { isUnderGeneratedServerFolder } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
 import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";
@@ -186,11 +187,17 @@ const manifestSchema = fromBlueprintSchema
 /** A folder name that is safe in an ID, a URL and an audit event. */
 const idSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
 
-/** Every file under `dir`, by its path from `dir`, with `/` between names. */
-const filesIn = (dir: string): Record<string, string> => {
+/**
+ * Every file under `dir`, by its path from `dir`, with `/` between names,
+ * but what Grasp generates from its server code (`server/_generated/`):
+ * committed for the repo's type check (generate-blueprints.ts), and
+ * generated again as the install writes the copy's files.
+ */
+export const filesIn = (dir: string): Record<string, string> => {
   const paths = readdirSync(dir, { recursive: true, encoding: "utf-8" })
     .filter((file) => statSync(path.join(dir, file)).isFile())
     .map((file) => file.split(path.sep).join("/"))
+    .filter((file) => !isUnderGeneratedServerFolder(file))
     .toSorted();
   return Object.fromEntries(
     paths.map((file) => [file, readFileSync(path.join(dir, file), "utf-8")])

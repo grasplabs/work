@@ -8,6 +8,7 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
+import { usualHostProviders } from "@grasp-os/shared/ai-providers";
 import {
   clientDomain as stageDomain,
   clientsNamespace,
@@ -296,6 +297,27 @@ export const graspStaffOf = (env: {
 };
 
 /**
+ * The providers whose platform features go to their usual host, not their
+ * EU data residency host, on every client this admin deploys, as core and
+ * connect read it (`PLATFORM_AI_USUAL_HOSTS`, @grasp-os/shared/
+ * ai-providers): for testing with a key of an account that has no EU
+ * residency. From the admin's var of the same name, and only on staging:
+ * production's admin gives it to no client, whatever its vars say, so
+ * what a client's people say or are told never leaves the EU there by a
+ * setting. Only the names core and connect would take; undefined for none.
+ */
+export const usualHostsOf = (env: {
+  STAGE?: string;
+  PLATFORM_AI_USUAL_HOSTS?: string;
+}): string | undefined => {
+  if (env.STAGE !== "staging") {
+    return undefined;
+  }
+  const providers = usualHostProviders(env.PLATFORM_AI_USUAL_HOSTS);
+  return providers.length === 0 ? undefined : providers.join(",");
+};
+
+/**
  * Grasp's OAuth apps' client ids, from the admin's vars (wrangler.jsonc):
  * not secrets, their secrets are shared secrets above.
  */
@@ -325,6 +347,12 @@ export interface DeployContext {
    * (src/deploy/core-config.ts); none unless given.
    */
   signInApps?: SignInApps;
+  /**
+   * The providers whose platform features go to their usual host on the
+   * clients this admin deploys (`usualHostsOf`): none unless given, and
+   * never on production.
+   */
+  usualHosts?: string;
   /** The time now: `new Date()` unless a test sets it. */
   now?: () => Date;
   router: {
@@ -377,12 +405,14 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
   // admin whose STAGE is missing or misspelt runs no operation anywhere.
   const stage = stageNamed(env.STAGE);
   const relay = oauthRelayOf(env);
+  const usualHosts = usualHostsOf(env);
   return {
     api: await deployerApi(env),
     db: adminDatabase(env.DB),
     store: env.RELEASES,
     secrets: await deploySecrets(env),
     signInApps: signInApps(env),
+    ...(usualHosts === undefined ? {} : { usualHosts }),
     router: {
       hosts: env.ROUTER_HOSTS,
       domain,

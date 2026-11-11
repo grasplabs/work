@@ -1,7 +1,6 @@
 import { isFileType } from "@grasp-os/shared/app-file-limits";
 import type { FileDescription } from "@grasp-os/shared/app-file-limits";
-
-import { isPlainObject } from "./value-descriptor.ts";
+import { isPlainObject } from "@grasp-os/shared/json";
 
 /** What core answers of an upload: its ID, state and the chunks it holds. */
 export interface UploadState {

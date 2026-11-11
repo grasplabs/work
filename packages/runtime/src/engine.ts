@@ -6,7 +6,7 @@ import type { Json } from "@grasp-os/shared/json";
  * How a decision stands when a wait for it ends: answered, by a person
  * the runtime checked may answer it, or not (yet).
  */
-export type EngineDecision =
+type EngineDecision =
   | { answered: true; approved: boolean; by: string; payload: Json | null }
   | { answered: false };
 
@@ -25,12 +25,12 @@ type BindingMethod = (...args: Json[]) => Promise<Json>;
  * inside a step (a replay doesn't call them again), and a connection call
  * takes that step's `idempotencyKey` or none.
  */
-export type WorkflowEnv = Readonly<
+type WorkflowEnv = Readonly<
   Record<string, Readonly<Record<string, BindingMethod>>>
 >;
 
 /** How the delay between attempts grows. */
-export type Backoff = "constant" | "linear" | "exponential";
+type Backoff = "constant" | "linear" | "exponential";
 
 /**
  * How often to try a failing step again. `limit` counts retries, not

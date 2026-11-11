@@ -11,6 +11,7 @@ import {
   flowSteps,
   onboardingFlowSchema,
   setupSteps,
+  startingFlowOf,
   storedFlowOf,
   withStepMoved,
 } from "../src/onboarding-flow.ts";
@@ -213,6 +214,27 @@ describe("an onboarding flow", () => {
       ],
       ["none", true, [], "at_once"],
     ]);
+  });
+
+  it("starts a company's onboarding with the flow its deployment names, and with all of it for anything else", () => {
+    expect({
+      short: startingFlowOf("short"),
+      setup: startingFlowOf("setup"),
+      none: startingFlowOf("none"),
+      full: startingFlowOf("full"),
+      unset: startingFlowOf(null),
+      unknown: startingFlowOf("everything"),
+      // A flow itself is never taken from the config, only a name.
+      aFlow: startingFlowOf(flowPresets.none),
+    }).toStrictEqual({
+      short: flowPresets.short,
+      setup: flowPresets.setup,
+      none: flowPresets.none,
+      full: null,
+      unset: null,
+      unknown: null,
+      aFlow: null,
+    });
   });
 
   it("puts the interviews' screens last, wherever the flow has the step", () => {
