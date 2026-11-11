@@ -1,5 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
+import { apiPath } from "@grasp-os/shared/api-path";
 import {
   docsMarkdownFile,
   docsPagesSchema,
@@ -79,7 +80,11 @@ const pagesOf = async (assets: Fetcher): Promise<DocsPage[]> => {
 
 /** A page's Markdown, refused when the static files answer with the frontend's page instead. */
 const markdownOf = async (assets: Fetcher, route: string): Promise<string> => {
-  const response = await assets.fetch(assetUrl(docsMarkdownFile(route)));
+  // A route the docs' index lists, a segment at a time.
+  const [, ...file] = docsMarkdownFile(route).split("/");
+  const response = await assets.fetch(
+    `https://assets${docsPath}${apiPath(...file)}`
+  );
   const isHtml =
     response.headers.get("content-type")?.includes("text/html") ?? false;
   if (!response.ok || isHtml) {
