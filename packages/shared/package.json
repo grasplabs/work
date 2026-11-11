@@ -106,6 +106,7 @@
     "./identifier": "./src/identifier.ts",
     "./held-starts": "./src/held-starts.ts",
     "./ids": "./src/ids.ts",
+    "./instruction-files": "./src/instruction-files.ts",
     "./json": "./src/json.ts",
     "./knowledge": "./src/knowledge.ts",
     "./knowledge-signals": "./src/knowledge-signals.ts",

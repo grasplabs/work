@@ -3,6 +3,7 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import { chunksOf } from "./chunks.ts";
 import type {
+  CurrentRequest,
   NewSource,
   SourceVersion,
   SourceVersionRef,
@@ -25,7 +26,9 @@ import { indexWords } from "./words.ts";
 // the last: the newest is current, and recall searches it alone, while
 // the ones before stay as history. Each version's text is kept whole as a
 // file in R2 (files.ts) and in chunks in the store (chunks.ts), whose
-// words recall searches.
+// words recall searches. An instruction file is a source kept whole
+// only: it has no chunks, so recall never finds it, and it is read whole
+// by its current version (`readCurrent`).
 //
 // An add is recognised as one already made, in this order:
 //
@@ -48,11 +51,16 @@ export interface SourcesStore {
 
 const encoder = new TextEncoder();
 
-/** An add, with what it is compared by: its file's hash and its readers' key. */
+/**
+ * An add, with what it is compared by (its file's hash and its readers'
+ * key), and whether its text is indexed for recall: an instruction file's
+ * never is (contract.ts `addInstructions`).
+ */
 interface Adding {
   readonly added: NewSource;
   readonly hash: string;
   readonly readers: string;
+  readonly indexed: boolean;
 }
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
@@ -122,10 +130,10 @@ const madeBefore = (
 
 /**
  * Writes the next version of `adding.added.source`, whole: the version,
- * its chunks and their words, its count on the file, its change, and the
- * source's current pointer, which makes it visible and removes the vector
- * codes of the version it replaces (vectors.ts). Run it in one
- * transaction. Answers `undefined` when the file's row is gone (swept
+ * its chunks and their words when it is indexed, its count on the file,
+ * its change, and the source's current pointer, which makes it visible and
+ * removes the vector codes of the version it replaces (vectors.ts). Run it
+ * in one transaction. Answers `undefined` when the file's row is gone (swept
  * since it was noted), noting it again for the sweep to find what the add
  * wrote.
  */
@@ -161,7 +169,8 @@ const record = (
     })
     .returning({ row: sourceVersions.row })
     .get();
-  for (const [position, chunk] of chunksOf(added.text).entries()) {
+  const indexed = adding.indexed ? chunksOf(added.text) : [];
+  for (const [position, chunk] of indexed.entries()) {
     const written = db
       .insert(chunks)
       .values({ versionRow: row, position, text: chunk })
@@ -196,17 +205,20 @@ const record = (
  * Adds `added` as a version of its source, or answers with the version it
  * already is (above): the file first, then the version whole. So an add
  * can be repeated after a lost reply, or after a crash between the file
- * and the version, which it then finishes.
+ * and the version, which it then finishes. Its text is cut into chunks
+ * and indexed for recall when `indexed`; otherwise it is only kept whole.
  */
 export const addVersion = async (
   { storage, db, bucket }: SourcesStore,
-  added: NewSource
+  added: NewSource,
+  { indexed }: { indexed: boolean }
 ): Promise<SourceVersionRef> => {
   const body = encoder.encode(added.text);
   const adding: Adding = {
     added,
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
+    indexed,
   };
   const before = madeBefore(db, adding);
   if (before !== undefined) {
@@ -225,6 +237,15 @@ export const addVersion = async (
     throw new Error("The Brain lost the file while adding it: add it again");
   }
   return recorded;
+};
+
+/** The text of a version's file, under its hash `file`. */
+const textOf = async (bucket: R2Bucket, file: string): Promise<string> => {
+  const object = await bucket.get(fileKeyOf(file));
+  if (object === null) {
+    throw new Error("The Brain's file of a version is missing");
+  }
+  return await object.text();
 };
 
 /**
@@ -271,14 +292,52 @@ export const readVersion = async (
   if (found === undefined) {
     return null;
   }
-  const file = await bucket.get(fileKeyOf(found.file));
-  if (file === null) {
-    throw new Error("The Brain's file of a version is missing");
-  }
   return {
     source,
     version,
-    text: await file.text(),
+    text: await textOf(bucket, found.file),
     addedAt: new Date(found.added_at),
   };
+};
+
+/**
+ * `?1` the sources (JSON), `?2` the reader's person, `?3` their groups
+ * (JSON): each source's current version the reader may read, its number,
+ * file and when it was added, in the order the sources are given.
+ */
+const currentSql = `
+WITH ${readableSql}
+SELECT asked.value AS source, source_versions.version AS version,
+  source_versions.file AS file, source_versions.added_at AS added_at
+FROM json_each(?1) AS asked
+JOIN current_versions ON current_versions.source = asked.value
+JOIN source_versions ON source_versions.row = current_versions.version_row
+WHERE source_versions.reader_set IN (SELECT reader_set FROM readable)
+ORDER BY asked.key`;
+
+/**
+ * The current version of each of `sources`, whole from its file, in the
+ * order given: leaving out each that doesn't exist and each `reader` may
+ * not read, alike.
+ */
+export const readCurrent = async (
+  { storage, bucket }: SourcesStore,
+  { sources, reader }: CurrentRequest
+): Promise<SourceVersion[]> => {
+  const found = storage.sql
+    .exec<{ source: string; version: number; file: string; added_at: number }>(
+      currentSql,
+      JSON.stringify(sources),
+      reader.person,
+      JSON.stringify(reader.groups)
+    )
+    .toArray();
+  return await Promise.all(
+    found.map(async ({ source, version, file, added_at: addedAt }) => ({
+      source,
+      version,
+      text: await textOf(bucket, file),
+      addedAt: new Date(addedAt),
+    }))
+  );
 };

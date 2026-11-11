@@ -5,6 +5,7 @@ import type { ErrorComponentProps } from "@tanstack/react-router";
 import { ChatDock } from "../chat/chat-dock.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
+import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
 import {
@@ -23,6 +24,7 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 
 const Shell = () => {
   const { core, identity } = Route.useRouteContext();
+  const { failing } = Route.useLoaderData();
   return (
     // The panel slot beside every page (pages/app-panel.tsx): outside the
     // page, so navigating the page leaves it open.
@@ -39,6 +41,7 @@ const Shell = () => {
             </>
           }
           core={core}
+          failing={failing}
           identity={identity}
         >
           <Outlet />
@@ -149,6 +152,19 @@ export const Route = createFileRoute("/_shell")({
     }
     return { identity };
   },
+  // Which AI providers fail, for the banner over every page (an admin's):
+  // read with the page, beside its own loader, so the banner comes with
+  // the page instead of pushing it down, under the person's pointer, once
+  // it is up. Only as the shell is entered: moving within it, preloading
+  // and `invalidate` (which runs this loader again whatever
+  // `shouldReload` says) read nothing, as the banner keeps itself current,
+  // reading again every minute.
+  loader: async ({ cause, context: { core, identity } }) => ({
+    failing:
+      cause === "enter"
+        ? await failingUpFront(identity, providersOf(core))
+        : undefined,
+  }),
   component: Shell,
   errorComponent: ShellError,
 });

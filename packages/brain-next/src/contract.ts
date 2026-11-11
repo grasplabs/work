@@ -33,6 +33,16 @@ export const recallLimit = 10;
 export const sourceIdMaxLength = 256;
 
 /**
+ * Most UTF-16 units (`.length`) of an instruction file's text: about 2000
+ * tokens, so the few files a chat starts with leave it room for the
+ * conversation.
+ */
+export const instructionsMaxLength = 8000;
+
+/** Most sources one read of current versions names. */
+export const currentReadMax = 10;
+
+/**
  * A string as the Brain takes it: well-formed, no half of a surrogate pair
  * on its own. Every string the Brain hashes, compares or keeps as bytes is
  * one: encoding turns a lone half into U+FFFD, so two strings would become
@@ -108,6 +118,33 @@ export const newSourceSchema = z.strictObject({
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
 
+/** Whether `text` is over `instructionsMaxLength` UTF-16 units. */
+export const isOverInstructionsLimit = (text: string): boolean =>
+  text.length > instructionsMaxLength;
+
+/**
+ * An instruction file's text: some text, at most `instructionsMaxLength`
+ * UTF-16 units (`.length`), the one rule for it, which the host checks
+ * with too.
+ */
+export const instructionsTextSchema = wellFormedString()
+  .regex(/\S/u, { message: "Holds no text" })
+  // Not zod's `max`, which counts code points.
+  .refine((text) => !isOverInstructionsLimit(text), {
+    message: `At most ${instructionsMaxLength} UTF-16 units`,
+  });
+
+/**
+ * A version of an instruction file to add: a source whose text is
+ * `instructionsTextSchema`'s. It is kept whole and versioned like any
+ * source, but never cut into chunks or indexed, so recall never finds it:
+ * it is read whole (`readCurrent`).
+ */
+export const newInstructionsSchema = newSourceSchema.extend({
+  text: instructionsTextSchema,
+});
+export type NewInstructions = z.infer<typeof newInstructionsSchema>;
+
 /**
  * Who reads, as the host resolves them now: the person, and each group the
  * host counts them in.
@@ -148,6 +185,13 @@ export const versionRequestSchema = z.strictObject({
   reader: readerSchema,
 });
 export type VersionRequest = z.infer<typeof versionRequestSchema>;
+
+/** Sources whose current versions to read whole, and who reads them. */
+export const currentRequestSchema = z.strictObject({
+  sources: z.array(sourceIdSchema).max(currentReadMax),
+  reader: readerSchema,
+});
+export type CurrentRequest = z.infer<typeof currentRequestSchema>;
 
 /** A version of a source, whole: its original text, and when it was added. */
 export interface SourceVersion extends SourceVersionRef {
@@ -251,6 +295,12 @@ export interface Brain {
    */
   addSource: (source: NewSource) => Promise<SourceVersionRef>;
   /**
+   * Adds a version of an instruction file as `addSource` adds a source,
+   * with the same versions, change keys and safe repeats, but kept whole:
+   * never cut into chunks or indexed, so recall never returns it.
+   */
+  addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
+  /**
    * The chunks of current versions the reader may read that hold the
    * question's words, best first: those holding more of them, then
    * shorter, then newer.
@@ -264,6 +314,12 @@ export interface Brain {
    * hides its history from those taken off.
    */
   readVersion: (request: VersionRequest) => Promise<SourceVersion | null>;
+  /**
+   * The current version of each source asked for, whole, in the order
+   * asked, leaving out alike each that doesn't exist and each whose
+   * current version the reader may not read.
+   */
+  readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
    * Removes what an add that never finished left: files no version holds,
    * once past the time an add takes. Harmless to run late or twice.
