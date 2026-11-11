@@ -131,6 +131,19 @@ const quoting = (quote: string, lookalike?: string): BrainEvalQuestion => ({
   id: "quoting",
 });
 
+const whitespace = /\s+/u;
+
+/** The words of `text`, in order, whatever whitespace parts them. */
+const wordsOf = (text: string): string[] => text.split(whitespace);
+
+/** A one-line note everyone may read, ending in `mark`. */
+const note = (key: string, mark: string): BrainEvalSource => ({
+  key,
+  language: "nl",
+  readers: { team: "everyone" },
+  text: `Kantine: vrijdag dicht ${mark}.`,
+});
+
 describe("the Brain evaluation's checks", () => {
   it("finds the set itself sound", () => {
     expect(setProblems(sources, brainEvalSet.questions)).toStrictEqual([]);
@@ -359,7 +372,7 @@ describe("the Brain evaluation's checks", () => {
     await expect(setDigestOf({ ...brainEvalSet })).resolves.toBe(digest);
   });
 
-  it("gives the passages, and a question over a source, another digest when the source is cut differently", async () => {
+  it("digests the passages by where the chunker cuts: the same words cut elsewhere differ, a text cut the same way doesn't", async () => {
     const asked: BrainEvalQuestion = {
       ...leaveInUtrecht,
       expects: answer(
@@ -368,21 +381,58 @@ describe("the Brain evaluation's checks", () => {
         "25 vakantiedagen per jaar in Utrecht"
       ),
     };
-    // The same paragraphs, the first two run together: two passages, not three.
-    const recut: BrainEvalSource = {
+    // The same three paragraphs in the same order, with the one blank line moved: Duisburg runs into the sickness rule in
+    // one, into Utrecht in the other. Two passages each, cut elsewhere.
+    const cutAfterUtrecht: BrainEvalSource = {
+      ...handbook,
+      text: [leaveUtrecht, `${leaveDuisburg} ${sickness}`].join("\n\n"),
+    };
+    const cutAfterDuisburg: BrainEvalSource = {
       ...handbook,
       text: [`${leaveUtrecht} ${leaveDuisburg}`, sickness].join("\n\n"),
     };
-    expect(passagesOf([recut])).toHaveLength(2);
-    const set = { ...brainEvalSet, sources: [handbook, memo] };
-    const recutSet = { ...brainEvalSet, sources: [recut, memo] };
-    const passages = await passagesDigestOf(set.sources);
-    await expect(passagesDigestOf([handbook, memo])).resolves.toBe(passages);
-    await expect(passagesDigestOf(recutSet.sources)).resolves.not.toBe(
-      passages
+    // Another text, an extra blank line at the break, but the same cut.
+    const widerBreak: BrainEvalSource = {
+      ...cutAfterUtrecht,
+      text: [leaveUtrecht, `${leaveDuisburg} ${sickness}`].join("\n\n\n"),
+    };
+    expect(wordsOf(cutAfterDuisburg.text)).toStrictEqual(
+      wordsOf(cutAfterUtrecht.text)
     );
-    const digest = await questionDigestOf(set, asked);
-    await expect(questionDigestOf(recutSet, asked)).resolves.not.toBe(digest);
+    expect(
+      [cutAfterUtrecht, cutAfterDuisburg].map(
+        (source) => passagesOf([source]).length
+      )
+    ).toStrictEqual([2, 2]);
+    const digest = await passagesDigestOf([cutAfterUtrecht, memo]);
+    await expect(passagesDigestOf([cutAfterDuisburg, memo])).resolves.not.toBe(
+      digest
+    );
+    await expect(passagesDigestOf([widerBreak, memo])).resolves.toBe(digest);
+    const set = { ...brainEvalSet, sources: [cutAfterUtrecht, memo] };
+    const recutSet = { ...brainEvalSet, sources: [cutAfterDuisburg, memo] };
+    await expect(questionDigestOf(recutSet, asked)).resolves.not.toBe(
+      await questionDigestOf(set, asked)
+    );
+  });
+
+  it("measures a passage's length in code points, as SQLite does, in the set's checks and in grep's ties", () => {
+    // One code point and two UTF-16 units against one of each, then two.
+    const emoji = note("emoji", "😀");
+    const oneChar = note("one-char", "!");
+    const twoChars = note("two-chars", "!!");
+    expect(setProblems([emoji, oneChar], [])).toStrictEqual([
+      "emoji, one-char: all 25 characters long",
+    ]);
+    expect(setProblems([emoji, twoChars], [])).toStrictEqual([]);
+    // Two code points in four units against three in three: shorter in code
+    // points, longer in units.
+    const emojis = note("emojis", "😀😀");
+    const threeChars = note("three-chars", "!!!");
+    expect(
+      grepRecall(passagesOf([emojis, threeChars]), "eva", "kantine vrijdag", 10)
+        .keys
+    ).toStrictEqual(["emojis", "three-chars"]);
   });
 
   it("gives a question another digest when its asker, or the teams they are in, change", async () => {

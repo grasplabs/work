@@ -147,7 +147,7 @@ const readersIn = (
 };
 
 describe("the Brain evaluation", () => {
-  it("asks every question of the Brain and of plain text search, and nothing reaches an asker who may not read it", async () => {
+  it("asks every question of the Brain and of plain text search; nothing reaches an asker who may not read it, and every chunk returned is one the set cut", async () => {
     expect(setProblems(sources, questions)).toStrictEqual([]);
 
     const people = await signUpPeople();

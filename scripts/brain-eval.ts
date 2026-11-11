@@ -157,7 +157,10 @@ const file = path.join(
   options.out,
   `${at.replaceAll(":", "-")}-${sha.slice(0, 8)}.json`
 );
-if (ok) {
+// Failed: the run didn't finish cleanly, something reached an asker who may
+// not read it, or the Brain returned a chunk the set didn't cut.
+const passed = ok && summary.leaks.length === 0 && uncut.length === 0;
+if (passed) {
   writeFileSync(file, `${JSON.stringify({ ...run, summary }, null, 2)}\n`);
 }
 
@@ -198,15 +201,17 @@ process.stdout.write(
 );
 if (uncut.length > 0) {
   process.stdout.write(
-    `\nUNCUT chunks in ${uncut.length} results: the Brain no longer cuts as the set does; ranks are not comparable. ${uncut.map(({ id, source, start }) => `${id} (${source}: "${start}…")`).join("; ")}\n`
+    `\n${uncut.length} uncut chunks: the Brain no longer cuts as the set does; ranks are not comparable.\n${uncut.map(({ id, source, start }) => `  ${id} (${source}: "${start}…")\n`).join("")}`
   );
 }
-if (ok) {
+if (passed) {
   process.stdout.write(`\nResult: ${file}\n`);
 } else {
-  process.stderr.write(`\n${tailOf(output)}\n`);
+  if (!ok) {
+    process.stderr.write(`\n${tailOf(output)}\n`);
+  }
   process.stderr.write(
     "The Brain evaluation failed: see its output above. Its result is not kept, so it never becomes the baseline.\n"
   );
 }
-process.exit(ok && summary.leaks.length === 0 && uncut.length === 0 ? 0 : 1);
+process.exit(passed ? 0 : 1);

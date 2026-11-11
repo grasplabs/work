@@ -288,7 +288,7 @@ const wordPattern = /[\p{L}\p{N}]+/gu;
  * substring. Passages, not whole sources, so a rank counts the same unit in
  * both arms: a whole long document holds most of any question's words and
  * always holds the quote, and one result of it would stand for a dozen of
- * the Brain's. (A source of one passage is ranked as its whole text.)
+ * the Brain's. (A source of one passage is ranked as its one chunk.)
  *
  * The substring finds a question's word inside a longer word of the text
  * for free, a singular in its plural or a word in a compound ("tankpas" in
@@ -352,8 +352,8 @@ const passageProblems = (
     (bySource.get(source.key)?.length ?? 0) > 1
       ? `${source.key}#${position}`
       : source.key;
-  // A source of one passage is that passage, and the Brain breaks a tie on
-  // score by the chunk's length: with no two the same, a tie never reaches
+  // A source of one passage counts as its one chunk, and the Brain breaks a
+  // tie on score by the chunk's length: with no two the same, a tie never reaches
   // its random IDs.
   const byLength = Map.groupBy(passages, ({ text }) => lengthOf(text));
   for (const [length, same] of byLength) {
