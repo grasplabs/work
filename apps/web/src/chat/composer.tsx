@@ -113,7 +113,7 @@ const ChoiceLabel = ({
   const { t } = useLingui();
   return (
     <>
-      <span className="max-w-48 truncate">{name}</span>
+      <span className="max-w-48 min-w-0 truncate">{name}</span>
       {effort === undefined ? null : (
         <span className="text-muted-foreground">{t(effortNames[effort])}</span>
       )}
@@ -154,7 +154,8 @@ const ModelPicker = ({
               })}. Change model or thinking`
             : t`Model: ${name}. Change model`
         }
-        render={<PromptInputButton size="sm" />}
+        // It gives way on a narrow screen, so the box's buttons stay apart.
+        render={<PromptInputButton className="min-w-0 shrink" size="sm" />}
       >
         <SparklesIcon className="text-status-attention" />
         <ChoiceLabel effort={thinks ? effort : undefined} name={name} />
@@ -244,6 +245,7 @@ const ModelChoice = ({
   effort,
   onEffort,
   attach,
+  agent,
 }: {
   models: readonly string[];
   model: string | undefined;
@@ -252,9 +254,11 @@ const ModelChoice = ({
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
   attach: ReactNode;
+  agent: ReactNode;
 }) => (
   <PromptInputTools>
     {attach}
+    {agent}
     {models.length === 0 ||
     model === undefined ||
     onModel === undefined ? null : (
@@ -391,6 +395,7 @@ export const Composer = ({
   files = noFiles,
   onAttach,
   onRemoveFile,
+  agent,
 }: {
   text: string;
   onText: (text: string) => void;
@@ -439,6 +444,12 @@ export const Composer = ({
   /** Adds files to the question; without it, the box takes none. */
   onAttach?: (files: readonly File[]) => void;
   onRemoveFile?: (id: string) => void;
+  /**
+   * Which agent answers, beside the model: the way to pick one for a new
+   * chat, or the name of the one an open chat is with (agent-choice.tsx).
+   * Not in a compact box.
+   */
+  agent?: ReactNode;
 }) => {
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
@@ -510,6 +521,7 @@ export const Composer = ({
           </PromptInputAttachmentsContext>
           <PromptInputFooter>
             <ModelChoice
+              agent={agent}
               attach={
                 onAttach === undefined ? null : (
                   <AttachFiles
