@@ -350,7 +350,7 @@ describe("an organization's company in Attio, with Attio's key", () => {
     );
   });
 
-  it.each(hostileSegments)(
+  it.each([...hostileSegments, "x&limit=1000"])(
     "reads the meetings and notes of a stored company id %j at their own paths, the id one query value, or asks nothing",
     async (companyId) => {
       attio.records.companies.set(companyId, {

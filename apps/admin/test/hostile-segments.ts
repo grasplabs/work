@@ -10,6 +10,7 @@ export const hostileSegments = [
   "..",
   "../../other",
   "%2e%2e",
+  "%2e%2e/x",
   "a%2fb",
   "a/b",
   "//evil.example/x",
@@ -51,15 +52,23 @@ export const refusedForItsPath = async (
   return false;
 };
 
+/** The values above no segment can be: dot pieces, plain or percent-encoded. */
+const refusedSegments: ReadonlySet<string> = new Set([
+  "..",
+  "../../other",
+  "%2e%2e",
+  "%2e%2e/x",
+]);
+
 /**
  * What a call with `value` in its path must come to: refused unsent when
- * no segment can be it (`..`, or `..` pieces an API decoding `%2F` once
- * would climb by), or else sent with `value` as its one segment, decoding
- * back to itself.
+ * no segment can be it (`..`, `%2e%2e`, or such pieces an API decoding
+ * `%2F` or the path once would climb by), or else sent with `value` as its
+ * one segment, decoding back to itself.
  */
 export const keptOrRefused = (
   value: string
 ): { refused: boolean; segments: string[] } =>
-  value === ".." || value === "../../other"
+  refusedSegments.has(value)
     ? { refused: true, segments: [] }
     : { refused: false, segments: [value] };

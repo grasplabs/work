@@ -87,6 +87,14 @@ const connectForBot = () => connectWith(microsoft.bot());
 const withLogin = new URL(activities());
 withLogin.username = "someone";
 
+/** Tenants no path segment can be: dot pieces, plain or percent-encoded. */
+const refusedTenants: ReadonlySet<string> = new Set([
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+]);
+
 /** Whatever left for the Bot Connector. */
 const toBotConnector = () =>
   microsoft.sent.filter(({ host }) => host === botConnectorHost);
@@ -223,7 +231,17 @@ describe("what it refuses", () => {
     expect(microsoft.tokenRequests).toStrictEqual([]);
   });
 
-  it.each(["..", "%2e%2e", "a%2fb", "a/b", "//evil.example/x", "x?y=1", "x#y"])(
+  it.each([
+    "..",
+    "../x",
+    "%2e%2e",
+    "%2e%2e/x",
+    "a%2fb",
+    "a/b",
+    "//evil.example/x",
+    "x?y=1",
+    "x#y",
+  ])(
     "asks for the token of a bot whose tenant is set to %j only at that tenant, or nowhere",
     async (tenant) => {
       const connect = connectWith({
@@ -235,7 +253,8 @@ describe("what it refuses", () => {
         adapterRequest(activities())
       );
 
-      // Entra knows no such tenant; a dot segment can't be sent at all.
+      // Entra knows no such tenant; a dot piece, plain or encoded, can't
+      // be sent at all.
       expect({
         answer: response.headers.get(channelHeader),
         asked: microsoft.tokenPaths.map((path) =>
@@ -247,7 +266,9 @@ describe("what it refuses", () => {
         sent: toBotConnector(),
       }).toStrictEqual({
         answer: channelAnswer.failed,
-        asked: tenant === ".." ? [] : [[tenant, "oauth2", "v2.0", "token"]],
+        asked: refusedTenants.has(tenant)
+          ? []
+          : [[tenant, "oauth2", "v2.0", "token"]],
         sent: [],
       });
     }

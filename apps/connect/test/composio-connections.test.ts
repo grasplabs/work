@@ -1535,7 +1535,9 @@ describe("changing what a connected Composio toolkit may do", () => {
 /** IDs that would name another resource were they read as a path. */
 const pathAttacks = [
   "..",
+  "../x",
   "%2e%2e",
+  "%2e%2e/x",
   "a%2fb",
   "a/b",
   "//evil.example/x",
@@ -1543,8 +1545,13 @@ const pathAttacks = [
   "x#y",
 ] as const;
 
-/** What a URL parser makes a path of, so none can be sent. */
-const refusedIds: ReadonlySet<string> = new Set([".."]);
+/** Dot pieces, plain or encoded, that a parser or a decoding API reads as moves up, so none can be sent. */
+const refusedIds: ReadonlySet<string> = new Set([
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+]);
 
 /** The areas of Composio's API connect asks. */
 const composioAreas: ReadonlySet<string> = new Set([

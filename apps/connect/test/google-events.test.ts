@@ -52,13 +52,23 @@ const audit = auditEvents();
 /** Values that would name another resource were they read as a path. */
 const pathAttacks = [
   "..",
+  "../x",
   "%2e%2e",
+  "%2e%2e/x",
   "a%2fb",
   "a/b",
   "//evil.example/x",
   "x?y=1",
   "x#y",
 ] as const;
+
+/** Of those, dot pieces, plain or encoded, which no path segment can be. */
+const refusedSegments: ReadonlySet<string> = new Set([
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+]);
 
 /** Finance's shared drive. */
 const financeDrive = "0AFk3nRq9GkTnUk9PVA";
@@ -542,16 +552,16 @@ describe("Google Workspace connector events", () => {
   });
 
   it.each(pathAttacks)(
-    "ask Gmail for a message whose ID it answered as %j only at that ID, or for none",
+    "ask Gmail for a message whose ID it answered as %j only at that ID, or for none, and read the others",
     async (id) => {
       const gmail = await connected();
       await sync([listener(gmail)]);
       later();
-      google.receive(gmail.address, {
-        ...gmailInvoice(1, Date.now()),
-        id,
-        threadId: id,
-      });
+      google.receive(
+        gmail.address,
+        { ...gmailInvoice(1, Date.now()), id, threadId: id },
+        gmailInvoice(2, Date.now())
+      );
       const from = internet.sent.length;
       await sync([listener(gmail)]);
       // Each message the batch asks for, as its path's segments, decoded.
@@ -575,13 +585,22 @@ describe("Google Workspace connector events", () => {
         );
       const kept = await outboxed();
 
-      // A dot segment can't be sent: the read fails, and is tried again.
+      const message = (each: string) => [
+        "gmail",
+        "v1",
+        "users",
+        gmail.address,
+        "messages",
+        each,
+      ];
+
+      // A dot piece can't be sent: that message is left out, the others read.
       expect({ asked, kept: kept.map((event) => event.id) }).toStrictEqual(
-        id === ".."
-          ? { asked: [], kept: [] }
+        refusedSegments.has(id)
+          ? { asked: [message(gmailId(2))], kept: [gmailId(2)] }
           : {
-              asked: [["gmail", "v1", "users", gmail.address, "messages", id]],
-              kept: [id],
+              asked: [message(id), message(gmailId(2))],
+              kept: [id, gmailId(2)],
             }
       );
     }

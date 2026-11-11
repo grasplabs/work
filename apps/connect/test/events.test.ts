@@ -154,13 +154,23 @@ const now = (): string => new Date().toISOString();
 /** Values that would name another resource were they read as a path. */
 const pathAttacks = [
   "..",
+  "../x",
   "%2e%2e",
+  "%2e%2e/x",
   "a%2fb",
   "a/b",
   "//evil.example/x",
   "x?y=1",
   "x#y",
 ] as const;
+
+/** Of those, dot pieces, plain or encoded, which no path segment can be. */
+const refusedSegments: ReadonlySet<string> = new Set([
+  "..",
+  "../x",
+  "%2e%2e",
+  "%2e%2e/x",
+]);
 
 /** The audit events of listening and reading, in the order recorded. */
 const listening = async () => {
@@ -479,9 +489,9 @@ describe("connector events", () => {
             .map((segment) => decodeURIComponent(segment))
         );
 
-      // A dot segment can't be sent: each source's read fails instead.
+      // A dot piece can't be sent: each source's read fails instead.
       expect(sent).toStrictEqual(
-        account === ".."
+        refusedSegments.has(account)
           ? []
           : [
               ["v1.0", "users", account, "drive", "root", "delta"],

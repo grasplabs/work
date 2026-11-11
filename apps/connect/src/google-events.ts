@@ -1,6 +1,6 @@
 import { addressesOf } from "@grasp-os/connector-google-workspace/mime";
 import { stampHeader } from "@grasp-os/connector-kit/manifest";
-import { apiPath } from "@grasp-os/shared/api-path";
+import { ApiPathError, apiPath } from "@grasp-os/shared/api-path";
 import { z } from "zod";
 
 import {
@@ -210,16 +210,34 @@ const batchParts = (
 };
 
 /**
+ * Whether a message ID from Gmail's answer can be one segment of a path
+ * (`apiPath`). One that can't is no message Gmail could read back.
+ */
+const isMessageId = (id: string): boolean => {
+  try {
+    apiPath(id);
+    return true;
+  } catch (error) {
+    if (error instanceof ApiPathError) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
  * The events of messages `ids`, their metadata read through Gmail's batch
  * endpoint, a request per `messagesPerBatch` messages. A message deleted
- * since it arrived is left out; any other failure fails the read.
+ * since it arrived is left out, as is an ID no path can hold, so one such
+ * ID doesn't stall the mailbox; any other failure fails the read.
  */
 const mailEventsOf = async (
   access: ProviderAccess,
   mailbox: string,
-  ids: readonly string[]
+  answered: readonly string[]
 ): Promise<ReadEvent[]> => {
   const events: ReadEvent[] = [];
+  const ids = answered.filter(isMessageId);
   for (let at = 0; at < ids.length; at += messagesPerBatch) {
     const boundary = `batch_${crypto.randomUUID()}`;
     const body = `${ids
@@ -227,7 +245,7 @@ const mailEventsOf = async (
       .map(
         (id, index) =>
           // A path Gmail parses as a URL's: a message ID from its answer
-          // is one segment, or the batch is refused before it is sent.
+          // is one segment (`isMessageId`).
           `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <m${index}>\r\n\r\nGET ${gmailPath(mailbox, "messages", id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=${stampHeader}\r\n\r\n`
       )
       .join("")}--${boundary}--`;
