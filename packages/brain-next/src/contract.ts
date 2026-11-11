@@ -127,8 +127,7 @@ export const isOverInstructionsLimit = (text: string): boolean =>
  * UTF-16 units (`.length`), the one rule for it, which the host checks
  * with too.
  */
-export const instructionsTextSchema = z
-  .string()
+export const instructionsTextSchema = wellFormedString()
   .regex(/\S/u, { message: "Holds no text" })
   // Not zod's `max`, which counts code points.
   .refine((text) => !isOverInstructionsLimit(text), {

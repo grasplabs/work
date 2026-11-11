@@ -13,7 +13,7 @@ import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import {
   addInstructionFile,
-  instructionFileSchema,
+  instructionFileOf,
   readInstructionFilesAs,
 } from "./brain-next.ts";
 import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
@@ -54,7 +54,7 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
  * today's memory (workspace.ts); an `Authority` doesn't carry it. The App
  * is checked here: its file is given only to one of its builders.
  */
-export const instructionContextSchema = z.discriminatedUnion("conversation", [
+const instructionContextSchema = z.discriminatedUnion("conversation", [
   z.strictObject({
     conversation: z.literal("own"),
     appId: appIdSchema.optional(),
@@ -231,11 +231,7 @@ export const saveInstructionFile = async (
     identitySchema,
     by
   );
-  const file = permissionErrors.parse(
-    "permission.invalid",
-    instructionFileSchema,
-    saved.file
-  );
+  const file = instructionFileOf(saved.file);
   await requireWriter(env, await memberNamed(env, person.userId), file);
   return await addInstructionFile(env, { ...saved, file });
 };

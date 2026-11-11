@@ -4,11 +4,20 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, recallAs } from "../src/brain-next.ts";
-import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { addInstructionFile, addSource, recallAs } from "../src/brain-next.ts";
+import type {
+  InstructionFile,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { BrainStore } from "../src/index.ts";
-import { coreProbes, storeProbes, textOf } from "./brain-next-surfaces.ts";
+import {
+  coreProbes,
+  instructionProbes,
+  storeProbes,
+  textOf,
+} from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -94,6 +103,10 @@ const surfaces: [string, Probe][] = [
     `core ${name}`,
     probe,
   ]),
+  ...Object.entries(instructionProbes).map(([name, probe]): [string, Probe] => [
+    `instructions ${name}`,
+    probe,
+  ]),
   ...Object.entries(storeProbes).map(([name, probe]): [string, Probe] => [
     `store ${name}`,
     probe,
@@ -127,17 +140,18 @@ const findingsIn = (
 };
 
 /**
- * Calls every surface as `probing`'s reader; what they gave away, in
- * their answers or in the console.
+ * Calls every surface (or those `among`) as `probing`'s reader; what they
+ * gave away, in their answers or in the console.
  */
 const findingsOf = async (
   pass: string,
   probing: Probing,
-  forbidden: Readonly<Record<string, string>>
+  forbidden: Readonly<Record<string, string>>,
+  among: readonly [string, Probe][] = surfaces
 ): Promise<Finding[]> => {
   const { value: answered, lines } = await logsOf(async () => {
     const found: [string, Answer[]][] = [];
-    for (const [name, probe] of surfaces) {
+    for (const [name, probe] of among) {
       // oxlint-disable-next-line no-await-in-loop -- one surface at a time
       found.push([name, await probe(probing)]);
     }
@@ -247,12 +261,17 @@ describe(
   () => {
     it("has a probe for every member core and the Brain's store expose", async () => {
       const coreMembers = Object.keys(await import("../src/brain-next.ts"));
+      const instructionMembers = Object.keys(
+        await import("../src/instruction-files.ts")
+      );
 
       expect({
         core: coreMembers.toSorted(),
+        instructions: instructionMembers.toSorted(),
         store: storeMethods().toSorted(),
       }).toStrictEqual({
         core: Object.keys(coreProbes).toSorted(),
+        instructions: Object.keys(instructionProbes).toSorted(),
         store: Object.keys(storeProbes).toSorted(),
       });
     });
@@ -277,13 +296,48 @@ describe(
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
+        "the holder's instruction file": markerWord(),
+        "another agent's instruction file": markerWord(),
+        "an App's instruction file the outsider doesn't build": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
         "a source narrowed away from the outsider": narrowedMarker,
+        "the holder's instruction file": holderFileMarker,
+        "another agent's instruction file": agentFileMarker,
+        "an App's instruction file the outsider doesn't build": appFileMarker,
       } = markers;
+      // Instruction files the outsider may not get: the holder's own,
+      // another agent's than theirs, and an App's they don't build (one no
+      // one made, so no one builds it).
+      const holderFile: InstructionFile = { scope: "person", personId: holder };
+      const agentFile: InstructionFile = {
+        scope: "agent",
+        agentId: `agent-${unique()}`,
+      };
+      const appFile: InstructionFile = {
+        scope: "app",
+        appId: crypto.randomUUID(),
+      };
+      for (const [file, marker] of [
+        [holderFile, holderFileMarker],
+        [agentFile, agentFileMarker],
+        [appFile, appFileMarker],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        await addInstructionFile(env, {
+          file,
+          change: crypto.randomUUID(),
+          text: `Instructions ${sharedWord} ${marker}`,
+        });
+      }
+      const instructionMarkers = [
+        holderFileMarker,
+        agentFileMarker,
+        appFileMarker,
+      ];
       const ownerIds = [
         await add(`Salary review ${sharedWord} ${ownerMarker}`, {
           kind: "owner",
@@ -356,8 +410,15 @@ describe(
         reader: { person: outsider, groups: groups.map((id) => `team:${id}`) },
         sharedWord,
         unknownWord,
-        markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
+        markers: [
+          ownerMarker,
+          teamMarker,
+          noneMarker,
+          narrowedMarker,
+          ...instructionMarkers,
+        ],
         hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
+        hiddenInstructionFiles: [holderFile, agentFile, appFile],
       });
       const first = await findingsOf(
         "the outsider",
@@ -375,7 +436,12 @@ describe(
         "the outsider, in the team",
         {
           ...asOutsider([ownTeam, secretTeam]),
-          markers: [ownerMarker, noneMarker, narrowedMarker],
+          markers: [
+            ownerMarker,
+            noneMarker,
+            narrowedMarker,
+            ...instructionMarkers,
+          ],
           hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
         },
         notJoined
@@ -400,15 +466,19 @@ describe(
           reader: { person: holder, groups: [`team:${secretTeam}`] },
           sharedWord,
           unknownWord,
-          markers: [noneMarker, narrowedMarker],
+          markers: [noneMarker, narrowedMarker, agentFileMarker, appFileMarker],
           hiddenVersions: [
             ...everyVersionOf(noneId),
             { source: narrowedId, version: 1 },
           ],
+          // Their own instruction file is theirs.
+          hiddenInstructionFiles: [agentFile, appFile],
         },
         {
           "a source nobody is known to read": noneMarker,
           "a source narrowed away from the outsider": narrowedMarker,
+          "another agent's instruction file": agentFileMarker,
+          "an App's instruction file the outsider doesn't build": appFileMarker,
         }
       );
 
@@ -442,6 +512,51 @@ describe(
         outsiderFinds: [handbook],
         joinedFinds: [teamSource],
         leftFinds: [],
+      });
+    });
+
+    it("gives someone who isn't a member nothing of the company's instruction files", async () => {
+      await answeringProvider(() => {});
+      // Every member may read the company's files, so they are probed as
+      // someone who isn't one: the surfaces that load and read them.
+      const marker = markerWord();
+      const companyFiles: InstructionFile[] = [
+        { scope: "company", name: "instructions" },
+        { scope: "company", name: "facts" },
+      ];
+      for (const file of companyFiles) {
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        await addInstructionFile(env, {
+          file,
+          change: crypto.randomUUID(),
+          text: `Company instructions ${marker}`,
+        });
+      }
+      const nonMember = `stranger-${crypto.randomUUID()}`;
+      const forbidden = { "the company's instruction files": marker };
+      const findings = await findingsOf(
+        "someone who isn't a member",
+        {
+          personId: nonMember,
+          reader: { person: nonMember, groups: [] },
+          sharedWord: `s${unique()}`,
+          unknownWord: `u${unique()}`,
+          markers: [marker],
+          hiddenVersions: [],
+          hiddenInstructionFiles: companyFiles,
+        },
+        forbidden,
+        surfaces.filter(([name]) =>
+          ["instructions instructionFilesFor", "store readCurrent"].includes(
+            name
+          )
+        )
+      );
+      const prompted = await carrying(marker);
+
+      expect({ findings, prompted }).toStrictEqual({
+        findings: [],
+        prompted: [],
       });
     });
   }

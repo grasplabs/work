@@ -349,7 +349,7 @@ const instructionIdSchema = producerIdSchema(
  * instructions, and its lasting facts), one person's, one App's or one
  * agent's.
  */
-export const instructionFileSchema = z.discriminatedUnion("scope", [
+const instructionFileSchema = z.discriminatedUnion("scope", [
   z.strictObject({
     scope: z.literal("company"),
     name: z.enum(["instructions", "facts"]),
@@ -364,6 +364,14 @@ export const instructionFileSchema = z.discriminatedUnion("scope", [
 
 /** An instruction file, by its scope. */
 export type InstructionFile = z.infer<typeof instructionFileSchema>;
+
+/**
+ * `input` as an instruction file, checked whole: refused with
+ * `permission.invalid` when it isn't one. For instruction-files.ts, which
+ * checks who may write a file before it is added.
+ */
+export const instructionFileOf = (input: unknown): InstructionFile =>
+  permissionErrors.parse("permission.invalid", instructionFileSchema, input);
 
 /** The Brain's key for `file`: its scope is part of it. */
 const instructionKeyOf = (file: InstructionFile): SourceId => {
