@@ -1,4 +1,4 @@
-import type { AgentSettings } from "@grasp-os/shared/agents";
+import type { AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
@@ -34,8 +34,10 @@ const AgentsPage = () => {
     <AgentsSettings
       agents={page.data.agents}
       editable={isMemberAdmin(identity)}
+      people={page.data.people}
       settings={page.data.settings}
       teams={page.data.teams}
+      wakes={page.data.wakes}
     />
   );
 };
@@ -46,9 +48,10 @@ export const Route = createFileRoute("/_shell/settings/agents")({
   component: AgentsPage,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [agents, reach] = await Promise.all([
+      const [agents, reach, people] = await Promise.all([
         session.connections.agents(),
         session.connections.stephenReach(),
+        session.members.list(),
       ]);
       // Every agent but the first, whose reach is Settings › Stephen's.
       const others = agents.slice(1);
@@ -58,6 +61,18 @@ export const Route = createFileRoute("/_shell/settings/agents")({
           await session.connections.agentSettings(id),
         ])
       );
-      return { agents, settings: Object.fromEntries(read), teams: reach.teams };
+      const wakes = await Promise.all(
+        agents.map(async ({ id }): Promise<[string, AgentWake[]]> => [
+          id,
+          await session.connections.agentWakes(id),
+        ])
+      );
+      return {
+        agents,
+        settings: Object.fromEntries(read),
+        teams: reach.teams,
+        wakes: Object.fromEntries(wakes),
+        people,
+      };
     }),
 });

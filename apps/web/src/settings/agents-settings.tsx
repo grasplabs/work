@@ -1,4 +1,5 @@
-import type { Agent, AgentSettings } from "@grasp-os/shared/agents";
+import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
+import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { Button } from "@grasp-os/ui/components/button";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -20,6 +21,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AgentWakes } from "./agent-wakes.tsx";
 import { SettingsSection } from "./settings-parts.tsx";
 import {
   AudienceControl,
@@ -147,6 +149,8 @@ const AgentPanel = ({
   first,
   settings,
   teams,
+  wakes,
+  people,
   can,
   change,
 }: {
@@ -155,6 +159,8 @@ const AgentPanel = ({
   first: boolean;
   settings: AgentSettings | undefined;
   teams: StephenReach["teams"];
+  wakes: readonly AgentWake[];
+  people: readonly Member[];
   can: boolean;
   change: Change;
 }) => {
@@ -210,6 +216,8 @@ const AgentPanel = ({
             name={t`Who may use it, and what it may do`}
           >
             <Button
+              // A link, drawn as a button.
+              nativeButton={false}
               render={<Link to="/settings/stephen" />}
               size="sm"
               variant="outline"
@@ -280,10 +288,20 @@ const AgentPanel = ({
             })}
           </>
         )}
+        <AgentWakes
+          agent={agent}
+          can={can}
+          change={change}
+          people={people}
+          wakes={wakes}
+        />
       </ul>
     </>
   );
 };
+
+/** An agent that never works on its own. */
+const noWakes: readonly AgentWake[] = [];
 
 /** What is open beside the page: an agent, or the form for a new one. */
 type Opened = { kind: "agent"; id: string } | { kind: "new" } | null;
@@ -292,6 +310,8 @@ export const AgentsSettings = ({
   agents,
   settings,
   teams,
+  wakes,
+  people,
   editable,
 }: {
   /** Every agent, the company's first one first. */
@@ -299,6 +319,10 @@ export const AgentsSettings = ({
   /** Each other agent's reach and classes, by its ID. */
   settings: Readonly<Record<string, AgentSettings>>;
   teams: StephenReach["teams"];
+  /** Each agent's wake-ups, by its ID. */
+  wakes: Readonly<Record<string, readonly AgentWake[]>>;
+  /** The company's people, whom a wake-up can work for. */
+  people: readonly Member[];
   editable: boolean;
 }) => {
   const { t } = useLingui();
@@ -379,8 +403,10 @@ export const AgentsSettings = ({
               can={can}
               change={change}
               first={open.id === first?.id}
+              people={people}
               settings={settings[open.id]}
               teams={teams}
+              wakes={wakes[open.id] ?? noWakes}
             />
           )}
           {opened?.kind === "new" ? (
