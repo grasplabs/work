@@ -23,7 +23,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { organizationId } from "./auth/membership-sql.ts";
 import {
+  agentToolClasses,
   appPointers,
   appToolClasses,
   sharedMailboxPointers,
@@ -315,6 +317,43 @@ export const takesIn = async (
 };
 
 /**
+ * Refuses `toolClass` with `connect.class_off` for a person the acting
+ * agent doesn't have it for (agent-reach.ts). Asked after the company's
+ * setting and the app's, so an agent only narrows them. The
+ * organization's own agent has every class as the company has it; any
+ * other agent without a row for the class too, and one whose row can't
+ * be read has it for nobody.
+ */
+const requireAgentHasClass = async (
+  env: Env,
+  authority: Authority,
+  toolClass: CompanyToolClass
+): Promise<void> => {
+  if (
+    authority.subject.type !== "agent" ||
+    authority.subject.agentId === organizationId
+  ) {
+    return;
+  }
+  const row = await drizzle(env.DB)
+    .select({ who: agentToolClasses.who, teams: agentToolClasses.teams })
+    .from(agentToolClasses)
+    .where(
+      and(
+        eq(agentToolClasses.agentId, authority.subject.agentId),
+        eq(agentToolClasses.toolClass, toolClass)
+      )
+    )
+    .get();
+  if (row === undefined || row.who === "asClass") {
+    return;
+  }
+  if (!(await takesIn(env, audienceOf(row) ?? off, authority.onBehalfOf))) {
+    throw connectErrors.create("connect.class_off");
+  }
+};
+
+/**
  * What core signs into the capability of a call it let through: for a read
  * in a company app pointed at within some resources, those resources.
  */
@@ -395,6 +434,7 @@ const requireAppClassOn = async (
   }
   requireOfferedUnattended(toolClass, unattended);
   if (toolClass === "read-company") {
+    await requireAgentHasClass(env, authority, toolClass);
     const pointer = await appPointerFor(env, owner.id, authority.onBehalfOf);
     if (pointer === undefined) {
       throw connectErrors.create("connect.app_not_pointed");
@@ -407,6 +447,7 @@ const requireAppClassOn = async (
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
+  await requireAgentHasClass(env, authority, toolClass);
   return {};
 };
 
@@ -495,6 +536,14 @@ export const requireToolClassOn = async (
     !(await takesIn(env, narrowed, authority.onBehalfOf))
   ) {
     throw connectErrors.create("connect.class_off");
+  }
+  // An agent narrows both the class the company checked the call as (a
+  // mail tool in a mailbox is its person's own, `inMailbox`) and the
+  // tool's own class, which its app narrows: off for either is off.
+  const checked = inMailbox(owner.provider, action, toolClass);
+  await requireAgentHasClass(env, authority, checked);
+  if (checked !== toolClass) {
+    await requireAgentHasClass(env, authority, toolClass);
   }
   return {};
 };

@@ -1,9 +1,11 @@
 import { sql } from "drizzle-orm";
 import {
+  blob,
   check,
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   unique,
@@ -180,4 +182,99 @@ export const chunks = sqliteTable(
       table.position
     ),
   ]
+);
+
+// The vector way (vectors.ts). A chunk of a current version can hold a
+// code per embedding model: a 1-bit code that every search scans, and an
+// 8-bit code that re-scores the best candidates. A code takes the set of
+// readers of its chunk's version, never one a caller names, and codes are
+// grouped by model and set of readers, so a search reads only the groups
+// its reader is in.
+
+/**
+ * An embedding model, named with its build by the caller: codes of one
+ * model are never compared with another's. Its first codes fix its
+ * dimensions and its centre.
+ */
+export const vectorModels = sqliteTable("vector_models", {
+  id: integer().primaryKey(),
+  /** The model and its build, as the caller names them. */
+  name: text().notNull().unique(),
+  /** What 1-bit codes are taken against, per dimension, as float64s. */
+  centre: blob({ mode: "buffer" }).notNull(),
+});
+
+/**
+ * Codes of one model and set of readers, packed: the chunks' rows (as
+ * float64s) and their 1-bit codes, in the same order. Written once and
+ * never changed (migration 0003): a repack writes a new block and deletes
+ * the old one.
+ */
+export const vectorBlocks = sqliteTable(
+  "vector_blocks",
+  {
+    id: integer().primaryKey(),
+    model: integer()
+      .notNull()
+      .references(() => vectorModels.id),
+    readerSet: integer("reader_set")
+      .notNull()
+      .references(() => readerSets.id),
+    chunks: blob({ mode: "buffer" }).notNull(),
+    bits: blob({ mode: "buffer" }).notNull(),
+  },
+  (table) => [index("vector_blocks_group_idx").on(table.model, table.readerSet)]
+);
+
+/**
+ * A chunk's code for a model: in its group's tail while `block` is null,
+ * and at `slot` of a packed block once packed. Deleted when its version
+ * stops being current; a packed one is then marked removed in its block
+ * (`vector_removed`) until a repack drops it.
+ */
+export const vectorCodes = sqliteTable(
+  "vector_codes",
+  {
+    chunk: integer()
+      .notNull()
+      .references(() => chunks.row),
+    model: integer()
+      .notNull()
+      .references(() => vectorModels.id),
+    /** The set of readers of the chunk's version, as it was put. */
+    readerSet: integer("reader_set")
+      .notNull()
+      .references(() => readerSets.id),
+    /** The 1-bit code: a bit per dimension, as uint32s. */
+    bits: blob({ mode: "buffer" }).notNull(),
+    /** One over the 8-bit code's own length, so scores are its cosine. */
+    inverseLength: real("inverse_length").notNull(),
+    /** The 8-bit code: the vector, its largest component 127 steps, as int8s. */
+    fine: blob({ mode: "buffer" }).notNull(),
+    block: integer().references(() => vectorBlocks.id),
+    slot: integer(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chunk, table.model] }),
+    // A search reads a group's tail; a pack counts and takes it.
+    index("vector_codes_group_idx").on(
+      table.model,
+      table.readerSet,
+      table.block
+    ),
+    // A repack takes a block's codes back.
+    index("vector_codes_block_idx").on(table.block, table.slot),
+  ]
+);
+
+/** A packed code marked removed: never scored, and gone at the next repack. */
+export const vectorRemoved = sqliteTable(
+  "vector_removed",
+  {
+    block: integer()
+      .notNull()
+      .references(() => vectorBlocks.id),
+    slot: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.block, table.slot] })]
 );

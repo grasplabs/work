@@ -55,12 +55,21 @@ export const readerSetKeyOf = (access: Access): string =>
  * statement whose `?2` is the reader's person and `?3` their groups
  * (JSON). Principals are matched with their kind, so a person never
  * matches a group of the same name, and a set with no principals matches
- * no one.
+ * no one. Each set once.
+ *
+ * One lookup of the members' index per principal, whatever SQLite's
+ * statistics say: the groups come first (`CROSS JOIN` keeps SQLite to
+ * that order), and a `UNION` rather than an `OR`, which SQLite's planner
+ * may answer, once it has statistics, by reading every member.
  */
 export const readableSql = `readable AS (
   SELECT reader_set FROM reader_set_members
-  WHERE (kind = 'person' AND principal = ?2)
-    OR (kind = 'group' AND principal IN (SELECT value FROM json_each(?3)))
+  WHERE kind = 'person' AND principal = ?2
+  UNION
+  SELECT reader_set_members.reader_set FROM json_each(?3) AS asked
+  CROSS JOIN reader_set_members
+    ON reader_set_members.kind = 'group'
+    AND reader_set_members.principal = asked.value
 )`;
 
 /**
