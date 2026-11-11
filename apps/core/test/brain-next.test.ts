@@ -251,6 +251,25 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     await expect(
       recalledAs(reader, fullWidth(wide.toUpperCase()))
     ).resolves.toStrictEqual([fullWidthSource]);
+
+    // Where a mark is part of the letter, words that differ by it stay
+    // distinct: Japanese "school" and "cuckoo", Devanagari "book" and a
+    // word without its vowel sign.
+    for (const [one, other] of [
+      ["がっこう", "かっこう"],
+      ["किताब", "कताब"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one pair at a time
+      const [first, second] = [await add(one, owner), await add(other, owner)];
+      // oxlint-disable-next-line no-await-in-loop -- one pair at a time
+      await expect(recalledAs(reader, one)).resolves.toStrictEqual([first]);
+      // oxlint-disable-next-line no-await-in-loop -- one pair at a time
+      await expect(recalledAs(reader, other)).resolves.toStrictEqual([second]);
+    }
+    // Hebrew vowel points are optional, as accents are: a pointed word is
+    // found by its plain spelling.
+    const pointed = await add("שָׁלוֹם", owner);
+    await expect(recalledAs(reader, "שלום")).resolves.toStrictEqual([pointed]);
   });
 
   it("counts a word once however the question spells it", async () => {

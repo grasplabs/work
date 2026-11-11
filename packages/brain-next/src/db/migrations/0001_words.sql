@@ -1,11 +1,17 @@
 -- The words of every source, for recall (recall.ts): its text as search
 -- reads it (words.ts `foldForSearch`), written by the store in the same
 -- transaction as the source, while `sources` keeps the text whole as
--- given. The tokenizer is today's Brain's; folding already removed case
--- and accents, so it only cuts the text into words.
+-- given. Contentless: the index keeps no copy of the text, only which
+-- rows hold which words, since recall reads nothing back but the rowid;
+-- `contentless_delete` lets a row be deleted by its rowid. The tokenizer
+-- is today's Brain's, with marks counted as part of a word (words.ts
+-- `wordPattern`: the same categories), so a Devanagari or Thai word isn't
+-- cut at its vowel signs; folding already removed case and accents.
 CREATE VIRTUAL TABLE `source_words` USING fts5(
 	text,
-	tokenize = 'unicode61 remove_diacritics 2'
+	content = '',
+	contentless_delete = 1,
+	tokenize = 'unicode61 remove_diacritics 2 categories ''L* N* Co M*'''
 );
 --> statement-breakpoint
 CREATE TRIGGER `sources_words_delete` AFTER DELETE ON `sources` BEGIN

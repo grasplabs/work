@@ -58,6 +58,16 @@ const brainStoreImports = {
     "Reach the Brain through @grasp-os/brain-next/contract (core's src/brain-next.ts), never its store.",
 };
 
+/**
+ * The Brain's contract, inside core: only src/brain-next.ts holds it, so
+ * the Brain's reader is made there alone, from core's own records.
+ */
+const brainContractImports = {
+  group: ["@grasp-os/brain-next", "@grasp-os/brain-next/contract"],
+  message:
+    "In core, only src/brain-next.ts reaches the Brain: add and recall through its addSource and recallAs.",
+};
+
 export default defineConfig({
   lint: {
     extends: [core, react, tanstack, vitest, shadcn],
@@ -239,7 +249,10 @@ export default defineConfig({
         rules: {
           "no-restricted-imports": [
             "error",
-            { paths: unboundedTargetPaths, patterns: [brainStoreImports] },
+            {
+              paths: unboundedTargetPaths,
+              patterns: [brainStoreImports, brainContractImports],
+            },
           ],
           "grasp/no-unbounded-rpc-target": "error",
         },
@@ -248,7 +261,20 @@ export default defineConfig({
         // Core's entry point registers the Brain's store: its one import.
         files: ["apps/core/src/index.ts"],
         rules: {
-          "no-restricted-imports": ["error", { paths: unboundedTargetPaths }],
+          "no-restricted-imports": [
+            "error",
+            { paths: unboundedTargetPaths, patterns: [brainContractImports] },
+          ],
+        },
+      },
+      {
+        // Core's one way to the Brain: its contract, never its store.
+        files: ["apps/core/src/brain-next.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            { paths: unboundedTargetPaths, patterns: [brainStoreImports] },
+          ],
         },
       },
       {
@@ -281,7 +307,7 @@ export default defineConfig({
                   message: unboundedTarget,
                 },
               ],
-              patterns: [brainStoreImports],
+              patterns: [brainStoreImports, brainContractImports],
             },
           ],
         },

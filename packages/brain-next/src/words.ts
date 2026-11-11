@@ -4,11 +4,23 @@
 // (`source_words`). Later ways of matching words (stemming per language)
 // extend `foldForSearch`, and with it both sides at once.
 
-/** Combining marks, left once a character is decomposed: its accents. */
-const marks = /\p{M}/gu;
+/**
+ * The marks folding removes, once a character is decomposed: those on a
+ * Latin, Greek or Cyrillic letter (its accents: "ë", "é", "ñ", "ά"), and
+ * the optional vowel points of Hebrew and Arabic, which most text leaves
+ * out, so a pointed word is found by its plain spelling. Everywhere else a
+ * mark is part of the letter (Japanese "が" and "か", Devanagari vowel
+ * signs, Thai vowels) and stays, so distinct words stay distinct.
+ */
+const marks =
+  /(?<=[\p{sc=Latin}\p{sc=Greek}\p{sc=Cyrillic}\p{sc=Hebrew}\p{sc=Arabic}]\p{M}*)\p{M}/gu;
 
-/** Whatever isn't a letter or a digit separates words. */
-const wordPattern = /[\p{L}\p{N}]+/gu;
+/**
+ * What a word is made of: letters, digits, the marks that are part of
+ * them, and private-use characters. Anything else separates words, as for
+ * the word index's tokenizer (migration 0001: the same categories).
+ */
+const wordPattern = /[\p{L}\p{N}\p{M}\p{Co}]+/gu;
 
 /** Most words of a question that count; the rest are left out. */
 const maxTerms = 16;
