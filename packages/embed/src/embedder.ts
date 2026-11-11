@@ -94,10 +94,19 @@ export class Embedder extends DurableObject<EmbedderEnv> {
   /** The embedding of `text`, cut at the most tokens the model reads. */
   async embed(text: string): Promise<Embedding> {
     const { engine, format, identity } = await this.loaded();
-    const vector = engine.embed(engine.tokenize(text), format, (ids) =>
-      this.rows(ids)
-    );
-    return { vector, model: identity };
+    try {
+      const vector = engine.embed(engine.tokenize(text), format, (ids) =>
+        this.rows(ids)
+      );
+      return { vector, model: identity };
+    } catch (error) {
+      // A trap leaves the module's state unknown: the next call loads a
+      // fresh instance from storage instead of using this one.
+      if (error instanceof WebAssembly.RuntimeError) {
+        this.loading = undefined;
+      }
+      throw error;
+    }
   }
 
   /** The model, loaded once per life of the object. */
@@ -254,14 +263,13 @@ export class Embedder extends DurableObject<EmbedderEnv> {
   }
 
   private async copyTokens(): Promise<RowFormat> {
-    const format = await this.copyFile("tokens", async (reader) => {
-      const read = await this.copyRows(reader);
-      return read;
-    });
-    return format;
+    return await this.copyFile("tokens", this.copyRows);
   }
 
-  private async copyRows(reader: HashingReader): Promise<RowFormat> {
+  /** Reads the token table into storage, a row per token (an arrow, as `copyFile` calls it unbound). */
+  private readonly copyRows = async (
+    reader: HashingReader
+  ): Promise<RowFormat> => {
     const header = readTokensHeader(
       (await reader.read(tokensHeaderBytes)) ?? new Uint8Array()
     );
@@ -298,7 +306,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       });
     }
     return header.format;
-  }
+  };
 
   /** A stored file's parts, for the module to read. */
   private stored(file: WholeFile): FileBytes {

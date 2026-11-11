@@ -242,9 +242,9 @@ impl Tok {
         let mut k = 3;
         while k <= m.len() {
             if k == m.len() || m[k..].starts_with(&META) {
-                // No token covers more than `longest` bytes of a word, so a word longer than twice the room left
-                // times that certainly fills it: only its start is encoded (cut at a character), which bounds the
-                // work on a long text without spaces. A text within the limit never gets here.
+                // A token covers at most `longest` bytes, so a word over twice the room left times that fills it: only
+                // its start is encoded (bounded work). Texts within the limit never get here and keep the reference's
+                // tokens; beyond it, merges near the cut may make the kept tokens differ from the reference's.
                 let room = (max - ids.len()).saturating_mul(self.longest).saturating_mul(2);
                 let mut end = k;
                 if end - st > room {

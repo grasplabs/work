@@ -13,7 +13,10 @@ activations kept in float. Every int8 linear layer keeps each group of 4 weights
 sum |w| <= 258, so the embedder's 16-bit kernels give the same bits as its 32-bit ones. Without calibration texts
 the int8 encoder is quantised plainly.
 
-Usage: python -I export.py <model dir> <out dir> [--float] [--calibration texts.json]
+The encoder reads at most --max-tokens tokens (default 512, as the reference truncates); its buffers and rotary
+tables are sized to that, not to the config's max_position_embeddings, which the module's memory may not hold.
+
+Usage: python -I export.py <model dir> <out dir> [--float] [--calibration texts.json] [--max-tokens 512]
 Needs numpy, torch, transformers, safetensors and tokenizers."""
 import argparse
 import json
@@ -30,6 +33,7 @@ HD = 64  # the head width the runtime is written for
 SMOOTH = {"qkv": 0.6, "o": 0.0, "ff1": 0.6, "ff2": 0.8}  # per-channel rescaling strength at each linear input
 FLOAT_CHANNELS = 16  # feed-forward channels of the last layer kept in float
 PAIR_LIMIT = 258  # largest sum |w| over the 4 weights feeding one 16-bit lane
+MAX_TOKENS = 512  # the most tokens the embedder reads by default: the reference truncation
 
 
 def pad16(b: bytes) -> bytes:
@@ -107,11 +111,10 @@ def calibrate(src: Path, texts: list[str], max_tokens: int) -> dict[str, np.ndar
     return acc
 
 
-def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None) -> bytes:
+def encoder(src: Path, cfg, int8: bool, cal: dict[str, np.ndarray] | None, maxn: int) -> bytes:
     T = {k: v.float().numpy() for k, v in load_file(src / "model.safetensors").items()}
     T = {k.removeprefix("model."): v for k, v in T.items()}
     h, nh, ff, nl = cfg.hidden_size, cfg.num_attention_heads, cfg.intermediate_size, cfg.num_hidden_layers
-    maxn = cfg.max_position_embeddings
     assert h == nh * HD, f"head width {h // nh}, the runtime runs {HD}"
     assert not cfg.norm_bias and not cfg.attention_bias and not cfg.mlp_bias and cfg.hidden_activation == "gelu"
     thetas = sorted({cfg.rope_parameters[t]["rope_theta"] for t in cfg.layer_types})
@@ -228,14 +231,15 @@ def tokenizer(src: Path) -> bytes:
     return blob + b"".join(pieces)
 
 
-def export(src: Path, out: Path, float_files: bool, calibration: list[str] | None) -> dict[str, int]:
+def export(src: Path, out: Path, float_files: bool, calibration: list[str] | None, max_tokens: int = MAX_TOKENS) -> dict[str, int]:
     """Writes the three model files into `out`; returns their sizes."""
     cfg = AutoConfig.from_pretrained(src)
+    assert 2 <= max_tokens <= cfg.max_position_embeddings and max_tokens % 8 == 0, max_tokens
     out.mkdir(parents=True, exist_ok=True)
     int8 = not float_files
-    cal = calibrate(src, calibration, cfg.max_position_embeddings) if int8 and calibration else None
+    cal = calibrate(src, calibration, max_tokens) if int8 and calibration else None
     kind = "float" if float_files else "int8"
-    files = {"tokenizer.bin": tokenizer(src), f"encoder-{kind}.bin": encoder(src, cfg, int8, cal), f"tokens-{kind}.bin": tokens(src, int8)}
+    files = {"tokenizer.bin": tokenizer(src), f"encoder-{kind}.bin": encoder(src, cfg, int8, cal, max_tokens), f"tokens-{kind}.bin": tokens(src, int8)}
     for name, data in files.items():
         (out / name).write_bytes(data)
     return {name: len(data) for name, data in files.items()}
@@ -247,6 +251,14 @@ if __name__ == "__main__":
     ap.add_argument("out", type=Path)
     ap.add_argument("--float", action="store_true", help="float32 encoder and token table, for verification")
     ap.add_argument("--calibration", type=Path, help="JSON list of calibration texts for the int8 encoder")
+    ap.add_argument(
+        "--max-tokens",
+        type=int,
+        default=MAX_TOKENS,
+        help=f"the most tokens the embedder reads (default {MAX_TOKENS}, as the reference truncates), not the config's "
+        "max_position_embeddings: the encoder's buffers and rotary tables are sized to it, and at 8,192 they don't fit "
+        "the module's 64 MiB",
+    )
     args = ap.parse_args()
     texts = json.loads(args.calibration.read_text()) if args.calibration else None
-    print(export(args.model, args.out, args.float, texts))
+    print(export(args.model, args.out, args.float, texts, args.max_tokens))

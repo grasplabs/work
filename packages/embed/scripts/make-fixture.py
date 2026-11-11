@@ -85,7 +85,7 @@ def main() -> None:
         src = Path(tmp)
         model.save_pretrained(src)
         tk.save(str(src / "tokenizer.json"))
-        sizes = export(src, FIXTURES, float_files=True, calibration=None) | export(src, FIXTURES, float_files=False, calibration=texts)
+        sizes = export(src, FIXTURES, float_files=True, calibration=None, max_tokens=MAX_TOKENS) | export(src, FIXTURES, float_files=False, calibration=texts, max_tokens=MAX_TOKENS)
         tk.enable_truncation(MAX_TOKENS)
         ref = ModernBertModel.from_pretrained(src, attn_implementation="eager", dtype=torch.float32).eval()
         embeddings = []
