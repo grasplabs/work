@@ -334,7 +334,7 @@ const bindingOf = async (
     )
     .get();
   if (binding === undefined) {
-    throw functionErrors.create("resource.unavailable");
+    throw functionErrors.create("permission.unavailable");
   }
   return binding;
 };

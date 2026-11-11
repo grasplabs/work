@@ -226,4 +226,13 @@ describe("the AI key banner", () => {
 
     expect(replaced).toStrictEqual({ said: "", links: [] });
   });
+
+  it("says nothing of the organization's own key while its AI runs on Grasp's AI", async () => {
+    const onGrasp = await bannerFor(
+      { ...listingWith(refused), source: "grasp" },
+      { role: "admin", staff: false }
+    );
+
+    expect(onGrasp).toStrictEqual({ said: "", links: [] });
+  });
 });

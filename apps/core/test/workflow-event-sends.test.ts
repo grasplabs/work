@@ -215,7 +215,7 @@ const runner: Runner = async (path, args, channel: FunctionChannel) => {
       .object({ event: z.string(), runId: z.string(), data: z.string() })
       .parse(args);
     return await channel
-      .resource(
+      .permission(
         path === "jobs.rawSendEvent" ? "review" : "ghost",
         "sendEvent",
         [asked.event, asked.runId, JSON.parse(asked.data)]
@@ -714,21 +714,21 @@ describe(
       expect({ outcomes, outbox: await outboxOf(fx.store) }).toStrictEqual({
         outcomes: {
           failed: "desk.refused",
-          undeclared: "resource.not_allowed",
-          otherEvent: "resource.not_allowed",
-          anotherWorkflows: "resource.not_allowed",
-          inherited: inherited.map(() => "resource.not_allowed"),
+          undeclared: "permission.not_allowed",
+          otherEvent: "permission.not_allowed",
+          anotherWorkflows: "permission.not_allowed",
+          inherited: inherited.map(() => "permission.not_allowed"),
           forged: {
-            madeUp: "resource.not_allowed",
-            inherited: inherited.map(() => "resource.not_allowed"),
-            otherWorkflows: "resource.not_allowed",
-            undeclaredWorkflow: "resource.not_allowed",
+            madeUp: "permission.not_allowed",
+            inherited: inherited.map(() => "permission.not_allowed"),
+            otherWorkflows: "permission.not_allowed",
+            undeclaredWorkflow: "permission.not_allowed",
           },
           extraField: "contract.invalid_args",
           malformed: "contract.invalid_args",
           othersData: "contract.invalid_args",
-          noSuchRun: "resource.unavailable",
-          personsRun: "resource.unavailable",
+          noSuchRun: "permission.unavailable",
+          personsRun: "permission.unavailable",
           // The one well-formed event staged.
           wellFormed: "staged",
         },
@@ -804,15 +804,15 @@ describe(
         refusals: await refusals(),
         outbox: await outboxOf(fx.store),
       }).toStrictEqual({
-        later: "resource.not_allowed",
-        sealed: "resource.unavailable",
+        later: "permission.not_allowed",
+        sealed: "permission.unavailable",
         refusals: [
           {
             function: "jobs.rawSendEvent",
             useKind: "workflow",
             useName: "review",
             reason: "request_not_allowed",
-            errorCode: "resource.not_allowed",
+            errorCode: "permission.not_allowed",
           },
         ],
         outbox: [],
@@ -832,7 +832,7 @@ describe(
       expect({
         refused: answerOf(refused),
         outbox: await outboxOf(fx.store),
-      }).toStrictEqual({ refused: "resource.unavailable", outbox: [] });
+      }).toStrictEqual({ refused: "permission.unavailable", outbox: [] });
     });
 
     it("settles undeliverable, audited, once the run ended or the grant went before delivery, and the mutation stands", async () => {

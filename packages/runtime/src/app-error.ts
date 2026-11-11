@@ -5,8 +5,9 @@ import {
   isAppErrorCode,
   reservedErrorNamespaces,
 } from "@grasp-os/shared/function-limits";
+import { isPlainObject } from "@grasp-os/shared/json";
 
-import { isPlainObject, valueLimits } from "./value-descriptor.ts";
+import { valueLimits } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";
 
 // `AppError`: how a server function fails on purpose, with a code its

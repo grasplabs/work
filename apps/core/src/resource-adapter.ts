@@ -103,17 +103,17 @@ export const invocationSources = (): InvocationSources => {
 
 /**
  * A target's provider couldn't be reached to say what it serves now (a
- * Composio server that didn't answer): `resource.unavailable` for this
+ * Composio server that didn't answer): `permission.unavailable` for this
  * request, but nothing is known to have changed, so a held call of the
  * binding keeps waiting instead of being dropped as stale
  * (`isProviderUnreachable`).
  */
 export const providerUnreachable = () =>
-  functionErrors.create("resource.unavailable", { transient: true });
+  functionErrors.create("permission.unavailable", { transient: true });
 
 /** Whether `error` is {@link providerUnreachable}'s. */
 export const isProviderUnreachable = (error: unknown): boolean =>
-  functionErrors.codeOf(error) === "resource.unavailable" &&
+  functionErrors.codeOf(error) === "permission.unavailable" &&
   typeof error === "object" &&
   error !== null &&
   "details" in error &&

@@ -101,6 +101,7 @@
     "./kickoff": "./src/kickoff.ts",
     "./hr": "./src/hr.ts",
     "./http-connections": "./src/http-connections.ts",
+    "./http-contract": "./src/http-contract.ts",
     "./http": "./src/http.ts",
     "./identifier": "./src/identifier.ts",
     "./held-starts": "./src/held-starts.ts",

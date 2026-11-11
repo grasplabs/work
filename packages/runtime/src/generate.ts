@@ -30,7 +30,7 @@ import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 //     specialization is in its types, which come from `server/schema.ts`
 //     and `grasp.config.ts`.
 //   - `dataModel.ts` (`@server/_generated/dataModel`): the data model's
-//     types (`Doc`, `Id`, `TableName`), from the schema too.
+//     types (`Doc`, `Id`, `TableNames`), from the schema too.
 //   - `internal.ts` (`@server/_generated/internal`): the `internal` tree,
 //     for the App's own server code only.
 //   - `api.ts` (`@server/_generated/api`): the public `api`, `workflows`

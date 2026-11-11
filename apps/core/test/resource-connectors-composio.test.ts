@@ -46,7 +46,10 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
     expect({
       outcome: outcomeOf(result),
       ran: await app.crm.ran(),
-    }).toStrictEqual({ outcome: { failed: "resource.invalid_args" }, ran: [] });
+    }).toStrictEqual({
+      outcome: { failed: "permission.invalid_args" },
+      ran: [],
+    });
   });
 
   it("stop once Composio changes a tool, until an admin approves the binding again", async () => {
@@ -65,7 +68,7 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
       ranWhileDrifted,
       approvedAgain: outcomeOf(approvedAgain),
     }).toStrictEqual({
-      drifted: { failed: "resource.unavailable" },
+      drifted: { failed: "permission.unavailable" },
       ranWhileDrifted: [],
       approvedAgain: 0,
     });
@@ -82,8 +85,8 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
       notAllowed: outcomeOf(notAllowed),
       ran: await app.crm.ran(),
     }).toStrictEqual({
-      notARead: { failed: "resource.unavailable" },
-      notAllowed: { failed: "resource.unavailable" },
+      notARead: { failed: "permission.unavailable" },
+      notAllowed: { failed: "permission.unavailable" },
       ran: [],
     });
   });
@@ -92,7 +95,7 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
     const app = await contactsApp();
     await app.crm.serve({ answers: crmAnswers({ contacts: [], total: 0 }) });
     expect(outcomeOf(await call(app, "crm.contacts", {}))).toStrictEqual({
-      failed: "contract.invalid_resource_result",
+      failed: "contract.invalid_permission_result",
     });
   });
 
@@ -108,7 +111,7 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
       ranWhileHeld,
       answered: outcomeOf(answered),
     }).toStrictEqual({
-      held: { failed: "resource.awaiting_confirmation" },
+      held: { failed: "permission.awaiting_confirmation" },
       ranWhileHeld: [],
       answered: "Created contact-1",
     });
@@ -136,7 +139,7 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
       answered: outcomeOf(answered),
       ran: await app.crm.ran(),
     }).toStrictEqual({
-      whileDown: "resource.unavailable",
+      whileDown: "permission.unavailable",
       stillWaiting: [held.id],
       answered: "Created contact-1",
       ran: [{ tool: "CRM_CREATE_CONTACT", arguments: input }],
@@ -158,8 +161,8 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
       unreachable: outcomeOf(unreachable),
       ran: await app.crm.ran(),
     }).toStrictEqual({
-      open: "resource.target_invalid",
-      unreachable: { failed: "resource.unavailable" },
+      open: "permission.target_invalid",
+      unreachable: { failed: "permission.unavailable" },
       ran: [],
     });
   });

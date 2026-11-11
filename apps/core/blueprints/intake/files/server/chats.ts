@@ -106,7 +106,7 @@ export const overview = action({
       const chats = await ctx.guests.list();
       return { writable: true, chats: chats.map(listed) };
     } catch (error) {
-      if (codeOf(error) === "resource.unavailable") {
+      if (codeOf(error) === "permission.unavailable") {
         return { writable: true, chats: null };
       }
       throw error;

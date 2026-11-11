@@ -3,11 +3,7 @@
 // platform runs them with. They assert with vitest's `expect`, which
 // they import from `vitest`.
 
-export {
-  appTest,
-  GraspError,
-  TestDefinitionError,
-} from "@grasp-os/runtime/testing";
+export { appTest, GraspError } from "@grasp-os/runtime/testing";
 export type {
   AppTestContext,
   AppTestFunction,

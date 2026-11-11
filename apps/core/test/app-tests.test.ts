@@ -147,7 +147,7 @@ export default appTest(schema, {
     const owner = t.withIdentity({ name: "Ada" });
     await expect(
       owner.action(api.notes.searchHelp, { text: "leave" })
-    ).rejects.toMatchObject({ code: "resource.unavailable" });
+    ).rejects.toMatchObject({ code: "permission.unavailable" });
   },
   "the host refuses what a page's call is refused": async (t) => {
     const owner = t.withIdentity({ name: "Ada" });

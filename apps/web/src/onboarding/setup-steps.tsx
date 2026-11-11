@@ -259,6 +259,27 @@ const toolsIn = (documents: OnboardingDocument[]): string[] => [
   ...new Set(documents.flatMap((each) => each.reading.tools)),
 ];
 
+/**
+ * What Stephen says on the AI step: that he runs on a model, and what is
+ * asked of the admin, by whether one is ready for calls and whether this
+ * deployment offers Grasp's AI beside a key of their own.
+ */
+const useAiSentence = (ai: AiReadiness | null): string => {
+  const { t } = useLingui();
+  if (ai === null) {
+    return t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key.`;
+  }
+  const onGrasp = ai.listing.source === "grasp";
+  if (ai.ready) {
+    return onGrasp
+      ? t`Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready.`
+      : t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Yours is ready.`;
+  }
+  return ai.listing.grasp.available
+    ? t`Everything I read and every conversation I have runs on an AI model. Use Grasp’s AI, or your organization’s own key with a model you choose.`
+    : t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Pick your provider, paste its key and choose a model. The key is stored sealed and never shown again.`;
+};
+
 /** What the kickoff told about the company, in the language the page is in; undefined where it told nothing in it. */
 const useContextWords = (data: SetupData): ContextWords | undefined => {
   const { i18n } = useLingui();
@@ -318,12 +339,7 @@ const useHeadlines = ({
     companySentence = t`The quickest way is to connect your ${signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
   }
   // Which AI: asked for until a model is ready for calls; where core can't say, neither is said.
-  let aiSentence = t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key.`;
-  if (data.ai?.ready === false) {
-    aiSentence = t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Pick your provider, paste its key and choose a model. The key is stored sealed and never shown again.`;
-  } else if (data.ai?.ready === true) {
-    aiSentence = t`Everything I read and every conversation I have runs on an AI model, on your organization’s own key. Yours is ready.`;
-  }
+  const aiSentence = useAiSentence(data.ai);
   // Before the organization, the leads step asks for the HR platform, until the admin said which.
   const hr: Headline = {
     title: t`Which HR platform do you use?`,

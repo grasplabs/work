@@ -1,3 +1,4 @@
+import { maxWaits } from "@grasp-os/runtime/host";
 import type { BoundWorkflow } from "@grasp-os/runtime/host";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -58,9 +59,6 @@ import type { SealedSteps } from "./sealed-steps.ts";
 const decisionWaitSchema = z
   .looseObject({ kind: z.literal("decision"), id: z.string() })
   .transform((wait) => ({ id: wait.id, wait }));
-
-/** The most waits a snapshot lists, as the SDK reads them (`maxWaits`). */
-const maxWaits = 256;
 
 /** The prefix of core's own steps of a wait (host.ts, `waitStepPrefix`). */
 const waitPrefix = `${coreStepPrefix.replaceAll("$", "\\$")}wait:`;

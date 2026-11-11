@@ -29,12 +29,14 @@ export interface ShardFile {
 }
 
 /**
- * How many files a shard's runner works through at once, on average: a
- * group's work divided by how long it took, from CI's test-progress
- * artifacts (October 2026). Each of the runner's 4 Vitest workers shares
- * its CPUs with the workerd it drives, so fewer than 4.
+ * How many files a shard's runner works through at once, on average: with
+ * `projectStartSeconds` and `coreStartSeconds`, what predicted the test
+ * step of six merge-queue runs' 180 shards best, within 28 s on average
+ * and as often over as under (November 2026). Each of the runner's 6
+ * Vitest workers shares its 4 CPUs with the workerd it drives, so fewer
+ * than 6.
  */
-export const concurrentFiles = 2.5;
+export const concurrentFiles = 3.5;
 
 /**
  * The least a file is taken to take: loading it and the reset before it,
@@ -44,13 +46,31 @@ export const concurrentFiles = 2.5;
 export const fileOverheadSeconds = 1;
 
 /**
- * What starting a project's pools in a shard takes: its global setup,
- * its workers' runtimes and, for core's projects, the built-ins' install,
- * before its first file. A shard of one group that ran small files of a
- * dozen projects worked through only 1.25 files at a time (October 2026,
- * GRA-1094): counted, it keeps a project's files on few shards.
+ * What starting a project's pools in a shard takes: its global setup and
+ * its workers' runtimes, before its first file. A shard of one group that
+ * ran small files of a dozen projects worked through only 1.25 files at a
+ * time (October 2026, GRA-1094): counted, it keeps a project's files on
+ * few shards.
  */
-export const projectStartSeconds = 30;
+export const projectStartSeconds = 20;
+
+/**
+ * What starting one of core's projects takes instead: its global setup's
+ * builds, the built-ins' install and its runtime's first load of core. In
+ * six merge-queue runs a shard's first file started a median 66 s into
+ * the test step when it was core's, 38 s when it was another project's
+ * (November 2026). Counted as any other project's, the brain's two
+ * shards were put 40 s before the first group's, and so got no third,
+ * though they ended the run more often than not.
+ */
+export const coreStartSeconds = 50;
+
+/** Whether `project` is one of core's, which start core's runtime. */
+const startsCore = (project: string): boolean =>
+  project === "@grasp-os/core" || project.startsWith("@grasp-os/core:");
+
+const startOf = (project: string): number =>
+  startsCore(project) ? coreStartSeconds : projectStartSeconds;
 
 const costOf = (file: ShardFile): number =>
   Math.max(file.seconds, fileOverheadSeconds);
@@ -74,11 +94,11 @@ const workOf = (files: readonly ShardFile[]): number =>
  */
 export const shardSeconds = (files: readonly ShardFile[]): number => {
   let total = 0;
-  for (const own of Map.groupBy(files, ({ project }) => project).values()) {
+  for (const [name, own] of Map.groupBy(files, ({ project }) => project)) {
     const work = workOf(own);
     const longest = Math.max(...own.map(costOf));
     total +=
-      projectStartSeconds +
+      startOf(name) +
       (own[0]?.serial === true
         ? work
         : Math.max(work / concurrentFiles, longest));

@@ -73,8 +73,9 @@ import { brainOf } from "./ports.ts";
 // person; the shared memory files are edited through Knowledge, by those
 // who can change the Memory collection. What each context gets:
 //
-// - a person's own chat: the company's AGENTS.md and MEMORY.md, their
-//   USER.md, and the App's AGENTS.md when they're working on one;
+// - a person's own chat: the company's AGENTS.md and MEMORY.md, the
+//   agent's AGENTS.md, their USER.md, and the App's AGENTS.md when
+//   they're working on one;
 // - an agent in a direct message: the company files, the agent's
 //   AGENTS.md and that person's USER.md;
 // - an agent in a shared channel: the company files and the agent's
@@ -199,7 +200,14 @@ const wantedFor = async (
     context.appId === undefined
       ? []
       : [{ source: "app", name: "AGENTS.md", at: { appId: context.appId } }];
-  return [...companyFiles, ...app, await userFile(authority)];
+  // The agent's own file here too: what it knows of its job goes with it
+  // to every place it works, a person's own chat as much as a chat app.
+  return [
+    ...companyFiles,
+    agentFile(authority),
+    ...app,
+    await userFile(authority),
+  ];
 };
 
 /** A file found for a context: its version now, and where it is. */

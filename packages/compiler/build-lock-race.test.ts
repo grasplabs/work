@@ -11,8 +11,11 @@ import {
   wholeRelease,
 } from "./build-harness.ts";
 
-// Each build starts Node, TypeScript and three bundles.
-describe("the compiler's build", { timeout: 120_000 }, () => {
+// Two builds one after the other, each Node, TypeScript and three bundles:
+// 28 to 36 s in CI's shards, 15 s on a laptop (November 2026). Allowed
+// two and a half times CI's, so a stuck build fails here and its retry
+// starts within half the shard's step, not after 4 minutes of it.
+describe("the compiler's build", { timeout: 90_000 }, () => {
   afterEach(removeScratch);
 
   it("builds one at a time when two builds start together", async () => {

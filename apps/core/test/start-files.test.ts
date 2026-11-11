@@ -848,7 +848,7 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
         .map(({ detail }) => detail?.reason),
     }).toStrictEqual({
       // App code learns only that the input names no file it can hand.
-      anotherPersons: { refused: "resource.invalid_args" },
+      anotherPersons: { refused: "permission.invalid_args" },
       entries: [{ undeliverable: "file.not_found" }],
       runs: 0,
       refusal: ["file.not_found"],

@@ -1,5 +1,6 @@
 import { appLinksPath } from "@grasp-os/shared/app-link-limits";
 import type { LinkIntent } from "@grasp-os/shared/app-link-limits";
+import { isPlainObject } from "@grasp-os/shared/json";
 import {
   pageLeaseHeader,
   pagePersonHeader,
@@ -7,7 +8,6 @@ import {
 
 import { refusal } from "./client-shared.ts";
 import type { CoreFetch } from "./file-requests.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // The page's side of core's link channel (core's app-link-route.ts): what
 // the trusted page around a page's frame asks core before it opens a

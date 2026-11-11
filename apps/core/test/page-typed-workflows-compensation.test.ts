@@ -108,7 +108,7 @@ describe(
 
     it("shows a failed run compensating with what it failed with, then failed with that once its compensation is done", async () => {
       await expect(
-        compensatedRun({ ends: { fails: "resource.declined" } })
+        compensatedRun({ ends: { fails: "permission.declined" } })
       ).resolves.toStrictEqual({
         during: undefined,
         compensating: {
@@ -117,8 +117,8 @@ describe(
             cause: "failure",
             activity: "running",
             originalError: {
-              code: "resource.declined",
-              message: expectedMessageOf("resource.declined"),
+              code: "permission.declined",
+              message: expectedMessageOf("permission.declined"),
               category: "domain",
               retryable: false,
               requestId: null,
@@ -129,13 +129,13 @@ describe(
           canCancel: false,
           canPause: false,
         },
-        ended: { status: "failed", error: "resource.declined" },
+        ended: { status: "failed", error: "permission.declined" },
       });
     });
 
     it("ends a run whose compensation failed as workflow.compensation_failed", async () => {
       const shown = await compensatedRun({
-        ends: { fails: "resource.declined" },
+        ends: { fails: "permission.declined" },
         rollbackFails: true,
       });
       expect(shown.ended).toStrictEqual({
@@ -215,7 +215,7 @@ describe(
           }
         | undefined;
       const shown = await compensatedRun(
-        { ends: { fails: "resource.declined" } },
+        { ends: { fails: "permission.declined" } },
         undefined,
         async ({ channel, runId }) => {
           // The engine's word is lost as the cancel is admitted, as when
@@ -273,7 +273,7 @@ describe(
           terminated: 0,
         },
         // Its compensation ran to its end, never cut short.
-        ended: { status: "failed", error: "resource.declined" },
+        ended: { status: "failed", error: "permission.declined" },
         // Settled by the run's end, which no stop of its brought about.
         receipt: "superseded",
         terminated: 0,
@@ -282,7 +282,7 @@ describe(
 
     it("refuses a cancel or a stop while a run compensates, with no receipt and nothing audited as terminated", async () => {
       const shown = await compensatedRun(
-        { ends: { fails: "resource.declined" } },
+        { ends: { fails: "permission.declined" } },
         undefined,
         async ({ channel, runId, builder, workflow }) => {
           let cancel: unknown;
@@ -321,7 +321,7 @@ describe(
           terminated: 0,
         },
         // Its compensation ran to its end, its failure as it failed.
-        ended: { status: "failed", error: "resource.declined" },
+        ended: { status: "failed", error: "permission.declined" },
       });
     });
   }

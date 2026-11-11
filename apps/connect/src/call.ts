@@ -379,13 +379,15 @@ const actionFor = async (
  * Composio every call of such a context is a side effect (policy.ts). A
  * workflow run's other side effects come
  * from reviewed code or pass a decision, and run. The held action a
- * person just confirmed (`held`) runs.
+ * person just confirmed (`held`) runs. Every side effect of a turn nobody
+ * was there for (`unattended`) is held, whoever makes it.
  */
 const mustHold = (
-  { restricted, authority }: CapabilityClaims,
+  { restricted, unattended, authority }: CapabilityClaims,
   held: HeldAction | undefined
 ): boolean =>
-  held === undefined && (restricted || authority.mode === "interactive");
+  held === undefined &&
+  (restricted || unattended || authority.mode === "interactive");
 
 /**
  * The connection a call may use, as `usableConnection` says; for a held
@@ -622,14 +624,20 @@ export const recoverableNow = async (env: Env, row: Row): Promise<boolean> => {
 /**
  * Refuses a side effect of work that may only read (`readOnly`), before it
  * is held or run: a read can't turn into a change further on, whatever
- * the code that called it asks.
+ * the code that called it asks. Refuses one of a turn nobody was there for
+ * (`unattended`) that carries no end for what is held.
  */
 const requireAllowedEffect = (
-  { readOnly }: CapabilityClaims,
+  { readOnly, unattended, heldUntil }: CapabilityClaims,
   sideEffect: boolean
 ): void => {
   if (sideEffect && readOnly) {
     throw connectErrors.create("connect.read_only");
+  }
+  // What nobody was there to ask for ends with the company's day: one
+  // signed without an end is refused, never held for good.
+  if (sideEffect && unattended && heldUntil === undefined) {
+    throw connectErrors.create("connect.invalid");
   }
 };
 
