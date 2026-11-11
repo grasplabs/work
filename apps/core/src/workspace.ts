@@ -1922,6 +1922,21 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * As `askUnattended`, but resolves once the turn is under way, as `send`
+   * does: what wakes an agent doesn't wait for its answer. Refused as
+   * `ask` refuses a turn that can't start.
+   */
+  async sendUnattended(chatId: unknown, question: Question): Promise<void> {
+    const chat = this.#chat(chatId);
+    const started = Promise.withResolvers<boolean>();
+    const ended = this.#sentTurn(chat, question, started, true);
+    this.#sent.add(ended);
+    void this.#forget(ended);
+    await started.promise;
+    await this.#alarmBy(Date.now());
+  }
+
+  /**
    * The turn `send` started: `started` resolves once it is under way, or
    * rejects with why it couldn't start. Why one under way stopped short
    * goes to the chat's watchers.
@@ -1929,14 +1944,22 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurn(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>
+    started: PromiseWithResolvers<boolean>,
+    unattended?: boolean
   ): Promise<void> {
     let underWay = false;
     try {
-      await this.#turn(chat, question, () => {
-        underWay = true;
-        started.resolve(true);
-      });
+      await this.#turn(
+        chat,
+        question,
+        () => {
+          underWay = true;
+          started.resolve(true);
+        },
+        undefined,
+        undefined,
+        unattended
+      );
     } catch (error) {
       if (!underWay) {
         started.reject(error);

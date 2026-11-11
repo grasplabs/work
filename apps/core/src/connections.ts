@@ -1,4 +1,4 @@
-import type { Agent, AgentSettings } from "@grasp-os/shared/agents";
+import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   catalogLogoPath,
@@ -53,6 +53,12 @@ import {
   setAgentReach,
   setAgentToolClass,
 } from "./agent-builder.ts";
+import {
+  deleteAgentWake,
+  listAgentWakes,
+  makeAgentWake,
+  setAgentWakePaused,
+} from "./agent-wakes.ts";
 import { pointApp, readAppPointers } from "./app-pointers.ts";
 import {
   auditedBatch,
@@ -752,6 +758,33 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async setAgentPaused(agentId: unknown, paused: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setAgentPaused(this.#env, identity, agentId, paused);
+    });
+  }
+
+  async agentWakes(agentId: unknown): Promise<AgentWake[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentWakes(this.#env, identity, agentId)
+    );
+  }
+
+  async makeAgentWake(agentId: unknown, input: unknown): Promise<AgentWake> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await makeAgentWake(this.#env, identity, agentId, input)
+    );
+  }
+
+  async setAgentWakePaused(wakeId: unknown, paused: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentWakePaused(this.#env, identity, wakeId, paused);
+    });
+  }
+
+  async deleteAgentWake(wakeId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await deleteAgentWake(this.#env, identity, wakeId);
     });
   }
 

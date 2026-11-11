@@ -213,6 +213,10 @@ msgstr "{changeCount, plural, one {# cambio por publicar} other {# cambios por p
 msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgstr "Entonces, {chosen}. Esto lleva unos {minutes} minutos. ¿Empezamos?"
 
+#: src/settings/agents-settings.tsx
+msgid "{className}, for {name}"
+msgstr "{className}, para {name}"
+
 #: src/apps/resource-bindings.tsx
 msgid "{collection}: {name}"
 msgstr "{collection}: {name}"
@@ -779,6 +783,10 @@ msgstr "{name} se nombra, pero aún no se ha visto en uso."
 #: src/apps/field-editor.tsx
 msgid "{name} is now at place {place}."
 msgstr "{name} está ahora en el puesto {place}."
+
+#: src/settings/agents-settings.tsx
+msgid "{name} is on"
+msgstr "{name} está activo"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
@@ -2040,6 +2048,12 @@ msgstr "Agente {agentId} para {person}, en {app}"
 msgid "Agent for {person}"
 msgstr "Agente para {person}"
 
+#: src/routes/_shell.settings.agents.tsx
+#: src/routes/_shell.settings.tsx
+#: src/settings/agents-settings.tsx
+msgid "Agents"
+msgstr "Agentes"
+
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
 msgstr "Los agentes leen esto antes de mirar dentro."
@@ -2643,6 +2657,10 @@ msgstr "A fecha de {date}."
 #: src/apps/access-view.tsx
 msgid "As the App's code sets it"
 msgstr "Como lo define el código de la App"
+
+#: src/settings/agents-settings.tsx
+msgid "As the company has it"
+msgstr "Como lo tiene la empresa"
 
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
@@ -3720,6 +3738,7 @@ msgstr "Borrar filtros"
 #: src/onboarding/place-picker.tsx
 #: src/pages/app-panel.tsx
 #: src/routes/_shell.index.tsx
+#: src/settings/agents-settings.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
 #: src/shown-once.tsx
@@ -4885,6 +4904,10 @@ msgstr "Descartó un evento que ningún flujo de trabajo pudo recibir"
 msgid "Dublin"
 msgstr "Dublín"
 
+#: src/settings/agents-settings.tsx
+msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it. A new agent starts with nobody and nothing."
+msgstr "Cada agente tiene su propio nombre y su propia tarea, responde solo a las personas que elijas y hace solo lo que le permitas. Un agente nuevo empieza sin nadie y sin nada."
+
 #: src/connections/http-connections.tsx
 msgid "Each allows everything under it; / allows all paths."
 msgstr "Cada uno permite todo lo que hay debajo; / permite todas las rutas."
@@ -4892,6 +4915,10 @@ msgstr "Cada uno permite todo lo que hay debajo; / permite todas las rutas."
 #: src/settings/erasures.tsx
 msgid "Each area is erased on its own. One that fails is tried again until it is done, even after you close this."
 msgstr "Cada área se borra por separado. Si una falla, se vuelve a intentar hasta completarla, incluso después de cerrar esto."
+
+#: src/settings/agents-settings.tsx
+msgid "Each as the company has it, or for fewer people. Never for more."
+msgstr "Cada una como la tiene la empresa, o para menos personas. Nunca para más."
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Each event of this type from the source starts a run, with its data as the input."
@@ -6522,6 +6549,10 @@ msgstr "Entrada"
 msgid "Input, as JSON"
 msgstr "Entrada, en JSON"
 
+#: src/settings/agents-settings.tsx
+msgid "Instructions"
+msgstr "Instrucciones"
+
 #: src/apps/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
@@ -6763,6 +6794,10 @@ msgstr "No inicia más ejecuciones. Las que ya inició continúan. Esto no se pu
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "It starts nothing until an admin allows it to start this workflow."
 msgstr "No inicia nada hasta que un administrador le permita iniciar este flujo de trabajo."
+
+#: src/settings/agents-settings.tsx
+msgid "It starts on, reaching nobody and with nothing it may do. Say whom it answers once it is made."
+msgstr "Empieza activo, sin llegar a nadie y sin nada que pueda hacer. Di a quién responde una vez creado."
 
 #: src/knowledge/new-document.tsx
 msgid "It starts with its name as a heading; write the rest in the editor."
@@ -7542,6 +7577,10 @@ msgstr "Convertirlo en un flujo de trabajo"
 msgid "Make admin"
 msgstr "Hacer administrador"
 
+#: src/settings/agents-settings.tsx
+msgid "Make agent"
+msgstr "Crear agente"
+
 #: src/apps/app-versions.tsx
 msgid "Make current"
 msgstr "Hacer actual"
@@ -7867,6 +7906,7 @@ msgstr "En silencio"
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/agents-settings.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Name"
@@ -7967,6 +8007,10 @@ msgstr "Nuevo"
 msgctxt "make something in a project"
 msgid "New"
 msgstr "Nuevo"
+
+#: src/settings/agents-settings.tsx
+msgid "New agent"
+msgstr "Nuevo agente"
 
 #: src/apps/apps-overview.tsx
 #: src/routes/_shell.apps.new.tsx
@@ -8490,6 +8534,10 @@ msgstr "Nadie con ese nombre."
 msgid "Nobody yet"
 msgstr "Nadie todavía"
 
+#: src/settings/agents-settings.tsx
+msgid "Nobody yet, until you choose. People outside it can't ask it anything."
+msgstr "Nadie todavía, hasta que elijas. Quien quede fuera no puede preguntarle nada."
+
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/settings/ai-providers.tsx
 msgid "None"
@@ -8953,6 +9001,7 @@ msgctxt "inbox sort"
 msgid "Oldest first"
 msgstr "Más antiguos primero"
 
+#: src/settings/agents-settings.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
 msgid "On"
@@ -9049,6 +9098,10 @@ msgstr "En cuanto tenga una versión, se puede copiar."
 #: src/knowledge/purge.tsx
 msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
 msgstr "Uno por línea, hasta {most}: un nombre, cada otra forma de él, una dirección de correo. Un término se elimina como palabra completa, sin importar mayúsculas, así que añade las formas unidas como términos propios."
+
+#: src/settings/agents-settings.tsx
+msgid "One line, such as: chases unpaid invoices."
+msgstr "Una línea, por ejemplo: reclama facturas impagadas."
 
 #: src/interview/voice-bar.tsx
 msgid "One moment"
@@ -9265,6 +9318,10 @@ msgstr "Abrir en el espacio de trabajo de la App"
 #: src/dashboard/in-inbox.tsx
 msgid "Open in the inbox: {title}"
 msgstr "Abrir en la bandeja de entrada: {title}"
+
+#: src/settings/agents-settings.tsx
+msgid "Open its settings"
+msgstr "Abrir sus ajustes"
 
 #: src/chat/answer-markdown.tsx
 msgid "Open link"
@@ -9607,6 +9664,7 @@ msgstr "Pausarlo"
 msgid "Pause Stephen outside Grasp?"
 msgstr "¿Pausar a Stephen fuera de Grasp?"
 
+#: src/settings/agents-settings.tsx
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "En pausa"
@@ -9626,9 +9684,17 @@ msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "En pausa"
 
+#: src/settings/agents-settings.tsx
+msgid "Paused · answers nobody"
+msgstr "En pausa · no responde a nadie"
+
 #: src/settings/stephen-card.tsx
 msgid "Paused outside Grasp"
 msgstr "En pausa fuera de Grasp"
+
+#: src/settings/agents-settings.tsx
+msgid "Paused, it answers nobody anywhere."
+msgstr "En pausa, no responde a nadie en ningún sitio."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
@@ -11219,6 +11285,7 @@ msgstr "Sam, como todos los que usan la App, ve todos los registros de {table}."
 #: src/chat/chat-more.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
+#: src/settings/agents-settings.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Guardar"
@@ -14907,10 +14974,18 @@ msgstr "Aquello a lo que está vinculado ya no puede atenderlo: se revocó su pe
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Aquello a lo que está vinculado ha cambiado desde que se aprobó la vinculación. Vincúlalo de nuevo cuando hayas comprobado que sigue encajando."
 
+#: src/settings/agents-settings.tsx
+msgid "What it is for"
+msgstr "Para qué sirve"
+
 #: src/apps/app-settings.tsx
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "Para qué sirve"
+
+#: src/settings/agents-settings.tsx
+msgid "What it may do"
+msgstr "Qué puede hacer"
 
 #: src/apps/app-access-requests.tsx
 msgid "What it needs"
@@ -14927,6 +15002,10 @@ msgstr "Qué devolvió"
 #: src/brain/share-record.tsx
 msgid "What it says"
 msgstr "Lo que dice"
+
+#: src/settings/agents-settings.tsx
+msgid "What it should know and how it should work. Grasp's own rules always hold over these."
+msgstr "Qué debe saber y cómo debe trabajar. Las reglas de Grasp siempre están por encima de estas."
 
 #: src/brain/memory-page.tsx
 msgid "What it should say"
@@ -15361,6 +15440,18 @@ msgstr "¿Quién lo dirige?"
 msgid "Who may read it"
 msgstr "Quién puede leerla"
 
+#: src/settings/agents-settings.tsx
+msgid "Who may use {name}"
+msgstr "Quién puede usar a {name}"
+
+#: src/settings/agents-settings.tsx
+msgid "Who may use it"
+msgstr "Quién puede usarlo"
+
+#: src/settings/agents-settings.tsx
+msgid "Who may use it, and what it may do"
+msgstr "Quién puede usarlo y qué puede hacer"
+
 #: src/apps/app-settings.tsx
 msgid "Who opens the App besides you, and as what."
 msgstr "Quién abre la App además de ti, y con qué papel."
@@ -15392,6 +15483,10 @@ msgstr "¿Quién es quién en tu empresa?"
 #: src/chat/builds.tsx
 msgid "whoever added the row"
 msgstr "quien añadió la fila"
+
+#: src/settings/agents-settings.tsx
+msgid "Whom the company's first agent reaches, and what it may do, is set in one place."
+msgstr "A quién llega el primer agente de la empresa y qué puede hacer se define en un solo lugar."
 
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx

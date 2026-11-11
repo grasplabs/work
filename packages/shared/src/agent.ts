@@ -16,6 +16,10 @@ export const agentErrors = defineErrorFamily({
   "agent.record_invalid": "That isn't an agent's name, job or instructions.",
   "agent.unknown": "The company has no such agent.",
   "agent.name_taken": "Another agent already has that name.",
+  // An agent's wake-ups (core's agent-wakes.ts).
+  "agent.wake_invalid":
+    "That isn't a wake-up: it needs a schedule that names a time to come, a person of the company, and what to ask.",
+  "agent.wake_unknown": "The agent has no such wake-up.",
   "agent.settings_elsewhere":
     "Who reaches the company's first agent, and what it may do, is set in Settings › Stephen.",
   "agent.unattended":

@@ -65,7 +65,7 @@ import { StephenCard } from "./stephen-card.tsx";
 // it; Grasp staff only read it. The prototype's Microsoft 365 demo (its
 // register, leave and expenses) stays behind.
 
-const classNames = {
+export const classNames = {
   "read-own": msg`Read their own`,
   "read-company": msg`Read the company's`,
   "change-own": msg`Change their own`,
@@ -93,7 +93,7 @@ const appNames: Readonly<Record<string, string>> = {
 const addable = ["teams", "slack"] as const;
 
 /** One setting's row: its name and what it means, then its control. */
-const Row = ({
+export const Row = ({
   name,
   description,
   children,
@@ -126,7 +126,7 @@ const stateDot = {
  * A place's fact has a dot before it: filled where he is on there, hollow
  * where he is off.
  */
-const OpenRow = ({
+export const OpenRow = ({
   logo,
   name,
   line,
