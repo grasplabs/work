@@ -34,6 +34,27 @@ export const liveStatus = async (run: string): Promise<string> => {
 };
 
 /**
+ * A run's status once it reads as `wanted`, or what it reads as after a
+ * few seconds if it never does. The engine says a sleep began a moment
+ * before it reports the run as waiting, so a status read at once after
+ * {@link sleeping} can still be `running` on a slow runner.
+ */
+export const statusOnce = async (
+  run: string,
+  wanted: string
+): Promise<string> => {
+  const until = Date.now() + 5000;
+  let status = await liveStatus(run);
+  while (status !== wanted && Date.now() < until) {
+    // oxlint-disable-next-line no-await-in-loop -- polled, one read after another
+    await scheduler.wait(50);
+    // oxlint-disable-next-line no-await-in-loop -- polled, one read after another
+    status = await liveStatus(run);
+  }
+  return status;
+};
+
+/**
  * Stops a run's activation, as a crash or a deploy does; resuming it runs
  * the workflow again from its start, loaded anew, finished steps replayed.
  * The engine lets a run stop at a safe boundary: between steps, or while
