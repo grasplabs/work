@@ -32,7 +32,7 @@ const idp = mockIdp();
 const word = () => `w${unique()}`;
 
 /** What core or the store says when it refuses an input. */
-const refused = /^(?:The Brain refused it|Unknown readers)/u;
+const refused = /^(?:The Brain refused it|Refused)/u;
 
 /** A member of the organization, signed in. */
 const person = async (): Promise<string> => {
@@ -337,6 +337,11 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
       { kind: "everyone" },
       { kind: "audience", group: "everyone" },
       { kind: "owner", personId: "" },
+      { kind: "owner" },
+      { kind: "owner", personId: reader, teamId: "extra" },
+      { kind: "team", teamId: "" },
+      { kind: "team" },
+      { kind: "none", personId: reader },
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
       await expect(addUnchecked(secret, readers)).rejects.toThrow(refused);
@@ -346,6 +351,26 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     ).rejects.toThrow(refused);
 
     await expect(recalledAs(reader, secret)).resolves.toStrictEqual([]);
+  });
+
+  it("refuses a recall for an empty or missing person, never answering it with nothing", async () => {
+    const asGivenIds: unknown[] = ["", undefined];
+    for (const personId of asGivenIds) {
+      // SAFETY: what the type rules out, as a call from outside TypeScript
+      // could make it.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const asGiven = personId as string;
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await expect(recallAs(env, asGiven, "anything")).rejects.toThrow(refused);
+    }
+  });
+
+  it("refuses a recall when core's own records hold a team with an empty ID", async () => {
+    const reader = await person();
+    await newTeam("");
+    await join("", reader);
+
+    await expect(recalledAs(reader, "anything")).rejects.toThrow(refused);
   });
 
   it("holds to its bounds: as many teams as a reader may have, and no more", async () => {

@@ -1,4 +1,4 @@
-import { brainOf } from "@grasp-os/brain-next/contract";
+import { brainOf, principalMaxLength } from "@grasp-os/brain-next/contract";
 import type {
   Access,
   Brain,
@@ -7,6 +7,7 @@ import type {
   SourceId,
 } from "@grasp-os/brain-next/contract";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import { inJurisdiction } from "./durable-objects.ts";
@@ -17,12 +18,43 @@ import { inJurisdiction } from "./durable-objects.ts";
 // recalls through the two functions here, naming people and teams; the
 // Brain's reader is made only here, from core's own records read at each
 // recall, never from what a caller claims or hands in ready-made.
+//
+// Every argument is checked here, strictly, before anything is named for
+// the Brain: an empty or missing ID would otherwise become a principal
+// ("team:", "team:undefined") the Brain can't tell from a real one, and
+// a source nobody can reach would be added without a word.
+
+/** A team's group name starts with this; the rest is the team's ID. */
+const teamPrefix = "team:";
+
+/** A person's or a team's ID, as core passes it: never empty. */
+const idSchema = z
+  .string()
+  .min(1)
+  .max(principalMaxLength - teamPrefix.length);
+
+const sourceReadersSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
+  z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
+  z.strictObject({ kind: z.literal("none") }),
+]);
 
 /** Who may read a source, as core names them. */
-export type SourceReaders =
-  | { kind: "owner"; personId: string }
-  | { kind: "team"; teamId: string }
-  | { kind: "none" };
+export type SourceReaders = z.infer<typeof sourceReadersSchema>;
+
+const newSourceSchema = z.strictObject({
+  text: z.string(),
+  readers: sourceReadersSchema,
+});
+
+/** `input` as `schema` reads it, or an error naming what was wrong. */
+const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
+  const result = schema.safeParse(input);
+  if (!result.success) {
+    throw new Error(`Refused: ${z.prettifyError(result.error)}`);
+  }
+  return result.data;
+};
 
 type BrainEnv = Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">;
 
@@ -32,9 +64,11 @@ const brain = (env: BrainEnv): Brain =>
 
 /**
  * A team, as the Brain's group: named by kind, so no other kind of group
- * core names later can take its name.
+ * core names later can take its name. Its ID is checked first, whether a
+ * caller passed it or core's own records hold it.
  */
-const teamGroup = (teamId: string): string => `team:${teamId}`;
+const teamGroup = (teamId: string): string =>
+  `${teamPrefix}${checked(idSchema, teamId)}`;
 
 const accessOf = (readers: SourceReaders): Access => {
   switch (readers.kind) {
@@ -61,7 +95,7 @@ const readerOf = async (
   env: Pick<Env, "DB">,
   personId: string
 ): Promise<Reader> => {
-  const member = await memberOf(env.DB, personId);
+  const member = await memberOf(env.DB, checked(idSchema, personId));
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
@@ -74,14 +108,16 @@ const readerOf = async (
 /** Adds `text` to the Brain as a source `readers` may read. */
 export const addSource = async (
   env: BrainEnv,
-  { text, readers }: { text: string; readers: SourceReaders }
-): Promise<{ id: SourceId }> =>
-  await brain(env).addSource({ text, access: accessOf(readers) });
+  source: { text: string; readers: SourceReaders }
+): Promise<{ id: SourceId }> => {
+  const { text, readers } = checked(newSourceSchema, source);
+  return await brain(env).addSource({ text, access: accessOf(readers) });
+};
 
 /**
  * What the member `personId` may read of the sources holding `question`'s
  * words, best first, as core counts them now. Refused once they are no
- * longer a member.
+ * longer a member, or when `personId` isn't an ID.
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB">,
