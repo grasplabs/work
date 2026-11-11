@@ -3,10 +3,13 @@
  * what apps/core/test/brain-eval.test.ts printed, one result per question.
  * scripts/brain-eval.ts runs it and prints and keeps what these return.
  *
- * Retrieval only, no model: is the question's source among the first
+ * Retrieval only, no model: is the passage that answers the question (a
+ * chunk of its source holding the quote) among the first
  * {@link resultBudget} results (recall at that budget: each question has
- * one source, so it is whether it was found), and where (the reciprocal of
- * its rank, MRR).
+ * one such passage, so it is whether it was found), and where (the
+ * reciprocal of its rank, MRR). For questions over long documents, cut
+ * into several passages, also how often the right source was returned but
+ * not the passage that answers.
  *
  * Two kinds of uncertainty, each where it fits:
  * - Recall is 0 or 1 per question, so whether one arm or run beats another
@@ -36,7 +39,15 @@ export const latencyTargetsMs = { p50: 400, p95: 1000 } as const;
 
 const languageSchema = z.enum(brainEvalLanguages);
 
-/** One question's result, as the run printed it. */
+const rankSchema = z.int().positive().nullable();
+
+/**
+ * One question's result, as the run printed it. `long`, `lookalike` and
+ * `sourceRank` came with long documents: a run written before them lacks
+ * them and still parses, as over sources of one passage with no source
+ * rank, since an earlier run is only read for the Brain's rank per
+ * question.
+ */
 export const questionResultSchema = z.object({
   id: z.string(),
   digest: z.string(),
@@ -44,14 +55,20 @@ export const questionResultSchema = z.object({
   sourceLanguage: languageSchema.nullable(),
   expects: z.enum(["answer", "absent", "hidden"]),
   way: z.enum(brainEvalWays).nullable(),
+  /** The question's source is a long document, cut into several passages. */
+  long: z.boolean().default(false),
+  /** The answer names a look-alike passage of the same document. */
+  lookalike: z.boolean().default(false),
   brain: z.object({
-    rank: z.int().positive().nullable(),
+    rank: rankSchema,
+    sourceRank: rankSchema.default(null),
     returned: z.int().nonnegative(),
     leaks: z.array(z.string()),
     ms: z.number().nonnegative(),
   }),
   grep: z.object({
-    rank: z.int().positive().nullable(),
+    rank: rankSchema,
+    sourceRank: rankSchema.default(null),
     returned: z.int().nonnegative(),
   }),
 });
@@ -62,6 +79,8 @@ export const runInfoSchema = z.object({
   set: z.string(),
   setDigest: z.string(),
   sources: z.int(),
+  longDocuments: z.int().optional(),
+  passages: z.int().optional(),
   questions: z.int(),
   recallLimit: z.int(),
 });
@@ -169,10 +188,17 @@ const signTestOf = (pairs: readonly (readonly [boolean, boolean])[]) =>
 export interface ArmScore {
   recall: Estimate | null;
   mrr: Estimate | null;
+  /**
+   * How often a passage of the right source was among the first
+   * {@link resultBudget} results but the one that answers wasn't.
+   */
+  sourceNotPassage: Estimate | null;
 }
 
 export interface GroupScore {
   group: string;
+  /** Whether the group holds questions over long documents. */
+  long: boolean;
   questions: number;
   brain: ArmScore;
   grep: ArmScore;
@@ -186,19 +212,32 @@ export interface GroupScore {
 
 const scoreGroup = (
   group: string,
+  long: boolean,
   results: readonly QuestionResult[]
 ): GroupScore => {
   const recallOf = (rank: number | null) => (found(rank) ? 1 : 0);
+  const sourceNotPassageOf = ({
+    rank,
+    sourceRank,
+  }: QuestionResult["brain" | "grep"]) =>
+    found(sourceRank) && !found(rank) ? 1 : 0;
   return {
     group,
+    long,
     questions: results.length,
     brain: {
       recall: estimate(results.map(({ brain }) => recallOf(brain.rank))),
       mrr: estimate(results.map(({ brain }) => reciprocal(brain.rank))),
+      sourceNotPassage: estimate(
+        results.map(({ brain }) => sourceNotPassageOf(brain))
+      ),
     },
     grep: {
       recall: estimate(results.map(({ grep }) => recallOf(grep.rank))),
       mrr: estimate(results.map(({ grep }) => reciprocal(grep.rank))),
+      sourceNotPassage: estimate(
+        results.map(({ grep }) => sourceNotPassageOf(grep))
+      ),
     },
     brainOverGrep: signTestOf(
       results.map(({ brain, grep }) => [found(brain.rank), found(grep.rank)])
@@ -227,31 +266,62 @@ const languageNames = {
 const sameLanguage = (result: QuestionResult): boolean =>
   result.language === result.sourceLanguage;
 
+const shortSource = (result: QuestionResult): boolean => !result.long;
+
 /**
  * The groups a run is reported in, each a filter over answerable
- * questions: all of them; asked in the language of their source, pooled
- * and per language; across languages; and each way of finding a source,
- * in the same language only, so a way's group measures that way alone.
+ * questions, and whether it holds questions over long documents (`long`).
+ * Over sources of one passage: all of them; asked in the language of their
+ * source, pooled and per language; across languages; and each way of
+ * finding a source, in the same language only, so a way's group measures
+ * that way alone. Over long documents, apart: every question over one, in
+ * any language and any way, and those whose answer has a look-alike. The
+ * ways and languages were measured on sources of one passage, and mixing
+ * in passages of long documents, where the right source is no longer
+ * enough, would blur what each of them measures.
  */
 export const groups: readonly {
   name: string;
+  long: boolean;
   has: (result: QuestionResult) => boolean;
 }[] = [
-  { name: "All answerable", has: () => true },
-  { name: "Same language", has: sameLanguage },
+  { name: "All answerable", long: false, has: shortSource },
+  {
+    name: "Same language",
+    long: false,
+    has: (result: QuestionResult) =>
+      shortSource(result) && sameLanguage(result),
+  },
   ...brainEvalLanguages.map((language) => ({
     name: languageNames[language],
+    long: false,
     has: (result: QuestionResult) =>
-      sameLanguage(result) && result.language === language,
+      shortSource(result) &&
+      sameLanguage(result) &&
+      result.language === language,
   })),
   {
     name: "Across languages",
-    has: (result: QuestionResult) => !sameLanguage(result),
+    long: false,
+    has: (result: QuestionResult) =>
+      shortSource(result) && !sameLanguage(result),
   },
   ...brainEvalWays.map((way) => ({
     name: `Way: ${way}`,
-    has: (result: QuestionResult) => sameLanguage(result) && result.way === way,
+    long: false,
+    has: (result: QuestionResult) =>
+      shortSource(result) && sameLanguage(result) && result.way === way,
   })),
+  {
+    name: "Long documents",
+    long: true,
+    has: (result: QuestionResult) => result.long,
+  },
+  {
+    name: "Long documents: look-alike",
+    long: true,
+    has: (result: QuestionResult) => result.long && result.lookalike,
+  },
 ];
 
 export interface Latency {
@@ -281,6 +351,7 @@ const latencyOf = (results: readonly QuestionResult[]): Latency | null => {
 };
 
 export interface Summary {
+  /** Every group's score, in the order of {@link groups}. */
   groups: GroupScore[];
   /** Questions whose answer is nowhere: how often each returned nothing. */
   absent: { questions: number; brainEmpty: number; grepEmpty: number };
@@ -296,8 +367,8 @@ export const summarize = (results: readonly QuestionResult[]): Summary => {
   const absent = results.filter(({ expects }) => expects === "absent");
   const hidden = results.filter(({ expects }) => expects === "hidden");
   return {
-    groups: groups.map(({ name, has }) =>
-      scoreGroup(name, answerable.filter(has))
+    groups: groups.map(({ name, long, has }) =>
+      scoreGroup(name, long, answerable.filter(has))
     ),
     absent: {
       questions: absent.length,
@@ -410,42 +481,61 @@ const table = (
 
 const judgedLine = `Each of the ${groups.length} groups is judged on its own at p < ${significance}, with no correction across them: with this many, one group flagged alone may be chance.`;
 
+const qualityHeader = [
+  "Group",
+  "n",
+  `Brain R@${resultBudget}`,
+  `grep R@${resultBudget}`,
+  `Δ R@${resultBudget} [95%]`,
+  "only Brain/grep",
+  "p",
+  "vs grep",
+  "Brain MRR",
+  "grep MRR",
+  "Δ MRR [95%]",
+] as const;
+
+const qualityRow = (group: GroupScore): string[] => [
+  group.group,
+  String(group.questions),
+  withMargin(group.brain.recall),
+  withMargin(group.grep.recall),
+  signed(group.recallDifference),
+  `${group.brainOverGrep.gained}/${group.brainOverGrep.lost}`,
+  pOf(group.brainOverGrep),
+  group.brainOverGrep.verdict,
+  withMargin(group.brain.mrr),
+  withMargin(group.grep.mrr),
+  signed(group.mrrDifference),
+];
+
 /** The run's numbers as compact text tables. */
 export const report = (
   summary: Summary,
   changes: readonly GroupChange[] | null
 ): string => {
   const quality = table(
-    [
-      "Group",
-      "n",
-      `Brain R@${resultBudget}`,
-      `grep R@${resultBudget}`,
-      `Δ R@${resultBudget} [95%]`,
-      "only Brain/grep",
-      "p",
-      "vs grep",
-      "Brain MRR",
-      "grep MRR",
-      "Δ MRR [95%]",
-    ],
-    summary.groups.map((group) => [
-      group.group,
-      String(group.questions),
-      withMargin(group.brain.recall),
-      withMargin(group.grep.recall),
-      signed(group.recallDifference),
-      `${group.brainOverGrep.gained}/${group.brainOverGrep.lost}`,
-      pOf(group.brainOverGrep),
-      group.brainOverGrep.verdict,
-      withMargin(group.brain.mrr),
-      withMargin(group.grep.mrr),
-      signed(group.mrrDifference),
-    ])
+    qualityHeader,
+    summary.groups.filter(({ long }) => !long).map(qualityRow)
+  );
+  const longQuality = table(
+    [...qualityHeader, "Brain source, not passage", "grep source, not passage"],
+    summary.groups
+      .filter(({ long }) => long)
+      .map((group) => [
+        ...qualityRow(group),
+        withMargin(group.brain.sourceNotPassage),
+        withMargin(group.grep.sourceNotPassage),
+      ])
   );
   const { absent, hidden, leaks, latency } = summary;
   const lines = [
     quality,
+    "",
+    longQuality,
+    "",
+    `Long documents: questions over a source the Brain cuts into several passages, in any language and any way; such a question is found only when the passage that answers it is returned. "Source, not passage": a passage of the right source among the first ${resultBudget} results, but not the one that answers.`,
+    "Every other group holds only questions over sources of one passage. grep ranks the same passages the Brain's chunker cuts.",
     "",
     `R@${resultBudget} ± and Δ [95%]: seeded bootstrap over questions, for size. "vs grep": exact sign test (McNemar) on the questions only one of them found. MRR: paired bootstrap, not tested.`,
     judgedLine,

@@ -6,10 +6,14 @@
  * language, for finance and IT, is English.
  *
  * Its sources are what a company's Brain holds: handbook pages, emails,
- * tickets and meeting notes, each with who may read it. Its questions ask
- * for one source each, in the five languages and across them, plus
- * questions whose answer is nowhere and questions whose answer is only in
- * a source the asker may not read.
+ * tickets and meeting notes, each with who may read it. Most are short,
+ * one passage each as the Brain cuts them; the long documents (GRA-1782:
+ * handbook chapters, policies with numbered sections, email threads,
+ * minutes of several pages, retrospectives, in the `*-long*.ts` files) are
+ * cut into several, and a question over one is answered by one passage of
+ * it. Its questions ask for one source each, in the five languages and
+ * across them, plus questions whose answer is nowhere and questions whose
+ * answer is only in a source the asker may not read.
  *
  * How it was made: written once for this evaluation, in November 2026,
  * drafted with a language model directly in each language, never
@@ -28,7 +32,7 @@
  */
 
 /** Bumped with any change to the company, its sources or its questions. */
-export const brainEvalSetVersion = "2026-11-11.2";
+export const brainEvalSetVersion = "2026-11-11.3";
 
 export const brainEvalLanguages = ["en", "nl", "de", "fr", "es"] as const;
 export type BrainEvalLanguage = (typeof brainEvalLanguages)[number];
@@ -97,14 +101,25 @@ export type BrainEvalWay = (typeof brainEvalWays)[number];
 
 /**
  * What a question expects: the source that answers it, and the passage in
- * it that does (`quote`, unique in the set: a later recall that returns
- * passages instead of whole sources is scored on it); no answer, since
- * none is in the set (`absent`); or nothing that reveals the answer, which
- * is only in a source the asker may not read (`hidden`: none of `secrets`
- * may reach them).
+ * it that does (`quote`, unique in the set and whole in one passage of its
+ * source: recall returns passages, and only the one holding it counts);
+ * no answer, since none is in the set (`absent`); or nothing that reveals
+ * the answer, which is only in a source the asker may not read (`hidden`:
+ * none of `secrets` may reach them).
+ *
+ * An answer in a long document may name a `lookalike`: words of another
+ * passage of the same document that reads like the answer and isn't (the
+ * same rule for another site, a proposal the thread later changed). That
+ * passage must not count, and doesn't: it lacks the quote.
  */
 export type BrainEvalExpects =
-  | { kind: "answer"; way: BrainEvalWay; source: string; quote: string }
+  | {
+      kind: "answer";
+      way: BrainEvalWay;
+      source: string;
+      quote: string;
+      lookalike?: string;
+    }
   | { kind: "absent" }
   | { kind: "hidden"; source: string; secrets: readonly string[] };
 
@@ -121,12 +136,22 @@ export interface BrainEvalQuestion {
 /** The default asker, in every team. */
 export const brainEvalDefaultAsker: BrainEvalPerson = "eva";
 
-/** Expects `source` to answer, at `quote`, found the `way` given. */
+/**
+ * Expects `source` to answer, at `quote`, found the `way` given; with
+ * `lookalike`, another passage of it holds those words and must not count.
+ */
 export const answer = (
   way: BrainEvalWay,
   source: string,
-  quote: string
-): BrainEvalExpects => ({ kind: "answer", way, source, quote });
+  quote: string,
+  lookalike?: string
+): BrainEvalExpects => ({
+  kind: "answer",
+  way,
+  source,
+  quote,
+  ...(lookalike === undefined ? {} : { lookalike }),
+});
 
 /** Expects no answer: none is in the set. */
 export const absent: BrainEvalExpects = { kind: "absent" };

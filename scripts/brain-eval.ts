@@ -1,8 +1,8 @@
 /**
- * The Brain evaluation (GRA-1726): how well recall finds the right source,
- * per language, across languages and in the set written in Dutch, against
- * plain text search, with a margin of error, and how long each recall
- * takes. Outside the checks on each change: it is in no project the root
+ * The Brain evaluation (GRA-1726): how well recall finds the passage that
+ * answers a question, per language, across languages, in the set written
+ * in Dutch and in long documents, against plain text search over the same
+ * passages, with a margin of error, and how long each recall takes. Outside the checks on each change: it is in no project the root
  * runs, so neither `vp test` nor CI runs it.
  *
  *   vp run brain:eval                      run it against a local Brain
@@ -142,9 +142,13 @@ const file = path.join(
 );
 writeFileSync(file, `${JSON.stringify({ ...run, summary }, null, 2)}\n`);
 
+const passagesLine =
+  info.longDocuments === undefined || info.passages === undefined
+    ? ""
+    : ` (${info.longDocuments} long documents, ${info.passages} passages)`;
 const head = [
-  `Brain evaluation · set ${info.set} · ${info.questions} questions over ${info.sources} sources · ${run.identity.target} · ${sha.slice(0, 8)}${run.identity.dirty ? " (uncommitted changes)" : ""}`,
-  `R@${resultBudget}: the question's source among the first ${resultBudget} of at most ${info.recallLimit} results. Latency targets (${latencyTargetsMs.p50} ms / ${latencyTargetsMs.p95} ms) are for production; this is not.`,
+  `Brain evaluation · set ${info.set} · ${info.questions} questions over ${info.sources} sources${passagesLine} · ${run.identity.target} · ${sha.slice(0, 8)}${run.identity.dirty ? " (uncommitted changes)" : ""}`,
+  `R@${resultBudget}: the passage that answers the question among the first ${resultBudget} of at most ${info.recallLimit} results. Latency targets (${latencyTargetsMs.p50} ms / ${latencyTargetsMs.p95} ms) are for production; this is not.`,
   before === undefined
     ? "No earlier run to compare with."
     : `Compared with ${againstPath} (set ${before.identity.run.set}, ${before.identity.sha.slice(0, 8)}).`,

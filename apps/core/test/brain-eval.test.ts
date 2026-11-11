@@ -23,11 +23,14 @@ import {
   askerOf,
   brainEvalSet,
   grepRecall,
+  isLongDocument,
   leaksOf,
+  passagesOf,
   questionDigestOf,
   rankOf,
   setDigestOf,
   setProblems,
+  sourceRankOf,
 } from "./fixtures/brain-eval/set.ts";
 import type { Returned } from "./fixtures/brain-eval/set.ts";
 import { mockIdp } from "./idp.ts";
@@ -39,18 +42,38 @@ import { signedInWithRole } from "./sign-in.ts";
 // its teams, and each source through core's own `addSource` with who may
 // read it. Then it asks every question as its asker through core's
 // `recallAs`, timing each recall, and asks the same of plain text search
-// (`grepRecall` in fixtures/brain-eval/set.ts) over the same sources,
-// with the same access. It prints
+// (`grepRecall` in fixtures/brain-eval/set.ts) over the same passages the
+// Brain's chunker cuts the sources into, with the same access. It prints
 // what each returned, one JSON line per question (`BRAIN_EVAL_RESULT`),
-// for the script to score; it fails only when the set is broken or the
-// Brain returned something its asker may not read.
+// for the script to score; it fails only when the set is broken, the
+// Brain returned something its asker may not read, or it returned a chunk
+// the set didn't cut.
 
 const { sources, questions, version } = brainEvalSet;
+
+const passages = passagesOf(sources);
+
+/** Each source's passages' texts, by key, as the set cut them. */
+const passageTexts = new Map(
+  [...Map.groupBy(passages, ({ source }) => source.key)].map(
+    ([key, each]) => [key, new Set(each.map(({ text }) => text))] as const
+  )
+);
 
 const idp = mockIdp();
 
 const sourceOf = (key: string): BrainEvalSource | undefined =>
   sources.find((source) => source.key === key);
+
+/** Whether the question's source is a long document; false for none. */
+const isOverLongDocument = (question: BrainEvalQuestion): boolean => {
+  const { expects } = question;
+  if (expects.kind === "absent") {
+    return false;
+  }
+  const source = sourceOf(expects.source);
+  return source !== undefined && isLongDocument(source);
+};
 
 const sourceLanguageOf = (question: BrainEvalQuestion) => {
   const { expects } = question;
@@ -145,12 +168,15 @@ describe("the Brain evaluation", () => {
         set: version,
         setDigest: await setDigestOf(brainEvalSet),
         sources: sources.length,
+        longDocuments: sources.filter(isLongDocument).length,
+        passages: passages.length,
         questions: questions.length,
         recallLimit,
       })}`
     );
 
     const leaking: string[] = [];
+    const uncut: string[] = [];
     for (const question of questions) {
       const asker = askerOf(question);
       const started = performance.now();
@@ -168,10 +194,20 @@ describe("the Brain evaluation", () => {
         keys: recalled.chunks.map(({ source }) => source.id),
         texts: recalled.chunks.map(({ text }) => text),
       };
-      const grep = grepRecall(sources, asker, question.question, recallLimit);
+      const grep = grepRecall(passages, asker, question.question, recallLimit);
       const brainLeaks = leaksOf(sources, question, brain);
       if (brainLeaks.length > 0) {
         leaking.push(`${question.id}: ${brainLeaks.join(", ")}`);
+      }
+      // The set's checks (a quote whole in exactly one passage, no two
+      // passages the same length) and the baseline hold only if the Brain
+      // cuts each source as the set did: every chunk it returns of a source
+      // of the set must be one of that source's passages.
+      for (const { source, text } of recalled.chunks) {
+        const cut = passageTexts.get(source.id);
+        if (cut !== undefined && !cut.has(text)) {
+          uncut.push(`${question.id}: ${source.id} "${text.slice(0, 60)}…"`);
+        }
       }
       const { expects } = question;
       console.log(
@@ -183,16 +219,25 @@ describe("the Brain evaluation", () => {
           sourceLanguage: sourceLanguageOf(question),
           expects: expects.kind,
           way: expects.kind === "answer" ? expects.way : null,
+          long: isOverLongDocument(question),
+          lookalike:
+            expects.kind === "answer" && expects.lookalike !== undefined,
           brain: {
             rank: rankOf(question, brain),
+            sourceRank: sourceRankOf(question, brain),
             returned: brain.keys.length,
             leaks: brainLeaks,
             ms,
           },
-          grep: { rank: rankOf(question, grep), returned: grep.keys.length },
+          grep: {
+            rank: rankOf(question, grep),
+            sourceRank: sourceRankOf(question, grep),
+            returned: grep.keys.length,
+          },
         })}`
       );
     }
     expect(leaking).toStrictEqual([]);
+    expect(uncut).toStrictEqual([]);
   });
 });
