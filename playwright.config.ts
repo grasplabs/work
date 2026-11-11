@@ -38,6 +38,17 @@ const browserPolicyTests = /(?:page-attacks|product-page-scripts)\.e2e\.ts$/u;
  */
 export const onboardingTests = /onboarding\.e2e\.ts$/u;
 /**
+ * A company's own onboarding flow, and Grasp's go as its admin waits for
+ * it (e2e/onboarding-flow.e2e.ts): each closes the deployment, changes
+ * its flow or replaces its roster, which signs out, turns away or changes
+ * what everyone else on the stack sees, so they run in a project of their
+ * own, one test at a time. They need nothing of Grasp's go's other
+ * tests, so CI runs them on a stack of their own beside those; locally
+ * they run before them, as they turn the interviews off, which holds only
+ * while nobody on the team is told yet.
+ */
+export const onboardingFlowTests = /onboarding-flow\.e2e\.ts$/u;
+/**
  * Someone's own interview (e2e/interview.e2e.ts): its link goes out once
  * the agreements are in, which tells the team, and the onboarding's tests
  * expect links that wait. So it runs after them, one test at a time.
@@ -100,7 +111,13 @@ const parallelProjects: Project[] = [
   {
     name: "chromium",
     use: { ...devices["Desktop Chrome"] },
-    testIgnore: [onboardingTests, interviewTests, journeyTests, adminTests],
+    testIgnore: [
+      onboardingFlowTests,
+      onboardingTests,
+      interviewTests,
+      journeyTests,
+      adminTests,
+    ],
   },
   // A page's frame and the product page are held by the browser's own
   // sandbox and policy, so what they can't do is shown in each engine:
@@ -119,16 +136,23 @@ const parallelProjects: Project[] = [
 
 /**
  * The projects that run one after another, after `before` on the same
- * stack: Grasp's go, then the interviews, then the journeys, each changing
- * what every test after it sees.
+ * stack: a company's own flow, Grasp's go, then the interviews, then the
+ * journeys, each changing what every test after it sees.
  */
 const serialProjects = (before: string[]): Project[] => [
+  {
+    name: "onboarding-flow",
+    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    testMatch: onboardingFlowTests,
+    dependencies: before,
+    workers: 1,
+  },
   {
     name: "onboarding",
     // Never tried again (below), so a trace is kept of the run that failed.
     use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
     testMatch: onboardingTests,
-    dependencies: before,
+    dependencies: ["onboarding-flow"],
     workers: 1,
     // Not tried again: once a link is out the team is told, and nothing
     // undoes that (the agreements stay as they were), so a second try
@@ -161,14 +185,13 @@ const serialProjects = (before: string[]): Project[] => [
  * serial tail depends on everything before it. CI runs the parallel part
  * in parts (`parallel`, with a test list of each, scripts/e2e-parts.ts:
  * Chromium's tests in fourteen, Firefox's and WebKit's a part each), and
- * each serial project
- * on a stack of its own (`onboarding`, `interview`, `journeys`, the
- * journeys a file a stack with `--shard`): they run one after another
- * only so that what one does can't change what the next sees, and a
- * stack of its own sees nothing before it. One stack held all three, 18
- * tests one at a time, about 7 minutes (October 2026, GRA-1094). `serial`
- * runs the three in turn on one stack. Locally all of it runs on one
- * stack, the serial projects last.
+ * each serial project on a stack of its own (`onboarding-flow`,
+ * `onboarding`, `interview`, `journeys`, the journeys a file a stack with
+ * `--shard`): they run one after another only so that what one does
+ * can't change what the next sees, and a stack of its own sees nothing
+ * before it. One stack held all three, 18 tests one at a time, about 7
+ * minutes (October 2026, GRA-1094). `serial` runs them in turn on one
+ * stack. Locally all of it runs on one stack, the serial projects last.
  */
 const e2eProjects = (): Project[] => {
   const part = process.env.GRASP_E2E_PART;
@@ -189,7 +212,7 @@ const e2eProjects = (): Project[] => {
     return [{ ...alone, dependencies: [] }];
   }
   throw new Error(
-    `GRASP_E2E_PART is "${part}": leave it unset, or set "parallel", "serial", "onboarding", "interview" or "journeys".`
+    `GRASP_E2E_PART is "${part}": leave it unset, or set "parallel", "serial", "onboarding-flow", "onboarding", "interview" or "journeys".`
   );
 };
 

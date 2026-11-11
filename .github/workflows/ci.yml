@@ -574,6 +574,16 @@ jobs:
           - { part: 12/14, project: parallel, artifact: 12-of-14 }
           - { part: 13/14, project: parallel, artifact: 13-of-14 }
           - { part: 14/14, project: parallel, artifact: 14-of-14 }
+          # A company's own flow, a large staff list and Grasp's go as its
+          # admin waits (e2e/onboarding-flow.e2e.ts), apart from the rest
+          # of Grasp's go: on one stack, the onboarding's 13 tests took
+          # 120-145 s and ended the e2e run; these 5 were about 60 s of
+          # them locally, and need nothing of the others (November 2026).
+          - {
+              part: onboarding-flow,
+              project: onboarding-flow,
+              artifact: onboarding-flow,
+            }
           - { part: onboarding, project: onboarding, artifact: onboarding }
           - { part: interview, project: interview, artifact: interview }
           - {
