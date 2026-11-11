@@ -4,7 +4,9 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { appFor } from "../src/apps.ts";
 import { organizationId } from "../src/auth/auth.ts";
+import { memberOf } from "../src/auth/identity.ts";
 import { addInstructionFile, addSource, recallAs } from "../src/brain-next.ts";
 import type {
   InstructionFile,
@@ -14,6 +16,7 @@ import type {
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { BrainStore } from "../src/index.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
+import { published } from "./apps.ts";
 import {
   coreProbes,
   instructionProbes,
@@ -350,6 +353,9 @@ describe(
         name: "Ledger",
       });
       for (const appId of [withFile, withoutFile]) {
+        // Published, so its users may open it: a draft is its builders'.
+        // oxlint-disable-next-line no-await-in-loop -- one App at a time
+        await published(appId);
         // oxlint-disable-next-line no-await-in-loop -- one App at a time
         await holderApi.api.apps.members.add(appId, {
           type: "person",
@@ -551,6 +557,15 @@ describe(
         }),
         { conversation: "own", appId: withFile }
       );
+      // And the outsider does use it: it is theirs to open.
+      const outsiderMember = await memberOf(env.DB, outsider);
+      const outsiderOpens =
+        outsiderMember === undefined
+          ? "not a member"
+          : await appFor(env, outsiderMember, withFile, "user").then(
+              () => "opens it",
+              String
+            );
 
       // Any request any provider got, whoever's key it carried.
       const prompted: Finding[] = [];
@@ -578,12 +593,14 @@ describe(
         joinedFinds,
         leftFinds,
         holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
+        outsiderOpens,
       }).toStrictEqual({
         findings: [],
         outsiderFinds: [handbook],
         joinedFinds: [teamSource],
         leftFinds: [],
         holderAppFile: true,
+        outsiderOpens: "opens it",
       });
     });
 
