@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_resource_runs` ADD `failed_task` text;

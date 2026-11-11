@@ -97,6 +97,9 @@ writeAssetsService(out);
 // with the rest of `out`.
 const storage = path.join(out, "storage");
 mkdirSync(storage);
+// And the R2 service its objects' bodies, as files.
+const files = path.join(out, "files");
+mkdirSync(files);
 
 /** A message to `to`, as Email Routing hands it over, sent now. */
 const rawMail = (to: string): RawMail => ({
@@ -226,6 +229,7 @@ try {
       routerSecret: ROUTER_SECRET,
       modules,
       storage,
+      files,
     })
   );
 

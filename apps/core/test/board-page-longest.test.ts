@@ -1,4 +1,4 @@
-import type { OperationResult } from "@grasp-os/shared/operations";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -86,7 +86,7 @@ describe("the board page", { timeout: 90_000 }, () => {
       pagination: { pageSize: 100 },
     });
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- read beside the pages it counts
-    const items = (result: OperationResult) =>
+    const items = (result: FunctionResult) =>
       z.object({ items: z.array(z.unknown()) }).parse(valueOf(result)).items
         .length;
     expect({

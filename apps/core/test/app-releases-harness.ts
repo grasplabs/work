@@ -21,7 +21,7 @@ import { appWith, artifactKey, putArtifact, seal } from "./sealed-apps.ts";
 // What app-releases*.test.ts share: the Apps they seal and how they read
 // and rewrite a sealed release.
 
-/** Notes, laid out as spec 8 has an App: its schema, operations and registration. */
+/** Notes, laid out as spec 8 has an App: its schema, functions and registration. */
 /** The Notes App's definition, named `label`. */
 export const notesSpec = (label = "Notes"): AppSpec => ({
   name: label,
@@ -346,8 +346,8 @@ export const refusedSeal = async (
   }
 };
 
-/** An operation file added to the notes, holding `source`. */
-export const withOperation = (source: string): TestApp =>
+/** A server file added to the notes, holding `source`. */
+export const withFunction = (source: string): TestApp =>
   withFiles(notesFiles(), {
     "server/extra.ts": source,
   });
@@ -483,7 +483,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     build: async (files: Record<string, string>) =>
       await buildPages(env, files, "app-test"),
   },
-  "an operation": {
+  "a function": {
     types: codeTypes,
     file: "server/extra.ts",
     wrap: (lines: string) => `${lines}\nexport const extra = 1;\n`,

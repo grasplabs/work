@@ -77,14 +77,14 @@ export const pageFunctionsText = (
   manifest: AppManifest,
   workflows: readonly BoundWorkflow[]
 ): string => {
-  const operations: Record<string, FunctionManifest> = {
-    ...manifest.operations,
+  const functions: Record<string, FunctionManifest> = {
+    ...manifest.functions,
   };
   for (const workflow of workflows) {
     const { queries, mutations } = workflowFunctions(workflow);
     for (const fn of [...Object.values(queries), ...Object.values(mutations)]) {
       if (fn !== undefined) {
-        operations[fn.path] = fn;
+        functions[fn.path] = fn;
       }
     }
   }
@@ -92,7 +92,7 @@ export const pageFunctionsText = (
   // descriptor names `__proto__` stays a field, never the prototype.
   const data = JSON.stringify(
     canonicalText({
-      functions: pageFunctionsOf(operations),
+      functions: pageFunctionsOf(functions),
       workflows: pageWorkflowsOf(workflows),
     })
   );

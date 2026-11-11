@@ -1,7 +1,7 @@
 import { declaredWorkflows, workflowFunctions } from "@grasp-os/runtime/host";
 import type { WorkflowQueryName } from "@grasp-os/runtime/host";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -94,7 +94,7 @@ export const calledAs = async (
   app: string,
   { name, kind }: FunctionName,
   input: unknown = {}
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const answered = await callAppFunction(
     env,
     by,
@@ -218,10 +218,10 @@ export const queryReference = (
   const bound = declaredWorkflows(release.app, release.workflows).find(
     (workflow) => workflow.alias === alias
   );
-  const operation =
+  const fn =
     bound === undefined ? undefined : workflowFunctions(bound).queries[name];
-  if (operation === undefined) {
+  if (fn === undefined) {
     throw new Error(`No query ${name} of ${alias}`);
   }
-  return { name: operation.path, kind: "query" as const };
+  return { name: fn.path, kind: "query" as const };
 };

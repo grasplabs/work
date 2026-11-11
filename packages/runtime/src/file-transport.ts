@@ -11,7 +11,7 @@ export interface TransferProgress {
  * What the client needs of the platform to move files: the page's file
  * channel, through the frame's file port (page-runtime.ts), or a host's
  * own. Each rejects with a coded refusal (`{ code, message }`), as the
- * operation transport does; one without a code is a lost answer.
+ * function transport does; one without a code is a lost answer.
  */
 export interface FileTransport {
   /**

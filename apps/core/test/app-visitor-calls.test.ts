@@ -322,7 +322,7 @@ const call = async (
   const request = JSON.stringify({
     reference: {
       name: path,
-      kind: release.app.operations[path]?.kind ?? "query",
+      kind: release.app.functions[path]?.kind ?? "query",
     },
     args: input,
   });
@@ -574,7 +574,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       bound: {
         resources: invocation.resources,
         workflows: invocation.workflows,
-        notifications: invocation.notifications,
+        eventSends: invocation.eventSends,
       },
       roles: await invocation.authorize(),
     }).toStrictEqual({
@@ -584,7 +584,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       bound: {
         resources: undefined,
         workflows: undefined,
-        notifications: undefined,
+        eventSends: undefined,
       },
       roles: { appMember: false, appBuilder: false },
     });

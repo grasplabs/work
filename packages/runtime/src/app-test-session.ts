@@ -20,15 +20,15 @@ export interface AppTestSession {
   /**
    * Calls a function as identity `name`: `request` is the call's JSON
    * text (`{ reference, args }`), as a page sends it, and the answer
-   * the JSON text of what the call answered (an `OperationResult`).
+   * the JSON text of what the call answered (an `FunctionResult`).
    */
   call: (name: string, request: string) => Promise<string>;
   /**
    * Follows a query as identity `name`: `request` as `call` takes it.
    * Each push of core's (`{ revision, result }`, the result an
-   * `OperationResult`) goes to `onSnapshot`, and `onLost` is called once
+   * `FunctionResult`) goes to `onSnapshot`, and `onLost` is called once
    * core lets go of the subscription. Answers what releases it, or why
-   * core refused it: the JSON text of a failed `OperationResult`.
+   * core refused it: the JSON text of a failed `FunctionResult`.
    */
   subscribe: (
     name: string,
@@ -39,25 +39,25 @@ export interface AppTestSession {
   /**
    * Opens a transaction on the test's store (`t.run`), as identity `name`
    * or, for `null`, the test itself, which no access rule holds back.
-   * Answers the JSON text of an `OperationResult` holding its number
+   * Answers the JSON text of an `FunctionResult` holding its number
    * (`{ transaction }`).
    */
   begin: (name: string | null) => Promise<string>;
   /**
    * One read in transaction `transaction`, `request` a `ReadRequest` as
-   * JSON text: the JSON text of an `OperationResult`. It sees the
+   * JSON text: the JSON text of an `FunctionResult`. It sees the
    * transaction's own writes.
    */
   read: (transaction: number, request: string) => Promise<string>;
   /**
    * One write staged in transaction `transaction`, `request` a
-   * `WriteRequest` as JSON text: the JSON text of an `OperationResult`
+   * `WriteRequest` as JSON text: the JSON text of an `FunctionResult`
    * (an insert's minted ID).
    */
   write: (transaction: number, request: string) => Promise<string>;
   /**
    * Ends transaction `transaction`: commits what it staged when
-   * `commit`, else drops it. Answers the JSON text of an `OperationResult`
+   * `commit`, else drops it. Answers the JSON text of an `FunctionResult`
    * holding nothing, or why the commit was refused.
    */
   end: (transaction: number, commit: boolean) => Promise<string>;
@@ -65,7 +65,7 @@ export interface AppTestSession {
    * Starts a workflow as identity `name`: `request` is a call of its
    * reference's `start` mutation, as `call` takes one, and `options` its
    * `TestStartOptions` as JSON text, deciders by name. The answer is the
-   * JSON text of an `OperationResult` holding the run's number in the
+   * JSON text of an `FunctionResult` holding the run's number in the
    * session (`{ run }`).
    */
   start: (name: string, request: string, options: string) => Promise<string>;
@@ -85,13 +85,13 @@ export interface AppTestSession {
   modelRequestCount: (run: number, task: string) => Promise<number>;
   /**
    * Moves the time of the session's runs `ms` milliseconds on: the JSON
-   * text of an `OperationResult` holding nothing, or why it was refused.
+   * text of an `FunctionResult` holding nothing, or why it was refused.
    */
   advanceClock: (ms: number) => Promise<string>;
   /**
    * Answers, as identity `name`, the decision run `run` waits for:
    * `request` is the answer's JSON text (`{ task, approved, value? }`),
-   * and the answer the JSON text of an `OperationResult` holding nothing.
+   * and the answer the JSON text of an `FunctionResult` holding nothing.
    */
   respond: (name: string, run: number, request: string) => Promise<string>;
   /**
@@ -129,7 +129,7 @@ export class TestAssertionError extends Error {
 }
 
 /**
- * The value core's answer (an `OperationResult`'s JSON text) holds; throws
+ * The value core's answer (an `FunctionResult`'s JSON text) holds; throws
  * the `GraspError` a page's call gets for a refusal.
  */
 export const unwrapped = (answer: string): unknown => {

@@ -1,9 +1,9 @@
 import { GraspClient } from "@grasp-os/runtime/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import {
   queryMaxScannedBytes,
@@ -231,7 +231,7 @@ const call = async (
   { builder, app, version }: Payroll,
   path: string,
   input: Json = {}
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const current = await loadRelease(env, appIdSchema.parse(app), version);
   const { result } = await callAppFunction(
     env,
@@ -240,7 +240,7 @@ const call = async (
     JSON.stringify({
       reference: {
         name: path,
-        kind: current.app.operations[path]?.kind ?? "query",
+        kind: current.app.functions[path]?.kind ?? "query",
       },
       args: input,
     }),
@@ -250,7 +250,7 @@ const call = async (
 };
 
 /** What `call` answered, or the code it failed with. */
-const valueOf = (result: OperationResult): Json =>
+const valueOf = (result: FunctionResult): Json =>
   result.ok ? result.value : result.error.code;
 
 /** The sensitive reads of App `app` recorded after log position `after`. */

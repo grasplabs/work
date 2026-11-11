@@ -367,8 +367,8 @@ const payloadOf = (
   if (webhook.approvedAt === null) {
     return payload;
   }
-  if (delivery.operation !== null) {
-    payload.operation = delivery.operation;
+  if (delivery.function !== null) {
+    payload.function = delivery.function;
   }
   if (delivery.values !== null) {
     payload.values = delivery.values;

@@ -285,7 +285,7 @@ export const boundValuesIssue = (
 };
 
 // A write of a business store, as it crosses from a mutation's App code to
-// core's operation host: one staged change at a time, which the host
+// core's function host: one staged change at a time, which the host
 // validates against the pinned schema (defaults on insert, never on
 // patch), authorizes and keeps until the commit. It never holds a record
 // ID for an insert (the host mints it), a managed field, an owner, a role

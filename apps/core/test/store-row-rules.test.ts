@@ -15,10 +15,10 @@ import {
 } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import { storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { Commit, StoreFields, WriterRoles } from "@grasp-os/shared/stores";
@@ -29,7 +29,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { operationRoles } from "../src/app-access.ts";
+import { functionRoles } from "../src/app-access.ts";
 import { AppDataRpc } from "../src/app-data.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
@@ -38,8 +38,8 @@ import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appMembers, teamMembers, teams } from "../src/db/core/schema.ts";
-import { callOperation } from "../src/operations.ts";
-import type { Runner } from "../src/operations.ts";
+import { hostFunctionCall } from "../src/function-host.ts";
+import type { Runner } from "../src/function-host.ts";
 import type { SessionCheck } from "../src/session-check.ts";
 import type { MigrationRow } from "../src/store-host.ts";
 import { reviewVersion } from "../src/version-review.ts";
@@ -63,9 +63,9 @@ import {
 // Row rules (`defineTable(...).access`, store-rules.ts): who reads and who
 // changes which rows of a table, by owner, by a person field, by a team
 // field and by App role. Asked as App code asks (`ctx.db` in a real App's
-// functions), through the operation host and the store, with each
+// functions), through the function host and the store, with each
 // caller's roles and teams read from core's own records as every call
-// reads them (`operationRoles`). The cases follow the threat model:
+// reads them (`functionRoles`). The cases follow the threat model:
 // every read path (get, queries and their terminals, pages, searches,
 // groups, related records), every write (insert, patch, replace, delete,
 // a reference, a cascade, a restricted deletion a hidden row refers to),
@@ -399,7 +399,7 @@ const readLogs = query({
   },
 });
 
-const operations = {
+const functions = {
   addRequest,
   addTicket,
   moveTicket,
@@ -428,15 +428,15 @@ const operations = {
 const ruledApp = registerApp({
   config: defineApp({ name: "Requests" }),
   schema,
-  modules: { requests: operations },
+  modules: { requests: functions },
   migrations: [],
 });
 
 const { manifest } = inspectApp(ruledApp);
 
-type Operation = keyof typeof operations;
+type FunctionName = keyof typeof functions;
 
-const mutations = new Set<Operation>([
+const mutations = new Set<FunctionName>([
   "addRequest",
   "addTicket",
   "moveTicket",
@@ -549,14 +549,14 @@ const world = async (): Promise<World> => {
 };
 
 /**
- * What `by` gets calling `path` with `args`, as the operation host runs
+ * What `by` gets calling `path` with `args`, as the function host runs
  * an App's function: their roles and teams read from core's records now,
  * unless `roles` stands in for whoever core resolved.
  */
 const call = async (
   { appId, store }: World,
   by: Acting,
-  path: Operation,
+  path: FunctionName,
   args: Record<string, unknown> = {},
   {
     roles,
@@ -568,8 +568,8 @@ const call = async (
     /** Runs the App's code: its own, unless a test steps in between. */
     run?: Runner;
   } = {}
-): Promise<OperationResult> =>
-  await callOperation(
+): Promise<FunctionResult> =>
+  await hostFunctionCall(
     { manifest, run },
     {
       principal: by.userId,
@@ -581,7 +581,7 @@ const call = async (
       requestId: crypto.randomUUID(),
       deadline: Date.now() + 60_000,
       runId: null,
-      authorize: async () => roles ?? (await operationRoles(env, by, appId)),
+      authorize: async () => roles ?? (await functionRoles(env, by, appId)),
     },
     {
       path: `requests.${path}`,
@@ -591,7 +591,7 @@ const call = async (
   );
 
 /** What a call answered, or the code it was refused with. */
-const outcome = (result: OperationResult): unknown =>
+const outcome = (result: FunctionResult): unknown =>
   result.ok ? result.value : result.error.code;
 
 /** Field `field` of `value`, or undefined. */
@@ -601,7 +601,7 @@ const fieldOf = (value: unknown, field: string): unknown =>
     : undefined;
 
 /** A refusal as its caller sees it, but for the record it names. */
-const refusal = (result: OperationResult): unknown => {
+const refusal = (result: FunctionResult): unknown => {
   if (result.ok) {
     return result.value;
   }
@@ -614,11 +614,11 @@ const refusal = (result: OperationResult): unknown => {
 };
 
 /** The ID a call that inserted answered. */
-const idOf = (result: OperationResult): Id<"requests"> => {
+const idOf = (result: FunctionResult): Id<"requests"> => {
   if (!(result.ok && typeof result.value === "string")) {
     throw new Error(`Nothing was inserted: ${JSON.stringify(result)}`);
   }
-  // SAFETY: the insert's operation returns a record ID of its table.
+  // SAFETY: the insert's function returns a record ID of its table.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return result.value as Id<"requests">;
 };
@@ -959,7 +959,7 @@ describe("writing a table whose read rules are its write rules", () => {
     const hidden = await ticketOf(of.bob, "Bob's", of.support);
     const gone = await ticketOf(of.ada, "Gone", of.sales);
     await call(of, of.ada, "removeTicket", { id: gone });
-    const asAda = async (path: Operation, args: Record<string, unknown>) =>
+    const asAda = async (path: FunctionName, args: Record<string, unknown>) =>
       refusal(await call(of, of.ada, path, args));
     const missing = await asAda("removeTicket", { id: gone });
     expect({
@@ -1480,7 +1480,7 @@ const commitAs = async (
       binding: null,
       contractId: "tickets.update",
       contractVersion: 1,
-      operationKind: "mutation",
+      functionKind: "mutation",
     },
     key: [crypto.randomUUID()],
     inputHash: "c".repeat(64),

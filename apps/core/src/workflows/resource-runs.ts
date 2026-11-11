@@ -264,6 +264,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         accountRunId: sql<string | null>`${accountOfAdmitted(run)}`.as(
           "account"
         ),
+        failedTask: sql<null>`NULL`.as("failed_task"),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -805,6 +806,11 @@ export interface ResourceRunMemory {
   modelCalls?: RunModelCalls;
   /** A sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;
+  /**
+   * Keeps the task whose step's failure the run ends with, as the run's
+   * host names it (`SealedRunKind.endingTask`), before it ends.
+   */
+  keepFailedTask?: (task: string | null) => void;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls?: AiCalls;
   /** Aborts once the activation running the run is over. */
@@ -914,7 +920,7 @@ const loadedRun = async (
       calling,
       maxModelCalls: modelCalls,
     },
-    output: JSON.stringify(contract.output),
+    output: JSON.stringify(contract.returns),
   };
 };
 
@@ -1127,6 +1133,9 @@ export const sealedActivation = async (
     untaken ??
     codeFailure(result, reported, kind);
   if (failed !== undefined) {
+    // Which task's failure it is, by the very failure its host has
+    // pending, never by what the failure says: kept with the run.
+    memory.keepFailedTask?.(kind?.endingTask(failed) ?? null);
     throw namedError(failed.name, failed.message, failed.code);
   }
   return acceptedOutput(output, result.ok ? result.value : undefined);
@@ -1339,14 +1348,17 @@ const projectedOf = (
  * Makes run `id`'s row say where the engine says it is: a notification no
  * newer than the last the row took changes nothing, and an ended run never
  * changes again. Its end is audited with the change, once. A failed end
- * keeps the engine's error code (`failureCode`), which outlives the
- * engine's record of the run.
+ * keeps the engine's error code (`failureCode`), and the task whose step
+ * it failed at (`failedTask`, read only for the end it projects), which
+ * outlive the engine's record of the
+ * run.
  */
 export const projectResourceRun = async (
   env: Env,
   id: string,
   engine: EngineStatus,
-  failureCode: string | null = null
+  failureCode: string | null = null,
+  failedTask?: () => Promise<string | null>
 ): Promise<void> => {
   const row = await runOf(env, id);
   if (row === undefined) {
@@ -1359,6 +1371,8 @@ export const projectResourceRun = async (
     return;
   }
   const { status, failure, compensating } = projectedOf(engine, failureCode);
+  const task =
+    status === "failed" && failedTask !== undefined ? await failedTask() : null;
   const ended = !unended.includes(status);
   const action = endActions[status];
   const db = drizzle(env.DB);
@@ -1377,6 +1391,7 @@ export const projectResourceRun = async (
         ...(status === "failed" && failure !== null
           ? { failureCode: failure }
           : {}),
+        ...(task === null ? {} : { failedTask: task }),
         ...(compensating === undefined ? {} : { compensation: compensating }),
       })
       .where(

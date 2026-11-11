@@ -1073,7 +1073,7 @@ describe("the session client and lost access", () => {
     });
   });
 
-  it("keeps whose a key left unknown is for its operation, whatever another operation under the key does", async () => {
+  it("keeps whose a key left unknown is for its function, whatever another function under the key does", async () => {
     let signedOut = false;
     const tallies: string[] = [];
     const { client } = network(async (_call, request) => {

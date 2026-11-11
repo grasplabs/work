@@ -1,7 +1,7 @@
 import type { AnyPermission } from "@grasp-os/runtime/app";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { jsonOf } from "@grasp-os/shared/functions";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { jsonOf } from "@grasp-os/shared/operations";
 
 /**
  * A permission declaration's SHA-256, as a release seals it: what an

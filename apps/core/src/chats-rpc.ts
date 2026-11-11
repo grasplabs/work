@@ -34,12 +34,12 @@ import type {
   IndexUse,
 } from "@grasp-os/shared/data-model";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
+import { draftSealFailures } from "@grasp-os/shared/functions";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
-import { draftSealFailures } from "@grasp-os/shared/operations";
 import {
   pageErrors,
   pageHrefSchema,

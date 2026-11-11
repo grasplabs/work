@@ -159,8 +159,8 @@ export const call = async (
 ): Promise<unknown> => {
   const path = `guests.${method}`;
   const sealed = await loadRelease(env, app, await currentVersion(app));
-  const operation = sealed.app.operations[path];
-  if (operation === undefined) {
+  const fn = sealed.app.functions[path];
+  if (fn === undefined) {
     throw new Error(`No ${path}`);
   }
   const { result } = await callAppFunction(
@@ -168,7 +168,7 @@ export const call = async (
     await callerOf(userId),
     app,
     JSON.stringify({
-      reference: { name: path, kind: operation.kind },
+      reference: { name: path, kind: fn.kind },
       args: input,
     })
   );

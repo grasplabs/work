@@ -1,5 +1,5 @@
+import { functionErrors } from "@grasp-os/shared/functions";
 import type { Json } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -65,7 +65,7 @@ const recordOf = async (env: Env, runId: string) => {
     .get();
   // Its test ended: nothing more of it is called.
   if (row === undefined) {
-    throw operationErrors.create("function.cancelled");
+    throw functionErrors.create("function.cancelled");
   }
   return row;
 };
@@ -124,7 +124,7 @@ export const fixtureModelRequests = async (
 ): Promise<number> => {
   const parsed = taskIdSchema.safeParse(task);
   if (!parsed.success) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   const row = await drizzle(env.DB)
     .select({ counts: appTestRuns.modelRequests })
@@ -132,7 +132,7 @@ export const fixtureModelRequests = async (
     .where(eq(appTestRuns.runId, runId))
     .get();
   if (row === undefined) {
-    throw operationErrors.create("function.cancelled");
+    throw functionErrors.create("function.cancelled");
   }
   return ownOf(countsSchema.parse(JSON.parse(row.counts)), parsed.data) ?? 0;
 };
@@ -178,5 +178,5 @@ export const fixtureCall = async (
     await countModelRequest(env, run.runId, task);
     return requireShape(JSON.stringify(call.outputSchema), answer, "output");
   }
-  throw operationErrors.create("resource.unavailable");
+  throw functionErrors.create("resource.unavailable");
 };

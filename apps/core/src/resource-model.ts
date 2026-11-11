@@ -6,14 +6,14 @@ import {
 } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { jsonOf, functionErrors } from "@grasp-os/shared/functions";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { modelErrors } from "@grasp-os/shared/models";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { z } from "zod";
 
+import type { ResourceContext } from "./function-host.ts";
 import { modelSettings, models, usableAnswerTokens } from "./models.ts";
-import type { ResourceContext } from "./operations.ts";
 import type {
   BindingCaller,
   BindingRecord,
@@ -31,7 +31,7 @@ import type {
 // model-spend.ts), and audits it as metadata only. The declaration bounds
 // the answer's tokens. A request that asks for a value sends its
 // descriptor: the model is told its JSON Schema, asked once more when an
-// answer doesn't fit, and the operation host checks the answer against
+// answer doesn't fit, and the function host checks the answer against
 // the descriptor again.
 
 /** What every model binding serves: a prompt in, text or the declared value out. */
@@ -50,7 +50,7 @@ const modelFingerprint = sha256Hex(canonicalJson(modelContract));
 /** The longest one request may wait, as the gateway allows. */
 const maxTimeoutMs = 15 * 60_000;
 
-/** What the request schema of the operation host lets through (operations.ts). */
+/** What the request schema of the function host lets through (function-host.ts). */
 const requestSchema = z.strictObject({
   prompt: z.string(),
   instructions: z.string().optional(),
@@ -109,7 +109,7 @@ const answerSchema = (descriptor: ValueDescriptor) => {
  * a provider's rate limit is rate-limited (worth asking again, after the
  * wait core computed), an answer that never fit is a contract the
  * provider broke. Anything else stays the
- * gateway's, for the operation host to redact.
+ * gateway's, for the function host to redact.
  */
 const refusalOf = (error: unknown): unknown => {
   const code = modelErrors.codeOf(error);
@@ -118,7 +118,7 @@ const refusalOf = (error: unknown): unknown => {
     code === "model.unconfigured" ||
     code === "model.answer_too_long"
   ) {
-    return operationErrors.create("resource.unavailable");
+    return functionErrors.create("resource.unavailable");
   }
   const wait = isExpectedError(error)
     ? error.details?.retryAfterSeconds
@@ -128,10 +128,10 @@ const refusalOf = (error: unknown): unknown => {
   // The provider's rate: throttling, worth asking again after the wait
   // core computed.
   if (code === "model.rate_limited") {
-    return operationErrors.create("resource.rate_limited", after);
+    return functionErrors.create("resource.rate_limited", after);
   }
   if (code === "model.invalid_output") {
-    return operationErrors.create("contract.invalid_resource_result");
+    return functionErrors.create("contract.invalid_resource_result");
   }
   return error;
 };
@@ -171,7 +171,7 @@ const generate = async (
   context: ResourceContext
 ): Promise<unknown> => {
   const { prompt, instructions } = requestSchema.parse(args[0]);
-  // The value asked for, as the operation host read it already.
+  // The value asked for, as the function host read it already.
   const output =
     args[1] === undefined
       ? undefined

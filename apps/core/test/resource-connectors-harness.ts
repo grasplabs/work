@@ -2,8 +2,8 @@ import type {
   ConnectorContract,
   ConnectorContractRequest,
 } from "@grasp-os/shared/connect";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
@@ -301,14 +301,14 @@ export const call = async (
   input: unknown,
   key?: string,
   callEnv: Env = env
-): Promise<OperationResult> => {
-  const operation = release.app.operations[path];
+): Promise<FunctionResult> => {
+  const fn = release.app.functions[path];
   const answered = await callAppFunction(
     callEnv,
     by,
     release.manifest.resourceId,
     JSON.stringify({
-      reference: { name: path, kind: operation?.kind ?? "action" },
+      reference: { name: path, kind: fn?.kind ?? "action" },
       args: input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     })
@@ -316,7 +316,7 @@ export const call = async (
   return answered.result;
 };
 
-export const outcomeOf = (result: OperationResult): Json =>
+export const outcomeOf = (result: FunctionResult): Json =>
   result.ok ? result.value : { failed: result.error.code };
 
 /** The Mailer's declared resources and what its admin may bind each to. */

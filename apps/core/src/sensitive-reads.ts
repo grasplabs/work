@@ -2,7 +2,7 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import type { SensitiveRead, SensitiveReadsSink } from "./operations.ts";
+import type { SensitiveRead, SensitiveReadsSink } from "./function-host.ts";
 
 // Reads of a table its schema declares sensitive (`defineTable(...)
 // .sensitive()`, sticky in the store's `sdk_tables.sensitive`), recorded
@@ -16,10 +16,10 @@ import type { SensitiveRead, SensitiveReadsSink } from "./operations.ts";
 //
 // - App code reads a sensitive table off the record: what a read answered
 //   is counted by the store itself, in the read's own transaction
-//   (store-host.ts, `#readIn`), and handed to the operation host, never
+//   (store-host.ts, `#readIn`), and handed to the function host, never
 //   to App code; the host keeps the record once the call is over,
 //   answered or failed, thrown, timed out or cancelled alike
-//   (operations.ts, `callOperation`). Every read App code makes goes
+//   (function-host.ts, `hostFunctionCall`). Every read App code makes goes
 //   through that host, live queries' reads again on each push and the
 //   functions a call nests included.
 // - App code hides a read in a failure: a read that failed after it
@@ -35,7 +35,7 @@ import type { SensitiveRead, SensitiveReadsSink } from "./operations.ts";
 //   never a record, a field or a filter.
 //
 // The data browser of an App's page reads the store directly, without the
-// operation host, and records its own reads the same way (app-data.ts).
+// function host, and records its own reads the same way (app-data.ts).
 
 /** Whom a call's sensitive reads are recorded for, and what they read. */
 export interface SensitiveReadContext {

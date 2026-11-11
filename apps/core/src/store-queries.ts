@@ -114,7 +114,7 @@ import type { PhysicalSearch } from "./store-search.ts";
 // - `ReadScope` (principal, roles, schema hash, consumer) is taken as
 //   given: only core holds the store's binding, and core must build the
 //   scope for each invocation from its own records, never from what App
-//   code sends. That is a hard requirement on the operation boundary
+//   code sends. That is a hard requirement on the function boundary
 //   (GRA-244).
 // - An older schema's access is the access a read under its hash gets: a
 //   table tightened from `appMembers` to `owner` in a newer schema is

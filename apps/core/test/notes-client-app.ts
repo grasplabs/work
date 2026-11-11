@@ -129,7 +129,7 @@ export const stamp = action({
   },
 });
 
-// Answers as much as an operation may, which leaves no room for the rest
+// Answers as much as a function may, which leaves no room for the rest
 // of a page's answer.
 export const big = action({
   args: {},
@@ -245,13 +245,13 @@ export const referenceTo = <
   release: Release,
   path: string
 ): FunctionReference<Kind, "public", Args, Return, Progress> => {
-  const operation = release.app.operations[path];
-  if (operation === undefined) {
+  const fn = release.app.functions[path];
+  if (fn === undefined) {
     throw new Error(`The release has no ${path}`);
   }
   // Each caller names the kind, arguments, return and progress the
   // release declares.
-  return { name: operation.path };
+  return { name: fn.path };
 };
 
 /** The App's `api`, as its pages import it from `@server/_generated/api`. */

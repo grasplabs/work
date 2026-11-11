@@ -117,11 +117,11 @@ const servedOf = async (
 ): Promise<ReadonlyMap<string, FunctionManifest>> => {
   const served = new Map<string, FunctionManifest>();
   for (const [id, path] of await releaseFunctionsOf(env, release)) {
-    const operation = Object.hasOwn(release.app.operations, path)
-      ? release.app.operations[path]
+    const fn = Object.hasOwn(release.app.functions, path)
+      ? release.app.functions[path]
       : undefined;
-    if (operation?.visibility === "public") {
-      served.set(id, operation);
+    if (fn?.visibility === "public") {
+      served.set(id, fn);
     }
   }
   return served;
@@ -183,7 +183,7 @@ export const requireBoundFunctionsServed = async (
   // landing before the switch may name (`boundFunctionsServedSql`).
   const before = await currentServed(env, app, previous);
   const broken = new Map<string, string>();
-  for (const [id, operation] of after) {
+  for (const [id, fn] of after) {
     const was = before?.byId.get(id);
     if (was === undefined) {
       continue;
@@ -193,15 +193,15 @@ export const requireBoundFunctionsServed = async (
     // the ID onto that function: the two IDs swap meaning. (A rollback
     // past a rename takes the path back from a function `next` doesn't
     // have; a path with no ID is no other function a workflow holds.)
-    const other = before?.idAt.get(operation.path);
+    const other = before?.idAt.get(fn.path);
     const repointed =
-      was.path !== operation.path &&
+      was.path !== fn.path &&
       other !== undefined &&
       other !== id &&
       after.has(other);
     const reason = repointed
-      ? `is the App's other function \`${operation.path}\` now, not \`${was.path}\` renamed`
-      : functionBreak(was, operation);
+      ? `is the App's other function \`${fn.path}\` now, not \`${was.path}\` renamed`
+      : functionBreak(was, fn);
     if (reason !== undefined) {
       broken.set(id, reason);
     }
@@ -263,11 +263,11 @@ export const requireAppFunction = async (
     env,
     await loadRelease(env, app, currentVersion)
   );
-  const operation = served.get(id);
-  if (operation === undefined) {
+  const fn = served.get(id);
+  if (fn === undefined) {
     throw functionIssue("The App's current version gives no function this ID.");
   }
-  if (operation.kind === "action") {
+  if (fn.kind === "action") {
     throw functionIssue(
       "A workflow calls an App's queries and mutations, never its actions."
     );

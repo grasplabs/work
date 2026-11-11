@@ -20,6 +20,7 @@ import {
 import { read } from "@grasp-os/brain/tools";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -29,7 +30,6 @@ import {
   searchQueryMaxLength,
 } from "@grasp-os/shared/knowledge";
 import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -120,7 +120,7 @@ export const knowledgeFingerprintOf = async (
   );
 };
 
-/** What the operation host lets through, per operation (operations.ts). */
+/** What the function host lets through, per operation (function-host.ts). */
 const searchSchema = z.strictObject({
   text: z.string(),
   limit: z.int().optional(),
@@ -290,7 +290,7 @@ const readBound = async (
     ({ collectionId }) => collectionId === located?.collectionId
   );
   if (binding === undefined) {
-    throw operationErrors.create("resource.item_not_found");
+    throw functionErrors.create("resource.item_not_found");
   }
   try {
     const document = await readAsDelegate(
@@ -304,7 +304,7 @@ const readBound = async (
     return { title: document.title, text: document.text };
   } catch (error) {
     if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
-      throw operationErrors.create("resource.item_not_found");
+      throw functionErrors.create("resource.item_not_found");
     }
     throw error;
   }
@@ -357,14 +357,14 @@ const readableOf = async (
   return readable;
 };
 
-/** A Brain refusal, as the operation host answers an App. */
-const asOperationError = (error: unknown): unknown => {
+/** A Brain refusal, as the function host answers an App. */
+const asFunctionError = (error: unknown): unknown => {
   const code = brainErrors.codeOf(error);
   if (code === "brain.denied") {
-    return operationErrors.create("resource.unavailable");
+    return functionErrors.create("resource.unavailable");
   }
   if (code === "brain.invalid" || code === "brain.not_found") {
-    return operationErrors.create("resource.invalid_args");
+    return functionErrors.create("resource.invalid_args");
   }
   return error;
 };
@@ -383,7 +383,7 @@ const recallBound = async (
   bound: readonly BoundCollection[],
   { query, collections, budget }: z.output<typeof resourceRecallInputSchema>
 ): Promise<MemoryPack> => {
-  // The operation host refused names the declaration doesn't have; a
+  // The function host refused names the declaration doesn't have; a
   // name that isn't bound still never widens what is read.
   const asked =
     collections === undefined
@@ -411,7 +411,7 @@ const recallBound = async (
     caller.sources.note(provenance);
     return pack;
   } catch (error) {
-    throw asOperationError(error);
+    throw asFunctionError(error);
   }
 };
 
@@ -441,7 +441,7 @@ const selectBound = async (
     caller.sources.note(provenance);
     return selection;
   } catch (error) {
-    throw asOperationError(error);
+    throw asFunctionError(error);
   }
 };
 
@@ -470,9 +470,9 @@ const readSkillBound = async (
     return skill;
   } catch (error) {
     if (brainErrors.codeOf(error) === "brain.not_found") {
-      throw operationErrors.create("resource.item_not_found");
+      throw functionErrors.create("resource.item_not_found");
     }
-    throw asOperationError(error);
+    throw asFunctionError(error);
   }
 };
 
