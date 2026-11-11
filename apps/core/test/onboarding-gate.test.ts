@@ -9,7 +9,7 @@ import {
 } from "@grasp-os/shared/onboarding-flow";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { gateView } from "../src/onboarding/gate.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
@@ -325,6 +325,12 @@ const openings = (events: AuditEvent[]) =>
 //   through no onboarding.
 // - An opening with no trace of who caused it, or why.
 describe("a company's Grasp opening by its flow", { timeout: 60_000 }, () => {
+  // A gate never opened before, as a company's is as its onboarding
+  // starts: one opened once is only staff's to open again.
+  beforeEach(async () => {
+    await env.DB.prepare("DELETE FROM onboarding_gate").run();
+  });
+
   afterEach(async () => {
     await adminCommands().setFlow(null);
     await reopen();
@@ -386,6 +392,8 @@ describe("a company's Grasp opening by its flow", { timeout: 60_000 }, () => {
     const events = await auditedDuring(async () => {
       await admin.onboarding.finishSteps([]);
       await admin.onboarding.finishSteps(flowScreens(flowPresets.setup));
+      // A screen its flow doesn't have, finished now: still staff's to open.
+      await admin.onboarding.finishSteps(["pulse"]);
     });
     const closed = await gateNow();
     const member = await signIn(idp, "microsoft", entraPerson(acmeTenant));
