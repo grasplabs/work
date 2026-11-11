@@ -127,8 +127,8 @@ import {
 // - Authority copied with the code: each workflow is created fresh, the
 //   creator's own, its ID minted here, and its first version published
 //   from the release's definition as the creator's own publication. It
-//   holds no approval: each catalog binding it declares (a model, a store
-//   operation) serves nothing until an admin approves it for that very
+//   holds no approval: each catalog binding it declares (a model, a
+//   connector) serves nothing until an admin approves it for that very
 //   version (workflow-bindings.ts). The App's permission to start it is
 //   a request that waits for an admin, as any other. Nothing is copied
 //   from another App or workflow, and no approval, grant or run written.

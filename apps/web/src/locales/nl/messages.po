@@ -7441,6 +7441,10 @@ msgstr "Heeft een nieuw geheim gemaakt voor een webhookbron"
 msgid "Made by {person} on {date}."
 msgstr "Gemaakt door {person} op {date}."
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Made by an earlier platform release: publish it again"
+msgstr "Gemaakt door een eerdere platformversie: publiceer hem opnieuw"
+
 #: src/apps/app-settings.tsx
 msgid "Made for"
 msgstr "Gemaakt voor"

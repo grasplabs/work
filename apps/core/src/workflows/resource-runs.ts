@@ -920,7 +920,7 @@ const loadedRun = async (
       calling,
       maxModelCalls: modelCalls,
     },
-    output: JSON.stringify(contract.output),
+    output: JSON.stringify(contract.returns),
   };
 };
 

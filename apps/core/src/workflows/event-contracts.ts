@@ -40,7 +40,7 @@ export const acceptedEventData = (
   if (
     !parsed.success ||
     new TextEncoder().encode(canonicalJson(parsed.data)).byteLength >
-      platformLimits.operationInputBytes
+      platformLimits.functionArgsBytes
   ) {
     throw workflowResourceErrors.create("workflow.event_invalid", {
       issues: ["data: Not JSON, or too large for an event."],

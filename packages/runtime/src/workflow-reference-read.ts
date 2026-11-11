@@ -149,7 +149,7 @@ const readOf = (alias: string, workflow: PageWorkflow): ReadWorkflow => {
 /**
  * `value` as a public workflow reference, read by its own `name` alone
  * in the page's build (`internals`); `contract.invalid_request` for
- * anything else (an operation's reference, a string, a name the release
+ * anything else (a function's reference, a string, a name the release
  * declares no workflow under).
  */
 export const readWorkflowReference = (

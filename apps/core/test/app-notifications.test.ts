@@ -17,6 +17,7 @@ import {
   releaseManifestSchema,
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import {
   appIdSchema,
   chatIdSchema,
@@ -26,7 +27,6 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { appNotificationsPerHour } from "@grasp-os/shared/notifications";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -41,16 +41,16 @@ import {
 import type { Release } from "../src/app-releases.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { hostFunctionCall } from "../src/function-host.ts";
+import type { HostedApp, Invocation } from "../src/function-host.ts";
 import { listNotifications } from "../src/notifications.ts";
-import { callOperation } from "../src/operations.ts";
-import type { HostedApp, Invocation } from "../src/operations.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { applied } from "./store-schemas.ts";
 
 // Apps telling people (app-notifications.ts): an action's
-// `ctx.notifyPeople` and a mutation's, staged with its commit, through the real operation host,
+// `ctx.notifyPeople` and a mutation's, staged with its commit, through the real function host,
 // a real business store and its outbox, into the person's notifications
 // as their inbox lists them. App code runs as the SDK's runner runs it.
 
@@ -243,7 +243,7 @@ const fixture = async (): Promise<Fixture> => {
         storeId,
         schemaVersion: 1,
         schemaHash: zeros,
-        operationManifestHash: zeros,
+        functionManifestHash: zeros,
       },
       workflows: [],
     },
@@ -256,8 +256,8 @@ const callWith = async (
   path: keyof typeof kinds,
   args: Json,
   key?: string
-): Promise<OperationResult> =>
-  await callOperation(
+): Promise<FunctionResult> =>
+  await hostFunctionCall(
     hosted,
     invocation,
     { path, kind: kinds[path] },
@@ -272,7 +272,7 @@ const call = async (
   path: keyof typeof kinds,
   args: Json,
   options: { key?: string; runEnv?: Env } = {}
-): Promise<OperationResult> =>
+): Promise<FunctionResult> =>
   await callWith(
     await invocationFor(options.runEnv ?? env, fx.release, {
       by,
@@ -285,7 +285,7 @@ const call = async (
   );
 
 /** What a call answered, or the code it failed with. */
-const answerOf = (result: OperationResult): unknown =>
+const answerOf = (result: FunctionResult): unknown =>
   result.ok ? result.value : result.error.code;
 
 /** What `by`'s notifications list says the App told them. */

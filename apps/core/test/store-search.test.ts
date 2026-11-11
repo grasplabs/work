@@ -113,7 +113,7 @@ const commit = async (
       binding: null,
       contractId: "customers.write",
       contractVersion: 1,
-      operationKind: "mutation",
+      functionKind: "mutation",
     },
     key: [crypto.randomUUID()],
     inputHash: "c".repeat(64),

@@ -8,11 +8,11 @@ import { inspectApp, registerApp } from "@grasp-os/runtime/host";
 import { serverModule } from "@grasp-os/runtime/server";
 
 import type { OpenStore } from "../../src/data-stores.ts";
-import { callOperation } from "../../src/operations.ts";
+import { hostFunctionCall } from "../../src/function-host.ts";
 import { releaseRunner } from "../../src/release-runner.ts";
 
 // An App's functions on plain workerd (scripts/workerd-sandbox-functions.test.ts):
-// a call goes through core's operation host as any does, to the runner core
+// a call goes through core's function host as any does, to the runner core
 // runs a sealed release's functions with, with `SANDBOX_HOST` bound to the
 // sandbox supervisor as on-prem binds it.
 
@@ -207,7 +207,7 @@ export default {
     console.warn = (entry: unknown) => {
       logged.push(entry);
     };
-    const result = await callOperation(
+    const result = await hostFunctionCall(
       { manifest, run },
       {
         principal: "person-stand-in",

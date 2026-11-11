@@ -7,11 +7,11 @@ import {
 import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   runFileErrors,
@@ -1106,7 +1106,7 @@ export const makeCall = async (
   // Refused again, before anything is looked at, so none of its calls
   // can reach connect, a model, an App, a store or Knowledge.
   if (run.fixture === true) {
-    throw operationErrors.create("resource.unavailable");
+    throw functionErrors.create("resource.unavailable");
   }
   if (call.name === "grasp.app") {
     return await madeAppCall(env, run, task, call, effect);

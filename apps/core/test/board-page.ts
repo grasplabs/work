@@ -1,6 +1,6 @@
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -27,11 +27,11 @@ export const call = async (
   path: string,
   kind: "query" | "mutation" | "action",
   input: unknown = {}
-): Promise<OperationResult> =>
+): Promise<FunctionResult> =>
   await calledAs(await person.api.whoami(), app, { name: path, kind }, input);
 
 /** What a call answered; a refusal fails the test, saying why. */
-export const valueOf = (result: OperationResult): unknown => {
+export const valueOf = (result: FunctionResult): unknown => {
   if (!result.ok) {
     throw new Error(
       `Refused: ${result.error.code} ${result.error.message} ${JSON.stringify(result.error.details ?? null)}`
@@ -41,7 +41,7 @@ export const valueOf = (result: OperationResult): unknown => {
 };
 
 /** Why a call was refused, or `ok`. */
-export const codeOf = (result: OperationResult): string =>
+export const codeOf = (result: FunctionResult): string =>
   result.ok ? "ok" : result.error.code;
 
 export const estimated = (value: number) => ({
@@ -303,7 +303,7 @@ export const take = async (
   person: Person,
   app: AppId,
   input: Record<string, unknown> = defaultTake
-): Promise<OperationResult> =>
+): Promise<FunctionResult> =>
   await call(person, app, "snapshots.take", "action", input);
 
 /** A snapshot and its figures, by workflow. */

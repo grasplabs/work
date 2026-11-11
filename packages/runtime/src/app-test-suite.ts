@@ -13,7 +13,7 @@ import type { AnyTables } from "./server-function.ts";
 // App's release and its generated `@server/_generated/api` references, and
 // runs each suite with `runAppSuite` over a host it passes in: every call
 // a test identity makes crosses back into core, which runs it through the
-// real operation host on a store of the test's own, as it runs a page's
+// real function host on a store of the test's own, as it runs a page's
 // call. Nothing here stands in for core; what a test asserts is what the
 // App answered.
 

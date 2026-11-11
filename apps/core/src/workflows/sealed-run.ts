@@ -3,11 +3,11 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
@@ -2815,7 +2815,7 @@ class SealedRun implements SealedRunKind {
       // its sensitive values put in or it is audited, so nothing says a
       // call went out.
       if (calling.fixture === true && !fixtureCalls.has(template.call.name)) {
-        throw operationErrors.create("resource.unavailable");
+        throw functionErrors.create("resource.unavailable");
       }
       const sensitive: Json[] = [];
       let value: Json;

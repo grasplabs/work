@@ -1,9 +1,9 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import {
   statisticErrors,
@@ -35,8 +35,8 @@ import {
 //   active permissions to read the platform's statistics, which `bind`
 //   checks as the admin approves and on every request, and which the read
 //   authorizes again as it reads.
-// - A forged function: the operation host lets through only a path the
-//   declaration lists (operations.ts, `allowedRequest`); this adapter
+// - A forged function: the function host lets through only a path the
+//   declaration lists (function-host.ts, `allowedRequest`); this adapter
 //   serves `statistics.read` alone, its query checked by the platform's
 //   own schema (`statisticQuerySchema`) as it is read.
 // - The wrong caller: every read acts for the invocation's authority, as
@@ -87,12 +87,12 @@ const claim = async (env: Env, caller: BindingCaller): Promise<void> => {
 };
 
 /**
- * `error`, a statistics refusal, in the operation host's words: arguments
+ * `error`, a statistics refusal, in the function host's words: arguments
  * that don't fit (`resource.invalid_args`), a bound reached
  * (`resource.limit_reached`, which one, and for a minute's, when to try
  * again), an App the person may not see counted (`resource.item_not_found`)
  * or a person no longer a member (`resource.unavailable`). Anything else
- * as it is: the operation host allows only its own words through.
+ * as it is: the function host allows only its own words through.
  */
 const inHostWords = (error: unknown): unknown => {
   // The App's minute is counted in its host object: its refusal comes back
@@ -101,7 +101,7 @@ const inHostWords = (error: unknown): unknown => {
     statisticErrors.codeOf(error) ??
     (isExpectedError(error) ? error.code : undefined);
   if (code === "statistics.invalid") {
-    return operationErrors.create("resource.invalid_args");
+    return functionErrors.create("resource.invalid_args");
   }
   if (code === "statistics.rate_limited") {
     const details: unknown = isExpectedError(error) ? error.details : undefined;
@@ -110,7 +110,7 @@ const inHostWords = (error: unknown): unknown => {
       details !== null &&
       "limit" in details &&
       details.limit === "call";
-    return operationErrors.create(
+    return functionErrors.create(
       "resource.limit_reached",
       call
         ? { limit: "call" }
@@ -118,10 +118,10 @@ const inHostWords = (error: unknown): unknown => {
     );
   }
   if (code === "app.not_found") {
-    return operationErrors.create("resource.item_not_found");
+    return functionErrors.create("resource.item_not_found");
   }
   if (code === "permission.person_inactive") {
-    return operationErrors.create("resource.unavailable");
+    return functionErrors.create("resource.unavailable");
   }
   return error;
 };
@@ -183,7 +183,7 @@ const served = async (
   call: async (caller, { method, args }) => {
     const [path, query] = args;
     try {
-      // The operation host allows only a declared function through.
+      // The function host allows only a declared function through.
       if (method !== "call" || path !== statisticsRead) {
         throw permissionErrors.create("permission.denied");
       }

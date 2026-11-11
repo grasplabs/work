@@ -1,9 +1,9 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { guestErrors } from "@grasp-os/shared/guests";
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
@@ -41,29 +41,29 @@ import { platformGrantOf } from "./resource-platform.ts";
 const guestsContract = "grasp.guests@1";
 
 /**
- * `error`, a guest chats refusal, in the operation host's words: input
+ * `error`, a guest chats refusal, in the function host's words: input
  * that doesn't fit (`resource.invalid_args`), a chat the App has no such
  * (`resource.item_not_found`), as many open as it may
  * (`resource.limit_reached`, `open`), no model to chat with
- * (`resource.unavailable`). Anything else as it is: the operation host
+ * (`resource.unavailable`). Anything else as it is: the function host
  * allows only its own words through.
  */
 const inHostWords = (error: unknown): unknown => {
   const code = guestErrors.codeOf(error);
   if (code === "guest.invalid") {
-    return operationErrors.create("resource.invalid_args");
+    return functionErrors.create("resource.invalid_args");
   }
   if (code === "guest.not_found") {
-    return operationErrors.create("resource.item_not_found");
+    return functionErrors.create("resource.item_not_found");
   }
   if (code === "guest.too_many_open") {
-    return operationErrors.create("resource.limit_reached", { limit: "open" });
+    return functionErrors.create("resource.limit_reached", { limit: "open" });
   }
   if (code === "guest.no_model") {
-    return operationErrors.create("resource.unavailable");
+    return functionErrors.create("resource.unavailable");
   }
   if (isExpectedError(error) && error.code === "permission.person_inactive") {
-    return operationErrors.create("resource.unavailable");
+    return functionErrors.create("resource.unavailable");
   }
   return error;
 };
@@ -98,7 +98,7 @@ const inviteFor = async (
     caller.context.type !== "app" ||
     caller.context.appId !== caller.app
   ) {
-    throw operationErrors.create("resource.not_allowed");
+    throw functionErrors.create("resource.not_allowed");
   }
   return await inviteGuest(
     env,
@@ -151,7 +151,7 @@ const served = async (env: Env, permissionId: PermissionId) => ({
           side
         );
       }
-      // The operation host allows only a declared operation through.
+      // The function host allows only a declared operation through.
       throw permissionErrors.create("permission.denied");
     } catch (error) {
       throw inHostWords(error);
