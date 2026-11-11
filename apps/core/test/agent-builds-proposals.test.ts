@@ -69,10 +69,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("type-checks a draft's server code as its seal would, with no preview open, and proposes nothing that fails it", async () => {
-    // Calls an internal operation by its reference, typed as the seal's
-    // generated references type it from the draft's own operations: what
+    // Calls an internal function by its reference, typed as the seal's
+    // generated references type it from the draft's own functions: what
     // it answers is typed, and a wrong call fails.
-    const operations = `${(notesCode["server/notes.ts"] ?? "").replace(
+    const serverCode = `${(notesCode["server/notes.ts"] ?? "").replace(
       "import { action, doc, mutation, query }",
       'import { internal } from "@server/_generated/internal";\nimport { action, doc, internalQuery, mutation, query }'
     )}
@@ -91,12 +91,12 @@ export const titles = action({
   },
 });
 `;
-    const wrongCall = operations.replace(
+    const wrongCall = serverCode.replace(
       "const notes = await ctx.runQuery(internal.notes.listAll, {});\n    return notes.map((note) => note.title);",
       "return await ctx.runQuery(internal.notes.missing, {});"
     );
-    const sound = { ...notesCode, "server/notes.ts": operations };
-    const mistyped = operations.replace(
+    const sound = { ...notesCode, "server/notes.ts": serverCode };
+    const mistyped = serverCode.replace(
       'import { noteFields } from "../values.ts";',
       'import { noteFields } from "../values.ts";\n\nexport const total: number = "seven";'
     );

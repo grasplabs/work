@@ -1,3 +1,8 @@
+import { flowInterviews, flowScreens } from "@grasp-os/shared/onboarding-flow";
+import type {
+  OnboardingFlow,
+  SetupStepId,
+} from "@grasp-os/shared/onboarding-flow";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
@@ -33,10 +38,36 @@ export const takeJustSignedIn = (): boolean => {
 };
 
 /**
+ * Whether the company's admin has their onboarding behind them, by the
+ * company's flow: at once where it has no screens; where its people are
+ * interviewed, once Grasp gave its go (`open`), as before there was a
+ * flow; and where nobody is, once they finished every screen it has.
+ */
+export const onboardingBehind = ({
+  flow,
+  done,
+  open,
+}: {
+  flow: OnboardingFlow;
+  /** The screens the admin finished, as core keeps them. */
+  done: readonly SetupStepId[];
+  /** Whether the company's Grasp is open to its people. */
+  open: boolean;
+}): boolean => {
+  const screens = flowScreens(flow);
+  if (screens.length === 0) {
+    return true;
+  }
+  return flowInterviews(flow)
+    ? open
+    : screens.every((screen) => done.includes(screen));
+};
+
+/**
  * Where to send someone who just signed in on their way to `path`: to the
  * onboarding when they are the company's admin, were going to the home
- * page, and their organization has not finished onboarding (Grasp has not
- * given its go: `open` false); null to go on where they were going. Asked
+ * page, and their onboarding isn't behind them (`open` false, as
+ * `onboardingBehind` says it); null to go on where they were going. Asked
  * only for an admin, and only when that's what it turns on.
  */
 export const landingAfterSignIn = async ({
@@ -46,7 +77,7 @@ export const landingAfterSignIn = async ({
 }: {
   path: string;
   identity: Pick<Identity, "role" | "staff" | "onboardingOnly">;
-  /** Whether the organization finished onboarding; asked only when it matters. */
+  /** Whether their onboarding is behind them; asked only when it matters. */
   open: () => Promise<boolean>;
 }): Promise<"/setup" | null> => {
   const companyAdmin =

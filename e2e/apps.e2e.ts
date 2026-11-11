@@ -19,7 +19,7 @@ import { origin } from "./stack.ts";
 // workflows and who opens it are in its settings. Only the people core
 // opens Apps to see them.
 
-const operations = `import { v } from "@grasp-os/sdk";
+const serverCode = `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const count = query({
@@ -67,7 +67,7 @@ const counterApp = (): TestApp =>
       },
     },
     {
-      "server/counter.ts": operations,
+      "server/counter.ts": serverCode,
       "src/routes/index.tsx": appPage,
     }
   );

@@ -1,4 +1,4 @@
-import { isRetryableCode } from "@grasp-os/shared/operations";
+import { isRetryableCode } from "@grasp-os/shared/functions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { WorkflowResourceVersion } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";

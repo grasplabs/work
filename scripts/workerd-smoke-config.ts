@@ -15,7 +15,7 @@ import { z } from "zod";
 
 import { assetsBinding, assetsOf, assetsServices } from "./workerd-assets.ts";
 import { d1Bindings, d1DatabasesOf, d1Service } from "./workerd-d1.ts";
-import { r2Bindings, r2BucketsOf, r2Service } from "./workerd-r2.ts";
+import { r2Bindings, r2BucketsOf, r2Services } from "./workerd-r2.ts";
 import { parseJsonc } from "./wrangler-config-rules.ts";
 
 export const coreWranglerConfig = path.join(
@@ -77,6 +77,8 @@ export interface SmokeConfigInputs {
    * and the D1 service's: workerd has no SQLite in memory.
    */
   storage: string;
+  /** The directory the R2 service keeps the objects' bodies in. */
+  files: string;
 }
 
 /** The `config.capnp` text that serves core on plain workerd. */
@@ -86,6 +88,7 @@ export const smokeConfig = ({
   routerSecret,
   modules,
   storage,
+  files,
 }: SmokeConfigInputs): string => {
   const assets = assetsOf(coreWranglerConfig);
   const durableObjects = coreDurableObjects();
@@ -110,7 +113,7 @@ const config :Workerd.Config = (
     ${d1Service("storage")},
     # Core's R2 buckets, on the on-prem profile's R2 service: workerd has
     # R2's client but no R2 (apps/core/src/on-prem/r2.ts).
-    ${r2Service("storage")},
+    ${r2Services("storage", files).join(",\n    ")},
     # Where untrusted App code runs: the sandbox supervisor, outside core's
     # process, which plain workerd's lack of a CPU limit can't stall.
     (name = "sandbox", external = (address = "unix:${sandboxSocket}", http = ())),

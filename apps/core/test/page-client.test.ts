@@ -37,7 +37,7 @@ import { person as sealedPerson } from "./sealed-apps.ts";
 // lost response recovered from its receipt and a resend joining it while
 // it runs, never run twice, its receipt kept from another person and from
 // its own person once their role narrowed; each invocation's object
-// listed for as long as it holds anything; and arguments the operation
+// listed for as long as it holds anything; and arguments the function
 // can't take refused before anything is sent.
 
 mockSessionIdp();
@@ -698,9 +698,9 @@ describe("a page's build", { timeout: 120_000 }, () => {
   it("inspects the same server code once, however often a save brings it", async () => {
     const builder = await personApi("builder");
     // Server code of its own, so no other test inspected it already.
-    const operations = `${files.files["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`;
+    const serverCode = `${files.files["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`;
     const own = withFiles(files, {
-      "server/notes.ts": operations,
+      "server/notes.ts": serverCode,
     });
     const before = await inspections();
     const { id } = await builder.api.apps.create({ name: "Notes" });
@@ -721,7 +721,7 @@ describe("a page's build", { timeout: 120_000 }, () => {
       builder.api.apps.files,
       id,
       withFiles(own, {
-        "server/notes.ts": operations.replace(
+        "server/notes.ts": serverCode.replace(
           '.default("hello")',
           '.default("hi")'
         ),
@@ -780,7 +780,7 @@ describe("a page's build", { timeout: 120_000 }, () => {
   });
 
   it("types a reference from its function's code, a query without returns by what its handler answers", async () => {
-    const operations = `${files.files["server/notes.ts"] ?? ""}
+    const serverCode = `${files.files["server/notes.ts"] ?? ""}
 export const titles = query({
   args: {},
   handler: async (ctx) => {
@@ -789,7 +789,7 @@ export const titles = query({
   },
 });
 `;
-    const typed = withFiles(files, { "server/notes.ts": operations });
+    const typed = withFiles(files, { "server/notes.ts": serverCode });
     await expect(
       diagnosticsOf(
         withFiles(typed, {
@@ -838,7 +838,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     ).resolves.toStrictEqual([]);
   });
 
-  it("builds forms of the operations, a record's edit and a native schema, typed by what they bind", async () => {
+  it("builds forms of the functions, a record's edit and a native schema, typed by what they bind", async () => {
     const formPage = `import { createFileRoute } from "@tanstack/react-router";
 import { v } from "@grasp-os/sdk";
 import type { FunctionReturn } from "@grasp-os/sdk";

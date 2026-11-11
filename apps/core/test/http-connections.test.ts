@@ -1,5 +1,5 @@
 import { connectErrors } from "@grasp-os/shared/connect";
-import type { OperationResult } from "@grasp-os/shared/operations";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -175,14 +175,14 @@ const call = async (
   path: string,
   input: unknown,
   key?: string
-): Promise<OperationResult> => {
-  const operation = release.app.operations[path];
+): Promise<FunctionResult> => {
+  const fn = release.app.functions[path];
   const answered = await callAppFunction(
     env,
     by,
     release.manifest.resourceId,
     JSON.stringify({
-      reference: { name: path, kind: operation?.kind ?? "action" },
+      reference: { name: path, kind: fn?.kind ?? "action" },
       args: input,
       ...(key === undefined ? {} : { idempotencyKey: key }),
     })

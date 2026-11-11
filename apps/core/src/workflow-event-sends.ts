@@ -5,13 +5,13 @@ import {
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { isExpectedError, issuesOf } from "@grasp-os/shared/errors";
-import { operationInputMaxBytes } from "@grasp-os/shared/function-limits";
+import { functionArgsMaxBytes } from "@grasp-os/shared/function-limits";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
@@ -35,18 +35,18 @@ import { appSendHoldsSql } from "./workflow-starts.ts";
 import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
 import type { RunEventDelivery } from "./workflows/run-events.ts";
 
-// A mutation's workflow notifications (spec 10.7.4): `ctx.sendEvent(event,
+// The events a mutation sends workflow runs (spec 10.7.4): `ctx.sendEvent(event,
 // { runId, data })`, staged as an intent of its commit in its store's
-// outbox (operations.ts) and delivered from there, after the commit, into
+// outbox (function-host.ts) and delivered from there, after the commit, into
 // the run's inbox (workflows/run-events.ts), the inbox a page's send
 // reaches too (page-workflows.ts). Threat model, and how each is closed:
 //
-// - A notification outliving a mutation that didn't commit: it is an
+// - A sent event outliving a mutation that didn't commit: it is an
 //   outbox entry written in its commit's transaction with its records and
 //   receipt, or not at all (a rerun for stale reads stages its own from
-//   nothing), so a mutation refused, rolled back or superseded notifies
+//   nothing), so a mutation refused, rolled back or superseded sends
 //   nothing (store-host.ts).
-// - A notification delivered twice, or lost: the outbox hands an entry
+// - A sent event delivered twice, or lost: the outbox hands an entry
 //   over until it is settled, under the same ID, which names the receipt,
 //   the commit and the intent's place among its intents; that ID is the
 //   event's delivery key, so a dispatch that died after the inbox took the
@@ -65,18 +65,18 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 //   the version the binding names now, not yet ended. The App needs its
 //   own `send` grant on the workflow, for the person the call acts for,
 //   with their role in the App and the release not revoked
-//   (`appSendHoldsSql`). Each is read as the notification is staged
+//   (`appSendHoldsSql`). Each is read as the sent event is staged
 //   (anything that doesn't hold is `resource.unavailable`, never saying
 //   which, and fails the mutation), and again as it is delivered, with
 //   the run's own binding authority (`admitRunEvent`): a commit's success
 //   is its local commit, never the run taking the event.
 // - A run of another person's. The App is the sender, for the person the
 //   call acts for: a run it started for anyone through the binding is one
-//   it may notify, as its code decides (the App's own grant, which an admin
+//   it may send events to, as its code decides (the App's own grant, which an admin
 //   approved), as its mutations write records anyone in it reads. The
 //   event names the person and the mutation in its source.
 // - Restricted data carried into a run that isn't restricted: an App in
-//   restricted mode notifies only a run restricted itself, read as it is
+//   restricted mode sends events only to a run restricted itself, read as it is
 //   staged and again as it is delivered (restricted.ts).
 // - Forged provenance: App code names the event's reference, the run and
 //   the data, nothing else. The host mints the envelope: its source from
@@ -85,16 +85,16 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 // - One sender filling the run's inbox: the App and the person are one
 //   sender, as their page's sends are (`senderOf`), held to that
 //   sender's share of the inbox.
-// - A notification dropped unrecorded: one refused for good (the run
+// - A sent event dropped unrecorded: one refused for good (the run
 //   ended, the grant revoked, the run's inbox refusing it as invalid) is
 //   settled undeliverable with its sanitized code, in the store's outbox,
-//   and audited (`workflow.notify_intent.refused`), the mutation standing;
+//   and audited (`workflow.send_event.refused`), the mutation standing;
 //   one refused for now (an inbox at its limit, a run the engine doesn't
 //   know yet) is handed over again, audited once its last attempt fails
-//   (`workflow.notify_intent.abandoned`); one unreadable is audited too.
+//   (`workflow.send_event.abandoned`); one unreadable is audited too.
 
-/** A notification as its commit stages it, and its dispatch reads it. */
-const notifyIntentSchema = z.strictObject({
+/** A sent event as its commit stages it, and its dispatch reads it. */
+const sendEventIntentSchema = z.strictObject({
   app: appIdSchema,
   appVersion: z.int().min(1),
   principal: z.string().min(1).max(256),
@@ -109,12 +109,12 @@ const notifyIntentSchema = z.strictObject({
   data: z.json(),
   agent: workflowStartIntentSchema.shape.agent,
 });
-type NotifyIntent = z.infer<typeof notifyIntentSchema>;
+type SendEventIntent = z.infer<typeof sendEventIntentSchema>;
 
-/** How core stages a mutation's notifications, for one invocation. */
-export interface WorkflowNotifications {
+/** How core stages a mutation's sent events, for one invocation. */
+export interface WorkflowEventSends {
   /**
-   * The intent a commit stages to notify run `runId` of the workflow the
+   * The intent a commit stages to send an event to run `runId` of the workflow the
    * App binds under `workflow` with the event its release declares under
    * the alias `event` (as the function's reference names it) and `data`,
    * checked as the header says; refused otherwise.
@@ -127,15 +127,15 @@ export interface WorkflowNotifications {
   ) => Promise<Json>;
 }
 
-/** Who a notification comes from, as its event's source. */
-const sourceOf = (intent: NotifyIntent): string =>
+/** Who a sent event comes from, as its event's source. */
+const sourceOf = (intent: SendEventIntent): string =>
   `urn:grasp:app:${intent.app}:version:${intent.appVersion}:person:${encodeURIComponent(intent.principal)}:mutation`;
 
 /**
- * Who a notification counts against in a run's inbox: the App and the
+ * Who a sent event counts against in a run's inbox: the App and the
  * person, as their page's sends do.
  */
-const senderOf = (intent: Pick<NotifyIntent, "app" | "principal">): string =>
+const senderOf = (intent: Pick<SendEventIntent, "app" | "principal">): string =>
   `app:${intent.app}:person:${intent.principal}`;
 
 /**
@@ -189,24 +189,24 @@ const restrictsRun = async (
   return row?.restricted !== 1 && (await appHost(env, app).isRestricted());
 };
 
-/** A notification the App may not make now: never saying why. */
-const unavailable = () => operationErrors.create("resource.unavailable");
+/** A sent event the App may not make now: never saying why. */
+const unavailable = () => functionErrors.create("resource.unavailable");
 
 /**
- * How core stages the notifications of an invocation acting as
+ * How core stages the sent events of an invocation acting as
  * `authority` (the App, its version, the person) under `release`, made by
  * `agent`'s call when an agent made it.
  */
-export const appWorkflowNotifications = (
+export const appWorkflowEventSends = (
   env: Env,
   authority: Authority,
   release: Release,
   agent: CallingAgent | null
-): WorkflowNotifications => ({
+): WorkflowEventSends => ({
   intent: async (workflow, event, runId, data) => {
     const { subject, appVersion, onBehalfOf } = authority;
     if (subject.type !== "app" || appVersion === undefined) {
-      throw new Error("Only an App's call stages a notification.");
+      throw new Error("Only an App's call stages a sent event.");
     }
     const declared = declaredWorkflows(release.app, release.workflows).find(
       (each) => each.alias === workflow
@@ -216,7 +216,7 @@ export const appWorkflowNotifications = (
         ? declared.events[event]
         : undefined;
     if (declared === undefined || resolved === undefined) {
-      throw operationErrors.create("resource.not_allowed");
+      throw functionErrors.create("resource.not_allowed");
     }
     const checked = schemaFromDescriptor(JSON.stringify(resolved.data))[
       "~standard"
@@ -225,7 +225,7 @@ export const appWorkflowNotifications = (
       throw new Error("An event's data schema validated asynchronously");
     }
     if (checked.issues !== undefined) {
-      throw operationErrors.create("contract.invalid_args", {
+      throw functionErrors.create("contract.invalid_args", {
         issues: issuesOf({
           issues: checked.issues.map(({ path, message }) => ({
             path: (path ?? []).map(String),
@@ -237,10 +237,10 @@ export const appWorkflowNotifications = (
     const accepted = z.json().parse(checked.value);
     if (
       new TextEncoder().encode(canonicalJson(accepted)).byteLength >
-      operationInputMaxBytes
+      functionArgsMaxBytes
     ) {
-      throw operationErrors.create("contract.input_too_large", {
-        maxBytes: operationInputMaxBytes,
+      throw functionErrors.create("contract.input_too_large", {
+        maxBytes: functionArgsMaxBytes,
       });
     }
     const pin = declared.pinned;
@@ -262,7 +262,7 @@ export const appWorkflowNotifications = (
     ) {
       throw unavailable();
     }
-    const intent: NotifyIntent = {
+    const intent: SendEventIntent = {
       app,
       appVersion,
       principal: onBehalfOf,
@@ -286,7 +286,7 @@ export const appWorkflowNotifications = (
   },
 });
 
-/** Records what became of a notification, in the audit log. */
+/** Records what became of a sent event, in the audit log. */
 const audited = async (
   env: Env,
   actor: AuditActor,
@@ -311,27 +311,27 @@ const settledRefusals: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Delivers the notification a committed mutation staged (see the header):
+ * Delivers the sent event a committed mutation staged (see the header):
  * delivered once its run's inbox took the event, or had; settled
  * undeliverable, with the refusal's code and that refusal audited, for one
  * refused for good; handed over again later for anything else, audited
  * once its last attempt fails.
  */
-export const dispatchNotifyIntent = async (
+export const dispatchSendEventIntent = async (
   env: Env,
   entry: Pick<OutboxEntry, "id" | "intent" | "attempts" | "signal">
 ): Promise<"delivered" | { undeliverable: string }> => {
   const read =
-    entry.intent.kind === "workflow.notify"
-      ? notifyIntentSchema.safeParse(entry.intent.data)
+    entry.intent.kind === "workflow.send_event"
+      ? sendEventIntentSchema.safeParse(entry.intent.data)
       : undefined;
   if (read?.success !== true) {
-    log.error("workflow.notify_intent_unreadable", { entry: entry.id });
+    log.error("workflow.send_event_unreadable", { entry: entry.id });
     requireLive(entry.signal);
     await audited(
       env,
       { type: "system" },
-      "workflow.notify_intent.unreadable",
+      "workflow.send_event.unreadable",
       { type: "outbox_entry", id: entry.id },
       { entry: entry.id }
     );
@@ -411,14 +411,14 @@ export const dispatchNotifyIntent = async (
     const code = isExpectedError(error) ? error.code : undefined;
     if (code !== undefined && settledRefusals.has(code)) {
       requireLive(entry.signal);
-      await audited(env, actor, "workflow.notify_intent.refused", target, {
+      await audited(env, actor, "workflow.send_event.refused", target, {
         ...detail,
         reason: code,
       });
       return { undeliverable: code };
     }
     if (code === undefined) {
-      log.error("workflow.notify_intent_failed", {
+      log.error("workflow.send_event_failed", {
         entry: entry.id,
         ...errorFields(error),
       });
@@ -426,7 +426,7 @@ export const dispatchNotifyIntent = async (
     // Its last attempt: recorded before the outbox gives it up.
     if (entry.attempts + 1 >= defaultMaxAttempts) {
       requireLive(entry.signal);
-      await audited(env, actor, "workflow.notify_intent.abandoned", target, {
+      await audited(env, actor, "workflow.send_event.abandoned", target, {
         ...detail,
         reason: code ?? "internal.unexpected",
       });

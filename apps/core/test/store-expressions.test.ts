@@ -228,7 +228,7 @@ describe("lists and types", () => {
 
   it("never let a lower bound on a number reach text, which sorts above it", async () => {
     // Text where a number belongs can't come through a commit's checks
-    // in an operation, but the store doesn't rely on that.
+    // in a function, but the store doesn't rely on that.
     const held = {
       number: { title: "a", rank: 3 },
       text: { title: "b", rank: "9" },

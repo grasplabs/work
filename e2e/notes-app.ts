@@ -3,7 +3,7 @@ import type { AppSpec, TestApp } from "../apps/core/test/app-definitions.ts";
 
 /**
  * The Notes App of spec 8 and 9.4, as a builder writes it: a schema, its
- * operations and registration, and a page on the React SDK
+ * functions and registration, and a page on the React SDK
  * (`@grasp-os/sdk/react`) that reaches them only through the references
  * the host generates (`@server/_generated/api`).
  */
@@ -27,7 +27,7 @@ const notesSpec = {
   ],
 } satisfies AppSpec;
 
-const operations = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
+const serverCode = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, internalMutation, mutation, query } from "@server/_generated/server";
 import { internal } from "@server/_generated/internal";
 import { noteFields } from "../values.ts";
@@ -255,7 +255,7 @@ const createNote = `import { useForm } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 
-/** A new note: the operation's input is the form, its contract the check. */
+/** A new note: the function's input is the form, its contract the check. */
 export function CreateNote() {
   const form = useForm(api.notes.create, {
     defaultValues: { title: "", body: "" },
@@ -440,7 +440,7 @@ export const noteFields = {
   attachments: v.array(v.file()).max(20).default([]),
 };
 `,
-    "server/notes.ts": operations,
+    "server/notes.ts": serverCode,
     "src/components/import-note.tsx": importNote,
     "src/components/create-note.tsx": createNote,
     "src/components/note-editor.tsx": noteEditor,

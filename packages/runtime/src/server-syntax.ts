@@ -1,5 +1,5 @@
 import { appLimits } from "@grasp-os/shared/app-limits";
-import { appMaxOperations } from "@grasp-os/shared/function-limits";
+import { appMaxFunctions } from "@grasp-os/shared/function-limits";
 
 import { canRegisterAt } from "./app-functions.ts";
 import type { AppManifest } from "./app-types.ts";
@@ -77,7 +77,7 @@ const declaredFunctionsOf = (source: string): ReadonlyMap<string, Declared> => {
  * The functions `files`' server modules declare, each one's visibility by
  * its path (`crm.deals.list` for `server/crm/deals.ts`'s `list`): only
  * paths a function can have (`isFunctionPath`), and at most as many as an
- * App may register (`appMaxOperations`), in path order. A module that
+ * App may register (`appMaxFunctions`), in path order. A module that
  * doesn't parse declares none here: such code is never sealed.
  */
 export const serverFunctionsIn = (
@@ -98,7 +98,7 @@ export const serverFunctionsIn = (
       }
       // No more than an App may register: what is generated stays bounded
       // whatever the code declares, and a seal refuses the App anyway.
-      if (Object.keys(functions).length >= appMaxOperations) {
+      if (Object.keys(functions).length >= appMaxFunctions) {
         return functions;
       }
     }
@@ -129,11 +129,11 @@ export const generatedServerSources = (
  * generated from the syntax would name none of them rightly.
  */
 export const undeclaredFunctions = (
-  manifest: Pick<AppManifest, "operations">,
+  manifest: Pick<AppManifest, "functions">,
   functions: ServerFunctions
 ): string[] =>
   [
-    ...Object.values(manifest.operations).flatMap(
+    ...Object.values(manifest.functions).flatMap(
       ({ path, kind, visibility }) => {
         const declared = Object.hasOwn(functions, path)
           ? functions[path]
@@ -144,6 +144,6 @@ export const undeclaredFunctions = (
       }
     ),
     ...Object.keys(functions).filter(
-      (path) => !Object.hasOwn(manifest.operations, path)
+      (path) => !Object.hasOwn(manifest.functions, path)
     ),
   ].toSorted();

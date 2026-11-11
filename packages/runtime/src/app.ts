@@ -149,14 +149,14 @@ export const registerApp = (parts: AppParts): App => {
     manifest
   );
   const answers = readSchemaAnswers(config.answers, manifest, refuse);
-  const functions = registeredFunctions(
+  const registered = registeredFunctions(
     parts.schema,
     exportedFunctions(parts.modules)
   );
 
-  const operations: Record<string, FunctionManifest> = {};
-  for (const [path, fn] of functions) {
-    Object.defineProperty(operations, path, {
+  const functions: Record<string, FunctionManifest> = {};
+  for (const [path, fn] of registered) {
+    Object.defineProperty(functions, path, {
       enumerable: true,
       value: Object.freeze({
         path,
@@ -174,13 +174,13 @@ export const registerApp = (parts: AppParts): App => {
     manifest: deepFreeze({
       name: config.name,
       schema: manifest,
-      operations,
+      functions,
       permissions: Object.fromEntries(permissions),
       migrations,
       ...(answers.length > 0 ? { answers } : {}),
     }),
     schema: parts.schema,
-    functions,
+    functions: registered,
     migrations: new Map(migrationsByName),
   });
   return made;

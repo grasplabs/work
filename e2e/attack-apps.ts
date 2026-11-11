@@ -11,7 +11,7 @@ import type { TestApp } from "../apps/core/test/app-definitions.ts";
  * the test runs itself.
  */
 
-const operations = `import { v } from "@grasp-os/sdk";
+const serverCode = `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
 export const secret = query({ args: {}, returns: v.string(), handler: () => "fictional-marker-7f3a" });
@@ -570,7 +570,7 @@ export const attackAppFiles = ({
   return testApp(
     { name: "Attacks", tables: {} },
     {
-      "server/attacks.ts": operations,
+      "server/attacks.ts": serverCode,
       ...Object.fromEntries(
         Object.entries(pages).map(([name, code]) => [
           `src/routes/${name}.tsx`,
@@ -587,7 +587,7 @@ export const injectingAppFiles = (): TestApp =>
   testApp(
     { name: "Attacks", tables: {} },
     {
-      "server/attacks.ts": operations,
+      "server/attacks.ts": serverCode,
       "src/routes/index.tsx": injectingPage,
     }
   );

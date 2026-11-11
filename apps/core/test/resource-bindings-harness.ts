@@ -1,6 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { Json } from "@grasp-os/shared/json";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import type { ResourceBindingsReview } from "@grasp-os/shared/resource-bindings";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -174,12 +174,12 @@ export const requestFor = (
   path: string,
   input: unknown
 ): string => {
-  const operation = release.app.operations[path];
-  if (operation === undefined) {
+  const fn = release.app.functions[path];
+  if (fn === undefined) {
     throw new Error(`No ${path}`);
   }
   return JSON.stringify({
-    reference: { name: path, kind: operation.kind },
+    reference: { name: path, kind: fn.kind },
     args: input,
   });
 };
@@ -217,7 +217,7 @@ export const call = async (
   { app, owner, release }: Sealed,
   path: string,
   input: unknown
-): Promise<OperationResult> => {
+): Promise<FunctionResult> => {
   const answered = await callAppFunction(
     callEnv,
     owner,
@@ -237,7 +237,7 @@ export const hitsSchema = z.array(
 );
 
 /** What a call answered: its value, or its error's code. */
-export const outcomeOf = (result: OperationResult): Json =>
+export const outcomeOf = (result: FunctionResult): Json =>
   result.ok ? result.value : { failed: result.error.code };
 
 /** An admin's approval of the App's `ai` to the chosen model. */
@@ -455,7 +455,7 @@ export const callOn = async (
   callEnv: Env,
   sealed: Sealed,
   path: string
-): Promise<OperationResult> =>
+): Promise<FunctionResult> =>
   await call(callEnv, sealed, path, { prompt: "Hi" });
 
 /** Calls the App's `draft` through `callEnv`: its outcome. */

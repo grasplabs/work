@@ -225,15 +225,30 @@ export const withStepMoved = (
   return { ...flow, steps: [...rest.slice(0, at), moved, ...rest.slice(at)] };
 };
 
-/** The screens the admin goes through in this flow, in order; none where there is no onboarding. */
-export const flowScreens = (flow: OnboardingFlow): SetupStepId[] =>
-  flow.on
-    ? flow.steps
-        .filter(({ on }) => on)
-        .flatMap(({ id }): SetupStepId[] =>
-          id === "interviews" ? ["team", "listening", "review", "open"] : [id]
-        )
-    : [];
+/** The screens that come with the flow's `interviews` step, in their own order. */
+const interviewScreens: readonly SetupStepId[] = [
+  "team",
+  "listening",
+  "review",
+  "open",
+];
+
+/**
+ * The screens the admin goes through in this flow, in order; none where
+ * there is no onboarding. The interviews' screens come last wherever the
+ * flow has the step: once the team is told the admin waits, and the way
+ * in is the end of it.
+ */
+export const flowScreens = (flow: OnboardingFlow): SetupStepId[] => {
+  if (!flow.on) {
+    return [];
+  }
+  const on = flow.steps.filter((step) => step.on).map(({ id }) => id);
+  return [
+    ...on.flatMap((id): SetupStepId[] => (id === "interviews" ? [] : [id])),
+    ...(on.includes("interviews") ? interviewScreens : []),
+  ];
+};
 
 /**
  * How the platform opens to the company in this flow: on Grasp's `go`

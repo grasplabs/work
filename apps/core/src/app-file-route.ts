@@ -30,7 +30,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { operationRoles } from "./app-access.ts";
+import { functionRoles } from "./app-access.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { usableApp } from "./apps.ts";
@@ -435,7 +435,7 @@ interface Channel {
   /** Runs `work` while the lease's build is trusted, before and after. */
   readonly within: <Answer>(work: () => Promise<Answer>) => Promise<Answer>;
   /**
-   * Who reads, as the App's operations do: their roles now, its schema.
+   * Who reads, as the App's functions do: their roles now, its schema.
    * Asked again for each chunk of a download: refused once the session
    * ended or is someone else's, or the App's current release is no
    * longer the one the request began on, or it was revoked.
@@ -894,7 +894,7 @@ export const appFileResponse = async (
       await requireNotRevoked(env, app, version);
       return {
         principal: now.userId,
-        roles: await operationRoles(env, now, app),
+        roles: await functionRoles(env, now, app),
         schemaHash: await schemaHash(release.app.schema),
       };
     };

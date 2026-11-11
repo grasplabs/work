@@ -42,7 +42,7 @@ export default defineConfig({
     ignorePatterns: [
       ...(core.ignorePatterns ?? []),
       ...generated,
-      // The tests' own built-in, an App of spec 8's layout: its operations
+      // The tests' own built-in, an App of spec 8's layout: its functions
       // import what its seal generates (`@server/_generated/server`), which nothing
       // here maps, so its files are untyped, like any inline test App's
       // (the seal strips types without checking them), and

@@ -1,8 +1,8 @@
 import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { redact } from "@grasp-os/shared/redact";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
@@ -706,7 +706,7 @@ const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
     const request = asStreams(`${api}.${method}`, args, streamed);
     // A stream that didn't arrive in time, as the API itself refuses one.
     if (unfinished === true && Array.isArray(streamed) && streamed.length > 0) {
-      throw operationErrors.create("function.deadline_exceeded");
+      throw functionErrors.create("function.deadline_exceeded");
     }
     const answer: unknown = await Reflect.apply(fn, env[api], request);
     return answer;

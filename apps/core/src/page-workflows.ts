@@ -17,16 +17,16 @@ import {
   isExpectedError,
 } from "@grasp-os/shared/errors";
 import { isAppErrorCode } from "@grasp-os/shared/function-limits";
+import {
+  categoryOf,
+  isRetryableCode,
+  functionErrors,
+} from "@grasp-os/shared/functions";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  categoryOf,
-  isRetryableCode,
-  operationErrors,
-} from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -282,7 +282,7 @@ export const resolvedIn = async (
 ): Promise<Resolved> => {
   const found = await declaredIn(release, alias);
   if (found === undefined) {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   return { alias, ...found, pinned: found.declared.pinned };
 };
@@ -301,7 +301,7 @@ export const checkedValue = (
   const schema = schemaFromDescriptor(JSON.stringify(descriptor));
   const result = schema["~standard"].validate(value);
   if (result instanceof Promise || result.issues !== undefined) {
-    throw operationErrors.create(code);
+    throw functionErrors.create(code);
   }
   // SAFETY: what a descriptor admits is JSON.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -310,7 +310,7 @@ export const checkedValue = (
     code === "contract.invalid_return" &&
     canonicalText(normalized) !== canonicalText(value)
   ) {
-    throw operationErrors.create(code);
+    throw functionErrors.create(code);
   }
   return normalized;
 };
@@ -702,11 +702,11 @@ export const resultAsDeclared = (declared: unknown, result: unknown): Json => {
     "~standard"
   ].validate(result);
   if (checked instanceof Promise || checked.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_return");
+    throw functionErrors.create("contract.invalid_return");
   }
   const projected = z.json().safeParse(checked.value);
   if (!projected.success) {
-    throw operationErrors.create("contract.invalid_return");
+    throw functionErrors.create("contract.invalid_return");
   }
   return projected.data;
 };
@@ -1487,7 +1487,7 @@ const sent = async (
     ? resolved.declared.events[alias]
     : undefined;
   if (declared === undefined) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   const { type } = declared;
   const { row } = await seenRun(env, asking, resolved.alias, pin, send.runId);
@@ -1603,7 +1603,7 @@ const sendArgs = z.object({
 const argsOf = <Args>(schema: z.ZodType<Args>, args: Json): Args => {
   const parsed = schema.safeParse(args);
   if (!parsed.success) {
-    throw operationErrors.create("contract.invalid_args");
+    throw functionErrors.create("contract.invalid_args");
   }
   return parsed.data;
 };
@@ -1632,13 +1632,13 @@ export const answerWorkflowMutation = async (
   const name = path?.name ?? "";
   const fn = isMutationName(name) ? mutations[name] : undefined;
   if (fn === undefined) {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   if (call.reference.kind !== fn.kind) {
-    throw operationErrors.create("function.kind_mismatch");
+    throw functionErrors.create("function.kind_mismatch");
   }
   const args = checkedValue(fn.args, call.args, "contract.invalid_args");
-  // Keyed as the App's own mutations are (operations.ts): the client
+  // Keyed as the App's own mutations are (function-host.ts): the client
   // sends each under one, the caller's or its own.
   const key =
     call.idempotencyKey === undefined
@@ -1669,7 +1669,7 @@ export const answerWorkflowMutation = async (
       key,
     });
   } else {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   return {
     value: checkedValue(fn.returns, value, "contract.invalid_return"),
@@ -1703,12 +1703,12 @@ export const startCallIn = async (
     ? mutationPath.exec(call.data.reference.name)?.groups
     : undefined;
   if (!call.success || path?.alias === undefined || path.name !== "start") {
-    throw operationErrors.create("contract.invalid_request");
+    throw functionErrors.create("contract.invalid_request");
   }
   const resolved = await resolvedIn(release, path.alias);
   const { start } = workflowFunctions(resolved.declared).mutations;
   if (start === undefined) {
-    throw operationErrors.create("function.not_found");
+    throw functionErrors.create("function.not_found");
   }
   const args = checkedValue(
     start.args,
