@@ -1,4 +1,4 @@
-import { deepFreeze } from "@grasp-os/shared/json";
+import { deepFreeze, isPlainObject } from "@grasp-os/shared/json";
 
 import { AppDefinitionError } from "./app-definition-error.ts";
 import { exportedFunctions, registeredFunctions } from "./app-functions.ts";
@@ -17,7 +17,6 @@ import { refuser } from "./declaration.ts";
 import type { AppPermission } from "./permission-types.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // How an App registers itself, Convex's way: each part
 // is a file of its own, and the host's entry (`.grasp/app.ts`) hands them

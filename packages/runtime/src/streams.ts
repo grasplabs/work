@@ -2,7 +2,7 @@ import {
   functionRequestMaxBytes,
   streamIdleCancelMs,
 } from "@grasp-os/shared/function-limits";
-import { deepFreeze } from "@grasp-os/shared/json";
+import { deepFreeze, isPlainObject } from "@grasp-os/shared/json";
 
 import type { AccessFence } from "./access-fence.ts";
 import { readRejection } from "./call-answers.ts";
@@ -27,7 +27,6 @@ import {
 } from "./stream-connection.ts";
 import type { Followed } from "./stream-connection.ts";
 import { withKey } from "./submission-verdict.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // A streaming action (`stream`) is followed rather than
 // answered: its progress snapshots, then its result, over the transport's

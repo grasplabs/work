@@ -1,11 +1,11 @@
 import { httpContract } from "@grasp-os/shared/http-contract";
+import { isPlainObject } from "@grasp-os/shared/json";
 
 import type { FunctionChannel } from "./function-channel.ts";
 import { isActionPermission } from "./manifest-permissions.ts";
 import { memberName, membersOf } from "./member-names.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 // The clients an action reaches the App's permissions through
 // (`ctx.ai`, `ctx.brain`, `ctx.connections.<alias>`, `ctx.grasp`,

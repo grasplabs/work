@@ -1,3 +1,5 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import type { Grant } from "./ctx-workflows.ts";
 import { refuser } from "./declaration.ts";
 import { serverFunctions } from "./handlers.ts";
@@ -15,7 +17,6 @@ import type {
   FunctionKind,
   Visibility,
 } from "./server-function.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, ObjectOutput, ValueShape } from "./value-types.ts";
 import { v } from "./values.ts";

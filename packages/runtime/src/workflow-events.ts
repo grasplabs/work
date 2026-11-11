@@ -1,6 +1,7 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { namePattern } from "./declaration.ts";
 import type { argsType } from "./function-references.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /**
  * A generated reference to one event a workflow the App declares:

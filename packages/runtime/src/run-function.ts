@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 import { peopleAlias } from "@grasp-os/shared/notifications";
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
@@ -11,7 +12,6 @@ import { peopleDirectory } from "./people.ts";
 import type { AppPermission } from "./permission-types.ts";
 import { permissionsOf } from "./run-permission-clients.ts";
 import type { FunctionKind } from "./server-function.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";
 import { eventReferenceName } from "./workflow-events.ts";
 import type { EventName } from "./workflow-events.ts";

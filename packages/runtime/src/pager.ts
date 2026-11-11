@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 
@@ -5,7 +6,6 @@ import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
 import type { QueryEntry } from "./client-query-entry.ts";
 import type { ReadReference } from "./client-request.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /**
  * What a paginated list shows: the ordered records of its loaded pages,

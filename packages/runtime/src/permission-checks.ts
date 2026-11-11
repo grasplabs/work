@@ -1,7 +1,7 @@
 import { originRefusal } from "@grasp-os/shared/app-link-limits";
 import { resourceAliasPattern } from "@grasp-os/shared/function-limits";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
-import { deepFreeze } from "@grasp-os/shared/json";
+import { deepFreeze, isPlainObject } from "@grasp-os/shared/json";
 
 import { refuser } from "./declaration.ts";
 import type { FilesOperation } from "./file-link-references.ts";
@@ -13,7 +13,6 @@ import type {
   GuestsOperation,
   WorkflowPermission,
 } from "./permission-types.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 /** Why a permission's declaration was refused. */
 export class PermissionDefinitionError extends Error {

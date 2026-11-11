@@ -1,3 +1,5 @@
+import { isPlainObject } from "@grasp-os/shared/json";
+
 import { AppDefinitionError } from "./app-definition-error.ts";
 import { refuser } from "./declaration.ts";
 import {
@@ -7,7 +9,6 @@ import {
 } from "./permission-checks.ts";
 import { peopleDeclaration, permissionAliases } from "./permission-types.ts";
 import type { AppPermission } from "./permission-types.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 
 const refuse: (message: string) => never = refuser(AppDefinitionError);
 

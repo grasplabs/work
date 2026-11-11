@@ -1,4 +1,4 @@
-import { isPlainObject } from "./value-descriptor.ts";
+import { isPlainObject } from "@grasp-os/shared/json";
 
 // What the SDK's constructors and manifest readers share as they check
 // what they are given: refusing it with their own error, reading it,

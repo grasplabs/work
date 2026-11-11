@@ -1,3 +1,4 @@
+import { isPlainObject } from "@grasp-os/shared/json";
 /**
  * JSON text from caller values, written with a hard bound on the work:
  * what a run's isolate hands core (a step's result, a call's arguments,
@@ -60,11 +61,6 @@ const utf8Length = (text: string): number => {
     }
   }
   return bytes;
-};
-
-const isPlainObject = (value: object): boolean => {
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 };
 
 /** A writer of JSON text within `bounds`; it throws RefusedError. */

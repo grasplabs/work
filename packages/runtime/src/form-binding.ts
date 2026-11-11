@@ -1,4 +1,4 @@
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
@@ -23,7 +23,6 @@ import type {
 } from "./form-types.ts";
 import { settlesSubmission } from "./refusals.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 

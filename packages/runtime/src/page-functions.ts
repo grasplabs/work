@@ -1,4 +1,4 @@
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import type { FunctionManifest } from "./app-types.ts";
@@ -9,7 +9,6 @@ import type {
 } from "./bound-workflows.ts";
 import { namePattern } from "./declaration.ts";
 import type { ReferenceKind } from "./function-references.ts";
-import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { workflowReferenceLimits } from "./workflow-references.ts";
