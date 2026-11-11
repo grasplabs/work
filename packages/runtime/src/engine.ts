@@ -2,15 +2,6 @@
 import type { RunId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 
-/** An answer to a decision, as a test gives it (`@grasp-os/sdk/testing`). */
-export interface DecisionAnswer {
-  approved: boolean;
-  /** The person who answered. */
-  by: string;
-  /** Anything more they sent, e.g. `{ comment }`. */
-  payload?: Json;
-}
-
 /**
  * How a decision stands when a wait for it ends: answered, by a person
  * the runtime checked may answer it, or not (yet).

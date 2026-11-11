@@ -157,14 +157,7 @@ export const runPinned = async (
     // A test run of a draft checkpoint: its input is its row's.
     return await runCandidateWorkflow(env, pin, event.instanceId, step, memory);
   }
-  if (pin.type === "fixture") {
-    // An independent workflow's sealed build started by an App's test: its
-    // input is its own record's.
-    return await runFixtureWorkflow(env, pin, event.instanceId, step, memory);
-  }
-  // An App's own workflow: Apps hold none (GRA-1367), so a run pinned to
-  // one, started before they went, runs nothing.
-  throw new Error(
-    `Run ${event.instanceId} is of an App's own workflow, which no longer runs`
-  );
+  // An independent workflow's sealed build started by an App's test: its
+  // input is its own record's.
+  return await runFixtureWorkflow(env, pin, event.instanceId, step, memory);
 };

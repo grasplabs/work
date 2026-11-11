@@ -485,6 +485,9 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
       document.reading ? [document.reading.about] : []
     ),
     skipped,
+    ...(client.status === "off"
+      ? {}
+      : { adminStep: client.status === "done" ? "done" : client.step }),
     stephen: {
       languages: [profile.language],
       limits: [],

@@ -1,5 +1,4 @@
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
@@ -714,25 +713,23 @@ describe("model spend", { timeout: 60_000 }, () => {
   });
 
   it("sum a month's spend in the overview: the total across every caller, and each workflow's apart", async () => {
-    const app = `app-${crypto.randomUUID()}`;
+    const invoices = `workflow-${crypto.randomUUID()}`;
+    const orders = `workflow-${crypto.randomUUID()}`;
     const { call, month } = withProvider(times(5, pricedAnswer));
-    const step = async (workflow: string) =>
+    const step = async (workflowId: string) =>
       await call(
         hello({
           purpose: "workflow.step",
-          trigger: runActorOf({
-            runId: `run-${crypto.randomUUID()}`,
-            app,
-            workflow,
-          }),
+          trigger: { type: "system" },
+          lineage: { rootRunId: `run-${crypto.randomUUID()}`, workflowId },
         })
       );
 
     // A new run each time: the workflow counts all of its runs.
     await inTurn(
-      Array.from({ length: 3 }, () => async () => await step("invoices"))
+      Array.from({ length: 3 }, () => async () => await step(invoices))
     );
-    await step("orders");
+    await step(orders);
     // A new person: the total counts every caller, in this month.
     await call(hello());
     await recordedUsage(month, 5);
@@ -749,8 +746,8 @@ describe("model spend", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       total: 5 * pricedMicros,
       workflows: [
-        [app, "invoices", 3 * pricedMicros],
-        [app, "orders", pricedMicros],
+        [null, invoices, 3 * pricedMicros],
+        [null, orders, pricedMicros],
       ],
       more: false,
     });

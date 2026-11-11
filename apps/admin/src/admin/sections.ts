@@ -25,6 +25,7 @@ import {
   HourglassIcon,
   LayoutDashboardIcon,
   ListChecksIcon,
+  ListOrderedIcon,
   MessagesSquareIcon,
   NetworkIcon,
   PlugIcon,
@@ -40,6 +41,7 @@ export const orgSections = [
   "details",
   "contract",
   "members",
+  "flow",
   "steps",
   "organization",
   "interviews",
@@ -64,7 +66,7 @@ export const sectionGroups = [
   {
     id: "onboarding",
     label: "Onboarding",
-    sections: ["steps", "organization", "interviews", "workflows"],
+    sections: ["flow", "steps", "organization", "interviews", "workflows"],
   },
   {
     id: "platform",
@@ -87,6 +89,7 @@ export const sectionTo = {
   details: "/organizations/$clientId/details",
   contract: "/organizations/$clientId/contract",
   members: "/organizations/$clientId/members",
+  flow: "/organizations/$clientId/flow",
   steps: "/organizations/$clientId/steps",
   organization: "/organizations/$clientId/organization",
   interviews: "/organizations/$clientId/interviews",
@@ -122,6 +125,12 @@ export const sectionWords: Record<
     about:
       "Everyone invited into the company’s platform, and what each may do.",
     icon: UsersIcon,
+  },
+  flow: {
+    title: "Flow",
+    about:
+      "How much onboarding this company goes through: which steps, in which order, or none at all.",
+    icon: ListOrderedIcon,
   },
   steps: {
     title: "Steps",
@@ -270,6 +279,7 @@ export const originsOf = (
       { source: "stripe", what: "Its billing and invoices", read: stripe },
     ],
     members: [fromCore],
+    flow: [fromCore],
     steps: [fromCore],
     organization: [fromCore],
     interviews: [fromCore],

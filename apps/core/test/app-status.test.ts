@@ -8,8 +8,10 @@ import { changeStatus } from "../src/app-status.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { draftOverLatest, proposeDraft, proposeVersion } from "../src/apps.ts";
 import { deleteStore } from "../src/data-stores.ts";
-import { cancelRunsOf } from "../src/workflows/controls.ts";
-import { repairResourceStarts } from "../src/workflows/resource-runs.ts";
+import {
+  repairResourceStarts,
+  stopRunsStartedBy,
+} from "../src/workflows/resource-runs.ts";
 import { commitApp, withFiles } from "./app-definitions.ts";
 import { commitDefined, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -313,11 +315,12 @@ describe("an App's status", () => {
     await builder.api.apps.publish(app);
     const raced = await holdingRun(holding);
     // A cancel of that archive, late, leaves the run started since alone.
-    const { asked: late } = await cancelRunsOf(
+    const { asked: late } = await stopRunsStartedBy(
       env,
-      { userId: builder.userId, staff: false },
+      { type: "person", userId: builder.userId },
       app,
-      new Date(archivedAt?.at ?? 0)
+      new Date(archivedAt?.at ?? 0),
+      50
     );
     await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
       .bind(app)
@@ -403,11 +406,12 @@ describe("an App's status", () => {
     await builder.api.apps.publish(app);
     await holdingRun(holding);
     // A sweep asked of the restored App, however late its cutoff, finds none.
-    const { asked: swept } = await cancelRunsOf(
+    const { asked: swept } = await stopRunsStartedBy(
       env,
-      { userId: builder.userId, staff: false },
+      { type: "person", userId: builder.userId },
       app,
-      new Date(Date.now() + 60_000)
+      new Date(Date.now() + 60_000),
+      50
     );
 
     expect({

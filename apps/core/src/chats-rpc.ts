@@ -1,4 +1,5 @@
 import { isAppLayout } from "@grasp-os/compiler";
+import { ownFiles } from "@grasp-os/runtime/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppFiles } from "@grasp-os/shared/apps";
@@ -604,7 +605,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     app: string,
     files: ReadonlyMap<string, string>
   ): Promise<IndexUse[]> {
-    const given = Object.fromEntries(files);
+    // Never their copy of what Grasp generates, as the preview builds them.
+    const given = ownFiles(Object.fromEntries(files));
     try {
       const [code, pages] = await Promise.all([
         buildAppCode(this.#env, given, app),

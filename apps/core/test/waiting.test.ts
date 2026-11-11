@@ -14,7 +14,6 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { endLiveRuns } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // What waits on a person, in one feed (waiting-rpc.ts). Its threat model
@@ -71,10 +70,7 @@ const heldMail = async (person: Person, admin: Person) => {
 };
 
 describe("what waits", slow, () => {
-  afterEach(async () => {
-    await endLiveRuns();
-    await endLiveResourceRuns();
-  });
+  afterEach(endLiveResourceRuns);
 
   it("holds a person's write for them alone, and runs it once on their approval through the feed", async () => {
     const person = await signedInApi(idp, "user");

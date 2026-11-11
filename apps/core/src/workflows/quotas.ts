@@ -15,7 +15,6 @@ import {
   runLineages,
   workflowCandidateRuns,
   workflowResourceRuns,
-  workflowRuns,
 } from "../db/core/schema.ts";
 import { busyRetryAfterSeconds, slotFree } from "./admission.ts";
 
@@ -196,77 +195,6 @@ const limitReached = (limit: LineageLimit, limits: QuotaLimits) =>
     max: limits[lineageLimits[limit]],
   });
 
-/** The App of run `id`, as SQL: null for a run of no App's. */
-const appOf = (id: string): SQL =>
-  sql`(SELECT ${workflowRuns.appId} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${id})`;
-
-/**
- * The statements that charge `run`, started under `parent` in the lineage
- * of `root`, to an account there, after the statement that writes its
- * row (nothing for a row that wasn't written). Each App has at most two
- * accounts in a lineage, each claimed once by the lineage, the App and
- * its kind (`run_lineage_accounts`), so starts at once agree on one:
- * - a run of another App than the root's (a run's own mail starts other
- *   Apps' runs under it) is charged to its App's first such run in the
- *   lineage (`joined`);
- * - a run of the root's App under another App's run, which that App's
- *   mail started, is charged to the first such run (`rejoined`), never to
- *   the lineage's own allowances, which the other App could otherwise use
- *   up by mailing the root's App;
- * - a run of the root's App under one of its own runs is charged where
- *   its parent is: the lineage's own (no account) or `rejoined`.
- * So hopping between Apps never makes more than two accounts of an App,
- * however often it goes back and forth. An account has a row of its own
- * (`run_lineages`) whose age is the root's, so a hop never starts a
- * lineage's life afresh. The run's row names its account
- * (`account_run_id`), written once, here (migration 0112's triggers keep
- * it).
- *
- * What it closes: one App using up another's allowances in a lineage
- * (its attempts' active time, its host calls, its model spend, keyed by
- * its account, model-spend.ts) and taking the share of a person who
- * never used it (dispatcher.ts, `admissionSubjectOf`). Its place stays
- * the lineage's: it takes one of the lineage's descendant runs and sits a
- * level deeper (`admitInLineage`), which bound runs mailing each other back
- * and forth, whichever Apps they are of. What a lineage can spend in all
- * grows with the Apps it reaches: up to twice the per-lineage limits for
- * each App, the descendant runs it may start bounding how many Apps.
- */
-export const accountClaimed = (
-  db: DrizzleD1Database,
-  run: { id: string; appId: string; createdAt: Date },
-  root: string,
-  parent: string
-) => {
-  const accounts = runLineageAccounts;
-  // Its account's kind, or none to be charged where its parent is.
-  const kind = sql`(CASE WHEN ${run.appId} IS NOT ${appOf(root)} THEN 'joined' WHEN ${run.appId} IS NOT ${appOf(parent)} THEN 'rejoined' ELSE NULL END)`;
-  const ofKind = sql`${accounts.rootRunId} = ${root} AND ${accounts.appId} = ${run.appId} AND ${accounts.kind} = ${kind}`;
-  return [
-    db
-      .insert(accounts)
-      .select(
-        sql`SELECT ${root}, ${run.appId}, ${kind}, ${run.id}, ${run.createdAt.getTime()} WHERE EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.id}) AND ${kind} IS NOT NULL`
-      )
-      .onConflictDoNothing(),
-    // Its row, when this run is the account: aged as the lineage is.
-    db
-      .insert(runLineages)
-      .select(
-        sql`SELECT ${accounts.accountRunId}, (SELECT ${runLineages.createdAt} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root}), 0, 0, 0, 0 FROM ${accounts} WHERE ${ofKind} AND ${accounts.accountRunId} = ${run.id}`
-      )
-      .onConflictDoNothing(),
-    db
-      .update(workflowRuns)
-      .set({
-        accountRunId: sql`(CASE WHEN ${kind} IS NULL THEN (SELECT p.account_run_id FROM ${workflowRuns} AS p WHERE p.id = ${parent}) ELSE (SELECT ${accounts.accountRunId} FROM ${accounts} WHERE ${ofKind}) END)`,
-      })
-      .where(
-        and(eq(workflowRuns.id, run.id), isNull(workflowRuns.accountRunId))
-      ),
-  ] as const;
-};
-
 /**
  * The account a run of independent workflow `workflow` is charged to,
  * started by a trigger in the lineage of `root` (an event or a stamped
@@ -278,8 +206,8 @@ export const triggeredAccountOf = (root: string, workflow: string): SQL =>
 
 /**
  * The statements that claim an account in the lineage of `root` for the
- * runs a trigger starts there of independent workflow `workflow`, as App
- * runs have theirs (`accountClaimed`): the first such run, `run`, is the
+ * runs a trigger starts there of independent workflow `workflow`: the
+ * first such run, `run`, is the
  * account, claimed once by the lineage and the workflow, so starts at
  * once agree on one. `claim` goes before the statement that writes the
  * run's row (which names its account, `triggeredAccountOf`), only once
@@ -331,9 +259,9 @@ export const triggeredAccountClaimed = (
 };
 
 /**
- * The run whose allowances `run`'s work is charged to: its App's account
- * in its lineage (`accountClaimed`), or else its lineage's root, or the
- * run itself for a root.
+ * The run whose allowances `run`'s work is charged to: its workflow's
+ * account in its lineage (`triggeredAccountClaimed`), or else its
+ * lineage's root, or the run itself for a root.
  */
 export const accountOf = (run: {
   id: string;
@@ -344,45 +272,40 @@ export const accountOf = (run: {
 /**
  * The statement that creates the lineage of `root` (a root run's ID) from
  * its run's row, unless it has its row already: its age counts from the
- * root's start. A root is an App's run (`workflow_runs`) or an
- * independent workflow's (`workflow_resource_runs`, its start's
- * admission), or a test run of its draft (`workflow_candidate_runs`,
- * candidate-runs.ts): the same counters and admissions hold both, so no run gets
- * past a limit for being of either kind. Nothing for a run core has no
- * row of.
+ * root's start. A root is an independent workflow's run
+ * (`workflow_resource_runs`, its start's admission) or a test run of its
+ * draft (`workflow_candidate_runs`, candidate-runs.ts): the same counters
+ * and admissions hold both, so no run gets past a limit for being of
+ * either kind. Nothing for a run core has no row of.
  */
 export const lineageCreated = (db: DrizzleD1Database, root: string) =>
   db
     .insert(runLineages)
     .select(
-      sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}
-        UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${root}
+      sql`SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${root}
         UNION ALL SELECT ${workflowCandidateRuns.id}, ${workflowCandidateRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${root}`
     )
     .onConflictDoNothing();
 
 /**
- * That run `run` was cancelled, as SQL: an App run's tombstone, or an
- * independent run ended cancelled (resource-runs.ts, which ends it as
+ * That run `run` was cancelled, as SQL: an independent run, or a test
+ * run, ended cancelled (resource-runs.ts, which ends it as
  * the cancel is taken). Its attempts are charged up to their deadlines,
  * as the engine stops a cancelled attempt's calls, not its isolate.
  */
 const cancelledRun = (run: string): SQL =>
-  sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.cancelRequestedAt} IS NOT NULL)
-    OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND ${workflowResourceRuns.status} = 'cancelled')
+  sql`(EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND ${workflowResourceRuns.status} = 'cancelled')
     OR EXISTS (SELECT 1 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${run} AND ${workflowCandidateRuns.status} = 'cancelled'))`;
 
 /**
  * That the engine has fenced run `run`'s attempts of activation
  * `generation`, as SQL: the run was cancelled (`cancelledRun`), its object
  * said its attempts of this generation, or a newer one, hold no more
- * (`sharesReleased`), or, for an independent run or a test run, it has
- * ended. However
- * late an admission of such an attempt lands, it takes no share.
+ * (`sharesReleased`), or it has ended. However late an admission of such
+ * an attempt lands, it takes no share.
  */
 const fencedRun = (run: string, generation: number): SQL =>
   sql`(${cancelledRun(run)}
-    OR EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.sharesFencedThrough} >= ${generation})
     OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND (${workflowResourceRuns.sharesFencedThrough} >= ${generation} OR ${workflowResourceRuns.status} IN ('completed', 'failed', 'cancelled')))
     OR EXISTS (SELECT 1 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${run} AND (${workflowCandidateRuns.sharesFencedThrough} >= ${generation} OR ${workflowCandidateRuns.status} IN ('completed', 'failed', 'cancelled'))))`;
 
@@ -395,15 +318,6 @@ const fencedRun = (run: string, generation: number): SQL =>
  */
 const fenceRecorded = (db: DrizzleD1Database, run: string, through: number) =>
   [
-    db
-      .update(workflowRuns)
-      .set({ sharesFencedThrough: through })
-      .where(
-        and(
-          eq(workflowRuns.id, run),
-          lt(workflowRuns.sharesFencedThrough, through)
-        )
-      ),
     db
       .update(workflowResourceRuns)
       .set({ sharesFencedThrough: through })

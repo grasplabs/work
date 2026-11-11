@@ -60,6 +60,11 @@ export const onboarding = sqliteTable(
      * (`onboardingFlowSchema`), or `null` while it goes through all of it.
      */
     flow: text(),
+    /**
+     * Where the company's admin is in their onboarding, as JSON
+     * (`setupPlaceSchema`), or `null` before they finished a screen.
+     */
+    place: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );

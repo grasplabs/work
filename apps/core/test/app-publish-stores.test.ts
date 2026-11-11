@@ -18,11 +18,7 @@ import {
   sealRelease,
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import {
-  applyVersionSchema,
-  resetAppData,
-  resetLegacyAppData,
-} from "../src/app-schema.ts";
+import { applyVersionSchema, resetAppData } from "../src/app-schema.ts";
 import { createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore } from "../src/data-stores.ts";
@@ -1470,13 +1466,6 @@ describe(
   }
 );
 
-/** Puts `store` in the state of one written before stable IDs: no catalog. */
-const asBeforeStableIds = async (store: string): Promise<void> => {
-  await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) => {
-    state.storage.sql.exec("UPDATE sdk_store SET schema_catalog = NULL");
-  });
-};
-
 /** How many mutation receipts `store` keeps. */
 const receiptsOf = async (store: string): Promise<number> =>
   await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) =>
@@ -1509,71 +1498,6 @@ const notedApp = async () => {
 };
 
 describe("resetting an App's data", { timeout: 120_000 }, () => {
-  it("lets a builder reset data from before stable IDs, which nothing reads, and its current version runs again", async () => {
-    const { owner, app, store } = await notedApp();
-    await asBeforeStableIds(store);
-    const before = await codeOfCall(owner, app, "notes.rows");
-
-    await resetLegacyAppData(env, owner, app);
-    const receipts = await receiptsOf(store);
-    await valueOf(owner, app, "notes.create", { title: "Hiring" });
-
-    const actor = { type: "person", userId: owner.userId };
-    expect({
-      before,
-      receipts,
-      rows: await valueOf(owner, app, "notes.rows"),
-      audited: await resetAudit(store),
-    }).toStrictEqual({
-      before: "migration.metadata_missing",
-      receipts: 0,
-      rows: [{ title: "Hiring" }],
-      audited: [
-        {
-          action: "store.reset",
-          actor,
-          detail: {
-            app,
-            everything: 0,
-            tables: 1,
-            records: 1,
-            files: 0,
-            outbox: 0,
-            version: 1,
-          },
-        },
-        {
-          action: "app.data.erased",
-          actor,
-          detail: { store, table: "notes", records: 1 },
-        },
-      ],
-    });
-  });
-
-  it("refuses a builder's reset of data that can still be read, and Grasp staff's, and a stranger's, changing nothing", async () => {
-    const { owner, app } = await notedApp();
-    const stranger = await person("builder");
-
-    expect({
-      readable: await failure(async () => {
-        await resetLegacyAppData(env, owner, app);
-      }),
-      staff: await failure(async () => {
-        await resetLegacyAppData(env, { ...owner, staff: true }, app);
-      }),
-      stranger: await failure(async () => {
-        await resetLegacyAppData(env, stranger, app);
-      }),
-      rows: await valueOf(owner, app, "notes.rows"),
-    }).toStrictEqual({
-      readable: "migration.reset_refused",
-      staff: "role.forbidden",
-      stranger: "app.not_found",
-      rows: [{ title: "Launch" }],
-    });
-  });
-
   it("lets an admin reset every record, the App's name typed to confirm, and its current version runs again", async () => {
     const { owner, app, store } = await notedApp();
     const admin = await person("admin");
@@ -1596,7 +1520,6 @@ describe("resetting an App's data", { timeout: 120_000 }, () => {
       audited: [
         {
           app,
-          everything: 1,
           tables: 1,
           records: 1,
           files: 0,

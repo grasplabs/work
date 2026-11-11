@@ -35,7 +35,7 @@ import {
 import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildPages } from "../src/pages.ts";
-import { commitApp } from "./app-definitions.ts";
+import { appOf, commitApp } from "./app-definitions.ts";
 import { grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
@@ -75,6 +75,19 @@ const hello = (): BuiltinBlueprint => {
   }
   return found;
 };
+
+/**
+ * The files an App created from `blueprint` (of a release) holds: its own,
+ * and what Grasp generates among them (`server/_generated/`), as every
+ * version's.
+ */
+const committed = (
+  blueprint: Pick<BuiltinBlueprint, "files" | "definition"> | undefined
+): Readonly<Record<string, string>> | undefined =>
+  blueprint === undefined
+    ? undefined
+    : appOf(readDefinition(JSON.parse(blueprint.definition)), blueprint.files)
+        .files;
 
 /** The singleton's install, asked for by an isolate of this release. */
 const ensureInstalled = async (): Promise<boolean> =>
@@ -334,7 +347,7 @@ describe("the built-in blueprints", () => {
       blueprint: "hello",
       owner: builder.userId,
       permissions: [],
-      files: hello().files,
+      files: committed(hello()),
       greeting: { ok: true, value: "Hello, Ann: greeting 1" },
     });
 
@@ -435,8 +448,10 @@ describe("the built-in blueprints", () => {
     }).toStrictEqual({
       changed: true,
       audited: ["blueprint.changed"],
-      kept: hello().files,
-      after: changedHello().blueprints.find(({ id }) => id === "hello")?.files,
+      kept: committed(hello()),
+      after: committed(
+        changedHello().blueprints.find(({ id }) => id === "hello")
+      ),
     });
 
     await reinstall();
@@ -621,8 +636,9 @@ describe("the built-in blueprints", () => {
         (one, other) => one.localeCompare(other)
       ),
       deletedNext: [changed?.tree],
-      created: changedHello().blueprints.find(({ id }) => id === "hello")
-        ?.files,
+      created: committed(
+        changedHello().blueprints.find(({ id }) => id === "hello")
+      ),
     });
 
     await reinstall();
@@ -897,17 +913,16 @@ describe("the built-in blueprints", () => {
         ["app.committed", taken.version],
         ["app.blueprint.updated", taken.version],
       ],
-      files: {
-        ...hello().files,
-        [greetings]: mine,
-        [helperPath]: helper,
-      },
+      files: committed({
+        definition: hello().definition,
+        files: { ...hello().files, [greetings]: mine, [helperPath]: helper },
+      }),
       again: "app.conflict",
       afterwards: null,
       currentBefore: edited,
       current: taken.version,
       whole: [],
-      wholeFiles: next.blueprints.find(({ id }) => id === "hello")?.files,
+      wholeFiles: committed(next.blueprints.find(({ id }) => id === "hello")),
       ofMarked: null,
     });
 

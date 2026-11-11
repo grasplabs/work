@@ -1,4 +1,8 @@
-import { declaredPermissions, generatedPaths } from "@grasp-os/runtime/host";
+import {
+  declaredPermissions,
+  generatedPaths,
+  ownFiles,
+} from "@grasp-os/runtime/host";
 import type { WorkflowPin } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
@@ -226,8 +230,11 @@ export const exportAppDefinition = async (
       path: "definition",
     });
   }
+  // What the App's builders wrote: what Grasp generates, the package's
+  // destination generates anew.
+  const own = ownFiles(files);
   const budget = textBudget(maxBytesOf(env));
-  budget("app", files);
+  budget("app", own);
   const registration = canonicalText(release.app);
   // Named as the package names it: it is no file of the App's.
   budget(null, { "app.manifest": registration });
@@ -282,7 +289,7 @@ export const exportAppDefinition = async (
         compilerVersion: manifest.compilerVersion,
         generated,
       },
-      files,
+      files: own,
       definition: z.json().parse(JSON.parse(definition.text)),
       manifest: registration,
       store:

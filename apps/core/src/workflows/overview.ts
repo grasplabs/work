@@ -34,6 +34,7 @@ import {
   stillOpen,
 } from "../decisions/decisions.ts";
 import { queuedRuns } from "./admission.ts";
+import { unended } from "./resource-runs.ts";
 import type { RunRow } from "./resource-runs.ts";
 import {
   listOf,
@@ -44,7 +45,7 @@ import {
   waits,
 } from "./run-view.ts";
 import type { RunOrder, RunScope, RunWhere } from "./run-view.ts";
-import { goesOn, queuedRun, shownStatus, unended } from "./runs.ts";
+import { goesOn, queuedRun, shownStatus } from "./runs.ts";
 
 // Every independent workflow a person has a role in, and their runs: the
 // Workflows page, its Runs tab and the workflow view, with the runs their
