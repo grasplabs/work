@@ -33,8 +33,7 @@ const presetWords: Record<FlowPreset, { name: string; about: string }> = {
   },
   setup: {
     name: "Setup only",
-    about:
-      "Its admin sets Grasp up; nobody is interviewed. It opens when they finish.",
+    about: "Its admin sets Grasp up; nobody is interviewed.",
   },
   none: {
     name: "No onboarding",

@@ -314,7 +314,7 @@ const NewOrganization = () => {
           clientId,
           name: name.trim(),
           ...hosting,
-          onboarding,
+          ...(hosting.hosting === "grasp_cloud" ? { onboarding } : {}),
           signIn: signInOf(typed, adminEmail, detected, choice),
         },
       });
@@ -453,7 +453,10 @@ const NewOrganization = () => {
             </FieldDescription>
           </Field>
           <HostingChoice onChange={setHosting} value={hosting} />
-          <OnboardingChoice onChange={setOnboarding} value={onboarding} />
+          {/* Grasp sets up only what it hosts: an organization on its own premises gets no flow from here. */}
+          {hosting.hosting === "grasp_cloud" ? (
+            <OnboardingChoice onChange={setOnboarding} value={onboarding} />
+          ) : null}
         </FieldGroup>
         {failure === null ? null : (
           <p className="text-destructive text-sm" role="alert">
