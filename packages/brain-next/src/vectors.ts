@@ -315,94 +315,86 @@ const setBitsOf = (word: number): number => {
 };
 
 /**
- * The `size` nearest codes seen, by Hamming distance and then by chunk
- * row, so which are kept never depends on the order they are seen in: a
- * heap with the farthest kept on top.
+ * The `rescoreCandidates` nearest codes seen, by Hamming distance and then
+ * by chunk row, so which are kept never depends on the order they are
+ * seen in: a heap with the farthest kept at 0.
  */
-class Nearest {
-  readonly #distances: Int32Array;
-  readonly #chunks: Float64Array;
-  #count = 0;
-
-  constructor(size: number) {
-    this.#distances = new Int32Array(size);
-    this.#chunks = new Float64Array(size);
-  }
-
-  /** Whether `a` is farther than `b`. */
-  #farther(a: number, b: number): boolean {
-    const da = this.#distances[a] ?? 0;
-    const db = this.#distances[b] ?? 0;
-    return da === db
-      ? (this.#chunks[a] ?? 0) > (this.#chunks[b] ?? 0)
-      : da > db;
-  }
-
-  #swap(a: number, b: number): void {
-    const distance = this.#distances[a] ?? 0;
-    const chunk = this.#chunks[a] ?? 0;
-    this.#distances[a] = this.#distances[b] ?? 0;
-    this.#chunks[a] = this.#chunks[b] ?? 0;
-    this.#distances[b] = distance;
-    this.#chunks[b] = chunk;
-  }
-
-  /** Keeps the chunk at `distance` if it is among the nearest so far. */
-  offer(distance: number, chunk: number): void {
-    const size = this.#distances.length;
-    if (this.#count < size) {
-      let at = this.#count;
-      this.#count += 1;
-      this.#distances[at] = distance;
-      this.#chunks[at] = chunk;
-      while (at > 0) {
-        // oxlint-disable-next-line no-bitwise -- the heap's parent
-        const parent = (at - 1) >> 1;
-        if (!this.#farther(at, parent)) {
-          break;
-        }
-        this.#swap(at, parent);
-        at = parent;
-      }
-      return;
-    }
-    const top = this.#distances[0] ?? 0;
-    if (
-      distance > top ||
-      (distance === top && chunk > (this.#chunks[0] ?? 0))
-    ) {
-      return;
-    }
-    this.#distances[0] = distance;
-    this.#chunks[0] = chunk;
-    let at = 0;
-    for (;;) {
-      const left = 2 * at + 1;
-      const right = left + 1;
-      let farthest = at;
-      if (left < size && this.#farther(left, farthest)) {
-        farthest = left;
-      }
-      if (right < size && this.#farther(right, farthest)) {
-        farthest = right;
-      }
-      if (farthest === at) {
-        return;
-      }
-      this.#swap(at, farthest);
-      at = farthest;
-    }
-  }
-
-  /** The chunks kept. */
-  chunks(): number[] {
-    return [...this.#chunks.subarray(0, this.#count)];
-  }
+interface Nearest {
+  readonly distances: Int32Array;
+  readonly chunks: Float64Array;
+  count: number;
 }
 
+const nearestOf = (size: number): Nearest => ({
+  distances: new Int32Array(size),
+  chunks: new Float64Array(size),
+  count: 0,
+});
+
+/** Whether the kept code at `a` is farther than the one at `b`. */
+const farther = ({ distances, chunks }: Nearest, a: number, b: number) => {
+  const da = distances[a] ?? 0;
+  const db = distances[b] ?? 0;
+  return da === db ? (chunks[a] ?? 0) > (chunks[b] ?? 0) : da > db;
+};
+
+const swap = ({ distances, chunks }: Nearest, a: number, b: number): void => {
+  const distance = distances[a] ?? 0;
+  const chunk = chunks[a] ?? 0;
+  distances[a] = distances[b] ?? 0;
+  chunks[a] = chunks[b] ?? 0;
+  distances[b] = distance;
+  chunks[b] = chunk;
+};
+
+/** Keeps the chunk at `distance` if it is among the nearest so far. */
+const offer = (nearest: Nearest, distance: number, chunk: number): void => {
+  const { distances, chunks } = nearest;
+  const size = distances.length;
+  if (nearest.count < size) {
+    let at = nearest.count;
+    nearest.count += 1;
+    distances[at] = distance;
+    chunks[at] = chunk;
+    while (at > 0) {
+      // oxlint-disable-next-line no-bitwise -- the heap's parent
+      const parent = (at - 1) >> 1;
+      if (!farther(nearest, at, parent)) {
+        return;
+      }
+      swap(nearest, at, parent);
+      at = parent;
+    }
+    return;
+  }
+  const top = distances[0] ?? 0;
+  if (distance > top || (distance === top && chunk > (chunks[0] ?? 0))) {
+    return;
+  }
+  distances[0] = distance;
+  chunks[0] = chunk;
+  let at = 0;
+  for (;;) {
+    const left = 2 * at + 1;
+    const right = left + 1;
+    let farthest = at;
+    if (left < size && farther(nearest, left, farthest)) {
+      farthest = left;
+    }
+    if (right < size && farther(nearest, right, farthest)) {
+      farthest = right;
+    }
+    if (farthest === at) {
+      return;
+    }
+    swap(nearest, at, farthest);
+    at = farthest;
+  }
+};
+
 /**
- * Offers each code of `bits` (`words` a code), not marked in `skip`, at
- * its Hamming distance from `query`.
+ * Offers each code of `bits` (as many words a code as `query`), not
+ * marked in `skip`, at its Hamming distance from `query`.
  */
 const scan = (
   query: Uint32Array,
@@ -422,7 +414,7 @@ const scan = (
           (query[word] ?? 0) ^ (bits[at + word] ?? 0)
         );
       }
-      nearest.offer(distance, chunks[code] ?? 0);
+      offer(nearest, distance, chunks[code] ?? 0);
     }
   }
 };
@@ -451,6 +443,9 @@ WHERE model = ?1 AND block IS NULL
  * 8-bit code and place, if its version is current and the reader may
  * read it. The scan only offered such codes; this checks again, so a code
  * left behind by a fault is dropped before it is ranked, never returned.
+ * The candidates come first (`CROSS JOIN` keeps SQLite to that order), so
+ * it looks up at most `rescoreCandidates` codes: left to choose, SQLite
+ * read every code of the model, 100 ms at 10,000.
  */
 const candidatesSql = `
 WITH ${readableSql}
@@ -458,7 +453,7 @@ SELECT vector_codes.chunk AS chunk, vector_codes.scale AS scale,
   vector_codes.fine AS fine, source_versions.source AS source,
   source_versions.version AS version, chunks.position AS position
 FROM json_each(?4) AS candidate
-JOIN vector_codes ON vector_codes.chunk = candidate.value
+CROSS JOIN vector_codes ON vector_codes.chunk = candidate.value
   AND vector_codes.model = ?1
 JOIN chunks ON chunks.row = vector_codes.chunk
 JOIN current_versions ON current_versions.version_row = chunks.version_row
@@ -512,7 +507,7 @@ export const searchVectors = (
   const { person, groups } = reader satisfies Reader;
   const readerJson = JSON.stringify(groups);
   const query = bitsOf(vector, stored.centre);
-  const nearest = new Nearest(rescoreCandidates);
+  const nearest = nearestOf(rescoreCandidates);
   const blocks = sql.exec<{
     chunks: ArrayBuffer;
     bits: ArrayBuffer;
@@ -543,7 +538,7 @@ export const searchVectors = (
       nearest
     );
   }
-  const candidates = nearest.chunks();
+  const candidates = [...nearest.chunks.subarray(0, nearest.count)];
   if (candidates.length === 0) {
     return { chunks: [] };
   }

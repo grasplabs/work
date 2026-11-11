@@ -17,6 +17,7 @@ import {
 } from "./db/schema.ts";
 import { fileKeyOf, hashOf, holdFile, isHeld, noteWrite } from "./files.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
 
 // Sources and their versions. A source is an identity its host gives;
@@ -122,7 +123,8 @@ const madeBefore = (
 /**
  * Writes the next version of `adding.added.source`, whole: the version,
  * its chunks and their words, its count on the file, its change, and the
- * source's current pointer, which makes it visible. Run it in one
+ * source's current pointer, which makes it visible and removes the vector
+ * codes of the version it replaces (vectors.ts). Run it in one
  * transaction. Answers `undefined` when the file's row is gone (swept
  * since it was noted), noting it again for the sweep to find what the add
  * wrote.
@@ -170,6 +172,16 @@ const record = (
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })
     .run();
+  // The version before stops being found by meaning as it stops being
+  // current: its chunks' vector codes go with the pointer.
+  const replaced = db
+    .select({ versionRow: currentVersions.versionRow })
+    .from(currentVersions)
+    .where(eq(currentVersions.source, added.source))
+    .get();
+  if (replaced !== undefined) {
+    removeVectorsOf(storage.sql, replaced.versionRow);
+  }
   db.insert(currentVersions)
     .values({ source: added.source, versionRow: row })
     .onConflictDoUpdate({

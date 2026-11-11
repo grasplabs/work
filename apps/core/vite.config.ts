@@ -395,6 +395,9 @@ export default coreProject({
     // The Brain baseline's larger scale sizes, on request only:
     // vite.brain-scale.config.ts.
     "test/brain-scale-sizes.test.ts",
+    // How fast the Brain's store scans vector codes, on request only:
+    // vite.brain-vectors.config.ts.
+    "test/brain-next-vector-timings.test.ts",
     // The Brain baseline against a real model, which costs money, on
     // request only: vite.brain-model.config.ts.
     "test/brain-real-model.test.ts",
