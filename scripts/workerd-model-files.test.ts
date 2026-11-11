@@ -70,6 +70,15 @@ const releaseDir = (): string => {
   return dir;
 };
 
+/**
+ * The repo's own Wrangler, by its path: a test runs with no package
+ * manager putting `node_modules/.bin` on the PATH, as CI's does.
+ */
+const wranglerBinary = path.join(
+  import.meta.dirname,
+  "../node_modules/.bin/wrangler"
+);
+
 /** The test Worker, bundled as Wrangler bundles core, in a directory of its own. */
 const bundle = (): string => {
   const dir = tempDir();
@@ -87,7 +96,7 @@ const bundle = (): string => {
     })
   );
   execFileSync(
-    "wrangler",
+    wranglerBinary,
     ["deploy", "--dry-run", "--outdir", path.join(dir, "bundle"), "-c", config],
     { cwd: dir, stdio: "ignore" }
   );
