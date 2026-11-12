@@ -734,6 +734,67 @@ const leakyEmbedders = (markers: readonly string[]): Embedders => ({
     throw new Error(`Could not embed ${[...texts, ...markers].join(" ")}`);
   },
 });
+/**
+ * Adds an item of `markedWork` that carries the markers and parks it as
+ * its last failure would, without a tick: its id. For the probes of
+ * staff's surfaces, which read and put back parked items. Working it to
+ * parking instead (`workMarked`) costs the harness a tick an attempt, each
+ * of which works the whole store's queue, embedding's backlog with it,
+ * and the harness runs every probe in every pass.
+ */
+const parkMarked = async (markers: readonly string[]): Promise<number> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_store, state) => {
+      const key = `probe-${crypto.randomUUID()}`;
+      enqueueWork(state.storage, markedWork, {
+        key,
+        payload: { marked: markers.join(" ") },
+        priority: "asked",
+      });
+      return state.storage.sql
+        .exec<{ id: number }>(
+          `UPDATE work_items SET parked_at = ?, parks = 1, attempts = ?,
+            last_error = 'failed'
+          WHERE kind = ? AND key = ? RETURNING id`,
+          Date.now(),
+          workAttemptsMax,
+          markedWork.kind,
+          key
+        )
+        .one().id;
+    }
+  );
+
+/**
+ * A marked item parked, then every way to put an item back: that item,
+ * twice (the second finds it parked no more), an id nothing has, and ids
+ * that aren't one, the markers among them. Only the item it parked:
+ * putting back every parked item, embedding's among them, would have
+ * each later tick of the harness work them all again.
+ */
+const requeueMarked = async (
+  markers: readonly string[],
+  requeue: (id: number) => Promise<unknown>
+): Promise<Answer[]> => {
+  const id = await parkMarked(markers);
+  return [
+    await answer("a requeue of the marked item", async () => await requeue(id)),
+    await answer(
+      "a requeue of the marked item again",
+      async () => await requeue(id)
+    ),
+    await answer(
+      "a requeue of an id nothing has",
+      async () => await requeue(Number.MAX_SAFE_INTEGER)
+    ),
+    await answer("a requeue of 0", async () => await requeue(0)),
+    await answer(
+      "a requeue named by the markers",
+      async () => await requeue(unchecked(markers.join(" ")))
+    ),
+  ];
+};
 
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
@@ -1108,19 +1169,6 @@ export const coreProbes = {
       ),
     ];
   },
-  reembedBrain: async ({ markers }) => [
-    await answer("a re-embed", async () => {
-      await coreBrain.reembedBrain(env);
-    }),
-    ...(await workMarked(
-      markers,
-      async (at) => {
-        await coreBrain.reembedBrain(env);
-        await coreBrain.workBrain(env, at);
-      },
-      "a marked item worked through core's clock after a re-embed"
-    )),
-  ],
   brainWorkOverview: async ({ markers }) => [
     ...(await workMarked(
       markers,
@@ -1133,6 +1181,50 @@ export const coreProbes = {
       "the overview, the marked item parked",
       async () => await coreBrain.brainWorkOverview(env)
     ),
+  ],
+  brainStaffReport: async ({ markers }) => [
+    await answer("a marked item parked", async () => await parkMarked(markers)),
+    await answer(
+      "the staff's report, the marked item parked",
+      async () => await coreBrain.brainStaffReport(env)
+    ),
+  ],
+  actOnBrainForStaff: async ({ markers }) => [
+    ...(await requeueMarked(
+      markers,
+      async (item) =>
+        await coreBrain.actOnBrainForStaff(env, { type: "requeue", item })
+    )),
+    await answer(
+      "a rebuild of the word indexes",
+      async () =>
+        await coreBrain.actOnBrainForStaff(env, { type: "rebuild_words" })
+    ),
+    await answer(
+      "a rebuild while one is under way",
+      async () =>
+        await coreBrain.actOnBrainForStaff(env, { type: "rebuild_words" })
+    ),
+    await answer(
+      "an action named by the markers",
+      async () =>
+        await coreBrain.actOnBrainForStaff(
+          env,
+          unchecked({ type: markers.join(" ") })
+        )
+    ),
+    await answer(
+      "a re-embed",
+      async () => await coreBrain.actOnBrainForStaff(env, { type: "reembed" })
+    ),
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await coreBrain.actOnBrainForStaff(env, { type: "reembed" });
+        await coreBrain.workBrain(env, at);
+      },
+      "a marked item worked through core's clock after a re-embed"
+    )),
   ],
 } satisfies Record<CoreMember, Probe>;
 
@@ -2411,6 +2503,18 @@ export const storeProbes = {
     await answer(
       "the store's overview, the marked item parked",
       async () => await store().workOverview()
+    ),
+  ],
+  requeueWork: async ({ markers }) =>
+    await requeueMarked(markers, async (id) => await store().requeueWork(id)),
+  rebuildWords: async () => [
+    await answer(
+      "a rebuild of the word indexes",
+      async () => await store().rebuildWords()
+    ),
+    await answer(
+      "a rebuild while one is under way",
+      async () => await store().rebuildWords()
     ),
   ],
 } satisfies Record<StoreMember, Probe>;

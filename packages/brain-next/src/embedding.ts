@@ -577,19 +577,27 @@ export const embeddingStep = (
 /**
  * Starts the rebuild for the host's model as last seen again (staff's
  * re-embed): the walk from the first version, and the passages it
- * couldn't embed tried again.
+ * couldn't embed tried again. Answers whether it did: not while the store
+ * has seen no model, as there is nothing to embed with. During a walk it
+ * starts the walk over, so versions the walk already passed (their items
+ * parked, say) are put back too; that is safe, as a version put on the
+ * queue again replaces its item waiting or parked there.
  */
-export const reembed = (storage: DurableObjectStorage): void => {
+export const reembed = (storage: DurableObjectStorage): boolean =>
   storage.transactionSync(() => {
     const { sql } = storage;
+    const state = stateOf(sql);
+    if (state === undefined || state.model === null) {
+      return false;
+    }
     sql.exec(
       "UPDATE embedding_state SET walked_to = 0, walked = 0, rebuilt = 0"
     );
     sql.exec(
       "DELETE FROM unembeddable WHERE model = (SELECT model FROM embedding_state)"
     );
+    return true;
   });
-};
 
 const countOf = (sql: SqlStorage, query: string, ...bindings: unknown[]) =>
   sql.exec<{ count: number }>(query, ...bindings).one().count;

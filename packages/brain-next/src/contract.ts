@@ -415,6 +415,8 @@ export interface WaitingWork {
  * back by itself a day later, until it was parked three times (`final`).
  */
 export interface ParkedWork {
+  /** The queue's own id for it, never used twice: what a requeue names. */
+  id: number;
   kind: string;
   key: string;
   attempts: number;
@@ -514,6 +516,50 @@ export interface WorkOverview {
   };
   /** How far the host's embedding model has come over the current chunks. */
   embedding: EmbeddingOverview;
+  /**
+   * How many bytes the store's SQLite takes, from its page count, never a
+   * scan: what `storeBytesMax` holds it to.
+   */
+  storeBytes: number;
+  /**
+   * Whether every chunk's words are indexed by the current rules, or a
+   * rebuild is under way (`rebuildWords`, or new rules).
+   */
+  words: "current" | "rebuilding";
+  /** The erasures the store applied, as its ledger keeps them. */
+  erasures: ErasuresOverview;
+}
+
+/**
+ * The most bytes one Durable Object stores: 10 GB, read as 10^9 bytes a
+ * GB, the lower reading. A store full to it fails every write.
+ */
+export const storeBytesMax = 10 * 1000 ** 3;
+
+/**
+ * What a staff action did: `done`; `nothing`, when there was nothing to do
+ * (no item of that id parked, or a rebuild under way); `unavailable`, when
+ * the store answers nothing yet, as it reads its erasure ledger, and so
+ * applied nothing.
+ */
+export type StaffActionOutcome = "done" | "nothing" | "unavailable";
+
+/** How many erasures of one kind are in the ledger, and how many not yet. */
+export interface ErasureCount {
+  written: number;
+  unwritten: number;
+}
+
+/**
+ * The erasures the store applied, as counts only: by kind, written to the
+ * ledger or not yet, and by reason. Never which, when, or the SHA-256 the
+ * ledger names one by: an unsalted hash of an id confirms to anyone
+ * holding the id that it was erased.
+ */
+export interface ErasuresOverview {
+  source: ErasureCount;
+  person: ErasureCount;
+  byReason: Record<ErasureReason, number>;
 }
 
 /**
@@ -825,11 +871,28 @@ export interface Brain {
    * with chunks it hasn't embedded goes on the queue again, those parked
    * for good among them, over the next ticks, and the passages it couldn't
    * embed are tried again. For staff: after the embedders were broken long
-   * enough for items to park. Codes already there stay.
+   * enough for items to park. Codes already there stay. During a walk, it
+   * starts the walk over. `nothing` while no model was seen; `unavailable`,
+   * changing nothing, while the store reads its erasure ledger.
    */
-  reembed: () => Promise<void>;
+  reembed: () => Promise<StaffActionOutcome>;
   /** The queue, as staff see it. */
   workOverview: () => Promise<WorkOverview>;
+  /**
+   * Puts the parked item `id` back in the queue, due at once with its
+   * attempts reset; its parks are kept, so one parked for good that fails
+   * again is parked for good again. `nothing` when no item `id` is
+   * parked; `unavailable`, changing nothing, while the store reads its
+   * erasure ledger.
+   */
+  requeueWork: (id: number) => Promise<StaffActionOutcome>;
+  /**
+   * Starts a rebuild of the word indexes from every chunk's text, which
+   * the tick works a batch at a time while recall goes on. `nothing` when
+   * one is under way already, which goes on as it is; `unavailable`,
+   * changing nothing, while the store reads its erasure ledger.
+   */
+  rebuildWords: () => Promise<StaffActionOutcome>;
   /**
    * Keeps each vector as the codes of its chunk for `model`, readable as
    * the chunk's version is. A chunk that is not of a current version is

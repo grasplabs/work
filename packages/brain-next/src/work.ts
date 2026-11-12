@@ -1242,6 +1242,9 @@ export const workOverview = (
   | "sourcesWithoutCurrent"
   | "ledgerReplay"
   | "embedding"
+  | "storeBytes"
+  | "words"
+  | "erasures"
 > => {
   const db = drizzle(storage);
   const waiting = db
@@ -1262,6 +1265,7 @@ export const workOverview = (
     .toArray();
   const parked = storage.sql
     .exec<{
+      id: number;
       kind: string;
       key: string;
       attempts: number;
@@ -1269,7 +1273,7 @@ export const workOverview = (
       last_error: string | null;
       parked_at: number;
     }>(
-      `SELECT kind, key, attempts, parks, last_error, parked_at FROM work_items
+      `SELECT id, kind, key, attempts, parks, last_error, parked_at FROM work_items
        WHERE parked_at IS NOT NULL ORDER BY parked_at DESC, id DESC LIMIT ?`,
       parkedListed
     )
@@ -1300,6 +1304,7 @@ export const workOverview = (
     parked: parked.map((row) => {
       const error = errorCodeOf(row.last_error);
       return {
+        id: row.id,
         kind: row.kind,
         key: row.key,
         attempts: row.attempts,
@@ -1317,4 +1322,23 @@ export const workOverview = (
       key,
     })),
   };
+};
+
+/**
+ * Puts the parked item `id` back in the queue, due at once, its attempts
+ * reset as when it comes back by itself (rule 5): false when no item `id`
+ * is parked. Its parks are kept, so it is parked for good again should
+ * it fail again after its third.
+ */
+export const requeueWork = (
+  storage: DurableObjectStorage,
+  id: number
+): boolean => {
+  const requeued = storage.sql.exec(
+    `UPDATE work_items SET parked_at = NULL, attempts = 0, not_before = 0
+    WHERE id = ? AND parked_at IS NOT NULL`,
+    id
+  );
+  requeued.toArray();
+  return requeued.rowsWritten > 0;
 };

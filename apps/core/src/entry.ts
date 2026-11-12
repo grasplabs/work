@@ -4,6 +4,10 @@ import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
 import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
+import {
+  brainActionPath,
+  brainReportPath,
+} from "@grasp-os/shared/brain-report";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
@@ -40,6 +44,7 @@ import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
+import { brainActionResponse, brainReportResponse } from "./brain-report.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
@@ -340,6 +345,8 @@ const pathHandlers: ReadonlyMap<
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [aiStatusReportPath, aiStatusReportResponse],
+  [brainReportPath, brainReportResponse],
+  [brainActionPath, brainActionResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminKickoffPath, adminKickoffResponse],
   [adminCommandPath, adminCommandResponse],

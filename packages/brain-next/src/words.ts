@@ -502,3 +502,28 @@ export const reindexWords = (
   );
   return true;
 };
+
+/** Whether the word indexes are behind the current rules: a rebuild under way. */
+export const wordsRebuilding = (sql: SqlStorage): boolean =>
+  sql
+    .exec<{ behind: number }>(
+      "SELECT version <> ? AS behind FROM word_index WHERE id = 1",
+      wordsVersion
+    )
+    .one().behind === 1;
+
+/**
+ * Starts a rebuild of the word indexes from the first chunk, when none is
+ * under way: their rules marked as none (0), so the tick rebuilds them a
+ * batch at a time (`reindexWords`), by the current rules, while recall
+ * goes on with each chunk's rows as they are until its turn. One under
+ * way goes on as it is. Answers whether it started one.
+ */
+export const startWordsRebuild = (sql: SqlStorage): boolean => {
+  const started = sql.exec(
+    "UPDATE word_index SET version = 0, target = 0, cursor = 0 WHERE id = 1 AND version = ?",
+    wordsVersion
+  );
+  started.toArray();
+  return started.rowsWritten > 0;
+};

@@ -242,6 +242,7 @@ export default defineConfig({
           "apps/core/test/brain-next-surfaces.ts",
           "apps/core/test/brain-next-vectors.test.ts",
           "apps/core/test/brain-next-erasure.test.ts",
+          "apps/core/test/brain-report.test.ts",
         ],
         rules: {
           "no-restricted-imports": [
@@ -302,8 +303,12 @@ export default defineConfig({
       {
         // The modules that reach the Brain through core's module, each
         // probed by the permission harness: the instruction files' rules,
-        // and the clock's sweep.
-        files: ["apps/core/src/instruction-files.ts", "apps/core/src/clock.ts"],
+        // the clock's sweep, and the staff's report and actions.
+        files: [
+          "apps/core/src/instruction-files.ts",
+          "apps/core/src/clock.ts",
+          "apps/core/src/brain-report.ts",
+        ],
         rules: {
           "no-restricted-imports": [
             "error",

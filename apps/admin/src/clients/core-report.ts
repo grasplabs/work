@@ -37,9 +37,18 @@ export interface CoreReportRequest {
  */
 export const signedCoreReport = async <T>(
   { core, routerSecret, authSecret, signal }: CoreReportRequest,
-  report: { path: string; purpose: string; schema: z.ZodType<T> }
+  report: {
+    path: string;
+    purpose: string;
+    schema: z.ZodType<T>;
+    /** What the request carries besides when it was sent. */
+    fields?: Record<string, unknown>;
+  }
 ): Promise<T | null> => {
-  const body = JSON.stringify({ sentAt: new Date().toISOString() });
+  const body = JSON.stringify({
+    ...report.fields,
+    sentAt: new Date().toISOString(),
+  });
   const key = await hkdfHmacKey(authSecret, report.purpose, ["sign"]);
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))

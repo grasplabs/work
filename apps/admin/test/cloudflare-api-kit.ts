@@ -8,6 +8,12 @@ import type {
   AdminKickoffView,
 } from "@grasp-os/shared/admin-kickoff";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type {
+  BrainActionOutcome,
+  BrainActionRequest,
+  BrainReport,
+  BrainReportRequest,
+} from "@grasp-os/shared/brain-report";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 
 export const base = "https://api.cloudflare.com/client/v4";
@@ -205,6 +211,18 @@ export interface CoreState {
   commandRefusal?: { status: number; code: string };
   /** The commands its core took, as each signed envelope sent them. */
   commands: AdminCommandEnvelope[];
+  /**
+   * What its core answers the admin's signed Brain report request with
+   * (@grasp-os/shared/brain-report): unset, it doesn't answer (404, a
+   * release from before the report).
+   */
+  brain?: BrainReport;
+  /** What its core does once a Brain report request arrives, before answering it: waits, as a slow one does. */
+  brainHeld?: () => Promise<void>;
+  /** What its core answers a signed Brain action with: `done` unless set. */
+  brainOutcome?: BrainActionOutcome;
+  /** The Brain's reads and actions its core took, as each signed request sent them. */
+  brainAsks: (BrainReportRequest | BrainActionRequest)[];
 }
 
 /** A call the fake got. */

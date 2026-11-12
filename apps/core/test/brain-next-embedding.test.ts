@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   addSource,
   brainWorkOverview,
-  reembedBrain,
+  actOnBrainForStaff,
   workBrain,
 } from "../src/brain-next.ts";
 
@@ -34,12 +34,13 @@ describe("embedding the Brain's content through core", () => {
 
     await tick();
     const ticked = await brainWorkOverview(env);
-    await reembedBrain(env);
+    const reembed = await actOnBrainForStaff(env, { type: "reembed" });
     await tick();
     const reembedded = await brainWorkOverview(env);
 
     expect({
       shippedModel,
+      reembed,
       ticked: { embedding: ticked.embedding, waiting: ticked.waiting },
       reembedded: {
         embedding: reembedded.embedding,
@@ -47,6 +48,8 @@ describe("embedding the Brain's content through core", () => {
       },
     }).toStrictEqual({
       shippedModel: null,
+      // No model seen: nothing to embed with.
+      reembed: "nothing",
       ticked: {
         embedding: {
           model: null,
