@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouteContext } from "@tanstack/react-router";
 
 import { useBrainData } from "../brain/brain-data.ts";
 import { SourcesPage } from "../brain/sources-page.tsx";
@@ -9,11 +9,13 @@ import { SourcesPage } from "../brain/sources-page.tsx";
 
 const Sources = () => {
   const { workspace } = useBrainData();
+  const { identity } = useRouteContext({ from: "/_shell" });
   return (
     <SourcesPage
       connections={workspace.connections.filter(
         ({ status }) => status === "connected"
       )}
+      teams={identity.teams}
     />
   );
 };

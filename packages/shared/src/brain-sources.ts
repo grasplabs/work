@@ -3,7 +3,13 @@
 // one source's versions and text; and search, which is recall itself for
 // that person: the pack as recall answers it, nothing ranked again. Core
 // answers each from what the person may read alone, as if nothing else
-// existed.
+// existed. A person also uploads a file here, straight into the Brain,
+// choosing who may read it; its uploader re-uploads it as its next
+// version, and deletes it for good.
+
+import { z } from "zod";
+
+import { defineErrorFamily } from "./errors.ts";
 
 /** Who added a source: an upload, a chat, a workflow run. */
 export type BrainSourceProducer = "upload" | "chat" | "run";
@@ -100,6 +106,39 @@ export const brainQuestionMaxLength = 2000;
 /** How many tokens a search's pack may hold (the Brain's own estimate). */
 export const brainSearchBudget = 4000;
 
+/**
+ * Who may read an upload, as its uploader chooses: only them (nobody
+ * else, admins included), one of their teams, or everyone in the
+ * organization. Fixed for the upload's life: other readers are a new
+ * upload.
+ */
+export const brainUploadReadersSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("me") }),
+  z.strictObject({ kind: z.literal("team"), teamId: z.string().min(1) }),
+  z.strictObject({ kind: z.literal("everyone") }),
+]);
+export type BrainUploadReaders = z.infer<typeof brainUploadReadersSchema>;
+
+/** A file to upload into the Brain: its name and itself. */
+export interface BrainUploadFile {
+  /** Such as `Travel policy.docx`: its type is read from its extension. */
+  name: string;
+  bytes: Uint8Array;
+}
+
+/** An upload in the Brain, as the person may act on it. */
+export interface BrainUpload {
+  source: BrainSourceRef;
+  readers: BrainUploadReaders;
+  /** Whether they may upload its next version: its uploader alone. */
+  mayAddVersion: boolean;
+  /**
+   * Whether they may delete it: its uploader, or an admin when it isn't
+   * one person's own.
+   */
+  mayDelete: boolean;
+}
+
 /** The Brain's sources, for the person signed in. */
 export interface BrainSourcesApi {
   /** A page of the sources they may read, newest first, after `after`. */
@@ -116,4 +155,33 @@ export interface BrainSourcesApi {
   ) => Promise<BrainSourceText | null>;
   /** Recall for `question` as them, within `brainSearchBudget` tokens. */
   search: (question: string) => Promise<BrainSearchPack>;
+  /**
+   * Uploads `file` into the Brain for `readers`: a new source, its text
+   * read from the file, findable at once. Returns its first version.
+   */
+  upload: (
+    file: BrainUploadFile,
+    readers: BrainUploadReaders
+  ) => Promise<{ source: BrainSourceRef; version: number }>;
+  /** Uploads `file` as the next version of their upload `uploadId`, for the same readers. */
+  uploadVersion: (
+    uploadId: string,
+    file: BrainUploadFile
+  ) => Promise<{ source: BrainSourceRef; version: number }>;
+  /** An upload they may read, with what they may do to it: null when there is none or they may not read it, alike. */
+  uploadOf: (uploadId: string) => Promise<BrainUpload | null>;
+  /** Deletes an upload for good: every version, from the Brain and core alike. */
+  deleteUpload: (uploadId: string) => Promise<void>;
 }
+
+export const brainUploadErrors = defineErrorFamily({
+  "brain.upload_not_found": "There's no such upload, or you can't see it.",
+  "brain.upload_not_allowed":
+    "Only the person who uploaded this file can do that (or an admin can delete it, when it isn't one person's own).",
+  "brain.upload_readers":
+    "You can share an upload only with yourself, a team you're in, or everyone.",
+  "brain.upload_deleted":
+    "This upload was deleted, so it takes no new version.",
+  "brain.upload_busy":
+    "Files are being read for many people at the moment. Upload it again in a minute.",
+});

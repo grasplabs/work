@@ -8,6 +8,8 @@ import type {
   BrainSourceRef,
   BrainSourceText,
   BrainSourceVersionPage,
+  BrainUpload,
+  BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
 import {
   brainQuestionMaxLength,
@@ -23,8 +25,18 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import { Item, ItemContent, ItemGroup } from "@grasp-os/ui/components/item";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
 import {
   PageHeader,
   PageHeaderDescription,
@@ -33,6 +45,7 @@ import {
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 
+import { Confirmed } from "../confirmed.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -44,7 +57,17 @@ import { useCore } from "../use-core.ts";
 // search, which is recall as that person, shown as recall packs it (no
 // ranking of the page's own); and how each of their connections feeds the
 // Brain today. Core answers each from what they may read alone. Texts are
-// shown as text, never markup.
+// shown as text, never markup. A file uploaded here goes straight into the
+// Brain, for who the person chooses: only them, a team of theirs, or
+// everyone (GRA-1824); its uploader adds its next version, and its
+// uploader (or an admin, for a shared one) deletes it for good. What each
+// may do to an upload is core's to say (`uploadOf`).
+
+/** A team the person is in. */
+interface Team {
+  id: string;
+  name: string;
+}
 
 type Sources = Session["brainSources"];
 
@@ -70,6 +93,23 @@ const readFrom = async <T,>(
   } catch (error) {
     return { state: "refused", message: failureText(error) };
   }
+};
+
+/** A file as core takes it: its name and its bytes. */
+const fileOf = async (file: File) => ({
+  name: file.name,
+  bytes: new Uint8Array(await file.arrayBuffer()),
+});
+
+/** The file types an upload may be, for the file picker. */
+const uploadAccept = ".pdf,.docx,.xlsx,.vtt";
+
+/** Who may read an upload, as the form's choice names it: `me`, `everyone` or a team's id. */
+const readersOf = (choice: string): BrainUploadReaders => {
+  if (choice === "me" || choice === "everyone") {
+    return { kind: choice };
+  }
+  return { kind: "team", teamId: choice };
 };
 
 /** The same source, by its producer and id. */
@@ -180,6 +220,245 @@ const SearchResults = ({
         </p>
       ) : null}
     </section>
+  );
+};
+
+/** Uploading a file into the Brain: the file, and who may read it. */
+const UploadForm = ({
+  teams,
+  onUploaded,
+}: {
+  teams: Team[];
+  onUploaded: (source: BrainSourceRef) => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const fileId = useId();
+  const readersId = useId();
+  const [file, setFile] = useState<File>();
+  const [choice, setChoice] = useState("me");
+  const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
+  const busy = sent?.state === "loading";
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (file === undefined || busy) {
+          return;
+        }
+        const form = event.currentTarget;
+        setSent({ state: "loading" });
+        void (async () => {
+          const answer = await readFrom(
+            core,
+            async (sources) =>
+              await sources.upload(await fileOf(file), readersOf(choice))
+          );
+          setSent(answer);
+          if (answer.state === "ready") {
+            form.reset();
+            setFile(undefined);
+            onUploaded(answer.data.source);
+          }
+        })();
+      }}
+    >
+      <FieldGroup className="sm:flex-row sm:items-end">
+        <Field>
+          <FieldLabel htmlFor={fileId}>
+            <Trans>File</Trans>
+          </FieldLabel>
+          <Input
+            accept={uploadAccept}
+            id={fileId}
+            onChange={(event) => {
+              setFile(event.target.files?.[0]);
+            }}
+            type="file"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={readersId}>
+            <Trans context="a file uploaded into the Brain">
+              Who may read it
+            </Trans>
+          </FieldLabel>
+          <NativeSelect
+            id={readersId}
+            onChange={(event) => {
+              setChoice(event.target.value);
+            }}
+            value={choice}
+          >
+            <NativeSelectOption value="me">{t`Only me`}</NativeSelectOption>
+            {teams.map(({ id, name }) => (
+              <NativeSelectOption key={id} value={id}>
+                {t`Team ${name}`}
+              </NativeSelectOption>
+            ))}
+            <NativeSelectOption value="everyone">
+              {t`Everyone`}
+            </NativeSelectOption>
+          </NativeSelect>
+        </Field>
+        <Button disabled={file === undefined || busy} type="submit">
+          <Trans>Upload</Trans>
+        </Button>
+      </FieldGroup>
+      <FieldDescription>
+        <Trans>
+          A PDF, Word, Excel or WebVTT file of up to 10 MB. Who may read it
+          stays as you choose: to share it with others, upload it again for
+          them.
+        </Trans>
+      </FieldDescription>
+      {sent?.state === "refused" ? <ErrorText>{sent.message}</ErrorText> : null}
+    </form>
+  );
+};
+
+/** Who may read an upload, in words. */
+const ReadersLine = ({
+  readers,
+  teams,
+}: {
+  readers: BrainUploadReaders;
+  teams: Team[];
+}) => {
+  if (readers.kind === "me") {
+    return <Trans>Only you can read this upload.</Trans>;
+  }
+  if (readers.kind === "everyone") {
+    return <Trans>Everyone can read this upload.</Trans>;
+  }
+  const team = teams.find(({ id }) => id === readers.teamId)?.name;
+  return team === undefined ? (
+    <Trans>A team can read this upload.</Trans>
+  ) : (
+    <Trans>Team {team} can read this upload.</Trans>
+  );
+};
+
+/**
+ * What the person may do to an upload, as core says: upload its next
+ * version, and delete it for good.
+ */
+const UploadActions = ({
+  source,
+  teams,
+  onChanged,
+  onDeleted,
+}: {
+  source: BrainSourceRef;
+  teams: Team[];
+  onChanged: () => void;
+  onDeleted: () => void;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const fileId = useId();
+  const [upload, setUpload] = useState<Read<BrainUpload | null>>({
+    state: "loading",
+  });
+  const [file, setFile] = useState<File>();
+  const [acting, setActing] = useState<Read<unknown>>();
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.uploadOf(source.id)
+      );
+      if (!left) {
+        setUpload(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core, source]);
+  if (upload.state !== "ready" || upload.data === null) {
+    return null;
+  }
+  const { readers, mayAddVersion, mayDelete } = upload.data;
+  const busy = acting?.state === "loading";
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-muted-foreground text-sm">
+        <ReadersLine readers={readers} teams={teams} />
+      </p>
+      {mayAddVersion ? (
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (file === undefined || busy) {
+              return;
+            }
+            setActing({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) =>
+                  await sources.uploadVersion(source.id, await fileOf(file))
+              );
+              setActing(answer);
+              if (answer.state === "ready") {
+                onChanged();
+              }
+            })();
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor={fileId}>
+              <Trans>New version</Trans>
+            </FieldLabel>
+            <Input
+              accept={uploadAccept}
+              id={fileId}
+              onChange={(event) => {
+                setFile(event.target.files?.[0]);
+              }}
+              type="file"
+            />
+          </Field>
+          <Button
+            disabled={file === undefined || busy}
+            type="submit"
+            variant="outline"
+          >
+            <Trans>Upload new version</Trans>
+          </Button>
+        </form>
+      ) : null}
+      {mayDelete ? (
+        <Confirmed
+          busy={busy}
+          button={t`Delete`}
+          confirm={t`Delete for good`}
+          description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
+          label={t`Delete this upload`}
+          onConfirm={() => {
+            setActing({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(core, async (sources) => {
+                await sources.deleteUpload(source.id);
+              });
+              setActing(answer);
+              if (answer.state === "ready") {
+                onDeleted();
+              }
+            })();
+          }}
+          title={t`Delete this upload?`}
+        />
+      ) : null}
+      {acting?.state === "refused" ? (
+        <ErrorText>{acting.message}</ErrorText>
+      ) : null}
+    </div>
   );
 };
 
@@ -509,10 +788,18 @@ const VersionList = ({
 const SourcePanel = ({
   source,
   version: asked,
+  teams,
+  onChanged,
+  onDeleted,
 }: {
   source: BrainSourceRef;
   /** The version to show first: the newest they may read when left out. */
   version: number | undefined;
+  teams: Team[];
+  /** A new version of it was added. */
+  onChanged: () => void;
+  /** It was deleted. */
+  onDeleted: () => void;
 }) => {
   const core = useCore();
   const [versions, setVersions] = useState<Read<BrainSourceVersionPage>>({
@@ -612,6 +899,14 @@ const SourcePanel = ({
             }}
           />
         ) : null}
+        {source.producer === "upload" ? (
+          <UploadActions
+            onChanged={onChanged}
+            onDeleted={onDeleted}
+            source={source}
+            teams={teams}
+          />
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -620,9 +915,12 @@ const SourcePanel = ({
 /** The Brain's sources page: search, how connections feed it, and the sources. */
 export const SourcesPage = ({
   connections,
+  teams,
 }: {
   /** The person's connections, each one they have connected. */
   connections: Connection[];
+  /** The teams the person is in, whom they may upload for. */
+  teams: Team[];
 }) => {
   // Each opening counts, so opening a source again (a search result
   // citing a version, after another was picked in its panel) starts its
@@ -633,6 +931,9 @@ export const SourcesPage = ({
     opening: number;
   }>();
   const heading = useId();
+  const uploadHeading = useId();
+  // Each change to the sources counts, so the list reads them again.
+  const [listing, setListing] = useState(0);
   const open = (source: BrainSourceRef, version?: number) => {
     const opening = (opened?.opening ?? 0) + 1;
     setOpened(
@@ -656,6 +957,21 @@ export const SourcesPage = ({
           </PageHeaderDescription>
         </PageHeader>
         <Search onOpen={open} />
+        <section
+          aria-labelledby={uploadHeading}
+          className="flex flex-col gap-3"
+        >
+          <h2 className="text-sm font-medium" id={uploadHeading}>
+            <Trans>Upload a file</Trans>
+          </h2>
+          <UploadForm
+            onUploaded={(source) => {
+              setListing(listing + 1);
+              open(source);
+            }}
+            teams={teams}
+          />
+        </section>
         <ConnectionFeeds connections={connections} />
         <section aria-labelledby={heading} className="flex flex-col gap-3">
           <h2 className="text-sm font-medium" id={heading}>
@@ -663,6 +979,7 @@ export const SourcesPage = ({
           </h2>
           <div className="grid min-h-0 gap-6 lg:grid-cols-2">
             <SourceList
+              key={listing}
               onPick={(source) => {
                 open(source);
               }}
@@ -671,7 +988,16 @@ export const SourcesPage = ({
             {opened === undefined ? null : (
               <SourcePanel
                 key={opened.opening}
+                onChanged={() => {
+                  setListing(listing + 1);
+                  open(opened.source);
+                }}
+                onDeleted={() => {
+                  setListing(listing + 1);
+                  setOpened(undefined);
+                }}
                 source={opened.source}
+                teams={teams}
                 version={opened.version}
               />
             )}

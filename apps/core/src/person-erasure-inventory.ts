@@ -234,6 +234,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_workflow_bindings": { company: "bindings they made" },
   "core.workflow_candidate_runs": { company: "candidate runs (D3)" },
   "core.brain_gap_states": { company: "who answered a gap, by ID" },
+  "core.brain_uploads": {
+    company:
+      "who uploaded which file into the Brain, for whom, by ID; its name and text are the Brain's",
+  },
   "core.uploads": { company: "Knowledge uploads; Personal ones the Brain's" },
   "core.knowledge_signals": { erased: "apps" },
   "core.knowledge_signal_dismissals": {
@@ -557,6 +561,7 @@ export const reviewedPersonColumns: Readonly<
   "core.blueprints": ["marked_by"],
   "core.brain_gap_states": ["answered_by"],
   "core.business_store_members": ["added_by", "member_id", "member_type"],
+  "core.brain_uploads": ["uploaded_by"],
   "core.business_stores": ["closing_owner", "owner_id"],
   "core.channel_accounts": ["platform_user_id", "user_id"],
   "core.channel_conversations": ["user_id"],

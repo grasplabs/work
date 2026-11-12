@@ -1640,6 +1640,10 @@ msgstr "A page was refused the App's data"
 msgid "A page your team opens"
 msgstr "A page your team opens"
 
+#: src/brain/sources-page.tsx
+msgid "A PDF, Word, Excel or WebVTT file of up to 10 MB. Who may read it stays as you choose: to share it with others, upload it again for them."
+msgstr "A PDF, Word, Excel or WebVTT file of up to 10 MB. Who may read it stays as you choose: to share it with others, upload it again for them."
+
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
 msgid "A preference"
@@ -1743,6 +1747,10 @@ msgstr "A step is a JSON object."
 #: src/workflows/requests/request-parts.tsx
 msgid "A team"
 msgstr "A team"
+
+#: src/brain/sources-page.tsx
+msgid "A team can read this upload."
+msgstr "A team can read this upload."
 
 #: src/apps/app-settings.tsx
 msgid "A team it is no longer shared with"
@@ -4628,6 +4636,7 @@ msgstr "Definition version"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/sources-page.tsx
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4664,6 +4673,7 @@ msgstr "Delete {projectName}?"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/sources-page.tsx
 msgid "Delete for good"
 msgstr "Delete for good"
 
@@ -4702,6 +4712,14 @@ msgstr "Delete this source?"
 #: src/workflows/workflow-triggers.tsx
 msgid "Delete this trigger?"
 msgstr "Delete this trigger?"
+
+#: src/brain/sources-page.tsx
+msgid "Delete this upload"
+msgstr "Delete this upload"
+
+#: src/brain/sources-page.tsx
+msgid "Delete this upload?"
+msgstr "Delete this upload?"
 
 #: src/workflows/delete-workflow.tsx
 msgid "Delete this workflow"
@@ -5340,6 +5358,10 @@ msgstr "Every tool he has is of one of these kinds. Each is on for whom you choo
 msgid "Every tool it has: Apps and agents use only what they are granted."
 msgstr "Every tool it has: Apps and agents use only what they are granted."
 
+#: src/brain/sources-page.tsx
+msgid "Every version of it is erased from the Brain for everyone who could read it. This can't be undone."
+msgstr "Every version of it is erased from the Brain for everyone who could read it. This can't be undone."
+
 #: src/agents/agent-wakes.tsx
 msgid "Every weekday"
 msgstr "Every weekday"
@@ -5349,11 +5371,16 @@ msgid "Every weekday at {time}"
 msgstr "Every weekday at {time}"
 
 #: src/agents/agent-facts.tsx
+#: src/brain/sources-page.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
 msgstr "Everyone"
+
+#: src/brain/sources-page.tsx
+msgid "Everyone can read this upload."
+msgstr "Everyone can read this upload."
 
 #: src/dashboard/report.ts
 msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
@@ -5646,6 +5673,7 @@ msgstr "Fields"
 msgid "Fields to search"
 msgstr "Fields to search"
 
+#: src/brain/sources-page.tsx
 #: src/labels.ts
 msgid "File"
 msgstr "File"
@@ -8444,6 +8472,10 @@ msgstr "New table"
 msgid "New team"
 msgstr "New team"
 
+#: src/brain/sources-page.tsx
+msgid "New version"
+msgstr "New version"
+
 #: src/workflows/requests/request-summary.tsx
 msgid "New: “{label}”"
 msgstr "New: “{label}”"
@@ -9565,6 +9597,7 @@ msgstr "Only its builders open it, and its triggers don't fire, until it is shar
 msgid "Only mapped"
 msgstr "Only mapped"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/new-collection.tsx
 msgid "Only me"
 msgstr "Only me"
@@ -9627,6 +9660,10 @@ msgstr "Only you"
 #: src/brain/remember-dialog.tsx
 msgid "Only you and your agents read it, until you share it."
 msgstr "Only you and your agents read it, until you share it."
+
+#: src/brain/sources-page.tsx
+msgid "Only you can read this upload."
+msgstr "Only you can read this upload."
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -13167,6 +13204,14 @@ msgctxt "memory record scope"
 msgid "Team"
 msgstr "Team"
 
+#: src/brain/sources-page.tsx
+msgid "Team {name}"
+msgstr "Team {name}"
+
+#: src/brain/sources-page.tsx
+msgid "Team {team} can read this upload."
+msgstr "Team {team} can read this upload."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
 msgstr "team leads talked"
@@ -14927,6 +14972,7 @@ msgstr "Updating"
 msgid "Updating {name}…"
 msgstr "Updating {name}…"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/uploads.tsx
 msgid "Upload"
 msgstr "Upload"
@@ -14936,9 +14982,17 @@ msgctxt "a source of the Brain"
 msgid "Upload"
 msgstr "Upload"
 
+#: src/brain/sources-page.tsx
+msgid "Upload a file"
+msgstr "Upload a file"
+
 #: src/knowledge/uploads.tsx
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Upload a PDF, Word or Excel file, or captions (.vtt)"
+
+#: src/brain/sources-page.tsx
+msgid "Upload new version"
+msgstr "Upload new version"
 
 #: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
@@ -16082,6 +16136,11 @@ msgid "Who leads it?"
 msgstr "Who leads it?"
 
 #: src/knowledge/new-collection.tsx
+msgid "Who may read it"
+msgstr "Who may read it"
+
+#: src/brain/sources-page.tsx
+msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
 msgstr "Who may read it"
 

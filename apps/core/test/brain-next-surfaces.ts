@@ -122,6 +122,13 @@ export interface Probing {
    */
   instructionGroups: readonly string[];
   /**
+   * Uploads the reader may not read (brain-uploads.ts), each holding every
+   * marker: someone else's own, and a team's they aren't in. Each asked
+   * of, acted on or uploaded to must answer exactly as an upload no one
+   * made, and change nothing.
+   */
+  hiddenUploads?: readonly string[];
+  /**
    * Moments a recall asks as of besides the first and now: when a marked
    * version the reader could read then was its source's current one, so
    * "as of" is held to what they may read now.
@@ -871,7 +878,7 @@ export const coreProbes = {
     return [
       await add("for someone else", { kind: "owner", personId: stranger() }),
       await add("for nobody", { kind: "none" }),
-      await add("an unknown kind", unchecked({ kind: "everyone" })),
+      await add("an unknown kind", unchecked({ kind: "anyone" })),
       await add("no person", unchecked({ kind: "owner", personId: "" })),
       await add(
         "a team named by the markers",
@@ -3058,6 +3065,73 @@ const sourcesAs = (personId: string): BrainSourcesRpc =>
     async () => await Promise.resolve(sessionOf(personId))
   );
 
+/** WebVTT captions holding every marker: a file the extractor reads. */
+const markedFile = (markers: readonly string[]) => ({
+  name: "Captions.vtt",
+  bytes: new TextEncoder().encode(
+    `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${markedText(markers)}\n`
+  ),
+});
+
+/** A file of the reader's own, holding nothing of anyone else's. */
+const plainFile = () => ({
+  name: "Own.vtt",
+  bytes: new TextEncoder().encode(
+    "WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nTheir own words\n"
+  ),
+});
+
+/**
+ * Asks `ask` of an upload no one made (`nothing`) and of each of the
+ * reader's hidden uploads (`hidden`), from one place, so their answers
+ * compare whole; then of one named by the markers, of one of the
+ * reader's own (an upload made for it, which they may act on), and as
+ * someone who isn't a member.
+ */
+const askedOfUploads = async (
+  { personId, hiddenUploads = [], markers }: Probing,
+  ask: (
+    asking: BrainSourcesRpc,
+    uploadId: string,
+    file: { name: string; bytes: Uint8Array }
+  ) => Promise<unknown>
+): Promise<Answer[]> => {
+  const askOf = async (
+    name: string,
+    uploadId: string,
+    about?: Answer["about"],
+    as = personId,
+    file = markedFile(markers)
+  ) =>
+    await answer(
+      name,
+      async () => await ask(sourcesAs(as), uploadId, file),
+      about
+    );
+  const asked: Answer[] = [
+    await askOf("an upload no one made", crypto.randomUUID(), "nothing"),
+  ];
+  for (const [index, uploadId] of hiddenUploads.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- one upload at a time
+    asked.push(await askOf(`hidden upload ${index}`, uploadId, "hidden"));
+  }
+  const { source: own } = await sourcesAs(personId).upload(plainFile(), {
+    kind: "me",
+  });
+  asked.push(
+    await askOf("an upload named by the markers", markers.join("")),
+    // Their own, with nothing of anyone else's in what it adds.
+    await askOf("their own upload", own.id, undefined, personId, plainFile()),
+    await askOf(
+      "as someone who isn't a member",
+      hiddenUploads[0] ?? own.id,
+      undefined,
+      stranger()
+    )
+  );
+  return asked;
+};
+
 /** A source as the page names it after a list: its time as ISO 8601. */
 const pageAfter = (source: SourceRef) => ({
   addedAt: pastAll.toISOString(),
@@ -3208,7 +3282,75 @@ export const sourcesProbes = {
       async () => await sourcesAs(stranger()).search(probing.markers.join(" "))
     ),
   ],
-} satisfies Record<"list" | "versions" | "read" | "search", Probe>;
+  // Uploads (brain-uploads.ts): every way to name one the reader may not
+  // read answers as one no one made, and acts on nothing; an upload for
+  // readers they may not choose is refused before anything is kept.
+  uploadOf: async (probing) =>
+    await askedOfUploads(
+      probing,
+      async (asking, uploadId) => await asking.uploadOf(uploadId)
+    ),
+  uploadVersion: async (probing) =>
+    await askedOfUploads(
+      probing,
+      async (asking, uploadId, file) =>
+        await asking.uploadVersion(uploadId, file)
+    ),
+  deleteUpload: async (probing) =>
+    await askedOfUploads(probing, async (asking, uploadId) => {
+      await asking.deleteUpload(uploadId);
+    }),
+  upload: async ({ personId, markers }) => [
+    await answer(
+      "a file of their own",
+      async () => await sourcesAs(personId).upload(plainFile(), { kind: "me" })
+    ),
+    await answer(
+      "for a team named by the markers",
+      async () =>
+        await sourcesAs(personId).upload(
+          markedFile(markers),
+          unchecked({ kind: "team", teamId: markers.join("") })
+        )
+    ),
+    await answer(
+      "for someone else alone",
+      async () =>
+        await sourcesAs(personId).upload(
+          markedFile(markers),
+          unchecked({ kind: "owner", personId: stranger() })
+        )
+    ),
+    await answer(
+      "a file named by the markers that isn't what its name says",
+      async () =>
+        await sourcesAs(personId).upload(
+          {
+            name: `${markers.join(" ")}.vtt`,
+            bytes: new TextEncoder().encode(markers.join(" ")),
+          },
+          { kind: "me" }
+        )
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await sourcesAs(stranger()).upload(markedFile(markers), {
+          kind: "me",
+        })
+    ),
+  ],
+} satisfies Record<
+  | "list"
+  | "versions"
+  | "read"
+  | "search"
+  | "uploadOf"
+  | "uploadVersion"
+  | "deleteUpload"
+  | "upload",
+  Probe
+>;
 
 /** One way into the Brain: a module, or the store's class, and its probes. */
 interface Surface {

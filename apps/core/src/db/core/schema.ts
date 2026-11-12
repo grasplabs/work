@@ -5980,3 +5980,22 @@ export const providerHealth = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.provider, table.credential] })]
 );
+
+/**
+ * Files people uploaded straight into the Brain (brain-uploads.ts), each
+ * a source `upload:<id>` there: who uploaded it and who may read it,
+ * fixed for its life. IDs only: the file's name and text are the Brain's,
+ * kept and erased with the source. A row is written before the Brain is
+ * given anything under its key, and goes only once that key was erased,
+ * so every upload the Brain holds is named here for its deletion.
+ */
+export const brainUploads = sqliteTable("brain_uploads", {
+  id: text().primaryKey(),
+  uploadedBy: text("uploaded_by").notNull(),
+  /** Who may read it: its uploader alone, a team, or everyone. */
+  readers: text({ enum: ["me", "team", "everyone"] }).notNull(),
+  /** The team, for `team`. */
+  teamId: text("team_id"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});

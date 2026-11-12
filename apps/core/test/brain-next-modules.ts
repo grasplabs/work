@@ -30,4 +30,7 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Uploads straight into the Brain, reached only through the Sources
+  // page's methods (brain-sources-rpc.ts), whose probes call each of them.
+  "apps/core/src/brain-uploads.ts": "sources",
 } as const satisfies Readonly<Record<string, string>>;

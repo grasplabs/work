@@ -5,6 +5,7 @@ import type {
   BrainSourceListed,
   BrainSourceRef,
   BrainSourcesAfter,
+  BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -28,7 +29,9 @@ import { SourcesPage } from "./sources-page.tsx";
 // one opened at its newest version and then an older one; search shows
 // recall's pack as core gives it, in its order, with what it didn't find
 // and that it was cut short, and opens a result's source at its version;
-// each connection says how it feeds the Brain; a refusal is said.
+// each connection says how it feeds the Brain; a refusal is said; a file
+// uploads for the readers chosen, and an upload's panel offers what core
+// says the person may do to it.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -37,6 +40,10 @@ let root: Root | undefined;
 const handbook: BrainSourceRef = { producer: "upload", id: "u-1" };
 const minutes: BrainSourceRef = { producer: "chat", id: "c-1" };
 const older: BrainSourceRef = { producer: "run", id: "r-1" };
+const uploaded: BrainSourceRef = { producer: "upload", id: "u-2" };
+
+/** The teams the person is in. */
+const teams = [{ id: "t-1", name: "Finance" }];
 
 const listed = (
   source: BrainSourceRef,
@@ -166,6 +173,41 @@ const shown = async (
         ? { items: [], notFound: [unmatched], truncated: false }
         : pack;
     },
+    upload: async (
+      file: { name: string; bytes: Uint8Array },
+      readers: BrainUploadReaders
+    ) => {
+      await Promise.resolve();
+      const team = readers.kind === "team" ? ` ${readers.teamId}` : "";
+      calls.push(
+        `upload ${file.name} (${file.bytes.byteLength} bytes) for ${readers.kind}${team}`
+      );
+      return { source: uploaded, version: 1 };
+    },
+    uploadVersion: async (
+      uploadId: string,
+      file: { name: string; bytes: Uint8Array }
+    ) => {
+      await Promise.resolve();
+      calls.push(`uploadVersion ${uploadId} ${file.name}`);
+      return { source: handbook, version: 3 };
+    },
+    // The handbook is the person's upload, for a team of theirs.
+    uploadOf: async (uploadId: string) => {
+      await Promise.resolve();
+      return uploadId === handbook.id
+        ? {
+            source: handbook,
+            readers: { kind: "team" as const, teamId: "t-1" },
+            mayAddVersion: true,
+            mayDelete: true,
+          }
+        : null;
+    },
+    deleteUpload: async (uploadId: string) => {
+      await Promise.resolve();
+      calls.push(`deleteUpload ${uploadId}`);
+    },
   };
   const core = {
     withSession: async <T,>(
@@ -176,7 +218,7 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <SourcesPage connections={connections} />,
+    component: () => <SourcesPage connections={connections} teams={teams} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -439,5 +481,62 @@ describe(SourcesPage, () => {
       refusal: text.includes("You aren't a member of this organization."),
       empty: text.includes("Nothing in the Brain you may read yet"),
     }).toStrictEqual({ refusal: true, empty: false });
+  });
+
+  it("uploads a file for the team chosen, then offers its uploader a new version and deleting it", async () => {
+    const { calls } = await shown([]);
+    const [, picker] = document.querySelectorAll("input");
+    const readers = document.querySelector("select");
+    const form = picker?.closest("form");
+    if (!(picker && readers && form)) {
+      throw new TypeError("No upload form");
+    }
+    const options = [...readers.options].map(({ textContent }) => textContent);
+    await act(async () => {
+      Object.defineProperty(picker, "files", {
+        configurable: true,
+        value: [new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })],
+      });
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      readers.value = "t-1";
+      readers.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      form.requestSubmit();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+    await press("Handbook");
+    await settle();
+    const opened = panel();
+    await press("Delete");
+    await press("Delete for good");
+    await settle();
+
+    expect({
+      options,
+      opened: [
+        "Team Finance can read this upload.",
+        "Upload new version",
+        "Delete",
+      ].map((text) => opened.includes(text)),
+      closed: panel(),
+      calls: calls.filter((call) => !call.startsWith("read")),
+    }).toStrictEqual({
+      options: ["Only me", "Team Finance", "Everyone"],
+      opened: [true, true, true],
+      closed: "",
+      calls: [
+        "list",
+        "upload notes.vtt (6 bytes) for team t-1",
+        "list",
+        "versions u-2",
+        "versions u-1",
+        "deleteUpload u-1",
+        "list",
+      ],
+    });
   });
 });

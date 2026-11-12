@@ -83,6 +83,12 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 /** A team's group name starts with this; the rest is the team's ID. */
 const teamPrefix = "team:";
 
+/**
+ * Every current member is in this group (`readerOf`), and in no other
+ * way: what everyone in the organization may read.
+ */
+const companyGroup = "company";
+
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
   .min(1)
@@ -91,6 +97,7 @@ const idSchema = wellFormedString()
 const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
+  z.strictObject({ kind: z.literal("everyone") }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -272,6 +279,9 @@ const accessOf = (readers: SourceReaders): Access => {
     case "team": {
       return { kind: "audience", group: teamGroup(readers.teamId) };
     }
+    case "everyone": {
+      return { kind: "audience", group: companyGroup };
+    }
     case "none": {
       return { kind: "none" };
     }
@@ -282,8 +292,9 @@ const accessOf = (readers: SourceReaders): Access => {
 };
 
 /**
- * `personId` as the Brain's reader: the person, and the teams core counts
- * them in now. Refused once they have no current membership.
+ * `personId` as the Brain's reader: the person, the teams core counts
+ * them in now, and the company, as every member is. Refused once they
+ * have no current membership.
  */
 const readerOf = async (
   env: Pick<Env, "DB">,
@@ -295,7 +306,7 @@ const readerOf = async (
   }
   return {
     person: member.userId,
-    groups: member.teams.map(({ id }) => teamGroup(id)),
+    groups: [companyGroup, ...member.teams.map(({ id }) => teamGroup(id))],
   };
 };
 
@@ -629,9 +640,6 @@ export const erasePerson = async (
 // reaches which chat or run, and who may write each, is
 // instruction-files.ts's rule; the functions here only name them for the
 // Brain.
-
-/** Every current member is in this group, and in no other way. */
-const companyGroup = "company";
 
 /** An App's group: only for a reader who builds the App. */
 const appGroup = (appId: string): string => `app:${appId}`;

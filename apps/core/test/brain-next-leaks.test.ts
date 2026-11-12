@@ -2,6 +2,7 @@ import {
   exactCandidatesMax,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
+import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -308,6 +309,8 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "the holder's upload for only them": markerWord(),
+        "an upload for a team the outsider isn't in": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -318,6 +321,8 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's upload for only them": ownUploadMarker,
+        "an upload for a team the outsider isn't in": teamUploadMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -474,9 +479,32 @@ describe(
         narrowedId
       );
 
+      // Through the upload producer too (brain-uploads.ts): the holder's
+      // file for only them, and one for a team the outsider isn't in.
+      const uploaded = async (marker: string, readers: BrainUploadReaders) => {
+        const { source } = await holderApi.api.brainSources.upload(
+          {
+            name: "Captions.vtt",
+            bytes: new TextEncoder().encode(
+              `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nUploaded ${sharedWord} ${marker}\n`
+            ),
+          },
+          readers
+        );
+        return source;
+      };
+      const ownUpload = await uploaded(ownUploadMarker, { kind: "me" });
+      const teamUpload = await uploaded(teamUploadMarker, {
+        kind: "team",
+        teamId: secretTeam,
+      });
+
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
         teamSource,
+      ]);
+      await expect(textsFor(holder, teamUploadMarker)).resolves.toStrictEqual([
+        expect.stringContaining(teamUploadMarker),
       ]);
       await expect(
         textsFor(holder, `salary ${ownerMarker}`)
@@ -504,8 +532,18 @@ describe(
           noneMarker,
           narrowedMarker,
           ...instructionMarkers,
+          ownUploadMarker,
+          teamUploadMarker,
         ],
-        hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
+        hiddenVersions: everyVersionOf(
+          ...ownerIds,
+          teamId,
+          noneId,
+          narrowedId,
+          ownUpload,
+          teamUpload
+        ),
+        hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         usedApps,
         instructionGroups,
@@ -522,8 +560,11 @@ describe(
       // theirs to read, and nothing else is.
       await join(secretTeam, outsider);
       const joinedFinds = await textsFor(outsider, teamMarker);
-      const { "a team's source the outsider isn't in": _joined, ...notJoined } =
-        markers;
+      const {
+        "a team's source the outsider isn't in": _joined,
+        "an upload for a team the outsider isn't in": _joinedUpload,
+        ...notJoined
+      } = markers;
       const inTheTeam = await findingsOf(
         "the outsider, in the team",
         {
@@ -533,8 +574,15 @@ describe(
             noneMarker,
             narrowedMarker,
             ...instructionMarkers,
+            ownUploadMarker,
           ],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            noneId,
+            narrowedId,
+            ownUpload
+          ),
+          hiddenUploads: [ownUpload.id],
         },
         notJoined,
         { inRecall }
