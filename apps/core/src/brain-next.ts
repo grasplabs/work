@@ -24,14 +24,22 @@ import type {
   RecallRequest,
   SourceId,
   StepFailure,
+  WayCounts,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
-import { brainReportSchema, brainSteps } from "@grasp-os/shared/brain-report";
+import {
+  brainReportSchema,
+  brainSearchWays,
+  brainSteps,
+  brainWithoutMeaningReasons,
+} from "@grasp-os/shared/brain-report";
 import type {
   BrainAction,
   BrainActionOutcome,
   BrainReport,
+  BrainSearchWay,
   BrainStep,
+  BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
@@ -333,27 +341,28 @@ const isUsableVector = (vector: readonly number[]): boolean =>
  * whitespace (which words a question holds is the Brain's to say, so a
  * question of punctuation alone is still embedded, and the Brain finds
  * nothing for it), or when the embedder gave no vector the Brain can use
- * in time: logged with why, nothing of the question or the person, and
- * recall goes ahead by words and exact parts.
+ * in time: then why, logged with nothing of the question or the person,
+ * and handed to the Brain, which counts it for staff; recall goes ahead
+ * by words and exact parts. With no model shipped there is no why: going
+ * without is no failure then.
  */
 const meaningOf = async (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
   question: string
-): Promise<RecallRequest["meaning"]> => {
+): Promise<Pick<RecallRequest, "meaning" | "withoutMeaning">> => {
   if (question.trim() === "") {
-    return undefined;
+    return {};
   }
   const embedded = await questionVectorOf(env, question);
   if (embedded === null) {
-    return undefined;
+    return {};
   }
   if (embedded.kind === "vector" && isUsableVector(embedded.vector)) {
-    return { model: embedded.model, vector: embedded.vector };
+    return { meaning: { model: embedded.model, vector: embedded.vector } };
   }
-  log.warn("brain.recall.without_meaning", {
-    reason: embedded.kind === "none" ? embedded.reason : "unusable",
-  });
-  return undefined;
+  const reason = embedded.kind === "none" ? embedded.reason : "unusable";
+  log.warn("brain.recall.without_meaning", { reason });
+  return { withoutMeaning: reason };
 };
 
 /**
@@ -375,14 +384,14 @@ export const recallAs = async (
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId),
     // As of a moment the Brain never searches by meaning: nothing to embed.
-    asOf === undefined ? meaningOf(env, question) : undefined,
+    asOf === undefined ? meaningOf(env, question) : {},
   ]);
   const { items, notFound, truncated } = await brain(env).recall({
     question,
     reader,
     budget,
     ...(asOf === undefined ? {} : { asOf }),
-    ...(meaning === undefined ? {} : { meaning }),
+    ...meaning,
   });
   return {
     items: items.map(({ source, version, position, text, whole, found }) => ({
@@ -787,19 +796,35 @@ export const brainWorkOverview = async (env: BrainEnv): Promise<WorkOverview> =>
   await brain(env).workOverview();
 
 /**
- * The store's steps and the report's (`brainSteps`) are the same keys: a
- * step either names and the other doesn't fails to compile here, so none
- * is dropped silently.
+ * The names the store keys something by, when the report names the same
+ * ones: a name either has and the other doesn't makes this `never`, so
+ * the report's list fails to compile and none is dropped silently.
  */
-type StoreStep = keyof WorkOverview["stepsFailed"];
-type SameSteps = [StoreStep] extends [BrainStep]
-  ? [BrainStep] extends [StoreStep]
-    ? readonly StoreStep[]
+type SameNames<Store extends string, Report extends string> = [Store] extends [
+  Report,
+]
+  ? [Report] extends [Store]
+    ? readonly Store[]
     : never
   : never;
 
 /** Every step the store names, in the tick's order. */
-const reportedSteps = brainSteps satisfies SameSteps;
+const reportedSteps = brainSteps satisfies SameNames<
+  keyof WorkOverview["stepsFailed"],
+  BrainStep
+>;
+
+/** Every way of recall the store counts. */
+const reportedWays = brainSearchWays satisfies SameNames<
+  keyof WorkOverview["recall"]["ways"],
+  BrainSearchWay
+>;
+
+/** Every reason the store counts a recall without meaning by. */
+const reportedReasons = brainWithoutMeaningReasons satisfies SameNames<
+  keyof WorkOverview["recall"]["withoutMeaning"],
+  BrainWithoutMeaningReason
+>;
 
 /** A step's last failure as the staff report says it. */
 const failureOf = (
@@ -818,6 +843,21 @@ const stepsFailedOf = (
       reportedSteps.map((step) => [step, failureOf(steps[step])])
     )
   );
+
+/** A way's counts as the report says them, field by field. */
+const wayOf = ({ recalls, failed }: WayCounts) => ({ recalls, failed });
+
+/** Recall by each way and without meaning, as the report says it: counts. */
+const recallOf = (recall: WorkOverview["recall"]): BrainReport["recall"] =>
+  brainReportSchema.shape.recall.parse({
+    since: recall.since.toISOString(),
+    ways: Object.fromEntries(
+      reportedWays.map((way) => [way, wayOf(recall.ways[way])])
+    ),
+    withoutMeaning: Object.fromEntries(
+      reportedReasons.map((reason) => [reason, recall.withoutMeaning[reason]])
+    ),
+  });
 
 /**
  * The Brain as Grasp's staff see it (brain-report.ts): its overview, field
@@ -876,6 +916,7 @@ export const brainStaffReport = async (env: BrainEnv): Promise<BrainReport> => {
       byReason: overview.erasures.byReason,
     },
     stepsFailed: stepsFailedOf(overview.stepsFailed),
+    recall: recallOf(overview.recall),
   };
 };
 

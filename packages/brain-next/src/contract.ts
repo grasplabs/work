@@ -206,6 +206,21 @@ const vectorSchema = z
   });
 
 /**
+ * Why the host went ahead without the question's vector though it runs a
+ * model: its embedder didn't answer in time (`timed_out`), failed
+ * (`failed`) or refused the question (`refused`), or gave a vector the
+ * store can't take (`unusable`). A host that runs no model has no reason
+ * to give: that is no failure.
+ */
+export const withoutMeaningReasons = [
+  "timed_out",
+  "failed",
+  "refused",
+  "unusable",
+] as const;
+export type WithoutMeaningReason = (typeof withoutMeaningReasons)[number];
+
+/**
  * A recall: a question, in the reader's words, the reader, how many tokens
  * the pack may hold (`tokensOf`), to read the past, the moment the
  * sources are read as of: what each was then, to the millisecond and
@@ -213,18 +228,60 @@ const vectorSchema = z
  * search by meaning too, the question's vector (`meaning`) by the host's
  * model and the build that made it. The store makes no outside call, so
  * the host embeds the question first; without a vector, and always as of
- * a moment, recall is by words and exact parts alone.
+ * a moment, recall is by words and exact parts alone. A host whose model
+ * gave no vector it could use says why (`withoutMeaning`), for staff to
+ * count (`RecallOverview`); never with a vector.
  */
-export const recallRequestSchema = z.strictObject({
-  question: wellFormedString().max(questionMaxLength),
-  reader: readerSchema,
-  budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
-  asOf: z.date().optional(),
-  meaning: z
-    .strictObject({ model: embedModelSchema, vector: vectorSchema })
-    .optional(),
-});
+export const recallRequestSchema = z
+  .strictObject({
+    question: wellFormedString().max(questionMaxLength),
+    reader: readerSchema,
+    budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
+    asOf: z.date().optional(),
+    meaning: z
+      .strictObject({ model: embedModelSchema, vector: vectorSchema })
+      .optional(),
+    withoutMeaning: z.enum(withoutMeaningReasons).optional(),
+  })
+  .refine(
+    ({ meaning, withoutMeaning }) =>
+      meaning === undefined || withoutMeaning === undefined,
+    {
+      message: "Gives a vector and why it has none",
+      path: ["withoutMeaning"],
+    }
+  );
 export type RecallRequest = z.infer<typeof recallRequestSchema>;
+
+/**
+ * The ways recall searches by (`Brain.recall`): words (its stop words
+ * included), exact parts and meaning.
+ */
+export const searchWays = ["words", "exact", "meaning"] as const;
+export type SearchWay = (typeof searchWays)[number];
+
+/**
+ * One way of recall since the store started: how many recalls searched by
+ * it (a way runs only when the question has something for it: telling
+ * words, an exact part, or a vector, not as of a moment), how many of
+ * those it failed (its search threw, which fails the recall).
+ */
+export interface WayCounts {
+  recalls: number;
+  failed: number;
+}
+
+/**
+ * Recall as staff see it, since the store started (`since`): kept in
+ * memory, so gone with the instance, as `stepsFailed`. Counts alone:
+ * nothing of a question, a reader or what was found.
+ */
+export interface RecallOverview {
+  since: Date;
+  ways: Record<SearchWay, WayCounts>;
+  /** Recalls the host made without the question's vector, by why. */
+  withoutMeaning: Record<WithoutMeaningReason, number>;
+}
 
 /** A version of a source, as an add records it. */
 export interface SourceVersionRef {
@@ -564,6 +621,8 @@ export interface WorkOverview {
   words: "current" | "rebuilding";
   /** The erasures the store applied, as its ledger keeps them. */
   erasures: ErasuresOverview;
+  /** Recall by each way, since the store started. */
+  recall: RecallOverview;
 }
 
 /**
