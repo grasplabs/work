@@ -1,7 +1,7 @@
 import { eraseSource } from "./brain-next.ts";
 import type { SourceRef } from "./brain-next.ts";
 
-// What core hands the Brain comes from an origin core keeps (an upload's
+// What core hands the Brain comes from an origin core keeps (a Knowledge
 // document, a workflow run), and each origin's sources are named here
 // alone, one function per kind: producers add under these keys
 // (GRA-1727), and whatever deletes an origin erases them, so both always
@@ -14,20 +14,18 @@ import type { SourceRef } from "./brain-next.ts";
 // what names its keys, and a failure leaves the origin as it was, so the
 // erasure stays owed by the origin's own state until a retry returns
 // (the Brain's rule: only a call that returned is in its ledger): a
-// purge fails before it forgets an upload, a run's retention marks
-// nothing. Erasing a key that was never added closes it all the same, so
+// purge's step fails and stays owed, a run's retention marks nothing. Erasing a key that was never added closes it all the same, so
 // a hand-over still under way for a deleted origin is refused rather than
 // landing after.
 
 /**
- * The source an upload's text is under: the Knowledge document it was
- * saved as, the one key for that document in the Brain. A content purge
- * that names the document closes it for good (knowledge/uploads.ts
- * `forgetUploads`), as the purge forgets the uploads the Brain takes
- * documents from.
+ * The source of a Knowledge document, uploaded or written: the one key
+ * for it in the Brain. A purge that names the document, or deletes its
+ * collection, closes it for good (knowledge/rpc.ts `coreErasure`): what
+ * the purge leaves of it is never handed over again.
  */
-export const uploadSource = (documentId: string): SourceRef => ({
-  producer: "upload",
+export const documentSource = (documentId: string): SourceRef => ({
+  producer: "document",
   id: documentId,
 });
 

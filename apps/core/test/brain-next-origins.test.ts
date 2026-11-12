@@ -3,7 +3,7 @@ import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { runSource, uploadSource } from "../src/brain-next-origins.ts";
+import { documentSource, runSource } from "../src/brain-next-origins.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -33,7 +33,7 @@ import { runMinuteTasks } from "./maintenance.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Erasure reaching the new Brain from what core deletes (GRA-1727), from
-// its threat model on the issue: an upload's document purged and a run
+// its threat model on the issue: a document purged and a run
 // past its retention each erase their sources, and a
 // person's erasure erases what only they may read. Each Brain call is
 // owed until it returns: one that fails (the Brain's bucket out of reach)
@@ -120,69 +120,50 @@ const failNextBucketPut = async (): Promise<void> => {
   });
 };
 
-/** How many uploads share a collection and path with the one saved as `source`. */
-const uploadsKept = async (source: SourceRef): Promise<number | undefined> => {
-  const row = await env.DB.prepare(
-    `SELECT count(*) AS n FROM uploads WHERE (collection_id, path) IN
-      (SELECT collection_id, path FROM uploads WHERE document_id = ?)`
-  )
-    .bind(source.id)
-    .first<{ n: number }>();
-  return row?.n;
-};
-
-describe("an upload's document purged", { timeout: 120_000 }, () => {
+describe("a document purged", { timeout: 120_000 }, () => {
   /**
-   * A document an admin's colleague uploaded into a collection for
-   * everyone, recorded as their upload saved as it, and its text handed
-   * to the Brain for them alone. The document itself holds no mark: the
+   * A document an admin's colleague wrote into a collection for everyone,
+   * recorded as their upload too when `uploaded`, and its text handed to
+   * the Brain for them alone. The document itself holds no mark: the
    * Brain's copy alone does.
    */
-  const uploadInBrain = async () => {
-    const uploader = await signedInApi(idp, "admin");
+  const documentInBrain = async (uploaded: boolean) => {
+    const author = await signedInApi(idp, "admin");
     const admin = await signedInApi(idp, "admin");
-    const collection = await uploader.api.knowledge.createCollection({
+    const collection = await author.api.knowledge.createCollection({
       name: `Files ${unique()}`,
       access: "everyone",
     });
     const path = `offices-${unique()}.md`;
-    const document = await uploader.api.knowledge.saveDocument({
+    const document = await author.api.knowledge.saveDocument({
       collectionId: collection.id,
       path,
       text: "The facilities desk is at facilities@example.com.",
       ifVersion: 0,
     });
-    /** Records an upload of `path` by the uploader, saved as `documentId` or not yet. */
-    const recordUpload = async (
-      status: "pending" | "ready",
-      documentId: string | null
-    ): Promise<string> => {
-      const id = crypto.randomUUID();
+    if (uploaded) {
       const now = Date.now();
       await env.DB.prepare(
         `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
            uploaded_by, actor, status, document_id, version, created_at, updated_at)
-         VALUES (?, ?, ?, 'text/markdown', 1, ?, ?, ?, ?, ?, 1, ?, ?)`
+         VALUES (?, ?, ?, 'text/markdown', 1, ?, ?, ?, 'ready', ?, 1, ?, ?)`
       )
         .bind(
-          id,
+          crypto.randomUUID(),
           collection.id,
           path,
           "0".repeat(64),
-          uploader.userId,
-          JSON.stringify({ type: "person", userId: uploader.userId }),
-          status,
-          documentId,
+          author.userId,
+          JSON.stringify({ type: "person", userId: author.userId }),
+          document.id,
           now,
           now
         )
         .run();
-      return id;
-    };
-    await recordUpload("ready", document.id);
+    }
     const mark = newMark();
-    const source = uploadSource(document.id);
-    await handOver(source, markedText(mark), uploader.userId);
+    const source = documentSource(document.id);
+    await handOver(source, markedText(mark), author.userId);
     const input: PurgeInput = {
       type: "content",
       documentIds: [document.id],
@@ -193,85 +174,109 @@ describe("an upload's document purged", { timeout: 120_000 }, () => {
       const plan = await admin.api.knowledge.preparePurge(input);
       await admin.api.knowledge.purge(input, plan.token);
     };
-    return { uploader, mark, source, purge, recordUpload };
+    return { author, mark, source, purge };
   };
 
-  it("erases its text in the Brain, so its uploader recalls none and the store keeps nothing of it, and a late hand-over is refused", async () => {
-    const { uploader, mark, source, purge } = await uploadInBrain();
-    const before = await recalled(uploader.userId, mark);
+  it("erases a written document's text in the Brain, so its reader recalls none and the store keeps nothing of it, and refuses its redacted save's hand-over", async () => {
+    const { author, mark, source, purge } = await documentInBrain(false);
+    const before = await recalled(author.userId, mark);
 
     await purge();
-    const late = await settled(
-      handOver(source, markedText(newMark()), uploader.userId)
+    const redacted = await settled(
+      handOver(source, markedText(newMark()), author.userId)
     );
 
     expect({
       before,
-      after: await recalled(uploader.userId, mark),
-      late,
+      after: await recalled(author.userId, mark),
+      redacted,
       ledger: await inLedger(source),
       left: await leftOf([mark]),
     }).toStrictEqual({
       before: 1,
       after: 0,
-      late: { error: refusedAsErased },
+      redacted: { error: refusedAsErased },
       ledger: 1,
       left: nothingLeft,
     });
   });
 
-  it("fails the purge before it forgets the upload while the Brain can't record the erasure, and erases it when run again", async () => {
-    const { uploader, mark, source, purge } = await uploadInBrain();
+  it("erases an uploaded document's text in the Brain alike", async () => {
+    const { author, mark, source, purge } = await documentInBrain(true);
+
+    await purge();
+
+    expect({
+      after: await recalled(author.userId, mark),
+      ledger: await inLedger(source),
+      left: await leftOf([mark]),
+    }).toStrictEqual({ after: 0, ledger: 1, left: nothingLeft });
+  });
+
+  it("fails the purge before it rewrites the document while the Brain can't record the erasure, and erases it when run again", async () => {
+    const { author, mark, source, purge } = await documentInBrain(false);
 
     await failNextBucketPut();
     const failed = await outcome(purge());
-    const kept = await env.DB.prepare(
-      "SELECT count(*) AS n FROM uploads WHERE document_id = ?"
-    )
-      .bind(source.id)
-      .first<{ n: number }>();
+    const meanwhile = await author.api.knowledge.getDocument(source.id);
     await purge();
 
     expect({
       failed: failed === "ok" ? "purged" : "failed",
-      kept: kept?.n,
-      after: await recalled(uploader.userId, mark),
+      // Not rewritten yet: the step before its own failed.
+      meanwhile: JSON.stringify(meanwhile).includes("facilities@example.com"),
+      after: await recalled(author.userId, mark),
       ledger: await inLedger(source),
       left: await leftOf([mark]),
     }).toStrictEqual({
       failed: "failed",
-      // Still names its document, for the purge run again to erase.
-      kept: 1,
+      meanwhile: true,
       after: 0,
       ledger: 1,
       left: nothingLeft,
     });
   });
 
-  it("fails the purge, forgetting nothing, when one of its uploads is saved as a document after the Brain erased the others", async () => {
-    const { source, purge, recordUpload } = await uploadInBrain();
-    const later = await recordUpload("pending", null);
-    const gate = await holdNextBucketPut();
-    const purging = outcome(purge());
-    await vi.waitFor(
-      () => {
-        expect(gate.reached).toBeTruthy();
-      },
-      { timeout: 10_000 }
-    );
+  it("erases every document of a personal collection a personal purge deletes", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const leaver = await signedInApi(idp, "builder");
+    const { personal } = await leaver.api.memory.collections();
+    const document = await leaver.api.knowledge.saveDocument({
+      collectionId: personal ?? "",
+      path: `notes-${unique()}.md`,
+      text: "My own notes.",
+      ifVersion: 0,
+    });
+    const mark = newMark();
+    const source = documentSource(document.id);
+    await handOver(source, markedText(mark), leaver.userId);
+    const input: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    };
 
-    // Saved as a document of its own while the Brain writes its ledger.
-    await env.DB.prepare(
-      "UPDATE uploads SET status = 'ready', document_id = ? WHERE id = ?"
-    )
-      .bind(crypto.randomUUID(), later)
-      .run();
-    gate.released = true;
+    await failNextBucketPut();
+    const failed = await outcome(
+      (async () => {
+        const plan = await admin.api.knowledge.preparePurge(input);
+        await admin.api.knowledge.purge(input, plan.token);
+      })()
+    );
+    const plan = await admin.api.knowledge.preparePurge(input);
+    await admin.api.knowledge.purge(input, plan.token);
 
     expect({
-      purge: await purging,
-      kept: await uploadsKept(source),
-    }).toStrictEqual({ purge: "knowledge.conflict", kept: 2 });
+      failed: failed === "ok" ? "purged" : "failed",
+      after: await recalled(leaver.userId, mark),
+      ledger: await inLedger(source),
+      left: await leftOf([mark]),
+    }).toStrictEqual({
+      failed: "failed",
+      after: 0,
+      ledger: 1,
+      left: nothingLeft,
+    });
   });
 });
 
@@ -372,7 +377,7 @@ describe("a person erased", { timeout: 120_000 }, () => {
     const person = await signedInApi(idp, "builder");
     const marks = [newMark(), newMark()];
     const sources = [
-      uploadSource(crypto.randomUUID()),
+      documentSource(crypto.randomUUID()),
       runSource(crypto.randomUUID()),
     ];
     for (const [index, source] of sources.entries()) {
@@ -440,7 +445,7 @@ describe("a person erased", { timeout: 120_000 }, () => {
     const gate = await holdNextBucketPut();
     const handing = settled(
       handOver(
-        uploadSource(crypto.randomUUID()),
+        documentSource(crypto.randomUUID()),
         markedText(late),
         person.userId
       )

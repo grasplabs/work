@@ -64,6 +64,7 @@ import type { OnErase } from "@grasp-os/brain/purge";
 import { purgeStatus } from "@grasp-os/brain/purge-ledger";
 import { recall } from "@grasp-os/brain/recall";
 import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
+import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
@@ -99,9 +100,12 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
+import { documentSource, eraseSources } from "../brain-next-origins.ts";
 import { brainRecordErasure } from "../brain-records.ts";
 import { documentReadingErasure } from "../onboarding/documents.ts";
 import {
@@ -149,6 +153,50 @@ const allOf = (copies: readonly Copies[]): Copies => ({
 });
 
 /**
+ * What the new Brain took in of the documents a purge reaches (every
+ * document, uploaded or written: brain-next-origins.ts `documentSource`),
+ * erased in the purge's own steps before anything of them changes, ahead
+ * of `files` and `copies`: a content purge's documents in the step that
+ * forgets the copies made of them (`forgetDocuments`), before it rewrites
+ * any; a personal purge's, those of the collection it deletes, in the step
+ * that forgets its files (`forgetFiles` without a path), before the batch
+ * that deletes them. A Brain call that fails fails the step, which stays
+ * owed: running the purge again goes on from it, and erases them again.
+ * Their keys are closed for good, so what the purge leaves of a document
+ * is never handed over again (GRA-1727). A document added to the
+ * collection after the step read it goes with the collection unerased in
+ * the Brain, still readable by the collection's owner alone.
+ */
+const brainNextErasure = (
+  env: Env,
+  files: Pick<OnErase, "forgetFiles">,
+  copies: Pick<OnErase, "forgetDocuments">
+): Pick<OnErase, "forgetDocuments" | "forgetFiles"> => ({
+  forgetDocuments: async (by, named) => {
+    await eraseSources(
+      env,
+      named.map(({ id }) => documentSource(id)),
+      "deleted"
+    );
+    await copies.forgetDocuments(by, named);
+  },
+  forgetFiles: async (by, scope) => {
+    if (!("path" in scope)) {
+      const inCollection = await drizzle(env.KNOWLEDGE)
+        .select({ id: documents.id })
+        .from(documents)
+        .where(eq(documents.collectionId, scope.collectionId));
+      await eraseSources(
+        env,
+        inCollection.map(({ id }) => documentSource(id)),
+        "deleted"
+      );
+    }
+    await files.forgetFiles(by, scope);
+  },
+});
+
+/**
  * What a purge reaches of core's own copies (purge.ts `OnErase`): the
  * brain's gap answers and records, the kickoff, the interviews and staff's
  * own text, the originals of uploaded files, the
@@ -186,7 +234,7 @@ export const coreErasure = (env: Env): OnErase => {
     ...uploadErasure(env),
     ...appsErasure(env),
     personalCollection: personalCollectionId,
-    forgetDocuments: readings.forgetDocuments,
+    ...brainNextErasure(env, uploadErasure(env), readings),
   };
 };
 
