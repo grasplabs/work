@@ -13,8 +13,8 @@ import { zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { localExtractor } from "../src/knowledge/extract.ts";
-import { extractorAsset } from "../src/knowledge/extractor/asset.ts";
+import { localExtractor } from "../src/files/extract.ts";
+import { extractorAsset } from "../src/files/extractor/asset.ts";
 import {
   extractUpload,
   extractionRunId,

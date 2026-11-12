@@ -1,7 +1,11 @@
 import {
   brainOf,
   currentReadMax,
+  fitsSourceText,
+  erasedSource,
+  listPageMax,
   erasureReasons,
+  handOversMax,
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
@@ -18,6 +22,9 @@ import type {
   Brain,
   ErasureReason,
   Embedders,
+  HandOverPriority,
+  HandOverResult,
+  HandOvers,
   ModelReply,
   Pack,
   PackItem,
@@ -28,6 +35,7 @@ import type {
   WayCounts,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
+import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
 import {
   brainReportSchema,
   brainSearchWays,
@@ -42,20 +50,25 @@ import type {
   BrainStep,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
-import { firstLineOf } from "@grasp-os/shared/brain-sources";
+import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { skillErrors } from "@grasp-os/shared/skills";
 import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
+import { erasureBegun } from "./brain-hand-overs.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { shippedSkills } from "./shipped-skills.ts";
+import { skillCards, skillCardsKept } from "./skill-cards.ts";
+import type { SkillCardText } from "./skill-cards.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
 // people or teams: core names them as principals, a person by their user
@@ -109,25 +122,32 @@ const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
 /** The kind instruction files' keys are under (`instructionKeyOf`). */
 const instructionsKind = "instructions";
 
+/** The kind skills' keys are under (`skillKeyOf`). */
+const skillsKind = "skill";
+
 /**
- * `kinds`, which must hold no ":", and never `instructionsKind`: a
- * source's key is its kind, ":", and its id, so a kind with ":" could name
- * a key under another kind, and a kind `instructions` would name the
- * instruction files' keys (read through `readSourceVersionAs`). A list
- * where one does doesn't compile.
+ * `kinds`, which must hold no ":", and never `instructionsKind` or
+ * `skillsKind`: a source's key is its kind, ":", and its id, so a kind
+ * with ":" could name a key under another kind, and a kind `instructions`
+ * or `skill` would name the instruction files' or the skills' keys (read
+ * through `readSourceVersionAs`), letting a producer's text become a
+ * skill. A list where one does doesn't compile.
  */
 const kindsWithoutColon = <const K extends string>(
   kinds: readonly K[] &
-    ([Extract<K, `${string}:${string}` | typeof instructionsKind>] extends [
-      never,
-    ]
+    ([
+      Extract<
+        K,
+        `${string}:${string}` | typeof instructionsKind | typeof skillsKind
+      >,
+    ] extends [never]
       ? unknown
       : never)
 ): readonly K[] => kinds;
 
 /**
  * Everything that adds sources to the Brain, one kind each. Each producer
- * issue adds its own (GRA-1727: meetings, workflow runs, interviews;
+ * issue adds its own (GRA-1727: workflow runs; GRA-1824: uploads;
  * GRA-1730: what agents fetch). A kind is never `instructions`, the
  * instruction files' own (`instructionKeyOf`).
  *
@@ -136,8 +156,8 @@ const kindsWithoutColon = <const K extends string>(
  * (`sourceRefOf`), so a kind gone from this list would fail every recall
  * whose results hold one of its sources.
  */
-// `run` stays although nothing produces it now: stores filled between
-// #2157 and its revert hold run sources, and a recall that meets one must
+// `chat` stays although nothing produces it now: stores filled between
+// #2157 and its revert hold chat sources, and a recall that meets one must
 // still read it.
 const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
 
@@ -316,7 +336,8 @@ const readerOf = async (
  * the server, never from a person's input. An id is not a secret within
  * its kind (an upload's id is seen by those who can see the upload), so
  * a producer checks that whoever asks for the change may change that
- * source before it calls this; the Brain can't tell.
+ * source before it calls this; the Brain can't tell. An add an erasure
+ * closed is refused with `brain.source_erased`: final, never retried.
  */
 export const addSource = async (
   env: BrainEnv,
@@ -328,12 +349,22 @@ export const addSource = async (
   }
 ): Promise<SourceVersionRef> => {
   const { source, change, text, readers } = checked(newSourceSchema, added);
-  const { version } = await brain(env).addSource({
-    source: sourceKeyOf(source),
-    change,
-    text,
-    access: accessOf(readers),
-  });
+  let version: number;
+  try {
+    ({ version } = await brain(env).addSource({
+      source: sourceKeyOf(source),
+      change,
+      text,
+      access: accessOf(readers),
+    }));
+  } catch (error) {
+    // The Brain's own refusal of what an erasure closed, by its whole
+    // message (@grasp-os/brain-next/contract): a code producers can test.
+    if (error instanceof Error && error.message === erasedSource) {
+      throw brainSourceErrors.create("brain.source_erased");
+    }
+    throw error;
+  }
   return { source, version };
 };
 
@@ -798,6 +829,321 @@ export const readInstructionFilesAs = async (
   });
 };
 
+// Skills (GRA-1826): how things are done, as `SKILL.md` documents, kept
+// whole like instruction files (never indexed, so recall never returns
+// one), each a source under `skillsKind`: Grasp's own, which each release
+// ships (`scope` "grasp"), and the company's shared ones ("company").
+// Every current member may read both, as the company's instruction file:
+// a skill is guidance and grants no access. Which skills a chat or run
+// gets, and the release's install, are brain-skills.ts's rule; the
+// functions here only name them for the Brain. Nobody but the release's
+// install (and, later, an approved publish) adds one: no producer can
+// name a skill's key (`kindsWithoutColon`).
+
+/** Where a skill comes from: Grasp's release, or the company's own. */
+const skillScopes = ["grasp", "company"] as const;
+
+/** Where a skill comes from. */
+export type SkillScope = (typeof skillScopes)[number];
+
+const skillSchema = z.strictObject({
+  scope: z.enum(skillScopes),
+  name: skillNameSchema,
+});
+
+/** A skill, by where it comes from and its name. */
+export type Skill = z.infer<typeof skillSchema>;
+
+const skillAtSchema = skillSchema.extend({ version: z.int().positive() });
+
+/** A skill at one version: what a selection pins, and a read takes. */
+export type SkillAt = z.infer<typeof skillAtSchema>;
+
+/** A skill at its current version, and when to use it. */
+export interface SkillCardAt extends SkillAt {
+  description: string;
+}
+
+/** A skill at one version, whole. */
+export interface SkillVersion extends SkillAt {
+  text: string;
+}
+
+/** The Brain's key for `skill`: its scope is part of it. */
+const skillKeyOf = ({ scope, name }: Skill): SourceId =>
+  `${skillsKind}:${scope}:${name}`;
+
+/** `key` as the skill it names, or null for one that isn't a skill's. */
+const skillOfKey = (key: SourceId): Skill | null => {
+  const [kind, scope, name, ...rest] = key.split(":");
+  const parsed = skillSchema.safeParse({ scope, name });
+  return kind === skillsKind && rest.length === 0 && parsed.success
+    ? parsed.data
+    : null;
+};
+
+/** Who may read a skill in the Brain: every current member. */
+const skillAccess: Access = { kind: "audience", group: companyGroup };
+
+/**
+ * The release's own reader of skills, to compare what is stored with what
+ * it ships: the company's group, which every skill is readable by, and a
+ * person no member is (core's person principals are user IDs, which never
+ * hold ":"), so it reads nothing but what the company may.
+ */
+const releaseReader: Reader = {
+  person: "grasp:release",
+  groups: [companyGroup],
+};
+
+/** The names of Grasp's skills this release ships: the only ones it adds. */
+const shippedNames: ReadonlySet<string> = new Set(
+  shippedSkills.map(({ name }) => name)
+);
+
+/**
+ * Adds `text` as the next version of the Grasp skill `name`, one this
+ * release ships, readable by every member, unless it is the skill's
+ * current text already (`changed` false, and nothing written); the one
+ * before stays as history. `change` is as `addSource`'s. Refused
+ * (`skills.invalid`) for a name the release doesn't ship, and when the
+ * text isn't a skill named `name` in the Agent Skills format or is over
+ * `instructionsMaxLength` UTF-16 units, an instruction file's limit: both
+ * fail the same way every time, until another release. Two adds at once
+ * may both say `changed`; the store still keeps one version per text in
+ * a row.
+ *
+ * Grasp's own skills only: the release's install (brain-skills.ts) is its
+ * one caller. Nothing here adds a company skill: that write needs its own
+ * authorization and audit (the approved publish, GRA-1754).
+ */
+export const addShippedSkill = async (
+  env: BrainEnv,
+  added: { name: string; change: string; text: string }
+): Promise<SkillAt & { changed: boolean }> => {
+  const { name, change, text } = skillErrors.parse(
+    "skills.invalid",
+    z.strictObject({
+      name: skillNameSchema,
+      change: changeSchema,
+      text: instructionsTextSchema,
+    }),
+    added
+  );
+  if (!shippedNames.has(name) || skillCardOf(text)?.name !== name) {
+    throw skillErrors.create("skills.invalid");
+  }
+  const skill: Skill = { scope: "grasp", name };
+  const source = skillKeyOf(skill);
+  const [current] = await brain(env).readCurrent({
+    sources: [source],
+    reader: releaseReader,
+  });
+  if (current?.text === text) {
+    return { ...skill, version: current.version, changed: false };
+  }
+  const { version } = await brain(env).addInstructions({
+    source,
+    change,
+    text,
+    access: skillAccess,
+  });
+  return { ...skill, version, changed: true };
+};
+
+/**
+ * Most of the company's skills a listing answers: past them, the ones
+ * whose current version is oldest are left out. Far more than a company
+ * writes.
+ */
+const companySkillsMax = 10 * listPageMax;
+
+/** The isolate's skill cards (skill-cards.ts). */
+const cards = skillCards;
+
+const cardKeyOf = (source: SourceId, version: number): string =>
+  `${source}\u0000${version}`;
+
+/**
+ * Keeps `card` as the card of `source` at `version` in the shared cache,
+ * emptying it first when full. A response holds the cards it needs in a
+ * map of its own, so emptying the cache never takes one from it.
+ */
+const keepCard = (
+  source: SourceId,
+  version: number,
+  card: SkillCardText | null
+): void => {
+  if (cards.size >= skillCardsKept) {
+    cards.clear();
+  }
+  cards.set(cardKeyOf(source, version), card);
+};
+
+/** The card `text` declares, if it is the one `source` names. */
+const declaredCard = (source: SourceId, text: string): SkillCardText | null => {
+  const card = skillCardOf(text);
+  return card !== null && card.name === skillOfKey(source)?.name
+    ? { description: card.description }
+    : null;
+};
+
+/**
+ * `personId` as a reader of skills: the person, and the company, which
+ * every current member is in. Refused once they have no current
+ * membership.
+ */
+const skillReaderOf = async (
+  env: Pick<Env, "DB">,
+  personId: string
+): Promise<Reader> => {
+  const member = await memberOf(env.DB, checked(idSchema, personId));
+  if (member === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
+  return { person: member.userId, groups: [companyGroup] };
+};
+
+/** The current versions of `sources`, whole, a batch at a time, in order. */
+const readEachCurrent = async (
+  env: BrainEnv,
+  reader: Reader,
+  sources: readonly SourceId[]
+) => {
+  const read: Awaited<ReturnType<Brain["readCurrent"]>> = [];
+  for (let at = 0; at < sources.length; at += currentReadMax) {
+    // oxlint-disable-next-line no-await-in-loop -- a few batches, in order
+    const batch = await brain(env).readCurrent({
+      sources: sources.slice(at, at + currentReadMax),
+      reader,
+    });
+    read.push(...batch);
+  }
+  return read;
+};
+
+/**
+ * The company's skills `reader` may read, newest first, at most
+ * `companySkillsMax`, with their cards: those read before, the rest read
+ * now. A version replaced between the listing and the read is left out,
+ * as if listed a moment later.
+ */
+const companySkillsAs = async (
+  env: BrainEnv,
+  reader: Reader
+): Promise<SkillCardAt[]> => {
+  const listed: { source: SourceId; version: number }[] = [];
+  let after: { addedAt: Date; source: SourceId } | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, in order
+    const page = await brain(env).listSources({
+      reader,
+      prefixes: [`${skillsKind}:company:`],
+      after,
+      limit: listPageMax,
+    });
+    listed.push(...page.sources);
+    const last = page.sources.at(-1);
+    after =
+      page.more && last !== undefined
+        ? { addedAt: last.addedAt, source: last.source }
+        : undefined;
+  } while (after !== undefined && listed.length < companySkillsMax);
+  const kept = listed.slice(0, companySkillsMax);
+  // This response's cards, held here: those cached now, then those read.
+  // The shared cache may be emptied as they are kept (`keepCard`), so the
+  // response never reads from it after this.
+  const known = new Map<string, SkillCardText | null>();
+  for (const { source, version } of kept) {
+    const key = cardKeyOf(source, version);
+    const card = cards.get(key);
+    if (card !== undefined) {
+      known.set(key, card);
+    }
+  }
+  const read = await readEachCurrent(
+    env,
+    reader,
+    kept
+      .filter(({ source, version }) => !known.has(cardKeyOf(source, version)))
+      .map(({ source }) => source)
+  );
+  for (const { source, version, text } of read) {
+    const card = declaredCard(source, text);
+    known.set(cardKeyOf(source, version), card);
+    keepCard(source, version, card);
+  }
+  return kept.flatMap(({ source, version }) => {
+    const card = known.get(cardKeyOf(source, version));
+    const skill = skillOfKey(source);
+    return skill === null || card === undefined || card === null
+      ? []
+      : [{ ...skill, version, description: card.description }];
+  });
+};
+
+/**
+ * The skills `personId` may use, at their current versions, with their
+ * descriptions: Grasp's by the names in `shipped` (this release's), read
+ * by name, so however long ago they were installed; and the company's,
+ * listed on their own, newest first, at most `companySkillsMax`. A
+ * company skill takes the place of Grasp's of the same name. Those that
+ * declare their own name only. Refused with
+ * `permission.person_inactive` once they are no longer a member.
+ */
+export const listSkillsAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  shipped: ReadonlySet<string>
+): Promise<SkillCardAt[]> => {
+  const reader = await skillReaderOf(env, personId);
+  const company = await companySkillsAs(env, reader);
+  const replaced = new Set(company.map(({ name }) => name));
+  const graspSources = [...shipped]
+    .filter((name) => !replaced.has(name))
+    .flatMap((name) => {
+      const skill = skillSchema.safeParse({ scope: "grasp", name });
+      return skill.success ? [skillKeyOf(skill.data)] : [];
+    });
+  const graspRead = await readEachCurrent(env, reader, graspSources);
+  const grasp = graspRead.flatMap(({ source, version, text }) => {
+    // Read now, so its card is held here before the cache is touched.
+    const card =
+      cards.get(cardKeyOf(source, version)) ?? declaredCard(source, text);
+    keepCard(source, version, card);
+    const skill = skillOfKey(source);
+    return skill === null || card === null
+      ? []
+      : [{ ...skill, version, description: card.description }];
+  });
+  return [...grasp, ...company];
+};
+
+/**
+ * `skill` at its version, whole, for `personId`, current or history while
+ * they may read its current version (as `readSourceVersionAs`): `null`
+ * when there is none, alike. Refused with `skills.invalid` for something
+ * that isn't a skill at a version, and `permission.person_inactive` once
+ * they are no longer a member.
+ */
+export const readSkillAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted: SkillAt
+): Promise<SkillVersion | null> => {
+  const { scope, name, version } = skillErrors.parse(
+    "skills.invalid",
+    skillAtSchema,
+    wanted
+  );
+  const read = await brain(env).readVersion({
+    source: skillKeyOf({ scope, name }),
+    version,
+    reader: await skillReaderOf(env, personId),
+  });
+  return read === null ? null : { scope, name, version, text: read.text };
+};
+
 /**
  * The gateway's refusals of a call as it is: the item's own failure. Every
  * other failure is of the way to a model, which the whole queue waits out.
@@ -910,16 +1256,224 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
     await embedInBulk(env, texts, timeoutMs),
 });
 
+// Hand-overs: what core produces reaches the Brain through its work
+// queue (the contract's `handOver`). Core notes what to hand over from the
+// audit events of its changes (brain-hand-overs.ts), and the clock relays
+// it to the queue by key alone (brain-sources.ts `relayHandOvers`, through
+// `queueHandOvers`); the queue's item asks core's producers for the source
+// as their records hold it when it runs (brain-sources.ts `producersOf`,
+// given to `workBrain`), and tells them how it ended. The readers are
+// checked here as an add's (`sourceReadersSchema`): a producer that names
+// none is refused, and nothing is added.
+
+/**
+ * A source as its producer holds it now: its change, text and readers,
+ * and the text to keep instead when `text` is past a source's bound
+ * (`whenTooLarge`: what it is, saying plainly that the rest was too large
+ * to keep, never a cut part of it); or nothing to hand over (`gone`); or
+ * nothing, as the erasure of its one reader (`readers`, the store that
+ * may hold it) has begun, when the Brain closes its key, as an add of it
+ * may have landed after that erasure.
+ */
+export type Handed =
+  | { kind: "gone" }
+  | { kind: "erased"; readers: SourceReaders }
+  | {
+      kind: "source";
+      change: string;
+      text: string;
+      whenTooLarge: string;
+      readers: SourceReaders;
+    };
+
+/** How a hand-over that did something ended: added, or refused for good. */
+export type HandOverEnd = Exclude<HandOverResult, { kind: "nothing" }>;
+
+/** Core's producers, as the Brain's hand-overs reach them (brain-sources.ts). */
+export interface Producers {
+  /** `source` as its producer's records hold it now. */
+  read: (source: SourceRef) => Promise<Handed>;
+  /**
+   * Records how the hand-over of `source` ended: once it did, and again
+   * on a repeat. Throws when it can't, so the item is tried again.
+   */
+  settled: (source: SourceRef, outcome: HandOverEnd) => Promise<void>;
+}
+
+/** The class of the Brain's work every hand-over takes. */
+const handOverPriority: HandOverPriority = "conversation";
+
+/**
+ * Closes `source`'s key for good, as the erasure of its one reader
+ * (`readers`) has begun: the Brain's `eraseSource`, from the store
+ * `readers` say holds it.
+ */
+const closeKey = async (
+  env: BrainEnv,
+  source: SourceRef,
+  readers: SourceReaders
+): Promise<void> => {
+  checked(sourceReadersSchema, readers);
+  await eraseSource(env, { source, reason: "person_erased" });
+};
+
+/** Whether `error` is core's refusal of an add an erasure closed (`addSource`). */
+const isErasedRefusal = (error: unknown): boolean =>
+  brainSourceErrors.codeOf(error) === "brain.source_erased";
+
+/**
+ * Refuses the hand-over of `source` for `reason`: recorded first, then,
+ * when its one reader's erasure began (`closing`), its key closed. In
+ * that order, as closing the key takes this item off the queue with every
+ * other of its key: a refusal recorded after could, failing, never be
+ * tried again. A close that fails fails the item, which is tried again,
+ * recording again: each attempt records its own.
+ */
+const refuse = async (
+  env: Env,
+  producers: Producers,
+  source: SourceRef,
+  reason: HandOverEnd & { kind: "refused" },
+  closing?: SourceReaders
+): Promise<HandOverResult> => {
+  await producers.settled(source, reason);
+  if (closing !== undefined) {
+    await closeKey(env, source, closing);
+  }
+  return reason;
+};
+
+/**
+ * Hands `source` over as its producer's records hold it now, through
+ * `addSource`, which takes it to the store its readers belong in, and says
+ * how it ended (`HandOverResult`), which settles the item as done:
+ *
+ * - nothing, when the producer has nothing to hand over;
+ * - refused as `invalid`, when the producer's answer can't be added (no
+ *   readers, a text that isn't one): never tried again;
+ * - its text, or its `whenTooLarge` when the text is past a source's
+ *   bound as given or as indexed (`fitsSourceText`); refused as
+ *   `too_large` when neither fits;
+ * - refused as `erased` when what it adds was erased: final.
+ *
+ * A source for one person alone whose erasure has begun is erased (its key
+ * closed), never left: when the producer says so (`erased`), as an add of
+ * it may have landed after the Brain's erasure (began before it, the add's
+ * erasure failed or never ran), and when it was added while that erasure
+ * began (core's record of it is written before the Brain's erasure, and
+ * the producer checked it before the add). Only a throw tries it again: a
+ * store out of reach, an audit write or a close that failed.
+ */
+const handOver = async (
+  env: Env,
+  producers: Producers,
+  source: SourceRef
+): Promise<HandOverResult> => {
+  const handed = await producers.read(source);
+  if (handed.kind === "gone") {
+    return { kind: "nothing" };
+  }
+  const refused = async (
+    reason: (HandOverEnd & { kind: "refused" })["reason"],
+    closing?: SourceReaders
+  ) =>
+    await refuse(env, producers, source, { kind: "refused", reason }, closing);
+  if (handed.kind === "erased") {
+    return await refused("erased", handed.readers);
+  }
+  const readers = sourceReadersSchema.safeParse(handed.readers);
+  const texts = [handed.text, handed.whenTooLarge].filter(
+    (text) => wellFormedString().safeParse(text).success
+  );
+  if (!readers.success || texts.length < 2) {
+    return await refused("invalid");
+  }
+  const text = texts.find((each) => fitsSourceText(each));
+  if (text === undefined) {
+    return await refused("too_large");
+  }
+  let version: number;
+  try {
+    ({ version } = await addSource(env, {
+      source,
+      change: handed.change,
+      text,
+      readers: readers.data,
+    }));
+  } catch (error) {
+    if (!isErasedRefusal(error)) {
+      throw error;
+    }
+    return await refused("erased");
+  }
+  if (
+    readers.data.kind === "owner" &&
+    (await erasureBegun(env, readers.data.personId))
+  ) {
+    return await refused("erased", readers.data);
+  }
+  const added: HandOverResult = { kind: "added", version };
+  await producers.settled(source, added);
+  return added;
+};
+
+/** Core's producers as the Brain's work reaches them, by its keys. */
+const handOversOf = (env: Env, producers: Producers): HandOvers => ({
+  handOver: async (key) => await handOver(env, producers, sourceRefOf(key)),
+});
+
+/**
+ * Puts `sources` on the shared store's work queue to be handed over, each
+ * in place of one of its hand-overs still waiting or parked: their keys
+ * alone, as what is added is what its producer answers when the item runs
+ * (`workBrain`). One the Brain can't key (too long, a control character)
+ * never will be: left out and counted in the log, never named, as an id
+ * can echo what a person typed. Sent `handOversMax` at a time, one call
+ * after the other: a call that fails leaves those after it unsent.
+ */
+export const queueHandOvers = async (
+  env: BrainEnv,
+  sources: readonly SourceRef[]
+): Promise<void> => {
+  const items = sources.flatMap((each) => {
+    const source = sourceRefSchema.safeParse(each);
+    return source.success
+      ? [{ source: sourceKeyOf(source.data), priority: handOverPriority }]
+      : [];
+  });
+  if (items.length < sources.length) {
+    log.warn("brain.hand_over.unkeyed", {
+      count: sources.length - items.length,
+    });
+  }
+  for (let at = 0; at < items.length; at += handOversMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one call after the other
+    await brain(env).handOver({ items: items.slice(at, at + handOversMax) });
+  }
+};
+
 /**
  * One tick of the Brain's background work at `at`, the time core's clock
  * runs it: the store sweeps what adds that never finished left, repacks a
  * few blocks of vector codes, keeps its vectors to core's embedding model,
  * then runs what is due in its queue, its model calls through core's
- * gateway and its passages through core's bulk embedders. Harmless late or
- * twice.
+ * gateway, its passages through core's bulk embedders and its hand-overs
+ * through `producers`: core's (brain-sources.ts `producersOf`), which the
+ * clock gives. Required, so no tick of the shared store forgets them; a
+ * tick that hands nothing over says so with producers that read nothing.
+ * Harmless late or twice.
  */
-export const workBrain = async (env: Env, at: Date): Promise<void> => {
-  await brain(env).work(askModel(env), at, await embeddersOf(env));
+export const workBrain = async (
+  env: Env,
+  at: Date,
+  producers: Producers
+): Promise<void> => {
+  await brain(env).work({
+    ask: askModel(env),
+    at,
+    embedders: await embeddersOf(env),
+    handOvers: handOversOf(env, producers),
+  });
 };
 
 /** The Brain's work queue, store and ledger, as staff see it (brain-report.ts). */
