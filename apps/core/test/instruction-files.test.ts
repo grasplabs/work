@@ -1,5 +1,7 @@
 import {
+  brainOf,
   instructionsMaxLength,
+  personalBrainOf,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
@@ -8,8 +10,14 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { addInstructionFile, recallAs } from "../src/brain-next.ts";
+import {
+  addInstructionFile,
+  erasePerson,
+  readInstructionFilesAs,
+  recallAs,
+} from "../src/brain-next.ts";
 import type { InstructionFile } from "../src/brain-next.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import {
   instructionFileToEdit,
   instructionFilesFor,
@@ -17,6 +25,7 @@ import {
 } from "../src/instruction-files.ts";
 import type { InstructionContext } from "../src/instruction-files.ts";
 import { outlook, requestGranted } from "./apps.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { keptAgent } from "./instruction-saves.ts";
@@ -967,6 +976,77 @@ describe("instruction files, edited from a page", setUpTime, () => {
       second: "ok",
       stale: "instructions.changed",
       now: { version: 2, text: "Second." },
+    });
+  });
+
+  it("keeps a person's own file in their own store alone, checks a save's version there, loads it in their chats alone, and erases it with them", async () => {
+    const [person, other] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const file = { scope: "person", personId: person.userId } as const;
+    const key = `instructions:person:${person.userId}`;
+    const reader = { person: person.userId, groups: ["company"] };
+    const namespace = inJurisdiction(env, env.BRAIN_STORE);
+    const sent = async (text: string, after: number) =>
+      await outcome(
+        person.api.instructions.save({
+          file,
+          change: crypto.randomUUID(),
+          text,
+          after,
+        })
+      );
+    const marker = `Mine ${unique()}`;
+
+    const saves = {
+      first: await sent("Mine.", 0),
+      stale: await sent("From nothing.", 0),
+      second: await sent(marker, 1),
+    };
+    const ownStore = await personalBrainOf(
+      namespace,
+      person.userId
+    ).readCurrent({ sources: [key], reader });
+    const sharedStore = await brainOf(namespace).readCurrent({
+      sources: [key],
+      reader,
+    });
+    const theirChat = await textsFor(agentFor(newAgentId(), person.userId), {
+      conversation: "own",
+    });
+    const othersChat = await textsFor(agentFor(newAgentId(), other.userId), {
+      conversation: "own",
+    });
+    const erasing = {
+      personId: person.userId,
+      reason: "person_erased",
+    } as const;
+    await Promise.allSettled([erasePerson(env, erasing)]);
+    await ageOwnErasure(person.userId);
+    const erased = await erasePerson(env, erasing);
+    const afterErasure = await readInstructionFilesAs(
+      env,
+      { userId: person.userId },
+      [file]
+    );
+
+    expect({
+      saves,
+      ownStore: ownStore.map(({ version, text }) => ({ version, text })),
+      sharedStore,
+      theirChat: theirChat.includes(marker),
+      othersChat: othersChat.includes(marker),
+      erased,
+      afterErasure: afterErasure.map(({ text }) => text),
+    }).toStrictEqual({
+      saves: { first: "ok", stale: "instructions.changed", second: "ok" },
+      ownStore: [{ version: 2, text: marker }],
+      sharedStore: [],
+      theirChat: true,
+      othersChat: false,
+      erased: "erased",
+      afterErasure: [],
     });
   });
 });
