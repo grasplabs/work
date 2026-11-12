@@ -70,4 +70,22 @@ describe("the steps a company's flow has", () => {
       allDone: "open",
     });
   });
+
+  it("open, for a step its own section shows, on what is in someone's hands now, else on the next step that opens here", () => {
+    const shown = stagesIn(defaultFlow);
+    expect({
+      // The team leads are Interviews': Grasp opens is the next step here.
+      next: stageShown(
+        shown,
+        "leads",
+        statuses("done", { research: "later", leads: "now", open: "later" })
+      ),
+      // The first conversation waits on Grasp while the agreements do too.
+      inHand: stageShown(
+        shown,
+        "agreed",
+        statuses("later", { conversation: "now", agreed: "now" })
+      ),
+    }).toStrictEqual({ next: "open", inHand: "conversation" });
+  });
 });
