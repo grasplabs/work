@@ -98,7 +98,7 @@ import type { OrgSection, Origin } from "./sections.ts";
 import { Ago, useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
 import { organizationOf, unreadWhy, whyUnread } from "./views.ts";
-import { formatDate, formatList, stageLines } from "./words.ts";
+import { formatDate, stageLines } from "./words.ts";
 
 /** A client whose core answered, with its view. */
 export interface AnsweredOrganization {
@@ -503,22 +503,12 @@ const laterLine = ({ source, what = "This" }: Origin): string =>
     : `${what}: from ${sourceNames[source]}, once it is connected.`;
 
 /**
- * One quiet line under a section's title: where what it shows comes from,
- * and for a part that isn't read yet, where it will.
+ * One quiet line under a section's title, only for a part that isn't read
+ * yet: where it will come from. What is read says nothing of its source.
  */
 const SourceNote = ({ origins }: { origins: readonly Origin[] }) => {
-  const read = [
-    ...new Set(
-      origins
-        .filter((origin) => origin.read)
-        .map(({ source }) => sourceNames[source])
-    ),
-  ];
-  const lines = [
-    ...(read.length > 0 ? [`From ${formatList(read)}.`] : []),
-    ...origins.filter((origin) => !origin.read).map(laterLine),
-  ];
-  return (
+  const lines = origins.filter((origin) => !origin.read).map(laterLine);
+  return lines.length === 0 ? null : (
     <p className="text-muted-foreground text-xs" data-slot="source-note">
       {lines.join(" ")}
     </p>
