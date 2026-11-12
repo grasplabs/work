@@ -551,15 +551,13 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   }
 
   async purgeStatus(purgeId: string): Promise<PurgeStatus> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await purgeStatus(
-          brainOf(this.#env),
-          purgerOf(person),
-          knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, purgeId)
-        )
-    );
+    return await withPerson(this.#check, async (person) => {
+      purgerOf(person);
+      return await purgeStatus(
+        brainOf(this.#env),
+        knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, purgeId)
+      );
+    });
   }
 
   async finishPurge(purgeId: string): Promise<PurgeStatus> {

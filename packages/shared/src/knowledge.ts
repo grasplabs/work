@@ -512,17 +512,16 @@ export interface KnowledgeApi {
    * Where purge `purgeId` stands (GRA-1122): each projection it reaches,
    * queued, running, complete or blocked (with an error code), and what
    * each changed. A blocked one goes on when the purge is run again with
-   * the same input. Admins only, as purging is. What each step changed,
-   * and which document a document step is of, only to the admin who began
-   * it.
+   * the same input. Admins only, as purging is.
    */
   purgeStatus: (purgeId: string) => Promise<PurgeStatus>;
   /**
    * Finishes unfinished content purge `purgeId` by its ID alone, for any
    * admin: what it still owes that needs none of its terms, a document
    * gone since skipped (`knowledge.purge_needs_input` while it owes more).
-   * For a purge whoever began it can't run again. Answers where it stands,
-   * as `purgeStatus` does. Audited.
+   * For a purge whoever began it can't run again. Answers where it stands:
+   * its steps' states, with no counts and no document a step is of.
+   * Audited.
    */
   finishPurge: (purgeId: string) => Promise<PurgeStatus>;
   /**

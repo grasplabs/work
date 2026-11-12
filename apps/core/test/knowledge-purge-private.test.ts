@@ -8,6 +8,7 @@ import { saveUserMemory } from "../src/knowledge/memory.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  apiWith,
   newAgent,
   purged,
   rebuildFailingOnce,
@@ -84,6 +85,68 @@ const privateDocumentsOf = async (owner: Person, text: string) => {
   });
   const note = await saveOver(owner, mine.id, "note.md", `# Note\n${text}`);
   return { user, note };
+};
+
+/** A statement that rewrites a document's versions. */
+const rewritesVersions = /^update "versions"/iu;
+
+/** A statement that redacts or deletes memory records. */
+const writesRecords = /^(?:update|delete from) "brain_memories"/iu;
+
+/**
+ * `person`'s API on a connection whose Knowledge database refuses the
+ * first batch after a statement `pattern` matches: a purge stopped there.
+ */
+const failingOnce = async (person: Person, pattern: RegExp) => {
+  let armed = false;
+  let failed = false;
+  return await apiWith(person, {
+    prepare: (query) => {
+      armed ||= !failed && pattern.test(query);
+    },
+    beforeBatch: () => {
+      if (armed) {
+        armed = false;
+        failed = true;
+        throw new Error("D1 is unavailable");
+      }
+    },
+  });
+};
+
+/**
+ * What `other` is told finishing `owner`'s one unfinished purge by its ID,
+ * and whether that changed its steps, wrote to the audit log, or let an
+ * export begin.
+ */
+const refusedToFinish = async (owner: Person, other: Person) => {
+  const open = await env.KNOWLEDGE.prepare(
+    "SELECT id FROM brain_purges WHERE by = ? AND completed_at IS NULL"
+  )
+    .bind(owner.userId)
+    .first<{ id: string }>();
+  const purgeId = open?.id ?? "";
+  const before = await other.api.knowledge.purgeStatus(purgeId);
+  let answer = "";
+  const events = await auditedDuring(async () => {
+    answer = await outcome(other.api.knowledge.finishPurge(purgeId));
+  });
+  const after = await other.api.knowledge.purgeStatus(purgeId);
+  const exportOpen = await outcome(
+    other.api.knowledge
+      .prepareBrainExport()
+      .then(
+        async ({ token }) => await other.api.knowledge.startBrainExport(token)
+      )
+  );
+  return {
+    answer,
+    sameSteps:
+      before.state !== "complete" &&
+      JSON.stringify(before) === JSON.stringify(after),
+    events: events.map(({ action }) => action),
+    exportOpen,
+  };
 };
 
 /** `owner`'s own memory statements, sorted. */
@@ -666,6 +729,126 @@ describe(
         unknown: { code: "knowledge.not_found", message: notFound },
         shared: false,
         exported: "complete",
+      });
+    });
+
+    it("is not finished by its ID while a document it names still holds its text", async () => {
+      const owner = await personOf("admin");
+      const other = await personOf("admin");
+      const secret = `Salary${unique()}`;
+      const handbook = await other.api.knowledge.createCollection({
+        name: `Handbook ${unique()}`,
+        access: "everyone",
+      });
+      const shared = await saveOver(
+        other,
+        handbook.id,
+        "pay.md",
+        `# Pay\nAsk ${secret}.`
+      );
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [shared.id],
+        terms: [secret],
+        reason: "erasure_request",
+      };
+      // The owner's purge stops at the document: rewriting its versions fails.
+      const failing = await failingOnce(owner, rewritesVersions);
+      const first = await owner.api.knowledge.preparePurge(input);
+      await refusal(failing.knowledge.purge(input, first.token));
+      const told = await refusedToFinish(owner, other);
+      // Run again by the owner, it finishes, as before.
+      await purged(owner, input);
+      const [text] = await versionTexts(shared.id);
+      expect({ ...told, text }).toStrictEqual({
+        answer: "knowledge.purge_needs_input",
+        sameSteps: true,
+        events: [],
+        exportOpen: "knowledge.export_purge_open",
+        text: "# Pay\nAsk (removed).",
+      });
+    });
+
+    it("is not finished by its ID while it owes what needs its terms", async () => {
+      const owner = await personOf("admin");
+      const other = await personOf("admin");
+      const secret = `Diagnosis${unique()}`;
+      const { personal } = await owner.api.memory.collections();
+      const note = await saveOver(
+        owner,
+        personal,
+        "health.md",
+        `# Health\n${secret}.`
+      );
+      await rememberAs(other, `Covering for ${secret}.`);
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [note.id],
+        terms: [secret],
+        reason: "erasure_request",
+      };
+      // The owner's purge stops at the memory records, its first step.
+      const failing = await failingOnce(owner, writesRecords);
+      const first = await owner.api.knowledge.preparePurge(input);
+      await refusal(failing.knowledge.purge(input, first.token));
+      // The note goes: no document of it is left, only what needs the terms.
+      await purged(other, {
+        type: "personal",
+        userId: owner.userId,
+        reason: "offboarding",
+      });
+      const told = await refusedToFinish(owner, other);
+      // Its starter runs it again, the note gone, and it finishes.
+      await purged(owner, input);
+      const { records } = await other.api.knowledge.memoriesList();
+      expect({
+        ...told,
+        memory: records.some(({ statement }) => statement.includes(secret)),
+      }).toStrictEqual({
+        answer: "knowledge.purge_needs_input",
+        sameSteps: true,
+        events: [],
+        exportOpen: "knowledge.export_purge_open",
+        memory: false,
+      });
+    });
+
+    it("answers a personal purge left unfinished as it answers an ID nobody has", async () => {
+      const admin = await personOf("admin");
+      const leaver = await personOf("user");
+      const { personal } = await leaver.api.memory.collections();
+      await saveOver(leaver, personal, "notes.md", "# Notes\nMine.");
+      const input: PurgeInput = {
+        type: "personal",
+        userId: leaver.userId,
+        reason: "offboarding",
+      };
+      const failing = await rebuildFailingOnce(admin);
+      const first = await admin.api.knowledge.preparePurge(input);
+      await refusal(failing.knowledge.purge(input, first.token));
+      const open = await env.KNOWLEDGE.prepare(
+        "SELECT id FROM brain_purges WHERE kind = 'personal' AND completed_at IS NULL AND by = ?"
+      )
+        .bind(admin.userId)
+        .first<{ id: string }>();
+      const purgeId = open?.id ?? "";
+      const unknownId = crypto.randomUUID();
+      const answers = {
+        personal: answerOf(
+          await refusal(admin.api.knowledge.finishPurge(purgeId)),
+          purgeId
+        ),
+        unknown: answerOf(
+          await refusal(admin.api.knowledge.finishPurge(unknownId)),
+          unknownId
+        ),
+      };
+      // Run again, as a personal purge goes on.
+      await purged(admin, input);
+      expect({ open: purgeId !== "", ...answers }).toStrictEqual({
+        open: true,
+        personal: answers.unknown,
+        unknown: { code: "knowledge.not_found", message: notFound },
       });
     });
   }

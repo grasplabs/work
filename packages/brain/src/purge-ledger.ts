@@ -534,16 +534,11 @@ export const finishPurge = async <C>(
 
 /**
  * Where purge `purgeId` stands: each step's state, why one is blocked,
- * and, to the admin who began it alone, what each changed and which
- * document each document step is of. Anyone else reads the steps' states
- * and reasons only (a document step as `document`): the counts and the
- * documents say what someone else is removing, and where.
- * `knowledge.not_found` for none. Who may read it at all is the host's to
- * decide before (core: the client's admins).
+ * and what each changed. `knowledge.not_found` for none. Who may read it
+ * is the host's to decide before (core: the client's admins).
  */
 export const purgeStatus = async <C>(
   brain: Brain<C>,
-  by: Writer,
   purgeId: string
 ): Promise<PurgeStatus> => {
   const { db } = brain;
@@ -569,7 +564,6 @@ export const purgeStatus = async <C>(
   } else if (steps.some(({ state: each }) => each === "blocked")) {
     state = "blocked";
   }
-  const starter = purge.by === by.userId;
   return {
     purgeId,
     kind: purge.kind,
@@ -578,13 +572,10 @@ export const purgeStatus = async <C>(
     completedAt: purge.completedAt?.toISOString() ?? null,
     supersededBy: purge.supersededBy,
     steps: steps.map((each) => ({
-      step:
-        starter || !each.step.startsWith(documentStepPrefix)
-          ? each.step
-          : "document",
+      step: each.step,
       state: each.state,
       reason: each.reason,
-      counts: starter ? countsOf(each.counts) : {},
+      counts: countsOf(each.counts),
     })),
   };
 };

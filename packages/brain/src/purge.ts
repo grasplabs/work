@@ -2269,9 +2269,8 @@ const termFreeSteps: ReadonlySet<string> = new Set(["payloads", "search"]);
  * records, the host's copies): only running the purge again with them
  * finishes that. `knowledge.not_found` for a purge that doesn't exist,
  * finished, was superseded or is a personal one, alike. Recorded in the
- * audit log with who finished it; answers where the purge stands as
- * `purgeStatus` gives it to `by`, so nothing of what it removed to anyone
- * but who began it.
+ * audit log with who finished it; answers where the purge stands, its
+ * steps' states alone: no counts, and no document a step is of.
  */
 export const finishPurgeById = async <C>(
   brain: Brain<C>,
@@ -2337,5 +2336,16 @@ export const finishPurgeById = async <C>(
     });
   });
   await finishPurge(brain, held);
-  return await purgeStatus(brain, by, purgeId);
+  const status = await purgeStatus(brain, purgeId);
+  // Where it stands, and nothing of what it removed nor where: no counts,
+  // and a document's step without the document.
+  return {
+    ...status,
+    steps: status.steps.map(({ step, state, reason }) => ({
+      step: step.startsWith(documentStepPrefix) ? "document" : step,
+      state,
+      reason,
+      counts: {},
+    })),
+  };
 };
