@@ -1259,6 +1259,19 @@ const storeMethods = (): string[] => {
   return [...names].toSorted();
 };
 
+/** A recall of this test's person by meaning, the question's vector by `model`. */
+const byMeaningOf = (model: { name: string; build: string }) => ({
+  reader: me(),
+  question: "settled",
+  budget: whole,
+  meaning: {
+    model,
+    vector: Array.from({ length: splitDimensions }, (_, at) =>
+      at === 0 ? 1 : 0
+    ),
+  },
+});
+
 /**
  * For each method that can leave a person's store work for a tick: a
  * settled store with no alarm made to have work by it.
@@ -1317,6 +1330,14 @@ const leavingWork: Record<string, () => Promise<void>> = {
   rebuildWords: async () => {
     await own().rebuildWords();
   },
+  // A recall by meaning naming a model the store's tick never embedded
+  // for: the host's model changed, and nothing else would tell it.
+  find: async () => {
+    await own().find(byMeaningOf(splitModel));
+  },
+  recall: async () => {
+    await own().recall(byMeaningOf(splitModel));
+  },
   // Vectors of a build other than the one the store saw: to remove.
   putVectors: async () => {
     const kept = await add(own(), "With a vector", theirs());
@@ -1337,14 +1358,12 @@ const leavingWork: Record<string, () => Promise<void>> = {
  */
 const leavingNone = [
   "erasePerson",
-  "find",
   "handOver",
   "keyState",
   "listSources",
   "listVersions",
   "readCurrent",
   "readVersion",
-  "recall",
   "repackVectors",
   "searchVectors",
   "workOverview",
@@ -1403,6 +1422,19 @@ describe("a person's own store's alarm", () => {
       modelDone: null,
       paused: null,
     });
+  });
+
+  it("isn't armed by a recall by meaning naming the model its tick last embedded for, nor in a store that never kept anything", async () => {
+    const asleep: Record<string, number | null> = {};
+    await own().find(byMeaningOf(splitModel));
+    asleep.neverKept = await alarmOf(own());
+
+    await settled();
+    await sawModel(splitModelName);
+    await own().find(byMeaningOf(splitModel));
+    await own().recall(byMeaningOf(splitModel));
+    asleep.sameModel = await alarmOf(own());
+    expect(asleep).toStrictEqual({ neverKept: null, sameModel: null });
   });
 
   // A store that can't read whether it was erased answers as it would,

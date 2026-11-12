@@ -235,6 +235,28 @@ export const brainReportSchema = z.object({
     ),
     withoutMeaning: z.record(z.enum(brainWithoutMeaningReasons), count),
   }),
+  /**
+   * People's own stores (what one person alone may read), as each last
+   * told core of itself when its tick ended: totals across them only,
+   * never a store, a person or anything a store holds. `recall` above is
+   * the shared store's, which every recall searches.
+   */
+  ownStores: z.object({
+    /** Stores that hold anything and have run their own work. */
+    stores: count,
+    /** Items waiting in their queues. */
+    waiting: count,
+    /** When the item waiting longest across them was added; null while none waits. */
+    oldestWaitingAt: isoTime.nullable(),
+    /** Items parked in their queues. */
+    parked: count,
+    /** Stores whose last tick failed a step, whose queue is paused, or whose ledger isn't read through. */
+    failing: count,
+    /** Stores whose rebuild for the shipped model isn't done. */
+    notRebuilt: count,
+    /** Stores near what one object holds. */
+    nearLimit: count,
+  }),
 });
 export type BrainReport = z.infer<typeof brainReportSchema>;
 

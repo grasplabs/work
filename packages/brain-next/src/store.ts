@@ -25,6 +25,7 @@ import {
   vectorsToPutSchema,
   versionListRequestSchema,
   versionRequestSchema,
+  vectorModelNameOf,
 } from "./contract.ts";
 import type {
   AskModel,
@@ -61,6 +62,7 @@ import type {
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
 import {
+  embeddedFor,
   embeddingDue,
   embeddingOverview,
   embeddingStep,
@@ -132,6 +134,13 @@ import {
 export interface AlarmHost {
   ask: AskModel;
   embedders: Embedders;
+  /**
+   * Told the store's overview once each tick ends, done or failed, while
+   * the store holds anything and wasn't erased: for the host's health row
+   * of the store. Whatever it throws is dropped, and the tick's work
+   * stands.
+   */
+  report: (overview: WorkOverview) => Promise<void>;
 }
 
 /** What the store needs of its host's Worker: the Brain's bucket. */
@@ -702,9 +711,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayRead(asked.reader);
     const readable = await this.#readable();
     this.#countWithoutMeaning(asked);
-    return readable
-      ? recall(this.ctx.storage.sql, asked, countingInto(this.#recallCounts))
-      : packAcross(asked.question, asked.budget.tokens, [nothingFound]);
+    if (!readable) {
+      return packAcross(asked.question, asked.budget.tokens, [nothingFound]);
+    }
+    await this.#wakeForModel(asked);
+    return recall(
+      this.ctx.storage.sql,
+      asked,
+      countingInto(this.#recallCounts)
+    );
   }
 
   /**
@@ -716,9 +731,34 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayRead(asked.reader);
     const readable = await this.#readable();
     this.#countWithoutMeaning(asked);
-    return readable
-      ? find(this.ctx.storage.sql, asked, countingInto(this.#recallCounts))
-      : nothingFound;
+    if (!readable) {
+      return nothingFound;
+    }
+    await this.#wakeForModel(asked);
+    return find(this.ctx.storage.sql, asked, countingInto(this.#recallCounts));
+  }
+
+  /**
+   * A person's own store's alarm set, once, when a recall by meaning names
+   * a model other than the one its tick last embedded for: the host's model
+   * changed, and nothing else would tell a store nobody writes. Its tick
+   * then notes the model and walks its versions onto the queue for it
+   * (embedding.ts). The recall's answer stands whether or not it could set
+   * the alarm: a later recall tries again.
+   */
+  async #wakeForModel({ meaning }: RecallRequest): Promise<void> {
+    if (
+      this.#kind.kind !== "person" ||
+      meaning === undefined ||
+      embeddedFor(this.ctx.storage.sql) === vectorModelNameOf(meaning.model)
+    ) {
+      return;
+    }
+    try {
+      await this.#armAgain();
+    } catch {
+      // Nothing of the error is kept.
+    }
   }
 
   /** A recall the host made without the question's vector, counted by why. */
@@ -1018,8 +1058,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         const host = await this.alarmHost();
         // No side of hand-overs: a person's own store never queues one
         // (`handOver` refuses), so none is ever due here.
+        // Its report inside the same change, so a whole-store erasure
+        // waits for it as for any write (`#eraseWhole`).
         await this.#changing(async () => {
-          await this.#workNow(host.ask, new Date(), host.embedders);
+          try {
+            await this.#workNow(host.ask, new Date(), host.embedders);
+          } finally {
+            await this.#report(host);
+          }
         });
       }
     } catch {
@@ -1028,6 +1074,23 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // the store again in a minute, until it can: never only after the
       // runtime's own retries, which give up.
       await this.#armAgain();
+    }
+  }
+
+  /**
+   * The store's overview told its host as a tick ends (`AlarmHost.report`):
+   * one snapshot, read at once. Not once the store was erased, nor while it
+   * holds nothing: its host keeps no row for it then. What the host throws
+   * is dropped: the row is only stale until the next tick.
+   */
+  async #report(host: AlarmHost): Promise<void> {
+    if (this.#erased || !this.#schema) {
+      return;
+    }
+    try {
+      await host.report(this.workOverview());
+    } catch {
+      // Nothing of the error is kept.
     }
   }
 
