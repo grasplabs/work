@@ -1,4 +1,3 @@
-import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import {
   brainActionPurpose,
   brainErasureAnswerSchema,
@@ -24,6 +23,7 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { retryErasures } from "../src/person-erasure.ts";
 import {
   copyOfStore,
   killStore,
@@ -31,7 +31,12 @@ import {
 } from "./brain-next-store-copy.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
-import { auditedDuring, routed, signedInWithRole } from "./sign-in.ts";
+import {
+  auditedDuring,
+  routed,
+  signedInApi,
+  signedInWithRole,
+} from "./sign-in.ts";
 
 // Grasp's staff asking whether a source or a person was erased from this
 // client's Brain (src/brain-report.ts `brainErasureResponse`), as the
@@ -58,20 +63,6 @@ const staffActor = { type: "staff", userId: staffEmail, via: "console" };
 /** The Brain's one store, as the tests reach into it. */
 const storeObject = () =>
   inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
-
-/**
- * `person`'s own store erased whole, as core's erasure of a person will
- * erase it once its routing is in (#2196): its record is written at the
- * first call, which then goes on deleting its files past their grace.
- */
-const eraseOwnStore = async (person: string): Promise<void> => {
-  await Promise.allSettled([
-    personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), person).erasePerson({
-      person,
-      reason: "withdrawn",
-    }),
-  ]);
-};
 
 /** Words nobody else uses, to look for where they must not be. */
 const marker = () => `Quokka${crypto.randomUUID().replaceAll("-", "")}`;
@@ -266,15 +257,16 @@ describe("who may ask whether something was erased", () => {
 });
 
 describe("whether something was erased", () => {
-  it("says a source and a person were erased, with when, recording each lookup without the key, the id or their hash", async () => {
+  it("says a source and a withdrawn person were erased, with when, recording each lookup without the key, the id or their hash", async () => {
     const marked = marker();
     const person = `person-${marked}`;
     const source = await ownSource(`someone-${marked}`, `${marked} is kept.`);
     await ownSource(person, `${marked} is theirs.`);
     const before = Date.now();
     await eraseSource(env, { source, reason: "deleted" });
+    // A withdrawal: the shared store's alone, with no erasure in core's own
+    // record, so the ledger's answer is the answer.
     await erasePerson(env, { personId: person, reason: "withdrawn" });
-    await eraseOwnStore(person);
     const after = Date.now();
     const key = `upload:${source.id}`;
 
@@ -356,31 +348,87 @@ describe("whether something was erased", () => {
   });
 });
 
-describe("whether a person was erased, from both their stores", () => {
-  it("says a person erased in one store only isn't finished, and erased with the later time once both are", async () => {
-    const person = `person-${crypto.randomUUID()}`;
-    await ownSource(person, `${marker()} is theirs.`);
-    await erasePerson(env, { personId: person, reason: "withdrawn" });
-    const sharedOnly = await answerTo({ kind: "person", id: person });
-    const before = Date.now();
-    await eraseOwnStore(person);
-    const both = await answerTo({ kind: "person", id: person });
+/** Whether `name` is the shared store's, the only one staff may address. */
+const isShared = (name: string): boolean => name === "brain";
 
-    const other = `person-${crypto.randomUUID()}`;
-    await eraseOwnStore(other);
-    const ownOnly = await answerTo({ kind: "person", id: other });
+/**
+ * The Brain's store binding, each store it is asked for by name, or by an
+ * id made from one, recorded in `addressed`: the shared store is `brain`,
+ * a person's own `person:<id>`. An id handed over ready-made is recorded
+ * as `(id)`, which no shared lookup uses.
+ */
+const recordingStore = (addressed: string[]): Env["BRAIN_STORE"] =>
+  new Proxy(env.BRAIN_STORE, {
+    get: (namespace, member): unknown => {
+      if (member === "jurisdiction") {
+        return () => recordingStore(addressed);
+      }
+      const value: unknown = Reflect.get(namespace, member, namespace);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown => {
+        if (member === "getByName" || member === "idFromName") {
+          addressed.push(String(args[0]));
+        } else if (member === "get") {
+          addressed.push("(id)");
+        }
+        return Reflect.apply(value, namespace, args);
+      };
+    },
+  });
+
+describe("whether a person was erased, as core's own record and the shared ledger say", () => {
+  it("says an erasure of a person not finished while core's erasure of them from the Brain is pending, and erased once it is complete", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const erased = await signedInApi(idp, "builder");
+    await ownSource(erased.userId, `${marker()} is theirs.`);
+    await admin.api.members.remove(erased.userId);
+    // The Brain can't write its ledger: core's area for it stays pending.
+    await bucketPutsFailingDuring(async () => {
+      await Promise.allSettled([
+        admin.api.members.erase(erased.userId, String(erased.person.name)),
+      ]);
+    });
+    const lookup = { kind: "person", id: erased.userId } as const;
+    const pending = await answerTo(lookup);
+    // The Brain's tick writes the entry: its ledger has it, core not yet.
+    await workBrain(env, new Date());
+    const ledgerOnly = await answerTo(lookup);
+    // Core's clock asks the Brain again, which returns: the area is complete.
+    await retryErasures(env);
+    const complete = await answerTo(lookup);
 
     expect({
-      sharedOnly,
-      both: both?.state,
-      later: both?.state === "erased" && Date.parse(both.at) >= before - 1000,
-      ownOnly,
+      pending,
+      ledgerOnly,
+      complete: complete?.state,
     }).toStrictEqual({
-      sharedOnly: { state: "erasing" },
-      both: "erased",
-      later: true,
-      ownOnly: { state: "erasing" },
+      pending: { state: "erasing" },
+      ledgerOnly: { state: "erasing" },
+      complete: "erased",
     });
+  });
+
+  it("never addresses a person's own store, for a person or a source", async () => {
+    const addressed: string[] = [];
+    const person = `person-${crypto.randomUUID()}`;
+    const source = await ownSource(person, `${marker()} is theirs.`);
+    await erasePerson(env, { personId: person, reason: "withdrawn" });
+    const coreEnv = { ...env, BRAIN_STORE: recordingStore(addressed) };
+
+    const ofPerson = await lookUp({ kind: "person", id: person }, coreEnv);
+    const ofSource = await lookUp(
+      { kind: "source", key: `upload:${source.id}` },
+      coreEnv
+    );
+    const answers = [ofPerson.status, ofSource.status];
+
+    expect({
+      answers,
+      personal: addressed.filter((name) => !isShared(name)),
+      shared: addressed.some(isShared),
+    }).toStrictEqual({ answers: [200, 200], personal: [], shared: true });
   });
 });
 

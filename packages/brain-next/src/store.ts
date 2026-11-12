@@ -849,10 +849,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Refused, as every call is, by a store whose name says no one's;
    * `unavailable` while the ledger can't be read or is being replayed (the
    * gate `#ready` throws for, answered instead). A person's own store
-   * erased whole answers `erased` for its own person, at the time of its
-   * record, and `not_erased` for anything else: what it held is gone with
-   * the record of each erasure in it. One never written holds no record:
-   * `not_erased`, without a table read.
+   * never written, or erased whole, holds no record: `not_erased`, without
+   * a table read. Staff ask the shared store alone: no staff path
+   * addresses a person's own store (GRA-1762).
    */
   async erasureStatus(request: ErasureLookup): Promise<ErasureStatus> {
     if (this.#kind.kind === "unknown") {
@@ -863,24 +862,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       lookup.kind === "source" ? lookup.source : lookup.person
     );
     const ledger = await this.#ledgerStep();
-    if (this.#erased) {
-      const own =
-        this.#kind.kind === "person" &&
-        lookup.kind === "person" &&
-        lookup.person === this.#kind.person;
-      if (!own) {
-        return { state: "not_erased" };
-      }
-      try {
-        const at = await storeErasedAt(this.#bucket);
-        return at === null
-          ? { state: "unavailable" }
-          : { state: "erased", at: new Date(at) };
-      } catch {
-        // Nothing of the error is kept: it may name a key.
-        return { state: "unavailable" };
-      }
-    }
     if (ledger !== "through") {
       return { state: "unavailable" };
     }

@@ -1295,16 +1295,6 @@ const leavingNone = [
   "workOverview",
 ];
 
-/** When this test's person's store recorded its erasure whole. */
-const erasedWholeAt = async (): Promise<string> => {
-  const record = await env.BRAIN_OBJECTS.get(`${await ownPrefix()}erased`);
-  if (record === null) {
-    throw new Error("The store has no record of its erasure");
-  }
-  const { at } = erasureRecordSchema.parse(JSON.parse(await record.text()));
-  return new Date(at).toISOString();
-};
-
 /** What `store` says of the erasure `lookup` names, its time as text. */
 const statusOf = async (store: Store, lookup: ErasureLookup) => {
   const status = await store.erasureStatus(lookup);
@@ -1343,7 +1333,7 @@ describe("whether something was erased, as a person's own store says it", () => 
     ]);
   });
 
-  it("says its person was erased at its record's time once it was erased whole, and nothing of anything else", async () => {
+  it("holds no record once it was erased whole, and answers as one never written, without a table", async () => {
     const { source } = await add(own(), "Marker of their own", theirs());
     await eraseWhole();
 
@@ -1358,7 +1348,7 @@ describe("whether something was erased, as a person's own store says it", () => 
 
     expect({ said, tables: await tablesOf(own()) }).toStrictEqual({
       said: [
-        { state: "erased", at: await erasedWholeAt() },
+        { state: "not_erased" },
         { state: "not_erased" },
         { state: "not_erased" },
       ],

@@ -30,6 +30,7 @@ export const brainModules = {
   // eraseSource, and answers nothing of it.
   "apps/core/src/brain-next-origins.ts": "core",
   // Erases what an erased person alone may read with core's erasePerson,
-  // and answers nothing of it.
+  // and answers nothing of it: `brainErasureStateOf` says only where core's
+  // own record of that erasure stands, nothing the Brain answered.
   "apps/core/src/person-erasure.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;

@@ -853,6 +853,36 @@ const pastAll = new Date(8.64e15);
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
 
+/**
+ * The Brain's store binding, refusing every store but the shared one, by
+ * name or by an id made from a name: a staff path addresses no person's
+ * own store (GRA-1762), so a probe through it that tries fails.
+ */
+const sharedOnly = (): Env["BRAIN_STORE"] =>
+  new Proxy(env.BRAIN_STORE, {
+    get: (namespace, member): unknown => {
+      if (member === "jurisdiction") {
+        return () => sharedOnly();
+      }
+      const value: unknown = Reflect.get(namespace, member, namespace);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown => {
+        const named =
+          member === "getByName" || member === "idFromName"
+            ? String(args[0])
+            : null;
+        if (member === "get" || (named !== null && named !== "brain")) {
+          throw new Error(
+            "A staff lookup addressed a store but the shared one"
+          );
+        }
+        return Reflect.apply(value, namespace, args);
+      };
+    },
+  });
+
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
   addSource: async ({ markers, hiddenVersions }) => {
@@ -1503,6 +1533,8 @@ export const coreProbes = {
             version: 1,
           })
       ),
+    ];
+  },
   brainErasureForStaff: async ({ markers }) => {
     const look = async (
       name: string,
@@ -1513,7 +1545,10 @@ export const coreProbes = {
       await answer(
         name,
         async () =>
-          await coreBrain.brainErasureForStaff(env, unchecked(lookup)),
+          await coreBrain.brainErasureForStaff(
+            { ...env, BRAIN_STORE: sharedOnly() },
+            unchecked(lookup)
+          ),
         about,
         like
       );

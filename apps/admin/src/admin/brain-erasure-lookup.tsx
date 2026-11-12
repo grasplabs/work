@@ -57,7 +57,7 @@ const saidOf = (
 ): { text: string; wrong: boolean } => {
   if (result.state === "erased") {
     return {
-      text: `Yes: erased, recorded in the ledger ${new Date(result.at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}.`,
+      text: `Yes: erased from the Brain's store and queue and recorded in its ledger on ${new Date(result.at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}; its files are deleted by the Brain's sweep once their grace period has passed, and the Brain keeps no exports of it.`,
       wrong: false,
     };
   }

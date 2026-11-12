@@ -638,6 +638,31 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
   );
 };
 
+/**
+ * Where the erasure of `userId` from the new Brain stands, as core records
+ * it (`brain_sources`): `pending` until the Brain's call returned, which is
+ * only once it erased them (`brainSources`); `complete` after; null when
+ * no erasure of them was asked for. The area's state alone, for Grasp's
+ * staff asking whether a person was erased (brain-report.ts): one
+ * statement, whoever is named, so a person never erased reads as one who
+ * never existed.
+ */
+export const brainErasureStateOf = async (
+  env: Env,
+  userId: string
+): Promise<"pending" | "complete" | "skipped" | null> => {
+  const [area] = await drizzle(env.DB)
+    .select({ state: personErasureAreas.state })
+    .from(personErasureAreas)
+    .where(
+      and(
+        eq(personErasureAreas.userId, userId),
+        eq(personErasureAreas.area, brainSources.area)
+      )
+    );
+  return area?.state ?? null;
+};
+
 /** Where `userId`'s erasure stands, or null if none was asked for. */
 const erasureOf = async (env: Env, userId: string): Promise<Erasure | null> => {
   const db = drizzle(env.DB);
