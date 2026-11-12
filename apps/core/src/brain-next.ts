@@ -326,33 +326,18 @@ const narrowed =
   "Refused: a source keeps the readers it was first added for, so one added for more than one person, or one an erasure closed, can't become one person's own: add it as a new source";
 
 /**
- * Refuses an add of `source` to `own` as a narrowing, once `own`'s copy
- * of it, if it has one, is erased: one a shared add that landed during
- * this add left, or during an earlier one whose check or clean-up failed.
- * A clean-up that fails throws its own error, not the refusal, so the
- * caller's retry comes back here and does it again. A store never given
- * the key is only asked, never written to.
- */
-const refusedAsNarrowed = async (
-  own: Brain,
-  source: SourceId
-): Promise<never> => {
-  if (await own.holdsSource(source)) {
-    await own.eraseSource({ source, reason: "deleted" });
-  }
-  throw new Error(narrowed);
-};
-
-/**
  * `add` run on the store `source` is kept in for `access` (`keptIn`).
  * One person's own only while the shared store was never given its key,
  * asked before and again after: a shared source is never narrowed into a
  * person's own store, where its shared versions would stay readable to
  * those taken off. A shared add of the key that landed in between (two
- * producers at once) has the person's copy erased and this add refused;
- * one after the second ask is a widening, which producers never do. Every
- * refusal takes the person's copy back out first (`refusedAsNarrowed`),
- * so a retry finishes what a failed check or clean-up left.
+ * producers at once) has the copy this add wrote erased and this add
+ * refused; one after the second ask is a widening, which producers never
+ * do. A refusal at the first ask erases nothing: it can't tell what an
+ * earlier add of theirs kept from a copy a failed call left, and a
+ * refused call never erases a person's own content. What a failed second
+ * ask or clean-up leaves is theirs alone to read, and goes with their
+ * erasure.
  */
 const keptIn = async <T>(
   env: BrainEnv,
@@ -364,13 +349,15 @@ const keptIn = async <T>(
     return await add(brain(env));
   }
   const shared = brain(env);
-  const own = ownBrain(env, access.person);
   if (await shared.holdsSource(source)) {
-    return await refusedAsNarrowed(own, source);
+    throw new Error(narrowed);
   }
+  const own = ownBrain(env, access.person);
   const added = await add(own);
   if (await shared.holdsSource(source)) {
-    return await refusedAsNarrowed(own, source);
+    // A clean-up that fails throws its own error: the add failed.
+    await own.eraseSource({ source, reason: "deleted" });
+    throw new Error(narrowed);
   }
   return added;
 };

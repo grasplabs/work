@@ -105,13 +105,12 @@ const add = async (
   });
 };
 
-/** How long a store out of reach takes to fail, in these tests. */
-const outOfReachMs = 200;
-
 /**
  * Core's env with the store named `name` failing its `method` on the
  * calls numbered in `failing` (from 1), as a store out of reach would:
- * every other call reaches the store itself.
+ * every other call reaches the store itself. A failing call fails only
+ * once a shared store's erasure started beside it has landed, so what
+ * runs beside a failure is seen, with no clock to wait on.
  */
 const envFailing = (
   name: string,
@@ -119,10 +118,12 @@ const envFailing = (
   failing: readonly number[]
 ): Env => {
   let calls = 0;
+  /** The shared store's erasure under way, if one is. */
+  let sharedErasing: Promise<unknown> | undefined;
   const binding = env.BRAIN_STORE;
   const getByName = (named: string) => {
     const stub = binding.getByName(named);
-    if (named !== name) {
+    if (named !== name && named !== "brain") {
       return stub;
     }
     return new Proxy(stub, {
@@ -133,22 +134,29 @@ const envFailing = (
         }
         // Called through, never bound: an RPC stub takes `bind` for a
         // method of the store.
-        if (property !== method) {
+        const through = async (args: unknown[]): Promise<unknown> => {
+          const answered: unknown = await Reflect.apply(value, target, args);
+          return answered;
+        };
+        if (named === "brain" && property === "eraseSource") {
           return async (...args: unknown[]) => {
-            const answered: unknown = await Reflect.apply(value, target, args);
-            return answered;
+            const erasing = through(args);
+            sharedErasing = erasing.catch(() => "failed");
+            return await erasing;
           };
+        }
+        if (named !== name || property !== method) {
+          return async (...args: unknown[]) => await through(args);
         }
         return async (...args: unknown[]) => {
           calls += 1;
           if (failing.includes(calls)) {
-            // Late, as a store out of reach answers: whatever runs beside
-            // the call has landed by then.
-            await scheduler.wait(outOfReachMs);
+            // Anything started beside this call has been called by now.
+            await Promise.resolve();
+            await sharedErasing;
             throw new Error("Out of reach, for the test");
           }
-          const answered: unknown = await Reflect.apply(value, target, args);
-          return answered;
+          return await through(args);
         };
       },
     });
@@ -557,7 +565,7 @@ describe("a source whose readers would change kind", () => {
     });
   });
 
-  it("fails, not refused, when the shared store can't be asked after it landed, and its retry is refused and takes their copy back out", async () => {
+  it("fails, not refused, when the shared store can't be asked after it landed, leaving a copy only they can read", async () => {
     const [person, colleague] = await Promise.all([member(), member()]);
     const team = await teamOf(person, colleague);
     const word = markerWord();
@@ -578,70 +586,56 @@ describe("a source whose readers would change kind", () => {
     gate.released = true;
     const first = await adding;
 
+    // The retry is refused at the first ask, and erases nothing.
     const retry = await outcomeOf(add(source, text, theirs));
-    const listed = await listSourcesAs(env, person, {});
-    const theirsKept = await own(person).readCurrent({
-      sources: [keyOf(source)],
-      reader: { person, groups: [] },
-    });
+    const colleagues = await listSourcesAs(env, colleague, {});
+    const theirsFound = await textsFor(person, word, true);
 
     expect({
       first,
       retry: retry.includes("keeps the readers it was first added for"),
-      found: await textsFor(person, word, true),
-      listed: listed.sources
-        .filter(({ source: listedSource }) => listedSource.id === source.id)
+      colleague: await textsFor(colleague, word, true),
+      colleagueListed: colleagues.sources
+        .filter(({ source: listed }) => listed.id === source.id)
         .map(({ personal }) => personal),
-      read: await historyAs(person, { source, version: 1 }),
-      theirsKept,
+      colleagueRead: await historyAs(colleague, { source, version: 1 }),
+      // What is left is theirs alone, and goes with their erasure.
+      theirs: theirsFound.toSorted(),
     }).toStrictEqual({
       first: "Error: Out of reach, for the test",
       retry: true,
-      found: [`The team's ${word}`],
-      listed: [false],
-      read: `The team's ${word}`,
-      theirsKept: [],
+      colleague: [`The team's ${word}`],
+      colleagueListed: [false],
+      colleagueRead: `The team's ${word}`,
+      theirs: [`The team's ${word}`, text].toSorted(),
     });
   });
 
-  it("fails, not refused, when their copy can't be taken back out, and its retry takes it out and is refused", async () => {
+  it("is refused without erasing an earlier version of theirs, when the shared store holds the key", async () => {
     const [person, colleague] = await Promise.all([member(), member()]);
     const team = await teamOf(person, colleague);
     const word = markerWord();
     const source = newSource();
     const theirs: SourceReaders = { kind: "owner", personId: person };
-    // Theirs, then the team's: a copy of theirs the shared store's key holds.
+    // Theirs, then the team's (a producer's mistake): a real version of
+    // theirs under a key the shared store holds.
     await add(source, `Theirs alone ${word}`, theirs);
     await add(source, `The team's ${word}`, { kind: "team", teamId: team });
-    const failing = envFailing(`person:${person}`, "eraseSource", [1]);
 
-    const first = await outcomeOf(
-      addWith(failing, source, `Theirs again ${word}`, theirs)
-    );
-    const keptMeanwhile = await own(person).readCurrent({
-      sources: [keyOf(source)],
-      reader: { person, groups: [] },
-    });
-    const retry = await outcomeOf(
-      addWith(failing, source, `Theirs again ${word}`, theirs)
-    );
+    const later = await outcomeOf(add(source, `Theirs again ${word}`, theirs));
     const theirsKept = await own(person).readCurrent({
       sources: [keyOf(source)],
       reader: { person, groups: [] },
     });
 
     expect({
-      first,
-      keptMeanwhile: keptMeanwhile.length,
-      retry: retry.includes("keeps the readers it was first added for"),
-      found: await textsFor(person, word, true),
-      theirsKept,
+      later: later.includes("keeps the readers it was first added for"),
+      theirsKept: theirsKept.map(({ text }) => text),
+      colleague: await textsFor(colleague, word, true),
     }).toStrictEqual({
-      first: "Error: Out of reach, for the test",
-      keptMeanwhile: 1,
-      retry: true,
-      found: [`The team's ${word}`],
-      theirsKept: [],
+      later: true,
+      theirsKept: [`Theirs alone ${word}`],
+      colleague: [`The team's ${word}`],
     });
   });
 
