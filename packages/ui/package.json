@@ -11,7 +11,8 @@
     "./lib/*": "./src/lib/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
     "./styles.css": "./src/styles.css",
-    "./form": "./src/form.tsx"
+    "./form": "./src/form.tsx",
+    "./testing": "./test/prompt-typing.ts"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",
@@ -23,6 +24,16 @@
     "@tanstack/react-form": "catalog:",
     "@tanstack/react-table": "catalog:",
     "@tanstack/react-virtual": "catalog:",
+    "@tiptap/core": "catalog:",
+    "@tiptap/extension-document": "catalog:",
+    "@tiptap/extension-hard-break": "catalog:",
+    "@tiptap/extension-mention": "catalog:",
+    "@tiptap/extension-paragraph": "catalog:",
+    "@tiptap/extension-text": "catalog:",
+    "@tiptap/extensions": "catalog:",
+    "@tiptap/pm": "catalog:",
+    "@tiptap/react": "catalog:",
+    "@tiptap/suggestion": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "catalog:",

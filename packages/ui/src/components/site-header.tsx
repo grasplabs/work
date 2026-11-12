@@ -6,7 +6,9 @@
 // the page scrolls, and keeps to one line whatever the window: on a
 // narrow one only the step before the page is kept, or the first alone
 // (`phoneCrumbs`). With no crumbs yet
-// (the page is loading), a skeleton where they will be.
+// (the page is loading), a skeleton where they will be. Right after the
+// trail, what the page is about may say where it stands (`trailing`), as
+// an App's draft or live version does.
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -37,7 +39,9 @@ function SiteHeader({
   triggerLabel,
   breadcrumbLabel,
   actions,
+  trailing,
   phoneCrumbs = "last-two",
+  trigger = "always",
 }: {
   crumbs: readonly SiteCrumb[];
   /** What the sidebar's trigger says to a screen reader, translated by the page. */
@@ -45,6 +49,8 @@ function SiteHeader({
   /** The breadcrumb's name, translated by the page. */
   breadcrumbLabel?: string;
   actions?: ReactNode;
+  /** Right after the trail: where the page's own subject stands. */
+  trailing?: ReactNode;
   /**
    * Which crumbs a phone keeps: the step before the page and the page
    * (`last-two`, below md), or the first alone (`first`, below sm) for a
@@ -52,6 +58,11 @@ function SiteHeader({
    * the prototype, with the whole trail from sm up.
    */
   phoneCrumbs?: "last-two" | "first";
+  /**
+   * Where the sidebar's trigger shows: on every screen, or only on a phone
+   * (`mobile`), for a sidebar that holds its own fold on a wider one.
+   */
+  trigger?: "always" | "mobile";
 }) {
   const last = crumbs.length - 1;
   const firstOnly = phoneCrumbs === "first";
@@ -60,11 +71,15 @@ function SiteHeader({
       data-slot="site-header"
       className="bg-background sticky top-0 z-30 flex h-(--header-height) shrink-0 items-center border-b"
     >
-      <div className="flex h-full w-12 flex-none items-center justify-center">
+      <div
+        data-trigger={trigger}
+        className="flex h-full w-12 flex-none items-center justify-center data-[trigger=mobile]:md:hidden"
+      >
         <SidebarTrigger label={triggerLabel} />
       </div>
       <Separator
-        className="-ml-px h-4 data-vertical:self-auto"
+        data-trigger={trigger}
+        className="-ml-px h-4 data-vertical:self-auto data-[trigger=mobile]:md:hidden"
         orientation="vertical"
       />
       <div className="flex min-w-0 flex-1 items-center gap-1 px-4 lg:gap-2 lg:pr-6">
@@ -104,6 +119,9 @@ function SiteHeader({
               ))}
             </BreadcrumbList>
           </Breadcrumb>
+        )}
+        {trailing === undefined ? null : (
+          <div className="flex flex-none items-center gap-2">{trailing}</div>
         )}
         {actions === undefined ? null : (
           <div className="ml-auto flex flex-none items-center gap-2">
