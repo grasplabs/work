@@ -28,7 +28,7 @@ import {
   keepSubject,
   subjectOf,
 } from "./erasure.ts";
-import { enqueueExtraction } from "./extraction.ts";
+import { enqueueExtraction, enqueueExtractionIfDue } from "./extraction.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -111,6 +111,7 @@ const versionFields = {
  */
 const madeBefore = (
   db: DrizzleSqliteDODatabase,
+  storage: DurableObjectStorage,
   { added, hash, readers }: Adding
 ): SourceVersionRef | undefined => {
   const byChange = db
@@ -157,6 +158,16 @@ const madeBefore = (
       versionRow: current.row,
     })
     .run();
+  // A new change asking for memories of a version an earlier add kept
+  // without: drawn now, unless drawn already or under way.
+  if (added.extract !== undefined) {
+    enqueueExtractionIfDue(
+      storage,
+      added.source,
+      current.version,
+      added.extract
+    );
+  }
   return { source: added.source, version: current.version };
 };
 
@@ -189,7 +200,7 @@ const record = (
     throw new Error(erasedSource);
   }
   // The same change, or the same text and readers, added meanwhile.
-  const before = madeBefore(db, adding);
+  const before = madeBefore(db, storage, adding);
   if (before !== undefined) {
     return before;
   }
@@ -319,7 +330,7 @@ export const addVersion = async (
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
-  const before = madeBefore(db, adding);
+  const before = madeBefore(db, storage, adding);
   if (before !== undefined) {
     return before;
   }

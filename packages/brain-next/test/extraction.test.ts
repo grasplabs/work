@@ -115,6 +115,23 @@ const checkedSchema = z.object({
   ),
 });
 
+/** A check call's statements, as far as their filing. */
+const shownEntitySchema = z
+  .object({ kind: z.string(), names: z.array(z.string()) })
+  .nullable();
+const filingSchema = z.object({
+  statements: z.array(
+    z.object({
+      index: z.int(),
+      about: shownEntitySchema.optional(),
+      attribute: z.string().nullable().optional(),
+      object: shownEntitySchema.optional(),
+      value: z.string().nullable().optional(),
+      type: z.string().optional(),
+    })
+  ),
+});
+
 /** A check call's message, as far as which statements it shows. */
 const checkedIndexesSchema = z.object({
   statements: z.array(z.object({ index: z.int() })),
@@ -1713,6 +1730,217 @@ describe("extracting memories", () => {
 
     expect({ asked, read: read.map(({ value }) => value) }).toStrictEqual({
       asked: 0,
+      read: ["active"],
+    });
+  });
+
+  it("shows the checker the whole filing as it would be stored, so a relation filed the wrong way round is refused", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const alice = unique("Alice");
+    const bob = unique("Bob");
+    const shown: unknown[] = [];
+    answers.set(token, (request) => {
+      if (request.purpose === "brain.extract") {
+        return answering({
+          entities: [
+            { key: "a", kind: "person", names: [alice] },
+            { key: "b", kind: "person", names: [bob] },
+          ],
+          memories: [
+            {
+              // The text says Alice manages Bob; this files Bob as Alice's
+              // manager: the reverse.
+              about: "a",
+              attribute: "manager",
+              object: "b",
+              type: "fact",
+              statement: `${alice} manages ${bob}.`,
+              quote: `${alice} manages ${bob}`,
+            },
+          ],
+        })(request);
+      }
+      const { statements } = filingSchema.parse(JSON.parse(request.input));
+      shown.push(...statements);
+      // A checker that reads the filing: Bob is not Alice's manager.
+      const wrongWay = (statement: (typeof statements)[number]) =>
+        statement.about?.names.includes(alice) === true &&
+        statement.attribute === "manager" &&
+        statement.object?.names.includes(bob) === true;
+      return JSON.stringify({
+        supported: statements
+          .filter((statement) => !wrongWay(statement))
+          .map(({ index }) => index),
+      });
+    });
+    await added(`${token}: ${alice} manages ${bob}.`, audience(group), {
+      extract: fromOutside(),
+    });
+    await tick();
+    const read = await readAs({ person: unique("p"), groups: [group] }, alice);
+
+    expect({ shown, read }).toStrictEqual({
+      shown: [
+        {
+          index: 0,
+          about: { kind: "person", names: [alice] },
+          attribute: "manager",
+          object: { kind: "person", names: [bob] },
+          value: null,
+          type: "fact",
+        },
+      ],
+      read: [],
+    });
+  });
+
+  it("goes on from where a piece ended when its adds stopped part-way and the window changed before the rerun", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const prefix = unique("Acct");
+    const count = 150;
+    const nameOf = (index: number) => `${prefix}x${index}`;
+    const fact = (index: number) => `${nameOf(index)} is active in ${token}.`;
+    const tail = Array.from(
+      { length: 20 },
+      (_, index) => `Line ${index} of ${token} says nothing.`
+    );
+    const last = `${prefix}last is active in ${token}.`;
+    const facts = Array.from({ length: count }, (_, index) => fact(index));
+    // Whatever each piece holds, the model proposes the facts it holds.
+    answers.set(token, (request) => {
+      const held = [...facts, last].filter((line) =>
+        request.input.includes(line)
+      );
+      const names = held.map((line) => line.split(" ")[0] ?? "");
+      return answering({
+        entities: names.map((name, index) => ({
+          key: `e${index}`,
+          kind: "customer",
+          names: [name],
+        })),
+        memories: names.map((name, index) => ({
+          about: `e${index}`,
+          attribute: "status",
+          value: "active",
+          type: "fact",
+          statement: `${name} is active.`,
+          quote: `${name} is active`,
+        })),
+      })(request);
+    });
+    const source = unique("doc");
+    const text = `${facts.join(" ")} ${tail.join(" ")} ${last}`;
+    // The first piece holds the 150 facts (two adds) and not the rest.
+    const window =
+      2 *
+      (tokensOf(proposeInstructions) +
+        tokensOf(checkInstructions) +
+        facts.reduce((tokens, line) => tokens + tokensOf(`${line} `), 0) +
+        2);
+    // The store stops after the piece's first add: its second is refused.
+    const pieceKey = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
+    const second = await sha256(`${pieceKey}:1`);
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO memory_changes (key, hash, answer) VALUES (?, 'other', '{}')",
+        second
+      );
+    });
+    await added(text, audience(group), { extract: fromOutside(), source });
+    await tick(1, window);
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM memory_changes WHERE key = ?",
+        second
+      );
+    });
+    // The rerun, with a model of a window that would hold the whole text.
+    for (let round = 0; round < 4; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one piece a tick at most
+      await tick(2, null);
+    }
+    const asked = calls.filter(
+      ({ purpose, input }) =>
+        purpose === "brain.extract" && input.includes(token)
+    );
+    const readOnce = [...facts, ...tail, last].every(
+      (line) => asked.filter(({ input }) => input.includes(line)).length === 1
+    );
+    const reader = { person: unique("p"), groups: [group] };
+    const lastRead = await readAs(reader, `${prefix}last`);
+    const customers = await customersOf(reader, prefix);
+
+    expect({
+      readOnce,
+      customers: customers.length,
+      last: lastRead.map(({ value }) => value),
+    }).toStrictEqual({
+      readOnce: true,
+      customers: count + 1,
+      last: ["active"],
+    });
+  });
+
+  it("draws from a version added again as it is by a new change that asks for it, and only then", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Later");
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    const source = unique("doc");
+    const text = `${token}: ${name} is active.`;
+    const first = crypto.randomUUID();
+    const addAs = async (change: string, extract?: Extract) =>
+      await shared().addSource({
+        source,
+        change,
+        text,
+        access: audience(group),
+        ...(extract === undefined ? {} : { extract }),
+      });
+    // Kept first without asking for memories.
+    await addAs(first);
+    await tick();
+    const keptOnly = callsOf(token).length;
+    // The same change again, now asking: a retry of that add, nothing new.
+    await addAs(first, fromOutside());
+    await tick();
+    const retried = callsOf(token).length;
+    // A new change asking for them: drawn.
+    await addAs(crypto.randomUUID(), fromOutside());
+    await tick();
+    const asked = callsOf(token).length;
+    // Another new change asking again: drawn already, nothing more.
+    await addAs(crypto.randomUUID(), fromOutside());
+    await tick();
+    const again = callsOf(token).length;
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
+    expect({
+      keptOnly,
+      retried,
+      asked,
+      again,
+      read: read.map(({ value }) => value),
+    }).toStrictEqual({
+      keptOnly: 0,
+      retried: 0,
+      asked: 2,
+      again: 2,
       read: ["active"],
     });
   });
