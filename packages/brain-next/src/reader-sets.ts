@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
+import { z } from "zod";
 
 import type { Access } from "./contract.ts";
 import { readerSetMembers, readerSets } from "./db/schema.ts";
@@ -104,4 +105,59 @@ export const readerSetOf = (
       .run();
   }
   return id;
+};
+
+/** A set's key, as `keyOf` writes it: its principals, `[kind, id]` each. */
+const keySchema = z.array(z.tuple([z.enum(["person", "group"]), z.string()]));
+
+/**
+ * Makes again each set of readers that memories or extraction marks name
+ * by key and the store no longer holds: what an older release dropped
+ * when it saw nothing else use it (an admin's rollback). A key is the
+ * set's principals, so the set it makes is the one that was. Run at every
+ * start, in the caller's transaction: one indexed step per distinct key
+ * (`memories_readers_idx`, `memory_extractions_readers_idx`).
+ */
+export const rebuildMissingSets = (sql: SqlStorage): void => {
+  // One step per distinct key, over each index of keys: the next key
+  // after the last, never every row.
+  const missing = sql
+    .exec<{ readers: string }>(
+      `WITH RECURSIVE
+      memory_keys(readers) AS (
+        SELECT min(readers) FROM memories
+        UNION ALL
+        SELECT (SELECT min(readers) FROM memories WHERE readers > memory_keys.readers)
+        FROM memory_keys WHERE memory_keys.readers IS NOT NULL
+      ),
+      mark_keys(readers) AS (
+        SELECT min(readers) FROM memory_extractions
+        UNION ALL
+        SELECT (SELECT min(readers) FROM memory_extractions WHERE readers > mark_keys.readers)
+        FROM mark_keys WHERE mark_keys.readers IS NOT NULL
+      )
+      SELECT readers FROM memory_keys WHERE readers IS NOT NULL
+        AND readers NOT IN (SELECT key FROM reader_sets)
+      UNION
+      SELECT readers FROM mark_keys WHERE readers IS NOT NULL
+        AND readers NOT IN (SELECT key FROM reader_sets)`
+    )
+    .toArray();
+  for (const { readers } of missing) {
+    const principals = keySchema.parse(JSON.parse(readers));
+    const { id } = sql
+      .exec<{ id: number }>(
+        "INSERT INTO reader_sets (key) VALUES (?) RETURNING id",
+        readers
+      )
+      .one();
+    for (const [kind, principal] of principals) {
+      sql.exec(
+        "INSERT INTO reader_set_members (reader_set, kind, principal) VALUES (?, ?, ?)",
+        id,
+        kind,
+        principal
+      );
+    }
+  }
 };

@@ -37,7 +37,7 @@ const exportsSchema = z.object({
   tok_init: call,
   dim: call,
   max_tokens: call,
-  vocab_size: call,
+  table_rows: call,
   longest_token: call,
   set_kernel: call,
   kernel: call,
@@ -55,6 +55,12 @@ export interface FileBytes {
   size: number;
   parts: Iterable<Uint8Array>;
 }
+
+/** Why the module refused a tokenizer file (rust/src/lib.rs `tok_init`). */
+const tokenizerErrors: Record<number, string> = {
+  [-1]: "isn't a consistent tokenizer file of this version",
+  [-2]: "has a map from pieces to rows that names a row past the token table or an empty sequence, or doesn't give <bos> and <eos> a row each",
+};
 
 /** Why the module refused a model file (rust/src/lib.rs `model_init`). */
 const encoderErrors: Record<number, string> = {
@@ -106,10 +112,15 @@ export class Engine {
    */
   readonly kernel: RunningKernel;
   readonly maxTokens: number;
-  readonly vocabSize: number;
+  /**
+   * How many rows the token table has: one per tokenizer piece, or, for a
+   * trimmed table, as many as the tokenizer's map names.
+   */
+  readonly tableRows: number;
   /**
    * Bytes of non-whitespace that certainly make more tokens than the model
-   * reads: max tokens x the most bytes one token covers (`tokenize`).
+   * reads: max tokens x the most bytes one token covers (`tokenize`). A
+   * trimmed table's map only makes more rows of a piece, never fewer.
    */
   private readonly certainlyOver: number;
   private readonly exports: Exports;
@@ -141,14 +152,14 @@ export class Engine {
     );
     if (tokenizerStatus !== 0) {
       throw new Error(
-        "The tokenizer file isn't a consistent tokenizer file of this version."
+        `The tokenizer file ${tokenizerErrors[tokenizerStatus] ?? `was refused (${tokenizerStatus})`}.`
       );
     }
     this.exports.set_kernel(kernelCodes[kernel]);
     this.kernel = runningKernels[this.exports.kernel()] ?? "dot";
     this.dim = this.exports.dim();
     this.maxTokens = this.exports.max_tokens();
-    this.vocabSize = this.exports.vocab_size();
+    this.tableRows = this.exports.table_rows();
     this.certainlyOver = this.maxTokens * this.exports.longest_token();
   }
 
@@ -179,9 +190,11 @@ export class Engine {
   }
 
   /**
-   * The text's token IDs, `<bos>` and `<eos>` included, cut at the most
-   * tokens the model reads: the reference tokenizer's for every text within
-   * that limit, or a refusal.
+   * The text's tokens as rows of the token table, `<bos>` and `<eos>`
+   * included, cut at the most tokens the model reads: the reference
+   * tokenizer's for every text within that limit, or a refusal. With a
+   * trimmed table each removed piece is the rows it is written as, counted
+   * as such toward the limit, as the encoder runs them.
    *
    * A text longer than the module's 256 KiB text buffer is cut there only
    * when what is kept holds at least `certainlyOver` bytes of

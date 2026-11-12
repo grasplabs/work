@@ -7,6 +7,16 @@ import { packAcross } from "./across.ts";
 import { bucketUnder } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
 import {
+  attributeRuleOf,
+  entityKinds,
+  confirmRequestSchema,
+  contestedRequestSchema,
+  entitiesRequestSchema,
+  entityNamesRequestSchema,
+  entityRequestSchema,
+  memoriesRequestSchema,
+  newMemoriesSchema,
+  retireRequestSchema,
   currentRequestSchema,
   readableRequestSchema,
   embedModelSchema,
@@ -28,6 +38,21 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  AddedMemories,
+  ConfirmRequest,
+  ContestedPage,
+  ContestedRequest,
+  EntitiesRequest,
+  Entity,
+  EntityNamesPage,
+  EntityNamesRequest,
+  EntityPage,
+  EntityRequest,
+  MemoriesRead,
+  MemoriesRequest,
+  MemoryChangeOutcome,
+  NewMemories,
+  RetireRequest,
   AskModel,
   CurrentRequest,
   ReadableRequest,
@@ -68,6 +93,7 @@ import {
   embeddingStep,
   reembed,
 } from "./embedding.ts";
+import { findEntities, readEntity, readEntityNames } from "./entities.ts";
 import {
   confirmPending,
   deleteStoreObjects,
@@ -81,6 +107,7 @@ import {
   storeErasedAt,
   subjectOf,
   keepMissingSubjects,
+  replayMemoryErasures,
   ledgerPrefix,
   readLedgerStart,
   recordStoreErased,
@@ -99,12 +126,21 @@ import {
 import { enqueueHandOvers } from "./handover.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
+  confirmMemory,
+  listContested,
+  readMoment,
+  readMemories,
+  retireMemory,
+} from "./memories.ts";
+import { rebuildMissingSets } from "./reader-sets.ts";
+import {
   countingInto,
   countWithoutMeaning,
   newRecallCounts,
   recallOverviewOf,
 } from "./recall-counts.ts";
 import { find, recall } from "./recall.ts";
+import { addMemories } from "./remember.ts";
 import {
   addVersion,
   readCurrent,
@@ -202,6 +238,14 @@ const sharedOnly = "The Brain refused it: only the shared store takes this";
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
+
+/** What the shared store answers memories only one person may read. */
+const sharedNotOwn =
+  "The Brain refused it: memories only one person may read are kept in that person's own store";
+
+/** What a read of memories under an attribute it can't have answers. */
+const noSuchAttribute =
+  "The Brain refused it: the attribute is not one the entity's kind has";
 
 /** What a store whose name says no one's answers every call. */
 const noOnes =
@@ -427,6 +471,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       releaseInterrupted(this.ctx.storage);
       markWordsCurrentIfEmpty(this.ctx.storage.sql);
       await keepMissingSubjects(this.ctx.storage);
+      // What erasures covered of memories, replayed: one an older release
+      // recorded (an admin's rollback) reaches them now; and the sets of
+      // readers it dropped are made again from their keys.
+      this.ctx.storage.transactionSync(() => {
+        replayMemoryErasures(this.ctx.storage.sql);
+        rebuildMissingSets(this.ctx.storage.sql);
+      });
       this.#opened = true;
       this.#schema = true;
     }
@@ -466,6 +517,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   #refuseNoOnes(): never {
     this.ctx.abort(noOnes);
     throw new Error(noOnes);
+  }
+
+  /**
+   * The moment a page is read at, which its cursor carries (`at`,
+   * `cursorAt`), and the moment what the store learned is read at
+   * (`learned`): a later page's, its cursor's; a first page's, `asOf` or
+   * the moment a read of now is given (memories.ts `readMoment`), and what
+   * was learned by the earlier of the two: every write made before the
+   * read is at or before it, every write after it later (`stampWrite`),
+   * an `asOf` ahead of it included. The dates a fact is true are judged
+   * at `at`.
+   */
+  #pageMoments(
+    after: { at: Date; learned?: Date } | undefined,
+    asOf?: Date
+  ): { at: number; cursorAt: number; learned: number } {
+    if (after !== undefined) {
+      const at = after.at.getTime();
+      return { at, cursorAt: at, learned: after.learned?.getTime() ?? at };
+    }
+    const given = readMoment(this.ctx.storage.sql);
+    const at = asOf?.getTime() ?? given;
+    return { at, cursorAt: at, learned: Math.min(at, given) };
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */
@@ -1423,6 +1497,168 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#ready();
       return this.#schema && this.#repackOne();
     });
+  }
+
+  /** Adds memories and the entities they name (remember.ts). */
+  async addMemories(memories: NewMemories): Promise<AddedMemories> {
+    const adding = checked(newMemoriesSchema, memories);
+    this.#mayKeep(adding.access);
+    // Content only one person may read lies only in their own store.
+    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
+      throw new Error(sharedNotOwn);
+    }
+    if (adding.reader !== undefined) {
+      this.#mayRead(adding.reader);
+    }
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      // As a source's add: one cut off by an erasure of this person's own
+      // store answers as an erased store does, never in the database's
+      // words (its hashing before its transaction leaves room for one).
+      return await this.#unlessErasedMeanwhile(
+        async () =>
+          await addMemories(
+            {
+              storage: this.ctx.storage,
+              db: this.#db,
+              shared: this.#kind.kind === "shared",
+            },
+            adding
+          )
+      );
+    });
+  }
+
+  /**
+   * A page of the memories about an entity the reader may read
+   * (memories.ts). An attribute no kind lists is refused; one the entity's
+   * kind lacks is refused when the reader may see the entity, and reads
+   * as an unknown id's empty page when they may not.
+   */
+  async readMemories(request: MemoriesRequest): Promise<MemoriesRead> {
+    const asked = checked(memoriesRequestSchema, request);
+    this.#mayRead(asked.reader);
+    const { attribute } = asked;
+    if (
+      attribute !== undefined &&
+      !entityKinds.some((kind) => attributeRuleOf(kind, attribute))
+    ) {
+      throw new Error(noSuchAttribute);
+    }
+    if (!(await this.#readable())) {
+      return { memories: [], more: false };
+    }
+    const { sql } = this.ctx.storage;
+    if (attribute !== undefined) {
+      const seen = readEntity(sql, {
+        entity: asked.entity,
+        reader: asked.reader,
+      });
+      if (
+        seen !== null &&
+        attributeRuleOf(seen.kind, attribute) === undefined
+      ) {
+        throw new Error(noSuchAttribute);
+      }
+    }
+    return readMemories(sql, {
+      entity: asked.entity,
+      reader: asked.reader,
+      ...(attribute === undefined ? {} : { attribute }),
+      ...this.#pageMoments(asked.after, asked.asOf),
+      history: asked.history ?? false,
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
+  }
+
+  /** A page of the contested facts the reader may read (memories.ts). */
+  async listContested(request: ContestedRequest): Promise<ContestedPage> {
+    const asked = checked(contestedRequestSchema, request);
+    this.#mayRead(asked.reader);
+    if (!(await this.#readable())) {
+      return { facts: [], at: asked.after?.at ?? new Date(), more: false };
+    }
+    return listContested(this.ctx.storage.sql, {
+      ...(asked.entity === undefined ? {} : { entity: asked.entity }),
+      reader: asked.reader,
+      ...this.#pageMoments(asked.after),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
+  }
+
+  /** Retires one of the reader's own memories (memories.ts). */
+  async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
+    const { memory, reader } = checked(retireRequestSchema, request);
+    this.#mayRead(reader);
+    return await this.#changing(async () => {
+      if (!(await this.#readable())) {
+        return "nothing";
+      }
+      return this.ctx.storage.transactionSync(() =>
+        retireMemory(this.ctx.storage.sql, { id: memory, reader })
+      );
+    });
+  }
+
+  /** The reader confirms a memory as their own word (memories.ts). */
+  async confirmMemory(request: ConfirmRequest): Promise<MemoryChangeOutcome> {
+    const { memory, reader } = checked(confirmRequestSchema, request);
+    this.#mayRead(reader);
+    return await this.#changing(async () => {
+      if (!(await this.#readable())) {
+        return "nothing";
+      }
+      return this.ctx.storage.transactionSync(() =>
+        confirmMemory(this.ctx.storage.sql, { id: memory, reader })
+      );
+    });
+  }
+
+  /** The entities the reader may see that match (entities.ts). */
+  async findEntities(request: EntitiesRequest): Promise<EntityPage> {
+    const asked = checked(entitiesRequestSchema, request);
+    this.#mayRead(asked.reader);
+    if (!(await this.#readable())) {
+      return { entities: [], more: false };
+    }
+    return findEntities(this.ctx.storage.sql, {
+      reader: asked.reader,
+      ...this.#pageMoments(asked.after),
+      ...(asked.kind === undefined ? {} : { kind: asked.kind }),
+      ...(asked.identifier === undefined
+        ? {}
+        : { identifier: asked.identifier }),
+      ...(asked.name === undefined ? {} : { name: asked.name }),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
+  }
+
+  /** A page of the names and identifiers of an entity the reader may see (entities.ts). */
+  async readEntityNames(request: EntityNamesRequest): Promise<EntityNamesPage> {
+    const asked = checked(entityNamesRequestSchema, request);
+    this.#mayRead(asked.reader);
+    if (!(await this.#readable())) {
+      return { names: [], more: false };
+    }
+    return readEntityNames(this.ctx.storage.sql, {
+      entity: asked.entity,
+      reader: asked.reader,
+      ...this.#pageMoments(asked.after),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
+  }
+
+  /** An entity, if the reader may see it (entities.ts). */
+  async readEntity(request: EntityRequest): Promise<Entity | null> {
+    const asked = checked(entityRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? readEntity(this.ctx.storage.sql, asked)
+      : null;
   }
 
   /** One block repacked, in its own transaction: true when more are left. */
