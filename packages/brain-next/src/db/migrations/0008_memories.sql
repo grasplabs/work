@@ -6,14 +6,6 @@ CREATE TABLE `entities` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `entities_id_unique` ON `entities` (`id`);--> statement-breakpoint
 CREATE INDEX `entities_kind_idx` ON `entities` (`kind`,`row`);--> statement-breakpoint
-CREATE TABLE `entity_merges` (
-	`merged` integer PRIMARY KEY NOT NULL,
-	`into_entity` integer NOT NULL,
-	FOREIGN KEY (`merged`) REFERENCES `entities`(`row`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`into_entity`) REFERENCES `entities`(`row`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
-CREATE INDEX `entity_merges_into_idx` ON `entity_merges` (`into_entity`);--> statement-breakpoint
 CREATE TABLE `entity_names` (
 	`entity` integer NOT NULL,
 	`memory` integer NOT NULL,
@@ -85,13 +77,17 @@ CREATE TABLE `memory_confirmed_over` (
 --> statement-breakpoint
 CREATE INDEX `memory_confirmed_over_memory_idx` ON `memory_confirmed_over` (`memory`);--> statement-breakpoint
 CREATE TABLE `memory_extractions` (
-	`version_row` integer PRIMARY KEY NOT NULL,
+	`version_row` integer NOT NULL,
 	`lineage` text NOT NULL,
 	`version` integer NOT NULL,
-	`at` integer NOT NULL
+	`at` integer NOT NULL,
+	`reader_set` integer NOT NULL,
+	`only_for` text,
+	PRIMARY KEY(`version_row`, `reader_set`)
 );
 --> statement-breakpoint
 CREATE INDEX `memory_extractions_lineage_idx` ON `memory_extractions` (`lineage`,`version`);--> statement-breakpoint
+CREATE INDEX `memory_extractions_only_for_idx` ON `memory_extractions` (`only_for`);--> statement-breakpoint
 ALTER TABLE `word_index` ADD `memory_cursor` integer DEFAULT 0 NOT NULL;
 --> statement-breakpoint
 -- A memory's words and stems, as a chunk's (0005, 0006): its statement

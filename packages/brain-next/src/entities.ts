@@ -8,7 +8,7 @@ import type {
   Identifier,
   Reader,
 } from "./contract.ts";
-import { canonicalSql, familySql, visibleSql } from "./memories.ts";
+import { visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import { foldForSearch } from "./words.ts";
 
@@ -42,14 +42,13 @@ export const foldIdentifier = ({ type, value }: Identifier): string =>
   type === "email" ? value.toLowerCase() : value;
 
 /**
- * An entity the reader may see: a memory they may read mentions it, or
- * one merged into it.
+ * An entity the reader may see: a memory they may read mentions it.
  */
 const mentionedSql = (entity: string): string => `(
   EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.entity IN (${familySql(entity)}) AND ${visibleSql("m")})
+    WHERE m.entity = ${entity} AND ${visibleSql("m")})
   OR EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.object IN (${familySql(entity)}) AND ${visibleSql("m")})
+    WHERE m.object = ${entity} AND ${visibleSql("m")})
 )`;
 
 /**
@@ -72,8 +71,7 @@ const coveredSql = (alias: string): string => `(
 
 /**
  * The first entity of `kind` holding one of `identifiers` by a memory
- * read by exactly the set of readers `readerSet` (`coveredSql`), as the
- * entity it stands for: what an add with those readers links to. An
+ * read by exactly the set of readers `readerSet` (`coveredSql`): what an add with those readers links to. An
  * identifier only a memory others read gave links nothing, so no add
  * learns that two identifiers are one entity through a memory its readers
  * may not read: it makes a new entity, and joining the two is a person's
@@ -90,14 +88,14 @@ export const linkedBy = (
   }
   const [found] = sql
     .exec<{ row: number | null }>(
-      `SELECT min(stands.row) AS row
+      `SELECT min(entities.row) AS row
       FROM json_each(?2) AS asked
       JOIN entity_names
         ON entity_names.type = asked.value ->> 0
         AND entity_names.folded = asked.value ->> 1
       JOIN memories AS m ON m.row = entity_names.memory
-      JOIN entities AS stands ON stands.row = ${canonicalSql("entity_names.entity")}
-      WHERE stands.kind = ?1 AND ${coveredSql("m")}`,
+      JOIN entities ON entities.row = entity_names.entity
+      WHERE entities.kind = ?1 AND ${coveredSql("m")}`,
       kind,
       JSON.stringify(identifiers.map((id) => [id.type, foldIdentifier(id)])),
       readerSet
@@ -107,8 +105,7 @@ export const linkedBy = (
 };
 
 /**
- * Whether an add may name the entity at `entity` (one no merge points
- * away from) by its id: `reader` may see it, or, with no reader, a memory
+ * Whether an add may name the entity at `entity` by its id: `reader` may see it, or, with no reader, a memory
  * read by exactly the add's set of readers `readerSet` mentions it.
  */
 export const mayName = (
@@ -133,7 +130,7 @@ export const mayName = (
     sql
       .exec(
         `SELECT 1 FROM memories AS m
-        WHERE (m.entity IN (${familySql("?1")}) OR m.object IN (${familySql("?1")}))
+        WHERE (m.entity = ?1 OR m.object = ?1)
           AND ${coveredSql("m")}
         LIMIT 1`,
         entity,
@@ -174,10 +171,10 @@ export const keepNames = (
  */
 const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
   SELECT m.row AS first FROM memories AS m
-  WHERE m.entity IN (${familySql(entity)}) AND ${visibleSql("m")}
+  WHERE m.entity = ${entity} AND ${visibleSql("m")}
   UNION ALL
   SELECT m.row FROM memories AS m
-  WHERE m.object IN (${familySql(entity)}) AND ${visibleSql("m")}
+  WHERE m.object = ${entity} AND ${visibleSql("m")}
 ))`;
 
 /**
@@ -186,6 +183,11 @@ const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
  * the reader may see that hold each, by a memory they may read, in the
  * order of the first memory they may read that mentions each.
  */
+// Its cost: by kind alone, every entity of that kind is checked for a
+// memory the reader may read (and its first one found) before the limit,
+// so it grows with the entities of the kind. A name or an identifier
+// narrows it through `entity_names` first. No cheap bound keeps the order
+// exact; measure before a client's scale.
 const findSql = `
 WITH ${readableSql},
 found AS MATERIALIZED (
@@ -193,11 +195,9 @@ found AS MATERIALIZED (
     ${firstMentionSql("entities.row")} AS first
   FROM entities
   WHERE (?1 IS NULL OR entities.kind = ?1)
-    -- One merged into another is found as that other.
-    AND entities.row NOT IN (SELECT merged FROM entity_merges)
     -- Found through the index of names when one is asked: the first.
     AND (json_array_length(?4) = 0 OR entities.row IN (
-      SELECT ${canonicalSql("entity_names.entity")} FROM entity_names
+      SELECT entity_names.entity FROM entity_names
       WHERE entity_names.type = ?4 ->> '$[0][0]'
         AND entity_names.folded = ?4 ->> '$[0][1]'
     ))
@@ -206,7 +206,7 @@ found AS MATERIALIZED (
       WHERE NOT EXISTS (
         SELECT 1 FROM entity_names
         JOIN memories AS m ON m.row = entity_names.memory
-        WHERE entity_names.entity IN (${familySql("entities.row")})
+        WHERE entity_names.entity = entities.row
           AND entity_names.type = asked.value ->> 0
           AND entity_names.folded = asked.value ->> 1
           AND ${visibleSql("m")}
@@ -227,7 +227,7 @@ WITH ${readableSql}
 SELECT asked.value AS entity, entity_names.type AS type,
   entity_names.value AS value, entity_names.folded AS folded
 FROM json_each(?1) AS asked
-JOIN entity_names ON entity_names.entity IN (${familySql("asked.value")})
+JOIN entity_names ON entity_names.entity = asked.value
 JOIN memories AS m ON m.row = entity_names.memory
 WHERE ${visibleSql("m")}
 ORDER BY asked.value, m.row, entity_names.rowid`;
@@ -309,9 +309,8 @@ export const findEntities = (
 const oneSql = `
 WITH ${readableSql}
 SELECT entities.row AS row, entities.id AS id, entities.kind AS kind
-FROM entities AS named
-JOIN entities ON entities.row = ${canonicalSql("named.row")}
-WHERE named.id = ?1 AND ${mentionedSql("entities.row")}`;
+FROM entities
+WHERE entities.id = ?1 AND ${mentionedSql("entities.row")}`;
 
 /** An entity, if the reader may see it (contract.ts `readEntity`). */
 export const readEntity = (

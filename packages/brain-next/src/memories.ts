@@ -64,21 +64,6 @@ export const visibleSql = (alias: string): string => `(
   AND (${alias}.version_row IS NULL OR ${versionVisibleSql(`${alias}.version_row`)})
 )`;
 
-/**
- * The entity `entity` (an expression) stands for: the one it was merged
- * into (`entity_merges`), or itself. Every statement reads entities so,
- * so a merge re-points no memory.
- */
-export const canonicalSql = (entity: string): string =>
-  `coalesce((SELECT into_entity FROM entity_merges WHERE merged = ${entity}), ${entity})`;
-
-/**
- * The entity `canonical` (an expression, an entity no merge points away
- * from) and every entity merged into it, as rows (`IN (...)`).
- */
-export const familySql = (canonical: string): string =>
-  `SELECT ${canonical} UNION ALL SELECT merged FROM entity_merges WHERE into_entity = ${canonical}`;
-
 /** When a memory starts to count: when it was learned, or its world start if later. */
 const startSql = (alias: string): string =>
   `max(${alias}.learned_at, coalesce(${alias}.valid_from, ${alias}.learned_at))`;
@@ -92,7 +77,7 @@ const startSql = (alias: string): string =>
  */
 const newerSql = (alias: string, at: string, visible: boolean): string => `
   SELECT ${startSql("newer")} AS at FROM memories AS newer
-  WHERE newer.entity IN (${familySql(canonicalSql(`${alias}.entity`))})
+  WHERE newer.entity = ${alias}.entity
     AND newer.attribute = ${alias}.attribute
     AND newer.lineage = ${alias}.lineage
     AND (${alias}.one_value = 1 OR newer.value_key = ${alias}.value_key)
@@ -102,15 +87,17 @@ const newerSql = (alias: string, at: string, visible: boolean): string => `
     ${visible ? `AND ${visibleSql("newer")}` : ""}`;
 
 /**
- * The later versions of `alias`'s source marked fully extracted by `?4`
- * that the reader may read: each ends every memory of an earlier version
- * of it, whatever its attribute (contract.ts `extracted`).
+ * The later versions of `alias`'s source marked fully extracted by `?4`,
+ * for readers of both the add that marked it and that version: each ends
+ * every memory of an earlier version of it, whatever its attribute
+ * (contract.ts `extracted`).
  */
 const extractedSql = (alias: string): string => `
   SELECT extracted.at AS at FROM memory_extractions AS extracted
   WHERE extracted.lineage = ${alias}.lineage
     AND extracted.version > ${alias}.lineage_order
     AND extracted.at <= ?4
+    AND extracted.reader_set IN (SELECT reader_set FROM readable)
     AND ${versionVisibleSql("extracted.version_row")}`;
 
 /**
@@ -131,7 +118,7 @@ const rivalSql = `
     SELECT 1 FROM judged AS other
     JOIN memories AS rival ON rival.row = other.row
     WHERE other.is_current = 1 AND m.one_value = 1
-      AND rival.entity IN (${familySql(canonicalSql("m.entity"))})
+      AND rival.entity = m.entity
       AND rival.attribute = m.attribute AND rival.value_key IS NOT m.value_key`;
 
 /**
@@ -200,9 +187,9 @@ interface MemoriesQuery {
   /** More columns, from those joins. */
   columns?: string;
   /**
-   * The statement around the rows, as `rows` (a common table): what is
-   * returned of them, in which order. By default all, by `order`, at most
-   * `?5`.
+   * The statement over the rows, given them as the common table `rows`:
+   * what is returned of them, in which order. Without it, the rows
+   * themselves, by `order`, at most `?5`.
    */
   outer?: string;
 }
@@ -226,7 +213,7 @@ const memoriesSql = ({
   columns = "",
   outer,
 }: MemoriesQuery): string => {
-  const rows = `
+  const tables = `
 WITH ${readableSql},${prelude === undefined ? "" : `\n${prelude},`}
 base AS MATERIALIZED (${base}),
 candidates AS MATERIALIZED (
@@ -236,7 +223,7 @@ candidates AS MATERIALIZED (
   JOIN memories AS asked ON asked.row = base.row AND asked.one_value = 1
   JOIN memories AS partner
     ON partner.attribute = asked.attribute
-    AND partner.entity IN (${familySql(canonicalSql("asked.entity"))})
+    AND partner.entity = asked.entity
 ),
 seen AS MATERIALIZED (
   SELECT m.row AS row, ${endedAtSql} AS ended_at
@@ -250,7 +237,8 @@ judged AS MATERIALIZED (
       AND (m.valid_from IS NULL OR m.valid_from <= ?4)
       AND (m.valid_until IS NULL OR m.valid_until > ?4)) AS is_current
   FROM seen JOIN memories AS m ON m.row = seen.row
-)
+)`;
+  const select = `
 SELECT m.row AS row, about.row AS entity_row, m.id AS id, about.id AS about,
   m.attribute AS attribute, object.id AS object, m.value AS value,
   m.value_key AS value_key, m.lineage AS lineage, m.type AS type,
@@ -263,13 +251,13 @@ SELECT m.row AS row, about.row AS entity_row, m.id AS id, about.id AS about,
   ${confirmationSql} AS confirmation${columns}
 FROM judged
 JOIN memories AS m ON m.row = judged.row
-JOIN entities AS about ON about.row = ${canonicalSql("m.entity")}
-LEFT JOIN entities AS object ON object.row = ${canonicalSql("m.object")}
+JOIN entities AS about ON about.row = m.entity
+LEFT JOIN entities AS object ON object.row = m.object
 LEFT JOIN source_versions AS based ON based.row = m.version_row${joins}
 WHERE judged.row IN (SELECT row FROM base) AND ${filter}`;
   return outer === undefined
-    ? `${rows}\nORDER BY ${order}\nLIMIT ?5`
-    : `${rows.replace("\nSELECT m.row AS row,", ",\nrows AS (SELECT m.row AS row,")})\n${outer}`;
+    ? `${tables}${select}\nORDER BY ${order}\nLIMIT ?5`
+    : `${tables},\nrows AS (${select}\n)\n${outer}`;
 };
 
 /** The lineage of a writer's memories. */
@@ -350,16 +338,14 @@ const memoryRows = (
     )
     .toArray();
 
-/** The row and kind of the entity `id` stands for (`canonicalSql`), or none. */
+/** The row and kind of the entity `id`, or none. */
 export const entityRowOf = (
   sql: SqlStorage,
   id: EntityId
 ): { row: number; kind: string } | undefined =>
   sql
     .exec<{ row: number; kind: string }>(
-      `SELECT stands.row AS row, stands.kind AS kind FROM entities AS named
-      JOIN entities AS stands ON stands.row = ${canonicalSql("named.row")}
-      WHERE named.id = ?`,
+      "SELECT row, kind FROM entities WHERE id = ?",
       id
     )
     .toArray()
@@ -376,9 +362,9 @@ const aboutOrder = `m.attribute IS NULL, m.attribute, confirmation IS NULL,
  */
 const aboutSql = memoriesSql({
   base: `SELECT row FROM memories
-    WHERE entity IN (${familySql("?1")}) AND (?6 IS NULL OR attribute = ?6)
+    WHERE entity = ?1 AND (?6 IS NULL OR attribute = ?6)
     UNION SELECT row FROM memories
-    WHERE object IN (${familySql("?1")}) AND (?6 IS NULL OR attribute = ?6)`,
+    WHERE object = ?1 AND (?6 IS NULL OR attribute = ?6)`,
   filter: "(?7 = 1 OR judged.is_current = 1)",
   order: aboutOrder,
 });
@@ -420,10 +406,16 @@ export const readMemories = (
  * the order of each fact's first memory the reader may read, so where a
  * fact stands, and whether it is listed, depends on nothing hidden.
  */
+// Its cost: without an entity, every current one-value memory the reader
+// may read is judged (with its ending and its rivals) before the facts
+// are ranked and cut, so it grows with the store, not with the limit. No
+// cheap bound keeps the answer exact: a fact's first readable memory may
+// be any of them. Measure before a client's scale; an entity narrows it
+// to that entity's memories.
 const contestedSql = memoriesSql({
   base: `SELECT row FROM memories
     WHERE one_value = 1 AND attribute IS NOT NULL
-      AND (?1 IS NULL OR entity IN (${familySql("?1")}))`,
+      AND (?1 IS NULL OR entity = ?1)`,
   filter: `judged.is_current = 1 AND contested = 1`,
   order: "m.row",
   outer: `SELECT rows.* FROM rows
@@ -489,7 +481,7 @@ const currentOneSql = memoriesSql({
  */
 const currentOfAttributeSql = memoriesSql({
   base: `SELECT row FROM memories
-    WHERE entity IN (${familySql("?1")}) AND attribute = ?6`,
+    WHERE entity = ?1 AND attribute = ?6`,
   filter: "judged.is_current = 1",
   order: "m.row",
 });
@@ -558,8 +550,10 @@ export const confirmMemory = (
 
 /**
  * Retires the memory `id` if its lineage is `writer`'s, the reader may
- * read it, and it is still believed: not retired, and no newer memory of
- * its lineage ended it by now (contract.ts `retireMemory`).
+ * read it, and it is still believed as they see it: not retired, and no
+ * newer memory of its lineage that they may read ended it by now, so one
+ * hidden from them neither blocks the retire nor shows (contract.ts
+ * `retireMemory`).
  */
 export const retireMemory = (
   sql: SqlStorage,
@@ -575,7 +569,7 @@ export const retireMemory = (
     UPDATE memories AS m SET retired_at = ?5
     WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
       AND ${visibleSql("m")}
-      AND NOT EXISTS (${newerSql("m", "?5", false)})`,
+      AND NOT EXISTS (${newerSql("m", "?5", true)})`,
     id,
     reader.person,
     JSON.stringify(reader.groups),

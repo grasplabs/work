@@ -324,14 +324,15 @@ const writeMemory = (
 };
 
 /**
- * Marks version `version` of `source` fully extracted at `at` (contract.ts
- * `extracted`): every memory of an earlier version of it ends then
- * (memories.ts). Once per version: a repeat changes nothing.
+ * Marks version `version` of `source` fully extracted by the add `into`
+ * writes (contract.ts `extracted`): every memory of an earlier version of
+ * it ends then, for readers of the add and of that version (memories.ts).
+ * Once per version and set of readers: a repeat changes nothing.
  */
 const markExtracted = (
   sql: SqlStorage,
   { source, version }: { source: string; version: number },
-  at: number
+  { learnedAt, readerSet, onlyFor }: Into
 ): void => {
   const [found] = sql
     .exec<{ row: number }>(
@@ -346,12 +347,15 @@ const markExtracted = (
     throw refused("it marks extracted a version this store doesn't hold");
   }
   sql.exec(
-    `INSERT OR IGNORE INTO memory_extractions (version_row, lineage, version, at)
-    VALUES (?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO memory_extractions
+      (version_row, lineage, version, at, reader_set, only_for)
+    VALUES (?, ?, ?, ?, ?, ?)`,
     found.row,
     lineageOfSource(source),
     version,
-    at
+    learnedAt,
+    readerSet,
+    onlyFor
   );
 };
 
@@ -422,7 +426,7 @@ export const addMemories = async (
       writeMemory(into, memory, planned[index], index)
     );
     if (adding.extracted !== undefined) {
-      markExtracted(sql, adding.extracted, into.learnedAt);
+      markExtracted(sql, adding.extracted, into);
     }
     const answer: AddedMemories = {
       memories,
