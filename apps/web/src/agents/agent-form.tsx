@@ -71,7 +71,8 @@ export const AgentForm = ({
   can: boolean;
   /** The models the organization chose, which an agent can be given. */
   models?: readonly string[];
-  onSave: (typed: Typed) => Promise<void>;
+  /** What the form's own `parts` now say: nothing of the rest of the agent. */
+  onSave: (said: Partial<Typed>) => Promise<void>;
 }) => {
   const { t, i18n } = useLingui();
   const faceId = useId();
@@ -86,11 +87,16 @@ export const AgentForm = ({
       className="flex flex-col gap-4 px-5 pb-5"
       onSubmit={(event) => {
         event.preventDefault();
-        void onSave({
+        // Only this form's parts: another card may have saved the rest
+        // since this one was shown, and what it holds of them is old.
+        const trimmed: Typed = {
           ...typed,
           name: typed.name.trim(),
           job: typed.job.trim(),
-        });
+        };
+        void onSave(
+          Object.fromEntries(parts.map((part) => [part, trimmed[part]]))
+        );
       }}
     >
       {parts.includes("name") ? (

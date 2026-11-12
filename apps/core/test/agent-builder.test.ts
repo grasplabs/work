@@ -533,4 +533,44 @@ describe("the agent builder", setUpTime, () => {
       firstAsked: true,
     });
   });
+
+  it("keeps an agent deleted whatever is changed of it as it is deleted", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { connections } = admin.api;
+    // In every order the writes can land in, the agent ends deleted and
+    // its name free: a write that read it before the delete changes
+    // nothing after it.
+    const settled = await Promise.all(
+      ["Ada", "Bea", "Cas", "Dee"].map(async (name) => {
+        const { id } = await connections.makeAgent(said({ name }));
+        await Promise.all([
+          outcome(connections.deleteAgent(id)),
+          outcome(connections.setAgentPaused(id, true)),
+          outcome(connections.changeAgent(id, said({ name, job: "More." }))),
+          outcome(connections.setAgentReach(id, true, { who: "everyone" })),
+          outcome(
+            connections.setAgentToolClass(id, "read-own", { who: "asClass" })
+          ),
+        ]);
+        return {
+          agent: await readAgent(env, id),
+          reaches: await agentFor(env, id, admin.userId),
+          classes: await classesOf(id),
+          nameFree: await outcome(connections.makeAgent(said({ name }))),
+        };
+      })
+    );
+    expect(settled).toStrictEqual(
+      ["Ada", "Bea", "Cas", "Dee"].map(() => ({
+        agent: undefined,
+        reaches: nothing,
+        classes: Object.fromEntries(
+          companyToolClasses
+            .toSorted()
+            .map((toolClass) => [toolClass, "nobody"])
+        ),
+        nameFree: "ok",
+      }))
+    );
+  });
 });
