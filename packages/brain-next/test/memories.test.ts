@@ -3107,3 +3107,45 @@ describe("a readMemories cursor as the store gave it", () => {
     ).rejects.toThrow("Learned after the moment it reads at");
   });
 });
+
+describe("names that grow when folded", () => {
+  it("pages on past a name whose folded form is as long as a name may be, and refuses one longer", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    // "ﬃ" folds to "ffi": 166 of them are 498 characters folded.
+    const atLimit = "ﬃ".repeat(166);
+    const made = await remember(
+      audience(group),
+      [customer({ names: [atLimit, "Zeta"] })],
+      [fact({ kind: "writer", writer: unique("w") }, { statement: "Named" })]
+    );
+    const entity = made.entities.c ?? "";
+    const first = await shared().readEntityNames({ entity, reader, limit: 1 });
+    const second = await shared().readEntityNames({
+      entity,
+      reader,
+      limit: 1,
+      ...(first.next === undefined ? {} : { after: first.next }),
+    });
+    const longer = await remember(
+      audience(group),
+      [customer({ names: ["ﬃ".repeat(200)] })],
+      [fact({ kind: "writer", writer: unique("w") }, { statement: "Too long" })]
+    ).then(
+      () => "added",
+      () => "refused"
+    );
+
+    expect({
+      first: first.names.map(({ value }) => value),
+      more: first.more,
+      second: second.names.map(({ value }) => value),
+      longer,
+    }).toStrictEqual({
+      first: [atLimit],
+      more: true,
+      second: ["Zeta"],
+      longer: "refused",
+    });
+  });
+});

@@ -1379,6 +1379,17 @@ const someText = (max: number) =>
   wellFormedString().regex(/\S/u, { message: "Holds no text" }).max(max);
 
 /**
+ * A name of an entity: some text, at most `valueMaxLength` characters, and
+ * no longer than that once folded as search folds it (`foldForSearch`:
+ * compatibility forms such as "ﬃ" expand), so every name an add keeps
+ * fits a `readEntityNames` cursor, which holds a name folded.
+ */
+const nameSchema = someText(valueMaxLength).refine(
+  (name) => foldForSearch(name).length <= valueMaxLength,
+  { message: `At most ${valueMaxLength} characters once folded` }
+);
+
+/**
  * An entity an add names, by a key of its own within the add (`key`,
  * which its memories use): the known entity `id`, or else one found by
  * its exact identifiers, the first entity of its kind holding any of
@@ -1391,7 +1402,7 @@ export const newEntitySchema = z.strictObject({
   key: wellFormedString().min(1).max(64),
   id: entityIdSchema.optional(),
   kind: z.enum(entityKinds),
-  names: z.array(someText(valueMaxLength)).max(namesPerEntityMax).default([]),
+  names: z.array(nameSchema).max(namesPerEntityMax).default([]),
   identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
 });
 export type NewEntity = z.input<typeof newEntitySchema>;
@@ -1795,7 +1806,9 @@ export const entityNamesCursorSchema = z.strictObject({
   learnedAt: z.date(),
   memory: memoryIdSchema,
   type: z.enum(["name", "email", "ref"]),
-  folded: wellFormedString().max(1000),
+  // As a name's folded form is held to (`nameSchema`); identifiers fold to
+  // no more than they are (an email lowercased, a reference as written).
+  folded: wellFormedString().max(valueMaxLength),
 });
 export type EntityNamesCursor = z.infer<typeof entityNamesCursorSchema>;
 
@@ -2063,8 +2076,8 @@ export interface Brain {
   /**
    * Retires one of the reader's own memories (its lineage is the reader's
    * person, as writer) that they may read and that is current for them: it
-   * stops being current from now on, and stays as history. Nothing else
-   * changes: a memory it had ended stays ended. One already retired
+   * stops being current from now on, and stays as history. It no longer
+   * ends older memories, which may become current again. One already retired
    * answers `done` again, so a retry never reads as not found; one ended
    * otherwise, expired included, answers `nothing`, as one not theirs.
    */
