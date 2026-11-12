@@ -15,10 +15,10 @@ import {
   connectProvidersScript,
   connectVersionMetadata,
   platformAnthropicKey,
-  platformElevenLabsKey,
   directoryClient,
   documentsClient,
   googleConnectClient,
+  platformMistralKey,
   platformOpenAiKey,
   slackApp,
   teamsBot,
@@ -375,13 +375,13 @@ export const coreProject = (
                 TEAMS_BOT_SECRET: teamsBot.secret,
                 // Its Slack app, which the fake Slack there knows.
                 SLACK_BOT_TOKEN: slackApp.botToken,
-                // Grasp's own keys at OpenAI, Anthropic and ElevenLabs for
+                // Grasp's own keys at OpenAI, Anthropic and Mistral for
                 // platform features, which the fakes there take once a test
-                // plans for them (OpenAI's transcription and ElevenLabs'
-                // speech answer unplanned).
+                // plans for them (Mistral's transcription and speech
+                // answer unplanned).
                 OPENAI_API_KEY: platformOpenAiKey,
                 ANTHROPIC_API_KEY: platformAnthropicKey,
-                ELEVENLABS_API_KEY: platformElevenLabsKey,
+                MISTRAL_API_KEY: platformMistralKey,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).

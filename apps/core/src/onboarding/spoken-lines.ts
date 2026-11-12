@@ -1,3 +1,4 @@
+import type { voiceTags } from "@grasp-os/shared/interview-links";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { Speaker } from "@grasp-os/shared/voice";
 
@@ -9,17 +10,43 @@ import { forgetLines, storedKeysOf } from "../speech-cache.ts";
 // told, and the cache keeps a line's words with its sound for a month.
 
 /**
- * What the voice is sent: the line led by its tone, in English; the bare
- * line in any other language. A direction is English words in front of
- * the line, and the voice then starts it in English: the first Dutch word
- * came out with an English sound, "nog" as "nok".
+ * How the voice is told each of Stephen's tones (`voiceTags`): Mistral's
+ * voice takes a fixed set of emotions and paces, each a tag in front of
+ * the line (`[emotion=warm]`), never free words, so each tone is said as
+ * the nearest of them. A tone with none near enough is said plainly.
+ */
+const directions: Readonly<Record<(typeof voiceTags)[number], string>> = {
+  "warm, relaxed": "[emotion=warm]",
+  "sincere, steady": "[emotion=calm]",
+  "curious, gently": "[emotion=curious]",
+  softly: "[emotion=calm]",
+  "interested, a little lighter": "[emotion=curious]",
+  patient: "[emotion=calm]",
+  "neutral, light": "",
+  "upbeat, understanding": "[emotion=hopeful]",
+  "upbeat, reassuring": "[emotion=hopeful]",
+  "sincere, steady, reassuring": "[emotion=confident]",
+  "amused, soft chuckle": "[emotion=amused]",
+  warm: "[emotion=warm]",
+  "easy, light": "[emotion=playful]",
+  "clear, measured pace": "[emotion=calm][pace=slow]",
+  "warm, grateful": "[emotion=grateful]",
+  "warm, kind": "[emotion=warm]",
+};
+
+/**
+ * What the voice is sent: the line led by its tone's tags, in English;
+ * the bare line in any other language, where Mistral names the tags as
+ * untested. The tags are sent and never said.
  */
 export const spokenOf = (
   text: string,
   language: string,
-  tone: string | undefined
-): string =>
-  tone !== undefined && language === "en" ? `[${tone}] ${text}` : text;
+  tone: (typeof voiceTags)[number] | undefined
+): string => {
+  const tags = tone !== undefined && language === "en" ? directions[tone] : "";
+  return tags === "" ? text : `${tags}${text}`;
+};
 
 /** What was said in an interview, as its lines may have been kept. */
 export interface SaidIn {

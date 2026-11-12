@@ -7,7 +7,7 @@
 //
 // Each goes to the provider and model the platform's settings name
 // (@grasp-os/shared/platform-ai), with Grasp's own key, which connect
-// holds: ElevenLabs says lines, OpenAI writes down what is heard.
+// holds: Mistral's Voxtral says lines and writes down what is heard.
 //
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
@@ -40,7 +40,10 @@ export interface SpeechRequest {
   model?: string;
 }
 
-/** A word of a line, and when it is said, in ms from the start of the audio. */
+/**
+ * A word of a line, and when it is said, in ms from the start of the
+ * audio: estimated where the provider times none (core's voice-models.ts).
+ */
 export interface SpokenWord {
   text: string;
   startMs: number;
@@ -50,7 +53,7 @@ export interface SpokenWord {
 /** A line as said: its audio, and when each of its words is said. */
 export interface Speech {
   audio: Uint8Array;
-  /** The audio's media type, such as `audio/mpeg`. */
+  /** The audio's media type, such as `audio/wav`. */
   mime: string;
   /** In the order they are said; punctuation stays with its word. */
   words: SpokenWord[];
@@ -70,8 +73,6 @@ export interface TranscriptionOptions {
   keyterms: readonly string[];
   /** Samples a second of the audio `send` is given (16-bit PCM, mono). */
   sampleRate: number;
-  /** What was said just before, so the first words are heard in context. */
-  previousText?: string;
 }
 
 /** What a live transcription hears, as it hears it. */
@@ -139,7 +140,8 @@ export const speechRequestSchema = z.strictObject({
   speaker: z.enum(speakers).default("stephen"),
   /**
    * For a line only known as it is said, such as one with a count or a
-   * name: said by the platform's quicker speech model.
+   * name. Said as any other: the platform has one speech model. Still
+   * taken, as pages open before this release send it.
    */
   quick: z.boolean().default(false),
   /** How the line is said: one of the tones Stephen may use. */
@@ -192,7 +194,11 @@ export const transcriptionFrameMaxBytes = 32 * 1024;
 /** The most a text frame from the page may hold: a start, or a commit. */
 export const transcriptionTextMaxBytes = 4 * 1024;
 
-/** The longest `previousText` the page may send. */
+/**
+ * The longest `previousText` the page may send: what was said just
+ * before. Still taken, as pages open before this release send it, and of
+ * no effect: the live session takes terms to listen out for, no free text.
+ */
 export const transcriptionPreviousTextMaxChars = 1000;
 
 /** The first frame: the language, the audio's rate, and whose interview. */

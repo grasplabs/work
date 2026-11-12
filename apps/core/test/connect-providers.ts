@@ -23,13 +23,13 @@ import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
 
 /**
- * Grasp's own keys at OpenAI, Anthropic and ElevenLabs, for platform
+ * Grasp's own keys at OpenAI, Anthropic and Mistral, for platform
  * features, as set on connect in the tests; none for the other providers,
  * which aren't offered for them.
  */
 export const platformOpenAiKey = "test-platform-openai-key-0001";
 export const platformAnthropicKey = "test-platform-anthropic-key-0001";
-export const platformElevenLabsKey = "test-platform-elevenlabs-key-0001";
+export const platformMistralKey = "test-platform-mistral-key-0001";
 
 /** Connect's version metadata, as set on connect in the tests. */
 export const connectVersionMetadata = {

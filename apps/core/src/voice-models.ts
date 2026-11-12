@@ -3,34 +3,29 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each speech model is ElevenLabs's, priced per character it is
-// asked to say, which is how ElevenLabs bills speech. Each transcription
-// model is OpenAI's, priced per second it hears, at a price never below
-// what the provider bills for it. Grasp pays for these on its own keys:
-// what each cost is recorded for Grasp's spend overview (model-usage.ts).
+// models. Each is Mistral's Voxtral, in the EU: a speech model priced per
+// character it is asked to say, a transcription model per second it hears,
+// at a price never below what Mistral bills for it. Grasp pays for these
+// on its own key: what each cost is recorded for Grasp's spend overview
+// (model-usage.ts).
 
 /**
- * ElevenLabs's API prices for text to speech, in US dollars per 1,000
- * characters, the same on every plan.
+ * Mistral's price for text to speech, in US dollars per 1,000 characters.
  *
- * Source: ElevenLabs's API pricing page, "Model pricing"
- * (https://elevenlabs.io/pricing/api), read on 2026-10-21: v4 and v3 at
- * $0.08, v4 Turbo and Flash at $0.04.
+ * Source: Mistral's Voxtral 3 announcement (https://mistral.ai/news/
+ * voxtral-3/), read on 2026-11-12: Voxtral TTS 3 at $13 a million
+ * characters.
  */
 const dollarsPer1000Chars = {
-  /** Eleven v4: the most expressive, in which Stephen's lines are said. */
-  eleven_v4: 0.08,
-  /** Eleven v4 Turbo: for a line only known as it is said. Same voices. */
-  eleven_v4_turbo: 0.04,
-  eleven_v3: 0.08,
-  eleven_flash_v2_5: 0.04,
+  /** Voxtral TTS 3: says a whole line, in a preset or a saved voice. */
+  "voxtral-mini-tts-3-0": 0.013,
 } as const;
 
-/** The providers that say a line: ElevenLabs (platform-ai.ts). */
-const speechProviders = ["elevenlabs"] as const;
+/** The providers that say a line: Mistral (platform-ai.ts). */
+const speechProviders = ["mistral"] as const;
 
-/** The providers that write down speech: OpenAI (platform-ai.ts). */
-const transcriptionProviders = ["openai"] as const;
+/** The providers that write down speech: Mistral (platform-ai.ts). */
+const transcriptionProviders = ["mistral"] as const;
 
 /** A speech model the gateway offers. */
 export interface VoiceRef {
@@ -46,7 +41,7 @@ const isSpeechProvider = (provider: string): provider is VoiceRef["provider"] =>
 
 /**
  * A speech model as the gateway names it, `<provider>/<model>`, such as
- * `elevenlabs/eleven_v4`; `undefined` for any other.
+ * `mistral/voxtral-mini-tts-3-0`; `undefined` for any other.
  */
 export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
@@ -64,19 +59,16 @@ export const speechCostOf = ({ id }: VoiceRef, characters: number): number =>
   (characters * dollarsPer1000Chars[id] * 1000) / 1_000_000;
 
 /**
- * OpenAI's prices for speech to text, in US dollars per hour of audio.
- * Whisper is billed per minute, $0.006. The GPT-4o transcription models
- * are billed per token: audio in ($6 a million, about $0.006 a minute; $3
- * for mini) and the text written out ($10 a million; $5 for mini), live
- * over the realtime socket as from a recording (OpenAI's pricing page,
- * read on 2026-10-29). A minute of speech writes out at most 300 tokens,
- * $0.003 (mini $0.0015): charged $0.01 a minute ($0.005 for mini), above
- * both together, and the prompt of words to listen out for with them.
+ * Mistral's prices for speech to text, in US dollars per hour of audio,
+ * billed per minute: live over the realtime socket $0.008 a minute, from
+ * a recording $0.0035 a minute (the Voxtral 3 announcement, read on
+ * 2026-11-12).
  */
 const dollarsPerHour = {
-  "gpt-4o-transcribe": 0.6,
-  "gpt-4o-mini-transcribe": 0.3,
-  "whisper-1": 0.36,
+  /** Voxtral Transcribe Realtime 3: hears as someone speaks. */
+  "voxtral-mini-transcribe-realtime-3-0": 0.48,
+  /** Voxtral Mini Transcribe 3: writes a recording down. */
+  "voxtral-mini-transcribe-3-0": 0.21,
 } as const;
 
 /** A transcription model the gateway offers. */
@@ -95,7 +87,7 @@ const isTranscriptionProvider = (
 
 /**
  * A transcription model as the gateway names it, `<provider>/<model>`,
- * such as `openai/gpt-4o-transcribe`; `undefined` for any other, a speech
+ * such as `mistral/voxtral-mini-transcribe-3-0`; `undefined` for any other, a speech
  * model too: each takes calls of its own kind only.
  */
 export const parseHearingRef = (ref: string): HearingRef | undefined => {
@@ -115,62 +107,102 @@ export const hearingCostOf = ({ id }: HearingRef, seconds: number): number =>
 
 /**
  * Characters a line is charged as: its UTF-16 length, never fewer than
- * the characters (code points) ElevenLabs counts, so what is recorded is
- * never below what the line is billed.
+ * the characters (code points) Mistral counts, so what is recorded is
+ * never below what the line is billed. A direction (`[emotion=warm]`)
+ * counts too, as it is sent.
  */
 export const charactersOf = (text: string): number => text.length;
 
-/** When each character of a line is said, in seconds, as ElevenLabs aligns it. */
-export interface Alignment {
-  characters: readonly string[];
-  character_start_times_seconds: readonly number[];
-  character_end_times_seconds: readonly number[];
-}
+/** A WAV file's four-letter mark at `at`. */
+const markAt = (bytes: Uint8Array, at: number): string =>
+  String.fromCodePoint(...bytes.subarray(at, at + 4));
 
-const space = /^\s$/u;
+/** Where a WAV file's first chunk starts, after `RIFF`, its size and `WAVE`. */
+const wavChunksStart = 12;
+
+/** A chunk's header: its four-letter mark and its size. */
+const wavChunkHeader = 8;
 
 /**
- * The words of an aligned line, each a run of characters between spaces,
- * with when its first character starts and its last ends, in whole ms.
- * `undefined` when the alignment doesn't hold one time of each kind for
- * every character.
+ * How long a WAV file plays, in ms: the bytes of its samples over the
+ * bytes a second its format names. `undefined` for anything that isn't a
+ * WAV file with both. A `data` chunk that names more than the file holds
+ * (a size written before the audio was known) counts what is there.
  */
-export const wordsOf = ({
-  characters,
-  character_start_times_seconds: starts,
-  character_end_times_seconds: ends,
-}: Alignment): SpokenWord[] | undefined => {
+export const wavDurationMs = (bytes: Uint8Array): number | undefined => {
   if (
-    starts.length !== characters.length ||
-    ends.length !== characters.length
+    bytes.length < wavChunksStart ||
+    markAt(bytes, 0) !== "RIFF" ||
+    markAt(bytes, 8) !== "WAVE"
   ) {
     return undefined;
   }
-  const words: SpokenWord[] = [];
-  let word: { text: string; start: number; end: number } | undefined =
-    undefined;
-  const close = (): void => {
-    if (word !== undefined) {
-      words.push({
-        text: word.text,
-        startMs: Math.round(word.start * 1000),
-        endMs: Math.round(word.end * 1000),
-      });
-      word = undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let bytesPerSecond: number | undefined = undefined;
+  let at = wavChunksStart;
+  while (at + wavChunkHeader <= bytes.length) {
+    const mark = markAt(bytes, at);
+    const size = view.getUint32(at + 4, true);
+    const body = at + wavChunkHeader;
+    if (mark === "fmt " && body + 12 <= bytes.length) {
+      bytesPerSecond = view.getUint32(body + 8, true);
+    } else if (mark === "data") {
+      const samples = Math.min(size, bytes.length - body);
+      return bytesPerSecond === undefined || bytesPerSecond === 0
+        ? undefined
+        : Math.round((samples * 1000) / bytesPerSecond);
     }
-  };
-  for (const [at, character] of characters.entries()) {
-    const start = starts[at] ?? 0;
-    const end = ends[at] ?? start;
-    if (space.test(character)) {
-      close();
-    } else if (word === undefined) {
-      word = { text: character, start, end };
-    } else {
-      word.text += character;
-      word.end = end;
-    }
+    // A chunk of odd size is followed by one byte of padding.
+    at = body + size + (size % 2);
   }
-  close();
+  return undefined;
+};
+
+/** A direction to the voice, which is sent and never said: `[emotion=warm]`. */
+const direction = /\[[^\]]*\]/gu;
+
+const spaces = /\s+/u;
+
+/** A word's last character that ends a sentence, and one that ends a clause. */
+const sentenceEnd = /[.?!…]$/u;
+const clauseEnd = /[,;:]$/u;
+
+/**
+ * The pause after a word, in characters' worth of time: a breath after a
+ * comma, a longer one after a full stop, as the page paces a line it has
+ * no times for (apps/web/src/voice/timing.ts).
+ */
+const pauseAfter = (word: string): number => {
+  if (sentenceEnd.test(word)) {
+    return 6;
+  }
+  return clauseEnd.test(word) ? 3 : 1;
+};
+
+/**
+ * When each word of a line is said, estimated: Mistral's speech names no
+ * times, so each word takes its share of the audio's length by its
+ * characters and the pause after it. Close enough to light a line's words
+ * up as they are said (the page's use of them); never exact. Directions
+ * are left out, as they aren't said.
+ */
+export const wordsOver = (text: string, durationMs: number): SpokenWord[] => {
+  const written = text
+    .replaceAll(direction, " ")
+    .split(spaces)
+    .filter((word) => word !== "");
+  const shares = written.map((word) => charactersOf(word) + pauseAfter(word));
+  const whole = shares.reduce((sum, share) => sum + share, 0);
+  const words: SpokenWord[] = [];
+  let before = 0;
+  for (const [at, word] of written.entries()) {
+    const share = shares[at] ?? 0;
+    words.push({
+      text: word,
+      startMs: Math.round((before * durationMs) / whole),
+      endMs: Math.round(((before + share) * durationMs) / whole),
+    });
+    before += share;
+  }
   return words;
 };

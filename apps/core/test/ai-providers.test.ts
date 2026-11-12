@@ -1297,8 +1297,8 @@ describe("AI providers", { timeout: 60_000 }, () => {
         )
       ).toStrictEqual([
         "conversion: OpenAI, European Union",
-        "transcription: OpenAI, European Union",
-        "speech: ElevenLabs, European Union",
+        "transcription: Mistral AI, European Union (France)",
+        "speech: Mistral AI, European Union (France)",
       ]);
     });
 
@@ -1333,7 +1333,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const { platform } = await env.CONNECT.aiProviderRoutes();
       const noKey = await outcome(
         models(env).platformCall(
-          await callOf("mistral/mistral-small-latest", {
+          await callOf("openrouter/openai/gpt-5-mini", {
             work: { platform: "brain_upkeep" },
           })
         )
@@ -1343,7 +1343,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       );
 
       expect({ platform, noKey, notPlatform }).toStrictEqual({
-        platform: ["anthropic", "openai", "elevenlabs"],
+        platform: ["anthropic", "openai", "mistral"],
         noKey: "model.not_allowed",
         notPlatform: "model.invalid_call",
       });

@@ -434,8 +434,8 @@ describe("an organization from core's admin snapshot", () => {
       sonnet: euros((40 * 8000 * 3 + 40 * 120 * 15) / 1e6),
       opus: euros((40 * 8000 * 5 + 40 * 200 * 25 + 5000 * 5 + 1400 * 25) / 1e6),
       // He speaks a fifth of the time and listens to the rest.
-      voice: euros(40 * 0.2 * 0.15),
-      ears: euros(40 * 0.8 * 0.006),
+      voice: euros(40 * 0.2 * 0.012),
+      ears: euros(40 * 0.8 * 0.008),
     });
     // Tom's day is core's count alone: nothing worked out on top of it.
     expect(tom).toStrictEqual(shown().view.usage.days[1]);

@@ -86,15 +86,15 @@ export const realtimeSockets = async (): Promise<RealtimeSocket[]> => {
   return await response.json();
 };
 
-/** The newest realtime socket OpenAI's fake took, if any. */
+/** The newest realtime socket Mistral's fake took, if any. */
 export const newestSocket = async (): Promise<RealtimeSocket | undefined> => {
   const sockets = await realtimeSockets();
   return sockets.at(-1);
 };
 
-/** Has OpenAI's fake act on its open sockets: close them, send an error, or settle at a pause. */
+/** Has Mistral's fake act on its open sockets: close them, send an error, or write the rest of each stretch down late. */
 export const actOnRealtime = async (
-  act: { close: number } | { error: string } | { pause: true }
+  act: { close: number } | { error: number } | { late: true }
 ): Promise<void> => {
   await internet().fetch(realtimeControlUrl, {
     method: "POST",

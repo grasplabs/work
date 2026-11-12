@@ -236,10 +236,11 @@
       ],
       "vars": {
         "STAGE": "staging",
-        // For testing only, and on staging only: Grasp's own speech
-        // (ElevenLabs) and listening and conversion (OpenAI) go to the
-        // providers' usual hosts, not their EU data residency hosts, so
-        // keys of accounts without EU residency can be tried
+        // For testing only, and on staging only: Grasp's own conversion
+        // (OpenAI) goes to the provider's usual host, not its EU data
+        // residency host, so a key of an account without EU residency can
+        // be tried; speech and listening are Mistral's, in the EU either
+        // way
         // (@grasp-os/shared/ai-providers, `usualHostProviders`). Never set
         // for production, and the admin ignores it there
         // (src/deploy/context.ts, `usualHostsOf`).

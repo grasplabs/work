@@ -33,7 +33,7 @@ import type { Took } from "./store.ts";
 // prototype, packages/grasp: worker/speech.ts).
 //
 // Said through speech synthesis behind its interface (speech.ts): the
-// ElevenLabs voices fixed in src/platform-ai.ts, through the model
+// Mistral voices fixed in src/platform-ai.ts, through the model
 // gateway: the deployment's rules judge every line, its
 // budgets are charged, and the audit log records it, never the line.
 //
@@ -118,19 +118,6 @@ const failed = (error: unknown, requestId: string): Response => {
     code: "speech.failed",
   };
   return refused(refusal.status, speechErrors.create(refusal.code), requestId);
-};
-
-/**
- * The words of a line as written, from the words said: the direction's
- * words, up to the one that closes it, taken out. The line itself has no
- * bracket, so the first word that ends one ends the direction.
- */
-const wordsAsWritten = (
-  words: readonly SpokenWord[],
-  directed: boolean
-): SpokenWord[] => {
-  const closes = words.findIndex(({ text }) => text.endsWith("]"));
-  return directed && closes !== -1 ? words.slice(closes + 1) : [...words];
 };
 
 /** The page's request, read no further than it may be; `undefined` when it isn't one. */
@@ -296,7 +283,7 @@ const say = async (
   listener: Listener,
   requestId: string
 ): Promise<Response> => {
-  const model = speechModelOf(asked.quick);
+  const model = speechModelOf();
   const voice = platformAi.speech.voices[asked.speaker];
   const spoken = spokenOf(asked.text, asked.language, asked.tone);
   const key: SpokenKey = {
@@ -333,7 +320,8 @@ const say = async (
   const answer: SpeechAnswer = {
     audio: toBase64(speech.audio),
     mime: speech.mime,
-    words: wordsAsWritten(speech.words, spoken !== asked.text),
+    // Of the line as written: a direction is never among them (speech.ts).
+    words: speech.words,
   };
   const body = JSON.stringify(answer);
   await Promise.all([

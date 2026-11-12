@@ -100,7 +100,8 @@ import {
   parseHearingRef,
   parseVoiceRef,
   speechCostOf,
-  wordsOf,
+  wavDurationMs,
+  wordsOver,
 } from "./voice-models.ts";
 import type { HearingRef, VoiceRef } from "./voice-models.ts";
 
@@ -2496,7 +2497,7 @@ const relayOrFail = async (
 // Speech and listening: Grasp's own voice features, which Grasp pays for
 // (src/platform-ai.ts). A speech model says a line, and a
 // transcription model writes down what someone says (voice-models.ts),
-// each fixed in code at its provider's EU host. They go through the gateway
+// each fixed in code, at Mistral, in the EU. They go through the gateway
 // like any model call, as what is said and heard is interview content:
 // the rules judge it, and once it ended, what it used is recorded at its
 // price per character or per second, with its audit event, never anything
@@ -2506,8 +2507,8 @@ const relayOrFail = async (
 // and a provider Grasp has no key for is refused (`model.not_allowed`,
 // because `platform`), never served by another.
 
-/** Text without anything a URL's path would read apart: a voice's ID. */
-const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
+/** A voice's ID, as Mistral names its preset and saved voices (`voice_478`). */
+const voiceIdPattern = /^[A-Za-z0-9_]{1,64}$/u;
 
 /** An ISO 639-1 language code. */
 const languagePattern = /^[a-z]{2}$/u;
@@ -2537,36 +2538,28 @@ export type SpeechCall = z.input<typeof speechSchema> & {
 const speechTimeoutMs = 60_000;
 
 /**
- * Retries for a line the provider refused for a moment (429 or 5xx):
- * ElevenLabs says a few lines at a time and turns the rest away, which is
- * over in a moment.
+ * Retries for a line the provider refused for a moment (429 or 5xx): it
+ * says a few lines at a time and turns the rest away, which is over in a
+ * moment.
  */
 const speechRetries = 1;
 
 /** The wait before a line turned away is asked for again. */
 const speechRetryMs = 500;
 
-/** The audio asked for: MP3 at 44.1 kHz, 128 kbit/s, ElevenLabs's default. */
-const speechFormat = { query: "mp3_44100_128", mime: "audio/mpeg" } as const;
-
 /**
- * Steadier than the model's default: a voice says many separate lines, so
- * one line should sound like the next more than it should surprise.
+ * The audio asked for: WAV, 24 kHz mono as Mistral says every line. Its
+ * header says how long it plays, which a line's words are timed by
+ * (`wordsOver`), and Mistral starts answering it sooner than MP3; a line
+ * is at most `maxSpeechChars`, so about a minute of it.
  */
-const voiceSettings = { stability: 0.7, similarity_boost: 0.8 };
+const speechFormat = { name: "wav", mime: "audio/wav" } as const;
 
-/** The same seed for every line, so the same words sound the same. */
-const voiceSeed = 7;
+/** Where Mistral says a line. */
+const speechPath = "/v1/audio/speech";
 
-/** ElevenLabs's answer: the audio, and when each character is said. */
-const spokenSchema = z.object({
-  audio_base64: z.string().min(1),
-  alignment: z.object({
-    characters: z.array(z.string()),
-    character_start_times_seconds: z.array(z.number().nonnegative()),
-    character_end_times_seconds: z.array(z.number().nonnegative()),
-  }),
-});
+/** Mistral's answer: the audio, in base64. */
+const spokenSchema = z.object({ audio_data: z.string().min(1) });
 
 /** Base64 as bytes; `undefined` for text that isn't base64. */
 const bytesOf = (base64: string): Uint8Array | undefined => {
@@ -2719,18 +2712,13 @@ const admitSpeech = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  const query = new URLSearchParams({
-    // ElevenLabs keeps neither the line nor the audio.
-    enable_logging: "false",
-    output_format: speechFormat.query,
-  });
-  const path = `/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`;
+  // The voice says the language the line is written in: Mistral takes
+  // none named.
   const body = JSON.stringify({
-    text: call.text,
-    model_id: ref.id,
-    language_code: call.language,
-    seed: voiceSeed,
-    voice_settings: voiceSettings,
+    model: ref.id,
+    input: call.text,
+    voice_id: call.voice,
+    response_format: speechFormat.name,
   });
   return {
     env,
@@ -2741,7 +2729,7 @@ const admitSpeech = async (
       await connectRequest(
         env,
         target,
-        path,
+        speechPath,
         {
           headers: {
             "content-type": "application/json",
@@ -2820,31 +2808,37 @@ const sendSpeech = async (
   return sent;
 };
 
-/** What a line's answer holds, read; `undefined` when it isn't a line. */
-const readSpeech = async (answered: Response): Promise<Speech | undefined> => {
+/**
+ * What the answer to `text` holds, read: its audio, and its words timed
+ * over the audio's length (`wordsOver`). `undefined` when it isn't a line.
+ */
+const readSpeech = async (
+  answered: Response,
+  text: string
+): Promise<Speech | undefined> => {
   const parsed = spokenSchema.safeParse(
     await answered.json().catch(() => null)
   );
   if (!parsed.success) {
     return undefined;
   }
-  const audio = bytesOf(parsed.data.audio_base64);
-  const words = wordsOf(parsed.data.alignment);
-  return audio === undefined || words === undefined
+  const audio = bytesOf(parsed.data.audio_data);
+  const durationMs = audio === undefined ? undefined : wavDurationMs(audio);
+  return audio === undefined || durationMs === undefined
     ? undefined
-    : { audio, mime: speechFormat.mime, words };
+    : { audio, mime: speechFormat.mime, words: wordsOver(text, durationMs) };
 };
 
 /** The line the provider answered with, read; none when it said nothing. */
-const heardSpeech = async ({
-  answered,
-  answering,
-}: SpeechSent): Promise<Speech | undefined> => {
+const heardSpeech = async (
+  { answered, answering }: SpeechSent,
+  text: string
+): Promise<Speech | undefined> => {
   if (answered === undefined || answering === undefined) {
     return undefined;
   }
   try {
-    return await readSpeech(answered);
+    return await readSpeech(answered, text);
   } catch {
     // Cut off while its answer came in: said and billed all the same.
     return undefined;
@@ -2974,7 +2968,7 @@ export type ListeningOutcome = "answered" | "failed" | "cancelled";
 
 /** A listening the gateway admitted: the way to the provider, and how it is recorded. */
 export interface Listening {
-  /** The model as its provider's API names it, such as `gpt-4o-transcribe`. */
+  /** The model as its provider's API names it, such as `voxtral-mini-transcribe-3-0`. */
   modelId: string;
   /**
    * Sends one request of it to `path` at the provider (a recording to
@@ -3158,7 +3152,7 @@ const speakLine = async (
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const speech = await heardSpeech(sent);
+    const speech = await heardSpeech(sent, call.text);
     const stopped = limit.stopped();
     const outcome = speechOutcome(
       speech,
