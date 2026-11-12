@@ -437,7 +437,18 @@ const personalSteps = [
 const documentStep = (documentId: string): string =>
   `${documentStepPrefix}${documentId}`;
 
-/** The steps of a content purge of `documentIds`, in the order it runs them. */
+/**
+ * The steps of a content purge of `documentIds`, in the order it runs them:
+ * people's memory records and the host's copies first, so a document whose
+ * purge then fails doesn't leave them holding a term. What is written to
+ * them after their step ran (a record remembered, an answer given, an
+ * interview said while the purge runs) isn't covered, as nothing written
+ * to a document after a purge completed is: the purge's check counts only
+ * the documents named (`stillFound`), never those, and running the purge
+ * again erases it. Their steps stay first: run last, they would narrow
+ * that window, but leave everyone's records holding a term whenever a
+ * document's purge fails, which is the more likely of the two.
+ */
 const contentSteps = (documentIds: readonly string[]): string[] => [
   "statements",
   "host_copies",
@@ -2027,14 +2038,13 @@ const purgeContent = async <C>(
     // fails doesn't leave them holding a term.
     // The step keeps no count of them: how many records a term was in
     // says what people's private records held (`purgeStatus`).
-    await runStep(brain, held, "statements", async (save) => {
+    await runStep(brain, held, "statements", async () => {
       await eraseStatements(
         brain,
         by.actor,
         purgeId,
         (statement) => erasedStatement(statement, matcher),
-        () => heldNow(brain, held),
-        () => [save({})]
+        () => heldNow(brain, held)
       );
     });
     // The host's copies hold people's words too: every one is rewritten,

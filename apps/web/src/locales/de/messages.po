@@ -13505,6 +13505,10 @@ msgstr "das Team in {field}"
 msgid "The team in {field}"
 msgstr "Das Team in {field}"
 
+#: src/knowledge/purge.tsx
+msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
+msgstr "Die Begriffe verschwinden auch aus den Erinnerungen, Interviews und Antworten aller. Wie viele davon sie enthalten, wird weder gezählt noch angezeigt."
+
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"
 msgstr "Der Test hat nicht funktioniert. {model} hat nicht geantwortet: {why}"

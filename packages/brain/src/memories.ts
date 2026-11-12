@@ -329,9 +329,7 @@ export const eraseStatements = async <C>(
   purgeId: string,
   erase: (statement: string) => string | null,
   /** Each change is made only while it holds (a purge's hold, as it runs). */
-  holds: () => SQL = () => sql`1`,
-  /** What each batch carries besides (a purge's hold on its step). */
-  also: () => BatchItem<"sqlite">[] = () => []
+  holds: () => SQL = () => sql`1`
 ): Promise<void> => {
   const { db } = brain;
   const changes: { id: string; revision: number; now: string | null }[] = [];
@@ -404,7 +402,7 @@ export const eraseStatements = async <C>(
     const [first, ...rest] = batch.flatMap(write);
     if (first !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await auditedBatch(brain.ports, db, [first, ...rest, ...also()]);
+      await auditedBatch(brain.ports, db, [first, ...rest]);
     }
   }
 };

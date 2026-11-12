@@ -224,7 +224,13 @@ const PurgeForm = ({
 };
 
 /** The plan, to confirm before it expires. */
-const PlanView = ({ plan }: { plan: PurgePlan }) => {
+const PlanView = ({
+  plan,
+  kind,
+}: {
+  plan: PurgePlan;
+  kind: PurgeInput["type"];
+}) => {
   const until = formatDateTime(plan.expiresAt);
   const longer = plan.inLongerWords;
   return (
@@ -247,6 +253,18 @@ const PlanView = ({ plan }: { plan: PurgePlan }) => {
             </Trans>
           </AlertDescription>
         </Alert>
+      ) : null}
+      {kind === "content" ? (
+        // A content purge's widest effect, said without a number: how many
+        // of those hold a term is never counted (it would say what
+        // someone's private records hold).
+        <p className="text-sm">
+          <Trans>
+            The terms also go from everyone&apos;s memory records, interviews
+            and answers. How many of those hold them isn&apos;t counted or
+            shown.
+          </Trans>
+        </p>
       ) : null}
       <p className="text-muted-foreground text-sm">
         <Trans>
@@ -375,7 +393,9 @@ const PurgeFlow = ({
           terms={terms}
         />
       ) : null}
-      {stage.at === "plan" ? <PlanView plan={stage.plan} /> : null}
+      {stage.at === "plan" ? (
+        <PlanView plan={stage.plan} kind={stage.input.type} />
+      ) : null}
       {stage.at === "done" ? <ResultView result={stage.result} /> : null}
       <ErrorText>{failure}</ErrorText>
       <DialogFooter>
