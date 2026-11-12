@@ -335,6 +335,12 @@ export default defineConfig({
               message:
                 "Reach the Brain through src/brain-next.ts, never its store binding.",
             },
+            {
+              // The same namespace, as the Worker's own exports give it.
+              property: "BrainStore",
+              message:
+                "Reach the Brain through src/brain-next.ts, never its store.",
+            },
           ],
         },
       },
