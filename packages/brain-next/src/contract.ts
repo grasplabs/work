@@ -1,3 +1,4 @@
+import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { z } from "zod";
 
 import type { BrainStore } from "./store.ts";
@@ -17,8 +18,8 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
-/** Most characters of a question. */
-export const questionMaxLength = 2000;
+/** Most characters of a question (the host's page holds to it too). */
+export const questionMaxLength = brainQuestionMaxLength;
 
 /** Most groups a reader can be in. */
 export const readerGroupsMax = 1000;
@@ -474,6 +475,81 @@ export const currentRequestSchema = z.strictObject({
   reader: readerSchema,
 });
 export type CurrentRequest = z.infer<typeof currentRequestSchema>;
+
+/** Most sources, or versions of one, a listing answers at a time. */
+export const listPageMax = 50;
+
+/** Most characters of a listed source's opening (`ListedSource`). */
+export const openingMaxLength = 200;
+
+/** Most key prefixes one listing of sources is limited to. */
+export const listPrefixesMax = 16;
+
+/**
+ * Sources to list, and who reads them: those whose key starts with one of
+ * `prefixes` (the host names its producers so), at most `limit` (at most
+ * `listPageMax`, and that when left out), after `after`: the last item of
+ * the page before, by its current version's time and its key.
+ */
+export const sourceListRequestSchema = z.strictObject({
+  reader: readerSchema,
+  prefixes: z
+    .array(wellFormedString().min(1).max(sourceIdMaxLength))
+    .min(1)
+    .max(listPrefixesMax),
+  after: z
+    .strictObject({ addedAt: z.date(), source: sourceIdSchema })
+    .optional(),
+  limit: z.int().min(1).max(listPageMax).optional(),
+});
+export type SourceListRequest = z.infer<typeof sourceListRequestSchema>;
+
+/**
+ * A source, as a listing names it: its current version and when that was
+ * added; the opening of its text (of its first passage, at most
+ * `openingMaxLength` characters), for a title; whether it is the
+ * reader's alone (its current version's readers are that one person); and
+ * how many of its versions the reader may read.
+ */
+export interface ListedSource {
+  source: SourceId;
+  version: number;
+  addedAt: Date;
+  opening: string;
+  personal: boolean;
+  versions: number;
+}
+
+/** A page of sources, and whether more follow it. */
+export interface SourceList {
+  sources: ListedSource[];
+  more: boolean;
+}
+
+/**
+ * Versions of a source to list, and who reads them: at most `limit` (at
+ * most `listPageMax`, and that when left out), those numbered below
+ * `before` when given.
+ */
+export const versionListRequestSchema = z.strictObject({
+  source: sourceIdSchema,
+  reader: readerSchema,
+  before: versionSchema.optional(),
+  limit: z.int().min(1).max(listPageMax).optional(),
+});
+export type VersionListRequest = z.infer<typeof versionListRequestSchema>;
+
+/** A version of a source, as a listing names it. */
+export interface ListedVersion {
+  version: number;
+  addedAt: Date;
+}
+
+/** A page of a source's versions, and whether more follow it. */
+export interface VersionList {
+  versions: ListedVersion[];
+  more: boolean;
+}
 
 /** A version of a source, whole: its original text, and when it was added. */
 export interface SourceVersion extends SourceVersionRef {
@@ -1000,6 +1076,22 @@ export interface Brain {
    * current version the reader may not read.
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
+  /**
+   * The sources whose current version the reader may read, among those
+   * whose key starts with one of the prefixes asked: newest first by when
+   * their current version was added, then by key, a page at a time. Each
+   * counts only the versions the reader may read. What they may not read,
+   * and what an erasure hid, is left out of everything a listing answers,
+   * its order, its counts and whether more follow, as if it didn't exist.
+   */
+  listSources: (request: SourceListRequest) => Promise<SourceList>;
+  /**
+   * The versions of a source the reader may read (as `readVersion`
+   * answers them: only while they may read its current version), newest
+   * first, a page at a time; none, alike, for a source that doesn't
+   * exist and one they may not read.
+   */
+  listVersions: (request: VersionListRequest) => Promise<VersionList>;
   /**
    * One tick of the host's clock, at `at`, the host's time now. First it
    * deletes one batch of what erasures hid and haven't deleted yet. Then
