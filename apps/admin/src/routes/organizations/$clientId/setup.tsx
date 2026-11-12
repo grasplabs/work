@@ -1,10 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { Suspense } from "react";
 
-import { useOrgRead } from "../../../admin/organization.tsx";
-import { Checklist, OrgSetup, setupTabs } from "../../../admin/setup.tsx";
+import { OrgSetup, setupTabs } from "../../../admin/setup.tsx";
 import type { SetupTab } from "../../../admin/setup.tsx";
-import { organizationOf } from "../../../admin/views.ts";
 import {
   fetchClientAiStatus,
   fetchClientSetup,
@@ -15,43 +12,19 @@ import {
 } from "../../../hosting/functions.ts";
 import { fetchPinChoices } from "../../../provision/functions.ts";
 
-/** The checklist, once its core answered; nothing while it doesn't. */
-const AnsweredChecklist = ({
-  clientId,
-  setup,
-}: {
-  clientId: string;
-  setup: Parameters<typeof Checklist>[0]["setup"];
-}) => {
-  const { admin } = useOrgRead();
-  const { view } = organizationOf(admin);
-  return view === null ? null : (
-    <Checklist
-      clientId={clientId}
-      contractRead={!view.unknown.contract}
-      setup={setup}
-      view={view}
-    />
-  );
-};
-
 const Setup = () => {
   const { clientId } = Route.useParams();
   const { setup, releases, hosting, progress, aiStatus } =
     Route.useLoaderData();
   const { tab = "status" } = Route.useSearch();
   // Shown whether or not its core answered: being set up, it has none yet.
-  // Only its checklist waits for that, in its own place.
   return (
     <OrgSetup
-      checklist={
-        <Suspense fallback={null}>
-          <AnsweredChecklist clientId={clientId} setup={setup} />
-        </Suspense>
-      }
+      aiStatus={aiStatus}
       clientId={clientId}
       hosting={hosting}
-      aiStatus={aiStatus}
+      // Another company's Setup starts anew, its AI read for itself.
+      key={clientId}
       progress={progress}
       releases={releases}
       setup={setup}
@@ -74,13 +47,15 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     const tab = setupTabs.find((each) => each === search.tab);
     return { tab: tab === "status" ? undefined : tab };
   },
-  loader: async ({ params, preload }) => {
+  loader: async ({ params, preload, cause }) => {
     // Not awaited: a slow or unreachable core never holds up the Setup. A
     // read that fails (the database included) shows no section, never the
     // route's error page in place of the Setup. It doesn't ask the core on
     // a preload (a link pointed at): that waits until the Setup is opened.
+    // Nor when the Setup open already reads itself again (`stay`), every
+    // few seconds through a deploy: it keeps the answer it opened with.
     const aiStatus = (async () => {
-      if (preload) {
+      if (preload || cause === "stay") {
         return null;
       }
       try {
