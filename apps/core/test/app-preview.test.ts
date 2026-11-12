@@ -249,6 +249,36 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     });
   });
 
+  it("tells the builders' pages when a version goes live under a draft that changes nothing, so they show the App live", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Desk" });
+    const app = appIdSchema.parse(id);
+    // Committed, not live yet: the draft changes nothing over it.
+    const { version } = await commitApp(
+      builder.api.apps.files,
+      app,
+      deskFiles(),
+      "First"
+    );
+    const heard: number[] = [];
+    await previewOf(app).watch(builder.userId, async (revision: number) => {
+      heard.push(revision);
+      await Promise.resolve();
+    });
+    const before = await builder.api.apps.drafts.get(app);
+
+    await builder.api.apps.versions.publish(app, version);
+    const after = await builder.api.apps.drafts.get(app);
+
+    expect({
+      told: heard.length > 0,
+      draft: { changed: before.changed, base: after.base },
+    }).toStrictEqual({
+      told: true,
+      draft: { changed: [], base: version },
+    });
+  });
+
   it("opens a draft whose page doesn't build on the App's latest version, its calls on the draft as it is and heard by the draft's check, then takes the next write that builds", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);

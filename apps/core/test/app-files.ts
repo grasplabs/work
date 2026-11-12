@@ -20,7 +20,6 @@ import type { Release } from "../src/app-releases.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { commitApp, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { published as publishedApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
 import { referenceTo } from "./notes-client-app.ts";
@@ -359,7 +358,6 @@ export const appsOf = (idp: Idp) => {
   const releasedApp = async (builder: Person) => {
     const admin = await personApi("admin");
     const { id } = await builder.api.apps.create({ name: "Notes" });
-    await publishedApp(id);
     const { version } = await commitApp(
       builder.api.apps.files,
       id,

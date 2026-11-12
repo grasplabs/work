@@ -21,7 +21,6 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitApp, testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { published as publishedApp } from "./apps.ts";
 import { referenceTo } from "./notes-client-app.ts";
 import { personApi } from "./page-client.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -266,7 +265,7 @@ export const openedApp = async (
   const builder = people.builder ?? (await personApi("builder"));
   const admin = people.admin ?? (await personApi("admin"));
   const { id } = await builder.api.apps.create({ name: "Writer" });
-  await publishedApp(id);
+  // Its first version, published: open to the people it is shared with.
   const { version } = await commitApp(
     builder.api.apps.files,
     id,

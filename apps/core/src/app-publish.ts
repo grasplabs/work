@@ -423,8 +423,9 @@ export const publishVersion = async (
     }
     throw error;
   }
-  if (resets) {
-    await draftRevised(env, found.id);
-  }
+  // Told even when no row of the draft changed: a draft with no changes
+  // reads as over the version live (`draftBase`), so its builders' open
+  // workspaces follow the version that went live.
+  await draftRevised(env, found.id);
   return live;
 };
