@@ -73,10 +73,12 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import * as brainSkills from "../src/brain-skills.ts";
 import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
+import { shippedSkills } from "../src/shipped-skills.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 
 /** The reader a probe calls as, and what they may not see. */
@@ -1440,6 +1442,113 @@ export const coreProbes = {
       "a marked item worked through core's clock after a re-embed"
     )),
   ],
+  // Adds Grasp's own skills only, by the names the release ships, a
+  // skill every member may read: the release's own text, which holds no
+  // marker, then refusals each holding the markers. A skill added with
+  // them would be the company's to read.
+  addShippedSkill: async ({ markers }) => {
+    const text = markedText(markers);
+    const add = async (name: string, added: unknown) =>
+      await answer(
+        name,
+        async () => await coreBrain.addShippedSkill(env, unchecked(added))
+      );
+    const drawing = shippedSkills.find(
+      ({ name }) => name === "draw-a-workflow"
+    );
+    const named = (name: string) =>
+      `---\nname: ${name}\ndescription: ${text}\n---\n${text}`;
+    return [
+      await add("the release's own", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text: drawing?.text,
+      }),
+      await add("text with no card", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text,
+      }),
+      await add("a card of another name", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text: named("run-a-baseline"),
+      }),
+      await add("a name the release doesn't ship", {
+        name: "unwritten",
+        change: crypto.randomUUID(),
+        text: named("unwritten"),
+      }),
+      await add("too much text", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text: named("draw-a-workflow").padEnd(instructionsMaxLength + 1, " x"),
+      }),
+      await add("a name of the markers", {
+        name: markers.join("\n"),
+        change: crypto.randomUUID(),
+        text: named("draw-a-workflow"),
+      }),
+      await add("a scope named by the markers", {
+        name: "draw-a-workflow",
+        scope: markers.join(""),
+        change: crypto.randomUUID(),
+        text: named("draw-a-workflow"),
+      }),
+    ];
+  },
+  listSkillsAs: async ({ personId }) => [
+    await answer(
+      "the reader's skills",
+      async () =>
+        await coreBrain.listSkillsAs(
+          env,
+          personId,
+          new Set(["draw-a-workflow"])
+        )
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await coreBrain.listSkillsAs(env, stranger(), new Set<string>())
+    ),
+  ],
+  // A skill is read by its own key alone: no producer's source is under
+  // the skills' kind, so no hidden source can be named as one.
+  readSkillAs: async ({ personId, markers }) => {
+    const read = async (name: string, wanted: unknown) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.readSkillAs(env, personId, unchecked(wanted))
+      );
+    return [
+      await read("a skill never written", {
+        scope: "company",
+        name: "unwritten",
+        version: 1,
+      }),
+      await read("a name of the markers", {
+        scope: "grasp",
+        name: markers.join(" "),
+        version: 1,
+      }),
+      await read("a producer's kind as its scope", {
+        scope: "upload",
+        name: "unwritten",
+        version: 1,
+      }),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await coreBrain.readSkillAs(env, stranger(), {
+            scope: "grasp",
+            name: "draw-a-workflow",
+            version: 1,
+          })
+      ),
+    ];
+  },
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */
@@ -1739,6 +1848,140 @@ export const instructionProbes = {
     return asked;
   },
 } satisfies Record<InstructionMember, Probe>;
+
+/** Each export of core's brain-skills.ts. */
+type SkillMember = keyof typeof brainSkills;
+
+/** One probe per export of core's brain-skills.ts. */
+export const skillProbes = {
+  // The release's own, then skills holding the markers that aren't one:
+  // each refused, logged by its place alone.
+  installShippedSkills: async ({ markers }) => {
+    const text = markedText(markers);
+    return [
+      await answer(
+        "the release's skills",
+        async () => await brainSkills.installShippedSkills(env)
+      ),
+      await answer(
+        "marked skills that aren't one",
+        async () =>
+          await brainSkills.installShippedSkills(env, [
+            { name: "unwritten", text },
+            { name: markers.join("-"), text },
+          ])
+      ),
+    ];
+  },
+  skillsFor: async ({ personId }) => [
+    await answer(
+      "the reader's agent",
+      async () => await brainSkills.skillsFor(env, readersAgent(personId))
+    ),
+    await answer(
+      "an agent of someone who isn't a member",
+      async () => await brainSkills.skillsFor(env, readersAgent(stranger()))
+    ),
+    await answer(
+      "no authority",
+      async () =>
+        await brainSkills.skillsFor(env, unchecked({ onBehalfOf: personId }))
+    ),
+  ],
+  // A task of the markers finds what one of their twins does: nothing.
+  selectSkillsFor: async ({ personId, markers, sharedWord }) => {
+    const select = async (
+      name: string,
+      task: unknown,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await brainSkills.selectSkillsFor(env, readersAgent(personId), task),
+        about,
+        like
+      );
+    return [
+      await select(
+        "the markers",
+        { task: markers.join(" ") },
+        "hidden",
+        "the markers"
+      ),
+      await select(
+        "the markers",
+        { task: markers.map(twinOf).join(" ") },
+        "nothing",
+        "the markers"
+      ),
+      await select(
+        "beside the shared word",
+        { task: `${sharedWord} ${markers.join(" ")}` },
+        "hidden",
+        "beside the shared word"
+      ),
+      await select(
+        "beside the shared word",
+        { task: `${sharedWord} ${markers.map(twinOf).join(" ")}` },
+        "nothing",
+        "beside the shared word"
+      ),
+      await select("a workflow, beside the markers", {
+        task: `draw a workflow ${markers.join(" ")}`,
+      }),
+      await select("not a task", { task: markers }),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await brainSkills.selectSkillsFor(env, readersAgent(stranger()), {
+            task: markers.join(" "),
+          })
+      ),
+    ];
+  },
+  readSkillFor: async ({ personId, markers }) => {
+    const read = async (name: string, skill: unknown) =>
+      await answer(
+        name,
+        async () =>
+          await brainSkills.readSkillFor(env, readersAgent(personId), { skill })
+      );
+    await brainSkills.installShippedSkills(env);
+    const [shipped] = await brainSkills.skillsFor(env, readersAgent(personId));
+    return [
+      await read("a skill the release ships", shipped),
+      await read("a skill never written", {
+        scope: "company",
+        name: "unwritten",
+        version: 1,
+      }),
+      await read("a name of the markers", {
+        scope: "company",
+        name: markers.join("-"),
+        version: 1,
+      }),
+      await read("a Grasp skill this release doesn't ship", {
+        scope: "grasp",
+        name: "unwritten",
+        version: 1,
+      }),
+      await read("a version past any", {
+        scope: "grasp",
+        name: "draw-a-workflow",
+        version: 1_000_000,
+      }),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await brainSkills.readSkillFor(env, readersAgent(stranger()), {
+            skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+          })
+      ),
+    ];
+  },
+} satisfies Record<SkillMember, Probe>;
 
 /** What no caller reaches over RPC: the runtime's own handlers, such as the alarm. */
 type Handler = keyof Rpc.DurableObjectBranded | "alarm";
@@ -3291,6 +3534,7 @@ interface Surface {
 export const brainSurfaces = [
   { name: "core", module: coreBrain, probes: coreProbes },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
+  { name: "skills", module: brainSkills, probes: skillProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
   { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
 ] as const satisfies readonly Surface[];
