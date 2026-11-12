@@ -639,6 +639,36 @@ const pausedAt = (db: Db, now: number): boolean =>
   (bucketOf(db)?.pausedUntil ?? 0) > now;
 
 /**
+ * `?1` how long a parked item waits (`workParkedMs`), `?2` how often one
+ * may come back (`workParksMax`): when the claim (`claim`) could next take
+ * an item. The first not running and not parked, when due (its
+ * `not_before`), and the first parked one that comes back by itself
+ * (`returnParkedSql`), when its day is over; either once the queue's pause
+ * (rule 1) is over. Null when none is left: what is parked for good stays
+ * for staff.
+ */
+const queueDueSql = `
+SELECT max(min(at), (SELECT coalesce(max(paused_until), 0)
+  FROM work_model_bucket)) AS at
+FROM (
+  SELECT min(not_before) AS at FROM work_items
+    WHERE running = 0 AND parked_at IS NULL
+  UNION ALL SELECT min(parked_at) + ?1 FROM work_items
+    WHERE parked_at IS NOT NULL AND parks < ?2
+)
+HAVING min(at) IS NOT NULL`;
+
+/**
+ * When a tick could next claim an item of the queue in `storage`, in the
+ * queue's time (milliseconds), or null when none would ever be (above).
+ */
+export const queueDueAt = (storage: DurableObjectStorage): number | null =>
+  storage.sql
+    .exec<{ at: number }>(queueDueSql, workParkedMs, workParksMax)
+    .toArray()
+    .at(0)?.at ?? null;
+
+/**
  * Up to `free` of the due items, the first first, within each connection's
  * limit: the first few of no connection and of each connection with room,
  * merged, never the backlog of one at its limit.

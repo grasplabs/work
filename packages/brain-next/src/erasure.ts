@@ -685,6 +685,19 @@ export const eraseBatch = (storage: DurableObjectStorage): Erased => {
   }
 };
 
+/**
+ * Whether the tick has an erasure's work to do: versions an erasure hid
+ * still to delete (`eraseBatch`), or a ledger entry still to write
+ * (`confirmPending`).
+ */
+export const erasureDue = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM erasing_versions)
+        OR EXISTS (SELECT 1 FROM erasures WHERE confirmed = 0)`
+    )
+    .toArray().length > 0;
+
 /** How many erasures still hide versions the tick has to delete. */
 export const erasuresUnfinished = (sql: SqlStorage): number =>
   sql

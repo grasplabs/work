@@ -407,6 +407,10 @@ const repack = (sql: SqlStorage, marked: MarkedBlock): void => {
   packTail(sql, marked.model, marked.reader_set);
 };
 
+/** Whether a block holds removed codes: what `repackVectors` repacks. */
+export const repackDue = (sql: SqlStorage): boolean =>
+  sql.exec("SELECT 1 FROM vector_removed LIMIT 1").toArray().length > 0;
+
 /**
  * Repacks one block holding removed codes. Run it in one transaction.
  * True when another block holds removed codes.
@@ -417,7 +421,7 @@ export const repackVectors = (sql: SqlStorage): boolean => {
     return false;
   }
   repack(sql, marked);
-  return sql.exec("SELECT 1 FROM vector_removed LIMIT 1").toArray().length > 0;
+  return repackDue(sql);
 };
 
 /**

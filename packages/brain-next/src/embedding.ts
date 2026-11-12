@@ -559,6 +559,32 @@ const dropStep = (storage: DurableObjectStorage, model: string): void => {
 };
 
 /**
+ * Whether the tick's step of embedding (`embeddingStep`) has work for the
+ * model it last saw: its walk not over (`walkStep`), or, once it is,
+ * something of a build it replaced still to remove (`dropStep`: codes,
+ * vectors not yet let go, passages it couldn't embed). None while it has
+ * seen no model: then the step does nothing.
+ */
+export const embeddingDue = (storage: DurableObjectStorage): boolean => {
+  const { sql } = storage;
+  const state = stateOf(sql);
+  if (state === undefined || state.model === null) {
+    return false;
+  }
+  return (
+    state.walked === 0 ||
+    sql
+      .exec(
+        `SELECT 1 WHERE EXISTS (SELECT 1 FROM vector_models WHERE name <> ?1)
+          OR EXISTS (SELECT 1 FROM vector_files WHERE model <> ?1 AND unheld = 0)
+          OR EXISTS (SELECT 1 FROM unembeddable WHERE model <> ?1)`,
+        state.model
+      )
+      .toArray().length > 0
+  );
+};
+
+/**
  * A tick's step of embedding, before the queue: notes the host's model,
  * walks a few current versions onto the queue for it, and once the walk is
  * over removes a little of the builds it replaced. Bounded, so it never
