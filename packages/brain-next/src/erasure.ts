@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
@@ -1094,6 +1096,25 @@ const storeDeleteMs = 10_000;
 /** Whether the store whose part of the bucket is `bucket` was erased whole. */
 export const isStoreErased = async (bucket: BrainBucket): Promise<boolean> =>
   (await inTime(bucket.head(storeErasedKey))) !== null;
+
+/** The record of a store's erasure, as `recordStoreErased` writes it. */
+const storeErasedSchema = z.object({ at: z.number() });
+
+/**
+ * When the store whose part of the bucket is `bucket` was erased whole, in
+ * milliseconds, by its record: null when there is none. Throws when R2
+ * fails or doesn't answer in time, or the record can't be read.
+ */
+export const storeErasedAt = async (
+  bucket: BrainBucket
+): Promise<number | null> => {
+  const record = await inTime(bucket.get(storeErasedKey));
+  if (record === null) {
+    return null;
+  }
+  const text = await inTime(record.text());
+  return storeErasedSchema.parse(JSON.parse(text)).at;
+};
 
 /**
  * Reads the first page of the ledger of the store whose part of the bucket

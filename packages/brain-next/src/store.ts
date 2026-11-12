@@ -53,6 +53,7 @@ import {
   erasuresOverview,
   erasuresUnfinished,
   isStoreErased,
+  storeErasedAt,
   keepMissingSubjects,
   ledgerPrefix,
   readLedgerStart,
@@ -445,11 +446,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Refuses a call to a store whose name says no one's, and ends this
    * instance: an id reached once without its name (`idFromString`) makes
    * an instance that can't know whose it is, and the next call, by name,
-   * gets an instance of its own that can.
+   * gets an instance of its own that can. The instance is ended before
+   * the refusal is thrown, which ends this call with the same words.
    */
   #refuseNoOnes(): never {
-    // Once this call is answered: aborting within it would end the call
-    // with the instance.
     this.ctx.abort(noOnes);
     throw new Error(noOnes);
   }
@@ -732,21 +732,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     // An add, a source's erasure or a tick that started before this may
     // still write a file, a vector or a ledger entry under the store's
-    // prefix after this deletes what it lists: while one is under way, the
-    // erasure isn't finished, and the caller's next call deletes what it
-    // wrote.
+    // prefix after this deletes what it lists. While one is under way in
+    // this instance, the erasure isn't finished. Nor is it while one that
+    // an earlier instance started (reset meanwhile, so no longer seen
+    // here) may still land: until the grace an add has to write its file
+    // (files.ts `fileGraceMs`) has passed since the record. Both are read
+    // before the listing, so what lands after it is deleted by a later
+    // call: the caller calls again until one is done.
     const quiet = this.#writes.size === 0;
     let done = false;
     try {
-      done = await deleteStoreObjects(this.#bucket, [
+      const at = await storeErasedAt(this.#bucket);
+      const settled = at !== null && Date.now() - at >= fileGraceMs;
+      const emptied = await deleteStoreObjects(this.#bucket, [
         filesPrefix,
         vectorsPrefix,
         ledgerPrefix,
       ]);
+      done = quiet && settled && emptied;
     } catch {
       // Nothing of the error is kept: it may name a key.
     }
-    if (!(done && quiet)) {
+    if (!done) {
       throw new Error(stillDeleting);
     }
   }
@@ -827,6 +834,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * has none. Its tick sets the next.
    */
   override async alarm(): Promise<void> {
+    if (this.#kind.kind === "unknown") {
+      // Ended as every call to it is (`#refuseNoOnes`): the runtime retries
+      // the alarm on an instance of its own.
+      this.ctx.abort(noOnes);
+      return;
+    }
     if (this.#kind.kind !== "person") {
       return;
     }
@@ -1057,7 +1070,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (this.#kind.kind === "unknown") {
       this.#refuseNoOnes();
     }
-    if (!this.#schema) {
+    // A person's own store shows nothing of what it holds until its ledger
+    // is read through: a restored copy of an erased store, started while
+    // its record can't be read, would show its queue, sizes and counts.
+    const unread =
+      this.#kind.kind === "person" &&
+      (this.#ledger !== "through" || this.#erased);
+    if (!this.#schema || unread) {
       return this.#emptyOverview();
     }
     return {

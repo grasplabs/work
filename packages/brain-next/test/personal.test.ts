@@ -10,6 +10,7 @@ import type { Access, Reader } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { packAcross } from "../src/across.ts";
 import {
@@ -18,6 +19,7 @@ import {
   recallBudgetMax,
   vectorModelNameOf,
 } from "../src/contract.ts";
+import { fileGraceMs } from "../src/files.ts";
 import type { BrainStore } from "../src/store.ts";
 
 /** A store, as its namespace gives it. */
@@ -223,6 +225,27 @@ const breakBucket = async (
   };
 };
 
+/** `bucket`, its `head` failing: a store can't read whether it was erased. */
+const failingHeads = (bucket: R2Bucket): unknown =>
+  Object.fromEntries(
+    r2Calls.map((name) => [
+      name,
+      name === "head"
+        ? async () => {
+            await Promise.resolve();
+            throw new Error("Broken by the test");
+          }
+        : async (...args: unknown[]) => {
+            const method: unknown = Reflect.get(bucket, name);
+            if (typeof method !== "function") {
+              throw new TypeError(`R2 has no ${name}`);
+            }
+            const result: unknown = await Reflect.apply(method, bucket, args);
+            return result;
+          },
+    ])
+  );
+
 /**
  * Holds the store's writes of versions' files from now on: `reached`
  * once one waits, which writes when `release` is called.
@@ -260,6 +283,41 @@ const holdFileWrites = async (
  * own promise would call the store again through it.
  */
 const called = async <T>(rpc: Promise<T>): Promise<T> => await rpc;
+
+/** The record of a store's erasure, as the store writes it. */
+const erasureRecordSchema = z.object({ reason: z.string(), at: z.number() });
+
+/**
+ * The record of this test's person's erasure moved back past the grace an
+ * add has to write its file (files.ts `fileGraceMs`), as time passing
+ * would.
+ */
+const ageErasure = async (): Promise<void> => {
+  const key = `${await ownPrefix()}erased`;
+  const record = await env.BRAIN_OBJECTS.get(key);
+  if (record === null) {
+    throw new Error("The store has no record of its erasure");
+  }
+  const { reason, at } = erasureRecordSchema.parse(
+    JSON.parse(await record.text())
+  );
+  await env.BRAIN_OBJECTS.put(
+    key,
+    JSON.stringify({ reason, at: at - fileGraceMs - 1 })
+  );
+};
+
+/**
+ * This test's person's store erased whole, as its caller erases it:
+ * called again, once the grace is over, until it answers done.
+ */
+const eraseWhole = async (): Promise<void> => {
+  await Promise.allSettled([
+    called(own().erasePerson({ person, reason: "person_erased" })),
+  ]);
+  await ageErasure();
+  await own().erasePerson({ person, reason: "person_erased" });
+};
 
 /** The reader that is this test's person. */
 const me = (): Reader => readerOf(person);
@@ -749,7 +807,7 @@ describe("a person's own store", () => {
       group: "company",
     });
 
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
 
     await expect(
       keysUnder(`${await ownPrefix()}sources/`)
@@ -765,7 +823,7 @@ describe("a person's own store", () => {
   // Threat 6: an erased store comes back by a late add.
   it("once erased whole, refuses every call, a late add after a restart included, and makes nothing", async () => {
     await add(own(), "Before the erasure", theirs());
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
     const erased = /this store was erased/u;
 
     await expect(
@@ -781,7 +839,7 @@ describe("a person's own store", () => {
   it("once erased whole, deletes what a restore brings back before it answers", async () => {
     await add(own(), "Before the erasure", theirs());
     const backup = await copyOf(own());
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
 
     await restore(own(), backup);
     await expect(
@@ -790,7 +848,7 @@ describe("a person's own store", () => {
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
 
     // Erasing again is safe, and keeps only the record of it.
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
     await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
       `${await ownPrefix()}erased`,
     ]);
@@ -803,7 +861,7 @@ describe("a person's own store", () => {
     const elsewhere = `people/${await sha256(`other-${person}`)}/sources/abc`;
     await env.BRAIN_OBJECTS.put(elsewhere, "someone else's");
 
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
 
     await expect(
       keysUnder(`${await ownPrefix()}vectors/`)
@@ -842,7 +900,7 @@ describe("a person's own store", () => {
     ).rejects.toThrow(/this store was erased/u);
     await heal();
 
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
     await expect(
       keysUnder(`${await ownPrefix()}sources/`)
     ).resolves.toStrictEqual([]);
@@ -861,7 +919,7 @@ describe("a person's own store", () => {
     const [outcome] = await adding;
     expect(outcome?.status).toBe("rejected");
 
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
     await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
       `${await ownPrefix()}erased`,
     ]);
@@ -879,7 +937,7 @@ describe("a person's own store", () => {
 
   it("sets no alarm once erased whole", async () => {
     await add(own(), "Work for its queue", theirs());
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
 
     await expect(alarmOf(own())).resolves.toBeNull();
   });
@@ -928,7 +986,7 @@ describe("a person's own store", () => {
       keysUnder(`${await ownPrefix()}erasures/`)
     ).resolves.not.toStrictEqual([]);
 
-    await own().erasePerson({ person, reason: "person_erased" });
+    await eraseWhole();
 
     await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
       `${await ownPrefix()}erased`,
@@ -947,5 +1005,65 @@ describe("a person's own store", () => {
     );
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
     await heal();
+  });
+
+  // Partial failure: an add of an instance reset meanwhile, no longer
+  // seen as under way, writes its file after the erasure listed the prefix.
+  it("is not erased until an add of an earlier instance can no longer write a file", async () => {
+    await add(own(), "Theirs", theirs());
+    const stillDeleting = /still deleting its files/u;
+    await expect(
+      called(own().erasePerson({ person, reason: "person_erased" }))
+    ).rejects.toThrow(stillDeleting);
+    await kill(own());
+    const late = `${await ownPrefix()}sources/late`;
+    await env.BRAIN_OBJECTS.put(late, "written late");
+
+    await expect(
+      called(own().erasePerson({ person, reason: "person_erased" }))
+    ).rejects.toThrow(stillDeleting);
+    await ageErasure();
+    await own().erasePerson({ person, reason: "person_erased" });
+    await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
+      `${await ownPrefix()}erased`,
+    ]);
+  });
+
+  // Threat 5: a restored copy shows staff nothing of what it holds
+  // before it has read whether it was erased.
+  it("shows nothing of what a restore brought back while it can't read whether it was erased", async () => {
+    await add(own(), "Queued before the erasure", theirs());
+    const backup = await copyOf(own());
+    await eraseWhole();
+    const bucket = env.BRAIN_OBJECTS;
+    Reflect.set(env, "BRAIN_OBJECTS", failingHeads(bucket));
+    try {
+      await restore(own(), backup);
+      const overview = await own().workOverview();
+      expect({
+        waiting: overview.waiting,
+        bytes: overview.storeBytes,
+        ledger: overview.ledgerReplay,
+      }).toStrictEqual({ waiting: [], bytes: 0, ledger: "unreadable" });
+    } finally {
+      Reflect.set(env, "BRAIN_OBJECTS", bucket);
+    }
+  });
+
+  // Threat 1: an alarm on an instance reached without its name.
+  it("ends an instance without its name when its alarm runs, so a call by name is answered", async () => {
+    const named = env.BRAIN_STORE.idFromName(`person:${person}`);
+    const unnamed = env.BRAIN_STORE.get(
+      env.BRAIN_STORE.idFromString(named.toString())
+    );
+    await runInDurableObject(unnamed, async (_instance, state) => {
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+    await Promise.allSettled([called(runDurableObjectAlarm(unnamed))]);
+
+    const kept = await add(own(), "Theirs, by name", theirs());
+    await expect(
+      own().readVersion({ ...kept, reader: me() })
+    ).resolves.toMatchObject({ text: "Theirs, by name" });
   });
 });
