@@ -147,6 +147,7 @@ const typeRules: readonly {
   // (GRA-1754): by the share's ID or the skill's name, never its text.
   { action: "skill.share.requested", type: "action" },
   { action: "skill.share.published", type: "action" },
+  { action: "skill.share.publish_failed", type: "action" },
   { action: "skill.share", type: "decision" },
   { action: "skill.retired", type: "config" },
   // A skill selected for a task, or none (GRA-310): which, never its text.

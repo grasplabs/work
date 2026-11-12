@@ -365,11 +365,19 @@ export const approveShare = async (
     }
     throw skillErrors.create("skills.not_found");
   }
-  const { version } = await addCompanySkill(env, by.userId, {
-    name: decided.name,
-    change: `share:${decided.id}`,
-    text: decided.text,
-  });
+  let version: number;
+  try {
+    ({ version } = await addCompanySkill(env, by.userId, {
+      name: decided.name,
+      change: `share:${decided.id}`,
+      text: decided.text,
+    }));
+  } catch (error) {
+    // The decision stands, and its outcome is said: not added yet.
+    // Approving it again finishes it.
+    await appendAuditEvent(env, shareEntry(by, "publish_failed", decided.id));
+    throw error;
+  }
   await auditedBatch(env, db, [
     db
       .update(skillShares)
