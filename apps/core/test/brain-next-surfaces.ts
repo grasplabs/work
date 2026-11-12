@@ -82,10 +82,10 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
-import * as brainSkills from "../src/brain-skills.ts";
-import { producersOf } from "../src/brain-sources.ts";
 import * as codeRecall from "../src/brain-recall.ts";
+import * as brainSkills from "../src/brain-skills.ts";
 import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
+import { producersOf } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
