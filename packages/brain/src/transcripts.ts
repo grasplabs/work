@@ -1,4 +1,3 @@
-import type { Transcript } from "@grasp-os/shared/transcripts";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -12,6 +11,7 @@ import { collections, documents, transcripts } from "./db/schema.ts";
 import type { DetailValue } from "./events.ts";
 import type { Json } from "./json.ts";
 import type { Provenance } from "./knowledge.ts";
+import type { Transcript } from "./transcript-schema.ts";
 
 // A document's transcript: what was said, turn by turn, and the chapters
 // it moved through. The Brain keeps it as any producer gives it (a speaker
@@ -39,8 +39,8 @@ import type { Provenance } from "./knowledge.ts";
 //   identifiers only (`transcriptDetail`).
 // - A flood: at most `transcriptMaxTurns` turns, `transcriptMaxChapters`
 //   chapters and `transcriptMaxBytes` in all (`transcriptSchema`, in
-//   @grasp-os/shared/transcripts, which every producer's transcript is
-//   checked against).
+//   transcript-schema.ts, which every producer's transcript is checked
+//   against).
 
 /** What a save's audit event says of the transcript it saved: counts only. */
 export const transcriptDetail = (

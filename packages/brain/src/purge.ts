@@ -1,4 +1,3 @@
-import type { Transcript } from "@grasp-os/shared/transcripts";
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -81,6 +80,7 @@ import {
   rebuildSearchIndex,
   secureDeleteReady,
 } from "./search-erasure.ts";
+import type { Transcript } from "./transcript-schema.ts";
 import {
   replaceTranscript,
   rewrittenTranscript,

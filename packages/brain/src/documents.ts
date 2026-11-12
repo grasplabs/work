@@ -1,5 +1,3 @@
-import { transcriptSchema } from "@grasp-os/shared/transcripts";
-import type { Transcript } from "@grasp-os/shared/transcripts";
 import { and, asc, desc, eq, gt, lt, ne } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -59,6 +57,8 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
+import { transcriptSchema } from "./transcript-schema.ts";
+import type { Transcript } from "./transcript-schema.ts";
 import {
   hasTranscript,
   transcriptDetail,

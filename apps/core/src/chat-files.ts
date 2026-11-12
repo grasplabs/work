@@ -18,7 +18,7 @@ import { hasText, signatures } from "./files/upload-checks.ts";
 // Reading a file attached to a chat's question (`chats.attachFile`): its
 // text, as the agent reads it. Checked as a Knowledge upload is, by what
 // arrived (its size, and that a PDF or Office file starts as its type
-// does), and read with Knowledge's local extractor, in a sandbox of its
+// does), and read with core's local extractor, in a sandbox of its
 // own (files/extract.ts). Never Workers AI's conversion: a chat file
 // is the person's own, and Workers AI isn't pinned to the EU, so its
 // content never leaves the deployment's own Workers. Text files are read
