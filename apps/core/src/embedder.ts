@@ -38,7 +38,8 @@ import { inJurisdiction } from "./durable-objects.ts";
 // in core's jurisdiction, the EU's.
 //
 // Warming: an object's first load copies the model into its own storage
-// (about 115 MB and 256,000 rows for the real model, seconds); after an
+// (the token table a row at a time, as many as its files hold: seconds for
+// a real model); after an
 // eviction it reloads from its own storage. The first question after a
 // deploy would wait for that, so the clock has the question embedder load
 // once in each new isolate (`warmQuestionEmbedder`): within a minute of a
@@ -197,7 +198,7 @@ let tried = false;
  * The clock's task: in a new isolate, after a deploy or a restart, has the
  * question embedder load its model, once, whether that works or not: a
  * file that doesn't check out fails the load, and loading it again every
- * minute would copy and clear 256,000 rows for nothing. The next isolate
+ * minute would copy and clear the whole token table for nothing. The next isolate
  * tries again. With no model (none ships yet) it does nothing. On-prem it
  * first copies the model's files from the release directory
  * (`MODEL_SOURCE`). Without the model's files (local dev has no real
