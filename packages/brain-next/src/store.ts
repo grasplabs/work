@@ -607,7 +607,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addVersion(this.#sources, adding, { indexed: true });
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: true })
+      );
     });
   }
 
@@ -620,8 +622,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addVersion(this.#sources, adding, { indexed: false });
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: false })
+      );
     });
+  }
+
+  /**
+   * `add` run, refused as an erased store refuses (`erasedWhole`) when
+   * this person's own store was erased whole while it ran: its storage
+   * is gone under it, and what went wrong is never the database's words.
+   */
+  async #unlessErasedMeanwhile<T>(add: () => Promise<T>): Promise<T> {
+    try {
+      return await add();
+    } catch (error) {
+      if (this.#erased) {
+        // Nothing of the error is kept: it is the database's.
+        throw new Error(erasedWhole, { cause: error });
+      }
+      throw error;
+    }
   }
 
   /**

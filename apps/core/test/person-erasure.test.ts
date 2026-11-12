@@ -25,6 +25,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
+import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
@@ -584,6 +585,10 @@ describe("erasing a person", () => {
     const preview = await admin.api.members.erasure(person.userId);
 
     const erased = await admin.api.members.erase(person.userId, name);
+    // Their own Brain store is still deleting as the request ends; the
+    // clock finishes it once an add under way could have ended.
+    await finishedByTheClock(person.userId);
+    const done = await admin.api.members.erasure(person.userId);
 
     const row = await userRow(person.userId);
     expect({
@@ -593,6 +598,7 @@ describe("erasing a person", () => {
         requestedAt: typeof erased.requestedAt,
         completedAt: typeof erased.completedAt,
       },
+      done: typeof done.erasure?.completedAt,
       name: row?.name,
       emailKept: row?.email.toLowerCase() === email.toLowerCase(),
       emailLooksLikeOne: row?.email.includes(email.split("@")[0] ?? email),
@@ -618,11 +624,12 @@ describe("erasing a person", () => {
           "interview",
           "runs",
           "brain",
+          "brain_sources",
         ],
       },
       erased: {
         requestedAt: "string",
-        completedAt: "string",
+        completedAt: "object",
         areas: [
           { area: "identity", state: "complete" },
           { area: "channels", state: "complete" },
@@ -632,8 +639,10 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
+          { area: "brain_sources", state: "pending" },
         ],
       },
+      done: "string",
       name,
       emailKept: false,
       emailLooksLikeOne: false,
@@ -816,6 +825,7 @@ describe("erasing a person", () => {
     const invited = await outcome(
       core.authenticate().members.invite(email, "user")
     );
+    await finishedByTheClock(person.userId);
 
     const after = await admin.api.members.erasure(person.userId);
     const invitations = await env.DB.prepare(
@@ -842,6 +852,7 @@ describe("erasing a person", () => {
       // Once erased, the name they had still asks for them.
       const again = await admin.api.members.erase(person.userId, name);
       expect(again).toStrictEqual(first);
+      await finishedByTheClock(person.userId);
     });
     const requested = audited.filter(
       ({ action }) => action === "member.erasure.requested"
@@ -886,7 +897,7 @@ describe("erasing a person", () => {
       accounts: await rowsOf("accounts", "user_id", person.userId),
     };
 
-    await runMinuteTasks();
+    await finishedByTheClock(person.userId);
 
     const done = await admin.api.members.erasure(person.userId);
     expect({
@@ -910,6 +921,8 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
+          // Their own Brain store still deleting, until the clock.
+          { area: "brain_sources", state: "pending" },
         ],
       },
       // Nothing of the area went: one statement, or none of it.
@@ -926,6 +939,7 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
+          { area: "brain_sources", state: "complete" },
         ],
       },
       accounts: 0,

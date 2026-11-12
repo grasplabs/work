@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch } from "../audit-outbox.ts";
+import { eraseSources, runSource } from "../brain-next-origins.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
@@ -154,6 +155,8 @@ interface DueStart {
   createdAt: number;
   /** Whether it admitted a run: its run has its ID (resource-runs.ts). */
   ran: boolean;
+  /** The person it runs for: a run's sources are theirs alone. */
+  principalId: string;
 }
 
 /**
@@ -179,6 +182,7 @@ const dueStarts = async (
       id: receipts.id,
       workflowId: receipts.workflowResourceId,
       createdAt: sql<number>`${receipts.createdAt}`,
+      principalId: receipts.principalId,
       run: runs.id,
     })
     .from(receipts)
@@ -194,11 +198,12 @@ const dueStarts = async (
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(limit);
-  return rows.map(({ id, workflowId, createdAt, run }) => ({
+  return rows.map(({ id, workflowId, createdAt, principalId, run }) => ({
     id,
     workflowId,
     createdAt,
     ran: run !== null,
+    principalId,
   }));
 };
 
@@ -233,6 +238,26 @@ const startDetailsRemoved = async (
   if (heldOf.length > 0) {
     await env.CONNECT.dropForEndedRuns({ runs: heldOf });
   }
+  // And what the new Brain took in of their runs (brain-next-origins.ts):
+  // erased before they are marked, so a sweep it fails for marks nothing
+  // and the next erases them again. A hand-over still on its way for one
+  // of them is refused from now on.
+  // A run's sources are the person it ran for alone (`owner`), so they
+  // are erased in that person's own store and the shared one.
+  await eraseSources(
+    env,
+    dueRows.flatMap(({ id, ran, principalId }) =>
+      ran
+        ? [
+            {
+              source: runSource(id),
+              readers: { kind: "owner" as const, personId: principalId },
+            },
+          ]
+        : []
+    ),
+    "retention"
+  );
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
@@ -339,24 +364,29 @@ export const sweepWorkflowStartDetails = async (
   const db = drizzle(env.DB);
   let swept = 0;
   let after: DueStart | undefined;
-  while (swept < startDetailsPerSweep) {
-    const limit = Math.min(sweptPerBatch, startDetailsPerSweep - swept);
-    // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
-    const page = await dueStarts(db, before, after, limit);
-    if (page.length === 0) {
-      break;
+  // What follows the starts needs neither connect nor the Brain: it runs
+  // even when a page of starts failed on one of them.
+  try {
+    while (swept < startDetailsPerSweep) {
+      const limit = Math.min(sweptPerBatch, startDetailsPerSweep - swept);
+      // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
+      const page = await dueStarts(db, before, after, limit);
+      if (page.length === 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
+      await startDetailsRemoved(env, page, before, now);
+      swept += page.length;
+      if (page.length < limit) {
+        break;
+      }
+      after = page.at(-1);
     }
-    // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
-    await startDetailsRemoved(env, page, before, now);
-    swept += page.length;
-    if (page.length < limit) {
-      break;
-    }
-    after = page.at(-1);
+  } finally {
+    await paramValuesRemoved(db, before, now);
+    // The snapshots no start or test run names any more.
+    await orphanedSnapshotsRemoved(db);
   }
-  await paramValuesRemoved(db, before, now);
-  // The snapshots no start or test run names any more.
-  await orphanedSnapshotsRemoved(db);
 };
 
 /**

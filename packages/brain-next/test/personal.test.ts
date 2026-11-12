@@ -999,7 +999,10 @@ describe("a person's own store", () => {
     ).rejects.toThrow(/still deleting its files/u);
     release();
     const [outcome] = await adding;
-    expect(outcome?.status).toBe("rejected");
+    // Refused as an erased store refuses, never in the database's words.
+    expect(
+      outcome?.status === "rejected" ? String(outcome.reason) : "added"
+    ).toBe("Error: The Brain refused it: this store was erased");
 
     await eraseWhole();
     await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
