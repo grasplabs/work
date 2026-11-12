@@ -624,13 +624,20 @@ export const SourcesPage = ({
   /** The person's connections, each one they have connected. */
   connections: Connection[];
 }) => {
+  // Each opening counts, so opening a source again (a search result
+  // citing a version, after another was picked in its panel) starts its
+  // panel afresh at what was asked.
   const [opened, setOpened] = useState<{
     source: BrainSourceRef;
     version?: number;
+    opening: number;
   }>();
   const heading = useId();
   const open = (source: BrainSourceRef, version?: number) => {
-    setOpened(version === undefined ? { source } : { source, version });
+    const opening = (opened?.opening ?? 0) + 1;
+    setOpened(
+      version === undefined ? { source, opening } : { source, version, opening }
+    );
   };
   return (
     // A page of the brain as its memory is (memory-page.tsx): the title in
@@ -663,7 +670,7 @@ export const SourcesPage = ({
             />
             {opened === undefined ? null : (
               <SourcePanel
-                key={`${keyOf(opened.source)}@${opened.version ?? "newest"}`}
+                key={opened.opening}
                 source={opened.source}
                 version={opened.version}
               />

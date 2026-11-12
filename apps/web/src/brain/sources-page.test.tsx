@@ -322,6 +322,22 @@ describe(SourcesPage, () => {
     });
   });
 
+  it("opens a result at the version it cites, even after another version was picked in its panel", async () => {
+    await shown([]);
+    await search("invoices");
+    await press("Invoices are paid monthly.");
+    const cited = panel();
+    await press("Version 2");
+    const picked = panel();
+    await press("Invoices are paid monthly.");
+
+    expect({
+      cited: cited.includes("Invoices are paid monthly."),
+      picked: picked.includes("Invoices are paid on Fridays."),
+      again: panel().includes("Invoices are paid monthly."),
+    }).toStrictEqual({ cited: true, picked: true, again: true });
+  });
+
   it("shows a version picked as loading until its own text arrives, never the text of the one before", async () => {
     const read = Promise.withResolvers<boolean>();
     await shown([], { firstRead: read.promise });
