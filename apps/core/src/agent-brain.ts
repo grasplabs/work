@@ -38,7 +38,7 @@ import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { grantedPermissions } from "./permissions.ts";
 
-// The company brain for a chat's code: `await env.brain.recall({ query })`
+// The company brain for a chat's code: `await env.brain.recall({ question, budget })`
 // and `await env.brain.gaps()`. Its recall is the one every caller of the
 // Brain makes (`recallFor`, brain-recall.ts), with the same request and
 // pack as an App's action and a workflow's step: as the chat's agent

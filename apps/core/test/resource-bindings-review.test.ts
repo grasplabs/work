@@ -246,7 +246,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     expect({
       states: statesOf(builders),
       choices: builders.resources.map(({ choices }) => choices),
-      // The bound target named, for builders too: only the collection bound.
+      // The bound target named, for builders too: neither names a connection.
       labels: builders.resources.map(({ binding }) => binding?.label),
       staff: staff.resources.map(({ choices }) => choices),
       member: await failure(
@@ -259,13 +259,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       states: { ai: "served", brain: "served" },
       choices: [null, null],
-      labels: [
-        { connection: null, collections: {} },
-        {
-          connection: null,
-          collections: { handbook: "Handbook", salaries: "Handbook" },
-        },
-      ],
+      labels: [{ connection: null }, { connection: null }],
       staff: [null, null],
       member: "app.not_found",
       otherBuilder: "app.not_found",
