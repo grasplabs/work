@@ -14709,6 +14709,10 @@ msgstr "Wijzigingen ongedaan maken"
 msgid "Undo the changes only you see?"
 msgstr "De wijzigingen die alleen jij ziet ongedaan maken?"
 
+#: src/apps/app-history.tsx
+msgid "Undone changes"
+msgstr "Ongedaan gemaakte wijzigingen"
+
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Onafgemaakte runs (gestopt) en beslissingsbevestigingen"

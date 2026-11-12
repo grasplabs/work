@@ -12,6 +12,13 @@ import { useCore } from "../use-core.ts";
 // its agent wrote (`worked`), and whenever the workspace changed it itself
 // (`reread`). So another builder's writes come into the preview at once.
 
+/**
+ * Whether the draft has changes only its builders see: files, or its
+ * definition alone. None while it isn't read yet.
+ */
+export const hasChanges = (draft: AppDraft | undefined): boolean =>
+  draft !== undefined && (draft.changed.length > 0 || draft.definitionChanged);
+
 /** Lets go of a watch; one whose connection is gone already is let go. */
 const releaseQuietly = async (subscription: {
   release: () => Promise<void>;

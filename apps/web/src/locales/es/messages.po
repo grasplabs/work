@@ -14709,6 +14709,10 @@ msgstr "Deshacer los cambios"
 msgid "Undo the changes only you see?"
 msgstr "¿Deshacer los cambios que solo ves tú?"
 
+#: src/apps/app-history.tsx
+msgid "Undone changes"
+msgstr "Cambios deshechos"
+
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Ejecuciones sin terminar (detenidas) y confirmaciones de decisiones"

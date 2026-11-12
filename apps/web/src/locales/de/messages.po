@@ -14709,6 +14709,10 @@ msgstr "Änderungen rückgängig machen"
 msgid "Undo the changes only you see?"
 msgstr "Die Änderungen, die nur Sie sehen, rückgängig machen?"
 
+#: src/apps/app-history.tsx
+msgid "Undone changes"
+msgstr "Rückgängig gemachte Änderungen"
+
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Unbeendete Ausführungen (gestoppt) und Entscheidungsbestätigungen"

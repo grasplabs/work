@@ -64,6 +64,7 @@ import {
 import type { FileGroup } from "./draft-changes.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
+import { hasChanges } from "./use-app-draft.ts";
 
 // Share with your team, in the App's workspace bar (app-workspace.tsx):
 // the page's one lime action, in place of a separate Publish and Share.
@@ -415,8 +416,8 @@ const undoShare = async (
     undoFailed(draft.error);
     return;
   }
-  const { revision, changed } = draft.value;
-  if (changed.length === 0) {
+  const { revision } = draft.value;
+  if (!hasChanges(draft.value)) {
     await takeBack(tools, app, back, revision);
     return;
   }
@@ -446,7 +447,7 @@ const versionToShare = (
   draft: AppDraft | undefined
 ): number | undefined =>
   draft !== undefined &&
-  draft.changed.length === 0 &&
+  !hasChanges(draft) &&
   app.currentVersion === null &&
   draft.base !== null
     ? draft.base
@@ -574,10 +575,6 @@ const useSharing = (
     },
   };
 };
-
-/** Whether the App has changes only its builders see, to share. */
-const hasChanges = (draft: AppDraft | undefined): boolean =>
-  draft !== undefined && (draft.changed.length > 0 || draft.definitionChanged);
 
 /**
  * The changes to share, read while the App has some and Grasp isn't

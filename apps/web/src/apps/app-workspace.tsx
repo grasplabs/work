@@ -76,7 +76,7 @@ import { DraftPreview } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
 import { ChangesLine, ShareWithTeam, showsChangesLine } from "./publish.tsx";
-import { useAppDraft } from "./use-app-draft.ts";
+import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
@@ -305,11 +305,7 @@ const WorkspaceBar = ({
       actions={
         <>
           <ViewSwitch app={app.id} view={view} />
-          <MoreMenu
-            app={app}
-            changing={draft !== undefined && draft.changed.length > 0}
-            chatId={chatId}
-          />
+          <MoreMenu app={app} changing={hasChanges(draft)} chatId={chatId} />
           {sharesApp(app, identity) ? (
             <ShareWithTeam
               app={app}
@@ -899,9 +895,7 @@ const showsTeams = ({
     return true;
   }
   return (
-    app.currentVersion !== null &&
-    draft !== undefined &&
-    draft.changed.length === 0
+    app.currentVersion !== null && draft !== undefined && !hasChanges(draft)
   );
 };
 
@@ -1014,7 +1008,7 @@ const Building = ({
 }) => {
   const { chatId, running, busy, draftChanges } = useAppChat(app.id);
   const { draft, reread } = useAppDraft(app.id, draftChanges);
-  const changing = draft !== undefined && draft.changed.length > 0;
+  const changing = hasChanges(draft);
   // Each reset of the test data in Data starts the preview afresh on it,
   // without the alert that it didn't fit.
   const [resets, setResets] = useState(0);

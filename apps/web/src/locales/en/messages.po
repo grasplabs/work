@@ -14709,6 +14709,10 @@ msgstr "Undo changes"
 msgid "Undo the changes only you see?"
 msgstr "Undo the changes only you see?"
 
+#: src/apps/app-history.tsx
+msgid "Undone changes"
+msgstr "Undone changes"
+
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Unfinished runs (stopped) and decision confirmations"

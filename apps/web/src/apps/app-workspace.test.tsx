@@ -924,9 +924,11 @@ describe(AppWorkspace, () => {
 
   it("shows its builder what the team sees while nothing is only theirs, and their own version once there are changes", async () => {
     const seen: Record<string, unknown> = {};
-    for (const [state, changed] of [
-      ["nothingOnlyTheirs", []],
-      ["changes", ["src/routes/index.tsx"]],
+    for (const [state, changed, definitionChanged] of [
+      ["nothingOnlyTheirs", [], false],
+      ["changes", ["src/routes/index.tsx"], false],
+      // Its data model changed, and no file: changes all the same.
+      ["definitionOnly", [], true],
     ] as const) {
       const core = new PreviewingCore();
       socketsTo(core);
@@ -937,7 +939,11 @@ describe(AppWorkspace, () => {
         undefined,
         undefined,
         undefined,
-        async () => await Promise.resolve(draftOf("invoice-desk", [...changed]))
+        async () =>
+          await Promise.resolve({
+            ...draftOf("invoice-desk", [...changed]),
+            definitionChanged,
+          })
       );
       // oxlint-disable-next-line no-await-in-loop -- one page at a time
       await settled();
@@ -957,6 +963,7 @@ describe(AppWorkspace, () => {
     expect(seen).toStrictEqual({
       nothingOnlyTheirs: { teams: true, previews: 0, offered: false },
       changes: { teams: false, previews: 1, offered: true },
+      definitionOnly: { teams: false, previews: 1, offered: true },
     });
   });
 
@@ -2094,6 +2101,27 @@ describe(AppWorkspace, () => {
       gone: null,
       toasts: ["Your changes are sharedUndo"],
     });
+  });
+
+  it("says under the bar there is a change only you see when only the App's data model changed", async () => {
+    await opened(
+      fakeApps({ sharedWith: [memberOf("team", "t-fin")] }).apps,
+      identityOf(false),
+      "chat-definition-only",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () =>
+        await Promise.resolve({
+          ...draftOf("invoice-desk", []),
+          definitionChanged: true,
+        })
+    );
+    await settled();
+
+    const line =
+      document.querySelector('[aria-label="Changes only you see"]')
+        ?.textContent ?? "";
+    expect(line).toContain("1 change only you see");
   });
 
   it("undoes the changes only you see from the line under the bar, once the person confirms", async () => {

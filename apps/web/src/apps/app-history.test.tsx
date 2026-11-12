@@ -106,6 +106,7 @@ const fakeApps = ({
   changed = [],
   refusal,
   versions = [versionOf(3), versionOf(2), versionOf(1)],
+  history = points,
 }: {
   role: ViewedApp["role"];
   archived?: boolean;
@@ -115,6 +116,8 @@ const fakeApps = ({
   refusal?: Error;
   /** The App's versions, newest first. */
   versions?: AppVersion[];
+  /** The draft's undo points, newest first. */
+  history?: AppDraftHistoryPoint[];
 }) => {
   const asked: unknown[][] = [];
   let app: ViewedApp = {
@@ -202,7 +205,7 @@ const fakeApps = ({
           [Symbol.dispose]: () => {},
         }),
       points: async (): Promise<AppDraftHistoryPoint[]> =>
-        await Promise.resolve(points),
+        await Promise.resolve(history),
       restorePoint: async (id: string, number: number, revision: number) => {
         await Promise.resolve();
         asked.push(["restore", id, number, revision]);
@@ -355,8 +358,9 @@ describe("An App's History", () => {
     });
   });
 
-  it("shows no unpublished changes while the draft has none", async () => {
-    const { session } = fakeApps({ role: "builder" });
+  it("shows no unpublished changes while the draft has none and none were undone", async () => {
+    // Its newest point is the one publishing version 2 left.
+    const { session } = fakeApps({ role: "builder", history: points.slice(2) });
     await shown(session, person("user-owner", "builder"));
 
     expect({
@@ -365,6 +369,39 @@ describe("An App's History", () => {
     }).toStrictEqual({
       unpublished: null,
       published: ["26.10.3", "26.10.2Your team has this one", "26.10.1"],
+    });
+  });
+
+  it("keeps the undo points of changes undone, each to see and restore, as Undo changes promised", async () => {
+    // Undone: the draft changes nothing, its points since version 2 stay.
+    const { session, asked } = fakeApps({ role: "builder" });
+    await shown(session, person("user-owner", "builder"));
+    const unpublished = section("app-unpublished") ?? document;
+    const seeIt = [...unpublished.querySelectorAll("a")].filter(
+      (link) => link.textContent.trim() === "See it"
+    ).length;
+
+    await press(button("Restore", unpublished));
+    await press(
+      button(
+        "Restore",
+        document.querySelector('[role="alertdialog"]') ?? document
+      )
+    );
+
+    expect({
+      heading: unpublished.querySelector("h3")?.textContent,
+      lines: titles("app-unpublished"),
+      seeIt,
+      undo: button("Undo changes", unpublished),
+      asked,
+    }).toStrictEqual({
+      heading: "Undone changes",
+      // None is the draft now: each can be brought back.
+      lines: ["Grasp, in Ann's chat", "Ben edited it"],
+      seeIt: 2,
+      undo: undefined,
+      asked: [["restore", appId, 4, 7]],
     });
   });
 

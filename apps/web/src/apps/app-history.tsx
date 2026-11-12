@@ -78,7 +78,7 @@ import {
   ReleaseMenuItems,
 } from "./release-controls.tsx";
 import type { ReleaseAction } from "./release-controls.tsx";
-import { useAppDraft } from "./use-app-draft.ts";
+import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 
 // An App's history, in its settings (app-settings.tsx), as a deployments
 // list reads: on top, while its draft has some, the unpublished changes,
@@ -353,7 +353,11 @@ const PointItem = ({
   </Item>
 );
 
-/** The draft's unpublished changes, its undo points, and discarding it. */
+/**
+ * The draft's unpublished changes, its undo points, and discarding it;
+ * once they were undone (the draft changes nothing), the undo points they
+ * left, to see and restore, while there are any.
+ */
 const UnpublishedChanges = ({
   draft,
   onChanged,
@@ -370,24 +374,35 @@ const UnpublishedChanges = ({
     onChanged
   );
   const points = typeof read === "object" ? unpublishedPoints(read.points) : [];
-  const [newest] = points;
+  const changing = hasChanges(draft);
+  // Undone, the draft is none of its points: each is one to restore.
+  const [newest] = changing ? points : [];
+  if (!changing && points.length === 0) {
+    return null;
+  }
   return (
     <section aria-labelledby="app-unpublished" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-base font-medium" id="app-unpublished">
-          <Trans>Changes only you see</Trans>
+          {changing ? (
+            <Trans>Changes only you see</Trans>
+          ) : (
+            <Trans>Undone changes</Trans>
+          )}
         </h3>
         <span className="flex-1" />
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setAsked({ kind: "discard" });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Undo changes</Trans>
-        </Button>
+        {changing ? (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setAsked({ kind: "discard" });
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <Trans>Undo changes</Trans>
+          </Button>
+        ) : null}
       </div>
       <ErrorText>{failure}</ErrorText>
       {read === undefined ? <LoadingLines lines={2} /> : null}
@@ -429,10 +444,13 @@ const UnpublishedChanges = ({
   );
 };
 
-/** The draft's unpublished changes, followed as it is written; none without any. */
+/**
+ * The draft's unpublished changes, followed as it is written, or the undo
+ * points of those undone; none without either.
+ */
 const Unpublished = ({ app }: { app: string }) => {
   const { draft, reread } = useAppDraft(app, 0);
-  return draft === undefined || draft.changed.length === 0 ? null : (
+  return draft === undefined ? null : (
     <UnpublishedChanges draft={draft} onChanged={reread} />
   );
 };
@@ -806,7 +824,7 @@ export const VersionsView = ({
       setMove({
         ...wanted,
         revision: draft.revision,
-        discards: draft.changed.length > 0,
+        discards: hasChanges(draft),
       });
     });
   };
