@@ -260,6 +260,94 @@ const dollars = (usd: number): string => `$${usd.toFixed(2)}`;
 const costLine = (arm: string, cost: ArmCost): string =>
   `${arm}: ${cost.inputTokens} input and ${cost.outputTokens} output tokens, ${dollars(cost.usd)} at list price`;
 
+/**
+ * Where a model run keeps its results: a folder of their own under the
+ * evaluation's (`.brain-eval/`), so the evaluation's own reader, which
+ * takes the newest file there as its baseline, never reads one.
+ */
+export const modelResultsFolder = "model";
+
+/** The markers a run prints its lines after. */
+const markers = {
+  run: "BRAIN_EVAL_MODEL_RUN",
+  result: "BRAIN_EVAL_MODEL_RESULT",
+  end: "BRAIN_EVAL_MODEL_END",
+} as const;
+
+/** A marker and the JSON after it, up to the next marker on its line. */
+const printedLine = new RegExp(
+  `(${Object.values(markers).join("|")}) (.*?)(?=(?:${Object.values(markers).join("|")}) |$)`,
+  "gmu"
+);
+
+/** What a run printed, as read back. */
+export interface ReadRun {
+  info: ModelRunInfo | undefined;
+  end: ModelRunEnd | undefined;
+  /** Each question's result once, by its id, as first printed. */
+  results: ModelResult[];
+  /** Lines after a marker that couldn't be read: cut short, garbled, or not a result. */
+  unread: number;
+}
+
+/** `text` as JSON, or undefined when it isn't (a line a crash cut short). */
+const jsonOf = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What a run printed in `output`, read back line by line. A line a crash
+ * cut short, or two run together, loses only what can't be read: each
+ * marker starts a value of its own. A result printed twice counts once. A
+ * run's info or end line that is whole JSON yet not in the format this
+ * script reads throws: a run of another format is never read as one cut
+ * off.
+ */
+export const readRun = (output: string): ReadRun => {
+  const read: ReadRun = {
+    info: undefined,
+    end: undefined,
+    results: [],
+    unread: 0,
+  };
+  const seen = new Set<string>();
+  for (const [, marker, text = ""] of output.matchAll(printedLine)) {
+    const value = jsonOf(text.trim());
+    if (value === undefined) {
+      read.unread += 1;
+      continue;
+    }
+    if (marker === markers.result) {
+      const result = modelResultSchema.safeParse(value);
+      if (!result.success) {
+        read.unread += 1;
+      } else if (!seen.has(result.data.id)) {
+        seen.add(result.data.id);
+        read.results.push(result.data);
+      }
+      continue;
+    }
+    const schema =
+      marker === markers.run ? modelRunInfoSchema : modelRunEndSchema;
+    const parsed = schema.safeParse(value);
+    if (!parsed.success) {
+      throw new Error(
+        `The run printed a ${marker} line this script can't read: run the script of the same commit as the run`
+      );
+    }
+    if (marker === markers.run) {
+      read.info = modelRunInfoSchema.parse(value);
+    } else {
+      read.end = modelRunEndSchema.parse(value);
+    }
+  }
+  return read;
+};
+
 /** How a run's results are kept: as passed, `-partial` or `-failed`. */
 export interface Kept {
   /** How it ended: as it printed, or, cut off before it said, as failed. */

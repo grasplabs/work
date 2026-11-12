@@ -183,6 +183,7 @@
   "@grasp-os/core test/brain-changes.test.ts": 3,
   "@grasp-os/core test/brain-consolidation.test.ts": 0.4,
   "@grasp-os/core test/brain-entity-matches.test.ts": 1.3,
+  "@grasp-os/core test/brain-eval-arms.test.ts": 2.5,
   "@grasp-os/core test/brain-eval-set.test.ts": 0.2,
   "@grasp-os/core test/brain-export.test.ts": 5,
   "@grasp-os/core test/brain-forget.test.ts": 1.1,

@@ -20,15 +20,15 @@
  * key (Anthropic's, Mistral's or OpenRouter's), which is never committed:
  * give it in the shell. No question starts once what core recorded as
  * spent, plus the most that question can cost, would pass the budget; the
- * provider key's own spend limit is the hard cap. Exits 1 when the run
- * failed or an answer held what its asker may not read; writes the result
- * to `.brain-eval/model-<time>-<sha>.json` (git-ignored) otherwise.
+ * provider key's own spend limit is the hard cap. Writes what was asked,
+ * since it was paid for, to `.brain-eval/model/model-<time>-<sha>.json`
+ * (git-ignored, apart from the evaluation's own runs), with `-partial`
+ * when it stopped at its budget and `-failed` when it failed, was cut off
+ * or an answer held what its asker may not read; exits 1 for those last.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-
-import type { z } from "zod";
 
 import { parseModelRef } from "../apps/core/src/model-catalog.ts";
 import {
@@ -50,10 +50,9 @@ import {
 } from "../apps/core/test/real-providers.ts";
 import {
   modelReport,
-  modelResultSchema,
-  modelRunEndSchema,
-  modelRunInfoSchema,
   keptAs,
+  modelResultsFolder,
+  readRun,
   summarizeModelRun,
 } from "./brain-eval-model-scoring.ts";
 
@@ -177,34 +176,36 @@ const run = spawnSync(
 );
 const output = `${run.stdout}${run.stderr}`;
 
-/**
- * What the run printed after `marker`, a JSON value a line, parsed by
- * `schema`: a line a crash cut short is left out, never the whole run.
- */
-const linesAfter = <T>(marker: string, schema: z.ZodType<T>): T[] =>
-  output.split("\n").flatMap((line): T[] => {
-    const at = line.indexOf(`${marker} `);
-    if (at === -1) {
-      return [];
-    }
-    try {
-      const parsed = schema.safeParse(
-        JSON.parse(line.slice(at + marker.length + 1))
-      );
-      return parsed.success ? [parsed.data] : [];
-    } catch {
-      return [];
-    }
-  });
-
-const [info] = linesAfter("BRAIN_EVAL_MODEL_RUN", modelRunInfoSchema);
-const [printedEnd] = linesAfter("BRAIN_EVAL_MODEL_END", modelRunEndSchema);
-const results = linesAfter("BRAIN_EVAL_MODEL_RESULT", modelResultSchema);
+let read;
+try {
+  read = readRun(output);
+} catch (error) {
+  process.stderr.write(`${output.split("\n").slice(-60).join("\n")}\n`);
+  fail(error instanceof Error ? error.message : String(error));
+}
+const {
+  info,
+  end: printedEnd,
+  results,
+  unread,
+} = read ?? {
+  info: undefined,
+  end: undefined,
+  results: [],
+  unread: 0,
+};
 const tail = `${output.split("\n").slice(-60).join("\n")}\n`;
 if (info === undefined || (printedEnd === undefined && results.length === 0)) {
   process.stderr.write(tail);
   fail(
-    "The run did not finish: see its output above. Nothing was asked, so nothing was kept."
+    unread > 0
+      ? `The run printed ${unread} results this script could not read (cut short or garbled): see its output above. Nothing was kept.`
+      : "The run did not finish: see its output above. Nothing was asked, so nothing was kept."
+  );
+}
+if (unread > 0) {
+  process.stderr.write(
+    `${unread} printed lines could not be read (cut short or garbled) and are left out.\n`
   );
 }
 // What was asked is kept, since it was paid for: marked failed when the
@@ -218,7 +219,7 @@ const { end, failed, partial, suffix } = keptAs(
   summary.leaks.length
 );
 process.stdout.write(`${modelReport(summary, end, questions.length)}\n`);
-const out = path.join(root, ".brain-eval");
+const out = path.join(root, ".brain-eval", modelResultsFolder);
 mkdirSync(out, { recursive: true });
 const at = new Date().toISOString();
 const file = path.join(

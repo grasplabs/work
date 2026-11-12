@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import { brainEvalPeople } from "../apps/core/test/fixtures/brain-eval/company.ts";
@@ -34,9 +38,12 @@ import { tokensOf } from "../packages/brain-next/src/contract.ts";
 import {
   keptAs,
   modelReport,
+  modelResultsFolder,
+  readRun,
   summarizeModelRun,
 } from "./brain-eval-model-scoring.ts";
 import type { ModelResult } from "./brain-eval-model-scoring.ts";
+import { lastRunIn } from "./brain-eval-scoring.ts";
 
 // The Brain evaluation's run against a model (GRA-1813), its pure parts:
 // what "everything" gives the model, the most a question can cost, and
@@ -380,5 +387,89 @@ describe("scoring the run", () => {
       keptAs(0, whole, printed, 1).suffix,
       keptAs(0, { ...whole, asked: 2 }, printed, 0).suffix,
     ]).toStrictEqual(["-partial", true, "", "-failed", "-failed"]);
+  });
+});
+
+/** What a run prints before its first question. */
+const infoLine = `BRAIN_EVAL_MODEL_RUN ${JSON.stringify({
+  set: "s",
+  setDigest: "d",
+  model: "mistral/mistral-large-latest",
+  questions: 10,
+  packTokens: 4000,
+  everythingTokens: null,
+  budgetUsd: 1,
+  packSearch: "words and exact parts",
+})}`;
+
+/** A result line, as a run prints it. */
+const resultLine = (id: string): string =>
+  `BRAIN_EVAL_MODEL_RESULT ${JSON.stringify(result(id, true, false))}`;
+
+describe("reading a run back", () => {
+  it("keeps every whole result once, and counts what it can't read: a cut line, a garbled one, one not a result, two run together", () => {
+    const whole = resultLine("whole");
+    const output = [
+      "workerd says hello",
+      infoLine,
+      whole,
+      // Cut short by a crash.
+      resultLine("cut").slice(0, 60),
+      // Garbled.
+      "BRAIN_EVAL_MODEL_RESULT {not json}",
+      // Whole JSON, not a result.
+      'BRAIN_EVAL_MODEL_RESULT {"id":"odd"}',
+      // A cut line and a whole one run together.
+      `${resultLine("first").slice(0, 70)}${resultLine("second")}`,
+      // Printed twice.
+      whole,
+    ].join("\n");
+
+    const read = readRun(output);
+
+    expect({
+      info: read.info?.model,
+      end: read.end,
+      results: read.results.map(({ id }) => id),
+      unread: read.unread,
+    }).toStrictEqual({
+      info: "mistral/mistral-large-latest",
+      end: undefined,
+      results: ["whole", "second"],
+      unread: 4,
+    });
+  });
+
+  it("refuses a run's info or end line in a format it doesn't read, rather than reading the run as cut off", () => {
+    const strangeEnd = `BRAIN_EVAL_MODEL_END ${JSON.stringify({ asked: 1, finished: true })}`;
+    const strangeInfo = `BRAIN_EVAL_MODEL_RUN ${JSON.stringify({ set: "s" })}`;
+
+    expect(() =>
+      readRun([infoLine, resultLine("a"), strangeEnd].join("\n"))
+    ).toThrow(/can't read/u);
+    expect(() => readRun(strangeInfo)).toThrow(/can't read/u);
+  });
+
+  it("leaves a model run's results out of the evaluation's own baseline", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "brain-eval-"));
+    try {
+      writeFileSync(
+        path.join(dir, "2026-11-12T10-00-00.000Z-0123abcd.json"),
+        "{}"
+      );
+      mkdirSync(path.join(dir, modelResultsFolder));
+      writeFileSync(
+        path.join(
+          dir,
+          modelResultsFolder,
+          "model-2026-11-12T11-00-00.000Z-0123abcd-failed.json"
+        ),
+        "{}"
+      );
+
+      expect(lastRunIn(dir)).toBe("2026-11-12T10-00-00.000Z-0123abcd.json");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

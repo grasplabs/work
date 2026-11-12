@@ -5,24 +5,17 @@ import { z } from "zod";
 import { recallAs } from "../src/brain-next.ts";
 import { parseModelRef } from "../src/model-catalog.ts";
 import { usageRecorded } from "../src/model-usage.ts";
-import { models } from "../src/models.ts";
+import { answerAndJudge, bothArms } from "./brain-eval-arms.ts";
 import { idIn, setUpEvalCompany } from "./brain-eval-company.ts";
 import { realProvider } from "./brain-real-provider.ts";
 import type { BrainEvalQuestion } from "./fixtures/brain-eval/company.ts";
 import {
-  answerInput,
-  answerSystem,
   answeringPassageOf,
   costOf,
   everythingBudgetOf,
   everythingFor,
-  judgeInput,
-  judgeSystem,
-  judgedCorrect,
-  outputTokensMax,
   packTokens,
   questionTokensMax,
-  saidNotFound,
   secretsHiddenFrom,
   seededOrder,
   sourceBlock,
@@ -93,59 +86,6 @@ const spentIn = async (months: ReadonlySet<string>): Promise<number> => {
     total += await spentMicros(month);
   }
   return total;
-};
-
-/** One answer through core's gateway: its text and the tokens it used. */
-const ask = async (
-  purpose: string,
-  system: string,
-  input: string
-): Promise<{ text: string; input: number; output: number }> => {
-  const { text, usage } = await models(env).call({
-    model: settings.model,
-    system,
-    input,
-    purpose,
-    trigger: { type: "system" },
-    work: { platform: "brain_upkeep" },
-    maxTokens: outputTokensMax,
-  });
-  return { text, input: usage.inputTokens, output: usage.outputTokens };
-};
-
-/** Secrets of `question` that `text` holds. */
-const leaksIn = (question: BrainEvalQuestion, text: string): string[] =>
-  question.expects.kind === "hidden"
-    ? question.expects.secrets.filter((secret) => text.includes(secret))
-    : [];
-
-/** One arm's answer to `question` from `context`, judged. */
-const answerAndJudge = async (
-  question: BrainEvalQuestion,
-  arm: "pack" | "everything",
-  context: string,
-  passage: string
-) => {
-  const answered = await ask(
-    `brain.eval.${arm}`,
-    answerSystem,
-    answerInput(question.question, context)
-  );
-  const leaks = leaksIn(question, answered.text);
-  let correct = saidNotFound(answered.text) && leaks.length === 0;
-  let { input } = answered;
-  let { output } = answered;
-  if (question.expects.kind === "answer") {
-    const verdict = await ask(
-      "brain.eval.judge",
-      judgeSystem,
-      judgeInput(question.question, passage, answered.text)
-    );
-    correct = judgedCorrect(verdict.text);
-    input += verdict.input;
-    output += verdict.output;
-  }
-  return { correct, leaks, inputTokens: input, outputTokens: output };
 };
 
 describe("the Brain evaluation against a real model", () => {
@@ -222,20 +162,27 @@ describe("the Brain evaluation against a real model", () => {
           );
         }
       }
-      // Both arms settle before either's failure is thrown, so the run ends
-      // only once nothing it started still spends.
-      const [packed, given] = await Promise.allSettled([
-        answerAndJudge(question, "pack", pack, passage),
-        answerAndJudge(question, "everything", everything.text, passage),
-      ]);
-      if (packed.status === "rejected") {
-        throw packed.reason;
-      }
-      if (given.status === "rejected") {
-        throw given.reason;
-      }
-      const fromPack = packed.value;
-      const fromEverything = given.value;
+      // Both settle before either's failure is thrown (`bothArms`).
+      const { pack: fromPack, everything: fromEverything } = await bothArms(
+        async () =>
+          await answerAndJudge(
+            env,
+            settings.model,
+            question,
+            "pack",
+            pack,
+            passage
+          ),
+        async () =>
+          await answerAndJudge(
+            env,
+            settings.model,
+            question,
+            "everything",
+            everything.text,
+            passage
+          )
+      );
       for (const [arm, result] of [
         ["pack", fromPack],
         ["everything", fromEverything],
