@@ -30,4 +30,7 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Adds what a chat's agent read through a connection with core's
+  // addSource, for the chat's person alone, and hands nothing on.
+  "apps/core/src/connection-capture.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;

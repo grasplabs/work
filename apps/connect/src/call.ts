@@ -11,6 +11,7 @@ import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
   ConnectCall,
+  ConnectResult,
   HeldOutcome,
   PendingReference,
 } from "@grasp-os/shared/connect";
@@ -28,6 +29,8 @@ import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
+
+import { toolkitsWithoutCopies } from "#composio-classes";
 
 import { requirePointedResource } from "./app-pointers.ts";
 import { changeOf } from "./changes.ts";
@@ -216,6 +219,8 @@ export interface CallDone extends StoredAnswer {
   reconciled?: boolean;
   /** What it changed, as its native connector said: kept with its answer. */
   change?: CallChange;
+  /** A read core may keep as a source (`ConnectResult.keep`). */
+  keep?: ConnectResult["keep"];
 }
 
 /** What a held call answers: nothing done yet. */
@@ -641,6 +646,25 @@ const requireAllowedEffect = (
   }
 };
 
+/**
+ * Whether core may keep what a read answered as a source in the Brain
+ * (`ConnectResult.keep`): never from a toolkit whose provider's terms
+ * forbid copies; by the items it names when its server named any, else
+ * as an answer of its own (`withProvenance` names it by its tool alone).
+ */
+const keepOf = (
+  connection: Pick<Connection, "serverKind" | "provider">,
+  answered: McpToolResult
+): ConnectResult["keep"] => {
+  if (
+    connection.serverKind === "composio" &&
+    toolkitsWithoutCopies.has(connection.provider)
+  ) {
+    return undefined;
+  }
+  return answered.provenance.length > 0 ? "item" : "answer";
+};
+
 /** One call of a read, its answer as the tool gave it. */
 const readOnce = async (
   connection: Connection,
@@ -650,22 +674,24 @@ const readOnce = async (
 ): Promise<Omit<CallDone, "sideEffect">> => {
   // Every refusal is behind: only now may a token be read.
   const server = await open();
-  let read: McpToolResult;
+  let answered: McpToolResult;
   try {
-    read = withProvenance(
-      connection,
-      tool.name,
-      await server.call(tool.name, input)
-    );
+    answered = await server.call(tool.name, input);
   } catch (error) {
     throw error instanceof McpError
       ? connectErrors.create("connect.server_unavailable")
       : error;
   }
+  const read = withProvenance(connection, tool.name, answered);
   if (didNothing(connection.serverKind, read)) {
     throw notPerformed(connection.serverKind, read);
   }
-  return { ...answerOf(read), replayed: false };
+  const keep = keepOf(connection, answered);
+  return {
+    ...answerOf(read),
+    replayed: false,
+    ...(keep === undefined ? {} : { keep }),
+  };
 };
 
 /**

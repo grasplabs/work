@@ -506,7 +506,12 @@ describe("instruction files", setUpTime, () => {
         question: word,
         budget: { tokens: recallBudgetMax },
       })
-    ).resolves.toStrictEqual({ items: [], notFound: [word], truncated: false });
+    ).resolves.toStrictEqual({
+      items: [],
+      notFound: [word],
+      truncated: false,
+      elsewhere: [],
+    });
   });
 
   it("keeps scopes apart however an ID is shaped", async () => {

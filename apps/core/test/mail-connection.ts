@@ -72,16 +72,18 @@ const agentMayUse = async (connectionId: string): Promise<void> => {
  */
 export const mailConnection = async (
   plan: MailAnswer[] = [],
-  tools: unknown[] = ["mail.send"]
+  tools: unknown[] = ["mail.send"],
+  /** The toolkit it is of, as connect's review classes it. */
+  provider = "mail"
 ) => {
   const name = `mail-${crypto.randomUUID()}`;
   const id = `connection-${name}`;
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', 'active', 'composio', ?, ?, ?, ?)"
+      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, ?, 'shared', 'active', 'composio', ?, ?, ?, ?)"
     )
-    .bind(id, mailServerUrl(name), JSON.stringify(tools), now, now)
+    .bind(id, provider, mailServerUrl(name), JSON.stringify(tools), now, now)
     .run();
   await agentMayUse(id);
   await providers().fetch(mailControlUrl(name), {
@@ -107,6 +109,13 @@ export const mailConnection = async (
     did: async () => {
       const response = await providers().fetch(mailControlUrl(name));
       return mailServerStateSchema.parse(await response.json());
+    },
+    /** Answers `tool` with `result` (an MCP tool result) from now on. */
+    answer: async (tool: string, result: unknown) => {
+      await providers().fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify({ answers: { [tool]: result } }),
+      });
     },
     /** The queries `mail.search` ran for, in order. */
     searched: async () => {

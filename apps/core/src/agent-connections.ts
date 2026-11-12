@@ -39,6 +39,7 @@ import type { ConnectionGrant } from "./bindings.ts";
 import { readsMail, textsOf } from "./channels/stephen-rules.ts";
 import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
+import { captureRead } from "./connection-capture.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
@@ -498,6 +499,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
         ),
       ]
     );
+    // Recorded with the chat first: a run that ended since keeps nothing.
+    await captureRead(this.env, scope, connectionId, result);
     await recordToolCall(this.env, scope, shown);
     return { output, pending: null };
   }

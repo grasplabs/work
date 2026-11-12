@@ -5600,6 +5600,11 @@ msgstr "Reservemodellen"
 msgid "Fallbacks, in order"
 msgstr "Reservemodellen, op volgorde"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Fetched from a connection"
+msgstr "Opgehaald uit een verbinding"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Minder dan {least} van {of}"

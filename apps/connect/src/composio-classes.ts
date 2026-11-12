@@ -233,3 +233,12 @@ export const composioClasses: ComposioClasses = {
     PERSONIO_LIST_PROJECTS: "read-company",
   },
 };
+
+/**
+ * The reviewed toolkits whose provider's terms forbid keeping copies of
+ * what their tools return: nothing read through a connection of one is
+ * kept as a source in the Brain (`ConnectResult.keep`). A toolkit's terms
+ * are read in its review, as its classes are; native connectors' and HTTP
+ * connections' providers allow copies.
+ */
+export const toolkitsWithoutCopies: ReadonlySet<string> = new Set<string>();

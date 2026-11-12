@@ -53,6 +53,7 @@ import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
+import { connectionOfCapture } from "./connection-capture-key.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
@@ -139,7 +140,7 @@ const kindsWithoutColon = <const K extends string>(
 // `run` stays although nothing produces it now: stores filled between
 // #2157 and its revert hold run sources, and a recall that meets one must
 // still read it.
-const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
+const producerKinds = kindsWithoutColon(["upload", "chat", "run", "capture"]);
 
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];
@@ -242,7 +243,28 @@ export interface RecalledItem extends Omit<PackItem, "source"> {
 /** A pack, as recall answers (`recallAs`). */
 export interface RecalledPack extends Omit<Pack, "items"> {
   items: RecalledItem[];
+  /**
+   * The connections likely to hold more ("look elsewhere"): those the
+   * pack's own captured items came from (`capture` sources), in the order
+   * of their first item, each once. Only from items the reader may read,
+   * so a source they may not read never names its connection. An agent
+   * looks there with its own tools, if it may use them.
+   */
+  elsewhere: string[];
 }
+
+/** The connections `items` were captured from, by first item, each once. */
+const elsewhereOf = (items: readonly RecalledItem[]): string[] => [
+  ...new Set(
+    items.flatMap(({ source }) => {
+      const connection =
+        source.producer === "capture"
+          ? connectionOfCapture(source.id)
+          : undefined;
+      return connection === undefined ? [] : [connection];
+    })
+  ),
+];
 
 /** A version of a source, whole. */
 export interface SourceVersion extends SourceVersionRef {
@@ -403,17 +425,21 @@ export const recallAs = async (
     ...(asOf === undefined ? {} : { asOf }),
     ...meaning,
   });
-  return {
-    items: items.map(({ source, version, position, text, whole, found }) => ({
+  const recalled = items.map(
+    ({ source, version, position, text, whole, found }) => ({
       source: sourceRefOf(source),
       version,
       position,
       text,
       whole,
       found,
-    })),
+    })
+  );
+  return {
+    items: recalled,
     notFound,
     truncated,
+    elsewhere: elsewhereOf(recalled),
   };
 };
 

@@ -5600,6 +5600,11 @@ msgstr "Modèles de secours"
 msgid "Fallbacks, in order"
 msgstr "Modèles de secours, dans l'ordre"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Fetched from a connection"
+msgstr "Récupéré depuis une connexion"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Moins de {least} sur {of}"

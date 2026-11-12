@@ -5600,6 +5600,11 @@ msgstr "Fallbacks"
 msgid "Fallbacks, in order"
 msgstr "Fallbacks, in order"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Fetched from a connection"
+msgstr "Fetched from a connection"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Fewer than {least} of {of}"

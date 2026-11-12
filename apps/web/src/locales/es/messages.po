@@ -5600,6 +5600,11 @@ msgstr "Modelos de reserva"
 msgid "Fallbacks, in order"
 msgstr "Modelos de reserva, por orden"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Fetched from a connection"
+msgstr "Obtenido de una conexión"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Menos de {least} de {of}"

@@ -24,6 +24,7 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import { captureIdOf } from "../src/connection-capture-key.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { published } from "./apps.ts";
@@ -308,6 +309,7 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "what the holder's agent fetched through a connection": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -318,6 +320,7 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "what the holder's agent fetched through a connection": captureMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -390,6 +393,21 @@ describe(
           personId: holder,
         }),
       ];
+      // Fetched in the holder's chat: theirs alone, its connection's ID
+      // holding a marker too, so a pack that names where else to look
+      // (`elsewhere`) for anyone else would show it.
+      const captureConnection = `connection-${captureMarker}`;
+      const captureId = await add(
+        `Supplier quote ${sharedWord} ${captureMarker}`,
+        { kind: "owner", personId: holder },
+        {
+          producer: "capture",
+          id: await captureIdOf(captureConnection, holder, {
+            kind: "item",
+            items: [`quote-${captureMarker}`],
+          }),
+        }
+      );
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -484,6 +502,11 @@ describe(
       // What the outsider finds by the shared word: their own source, past
       // the marked ones.
       const outsiderFinds = await textsFor(outsider, sharedWord);
+      // The holder's own recall of it names its connection.
+      const { elsewhere: holderElsewhere } = await recallAs(env, holder, {
+        question: `supplier ${captureMarker}`,
+        budget: { tokens: recallBudgetMax },
+      });
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
         question: capId,
@@ -503,9 +526,16 @@ describe(
           teamMarker,
           noneMarker,
           narrowedMarker,
+          captureMarker,
           ...instructionMarkers,
         ],
-        hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
+        hiddenVersions: everyVersionOf(
+          ...ownerIds,
+          teamId,
+          noneId,
+          narrowedId,
+          captureId
+        ),
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         usedApps,
         instructionGroups,
@@ -532,9 +562,15 @@ describe(
             ownerMarker,
             noneMarker,
             narrowedMarker,
+            captureMarker,
             ...instructionMarkers,
           ],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            noneId,
+            narrowedId,
+            captureId
+          ),
         },
         notJoined,
         { inRecall }
@@ -621,6 +657,7 @@ describe(
           ...prompted,
         ],
         outsiderFinds,
+        holderElsewhere,
         cappedFinds,
         joinedFinds,
         leftFinds,
@@ -629,6 +666,7 @@ describe(
       }).toStrictEqual({
         findings: [],
         outsiderFinds: [handbook],
+        holderElsewhere: [captureConnection],
         cappedFinds: [{ text: capped, found: "exact" }],
         joinedFinds: [teamSource],
         leftFinds: [],

@@ -5,8 +5,11 @@
 // answers each from what the person may read alone, as if nothing else
 // existed.
 
-/** Who added a source: an upload, a chat, a workflow run. */
-export type BrainSourceProducer = "upload" | "chat" | "run";
+/**
+ * Who added a source: an upload, a chat, a workflow run, or what an agent
+ * fetched through a connection (`capture`).
+ */
+export type BrainSourceProducer = "upload" | "chat" | "run" | "capture";
 
 /** A source, as its producer names it. */
 export interface BrainSourceRef {

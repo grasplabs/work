@@ -541,6 +541,8 @@ describe("the cited pack", () => {
         "2026",
       ],
       truncated: false,
+      // Uploads alone: no connection to look in.
+      elsewhere: [],
     });
   });
 

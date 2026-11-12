@@ -128,6 +128,10 @@ const typeRules: readonly {
   // An admin adding records the brain is built from, and a purge
   // rewriting a record's words.
   { action: "brain.records", type: "action" },
+  // A chat's agent's read through a connection kept as a source in the
+  // new Brain, skipped, or failed (core's connection-capture.ts): IDs and
+  // counts, never what was read.
+  { action: "brain.capture", type: "action" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.

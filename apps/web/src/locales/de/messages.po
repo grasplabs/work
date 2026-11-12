@@ -5600,6 +5600,11 @@ msgstr "Ausweichmodelle"
 msgid "Fallbacks, in order"
 msgstr "Ausweichmodelle, der Reihe nach"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Fetched from a connection"
+msgstr "Aus einer Verbindung abgerufen"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Weniger als {least} von {of}"

@@ -944,6 +944,8 @@ const scenario = (people: readonly string[], seed: number) => {
     });
     return {
       ...pack,
+      // As core answers: uploads alone, so no connection to look in.
+      elsewhere: [],
       // Each source as the plan names it; one the plan doesn't know as
       // none, which the comparison shows.
       items: pack.items.map((item) => ({
@@ -1015,6 +1017,8 @@ const scenario = (people: readonly string[], seed: number) => {
         ),
         notFound: expected.notFound,
         truncated: false,
+        // Uploads alone: no connection to look in.
+        elsewhere: [],
       },
     });
     if (problems.length === 0) {
