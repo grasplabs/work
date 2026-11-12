@@ -24,4 +24,12 @@ export const brainModules = {
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.
   "apps/core/src/brain-sources-rpc.ts": "sources",
+  // A chat's recall before its question: hands the model what core's
+  // recallAs gave the chat's own person, two of its packs merged at most
+  // (mergeRecalled, which only drops and orders what both hold), as data;
+  // what an analysis says only ever becomes that same person's question.
+  "apps/core/src/turn-recall.ts": "core",
+  // Checks what a chat once handed over with core's readableVersionsAs, and
+  // hands on only which of those it may still send, never what they say.
+  "apps/core/src/history-access.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;

@@ -11,6 +11,7 @@ import { organizationId } from "../src/auth/auth.ts";
 import {
   addSource,
   readSourceVersionAs,
+  readableVersionsAs,
   recallAs,
   workBrain,
 } from "../src/brain-next.ts";
@@ -545,6 +546,53 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       teammate: [null, null],
       outsider: null,
       missing: null,
+    });
+  });
+
+  it("says which versions a reader may still read as reading them whole does, in the order asked and each once", async () => {
+    const [writer, teammate] = await Promise.all([person(), person()]);
+    const everyone = await teamOf(writer, teammate);
+    const narrowed = newSource();
+    const shared = newSource();
+    // Overshared at first, then narrowed to the writer.
+    await addSource(env, {
+      source: narrowed,
+      change: newChange(),
+      text: `Draft ${word()}`,
+      readers: team(everyone),
+    });
+    await addSource(env, {
+      source: narrowed,
+      change: newChange(),
+      text: `Final ${word()}`,
+      readers: owner(writer),
+    });
+    await addSource(env, {
+      source: shared,
+      change: newChange(),
+      text: `Plan ${word()}`,
+      readers: team(everyone),
+    });
+    const asked = [
+      { source: shared, version: 1 },
+      { source: narrowed, version: 2 },
+      { source: narrowed, version: 1 },
+      { source: shared, version: 1 },
+      { source: newSource(), version: 1 },
+      { source: shared, version: 2 },
+    ];
+
+    expect({
+      writer: await readableVersionsAs(env, writer, asked),
+      teammate: await readableVersionsAs(env, teammate, asked),
+    }).toStrictEqual({
+      writer: [
+        { source: shared, version: 1 },
+        { source: narrowed, version: 2 },
+        { source: narrowed, version: 1 },
+      ],
+      // Taken off the narrowed source: neither version, as reading says.
+      teammate: [{ source: shared, version: 1 }],
     });
   });
 

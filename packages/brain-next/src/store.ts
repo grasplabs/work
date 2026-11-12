@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import {
   currentRequestSchema,
+  readableRequestSchema,
   embedModelSchema,
   newInstructionsSchema,
   newSourceSchema,
@@ -20,6 +21,7 @@ import {
 import type {
   AskModel,
   CurrentRequest,
+  ReadableRequest,
   Embedders,
   NewInstructions,
   NewSource,
@@ -62,7 +64,12 @@ import {
   recallOverviewOf,
 } from "./recall-counts.ts";
 import { recall } from "./recall.ts";
-import { addVersion, readCurrent, readVersion } from "./sources.ts";
+import {
+  addVersion,
+  readCurrent,
+  readVersion,
+  readableVersions,
+} from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
 import {
@@ -346,6 +353,17 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return listVersions(
       this.ctx.storage.sql,
       checked(versionListRequestSchema, request)
+    );
+  }
+
+  /** Of some versions, those the reader may read now: no text read. */
+  async readableVersions(
+    request: ReadableRequest
+  ): Promise<SourceVersionRef[]> {
+    await this.#ready();
+    return readableVersions(
+      this.#sources,
+      checked(readableRequestSchema, request)
     );
   }
 

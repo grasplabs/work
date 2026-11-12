@@ -145,12 +145,26 @@ const pollMs = 10;
 /** The bridges still looking, stopped when the next starts or the file ends. */
 const running = new Set<() => void>();
 
+/**
+ * Replies to the analysis alongside a chat's recall before its question
+ * (src/turn-recall.ts), in the order a test queued them once its provider
+ * started, apart from every provider's script; once none is left, nothing
+ * to look up. Each request of it that reached the provider is kept in
+ * `recallAnalysisRequests`. Both start empty with each provider.
+ */
+export const recallAnalysisReplies: ProviderReply[] = [];
+
+/** Every request of a recall's analysis that reached the provider, oldest first. */
+export const recallAnalysisRequests: SentRequest[] = [];
+
 /** Stops every bridge still looking (test/start-each-file.ts, at a file's end). */
 export const stopModelProviders = (): void => {
   for (const stop of running) {
     stop();
   }
   running.clear();
+  recallAnalysisReplies.length = 0;
+  recallAnalysisRequests.length = 0;
 };
 
 /** The model the tests use unless they choose others. */
@@ -236,6 +250,20 @@ const isStephenRequests = (body: unknown): boolean => {
   return stephenRequestsOpenings.some((opening) => text.includes(opening));
 };
 
+const nothingToLookUp: ProviderReply = {
+  text: JSON.stringify({ query: null }),
+  inputTokens: 10,
+  outputTokens: 5,
+};
+
+/** How the analysis's instructions begin: the provider sees no purpose. */
+const recallAnalysisOpening =
+  "You prepare a search of a company's knowledge for the latest message of a chat.";
+
+/** Whether a request's body is a recall's analysis. */
+const isRecallAnalysis = (body: unknown): boolean =>
+  (JSON.stringify(body) ?? "").includes(recallAnalysisOpening);
+
 /** A provider the tests answer for, and what reached it. */
 export interface FakeProvider {
   /** The key the organization connected it with. */
@@ -293,6 +321,21 @@ export const answeringProvider = async (
     }
     const controller = new AbortController();
     cutOff.set(taken.id, controller);
+    // A chat's recall analysis too, as it runs alongside the turn's script.
+    if (isRecallAnalysis(body)) {
+      recallAnalysisRequests.push({
+        url: `https://${taken.host}${taken.path}`,
+        headers: new Headers(taken.headers),
+        body,
+        signal: controller.signal,
+      });
+      await answerWith(
+        taken.id,
+        taken.path,
+        recallAnalysisReplies.shift() ?? nothingToLookUp
+      );
+      return;
+    }
     requests.push({
       url: `https://${taken.host}${taken.path}`,
       headers: new Headers(taken.headers),
