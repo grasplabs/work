@@ -1904,10 +1904,6 @@ export const actOnBrainForStaff = async (
 // read only what they may. An instruction is the Brain's to keep its
 // writer's own (`owner` of that writer), which this is.
 
-/** `person`'s own store, where what only they may read is kept. */
-const personsOwn = (env: BrainEnv, person: string): Brain =>
-  personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), person);
-
 /** Every attribute any kind of entity has, as the Brain lists them. */
 const attributeNames = [
   ...new Set(
@@ -1987,7 +1983,7 @@ export const rememberAs = async (
   );
   const reader = await readerOf(env, personId);
   const { person } = reader;
-  const added = await personsOwn(env, person).addMemories({
+  const added = await ownBrain(env, person).addMemories({
     change,
     access: { kind: "owner", person },
     // An entity's id is taken only as they may see it.
@@ -2036,7 +2032,7 @@ export const ownEntityAs = async (
 ): Promise<OwnEntity | null> => {
   const id = checked(entityIdSchema, entity);
   const reader = await readerOf(env, personId);
-  const store = personsOwn(env, reader.person);
+  const store = ownBrain(env, reader.person);
   const read = await store.readEntity({ entity: id, reader });
   if (read === null) {
     return null;
@@ -2077,7 +2073,7 @@ export const forgetAs = async (
 ): Promise<MemoryChangeOutcome> => {
   const id = checked(memoryIdSchema, memory);
   const reader = await readerOf(env, personId);
-  return await personsOwn(env, reader.person).retireMemory({
+  return await ownBrain(env, reader.person).retireMemory({
     memory: id,
     reader,
   });
