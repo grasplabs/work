@@ -45,7 +45,7 @@ export interface StoreCopy {
 }
 
 /** The word indexes' own tables, written by the indexes themselves. */
-const indexPages = /^chunk_(?:words|stems)_/u;
+const indexPages = /^(?:chunk|memory)_(?:words|stems)_/u;
 
 /** A copy of the whole store, as a backup taken now would hold it. */
 export const copyOfStore = async (): Promise<StoreCopy> =>
