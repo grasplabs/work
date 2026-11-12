@@ -24,6 +24,8 @@ import {
   brainEvalLanguages,
   brainEvalWays,
 } from "../apps/core/test/fixtures/brain-eval/company.ts";
+import type { Price } from "../apps/core/test/fixtures/brain-eval/everything.ts";
+import type { Grouping } from "../apps/core/test/fixtures/brain-eval/set.ts";
 import {
   estimate,
   groups,
@@ -47,15 +49,39 @@ const armSchema = z.object({
   outputTokens: z.int().nonnegative(),
 });
 
+/** Whether `A` and `B` are the same type, each assignable to the other. */
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/**
+ * `schema`, which must read exactly `T`: one that reads more or less fails
+ * to compile.
+ */
+const exactly =
+  <T>() =>
+  <S extends z.ZodType>(
+    schema: S & (Same<z.infer<S>, T> extends true ? unknown : never)
+  ): S =>
+    schema;
+
+/**
+ * What decides a result's groups, exactly as the set's `groupingOf` writes
+ * it: a new kind of question, way or field there fails to compile here,
+ * before any run.
+ */
+const groupingSchema = exactly<Grouping>()(
+  z.object({
+    language: languageSchema,
+    sourceLanguage: languageSchema.nullable(),
+    expects: z.enum(["answer", "absent", "hidden"]),
+    way: z.enum(brainEvalWays).nullable(),
+    long: z.boolean(),
+    lookalike: z.boolean(),
+  })
+);
+
 /** One question's result, as the run printed it. */
-export const modelResultSchema = z.object({
+export const modelResultSchema = groupingSchema.extend({
   id: z.string(),
-  language: languageSchema,
-  sourceLanguage: languageSchema.nullable(),
-  expects: z.enum(["answer", "absent", "hidden"]),
-  way: z.enum(brainEvalWays).nullable(),
-  long: z.boolean(),
-  lookalike: z.boolean(),
   pack: armSchema,
   everything: armSchema.extend({
     /** Sources in the context, and whether one was cut or left out at the budget. */
@@ -72,8 +98,11 @@ export const modelRunInfoSchema = z.object({
   model: z.string(),
   questions: z.int(),
   packTokens: z.int(),
-  everythingTokens: z.int(),
+  /** The cut below the model's window, in tokens; null for the window. */
+  everythingTokens: z.int().positive().nullable(),
   budgetUsd: z.number(),
+  /** How the pack arm's recall searched: by words and exact parts, no vectors. */
+  packSearch: z.literal("words and exact parts"),
 });
 export type ModelRunInfo = z.infer<typeof modelRunInfoSchema>;
 
@@ -81,8 +110,13 @@ export type ModelRunInfo = z.infer<typeof modelRunInfoSchema>;
 export const modelRunEndSchema = z.object({
   asked: z.int().nonnegative(),
   stoppedAtBudget: z.boolean(),
-  /** What core recorded the run spent, in US dollars. */
-  spentUsd: z.number().nonnegative(),
+  /** A call failed (a provider's error, a refused context): the results are those asked before. */
+  failed: z.boolean(),
+  /**
+   * What core recorded the run spent, in US dollars; null when the run
+   * died before it said (the script keeps its results all the same).
+   */
+  spentUsd: z.number().nonnegative().nullable(),
 });
 export type ModelRunEnd = z.infer<typeof modelRunEndSchema>;
 
@@ -148,7 +182,7 @@ export interface ModelSummary {
 
 const costOfArm = (
   arms: readonly { inputTokens: number; outputTokens: number }[],
-  price: { input: number; output: number }
+  price: Price
 ): ArmCost => {
   const inputTokens = arms.reduce((sum, arm) => sum + arm.inputTokens, 0);
   const outputTokens = arms.reduce((sum, arm) => sum + arm.outputTokens, 0);
@@ -162,7 +196,7 @@ const costOfArm = (
 /** The run's results, scored; `price` is the model's list price per million tokens. */
 export const summarizeModelRun = (
   results: readonly ModelResult[],
-  price: { input: number; output: number }
+  price: Price
 ): ModelSummary => {
   const answerable = results.filter(({ expects }) => expects === "answer");
   return {
@@ -226,6 +260,146 @@ const dollars = (usd: number): string => `$${usd.toFixed(2)}`;
 const costLine = (arm: string, cost: ArmCost): string =>
   `${arm}: ${cost.inputTokens} input and ${cost.outputTokens} output tokens, ${dollars(cost.usd)} at list price`;
 
+/**
+ * Where a model run keeps its results: a folder of their own under the
+ * evaluation's (`.brain-eval/`), so the evaluation's own reader, which
+ * takes the newest file there as its baseline, never reads one.
+ */
+export const modelResultsFolder = "model";
+
+/** The markers a run prints its lines after. */
+const markers = {
+  run: "BRAIN_EVAL_MODEL_RUN",
+  result: "BRAIN_EVAL_MODEL_RESULT",
+  end: "BRAIN_EVAL_MODEL_END",
+} as const;
+
+/** A marker and the JSON after it, up to the next marker on its line. */
+const printedLine = new RegExp(
+  `(${Object.values(markers).join("|")}) (.*?)(?=(?:${Object.values(markers).join("|")}) |$)`,
+  "gmu"
+);
+
+/** What a run printed, as read back. */
+export interface ReadRun {
+  info: ModelRunInfo | undefined;
+  end: ModelRunEnd | undefined;
+  /** Each question's result once, by its id, as first printed. */
+  results: ModelResult[];
+  /** Lines after a marker that couldn't be read: cut short, garbled, or not a result. */
+  unread: number;
+}
+
+/** `text` as JSON, or undefined when it isn't (a line a crash cut short). */
+const jsonOf = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What a run printed in `output`, read back line by line. A line a crash
+ * cut short, or two run together, loses only what can't be read: each
+ * marker starts a value of its own. A result printed twice counts once. A
+ * run's info or end line that is whole JSON yet not in the format this
+ * script reads throws: a run of another format is never read as one cut
+ * off.
+ */
+export const readRun = (output: string): ReadRun => {
+  const read: ReadRun = {
+    info: undefined,
+    end: undefined,
+    results: [],
+    unread: 0,
+  };
+  const seen = new Set<string>();
+  for (const [, marker, text = ""] of output.matchAll(printedLine)) {
+    const value = jsonOf(text.trim());
+    if (value === undefined) {
+      read.unread += 1;
+      continue;
+    }
+    if (marker === markers.result) {
+      const result = modelResultSchema.safeParse(value);
+      if (!result.success) {
+        read.unread += 1;
+      } else if (!seen.has(result.data.id)) {
+        seen.add(result.data.id);
+        read.results.push(result.data);
+      }
+      continue;
+    }
+    const schema =
+      marker === markers.run ? modelRunInfoSchema : modelRunEndSchema;
+    const parsed = schema.safeParse(value);
+    if (!parsed.success) {
+      throw new Error(
+        `The run printed a ${marker} line this script can't read: run the script of the same commit as the run`
+      );
+    }
+    if (marker === markers.run) {
+      read.info = modelRunInfoSchema.parse(value);
+    } else {
+      read.end = modelRunEndSchema.parse(value);
+    }
+  }
+  return read;
+};
+
+/** How a run's results are kept: as passed, `-partial` or `-failed`. */
+export interface Kept {
+  /** How it ended: as it printed, or, cut off before it said, as failed. */
+  end: ModelRunEnd;
+  failed: boolean;
+  /** Stopped at its budget: a sample of each group, not the whole set. */
+  partial: boolean;
+  /** What the result file's name ends with, before `.json`. */
+  suffix: "" | "-partial" | "-failed";
+}
+
+/**
+ * How a run's results are kept, since they were paid for whatever
+ * happened: failed when it exited otherwise than 0, a call failed, it was
+ * cut off before its end line (a timeout, workerd gone: then its results
+ * are what it printed, and what it spent is unknown), or an answer leaked;
+ * partial when it stopped at its budget.
+ */
+export const keptAs = (
+  exited: number | null,
+  printed: ModelRunEnd | undefined,
+  results: readonly ModelResult[],
+  leaks: number
+): Kept => {
+  const end = printed ?? {
+    asked: results.length,
+    stoppedAtBudget: false,
+    failed: true,
+    spentUsd: null,
+  };
+  const failed =
+    exited !== 0 || end.failed || results.length !== end.asked || leaks > 0;
+  const partial = end.stoppedAtBudget;
+  let suffix: Kept["suffix"] = "";
+  if (failed) {
+    suffix = "-failed";
+  } else if (partial) {
+    suffix = "-partial";
+  }
+  return { end, failed, partial, suffix };
+};
+
+/** How the run ended, in a line. */
+const endLine = (end: ModelRunEnd, questions: number): string => {
+  if (end.failed) {
+    return `FAILED after ${end.asked} of ${questions} questions: a call failed, or the run was cut off (see the run's output). The results above are those asked before it.`;
+  }
+  return end.stoppedAtBudget
+    ? `STOPPED AT THE BUDGET after ${end.asked} of ${questions} questions (asked in a seeded order, so each group is a sample).`
+    : `Every question asked: ${end.asked}.`;
+};
+
 /** The run's numbers as compact text, in the evaluation's table shape. */
 export const modelReport = (
   summary: ModelSummary,
@@ -241,10 +415,8 @@ export const modelReport = (
     "",
     `Right: a question with an answer when the judge (the same model) found it correct against the passage that answers it; one with no answer, or with its answer hidden from the asker, when the model said it isn't there. ± and Δ [95%]: seeded bootstrap over questions. "pack vs everything": exact sign test (McNemar) on the questions only one arm got right, at p < 0.05, each group on its own.`,
     `"everything" was cut at its budget for ${summary.cut} of ${end.asked} questions.`,
-    end.stoppedAtBudget
-      ? `STOPPED AT THE BUDGET after ${end.asked} of ${questions} questions (asked in a seeded order, so each group is a sample).`
-      : `Every question asked: ${end.asked}.`,
-    `Cost, ${costLine("pack", summary.cost.pack)}; ${costLine("everything", summary.cost.everything)}. Core recorded ${dollars(end.spentUsd)} spent.`,
+    endLine(end, questions),
+    `Cost, ${costLine("pack", summary.cost.pack)}; ${costLine("everything", summary.cost.everything)}. ${end.spentUsd === null ? "What core recorded as spent is unknown: the run died before it said; the provider's own usage says." : `Core recorded ${dollars(end.spentUsd)} spent.`}`,
     summary.leaks.length === 0
       ? "Leaks: none. No answer held what its asker may not read."
       : `LEAKS in ${summary.leaks.length} answers: ${summary.leaks.map(({ id, arm, leaks }) => `${id} (${arm}: ${leaks.length})`).join("; ")}`,

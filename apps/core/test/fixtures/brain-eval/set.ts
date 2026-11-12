@@ -12,10 +12,13 @@ import {
   brainEvalTeams,
 } from "./company.ts";
 import type {
+  BrainEvalExpects,
+  BrainEvalLanguage,
   BrainEvalPerson,
   BrainEvalQuestion,
   BrainEvalSource,
   BrainEvalTeam,
+  BrainEvalWay,
 } from "./company.ts";
 import { crossLongQuestions } from "./cross-long.ts";
 import { crossQuestions } from "./cross.ts";
@@ -207,12 +210,23 @@ export const isLongDocument = (source: BrainEvalSource): boolean =>
  * What decides a question's groups in a report (scripts/
  * brain-eval-scoring.ts `groups`): its language and its source's, what it
  * expects and how its source is found, whether its source is a long
- * document, and whether its answer has a look-alike.
+ * document, and whether its answer has a look-alike. The scripts that read
+ * a run's results hold their schemas to this type, so a new kind of
+ * question fails to compile there rather than to parse after a run.
  */
+export interface Grouping {
+  language: BrainEvalLanguage;
+  sourceLanguage: BrainEvalLanguage | null;
+  expects: BrainEvalExpects["kind"];
+  way: BrainEvalWay | null;
+  long: boolean;
+  lookalike: boolean;
+}
+
 export const groupingOf = (
   sources: readonly BrainEvalSource[],
   question: BrainEvalQuestion
-) => {
+): Grouping => {
   const { expects } = question;
   const source =
     expects.kind === "absent"
