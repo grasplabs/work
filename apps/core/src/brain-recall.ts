@@ -7,7 +7,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
-import { recallAs, recallOf } from "./brain-next.ts";
+import { codeRecallOf, recallAs } from "./brain-next.ts";
 import { authorize } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -17,7 +17,7 @@ import { authorize } from "./permissions.ts";
 // on GRA-1731. In order:
 //
 // - The request is untrusted: checked first, strictly, with the Brain's
-//   own limits (`recallOf`), so it can't name a reader, groups or a
+//   own limits (`codeRecallOf`), so it can't name a reader, groups or a
 //   vector, and refused in the function host's fixed words
 //   (`permission.invalid_args`).
 // - The caller's grant: the App, run or agent must hold the permission to
@@ -57,7 +57,7 @@ export interface RecallCaller {
 
 /** Whether `input` is a recall as code asks for one (`BrainRecall`). */
 export const isBrainRecall = (input: unknown): boolean =>
-  recallOf(input) !== undefined;
+  codeRecallOf(input) !== undefined;
 
 /** `error` in the function host's words, which carry nothing of the call. */
 const inHostWords = (error: unknown): unknown => {
@@ -91,7 +91,7 @@ export const recallFor = async (
     });
   };
   try {
-    const recall = recallOf(input);
+    const recall = codeRecallOf(input);
     if (recall === undefined) {
       throw functionErrors.create("permission.invalid_args");
     }

@@ -48,6 +48,6 @@ expectTypeOf<Mutable<BrainRecall["budget"]>>().toEqualTypeOf<
   Request["budget"]
 >();
 expectTypeOf<Exclude<keyof BrainRecall, "asOf">>().toEqualTypeOf<
-  Exclude<keyof Request, "asOf" | "reader" | "meaning">
+  Exclude<keyof Request, "asOf" | "reader" | "meaning" | "withoutMeaning">
 >();
 expectTypeOf<Request["asOf"]>().toEqualTypeOf<Date | undefined>();

@@ -271,12 +271,14 @@ export interface Recall {
  * offset, which crosses JSON where a `Date` can't. Nothing else, so code
  * never names a reader, groups or a vector.
  */
-const codeRecallSchema = recallRequestSchema
-  .pick({ question: true, budget: true })
-  .extend({ asOf: z.iso.datetime({ offset: true }).optional() });
+const codeRecallSchema = z.strictObject({
+  question: recallRequestSchema.shape.question,
+  budget: recallRequestSchema.shape.budget,
+  asOf: z.iso.datetime({ offset: true }).optional(),
+});
 
 /** `input` as a recall code asks for (`codeRecallSchema`), or undefined. */
-export const recallOf = (
+export const codeRecallOf = (
   input: unknown
 ): Omit<Recall, "personal"> | undefined => {
   const parsed = codeRecallSchema.safeParse(input);

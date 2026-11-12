@@ -1232,11 +1232,11 @@ export const coreProbes = {
   },
   // Pure: a request as code sends it, read; what is refused holds the
   // markers, and is refused alike.
-  recallOf: async ({ markers, sharedWord }) => {
+  codeRecallOf: async ({ markers, sharedWord }) => {
     const of = async (name: string, input: unknown) =>
       await answer(name, async () => {
         await Promise.resolve();
-        return coreBrain.recallOf(input);
+        return coreBrain.codeRecallOf(input);
       });
     const hidden = markers.join(" ");
     return [
