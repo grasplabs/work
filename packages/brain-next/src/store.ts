@@ -180,6 +180,13 @@ const noOnes =
 /** What a person's own store answers once it was erased whole. */
 const erasedWhole = "The Brain refused it: this store was erased";
 
+/**
+ * What a call that changed a person's own store answers when it could not
+ * set when the store wakes for what it left: done, but to repeat.
+ */
+const alarmUnset =
+  "The Brain did it but couldn't schedule what it left to finish: try again";
+
 /** What erasing a person's own store answers while files are left to delete. */
 const stillDeleting =
   "The Brain erased this store and is still deleting its files: erase it again";
@@ -258,11 +265,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   #prefix: string | undefined;
 
   /**
-   * Whether the store's schema is made. A person's own store makes it at
-   * its first write, so a person who never had anything kept costs no
+   * Whether the store's schema is made, as this instance's start found or
+   * made it (`#start`): false until then, so nothing reads a table that
+   * may not exist (a person's store that couldn't read whether it was
+   * erased stops before it looks). A person's own store makes it at its
+   * first write, so a person who never had anything kept costs no
    * storage: until then every read answers that nothing is there.
    */
-  #schema = true;
+  #schema = false;
 
   /** Whether this person's own store was erased whole: then it refuses every call. */
   #erased = false;
@@ -339,6 +349,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       this.#prefix = await prefixOf(this.#kind);
       await this.#start(false);
+      // What an earlier instance left (a write cut off by a reset, what
+      // this start's replay hid) wakes this one: nothing else would.
+      await this.#armQuietly();
     });
   }
 
@@ -507,6 +520,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         if (this.#ledger === "unreadable") {
           this.#ledgerRetryAfter = Date.now() + ledgerRetryMs;
         }
+        // A replay may have hidden versions to delete, from a read.
+        await this.#armQuietly();
       });
     }
     return this.#ledger;
@@ -610,11 +625,37 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async #changing<T>(change: () => Promise<T>): Promise<T> {
     const running = change();
     this.#writes.add(running);
+    let outcome: { done: true; value: T } | { done: false; error: unknown };
     try {
-      return await running;
+      outcome = { done: true, value: await running };
+    } catch (error) {
+      outcome = { done: false, error };
     } finally {
       this.#writes.delete(running);
+    }
+    // The call's own answer stands: a failure to arm never replaces it,
+    // and never reaches the caller in its own words.
+    const armed = await this.#armQuietly();
+    if (!outcome.done) {
+      throw outcome.error;
+    }
+    if (!armed) {
+      throw new Error(alarmUnset);
+    }
+    return outcome.value;
+  }
+
+  /**
+   * `#armAlarm`, its failure kept from the caller: whether it armed (or
+   * had nothing to arm). Nothing of the error is kept: it may be the
+   * database's own words.
+   */
+  async #armQuietly(): Promise<boolean> {
+    try {
       await this.#armAlarm();
+      return true;
+    } catch {
+      return false;
     }
   }
 

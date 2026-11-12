@@ -203,6 +203,12 @@ export const releaseVectors = (store: SqlStorage, hashes: string): void => {
   );
 };
 
+/** A file no version points at: what the sweep deletes, past its grace. */
+const unreferencedFile = "refs = 0";
+
+/** A vector row let go: what the sweep deletes, past its grace. */
+const unheldVector = "unheld = 1";
+
 /**
  * `?1` the grace (`fileGraceMs`): when the sweep (`sweepFiles`) next has a
  * file or a vector to look at, by the same conditions it takes them by: a
@@ -211,8 +217,8 @@ export const releaseVectors = (store: SqlStorage, hashes: string): void => {
  */
 const sweepDueSql = `
 SELECT min(at) AS at FROM (
-  SELECT min(written_at) + ?1 AS at FROM files WHERE refs = 0
-  UNION ALL SELECT min(written_at) + ?1 FROM vector_files WHERE unheld = 1
+  SELECT min(written_at) + ?1 AS at FROM files WHERE ${unreferencedFile}
+  UNION ALL SELECT min(written_at) + ?1 FROM vector_files WHERE ${unheldVector}
 )
 HAVING min(at) IS NOT NULL`;
 
@@ -227,7 +233,7 @@ export const sweepDueAt = (store: SqlStorage): number | null =>
  */
 const vectorsDueSql = `
 SELECT model, hash FROM vector_files INDEXED BY vector_files_unheld_idx
-WHERE unheld = 1 AND written_at <= ?1
+WHERE ${unheldVector} AND written_at <= ?1
 ORDER BY written_at
 LIMIT ?2`;
 
@@ -434,7 +440,7 @@ export const sweepFiles = async (
 ): Promise<"swept" | "idle" | "timed_out"> => {
   const asOf = Math.min(at.getTime(), Date.now());
   const unreferenced = and(
-    eq(files.refs, 0),
+    sql.raw(unreferencedFile),
     lte(files.writtenAt, new Date(asOf - fileGraceMs))
   );
   const due = db

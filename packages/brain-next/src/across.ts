@@ -7,6 +7,7 @@ import type {
   Pack,
 } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
+import { byBytes, byNearness } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Found } from "./pack.ts";
 import { sequenceOf, termsOf } from "./words.ts";
@@ -51,22 +52,6 @@ import { sequenceOf, termsOf } from "./words.ts";
 
 /** A passage of the store `store` (its index in `findings`). */
 type Of<T extends FoundPassage> = T & { store: number };
-
-const encoder = new TextEncoder();
-
-/** `a` and `b` as SQLite orders text (BINARY: by their UTF-8 bytes). */
-const byBytes = (a: string, b: string): number => {
-  const left = encoder.encode(a);
-  const right = encoder.encode(b);
-  const shorter = Math.min(left.length, right.length);
-  for (let index = 0; index < shorter; index += 1) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0);
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-  return left.length - right.length;
-};
 
 /** After a way's counts: shorter, newer, by source and place, then store. */
 const byPassage = (a: Of<OrderedPassage>, b: Of<OrderedPassage>): number =>
@@ -181,7 +166,7 @@ const byExact = (
 /** The meaning way's list: the nearest of all stores, by cosine. */
 const byMeaning = (findings: readonly Finding[]): Found[] =>
   allOf(findings, ({ meaning }) => meaning)
-    .toSorted((a, b) => b.score - a.score || a.row - b.row)
+    .toSorted((a, b) => byNearness(a, b) || a.store - b.store)
     .slice(0, recallLimit)
     .map((passage) => foundAs(passage, "meaning"));
 

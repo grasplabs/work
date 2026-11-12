@@ -581,16 +581,19 @@ const keyIdle = `NOT EXISTS (
   WHERE r.running = 1 AND r.kind = w.kind AND r.key = w.key
 )`;
 
+/** An item not running and not parked: waiting, interrupted or not. */
+const unclaimedRow = "running = 0 AND parked_at IS NULL";
+
 /** The next interrupted item that is due. */
 const nextInterruptedSql = `
 SELECT ${claimedColumns} FROM work_items AS w
-WHERE running = 0 AND parked_at IS NULL AND interrupted = 1
+WHERE ${unclaimedRow} AND interrupted = 1
   AND not_before <= ? AND ${keyIdle}
 ORDER BY priority, id
 LIMIT 1`;
 
 /** A waiting row the claim may take: the condition of `work_items_waiting_idx`. */
-const waitingRow = "running = 0 AND parked_at IS NULL AND interrupted = 0";
+const waitingRow = `${unclaimedRow} AND interrupted = 0`;
 
 /**
  * The connections with items waiting, each found by one lookup of the
@@ -621,10 +624,13 @@ LIMIT ?3`;
 const nextOfNoneSql = nextOf("none");
 const nextOfOneSql = nextOf("one");
 
-/** Parked items whose day is over come back, attempts reset (rule 5). */
+/** A parked item that comes back by itself (rule 5), `?2` the most parks. */
+const returnsParked = "parked_at IS NOT NULL AND parks < ?2";
+
+/** Parked items whose day is over (`?1`) come back, attempts reset (rule 5). */
 const returnParkedSql = `
 UPDATE work_items SET parked_at = NULL, attempts = 0, not_before = 0
-WHERE parked_at IS NOT NULL AND parked_at <= ? AND parks < ?`;
+WHERE ${returnsParked} AND parked_at <= ?1`;
 
 interface RunningRow extends Record<string, SqlStorageValue> {
   connection: string | null;
@@ -651,10 +657,8 @@ const queueDueSql = `
 SELECT max(min(at), (SELECT coalesce(max(paused_until), 0)
   FROM work_model_bucket)) AS at
 FROM (
-  SELECT min(not_before) AS at FROM work_items
-    WHERE running = 0 AND parked_at IS NULL
-  UNION ALL SELECT min(parked_at) + ?1 FROM work_items
-    WHERE parked_at IS NOT NULL AND parks < ?2
+  SELECT min(not_before) AS at FROM work_items WHERE ${unclaimedRow}
+  UNION ALL SELECT min(parked_at) + ?1 FROM work_items WHERE ${returnsParked}
 )
 HAVING min(at) IS NOT NULL`;
 

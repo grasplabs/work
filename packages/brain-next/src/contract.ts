@@ -388,8 +388,11 @@ export interface Finding {
   exact: (OrderedPassage & { parts: number[]; nearParts: number[] })[];
   /** The exact parts, by index, more than `exactCandidatesMax` passages may hold. */
   capped: number[];
-  /** The passages nearest the question's vector, nearest first, with their cosine. */
-  meaning: (FoundPassage & { score: number })[];
+  /**
+   * The passages nearest the question's vector, nearest first, with their
+   * cosine and when their version was added, which ties are ordered by.
+   */
+  meaning: (FoundPassage & { score: number; addedAt: number })[];
 }
 
 /** An ASCII letter or the space: a third of a token each (`tokensOf`). */

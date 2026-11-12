@@ -685,6 +685,9 @@ export const eraseBatch = (storage: DurableObjectStorage): Erased => {
   }
 };
 
+/** A ledger entry recorded but not yet written (`confirmPending`). */
+const unconfirmed = "confirmed = 0";
+
 /**
  * Whether the tick has an erasure's work to do: versions an erasure hid
  * still to delete (`eraseBatch`), or a ledger entry still to write
@@ -694,7 +697,7 @@ export const erasureDue = (sql: SqlStorage): boolean =>
   sql
     .exec(
       `SELECT 1 WHERE EXISTS (SELECT 1 FROM erasing_versions)
-        OR EXISTS (SELECT 1 FROM erasures WHERE confirmed = 0)`
+        OR EXISTS (SELECT 1 FROM erasures WHERE ${unconfirmed})`
     )
     .toArray().length > 0;
 
@@ -820,7 +823,7 @@ export const confirmPending = async (store: ErasureStore): Promise<void> => {
   const stopAt = Date.now() + confirmTickMs;
   const pending = store.storage.sql
     .exec<Recorded>(
-      `SELECT key, kind FROM erasures WHERE confirmed = 0
+      `SELECT key, kind FROM erasures WHERE ${unconfirmed}
       ORDER BY key LIMIT ?`,
       confirmPerTick
     )
