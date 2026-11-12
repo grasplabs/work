@@ -2,8 +2,10 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
-import { ChatDock } from "../chat/chat-dock.tsx";
+import { ChatBar } from "../chat/chat-bar.tsx";
+import { ChatPanel } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
+import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -13,8 +15,6 @@ import {
   onboardingBehind,
   takeJustSignedIn,
 } from "../landing.ts";
-import { AppPanelProvider } from "../pages/app-panel-context.tsx";
-import { AppPanelSlot } from "../pages/app-panel.tsx";
 import { RouteError } from "../route-error.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
@@ -22,32 +22,40 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 // headed by its own site header (frame/site-header.tsx). Everyone else goes
 // to the sign-in page, which sends them back here once they're in.
 
-const Shell = () => {
+/**
+ * The frame, with Grasp's one chat (chat/global-chat.tsx): its idle bar over
+ * the page, and the chat itself, docked beside the page or floating over it.
+ */
+const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
+  const { stage } = useGlobalChat();
   const { failing } = Route.useLoaderData();
   return (
-    // The panel slot beside every page (pages/app-panel.tsx): outside the
-    // page, so navigating the page leaves it open.
+    <AppFrame
+      core={core}
+      // The chat full screen: the page's content fades out under it.
+      covered={stage.card && stage.placement === "fullscreen"}
+      dock={<ChatBar />}
+      failing={failing}
+      identity={identity}
+      panels={<ChatPanel />}
+    >
+      <Outlet />
+    </AppFrame>
+  );
+};
+
+const Shell = () => {
+  const { identity } = Route.useRouteContext();
+  return (
+    // The chats window, ⌘K away on every page (chat/chat-switcher.tsx).
     // Keyed by who is signed in: someone else signing in on the browser
-    // finds no panel of theirs open.
-    <AppPanelProvider key={identity.userId}>
-      {/* The chats window, ⌘K away on every page (chat/chat-switcher.tsx). */}
-      <ChatSwitcherProvider>
-        <AppFrame
-          aside={
-            <>
-              <AppPanelSlot />
-              <ChatDock />
-            </>
-          }
-          core={core}
-          failing={failing}
-          identity={identity}
-        >
-          <Outlet />
-        </AppFrame>
-      </ChatSwitcherProvider>
-    </AppPanelProvider>
+    // finds nothing of theirs open.
+    <ChatSwitcherProvider key={identity.userId}>
+      <GlobalChatProvider>
+        <ShellFrame />
+      </GlobalChatProvider>
+    </ChatSwitcherProvider>
   );
 };
 

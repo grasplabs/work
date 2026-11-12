@@ -19,7 +19,7 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What the organization's own admins do to an App's sealed releases, on
-// its Versions tab (`apps.versions.releases`, `revoke`, `placeHold`,
+// its History (`apps.versions.releases`, `revoke`, `placeHold`,
 // `releaseHold`, which core refuses anyone else, Grasp staff included):
 // revoke one, so it runs no more, calls already running included; or
 // place a legal hold that keeps it, however old, until it is lifted. Each
@@ -90,14 +90,26 @@ export const ReleaseMenuItems = ({
   );
 };
 
-/** What the dialog says of `action`: its title and what it does. */
-const ActionText = ({ action }: { action: ReleaseAction }) => {
-  const { version } = action;
+/**
+ * What the dialog says of `action`: its title, naming the version by its
+ * `label` (as "this version" while it has none), and what it does.
+ */
+const ActionText = ({
+  action,
+  label,
+}: {
+  action: ReleaseAction;
+  label: string | null;
+}) => {
   if (action.kind === "revoke") {
     return (
       <>
         <DialogTitle>
-          <Trans>Revoke version {version}?</Trans>
+          {label === null ? (
+            <Trans>Revoke this version?</Trans>
+          ) : (
+            <Trans>Revoke version {label}?</Trans>
+          )}
         </DialogTitle>
         <DialogDescription>
           <Trans>
@@ -113,7 +125,11 @@ const ActionText = ({ action }: { action: ReleaseAction }) => {
     return (
       <>
         <DialogTitle>
-          <Trans>Place a legal hold on version {version}?</Trans>
+          {label === null ? (
+            <Trans>Place a legal hold on this version?</Trans>
+          ) : (
+            <Trans>Place a legal hold on version {label}?</Trans>
+          )}
         </DialogTitle>
         <DialogDescription>
           <Trans>
@@ -128,9 +144,13 @@ const ActionText = ({ action }: { action: ReleaseAction }) => {
   return (
     <>
       <DialogTitle>
-        <Trans>
-          Lift the legal hold {hold} from version {version}?
-        </Trans>
+        {label === null ? (
+          <Trans>Lift the legal hold {hold} from this version?</Trans>
+        ) : (
+          <Trans>
+            Lift the legal hold {hold} from version {label}?
+          </Trans>
+        )}
       </DialogTitle>
       <DialogDescription>
         <Trans>
@@ -160,11 +180,14 @@ const ActionLabel = ({ action }: { action: ReleaseAction }) => {
 export const ReleaseDialog = ({
   app,
   action,
+  label,
   onClose,
   onChanged,
 }: {
   app: string;
   action: ReleaseAction;
+  /** What people call the version (`AppVersion.label`), if it has a label. */
+  label: string | null;
   onClose: () => void;
   onChanged: (release: AppRelease) => void;
 }) => {
@@ -210,7 +233,7 @@ export const ReleaseDialog = ({
     >
       <DialogContent closeLabel={t`Close`}>
         <header className="flex flex-col gap-1 pr-8">
-          <ActionText action={action} />
+          <ActionText action={action} label={label} />
         </header>
         {action.kind === "hold" ? (
           <Field>

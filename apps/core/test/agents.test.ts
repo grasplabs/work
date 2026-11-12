@@ -55,6 +55,7 @@ describe("the company's agents", () => {
       job: "Chases unpaid invoices.",
       instructions: "Answer only about invoices.",
       modelRole: "careful",
+      model: null,
       state: "paused",
       changedBy: "admin-2",
       changedAt: "2026-11-02T00:00:00.000Z",

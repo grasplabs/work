@@ -23,8 +23,6 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { activeChat, setActiveChat } from "../chat/active-chat.ts";
-import { setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ProjectView } from "./project-view.tsx";
 
 // A project's page against core's projects API as the page reaches it
@@ -96,8 +94,6 @@ const invoicesMoved: ProjectItemsPage["items"][number] = {
 
 const fakeProjects = (
   pages: ProjectItemsPage[] = [{ items: [desk], more: false }],
-  /** How many filings core refuses before it takes one. */
-  refusals = 0,
   /** The people core offers to add. */
   people: ProjectShareCandidates["people"] = [
     { id: "user-bo", name: "Bo" },
@@ -106,19 +102,14 @@ const fakeProjects = (
 ) => {
   const left = [...pages];
   const asked: unknown[][] = [];
-  let refused = 0;
   const workflowResources = {
-    create: async (name: string): Promise<{ id: string }> => {
+    create: async (
+      name: string,
+      inProject?: string
+    ): Promise<{ id: string }> => {
       await Promise.resolve();
-      asked.push(["create", name.slice(0, -9)]);
+      asked.push(["create", name.slice(0, -9), inProject]);
       return { id: "wf-made" };
-    },
-  };
-  const apps = {
-    create: async ({ name }: { name: string }): Promise<{ id: string }> => {
-      await Promise.resolve();
-      asked.push(["create", name]);
-      return { id: "app-made" };
     },
   };
   const projects = {
@@ -140,10 +131,6 @@ const fakeProjects = (
     },
     file: async (_id: string, file: FileItem): Promise<void> => {
       await Promise.resolve();
-      if (refused < refusals) {
-        refused += 1;
-        throw new Error("The share was refused.");
-      }
       asked.push(["file", file.item.id, file.share]);
     },
     unfile: async (_id: string, item: ProjectItemRef): Promise<void> => {
@@ -160,13 +147,10 @@ const fakeProjects = (
       return left.shift() ?? { items: [], more: false };
     },
   };
-  return { session: { apps, projects, workflowResources }, asked };
+  return { session: { projects, workflowResources }, asked };
 };
 
 let root: Root | undefined;
-
-/** How the chat dock sits, for the page to read. */
-const DockMode = () => <output aria-label="Dock">{useDockMode()}</output>;
 
 const settled = async (): Promise<void> => {
   await act(async () => {
@@ -190,10 +174,7 @@ const shown = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <>
-        <ProjectView identity={{ role: "builder" }} project={shownProject} />
-        <DockMode />
-      </>
+      <ProjectView identity={{ role: "builder" }} project={shownProject} />
     ),
   });
   const router = createRouter({
@@ -234,6 +215,11 @@ const button = (name: string) =>
     (each) =>
       each.textContent?.trim() === name ||
       each.getAttribute("aria-label") === name
+  );
+
+const link = (name: string) =>
+  [...document.querySelectorAll("a")].find(
+    (each) => each.textContent?.trim() === name
   );
 
 const type = async (input: Element | null, value: string) => {
@@ -277,41 +263,22 @@ describe("A project's page", () => {
     });
     root = undefined;
     document.body.replaceChildren();
-    setDockMode("bar");
-    setActiveChat(undefined);
   });
 
-  it("makes a workflow in the project once, though filing it failed the first time, and opens it with a new chat docked beside it", async () => {
-    setActiveChat("chat-about-holidays");
-    const { session, asked } = fakeProjects(undefined, 1);
+  it("makes something in the project from Make something, making nothing until asked, with the project carried along", async () => {
+    const { session, asked } = fakeProjects();
     const router = await shown(session, project("builder"));
 
-    await press(button("New"));
-    await type(
-      document.querySelector('[role="dialog"] input:not([type="hidden"])'),
-      "Invoice approvals"
-    );
-    await press(button("Make"));
-    const refused = document.body.textContent?.includes(
-      "The share was refused."
-    );
-    await press(button("Make"));
+    await press(link("Make something"));
 
     expect({
-      refused,
       asked,
       at: router.state.location.pathname,
-      dock: document.querySelector('output[aria-label="Dock"]')?.textContent,
-      chat: activeChat(),
+      search: { ...router.state.location.search },
     }).toStrictEqual({
-      refused: true,
-      asked: [
-        ["create", "invoice-approvals"],
-        ["file", "wf-made", true],
-      ],
-      at: "/workflows/wf-made",
-      dock: "drawer",
-      chat: undefined,
+      asked: [],
+      at: "/",
+      search: { make: "app", project: "project-1" },
     });
   });
 
@@ -346,28 +313,6 @@ describe("A project's page", () => {
     });
   });
 
-  it("makes an App in the project once, though filing it failed the first time, and opens it to build", async () => {
-    const { session, asked } = fakeProjects(undefined, 1);
-    const router = await shown(session, project("builder"));
-
-    await press(button("New"));
-    await press(button("App"));
-    await type(
-      document.querySelector('[role="dialog"] input:not([type="hidden"])'),
-      "Desk "
-    );
-    await press(button("Make"));
-    await press(button("Make"));
-
-    expect({ asked, at: router.state.location.pathname }).toStrictEqual({
-      asked: [
-        ["create", "Desk"],
-        ["file", "app-made", true],
-      ],
-      at: "/apps/app-made/edit",
-    });
-  });
-
   it("adds someone as a user, from who core offers when the list opens, and says why an add was refused", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
@@ -399,7 +344,7 @@ describe("A project's page", () => {
   });
 
   it("tells apart someone offered from someone of the same name in it already, by the end of their ID", async () => {
-    const { session } = fakeProjects(undefined, 0, [
+    const { session } = fakeProjects(undefined, [
       { id: "user-ada-222222", name: "Ada" },
       { id: "user-bo", name: "Bo" },
     ]);

@@ -1,11 +1,9 @@
 import { definitionText } from "@grasp-os/runtime/definition";
-import { agentErrors } from "@grasp-os/shared/agent";
-import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { chatWork, readDraft, saveDraft } from "../src/app-drafts.ts";
 import {
   appName,
   findApp,
@@ -20,7 +18,6 @@ import {
 import {
   codeResults,
   codeStep,
-  openTestRun,
   says,
   toolResults,
   toolStep,
@@ -28,6 +25,7 @@ import {
   turnChecks,
 } from "./agent-chat.ts";
 import { commitApp, withFiles } from "./app-definitions.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
 import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
 
@@ -56,7 +54,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { builder, existing, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         ${ledger}
-        await env.build.write(app.id, { "notes.md": "the agent's" });
+        await env.build.write(app.id, { "notes.md": "the agent's" }, { revision: (await env.build.files(app.id)).revision });
         return await env.build.files(app.id);
       };`),
       says("Written."),
@@ -100,57 +98,47 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         "builder.md": "mine",
       }).files
     );
-    // The chat's page lists what the agent is changing, for its person only.
-    // In the object itself: a refusal over RPC is also reported as
-    // uncaught by the object, which fails the run.
-    const listed = await runInDurableObject(chat.stub, (instance) => {
-      const refused = (() => {
-        try {
-          instance.drafts(chat.chat.id, "someone-else");
-          return "listed";
-        } catch (error) {
-          return agentErrors.codeOf(error);
-        }
-      })();
-      return { own: instance.drafts(chat.chat.id, builder.userId), refused };
-    });
+    // The chat's page lists what its agent worked on (app-drafts.test.ts
+    // has who reads it).
+    const listed = await chatWork(env, chat.chat.id);
     // The draft names the code step that wrote it, where the thread shows
     // its preview: the first, not the later one that only read it.
     const messages = await transcript(chat.stub, chat.chat.id);
     const steps = messages.flatMap((message) =>
       message.role === "toolResult" ? [message.toolCallId] : []
     );
-    expect(listed).toMatchObject({
-      own: [
-        { app: existing, base: 1, changed: ["notes.md"], callId: steps[0] },
-      ],
-      refused: "agent.chat_not_found",
-    });
+    expect(listed).toMatchObject([
+      { kind: "app", id: existing, callId: steps[0] },
+    ]);
     expect(steps).toHaveLength(2);
   });
 
   it("answers every write with what doesn't compile, however often the same error comes back, and never locks the agent out", async () => {
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+    const { chat, grant } = await setUp(
+      [
+        codeStep(`export default async (self, env) => {
+        ${findApp}
         const errors = [];
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          const written = await env.build.write(app.id, { "src/routes/index.tsx": ${JSON.stringify(unclosed)} + "// " + attempt + "\\n" });
+          const written = await env.build.write(app.id, { "src/routes/index.tsx": ${JSON.stringify(unclosed)} + "// " + attempt + "\\n" }, { revision: (await env.build.files(app.id)).revision });
           errors.push(written.errors);
         }
         return errors;
       };`),
-      says("The page still doesn't compile."),
-      // What the turn's check found, the same.
-      says("I'm stuck on it."),
-      codeStep(`export default async (self, env) => {
+        says("The page still doesn't compile."),
+        // What the turn's check found, the same.
+        says("I'm stuck on it."),
+        codeStep(`export default async (self, env) => {
         ${findApp}
-        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })});
-        const proposal = await env.build.propose(app.id, "A desk");
-        return { errors: written.errors, version: proposal.version };
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })}, { revision: (await env.build.files(app.id)).revision });
+        const checked = await env.build.check(app.id);
+        return { errors: written.errors, passed: checked.passed };
       };`),
-      says("Fixed and proposed."),
-    ]);
+        says("Fixed: it's ready to publish."),
+      ],
+      "builder",
+      true
+    );
     await grant();
 
     await chat.ask("Build an invoice desk");
@@ -160,7 +148,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(returned(results[0]?.text)).toStrictEqual(
       Array.from({ length: 8 }, () => 1)
     );
-    expect(returned(results[1]?.text)).toStrictEqual({ errors: 0, version: 1 });
+    expect(returned(results[1]?.text)).toStrictEqual({
+      errors: 0,
+      passed: true,
+    });
   });
 
   it("checks the turn's drafts once it answers, a type error and a lint error together, by file, and the agent goes on in the same turn", async () => {
@@ -294,26 +285,30 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "\nexport const list = query({",
       '\nif (globalThis.Object === Object) throw new Error("No notes today");\nexport const list = query({'
     );
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+    const { chat, grant } = await setUp(
+      [
+        codeStep(`export default async (self, env) => {
+        ${findApp}
         ${defineNotes}
-        await env.build.write(app.id, ${JSON.stringify({ ...notesCode, "server/notes.ts": throwing })});
-        const proposal = await env.build.propose(app.id, "Notes");
-        const errorsOf = ({ check }) => [check.pages, check.server].flatMap(({ diagnostics }) => diagnostics).filter(({ severity }) => severity === "error");
+        await env.build.write(app.id, ${JSON.stringify({ ...notesCode, "server/notes.ts": throwing })}, { revision: (await env.build.files(app.id)).revision });
+        const checked = await env.build.check(app.id);
+        const errorsOf = (check) => [check.pages, check.server].flatMap(({ diagnostics }) => diagnostics).filter(({ severity }) => severity === "error");
         // Then an serverCode file that doesn't parse, the throw gone.
-        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${serverCode}\nexport const broken = query({ args: {` })});
-        const unparsed = errorsOf(await env.build.propose(app.id, "Notes"));
+        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${serverCode}\nexport const broken = query({ args: {` })}, { revision: (await env.build.files(app.id)).revision });
+        const unparsed = errorsOf(await env.build.check(app.id));
         return {
-          errors: errorsOf(proposal).length,
-          diagnostics: errorsOf(proposal).map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
-          version: proposal.version,
+          errors: errorsOf(checked).length,
+          diagnostics: errorsOf(checked).map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
+          passed: checked.passed,
           unparsed: { errors: unparsed.length, files: [...new Set(unparsed.map(({ file }) => file))] },
         };
       };`),
-      says("The registration throws."),
-      says("It still doesn't parse."),
-    ]);
+        says("The registration throws."),
+        says("It still doesn't parse."),
+      ],
+      "builder",
+      true
+    );
     await grant();
 
     await chat.ask("Build a notes App");
@@ -330,28 +325,27 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
           says: true,
         },
       ],
-      version: null,
+      passed: false,
       // Its compile error, and nothing of the pages that import it.
       unparsed: { errors: 1, files: ["server/notes.ts"] },
     });
   });
 
-  it("never proposes pages checked against stand-ins, though the sandbox ends one inspection and not the next", async () => {
+  it("never passes pages checked against stand-ins, though the sandbox ends one inspection and not the next", async () => {
     // The attack, under load: the sandbox ends one inspection of the
     // server code (its deadline), so the pages fall back to the
     // permissive stand-ins, while another inspection of the same code
-    // registers and passes the server check. Proposed then, a page with
-    // calls that don't exist would be committed. The draft's builds
+    // registers and passes the server check. Passed then, a page with
+    // calls that don't exist would be published. The draft's builds
     // inspect once, for both, and a stand-in check never passes.
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         ${findApp}
-        const proposal = await env.build.propose(app.id, "Notes");
+        const checked = await env.build.check(app.id);
         return {
-          version: proposal.version,
-          passed: proposal.check.passed,
-          standIn: proposal.check.pages.standIn ?? false,
-          server: proposal.check.server.status,
+          passed: checked.passed,
+          standIn: checked.pages.standIn ?? false,
+          server: checked.server.status,
         };
       };`),
       says("It doesn't pass yet."),
@@ -363,15 +357,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const files = withFiles(notesFiles, {
       "server/notes.ts": `${notesFiles.files["server/notes.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
     });
-    await chat.stub.saveDraft(
-      chatId,
+    await saveDraft(
+      env,
       app,
-      null,
-      files.files,
-      [],
-      0,
-      { runId: await openTestRun(chat.stub, chatId) },
-      definitionText(files.definition)
+      await readDraft(env, app),
+      {
+        changes: files.files,
+        unchanged: [],
+        definition: definitionText(files.definition),
+      },
+      await agentWriting(person, chatId)
     );
     // The sandbox ends the first inspection only, as its deadline would.
     const { LOADER: loader } = env;
@@ -406,17 +401,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     };
     try {
       env.LOADER = ending;
-      await chat.ask("Propose the notes App");
+      await chat.ask("Check the notes App");
     } finally {
       env.LOADER = loader;
     }
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect({ inspections, proposal: returned(result?.text) }).toStrictEqual({
+    expect({ inspections, checked: returned(result?.text) }).toStrictEqual({
       // One inspection, read by the pages and the server check alike.
       inspections: 1,
-      proposal: {
-        version: null,
+      checked: {
         passed: false,
         standIn: true,
         server: "failed",
@@ -425,53 +419,30 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await expect(person.api.apps.versions.list(app)).resolves.toStrictEqual([]);
   });
 
-  it("caps the Apps a turn creates, counting none that wasn't created", async () => {
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
-        // Refused as invalid: it creates nothing, and takes no App's place.
-        const created = [await tried(async () => (await env.build.create({ name: "" })).name)];
-        for (let count = 0; count < 4; count += 1) {
-          created.push(await tried(async () => (await env.build.create({ name: ${JSON.stringify(appName)} + count })).name));
-        }
-        return created;
-      };`),
-      says("Done."),
-    ]);
-    await grant();
-
-    await chat.ask("Build three desks");
-
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual([
-      appErrors.create("app.invalid").message,
-      `${appName}0`,
-      `${appName}1`,
-      `${appName}2`,
-      appErrors.create("app.creates_exhausted").message,
-    ]);
-  });
-
-  it("says a write's build couldn't run, proposes nothing then, and checks it at the next write once it can", async () => {
+  it("says a write's build couldn't run, passes nothing then, and checks it at the next write once it can", async () => {
     const write = `export default async (self, env) => {
       ${findApp}
-      const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })});
-      const proposal = await env.build.propose(app.id, "A desk");
-      return { errors: written.errors, notChecked: written.notChecked, version: proposal.version };
+      const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })}, { revision: (await env.build.files(app.id)).revision });
+      const checked = await env.build.check(app.id);
+      return { errors: written.errors, notChecked: written.notChecked, passed: checked.passed };
     };`;
     // Never built before, so no build of it is in the cache to serve.
     const unbuilt = `${fixed}\n// ${crypto.randomUUID()}\n`;
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": unbuilt })});
-        const proposal = await env.build.propose(app.id, "A desk");
-        return { errors: written.errors, notChecked: written.notChecked, version: proposal.version };
+    const { chat, grant } = await setUp(
+      [
+        codeStep(`export default async (self, env) => {
+        ${findApp}
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": unbuilt })}, { revision: (await env.build.files(app.id)).revision });
+        const checked = await env.build.check(app.id);
+        return { errors: written.errors, notChecked: written.notChecked, passed: checked.passed };
       };`),
-      says("It couldn't be built now."),
-      codeStep(write),
-      says("Built."),
-    ]);
+        says("It couldn't be built now."),
+        codeStep(write),
+        says("Built."),
+      ],
+      "builder",
+      true
+    );
     await grant();
     // The compiler can't start: no build can run now. (The build cache
     // being out is only a miss: the build runs, build-cache.ts.)
@@ -494,35 +465,39 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Check it again");
 
     const results = await codeResults(chat.stub, chat.chat.id);
-    // No error found, but not checked either: never proposed.
+    // No error found, but not checked either: never passed.
     expect(returned(results[0]?.text)).toStrictEqual({
       errors: 0,
       notChecked: {
         pages:
           "The build couldn't run now. It runs again when this is first used.",
       },
-      version: null,
+      passed: false,
     });
     expect(returned(results[1]?.text)).toStrictEqual({
       errors: 0,
       notChecked: {},
-      version: 1,
+      passed: true,
     });
   });
 
-  it("says a write's build didn't finish within its bound, and proposes nothing", async () => {
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })});
-        const proposal = await env.build.propose(app.id, "Fixed the button");
+  it("says a write's build didn't finish within its bound, and passes nothing", async () => {
+    const { chat, grant } = await setUp(
+      [
+        codeStep(`export default async (self, env) => {
+        ${findApp}
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })}, { revision: (await env.build.files(app.id)).revision });
+        const checked = await env.build.check(app.id);
         return {
           written: { errors: written.errors, notChecked: written.notChecked },
-          proposal: { version: proposal.version, passed: proposal.check.passed, pages: proposal.check.pages },
+          checked: { passed: checked.passed, pages: checked.pages },
         };
       };`),
-      says("It couldn't be built in time."),
-    ]);
+        says("It couldn't be built in time."),
+      ],
+      "builder",
+      true
+    );
     await grant();
     // The build cache holds every build until the test ends: none finishes
     // within the bound, which the test shortens.
@@ -559,8 +534,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "The build didn't finish in time. It runs again when this is first used.";
     expect(returned(result?.text)).toStrictEqual({
       written: { errors: 0, notChecked: { pages: late } },
-      proposal: {
-        version: null,
+      checked: {
         passed: false,
         pages: { status: "error", diagnostics: [], error: late },
       },

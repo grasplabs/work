@@ -84,7 +84,7 @@ import type {
 //   in between, and every call after the mark is refused there, whatever
 //   core's inventory says.
 // - A store is deleted under a sealed release that may still run on it (a
-//   current or pending version, a rollback target, a pinned run, an open
+//   current version, a rollback target, a pinned run, an open
 //   page's lease): refused (`data.store_bound`) while any release its App
 //   keeps is bound to it (`sdk_resource_bindings`, whose rows retention
 //   deletes with their release), read in the statement that marks the
@@ -341,7 +341,7 @@ export const resetAppStore = async (
 };
 
 /** The App a store serves: whose roles decide who manages it. */
-type StoreApp = Pick<App, "id" | "owner" | "status"> & {
+type StoreApp = Pick<App, "id" | "owner" | "currentVersion" | "archived"> & {
   /** Whether the App was removed (app-removal.ts): its admins' alone then. */
   removed: boolean;
 };
@@ -358,7 +358,8 @@ const storeApp = async (
     .select({
       id: apps.id,
       owner: apps.ownerId,
-      status: apps.status,
+      currentVersion: apps.currentVersion,
+      archivedAt: apps.archivedAt,
       removedAt: apps.removedAt,
     })
     .from(appDefaultStores)
@@ -368,13 +369,14 @@ const storeApp = async (
   if (row === undefined) {
     return undefined;
   }
-  if (row.id === null || row.owner === null || row.status === null) {
+  if (row.id === null || row.owner === null) {
     throw dataErrors.create("data.store_unavailable");
   }
   return {
     id: appIdSchema.parse(row.id),
     owner: row.owner,
-    status: row.status,
+    currentVersion: row.currentVersion,
+    archived: row.archivedAt !== null,
     removed: row.removedAt !== null,
   };
 };
@@ -431,8 +433,8 @@ const managedBy = async (
 
 /**
  * That some sealed release is bound to store `id` (`sdk_resource_bindings`):
- * a retained version of its App, which may still run (as current or
- * pending, a rollback target, a pinned run or an open page's lease).
+ * a retained version of its App, which may still run (as current, a
+ * rollback target, a pinned run or an open page's lease).
  * Retention deletes a release's bindings with it (release-retention.ts),
  * so a binding is there exactly while its release is kept.
  */

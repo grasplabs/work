@@ -507,6 +507,14 @@
   --icon-x: 1.5px;
 }
 
+/* The agent gives a nod. */
+.lucide-bot {
+  --icon-move: icon-swing;
+  --icon-turn: -10deg;
+  --icon-origin: 50% 90%;
+  --icon-time: 0.6s;
+}
+
 /* The line down its middle and its fold are drawn, and both sides swell. */
 .lucide-brain > :nth-child(1) {
   --icon-move: icon-draw;
@@ -2098,6 +2106,12 @@
   --icon-time: 0.6s;
 }
 
+/* The click sparks round the pointer. */
+.lucide-mouse-pointer-click
+  > :is(:nth-child(1), :nth-child(2), :nth-child(3), :nth-child(4)) {
+  --icon-move: icon-pop;
+}
+
 /* The note comes up and its stem is drawn. */
 .lucide-music-2 > :nth-child(1) {
   --icon-move: icon-pop;
@@ -2209,6 +2223,16 @@
   --icon-x: -4px;
 }
 
+/* The panel widens to the left, its arrow a step ahead. */
+.lucide-panel-right-open > :nth-child(3) {
+  --icon-move: icon-hop;
+  --icon-x: -2px;
+}
+.lucide-panel-right-open > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+}
+
 /* The clip is drawn in one line. */
 .lucide-paperclip > :nth-child(1) {
   --icon-move: icon-draw;
@@ -2264,6 +2288,11 @@
   --icon-from: 10.5;
   --icon-time: 0.35s;
   --icon-wait: 0.1s;
+}
+
+/* The small picture comes up in its corner. */
+.lucide-picture-in-picture-2 > :nth-child(2) {
+  --icon-move: icon-pop;
 }
 
 /* A step forward and a small step back. */
@@ -2715,6 +2744,12 @@
   --icon-turn: -10deg;
   --icon-origin: 8.5px 15.5px;
   --icon-box: view-box;
+}
+
+/* The slash is drawn across. */
+.lucide-square-slash > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
 }
 
 /* The door comes up and the awning dips. */

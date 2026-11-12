@@ -23,11 +23,7 @@ import {
   uploadMediaTypeSchema,
   uploadTypes,
 } from "@grasp-os/shared/uploads";
-import type {
-  Upload,
-  UploadExtension,
-  UploadMediaType,
-} from "@grasp-os/shared/uploads";
+import type { Upload, UploadMediaType } from "@grasp-os/shared/uploads";
 import { and, asc, count, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -45,6 +41,7 @@ import { requireWritable } from "./collection-rules.ts";
 import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
 import type { Extracted } from "./extract.ts";
 import { brainOf } from "./ports.ts";
+import { hasText, signatures } from "./upload-checks.ts";
 
 // Files uploaded into Knowledge (see @grasp-os/shared/uploads). An upload
 // is checked by what arrived (its size, and that its first bytes are the
@@ -85,49 +82,6 @@ type UploadRow = typeof uploads.$inferSelect;
 
 /** The states of an upload that hasn't ended. */
 const unended = ["pending", "extracting", "saving"] as const;
-
-/** Bytes, as the first bytes of a file are compared. */
-const bytesOf = (text: string): number[] => [...new TextEncoder().encode(text)];
-
-/** Whether `bytes` start with `prefix`. */
-const startsWith = (bytes: Uint8Array, prefix: readonly number[]): boolean =>
-  prefix.every((byte, index) => bytes[index] === byte);
-
-/** UTF-8's byte order mark. */
-const byteOrderMark = [0xef, 0xbb, 0xbf];
-
-/** What ends WebVTT's signature: a space, a tab, a line break, or the file. */
-const afterVttSignature: ReadonlySet<number | undefined> = new Set([
-  0x20,
-  0x09,
-  0x0a,
-  0x0d,
-  undefined,
-]);
-
-const vttSignature = bytesOf("WEBVTT");
-
-/**
- * Whether a file starts as its type does: a PDF's header, a ZIP's for
- * Office files, and WebVTT's signature (after a byte order mark, if any)
- * as the WebVTT spec defines it.
- */
-export const signatures: Readonly<
-  Record<UploadExtension, (bytes: Uint8Array) => boolean>
-> = {
-  pdf: (bytes) => startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]),
-  docx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
-  xlsx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
-  vtt: (bytes) => {
-    const text = startsWith(bytes, byteOrderMark)
-      ? bytes.subarray(byteOrderMark.length)
-      : bytes;
-    return (
-      startsWith(text, vttSignature) &&
-      afterVttSignature.has(text[vttSignature.length])
-    );
-  },
-};
 
 const hex = (buffer: ArrayBuffer): string =>
   Array.from(new Uint8Array(buffer), (byte) =>
@@ -377,20 +331,6 @@ const documentText = (row: UploadRow, markdown: string): string =>
     original: row.path,
     mediaType: row.mediaType,
   })}---\n\n${markdown}\n`;
-
-const headingMarks = /^#{1,6}\s/gmu;
-const tableSyntax = /[\s|-]/gu;
-const pageHeading = /^#{1,6} Page \d+$/gmu;
-
-/**
- * Whether Markdown holds any text: a heading's counts, table rules and
- * the page headings a PDF's sections get don't.
- */
-export const hasText = (markdown: string): boolean =>
-  markdown
-    .replaceAll(pageHeading, "")
-    .replaceAll(headingMarks, "")
-    .replaceAll(tableSyntax, "") !== "";
 
 /**
  * Whether an upload of the same name to the same collection, made after

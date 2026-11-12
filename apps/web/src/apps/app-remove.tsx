@@ -28,10 +28,10 @@ import { useCoreAction } from "../use-core-action.ts";
 
 /** Whether `identity` may delete `app`: archived, and theirs or an admin's. */
 export const removesApp = (
-  app: Pick<App, "status" | "owner">,
+  app: Pick<App, "archived" | "owner">,
   identity: Pick<Identity, "userId" | "role" | "staff">
 ): boolean =>
-  app.status === "archived" &&
+  app.archived &&
   !identity.staff &&
   (app.owner === identity.userId || isAdmin(identity.role));
 

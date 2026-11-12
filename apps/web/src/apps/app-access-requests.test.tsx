@@ -36,8 +36,8 @@ const crm: ViewedApp = {
   audience: null,
   blueprint: null,
   currentVersion: 1,
-  pendingVersion: null,
-  status: "published",
+  liveLabel: "26.11.1",
+  archived: false,
   process: null,
   createdAt: "2026-10-01T09:00:00.000Z",
   role: "builder",
@@ -328,7 +328,7 @@ describe("Asking for access for an App, for its builders", () => {
 
   it("is not offered on an archived App, and shows nothing to who doesn't build it", async () => {
     const archived = fakeCore();
-    await shown(archived.session, { app: { ...crm, status: "archived" } });
+    await shown(archived.session, { app: { ...crm, archived: true } });
     const archivedAsks = button("Ask for access") !== undefined;
     unmount();
     await shown(fakeCore().session, { app: { ...crm, role: "user" } });

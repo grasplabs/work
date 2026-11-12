@@ -16,7 +16,6 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { publishVersion } from "../src/app-publish.ts";
 import { formSubmissionOf, queueFormSent } from "../src/app-webhook-queue.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { holdThrowawayStore } from "../src/data-stores.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -37,7 +36,6 @@ import {
   mapped,
   team as onboardingTeam,
 } from "./onboarding-team.ts";
-import { storeEmptied } from "./previews.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
@@ -1800,39 +1798,6 @@ describe("erasing a person", () => {
         },
       ],
     });
-  });
-
-  it("finishes their workspace's erasure, emptying for good the preview stores it lists", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const person = await signedInApi(idp, "builder");
-    const chat = await person.api.chats.create("Theirs");
-    await admin.api.members.remove(person.userId);
-    // A throwaway store of a preview's, in use, that the workspace lists
-    // only after their removal emptied what it listed then: their erasure
-    // empties it (draft-runs.ts).
-    const storeId = storeIdSchema.parse(`throwaway-${crypto.randomUUID()}`);
-    await holdThrowawayStore(env, storeId, Date.now() + 60 * 60 * 1000);
-    await runInDurableObject(
-      workspace(env, personalWorkspaceId(person.userId)),
-      (_instance, state) => {
-        state.storage.sql.exec(
-          "INSERT INTO preview_stores (store_id, chat_id, app_id, revision) VALUES (?, ?, 'app-gone', 1)",
-          storeId,
-          chat.id
-        );
-      }
-    );
-
-    const erased = await admin.api.members.erase(
-      person.userId,
-      String(person.person.name)
-    );
-
-    expect({
-      workspace: erased.areas.find(({ area }) => area === "workspace")?.state,
-      stores: await inWorkspace(person.userId, "preview_stores"),
-      emptied: await storeEmptied(storeId),
-    }).toStrictEqual({ workspace: "complete", stores: 0, emptied: true });
   });
 
   it("empties their workspace, their chats and everything in them, and leaves everyone else's as it was", async () => {

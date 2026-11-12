@@ -154,7 +154,7 @@ export const buildOnSave = async (
     checks = true,
     inspection,
   }: {
-    /** `preview` for a chat's draft, `production` for a saved version. */
+    /** `preview` for the App's draft, `production` for a saved version. */
     readonly profile: BuildProfile;
     /** False for a draft's write: its pages without the type check (pages.ts). */
     readonly checks?: boolean;

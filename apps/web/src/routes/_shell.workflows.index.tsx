@@ -52,6 +52,7 @@ import { EmptyCard } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { MakeSomethingLink } from "../make/make-link.tsx";
 import { useCore } from "../use-core.ts";
 import {
   ProcessGlyph,
@@ -60,7 +61,6 @@ import {
 } from "../workflows/business-process.tsx";
 import { RunFiguresView } from "../workflows/figures.tsx";
 import { GoLivesWaiting } from "../workflows/go-lives-waiting.tsx";
-import { NewWorkflow } from "../workflows/independent-workflows.tsx";
 import { needsAttention, processesIn, showsUnder } from "../workflows/lists.ts";
 import { listRuns, listWorkflows, readActivity } from "../workflows/reads.ts";
 import { runFiguresOf } from "../workflows/run-figures.ts";
@@ -593,7 +593,11 @@ const Workflows = () => {
     <>
       <SiteHeader
         // The page's one action, in the bar above it.
-        actions={canBuild(identity.role) ? <NewWorkflow /> : undefined}
+        actions={
+          canBuild(identity.role) ? (
+            <MakeSomethingLink kind="workflow" size="sm" />
+          ) : undefined
+        }
         crumbs={[{ label: t`Workflows` }]}
       />
       <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">

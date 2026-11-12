@@ -12,7 +12,7 @@ import {
 } from "../src/migration-run.ts";
 import type { TransformRow } from "../src/migration-run.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
-import { reviewVersion } from "../src/version-review.ts";
+import { reviewDraft } from "../src/version-review.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TableSpec, TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
@@ -447,24 +447,26 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
     });
   });
 
-  it("is listed in its version's review with its table and what its fixtures found, every one when no version is current", async () => {
+  it("is listed in a draft's changes with its table and how many fixtures publishing runs it on, every one when no version is live", async () => {
     const { fixture } = await sealed();
-    const review = await reviewVersion(env, fixture.owner, fixture.app, 3);
+    const review = await reviewDraft(
+      env,
+      fixture.owner,
+      { id: fixture.app, currentVersion: null },
+      { base: 3, changes: {}, definition: null, revision: 0 }
+    );
 
     expect(review.migrations).toContainEqual({
       name: "derive-category",
       table: "derive_category",
       change: "added",
       fixtures: 1,
-      fixturesPassed: true,
     });
-    // Its output on its fixture holds a managed field.
     expect(review.migrations).toContainEqual({
       name: "writes-managed",
       table: "writes_managed",
       change: "added",
       fixtures: 1,
-      fixturesPassed: false,
     });
     expect(review.migrations).toHaveLength(Object.keys(handlers).length);
   });

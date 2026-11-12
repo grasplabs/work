@@ -37,7 +37,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
-import { cancelArchivedRuns, changeStatus } from "../src/app-status.ts";
+import { cancelArchivedRuns, setArchived } from "../src/app-status.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
@@ -77,7 +77,7 @@ import {
   stopRetryMs,
 } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb } from "./apps.ts";
+import { racingDb, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { sleeping, woken } from "./runs.ts";
@@ -425,12 +425,24 @@ interface Fixture {
   readonly release: Release;
 }
 
+/** Archives an App behind its own back, as a pass whose request ended left it. */
+const archiveApp =
+  "UPDATE apps SET archived_at = ?, archived_by = ? WHERE id = ?";
+
+/** Ada, as `archived_by` records who archived `fx`'s App. */
+const archivedBy = (fx: Fixture): string =>
+  JSON.stringify({ userId: fx.ada.userId, staff: false });
+
 /**
  * Ada's App, version 1 approved and sealed, with its store; her workflow
  * bound to it as `followUp`; the App's `start` on it, granted by an
- * admin; and Bob, who uses the App and nothing else.
+ * admin; and Bob, who uses the App and nothing else. Live once `before`,
+ * if given, bound and granted what else the test needs.
  */
-const fixture = async (waits = false): Promise<Fixture> => {
+const fixture = async (
+  waits = false,
+  before?: (fx: Pick<Fixture, "admin" | "ada" | "app">) => Promise<void>
+): Promise<Fixture> => {
   const admin = await person("admin");
   const ada = await person("builder");
   const bob = await person("user");
@@ -468,6 +480,8 @@ const fixture = async (waits = false): Promise<Fixture> => {
     rolesOf(ada)
   );
   await grantPermission(env, admin, asked.id, { version: null });
+  await before?.({ admin, ada, app });
+  await standInLive(app);
   return {
     admin,
     ada,
@@ -752,7 +766,7 @@ describe("an action starting a workflow", () => {
     const runId = "value" in handle ? handle.value.runId : null;
     const before = await runOf(fx, runId);
 
-    await changeStatus(env, fx.ada, fx.app, "archive");
+    await setArchived(env, fx.ada, fx.app, true);
     const after = await ended(fx, runId);
     const asked = await env.DB.prepare(
       "SELECT stop_requested_at IS NOT NULL AS asked FROM workflow_resource_runs WHERE id = ?"
@@ -795,10 +809,8 @@ describe("an action starting a workflow", () => {
       { timeout: 30_000, interval: 100 }
     );
     // Archived by a pass that never reached the run (its request ended).
-    await env.DB.prepare(
-      "UPDATE apps SET status = 'archived', status_changed_at = ? WHERE id = ?"
-    )
-      .bind(Date.now(), fx.app)
+    await env.DB.prepare(archiveApp)
+      .bind(Date.now(), archivedBy(fx), fx.app)
       .run();
 
     await cancelArchivedRuns(env);
@@ -820,36 +832,34 @@ describe("an action starting a workflow", () => {
     // claim was saved and before the stop was sent.
     const claimedAgo = async (ms: number): Promise<void> => {
       await env.DB.batch([
-        env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?").bind(
-          fx.app
-        ),
+        env.DB.prepare(archiveApp).bind(Date.now(), archivedBy(fx), fx.app),
         env.DB.prepare(
           "UPDATE workflow_resource_runs SET stop_requested_at = ? WHERE id = ?"
         ).bind(Date.now() - ms, runId),
       ]);
     };
-    const statusOfApp = async () =>
-      await env.DB.prepare("SELECT status FROM apps WHERE id = ?")
+    const archivedNow = async () =>
+      (await env.DB.prepare("SELECT archived_at FROM apps WHERE id = ?")
         .bind(fx.app)
-        .first("status");
+        .first("archived_at")) !== null;
 
     await claimedAgo(1000);
-    const early = await outcome(changeStatus(env, fx.ada, fx.app, "restore"));
+    const early = await outcome(setArchived(env, fx.ada, fx.app, false));
     const owed = await runOf(fx, runId);
-    const whileOwed = { app: await statusOfApp(), ended: owed.endedAt };
+    const whileOwed = { archived: await archivedNow(), ended: owed.endedAt };
     await claimedAgo(stopRetryMs + 1000);
-    const restored = await changeStatus(env, fx.ada, fx.app, "restore");
+    const restored = await setArchived(env, fx.ada, fx.app, false);
     const after = await ended(fx, runId);
 
     expect({
       early,
       whileOwed,
-      restored: restored.status,
+      restored: restored.archived,
       after: after.status,
     }).toStrictEqual({
       early: "app.stops_pending",
-      whileOwed: { app: "archived", ended: null },
-      restored: "draft",
+      whileOwed: { archived: true, ended: null },
+      restored: false,
       after: "cancelled",
     });
   });
@@ -880,9 +890,7 @@ describe("an action starting a workflow", () => {
       env.DB.prepare(
         "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) SELECT ?, workflow_resource_id, version, manifest_hash, build_hash, principal_id, 'starting', ? FROM workflow_resource_runs WHERE id = ?"
       ).bind(orphan, Date.now() - hour, receipt?.id ?? ""),
-      env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?").bind(
-        fx.app
-      ),
+      env.DB.prepare(archiveApp).bind(Date.now(), archivedBy(fx), fx.app),
     ]);
 
     await repairResourceStarts(env);
@@ -914,7 +922,8 @@ describe("an action starting a workflow", () => {
       },
       rolesOf(fx.ada)
     );
-    await grantPermission(env, fx.admin, regranted.id, { version: null });
+    // Granted on the version live, as the admin reviewed it.
+    await grantPermission(env, fx.admin, regranted.id, { version: 1 });
     await unbindWorkflowFromApp(env, fx.ada, fx.bindingId);
     const unbound = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     expect({
@@ -943,26 +952,27 @@ describe("an action starting a workflow", () => {
 
 describe("App code starting a workflow it didn't declare", () => {
   it("is refused by the host, whatever it sends, and starts nothing", async () => {
-    const fx = await fixture();
     // Another workflow Ada binds to the App, which the App never declared.
-    const other = await workflowOf(fx.ada);
-    await bindWorkflowToApp(env, fx.ada, other.id, {
-      app: fx.app,
-      alias: "other",
-      version: 1,
+    const fx = await fixture(false, async ({ admin, ada, app }) => {
+      const other = await workflowOf(ada);
+      await bindWorkflowToApp(env, ada, other.id, {
+        app,
+        alias: "other",
+        version: 1,
+      });
+      const asked = await requestPermission(
+        env,
+        ada,
+        {
+          subject: { type: "app", appId: app },
+          object: { type: "workflow", workflowId: other.id },
+          actions: ["start"],
+          binding: "OTHER",
+        },
+        rolesOf(ada)
+      );
+      await grantPermission(env, admin, asked.id, { version: null });
     });
-    const asked = await requestPermission(
-      env,
-      fx.ada,
-      {
-        subject: { type: "app", appId: fx.app },
-        object: { type: "workflow", workflowId: other.id },
-        actions: ["start"],
-        binding: "OTHER",
-      },
-      rolesOf(fx.ada)
-    );
-    await grantPermission(env, fx.admin, asked.id, { version: null });
     const rogue = async (
       path: "requests.plainAction" | "requests.plainMutation",
       alias: string
@@ -1145,8 +1155,8 @@ describe("a mutation starting a workflow after it commits", () => {
     const fx = await fixture();
     const staged = await call(fx, fx.bob, "requests.submit", { who: "Bob" });
     // Archived after the commit, before its outbox hands the start on.
-    await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
-      .bind(fx.app)
+    await env.DB.prepare(archiveApp)
+      .bind(Date.now(), archivedBy(fx), fx.app)
       .run();
     await runDurableObjectAlarm(objectOf(fx.store));
     expect({

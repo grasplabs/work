@@ -93,23 +93,29 @@ const Findings = ({ findings }: { findings: readonly DependencyFinding[] }) => {
 const PackageRequest = ({
   request,
   onDecided,
+  onApproved,
 }: {
   request: DependencyRequest;
   onDecided: () => void;
+  onApproved: () => void;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
   const decide = async (approved: boolean): Promise<void> => {
-    await run(async (session) => {
+    const decided = await run(async (session) => {
       await session.dependencies.decide(request.id, {
         approved,
         graphHash: request.graphHash,
       });
+      return true;
     });
     // Read again however it went: a failed decision may have changed
     // something too (decided elsewhere, say).
     onDecided();
+    if (decided === true && approved) {
+      onApproved();
+    }
     await router.invalidate();
   };
   const subject = request.subject.name;
@@ -199,9 +205,15 @@ const PackageRequest = ({
 export const PackageRequests = ({
   chatId,
   version,
+  onApproved,
 }: {
   chatId: string;
   version: number;
+  /**
+   * Once packages are approved: the agent's turn ended asking for them,
+   * and only a new one carries on (core's notice starts none).
+   */
+  onApproved: () => void;
 }) => {
   const { t } = useLingui();
   const [read, setRead] = useState<Requests>({ state: "loading" });
@@ -233,6 +245,7 @@ export const PackageRequests = ({
       {read.requests.map((request) => (
         <PackageRequest
           key={request.id}
+          onApproved={onApproved}
           onDecided={() => {
             setReads(reads + 1);
           }}

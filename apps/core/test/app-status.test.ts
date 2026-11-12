@@ -1,12 +1,11 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
-import { changeStatus } from "../src/app-status.ts";
+import { setArchived } from "../src/app-status.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { draftOverLatest, proposeDraft, proposeVersion } from "../src/apps.ts";
 import { deleteStore } from "../src/data-stores.ts";
 import {
   repairResourceStarts,
@@ -32,30 +31,33 @@ import { notesFiles } from "./notes-client-app.ts";
 import { runObject, sleeping, whileEngineRefuses } from "./runs.ts";
 import { person as acting } from "./sealed-apps.ts";
 import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
-// An App is a draft, published or archived (app-status.ts). These tests
+// An App is open to the people it is shared with once a version of it
+// is live, and to nobody once archived (app-status.ts). These tests
 // start from the ways that can fail: someone who only uses an App reaching
-// a draft or an archived one by any way in, or learning a draft exists;
-// a trigger or a run outliving the archive; a transition by someone who
-// lost their role, or one nobody audited; and an App restored straight
-// back to the people who use it. The runs are of an independent JSON
-// workflow bound to the App, started from its page over core's
-// function route. Gone with App workflows: a schedule an App's own
-// workflow declares, firing only while the App is published, and its own
-// workflows' detail and parameters read, never set, once archived.
-// Already covered: a start refused for someone who may no longer use the
-// App once it is decided (workflow-starts.test.ts, "acts only for someone
-// who may use the App now, each with keys of their own").
+// one that isn't live yet or an archived one by any way in, or learning
+// one exists; a trigger or a run outliving the archive; an archive or a
+// restore by someone who lost their role, or one nobody audited; and a
+// stale restore landing on a newer archive. The runs are of an
+// independent JSON workflow bound to the App, started from its page over
+// core's function route. Already covered: a start refused for someone who
+// may no longer use the App once it is decided (workflow-starts.test.ts,
+// "acts only for someone who may use the App now, each with keys of their
+// own").
 
 const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
- * A builder's App with a page, its first version current, left a draft;
- * shared with `user` to use.
+ * A builder's App with a page, its first version committed but not yet
+ * live; shared with `user` to use.
  */
-const draftApp = async (builder: Person, user?: Person): Promise<string> => {
+const unpublishedApp = async (
+  builder: Person,
+  user?: Person
+): Promise<{ app: string; version: number }> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
   const { version } = await commitApp(
     builder.api.apps.files,
@@ -66,7 +68,6 @@ const draftApp = async (builder: Person, user?: Person): Promise<string> => {
     }),
     "First version"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
   if (user !== undefined) {
     await builder.api.apps.members.add(id, {
       type: "person",
@@ -74,7 +75,28 @@ const draftApp = async (builder: Person, user?: Person): Promise<string> => {
       role: "user",
     });
   }
-  return id;
+  return { app: id, version };
+};
+
+/** A builder's App with a page, its first version live; shared with `user`. */
+const liveApp = async (builder: Person, user?: Person): Promise<string> => {
+  const { app, version } = await unpublishedApp(builder, user);
+  await builder.api.apps.versions.publish(app, version);
+  return app;
+};
+
+/** An App's archive, as raw SQL: at `at`, or now. */
+const archivedRaw = async (app: string, at = Date.now()): Promise<void> => {
+  await env.DB.prepare("UPDATE apps SET archived_at = ? WHERE id = ?")
+    .bind(at, app)
+    .run();
+};
+
+/** An App's restore, as raw SQL. */
+const restoredRaw = async (app: string): Promise<void> => {
+  await env.DB.prepare("UPDATE apps SET archived_at = NULL WHERE id = ?")
+    .bind(app)
+    .run();
 };
 
 /** What `person` gets at each way into App `app`. */
@@ -155,57 +177,119 @@ const reached = async (
   return run.status;
 };
 
-describe("an App's status", () => {
+describe("an App's archive", () => {
   afterEach(endLiveResourceRuns);
 
-  it("opens a published App to those who only use it, and keeps a draft and an archived App from them, as an App that isn't there", async () => {
+  it("opens an App to those who only use it once a version is live, and keeps one not live yet and an archived one from them, as an App that isn't there", async () => {
     const [builder, user] = await Promise.all([
       signedInApi(idp, "builder"),
       signedInApi(idp, "user"),
     ]);
-    const app = await draftApp(builder, user);
+    const { app, version } = await unpublishedApp(builder, user);
     const missing = crypto.randomUUID();
 
-    const draft = await waysIn(user, app);
+    const notLive = await waysIn(user, app);
     const nothing = await waysIn(user, missing);
-    await builder.api.apps.publish(app);
-    const { status } = await user.api.apps.get(app);
-    const published = await waysIn(user, app);
+    await builder.api.apps.versions.publish(app, version);
+    const live = await waysIn(user, app);
     await builder.api.apps.archive(app);
     const archived = await waysIn(user, app);
+    // Restored, it is open again at once: its version is still live.
+    await builder.api.apps.restore(app);
+    const restored = await waysIn(user, app);
+    const open = {
+      get: "ok",
+      contents: "ok",
+      open: "ok",
+      version: "ok",
+      listed: true,
+    };
 
-    expect({
-      draft,
-      nothing,
-      status,
-      published,
-      archived,
-    }).toStrictEqual({
-      draft: noSuchApp,
+    expect({ notLive, nothing, live, archived, restored }).toStrictEqual({
+      notLive: noSuchApp,
       nothing: noSuchApp,
-      status: "published",
-      // Published, it opens for the people it is shared with, every way in.
-      published: {
-        get: "ok",
-        contents: "ok",
-        open: "ok",
-        version: "ok",
-        listed: true,
-      },
+      // Live, it opens for the people it is shared with, every way in.
+      live: open,
       archived: noSuchApp,
+      restored: open,
     });
   });
 
-  it("lets its builders use a draft, and nobody use an archived App, builders included", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
+  it("stays as closed as its status had it once the release that archives by time carries it over", async () => {
+    const [builder, user] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "user"),
+    ]);
+    const [archived, drafted, published] = await Promise.all([
+      liveApp(builder, user),
+      liveApp(builder, user),
+      liveApp(builder, user),
+    ]);
+    // As the release before left them: whom each reached was its status.
+    const changedAt = Date.parse("2026-10-01T09:00:00Z");
+    const changedBy = JSON.stringify({ userId: builder.userId, staff: false });
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE apps SET archived_at = NULL, archived_by = NULL, status = 'published' WHERE id = ?"
+      ).bind(published),
+      ...[
+        [archived, "archived"],
+        [drafted, "draft"],
+      ].map(([app, status]) =>
+        env.DB.prepare(
+          "UPDATE apps SET archived_at = NULL, archived_by = NULL, status = ?, status_changed_at = ?, status_changed_by = ? WHERE id = ?"
+        ).bind(status, changedAt, changedBy, app)
+      ),
+    ]);
+    const carried = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"))
+      .find(({ name }) => name.includes("_shared_app_drafts"))
+      ?.queries.filter((query) => query.includes("UPDATE `apps` SET"));
+    if (carried === undefined || carried.length === 0) {
+      throw new Error("shared_app_drafts carries no App over");
+    }
+    await env.DB.batch(carried.map((query) => env.DB.prepare(query)));
 
-    const draft = await outcome(builder.api.pages.open(app));
+    const kept = await env.DB.prepare(
+      "SELECT archived_at AS at, archived_by AS by FROM apps WHERE id = ?"
+    )
+      .bind(archived)
+      .first();
+    expect({
+      archived: await outcome(user.api.apps.get(archived)),
+      drafted: await outcome(user.api.apps.get(drafted)),
+      published: await outcome(user.api.apps.get(published)),
+      // Archived when, and by whom, its status said.
+      kept,
+      // A builder restores the draft, as any archived App.
+      restorable: await outcome(builder.api.apps.restore(drafted)),
+    }).toStrictEqual({
+      archived: "app.not_found",
+      drafted: "app.not_found",
+      published: "ok",
+      kept: { at: changedAt, by: changedBy },
+      restorable: "ok",
+    });
+  });
+
+  it("shows its builders an App before it is live, with nothing live to open, and lets nobody use an archived App, builders included", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { app } = await unpublishedApp(builder);
+
+    const before = await waysIn(builder, app);
     await builder.api.apps.archive(app);
     const archived = await waysIn(builder, app);
 
-    expect({ draft, archived }).toStrictEqual({
-      draft: "ok",
+    expect({ before, archived }).toStrictEqual({
+      // Theirs to build, in its preview: nothing of it is live to open.
+      before: {
+        get: "ok",
+        contents: "ok",
+        open: "app.not_running",
+        version: "ok",
+        listed: true,
+      },
       // Still theirs to see and restore, never to use.
       archived: {
         get: "ok",
@@ -217,81 +301,71 @@ describe("an App's status", () => {
     });
   });
 
-  it("moves only for its builders, from where it is now, audited once per change", async () => {
+  it("is archived and restored only by its builders, audited once per change", async () => {
     const [builder, other, user] = await Promise.all([
       signedInApi(idp, "builder"),
       signedInApi(idp, "builder"),
       signedInApi(idp, "user"),
     ]);
-    const { id: empty } = await builder.api.apps.create({ name: "Empty" });
-    const app = await draftApp(builder, user);
+    const { app, version } = await unpublishedApp(builder, user);
     await builder.api.apps.members.add(app, {
       type: "person",
       id: other.userId,
       role: "builder",
     });
 
-    const noVersion = await outcome(builder.api.apps.publish(empty));
-    const byUserOfDraft = await outcome(user.api.apps.publish(app));
-    await other.api.apps.publish(app);
-    // Publishing a published App changes and records nothing.
-    await builder.api.apps.publish(app);
-    const byUser = await outcome(user.api.apps.unpublish(app));
+    const byUserNotLive = await outcome(user.api.apps.archive(app));
+    await builder.api.apps.versions.publish(app, version);
+    const byUser = await outcome(user.api.apps.archive(app));
     // A builder no longer: their role is read for the call.
     await builder.api.apps.members.remove(app, {
       type: "person",
       id: other.userId,
     });
     const byFormer = await outcome(other.api.apps.archive(app));
-    await builder.api.apps.archive(app);
-    const publishArchived = await outcome(builder.api.apps.publish(app));
+    const archived = await builder.api.apps.archive(app);
+    // Archiving an archived App changes and records nothing; so does
+    // restoring a restored one.
+    const again = await builder.api.apps.archive(app);
     const restored = await builder.api.apps.restore(app);
+    const restoredAgain = await builder.api.apps.restore(app);
     const logged = await allEvents();
     const changes = logged
       .filter(
         ({ action, target }) =>
           target?.id === app &&
-          [
-            "app.published",
-            "app.unpublished",
-            "app.archived",
-            "app.restored",
-          ].includes(action)
+          ["app.archived", "app.restored"].includes(action)
       )
       .map(({ action, actor, detail }) => ({ action, actor, detail }));
 
     expect({
-      noVersion,
-      byUserOfDraft,
+      byUserNotLive,
       byUser,
       byFormer,
-      publishArchived,
-      restored: restored.status,
+      archived: [archived.archived, again.archived],
+      restored: [restored.archived, restoredAgain.archived],
+      currentVersion: restored.currentVersion,
       changes,
     }).toStrictEqual({
-      noVersion: "app.no_version",
-      byUserOfDraft: "app.not_found",
+      // Not live yet, it isn't there for them at all.
+      byUserNotLive: "app.not_found",
       byUser: "role.forbidden",
       // No role left at all in it: as for an App that isn't there.
       byFormer: "app.not_found",
-      publishArchived: "app.archived",
-      // A restored App is a draft: its users wait for it to be published.
-      restored: "draft",
+      archived: [true, true],
+      restored: [false, false],
+      // Restored, its live version is live again.
+      currentVersion: version,
       changes: [
-        {
-          action: "app.published",
-          actor: { type: "person", userId: other.userId },
-          detail: { from: "draft", to: "published" },
-        },
         {
           action: "app.archived",
           actor: { type: "person", userId: builder.userId },
-          detail: { from: "published", to: "archived" },
+          detail: {},
         },
         {
           action: "app.restored",
           actor: { type: "person", userId: builder.userId },
-          detail: { from: "archived", to: "draft" },
+          detail: {},
         },
       ],
     });
@@ -305,14 +379,13 @@ describe("an App's status", () => {
     await builder.api.apps.archive(app);
     const foundStatus = await reached(holding, found, "cancelled");
     const archivedAt = await env.DB.prepare(
-      "SELECT status_changed_at AS at FROM apps WHERE id = ?"
+      "SELECT archived_at AS at FROM apps WHERE id = ?"
     )
       .bind(app)
       .first<{ at: number }>();
     // A run whose start committed after the archive's look at its runs:
-    // started on the published App, then archived without that look.
+    // started on the restored App, then archived without that look.
     await builder.api.apps.restore(app);
-    await builder.api.apps.publish(app);
     const raced = await holdingRun(holding);
     // A cancel of that archive, late, leaves the run started since alone.
     const { asked: late } = await stopRunsStartedBy(
@@ -322,9 +395,7 @@ describe("an App's status", () => {
       new Date(archivedAt?.at ?? 0),
       50
     );
-    await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
-      .bind(app)
-      .run();
+    await archivedRaw(app);
     await runMinuteTasks({}, new Date());
     const racedStatus = await reached(holding, raced, "cancelled");
     const logged = await allEvents();
@@ -350,28 +421,20 @@ describe("an App's status", () => {
     });
   });
 
-  it("never moves for Grasp staff, whatever the transition", async () => {
+  it("is never archived or restored by Grasp staff", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
-    await builder.api.apps.publish(app);
+    const app = await liveApp(builder);
     const staff = { ...(await acting("admin")), staff: true };
 
-    const tried = {
-      publish: await outcome(changeStatus(env, staff, app, "publish")),
-      unpublish: await outcome(changeStatus(env, staff, app, "unpublish")),
-      archive: await outcome(changeStatus(env, staff, app, "archive")),
-      restore: await outcome(changeStatus(env, staff, app, "restore")),
-    };
-    const { status } = await builder.api.apps.get(app);
+    const archive = await outcome(setArchived(env, staff, app, true));
+    await builder.api.apps.archive(app);
+    const restore = await outcome(setArchived(env, staff, app, false));
+    const { archived } = await builder.api.apps.get(app);
 
-    expect({ tried, status }).toStrictEqual({
-      tried: {
-        publish: "role.forbidden",
-        unpublish: "role.forbidden",
-        archive: "role.forbidden",
-        restore: "role.forbidden",
-      },
-      status: "published",
+    expect({ archive, restore, archived }).toStrictEqual({
+      archive: "role.forbidden",
+      restore: "role.forbidden",
+      archived: true,
     });
   });
 
@@ -382,11 +445,7 @@ describe("an App's status", () => {
     // Archived without its cancels yet: their pass hasn't come.
     // Archived, its start having overlapped the archive's write: created
     // after the archive's time, which no cutoff at that time reaches.
-    await env.DB.prepare(
-      "UPDATE apps SET status = 'archived', status_changed_at = ? WHERE id = ?"
-    )
-      .bind(Date.now() - 60_000, app)
-      .run();
+    await archivedRaw(app, Date.now() - 60_000);
 
     // While the engine refuses the stop it owes, the stop is kept on the
     // run, which ends itself on its object's next alarm: until it has, the
@@ -395,7 +454,7 @@ describe("an App's status", () => {
       (method) => method === "terminate",
       async () => await outcome(builder.api.apps.restore(app))
     );
-    const { status: stillArchived } = await builder.api.apps.get(app);
+    const { archived: stillArchived } = await builder.api.apps.get(app);
     // Asked again: the restore goes through once the stop has ended the
     // run.
     const restored = await vi.waitFor(
@@ -403,7 +462,6 @@ describe("an App's status", () => {
       { timeout: 30_000, interval: 200 }
     );
     const leftStatus = await statusOf(holding, left);
-    await builder.api.apps.publish(app);
     await holdingRun(holding);
     // A sweep asked of the restored App, however late its cutoff, finds none.
     const { asked: swept } = await stopRunsStartedBy(
@@ -417,22 +475,22 @@ describe("an App's status", () => {
     expect({
       refused,
       stillArchived,
-      restored: restored.status,
+      restored: restored.archived,
       leftStatus,
       swept,
     }).toStrictEqual({
       refused: "app.stops_pending",
-      stillArchived: "archived",
-      restored: "draft",
+      stillArchived: true,
+      restored: false,
       leftStatus: "cancelled",
       swept: 0,
     });
   });
 
-  it("is read-only for its builders once archived: no version made current, sharing, binding or commit, though access can be taken away", async () => {
+  it("is read-only for its builders once archived: no version published, sharing, binding or commit, though access can be taken away", async () => {
     const builder = await signedInApi(idp, "builder");
     const user = await acting("user");
-    const app = await draftApp(builder);
+    const app = await liveApp(builder);
     const { version } = await commitApp(
       builder.api.apps.files,
       app,
@@ -453,9 +511,7 @@ describe("an App's status", () => {
       .run();
 
     expect({
-      current: await outcome(
-        builder.api.apps.versions.setCurrent(app, version)
-      ),
+      current: await outcome(builder.api.apps.versions.publish(app, version)),
       share: await outcome(
         builder.api.apps.members.add(app, {
           type: "person",
@@ -491,9 +547,9 @@ describe("an App's status", () => {
     });
   });
 
-  it("keeps what an archive raced unwritten: no version committed, proposed or made current once it lands", async () => {
+  it("keeps what an archive raced unwritten: no version committed or published once it lands", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
+    const app = await liveApp(builder);
     const by = await builder.api.whoami();
     const { version } = await commitApp(
       builder.api.apps.files,
@@ -502,14 +558,7 @@ describe("an App's status", () => {
       "Next"
     );
     const archive = async (): Promise<void> => {
-      await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
-        .bind(app)
-        .run();
-    };
-    const restore = async (): Promise<void> => {
-      await env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?")
-        .bind(app)
-        .run();
+      await archivedRaw(app);
     };
 
     // Archived just before each write's batch lands, after its check.
@@ -523,8 +572,8 @@ describe("an App's status", () => {
       )
     );
     const versions = await builder.api.apps.versions.list(app);
-    await restore();
-    const madeCurrent = await outcome(
+    await restoredRaw(app);
+    const published = await outcome(
       publishVersion(
         {
           ...env,
@@ -535,86 +584,53 @@ describe("an App's status", () => {
         version
       )
     );
-    await restore();
-    const draft = await draftOverLatest(env, appIdSchema.parse(app), {
-      base: version,
-      changes: { "notes.md": "Drafted" },
-      definition: null,
-    });
-    const drafted = await outcome(
-      proposeDraft(
-        { ...env, DB: racingDb(archive, /insert into "app_versions"/iu) },
-        by,
-        app,
-        draft,
-        "Drafted"
-      )
-    );
-    await restore();
-    const proposed = await outcome(
-      proposeVersion(
-        {
-          ...env,
-          DB: racingDb(archive, /update "apps" set "pending_version"/iu),
-        },
-        by,
-        app,
-        version
-      )
-    );
-    await restore();
+    await restoredRaw(app);
     const after = await builder.api.apps.get(app);
     const versionsAfter = await builder.api.apps.versions.list(app);
 
     expect({
       committed,
       versions: versions.map(({ version: number }) => number),
-      madeCurrent,
+      published,
       currentVersion: after.currentVersion,
-      drafted,
-      proposed,
-      pendingVersion: after.pendingVersion,
       versionsAfter: versionsAfter.map(({ version: number }) => number),
     }).toStrictEqual({
       committed: "app.archived",
       versions: [version, 1],
-      madeCurrent: "app.archived",
+      published: "app.archived",
       currentVersion: 1,
-      drafted: "app.archived",
-      proposed: "app.archived",
-      pendingVersion: null,
       versionsAfter: [version, 1],
     });
   });
 
-  it("refuses a restore once the App went round to archived again meanwhile", async () => {
+  it("refuses a restore once the App was archived again meanwhile", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await draftApp(builder);
+    const app = await liveApp(builder);
     await builder.api.apps.archive(app);
     const by = await builder.api.whoami();
     // Restored, used and archived again by others just before this
     // restore's write lands: archived as it read it, but another archive.
     const cycled = async (): Promise<void> => {
       await env.DB.prepare(
-        "UPDATE apps SET status = 'archived', status_changed_at = status_changed_at + 5 WHERE id = ?"
+        "UPDATE apps SET archived_at = archived_at + 5 WHERE id = ?"
       )
         .bind(app)
         .run();
     };
 
     const refused = await outcome(
-      changeStatus(
-        { ...env, DB: racingDb(cycled, /update "apps" set "status"/iu) },
+      setArchived(
+        { ...env, DB: racingDb(cycled, /update "apps" set "archived_at"/iu) },
         by,
         app,
-        "restore"
+        false
       )
     );
-    const { status } = await builder.api.apps.get(app);
+    const { archived } = await builder.api.apps.get(app);
 
-    expect({ refused, status }).toStrictEqual({
+    expect({ refused, archived }).toStrictEqual({
       refused: "app.conflict",
-      status: "archived",
+      archived: true,
     });
   });
 
@@ -643,7 +659,7 @@ describe("an App's status", () => {
     });
   });
 
-  it("sends no start the engine never took once its person may no longer use the App, as when it went back to a draft", async () => {
+  it("sends no start the engine never took once its person may no longer use the App", async () => {
     const holding = await holdingApp();
     const { builder, app } = holding;
     const { signedIn } = jsonWorkflowAppsOf(idp);
@@ -662,10 +678,12 @@ describe("an App's status", () => {
         await startedFrom(holding, builder),
       ]
     );
-    // Published then, a draft now: the user may no longer use it, whatever
-    // their start's row says; its builder still may.
-    await env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?")
-      .bind(app)
+    // Shared with them then, not now: the user may no longer use it,
+    // whatever their start's row says; its builder still may.
+    await env.DB.prepare(
+      "DELETE FROM app_members WHERE app_id = ? AND member_id = ?"
+    )
+      .bind(app, user.userId)
       .run();
 
     // Past when the repair first looks at them.
@@ -682,17 +700,21 @@ describe("an App's status", () => {
     });
   });
 
-  it("lets a start the engine took go on when the repair finds its App unpublished", async () => {
+  it("lets a start the engine took go on when the repair finds its App archived", async () => {
     const holding = await holdingApp();
     const { app } = holding;
     const runId = await holdingRun(holding);
-    // Its confirmation was never recorded, and the App went back to a
-    // draft since: the engine has the run, in flight.
+    // Its confirmation was never recorded, and the App was archived since
+    // without its cancels yet: the engine has the run, in flight, and
+    // ending it is the archive's cancels' to do, not the repair's.
     await env.DB.batch([
       env.DB.prepare(
         "UPDATE workflow_resource_runs SET status = 'starting' WHERE id = ?"
       ).bind(runId),
-      env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?").bind(app),
+      env.DB.prepare("UPDATE apps SET archived_at = ? WHERE id = ?").bind(
+        Date.now(),
+        app
+      ),
     ]);
 
     // Past when the repair first looks at it.
@@ -707,13 +729,11 @@ describe("an App's status", () => {
       signedInApi(idp, "admin"),
       signedInApi(idp, "user"),
     ]);
-    const app = await draftApp(builder);
+    const app = await liveApp(builder);
     const { generation } = await admin.api.dataPolicy.read(app);
     const by = await builder.api.whoami();
     const archive = async (): Promise<void> => {
-      await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
-        .bind(app)
-        .run();
+      await archivedRaw(app);
     };
 
     // Archived just before the sharing's batch lands, after its check.

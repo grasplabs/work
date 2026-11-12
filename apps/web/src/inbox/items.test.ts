@@ -13,7 +13,6 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
   BindingApprovalItem,
-  GoLiveItem,
   SignInAgainItem,
   WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
@@ -124,18 +123,6 @@ const signInAgain: SignInAgainItem = {
     createdAt: "2026-10-01T00:00:00.000Z",
   },
   integration: { source: "native", id: "microsoft", name: "Microsoft 365" },
-};
-
-/** A version of Invoices up for review, for the person who answers for it. */
-const goLive: GoLiveItem = {
-  kind: "goLive",
-  id: "goLive:app-invoices:4",
-  at: null,
-  urgent: false,
-  waitsOn: { type: "person", userId: "me" },
-  verdicts: [],
-  app: { id: app, name: "Invoices" },
-  version: 4,
 };
 
 /** A version of a workflow asked to go live, waiting on an admin. */
@@ -250,7 +237,6 @@ const waiting = (ranOut = true) =>
       },
     },
     reconnect: { state: "ready", data: ranOut ? [signInAgain] : [] },
-    versions: { state: "ready", data: [goLive] },
     requests: {
       state: "ready",
       data: {
@@ -308,7 +294,6 @@ describe(inboxItems, () => {
         "asked:asked-1",
         "bindingApproval:workflow-quotes:2",
         "decision:decision-1",
-        "goLive:app-invoices:4",
         "heldStart:held-start-1",
         "held:held-new",
         "held:held-old",
@@ -522,7 +507,6 @@ describe(inInbox, () => {
       "asked:asked-1",
       "bindingApproval:workflow-quotes:2",
       "decision:decision-1",
-      "goLive:app-invoices:4",
       "heldStart:held-start-1",
       "packageNotice:revoked-1",
       "stopped:stopped-1",
@@ -551,7 +535,6 @@ describe(listed, () => {
       "bindingApproval",
       "stoppedEvents",
       "heldStart",
-      "goLive",
       "goLive",
       "stoppedSchedule",
     ]);
@@ -582,14 +565,14 @@ describe(listed, () => {
     const stopped = items.find(({ kind }) => kind === "stoppedSchedule");
     expect({ title: stopped?.title, about: stopped?.about }).toStrictEqual({
       title: "The schedule of Nightly report stopped",
-      // Its workflow's Triggers tab, where it is turned on again.
+      // Its workflow's Triggers, where it is turned on again.
       about: {
         kind: "independentWorkflow",
         workflow: "workflow-1",
-        tab: "triggers",
+        section: "triggers",
       },
     });
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 8);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
   });
 });
 
@@ -628,11 +611,11 @@ describe(TargetLink, () => {
 
     expect({
       revoked: await hrefOf(about("packageNotice:revoked-1")),
-      goLive: await hrefOf(about("goLive:app-invoices:4")),
+      request: await hrefOf(about("request:request-1")),
       app: await hrefOf({ kind: "app", app }),
     }).toStrictEqual({
       revoked: `/apps/${app}`,
-      goLive: `/apps/${app}/settings?section=versions`,
+      request: `/apps/${app}/settings?section=connections`,
       app: `/apps/${app}`,
     });
   });

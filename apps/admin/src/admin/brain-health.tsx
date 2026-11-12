@@ -2,24 +2,32 @@
  * How a client's Brain is doing, for Grasp's staff (GRA-1733): its work
  * queue, its store's size against its limit, its erasure ledger and the
  * steps of its tick that failed, as its core reported it as the section
- * opened (src/clients/brain.ts), with its embedding's progress; and the
+ * opened (src/clients/brain.ts), with its embedding's progress and how
+ * its recall does by each way since its store started; and the
  * three things staff may do: put a parked item back in the queue, rebuild
  * the word indexes, and re-embed. Every
  * read and action is in the company's audit log, by the staff member.
  *
  * Operational state only: counts, ages, kinds of work, error codes,
- * sizes, and erasures as counts alone. Amber marks what
+ * sizes, recall's counts, and erasures as counts alone. Amber marks what
  * needs someone: parked items, a store near its limit, a ledger that
- * isn't read through, a step that failed. What is fine is said in a line
- * or folded: the queue's one kind, upkeep that got through, the erasure
- * counters, and the engine's rebuilds.
+ * isn't read through, a step that failed, a way of recall that failed.
+ * What is fine is said in a line or folded: the queue's one kind, upkeep
+ * that got through, the erasure counters, and the engine's rebuilds.
  */
-import { brainSteps, storeNearLimit } from "@grasp-os/shared/brain-report";
+import {
+  brainSearchWays,
+  brainSteps,
+  brainWithoutMeaningReasons,
+  storeNearLimit,
+} from "@grasp-os/shared/brain-report";
 import type {
   BrainAction,
   BrainActionOutcome,
   BrainReport,
+  BrainSearchWay,
   BrainStep,
+  BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -98,6 +106,19 @@ const stepWords: Record<BrainStep, string> = {
   repack: "Repacking vector codes",
   reindex: "Rebuilding the word indexes",
   embedding: "Putting passages on the queue to embed",
+};
+
+const wayWords: Record<BrainSearchWay, string> = {
+  words: "Words",
+  exact: "Exact parts",
+  meaning: "Meaning",
+};
+
+const withoutMeaningWords: Record<BrainWithoutMeaningReason, string> = {
+  timed_out: "timed out",
+  failed: "failed",
+  refused: "refused",
+  unusable: "unusable",
 };
 
 const reasonOrder = [
@@ -506,6 +527,68 @@ const Engine = ({
   );
 };
 
+/** How recall did by each way, and how often it went without meaning. */
+const Recall = ({ report }: { report: BrainReport }) => {
+  const { recall } = report;
+  return (
+    <Section
+      description={`Since the store last started, ${agoWords(Date.parse(recall.since), Date.parse(report.now))}. A recall searches by each way the question has something for.`}
+      title="Recall"
+    >
+      <div className="border-t">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead variant="card">Way</TableHead>
+              <TableHead className="text-right" variant="card">
+                Recalls
+              </TableHead>
+              <TableHead className="text-right" variant="card">
+                Failed
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {brainSearchWays.map((way) => {
+              const counts = recall.ways[way];
+              return (
+                <TableRow key={way}>
+                  <TableCell variant="card">{wayWords[way]}</TableCell>
+                  <TableCell className="text-right" variant="card">
+                    <span className="tabular-nums">
+                      {whole(counts.recalls)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right" variant="card">
+                    {counts.failed > 0 ? (
+                      <Badge variant="attention">{whole(counts.failed)}</Badge>
+                    ) : (
+                      <span className="tabular-nums">0</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+      <SectionRow
+        description="Recalls by words and exact parts alone, as the embedding model gave no vector for the question in time or none the Brain could use. Without a model, none is counted."
+        label="Without meaning"
+      >
+        <span className="tabular-nums">
+          {formatList(
+            brainWithoutMeaningReasons.map(
+              (reason) =>
+                `${whole(recall.withoutMeaning[reason])} ${withoutMeaningWords[reason]}`
+            )
+          )}
+        </span>
+      </SectionRow>
+    </Section>
+  );
+};
+
 /**
  * The erasure ledger in one line, its counters under it: by kind, by
  * reason, and not yet written. Open by itself while an entry is still
@@ -635,6 +718,7 @@ const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
       <Figures report={report} />
       <Parked acting={acting} report={report} />
       <Waiting report={report} />
+      <Recall report={report} />
       <Ledger report={report} />
       <Steps report={report} />
       <Engine acting={acting} report={report} />

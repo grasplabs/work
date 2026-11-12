@@ -1,15 +1,14 @@
 import type { Organization } from "@grasp-os/shared/organization";
 import { BrandHeader } from "@grasp-os/ui/components/brand-header";
-import { Link } from "@tanstack/react-router";
+import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 
-// The sidebar's header, as the prototype's (`app-sidebar.tsx`): the kit's
-// BrandHeader, which the admin shows too, with the organization's name over
-// "Grasp", the product it works in.
-// Until core says the name, or when it has none, "Grasp" alone. Read from
+// The sidebar's header: the kit's BrandHeader, which the admin shows too,
+// with the organization's name beside Grasp's mark, and the sidebar's own
+// fold. Until core says the name, or when it has none, "Grasp". Read from
 // core as the shell mounts, and changed at once when an admin renames the
 // organization on this page (`organizationRenamed`), so the header never
 // shows a name the page itself just replaced.
@@ -78,13 +77,20 @@ const readName = async (
   }
 };
 
-/** The header's link home, with `name` over "Grasp" when there is one. */
-export const SidebarBrandView = ({ name }: { name?: string }) =>
-  name === undefined ? (
-    <BrandHeader render={<Link to="/" />} title="Grasp" />
-  ) : (
-    <BrandHeader render={<Link to="/" />} subtitle="Grasp" title={name} />
+/**
+ * The header: the organization's name, or "Grasp" until core says it or
+ * when it has none, with the sidebar's own fold beside it (the page's
+ * header has none on a wide screen).
+ */
+const SidebarBrandView = ({ name }: { name?: string }) => {
+  const { t } = useLingui();
+  return (
+    <BrandHeader
+      title={name ?? "Grasp"}
+      toggleLabel={t`Show or hide the sidebar`}
+    />
   );
+};
 
 /**
  * The header, reading the organization's name once with `organization`,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { ChatFileInput, ChatFileType } from "./chat.ts";
 import type { CompanyToolClass, ToolClassAudience } from "./connect.ts";
 import { modelRoles } from "./deployment-config.ts";
 import type { ModelRole } from "./deployment-config.ts";
@@ -10,6 +11,13 @@ import type { AppClassAudience } from "./stephen-reach.ts";
 // tools. The organization's own agent, the one every company starts with,
 // is the first of them; who reaches it and what it may do stays in
 // Settings › Stephen (stephen-reach.ts).
+
+/**
+ * The ID of the company's first agent, the one every company starts with:
+ * the organization's own, which every chat's agent was before there were
+ * others (core's `firstAgentId`).
+ */
+export const firstAgentId = "organization";
 
 /** One of the company's agents, as core keeps it. */
 export interface Agent {
@@ -25,6 +33,12 @@ export interface Agent {
   instructions: string;
   /** The role it asks the gateway for; null: the model a chat uses anyway. */
   modelRole: ModelRole | null;
+  /**
+   * The model its turns use, `<provider>/<model>`, one the organization
+   * has chosen; null: the model the person asking picked. One the
+   * organization no longer has is passed over the same way.
+   */
+  model: string | null;
   /** Whether it answers. */
   state: "on" | "paused";
   /** Who last changed it, and when; null: as Grasp ships it. */
@@ -37,6 +51,22 @@ export const agentNameMax = 60;
 export const agentJobMax = 200;
 export const agentInstructionsMax = 8000;
 
+/**
+ * The figures an agent can be drawn with, by name: the dotted head every
+ * company's first agent has (`stephen`), and Grasp's other sign figures.
+ * What the pages offer; core keeps any name, and one a page doesn't know
+ * is drawn as the head.
+ */
+export const agentFaces = [
+  "stephen",
+  "brain",
+  "pen",
+  "lines",
+  "flow",
+  "check",
+] as const;
+export type AgentFace = (typeof agentFaces)[number];
+
 /** What an admin says of an agent as they make or change it. */
 export const agentInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(agentNameMax),
@@ -45,8 +75,13 @@ export const agentInputSchema = z.strictObject({
   job: z.string().trim().max(agentJobMax),
   instructions: z.string().max(agentInstructionsMax),
   modelRole: z.enum(modelRoles).nullable(),
+  /** The model its turns use; null, or left out, for the asker's own. */
+  model: z.string().min(1).max(200).nullable().default(null),
 });
-export type AgentInput = z.infer<typeof agentInputSchema>;
+/** As an admin sends it: its model may be left out. */
+export type AgentInput = z.input<typeof agentInputSchema>;
+/** As core reads it: every part said. */
+export type AgentSaid = z.output<typeof agentInputSchema>;
 
 /** Whom an agent reaches and for whom it has each class, as core keeps it. */
 export interface AgentSettings {
@@ -56,6 +91,26 @@ export interface AgentSettings {
   audience: ToolClassAudience;
   /** Every class the company turns on or off, as this agent has it. */
   classes: { toolClass: CompanyToolClass; audience: AppClassAudience }[];
+}
+
+/** Most documents one agent keeps. */
+export const agentDocumentsMax = 10;
+
+/**
+ * A document an admin gave an agent to answer from: a file whose text
+ * core read once and keeps, never the file itself. The agent reads it in
+ * any chat it answers, as the company's word on its job, so whoever may
+ * ask the agent may learn what it says.
+ */
+export interface AgentDocument {
+  id: string;
+  /** The file's name, as it was added. */
+  name: string;
+  type: ChatFileType;
+  /** The file's size, in bytes. */
+  bytes: number;
+  /** When it was added (ISO 8601). */
+  addedAt: string;
 }
 
 /** Most characters a wake-up's opening line holds. */
@@ -92,6 +147,25 @@ export interface AgentWake {
 }
 
 /**
+ * What one agent used of the organization's models in a month: how much,
+ * never what was asked or by whom.
+ */
+export interface AgentUsage {
+  agentId: string;
+  /** The UTC month counted, such as `2026-11`. */
+  month: string;
+  /** US dollars at the providers' list prices, in `month` and the month before. */
+  spent: number;
+  spentBefore: number;
+  /** The requests to a model it made in `month`: several for one question. */
+  requests: number;
+  /** How many people it made them for in `month`. */
+  people: number;
+  /** When it last made one, in either month (ISO 8601); null for none. */
+  lastAt: string | null;
+}
+
+/**
  * The agents over `/rpc`, on `connections`: the company's own admins
  * only, never Grasp staff; every change audited.
  */
@@ -107,6 +181,12 @@ export interface AgentsApi {
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
   setAgentPaused: (agentId: string, paused: boolean) => Promise<void>;
+  /**
+   * Deletes an agent, for good: it answers nobody, its wake-ups are gone
+   * and its name is free again. The chats people had with it stay theirs
+   * to read. Never the company's first agent.
+   */
+  deleteAgent: (agentId: string) => Promise<void>;
   /**
    * Whom an agent reaches and for whom it has each class. Not the first
    * agent's, which Settings › Stephen has.
@@ -124,6 +204,24 @@ export interface AgentsApi {
     toolClass: CompanyToolClass,
     audience: AppClassAudience
   ) => Promise<void>;
+  /** The documents an agent answers from, the oldest first. Never their text. */
+  agentDocuments: (agentId: string) => Promise<AgentDocument[]>;
+  /**
+   * Gives an agent a document: a file of one of a chat file's types and
+   * sizes, up to {@link agentDocumentsMax} an agent. Resolves once its
+   * text is read, and is refused with why when it can't be.
+   */
+  addAgentDocument: (
+    agentId: string,
+    file: ChatFileInput
+  ) => Promise<AgentDocument>;
+  /** Takes a document from an agent, for good. */
+  removeAgentDocument: (agentId: string, documentId: string) => Promise<void>;
+  /**
+   * What every agent used of the organization's models this month and the
+   * month before, in the order of `agents`.
+   */
+  agentsUsage: () => Promise<AgentUsage[]>;
   /** An agent's wake-ups, the oldest first. */
   agentWakes: (agentId: string) => Promise<AgentWake[]>;
   /**

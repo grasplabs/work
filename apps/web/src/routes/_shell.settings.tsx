@@ -26,8 +26,6 @@ import {
   CreditCardIcon,
   HistoryIcon,
   KeyRoundIcon,
-  UsersRoundIcon,
-  MessagesSquareIcon,
   PlugIcon,
   RocketIcon,
   SparklesIcon,
@@ -55,8 +53,6 @@ type SettingsPath =
   | "/settings/ai-providers"
   | "/settings/models"
   | "/settings/spend"
-  | "/settings/stephen"
-  | "/settings/agents"
   | "/settings/onboarding"
   | "/settings/brain"
   | "/settings/audit"
@@ -112,14 +108,6 @@ const groupsFor = ({
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
         // Its groups of teams, the brain's regions.
         { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
-        // A name: the company's assistant in its chat apps.
-        {
-          label: "Stephen",
-          to: "/settings/stephen",
-          icon: MessagesSquareIcon,
-        },
-        // The company's agents, Stephen the first of them.
-        { label: msg`Agents`, to: "/settings/agents", icon: UsersRoundIcon },
         {
           label: msg`Onboarding`,
           to: "/settings/onboarding",

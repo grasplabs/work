@@ -1,5 +1,6 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
+import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -20,6 +21,7 @@ import {
   apps,
   permissions,
 } from "./db/core/schema.ts";
+import { appPreview } from "./durable-objects.ts";
 import { forgetAppEntry } from "./knowledge/apps-collection.ts";
 import { withdrawnWith } from "./packages/approvals.ts";
 import { requireNotStaff } from "./sharing.ts";
@@ -72,11 +74,10 @@ import {
 //   Every call path refuses an archived App anyway.
 // - Destroying what it doesn't own: no statement here touches a store, a
 //   store's owner claim, its default store's row, or a workflow resource.
-//   Its releases go only as release retention reaps them: its current and
-//   pending versions are cleared, and retention keeps what a live run
-//   still pins.
+//   Its releases go only as release retention reaps them: its live
+//   version is cleared, and retention keeps what a live run still pins.
 // - A race with a restore, or a second removal: the removal writes only
-//   over the App still archived, as read (its status's last change), and
+//   over the App still archived, as read (when it was archived), and
 //   not removed; the rest of its batch only once that write made it
 //   removed. Otherwise nothing is written or recorded, and it is refused
 //   (`app.conflict`). A restore that read it archived before the removal
@@ -178,10 +179,20 @@ const endedWith = (
   ] as const;
 };
 
-/** What follows a removal, best effort: its entry, its held actions. */
-const afterRemoval = async (env: Env, appId: string): Promise<void> => {
+/**
+ * What follows a removal, best effort: its entry, its held actions, its
+ * preview.
+ */
+const afterRemoval = async (env: Env, appId: AppId): Promise<void> => {
   // Its Apps-collection entry: its name, description and AGENTS.md go.
   await forgetAppEntry(env, appId);
+  // Its preview's test data, which nobody builds any more, and what the
+  // preview kept (app-preview.ts).
+  try {
+    await appPreview(env, appId).discard();
+  } catch (error) {
+    log.warn("app.preview_discard_failed", { appId, ...errorFields(error) });
+  }
   // Its held actions in connect, which nobody can confirm now, go as
   // expired ones do, recorded there. Best effort: confirming one checks
   // its binding, which is revoked, and refuses it all the same.
@@ -207,16 +218,16 @@ export const removeApp = async (
     throw appErrors.create("app.remove_forbidden");
   }
   const db = drizzle(env.DB);
-  // Its status, and when that last changed, read before anything is
+  // When it was archived, read before anything is
   // checked against it: the stops below are this very archive's, and the
   // batch writes only over it, so a restore, new work and another archive
   // meanwhile is a conflict, never a removal whose stops went unchecked.
   const fence = await db
-    .select({ status: apps.status, at: apps.statusChangedAt })
+    .select({ at: apps.archivedAt })
     .from(apps)
     .where(eq(apps.id, found.id))
     .get();
-  if (fence?.status !== "archived") {
+  if (fence?.at === null || fence?.at === undefined) {
     throw appErrors.create("app.remove_unarchived");
   }
   if (await stopsUnsettled(env, found.id)) {
@@ -231,7 +242,7 @@ export const removeApp = async (
         removedBy: by.userId,
         // Retention reaps its releases, but what a live run still pins.
         currentVersion: null,
-        pendingVersion: null,
+        liveLabel: null,
         // Its link (app-own-links.ts) is free for another App: a tombstone
         // opens nothing.
         link: null,
@@ -239,9 +250,8 @@ export const removeApp = async (
       .where(
         and(
           eq(apps.id, found.id),
-          eq(apps.status, "archived"),
           isNull(apps.removedAt),
-          sql`${apps.statusChangedAt} IS ${fence.at?.getTime() ?? null}`,
+          sql`${apps.archivedAt} IS ${fence.at.getTime()}`,
           // And none settling still, read where the removal lands: a stop
           // claimed since the check above waits as one before it did.
           sql`NOT ${stopsUnsettledSql(found.id)}`

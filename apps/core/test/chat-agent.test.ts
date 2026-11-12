@@ -378,7 +378,7 @@ describe("the chat agent's prompt", () => {
   it("gives the instructions and the chat's sections as they always read", async () => {
     const expenses = skill("expenses");
     const chat = await openChat({
-      context: { skills: [expenses], app: "app-1" },
+      context: { skills: [expenses] },
     });
     await chat.ask("Hi", [chat.reply(says("Hello"))]);
     const sections = sectionsIn(chat.requests[0] ?? []);
@@ -387,7 +387,6 @@ describe("the chat agent's prompt", () => {
     expect(sections.skills).toContain(
       `- expenses (${expenses.documentId}): How to do expenses`
     );
-    expect(sections.app).toContain('<app id="app-1">');
   });
 
   it("sends the same prefix on the next turn while nothing changed", async () => {

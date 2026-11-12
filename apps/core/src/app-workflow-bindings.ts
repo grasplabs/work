@@ -778,7 +778,7 @@ export const bindWorkflowToApp = async (
         // was checked against: otherwise NULL, which fails the batch
         // (app-status.ts).
         appId: sql`(SELECT id FROM apps
-          WHERE id = ${found.id} AND status != 'archived'
+          WHERE id = ${found.id} AND archived_at IS NULL
             AND current_version IS ${found.currentVersion})`,
         // Only while the workflow is live: otherwise NULL, which fails the
         // batch, so a deletion and this binding never both land.
@@ -806,7 +806,7 @@ export const bindWorkflowToApp = async (
     if (notNullFailed(error, "app_workflow_bindings.app_id")) {
       // Archived, or another version made current since the check.
       const now = await appFor(env, by, found.id, "builder");
-      throw now.status === "archived"
+      throw now.archived
         ? appErrors.create("app.archived")
         : workflowResourceErrors.create("workflow.binding_conflict");
     }

@@ -152,7 +152,7 @@ const invoicesApp = async () => {
   });
   const created = await builder.api.apps.create({ name: "Invoices" });
   await commitApp(builder.api.apps.files, created.id, billingFiles(), "First");
-  await builder.api.apps.versions.setCurrent(created.id, 1);
+  await builder.api.apps.versions.publish(created.id, 1);
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },
     object: { type: "connection", connectionId },

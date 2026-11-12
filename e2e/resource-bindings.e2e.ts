@@ -44,7 +44,7 @@ export const draft = action({
     }
   );
 
-/** A builder's new App of `files`, with its first version current. */
+/** A builder's new App of `files`, with its first version live. */
 const appOf = async (
   builder: Parameters<typeof apiOf>[0],
   files: TestSource
@@ -54,10 +54,9 @@ const appOf = async (
   try {
     const { id } = await api.apps.create({ name });
     const { version } = await commitApp(api.apps.files, id, files, name);
-    await api.apps.versions.setCurrent(id, version);
-    // Published, for the people it is shared with (a draft is its
+    // Live, for the people it is shared with (until then, its
     // builders' alone).
-    await api.apps.publish(id);
+    await api.apps.versions.publish(id, version);
     return id;
   } finally {
     core[Symbol.dispose]();

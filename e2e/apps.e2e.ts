@@ -107,7 +107,10 @@ const newApp = async (
 
 /** A counter page on the page, once it has built. */
 const counterPage = async (page: Page) => {
-  const frame = page.frameLocator('iframe[title="App"]');
+  // The live App's frame, or, in a builder's workspace, the draft's preview.
+  const frame = page.frameLocator(
+    'iframe[title="App"], iframe[title="Your version of the App"]'
+  );
   // The first open builds the page, which on a loaded machine takes a
   // while (pages.e2e.ts).
   await expect(frame.getByRole("heading", { name: "Counter" })).toBeVisible({
@@ -142,18 +145,18 @@ test.beforeAll(async () => {
 test("a builder finds an App in the list, opens it and uses its page with live data", async ({
   pageOf,
 }) => {
-  // Seven more Apps of this run's own: five published, two drafts, so the
+  // Seven more Apps of this run's own: five live, two drafts, so the
   // Apps page offers its search and tabs. One of them, `books`, has two
   // pages: it is one App with two pages, never two apps. Their names
   // carry `run`, which no other test's do.
   const run = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) =>
     String.fromCodePoint(97 + (byte % 26))
   ).join("");
-  const published = ["books", "payroll", "stock", "fleet", "sales"];
+  const live = ["books", "payroll", "stock", "fleet", "sales"];
   const drafts = ["hiring", "legal"];
   const ids = await withApi(builder, async (api) => {
     const made = await Promise.all([
-      ...published.map(async (each) => {
+      ...live.map(async (each) => {
         const { id } = await api.apps.create({ name: `${each} ${run}` });
         await release(
           api,
@@ -163,15 +166,10 @@ test("a builder finds an App in the list, opens it and uses its page with live d
         );
         return [each, id] as const;
       }),
+      // Committed, never published: no version live yet.
       ...drafts.map(async (each) => {
         const { id } = await api.apps.create({ name: `${each} ${run}` });
-        const { version } = await commitApp(
-          api.apps.files,
-          id,
-          counterApp(),
-          "First"
-        );
-        await api.apps.versions.setCurrent(id, version);
+        await commitApp(api.apps.files, id, counterApp(), "First");
         return [each, id] as const;
       }),
     ]);
@@ -189,8 +187,10 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   // pages, each saying where it stands.
   await search.fill(run);
   await expect(cards).toHaveCount(7);
-  await expect(cards.filter({ hasText: "Published" })).toHaveCount(5);
-  await expect(cards.filter({ hasText: "Draft" })).toHaveCount(2);
+  const marked = (status: string) =>
+    cards.filter({ has: page.getByText(status, { exact: true }) });
+  await expect(marked("Your team uses it")).toHaveCount(5);
+  await expect(marked("Only you see this")).toHaveCount(2);
 
   // The App with two pages is one card; opened, it shows its first, `/`.
   await search.fill(`books ${run}`);
@@ -210,12 +210,13 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await expect(cards).toHaveCount(0);
   await search.fill("");
 
-  // Each App's card opens it, on its first page.
+  // Each App's card opens it, on its first page: for its builder, in its
+  // workspace, the preview of its draft.
   await cards.filter({ hasText: name }).getByRole("link", { name }).click();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
   const counter = await counterPage(page);
   // One page heading: the App's bar names it.
-  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeAttached();
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", {
@@ -225,7 +226,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("0");
   await counter.getByRole("button", { name: "Add one" }).click();
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
-  await page.getByRole("button", { name: `More for ${name}` }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
   await expect(
     page.getByRole("menuitem", { name: "Open full page" })
   ).toHaveAttribute("href", new RegExp(`^/apps/${app}/full/?$`, "u"));
@@ -233,7 +234,6 @@ test("a builder finds an App in the list, opens it and uses its page with live d
 
   // Its settings, beside the chat in its workspace: what it is, its
   // connections and its members.
-  await page.getByRole("link", { name: "Edit" }).click();
   await page
     .getByRole("navigation", { name: "Workspace views" })
     .getByRole("link", { name: "Settings" })
@@ -258,6 +258,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     "Projects",
     "Apps",
     "Workflows",
+    // The company's agents: the ones a person may ask, and for admins all of them.
+    "Agents",
     "Integrations",
   ];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
@@ -276,7 +278,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     // every link but theirs, in one read of the page.
     const texts = await links.evaluateAll((found) =>
       found
-        .filter((link) => link.closest('[aria-label="App shortcuts"]') === null)
+        .filter((link) => link.closest("[aria-labelledby]") === null)
         .map((link) => link.textContent ?? "")
     );
     // The person menu, at the sidebar's foot, by their name; their role is
@@ -291,7 +293,9 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     const menu = menuTexts.filter((text) =>
       ["Settings", "Sign out"].includes(text)
     );
-    await items.filter({ hasText: "Settings" }).click();
+    await page.keyboard.press("Escape");
+    // Settings, in the sidebar's foot above the person.
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(page).toHaveURL(/\/settings\/profile$/u);
     const sections = page
       .getByRole("navigation", { name: "Settings" })
@@ -313,7 +317,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const adminNav = nav.flatMap((section) =>
     section === "Workflows" ? [section, "Requests"] : [section]
   );
-  const menu = ["Settings", "Sign out"];
+  const menu = ["Sign out"];
   const account = ["Profile", "Security"];
   expect({
     admin: await sidebarOf(admin),
@@ -333,10 +337,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         // The company's groups of teams, the brain's regions: right after
         // AI spend, as in the prototype.
         "Brain",
-        // Who can reach Stephen and what he may do for whom.
-        "Stephen",
-        // The company's agents: who each answers and what it may do.
-        "Agents",
         // The company admin's view of the onboarding interviews.
         "Onboarding",
         "Audit trail",
@@ -409,7 +409,16 @@ test("loading a page again after a new version shows that version, and the App's
     `Swap ${crypto.randomUUID()}`,
     twoPages()
   );
-  const page = await pageOf(builder);
+  // Someone it is shared with has its page open: its builders have the
+  // App's workspace at its address instead.
+  await withApi(builder, async (api) => {
+    await api.apps.members.add(swapped, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+  });
+  const page = await pageOf(user);
   await page.goto(`/apps/${swapped}/pages/home`);
   await counterPage(page);
 

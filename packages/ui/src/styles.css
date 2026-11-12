@@ -42,6 +42,9 @@
  *   - `destructive` (red) is for errors, a form's error or something that
  *     failed, and for actions that can't be undone. Nothing else is red.
  *   - `syntax-*`, the hues of highlighted code.
+ *   - `mention-*`, what a mention in the box to ask in is (an App, a
+ *     workflow, a person, a command), each its own hue, as the chip's icon
+ *     and on a tint of itself.
  *   - `faint`, quieter than muted; `scrim`, what lies over the page behind
  *     a dialog; the dashboard's, the brain's and the charts' own colours.
  * And three shadows: a block resting on the page, what floats above it,
@@ -49,6 +52,11 @@
  */
 :root {
   --radius: 0.625rem;
+  /*
+   * The app shell's frame: the ink between the sidebar, the page's card and
+   * the chat docked beside it, and round them at the window's edges.
+   */
+  --app-shell-gap: 0.25rem;
   --font-sans:
     "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     sans-serif;
@@ -119,6 +127,10 @@
   --sidebar-ring: #6fb48a;
   --status-agreed: #1c7148;
   --status-attention: #82560f;
+  --mention-app: oklch(0.5 0.13 245);
+  --mention-workflow: oklch(0.5 0.14 305);
+  --mention-person: oklch(0.52 0.12 60);
+  --mention-command: oklch(0.5 0.1 165);
   /*
    * Code's colours, wherever code is highlighted (the chat's answers, an
    * App's Code view): what a word is to the language, in quiet hues that
@@ -211,6 +223,10 @@
     --sidebar-ring: #6fb48a;
     --status-agreed: #3fae6a;
     --status-attention: #e2b360;
+    --mention-app: oklch(0.79 0.1 245);
+    --mention-workflow: oklch(0.78 0.11 305);
+    --mention-person: oklch(0.82 0.11 70);
+    --mention-command: oklch(0.8 0.1 165);
     --syntax-keyword: oklch(0.78 0.11 305);
     --syntax-string: oklch(0.8 0.12 155);
     --syntax-constant: oklch(0.82 0.11 70);
@@ -243,11 +259,20 @@
   --ease-house: cubic-bezier(0.22, 1, 0.36, 1);
   --default-transition-timing-function: var(--ease-house);
   /*
-   * How a sidebar opens and folds: quick out of the gate, settling softly,
-   * as Grasp's own sidebar does. The app's sidebar and every page sidebar
-   * move on it, in 200ms both ways.
+   * How what opens and closes beside the page moves: quick out of the
+   * gate, settling softly, as Grasp's own sidebar does, the same both ways.
+   * The sidebars, the chat (its room, its card, its idle bar, going full
+   * screen) and the page fading under it all move on it.
    */
   --ease-sidebar: cubic-bezier(0.32, 0.72, 0, 1);
+  /*
+   * How long what opens, closes and moves beside the page takes (a Panel,
+   * the chat's card and its idle bar, the page fading under the chat full
+   * screen), and how far behind the second of two moving together starts
+   * (`delayed`): three quarters through the first, as it settles.
+   */
+  --motion-duration: 250ms;
+  --motion-stagger: calc(var(--motion-duration) * 0.75);
 }
 
 @theme inline {
@@ -311,6 +336,10 @@
   --color-tile-foreground: var(--tile-foreground);
   --color-status-agreed: var(--status-agreed);
   --color-status-attention: var(--status-attention);
+  --color-mention-app: var(--mention-app);
+  --color-mention-workflow: var(--mention-workflow);
+  --color-mention-person: var(--mention-person);
+  --color-mention-command: var(--mention-command);
   --color-syntax-keyword: var(--syntax-keyword);
   --color-syntax-string: var(--syntax-string);
   --color-syntax-constant: var(--syntax-constant);

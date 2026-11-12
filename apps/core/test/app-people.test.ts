@@ -630,7 +630,7 @@ describe("a chat's agent and who calls an App", { timeout: 180_000 }, () => {
       peopleFiles(),
       "First"
     );
-    await builder.api.apps.versions.setCurrent(id, version);
+    await builder.api.apps.versions.publish(id, version);
     const release = await loadRelease(env, appIdSchema.parse(id), version);
     const chat = await chatOf(
       builder.userId,

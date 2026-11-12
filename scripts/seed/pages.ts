@@ -1,172 +1,328 @@
 /**
- * The demo Apps' pages: a page per App that starts
- * a run of one of the workflows its App binds and follows it, as the
- * typed page SDK does (`useWorkflow(workflows.x)`). Decisions are
- * answered in the inbox and on the decision page, and a workflow's runs
- * are in its overview and activity: a page sees only the runs it
- * starts. Each reads nothing else: no permission, no connection.
+ * The demo Apps' pages: each App keeps one table of the work its process
+ * moves through four stages, and its page (`src/routes/index.tsx`) counts
+ * the records in each stage and lists them, a record's stage changed in
+ * place. Written as an App's builder would, with the public SDK and
+ * `@grasp-os/ui` only, as the example Apps in apps/docs/content/examples
+ * are. The seed adds each table's records through the App's data import.
  */
-import { apps } from "./apps.ts";
-import type { WorkflowSeed } from "./apps.ts";
+import type { DefinitionOperation } from "@grasp-os/runtime/definition";
 
-/** A component's name for workflow alias `alias`: `mortgageFiles` → `MortgageFiles`. */
-const componentOf = (alias: string): string =>
-  `${alias.charAt(0).toUpperCase()}${alias.slice(1)}Run`;
-
-/**
- * A page with a card for each workflow in `workflows`: a button that
- * starts a run of it with its sample input, and the run as it goes on.
- */
-const appPage = ({
-  title,
-  intro,
-  workflows,
-}: {
+/** An App's board: its table, its four stages, and the records it starts with. */
+export interface Board {
   title: string;
   intro: string;
-  workflows: readonly WorkflowSeed[];
-}): string => `import { useWorkflow } from "@grasp-os/sdk/react";
-import { createFileRoute } from "@tanstack/react-router";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@grasp-os/ui/components/card";
-import { useState } from "react";
+  /** The table, as `api.<table>` names it: `deals`. */
+  table: string;
+  /** What one record is, as its first column's heading: `Deal`. */
+  noun: string;
+  /** Its second text field: who or what a record is for. */
+  party: string;
+  /** Its stages in order, each by its label; the last is done. */
+  stages: Readonly<Record<string, string>>;
+  /** Whether a record has an amount in euros. */
+  money: boolean;
+  /** Title, party, stage and, with `money`, euros. */
+  records: readonly (readonly [string, string, string, number?])[];
+}
 
-import { workflows } from "@server/_generated/api";
-
-/** What a run is doing, in words, from its status. */
-const statusLabels: Record<string, string> = {
-  idle: "Starting",
-  loading: "Starting",
-  queued: "Waiting its turn",
-  running: "Running",
-  waiting: "Waiting for a decision: answer it in your inbox",
-  paused: "Paused",
-  compensating: "Undoing what it did",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
+/** The board of each App, by the App's name. */
+export const boards: Readonly<Record<string, Board>> = {
+  "Opportunity-to-Cash": {
+    title: "Advice pipeline",
+    intro: "Every advice file from first call to invoice.",
+    table: "deals",
+    noun: "Deal",
+    party: "client",
+    stages: { lead: "Lead", proposal: "Proposal", won: "Won", paid: "Paid" },
+    money: true,
+    records: [
+      ["Mortgage advice", "J. Visser", "lead", 2450],
+      ["Pension review", "Bakker Holding", "proposal", 3800],
+      ["Wealth plan", "M. de Jong", "proposal", 6200],
+      ["Mortgage advice", "S. Smit", "won", 2450],
+      ["Annual review", "Van Dijk BV", "paid", 1200],
+      ["Insurance check", "L. Mulder", "paid", 950],
+    ],
+  },
+  "Issue-to-Resolution": {
+    title: "Service desk",
+    intro: "Client questions and complaints until they are resolved.",
+    table: "tickets",
+    noun: "Ticket",
+    party: "client",
+    stages: {
+      open: "Open",
+      working: "In progress",
+      waiting: "Waiting on client",
+      resolved: "Resolved",
+    },
+    money: false,
+    records: [
+      ["Statement missing for Q3", "Bakker Holding", "open"],
+      ["Wrong IBAN on invoice", "J. Visser", "open"],
+      ["Question about advice fee", "S. Smit", "working"],
+      ["Documents for mortgage file", "M. de Jong", "waiting"],
+      ["Complaint about response time", "Van Dijk BV", "working"],
+      ["Change of address", "L. Mulder", "resolved"],
+    ],
+  },
+  "Purchase-to-Pay": {
+    title: "Invoices to pay",
+    intro: "Supplier invoices from receipt to payment.",
+    table: "invoices",
+    noun: "Invoice",
+    party: "supplier",
+    stages: {
+      received: "Received",
+      approved: "Approved",
+      scheduled: "Scheduled",
+      paid: "Paid",
+    },
+    money: true,
+    records: [
+      ["INV-2026-1184", "Kantoorhuis Utrecht", "received", 1840],
+      ["INV-2026-1185", "Datafeed Europe", "received", 4200],
+      ["INV-2026-1171", "CleanCo", "approved", 612],
+      ["INV-2026-1162", "Legal & Partners", "scheduled", 3150],
+      ["INV-2026-1150", "Kantoorhuis Utrecht", "paid", 1840],
+      ["INV-2026-1149", "TelecomNL", "paid", 289],
+    ],
+  },
+  "Risk-to-Compliance": {
+    title: "Risk register",
+    intro: "Risks from first sighting until they are under control.",
+    table: "risks",
+    noun: "Risk",
+    party: "area",
+    stages: {
+      identified: "Identified",
+      assessed: "Assessed",
+      mitigating: "Mitigating",
+      controlled: "Controlled",
+    },
+    money: false,
+    records: [
+      ["Advice given without suitability check", "Advice", "identified"],
+      ["Client files kept past retention", "Operations", "assessed"],
+      ["Single supplier for market data", "Finance", "mitigating"],
+      ["Shared passwords on desk laptops", "IT", "mitigating"],
+      ["Late AFM incident reporting", "Compliance", "controlled"],
+    ],
+  },
+  "Record-to-Report": {
+    title: "Month-end close",
+    intro: "This month's close, task by task.",
+    table: "closeTasks",
+    noun: "Task",
+    party: "assignee",
+    stages: {
+      todo: "To do",
+      doing: "Doing",
+      review: "In review",
+      done: "Done",
+    },
+    money: false,
+    records: [
+      ["Reconcile bank accounts", "Eva", "done"],
+      ["Book accruals", "Eva", "review"],
+      ["Revenue recognition", "Daan", "doing"],
+      ["Intercompany balances", "Daan", "todo"],
+      ["Management report", "Eva", "todo"],
+    ],
+  },
+  "Hire-to-Retire": {
+    title: "Hiring",
+    intro: "Candidates for the open roles, from application to hire.",
+    table: "candidates",
+    noun: "Candidate",
+    party: "role",
+    stages: {
+      applied: "Applied",
+      interview: "Interview",
+      offer: "Offer",
+      hired: "Hired",
+    },
+    money: false,
+    records: [
+      ["Femke Jansen", "Mortgage adviser", "applied"],
+      ["Ahmed El Amrani", "Mortgage adviser", "interview"],
+      ["Lotte Vermeer", "Compliance officer", "interview"],
+      ["Tom Hendriks", "Financial controller", "offer"],
+      ["Iris de Graaf", "Client service", "hired"],
+    ],
+  },
 };
-${workflows
-  .map(
-    ({ alias }) => `
-const ${componentOf(alias)} = ({ runId }: { runId: string }) => {
-  const run = useWorkflow(workflows.${alias}, { runId });
-  return (
-    <div className="flex flex-col gap-2">
-      <Badge variant="secondary">{statusLabels[run.status] ?? run.status}</Badge>
-      {run.status === "completed" ? (
-        <pre className="text-sm whitespace-pre-wrap">{JSON.stringify(run.result, null, 2)}</pre>
-      ) : null}
-      {run.status === "failed" ? <p className="text-sm text-destructive">{run.error.message}</p> : null}
-    </div>
-  );
-};`
-  )
-  .join("\n")}
 
-const Page = () => {
-  const [problem, setProblem] = useState("");
-${workflows
-  .map(
-    ({ alias }) => `  const ${alias} = useWorkflow(workflows.${alias});
-  const [${alias}Run, set${componentOf(alias)}] = useState<string | null>(null);`
-  )
-  .join("\n")}
+/** The definition operations that add `board`'s table. */
+export const boardOperations = (board: Board): DefinitionOperation[] => [
+  {
+    op: "addTable",
+    name: board.table,
+    fields: {
+      title: "v.string().trim().min(1).max(200)",
+      [board.party]: "v.string().trim().max(200)",
+      stage: `v.enum(${JSON.stringify(Object.keys(board.stages))})`,
+      ...(board.money ? { amount: "v.money()" } : {}),
+    },
+    access: { read: "appMembers", write: "appMembers" },
+  },
+  { op: "addIndex", table: board.table, name: "by_stage", fields: ["stage"] },
+];
+
+/** `board`'s server functions and page, by path. */
+export const boardFiles = ({
+  title,
+  intro,
+  table,
+  noun,
+  party,
+  stages,
+  money,
+}: Board): Record<string, string> => {
+  const done = Object.keys(stages).at(-1);
+  const columns = [
+    `{ field: "title", label: ${JSON.stringify(noun)} }`,
+    JSON.stringify(party),
+    ...(money ? ['"amount"'] : []),
+    `{
+            field: "stage",
+            cell: (row) => stages[row.stage],
+            edit: async (row, stage) => await setStage({ id: row._id, stage }),
+          }`,
+  ];
+  return {
+    [`server/${table}.ts`]: `import {
+  paginationOptionsValidator,
+  paginationResultValidator,
+  v,
+} from "@grasp-os/sdk";
+import { doc, mutation, query } from "@server/_generated/server";
+
+const stage = v.enum(${JSON.stringify(Object.keys(stages))});
+
+export const list = query({
+  args: { pagination: paginationOptionsValidator },
+  returns: paginationResultValidator(doc("${table}")),
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("${table}")
+      .withIndex("by_stage")
+      .paginate(args.pagination),
+});
+
+export const byStage = query({
+  args: {},
+  returns: v
+    .array(v.object({ stage, count: v.number().integer().min(0) }))
+    .max(${Object.keys(stages).length}),
+  handler: async (ctx) => {
+    const groups = await ctx.db
+      .query("${table}")
+      .withIndex("by_stage")
+      .group({ by: ["stage"] });
+    return groups.map(({ key, count }) => ({ stage: key.stage, count }));
+  },
+});
+
+export const setStage = mutation({
+  args: { id: v.id("${table}"), stage },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch("${table}", args.id, { stage: args.stage });
+    return null;
+  },
+});
+`,
+    "src/routes/index.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import { DataGrid } from "@grasp-os/ui/components/data-grid";
+import { Grid } from "@grasp-os/ui/components/grid";
+import {
+  PageHeader,
+  PageHeaderContent,
+  PageHeaderDescription,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
+import { Stat } from "@grasp-os/ui/components/stat";
+import { api } from "@server/_generated/api";
+import { createFileRoute } from "@tanstack/react-router";
+
+const stages = ${JSON.stringify(stages)} as const;
+
+const Board = () => {
+  const counts = useQuery(api.${table}.byStage);
+  const setStage = useMutation(api.${table}.setStage);
   return (
-    <main className="flex flex-col gap-4 p-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">${title}</h1>
-        <p className="text-muted-foreground">${intro}</p>
-      </header>
-      {problem === "" ? null : <p className="text-sm text-destructive">{problem}</p>}
-${workflows
-  .map(
-    ({ alias, title: name, sample }) => `      <Card>
-        <CardHeader>
-          <CardTitle>${name}</CardTitle>
-          <CardDescription>Starts a run on a sample and follows it.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-3">
-          <Button
-            className="self-start"
-            onClick={async () => {
-              setProblem("");
-              try {
-                const { runId } = await ${alias}.start(${JSON.stringify(sample)});
-                set${componentOf(alias)}(runId);
-              } catch (error) {
-                setProblem(error instanceof Error ? error.message : "That didn't start.");
-              }
-            }}
-          >
-            Try it on a sample
-          </Button>
-          {${alias}Run === null ? null : <${componentOf(alias)} runId={${alias}Run} />}
-          </div>
-        </CardContent>
-      </Card>`
-  )
-  .join("\n")}
+    <main className="flex flex-col gap-6 p-6">
+      <PageHeader>
+        <PageHeaderContent>
+          <PageHeaderTitle>${title}</PageHeaderTitle>
+          <PageHeaderDescription>${intro}</PageHeaderDescription>
+        </PageHeaderContent>
+      </PageHeader>
+      <Grid columns={4}>
+        {Object.entries(stages).map(([stage, label]) => (
+          <Card key={stage} size="sm">
+            <CardHeader>
+              <CardTitle>{label}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Stat variant={stage === "${done}" ? "done" : "default"}>
+                {counts === undefined
+                  ? "–"
+                  : (counts.find((group) => group.stage === stage)?.count ?? 0)}
+              </Stat>
+            </CardContent>
+          </Card>
+        ))}
+      </Grid>
+      <DataGrid
+        args={() => ({})}
+        columns={[
+          ${columns.join(",\n          ")},
+        ]}
+        label="${title}"
+        query={api.${table}.list}
+      />
     </main>
   );
 };
 
-export const Route = createFileRoute("/")({ component: Page });
-`;
-
-/** The page of each App that has one: its file's name, title and intro. */
-const pageOfApp: Record<
-  string,
-  { name: string; title: string; intro: string }
-> = {
-  "Purchase-to-Pay": {
-    name: "finance-cockpit",
-    title: "Finance cockpit",
-    intro:
-      "Try the invoice workflow on a sample. Approvals wait in the approvers' inbox.",
-  },
-  "Issue-to-Resolution": {
-    name: "service-desk",
-    title: "Service desk",
-    intro:
-      "Try the service desk's workflows on a sample. Compensation to approve waits in compliance's inbox.",
-  },
-  "Opportunity-to-Cash": {
-    name: "advice-pipeline",
-    title: "My advice pipeline",
-    intro:
-      "Try the onboarding and handover workflows on a sample. Files to take over wait in the advisers' inbox.",
-  },
+export const Route = createFileRoute("/")({ component: Board });
+`,
+  };
 };
 
-/**
- * The pages of each App, by App name, then by page name: the
- * prototype's apps (`apps` in noordkade.ts), each over the workflows of
- * its App, since a page starts only its own App's. The prototype's
- * charts of revenue, tickets and leads read systems no connection brings
- * yet, and its run histories are the workflows' own pages now.
- */
-export const appPages: Record<
-  string,
-  Record<string, string>
-> = Object.fromEntries(
-  apps.flatMap(({ name, workflows }) => {
-    const page = pageOfApp[name];
-    return page === undefined
-      ? []
-      : [
-          [
-            name,
-            {
-              [page.name]: appPage({
-                title: page.title,
-                intro: page.intro,
-                workflows,
-              }),
-            },
-          ],
-        ];
-  })
-);
+/** A CSV cell: quoted, its quotes doubled. */
+const cell = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+
+/** `board`'s records as the CSV the App's data import reads, and its columns' fields. */
+export const boardCsv = ({
+  party,
+  money,
+  records,
+}: Board): { csv: string; mapping: Record<string, string> } => {
+  const fields = ["title", party, "stage", ...(money ? ["amount"] : [])];
+  const rows = records.map(([title, who, stage, euros]) =>
+    [
+      title,
+      who,
+      stage,
+      ...(money
+        ? [JSON.stringify({ currency: "EUR", minorUnits: (euros ?? 0) * 100 })]
+        : []),
+    ]
+      .map(cell)
+      .join(",")
+  );
+  return {
+    csv: `${[fields.join(","), ...rows].join("\n")}\n`,
+    mapping: Object.fromEntries(fields.map((field) => [field, field])),
+  };
+};

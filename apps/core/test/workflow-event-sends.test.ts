@@ -65,6 +65,7 @@ import {
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
@@ -358,9 +359,17 @@ const granted = async (
  * Ada's Jobs App, version 1 approved and sealed, with its store; her
  * workflow, waiting for its job's completion through `jobEvents`
  * (approved), bound to it as `review`; the App's `start` and `send`
- * grants on it, each its own; and Bob, who uses the App.
+ * grants on it, each its own; and Bob, who uses the App. Live once
+ * `before`, if given, did what else the test needs first.
  */
-const fixture = async () => {
+const fixture = async (
+  before?: (fx: {
+    admin: Identity;
+    ada: Identity;
+    app: AppId;
+    workflowId: string;
+  }) => Promise<void>
+) => {
   const admin = await person("admin");
   const ada = await person("builder");
   const bob = await person("user");
@@ -406,6 +415,8 @@ const fixture = async () => {
   });
   await granted(admin, ada, app, workflow.id, ["start"]);
   const send = await granted(admin, ada, app, workflow.id, ["send"]);
+  await before?.({ admin, ada, app, workflowId: workflow.id });
+  await standInLive(app);
   const release: Release = {
     manifest: sealed.parsed,
     manifestHash: sealed.hash,
@@ -488,7 +499,7 @@ const answerOf = (result: FunctionResult): unknown =>
 
 /** A run of `review` the App starts for `by` on job `jobId`, waiting: its ID. */
 const startedRun = async (
-  fx: Fixture,
+  fx: Pick<Fixture, "app">,
   by: Identity,
   jobId = "job-1"
 ): Promise<string> => {
@@ -739,39 +750,41 @@ describe(
     });
 
     it("sends only the events its sealed version names, whatever the workflow is rebound to, and keeps a refused one as evidence", async () => {
-      const fx = await fixture();
-      const runId = await startedRun(fx, fx.ada);
-      // A later version of the workflow with an event of its own, bound to
-      // the App in place of the one its version was sealed with.
-      const contract = `later-events-${unique()}`;
-      await publishCatalogContract(env, fx.admin, {
-        key: contract,
-        kind: "event",
-        events: {
-          [completed]: {
-            data: JSON.stringify(jobData.descriptor),
-            browser: true,
+      let runId = "";
+      const fx = await fixture(async ({ admin, ada, app, workflowId }) => {
+        runId = await startedRun({ app }, ada);
+        // A later version of the workflow with an event of its own, bound
+        // to the App in place of the one its version was sealed with.
+        const contract = `later-events-${unique()}`;
+        await publishCatalogContract(env, admin, {
+          key: contract,
+          kind: "event",
+          events: {
+            [completed]: {
+              data: JSON.stringify(jobData.descriptor),
+              browser: true,
+            },
           },
-        },
-      });
-      await publishWorkflowVersion(env, fx.ada, fx.workflowId, {
-        definition: definitionOf(contract, {
-          laterEvents: { contract },
-        }),
-        basedOn: 1,
-      });
-      for (const alias of ["jobEvents", "laterEvents"]) {
-        // oxlint-disable-next-line no-await-in-loop -- one approval after the other
-        await approveWorkflowBinding(env, fx.admin, fx.workflowId, {
-          alias,
-          target: { kind: "event" },
-          reviewed: { version: 2 },
         });
-      }
-      await bindWorkflowToApp(env, fx.ada, fx.workflowId, {
-        app: fx.app,
-        alias: "review",
-        version: 2,
+        await publishWorkflowVersion(env, ada, workflowId, {
+          definition: definitionOf(contract, {
+            laterEvents: { contract },
+          }),
+          basedOn: 1,
+        });
+        for (const alias of ["jobEvents", "laterEvents"]) {
+          // oxlint-disable-next-line no-await-in-loop -- one approval after the other
+          await approveWorkflowBinding(env, admin, workflowId, {
+            alias,
+            target: { kind: "event" },
+            reviewed: { version: 2 },
+          });
+        }
+        await bindWorkflowToApp(env, ada, workflowId, {
+          app,
+          alias: "review",
+          version: 2,
+        });
       });
       const raw = async (event: string) =>
         answerOf(

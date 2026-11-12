@@ -6,6 +6,7 @@ import {
   instructionsTextSchema,
   isOverInstructionsLimit,
   principalMaxLength,
+  questionMaxLength,
   sourceIdMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
@@ -24,15 +25,24 @@ import type {
   RecallRequest,
   SourceId,
   StepFailure,
+  WayCounts,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
-import { brainReportSchema, brainSteps } from "@grasp-os/shared/brain-report";
+import {
+  brainReportSchema,
+  brainSearchWays,
+  brainSteps,
+  brainWithoutMeaningReasons,
+} from "@grasp-os/shared/brain-report";
 import type {
   BrainAction,
   BrainActionOutcome,
   BrainReport,
+  BrainSearchWay,
   BrainStep,
+  BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
+import { firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
@@ -57,8 +67,11 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // A source is named by the producer that adds it (one of `producerKinds`)
 // and that producer's own id for it; the Brain's key for it is made only
 // here (`sourceKeyOf`), so one producer can never name another's sources.
-// `addSource` and `readSourceVersionAs` are server-side functions for
-// producers: never reached by people, Apps or the SDK directly.
+// `addSource` is a server-side function for producers: never reached by
+// people, Apps or the SDK directly. People read sources only through the
+// functions ending in `As` (the Brain's Sources page reaches
+// `listSourcesAs`, `listVersionsAs`, `readSourceVersionAs` and `recallAs`
+// through `session.brainSources`), which read as them.
 //
 // Every argument is checked here, strictly, before anything is named for
 // the Brain: an empty or missing ID would otherwise become a principal
@@ -184,6 +197,9 @@ const newSourceSchema = z.strictObject({
   text: wellFormedString(),
   readers: sourceReadersSchema,
 });
+
+/** A question as the Brain takes one (`recallRequestSchema`). */
+const questionSchema = wellFormedString().max(questionMaxLength);
 
 const versionRefSchema = z.strictObject({
   source: sourceRefSchema,
@@ -333,27 +349,28 @@ const isUsableVector = (vector: readonly number[]): boolean =>
  * whitespace (which words a question holds is the Brain's to say, so a
  * question of punctuation alone is still embedded, and the Brain finds
  * nothing for it), or when the embedder gave no vector the Brain can use
- * in time: logged with why, nothing of the question or the person, and
- * recall goes ahead by words and exact parts.
+ * in time: then why, logged with nothing of the question or the person,
+ * and handed to the Brain, which counts it for staff; recall goes ahead
+ * by words and exact parts. With no model shipped there is no why: going
+ * without is no failure then.
  */
 const meaningOf = async (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
   question: string
-): Promise<RecallRequest["meaning"]> => {
+): Promise<Pick<RecallRequest, "meaning" | "withoutMeaning">> => {
   if (question.trim() === "") {
-    return undefined;
+    return {};
   }
   const embedded = await questionVectorOf(env, question);
   if (embedded === null) {
-    return undefined;
+    return {};
   }
   if (embedded.kind === "vector" && isUsableVector(embedded.vector)) {
-    return { model: embedded.model, vector: embedded.vector };
+    return { meaning: { model: embedded.model, vector: embedded.vector } };
   }
-  log.warn("brain.recall.without_meaning", {
-    reason: embedded.kind === "none" ? embedded.reason : "unusable",
-  });
-  return undefined;
+  const reason = embedded.kind === "none" ? embedded.reason : "unusable";
+  log.warn("brain.recall.without_meaning", { reason });
+  return { withoutMeaning: reason };
 };
 
 /**
@@ -370,19 +387,21 @@ const meaningOf = async (
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question, budget, asOf }: Recall
+  { question: asked, budget, asOf }: Recall
 ): Promise<RecalledPack> => {
+  // As the Brain checks it, before the embedder sees any of it.
+  const question = checked(questionSchema, asked);
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId),
     // As of a moment the Brain never searches by meaning: nothing to embed.
-    asOf === undefined ? meaningOf(env, question) : undefined,
+    asOf === undefined ? meaningOf(env, question) : {},
   ]);
   const { items, notFound, truncated } = await brain(env).recall({
     question,
     reader,
     budget,
     ...(asOf === undefined ? {} : { asOf }),
-    ...(meaning === undefined ? {} : { meaning }),
+    ...meaning,
   });
   return {
     items: items.map(({ source, version, position, text, whole, found }) => ({
@@ -422,6 +441,127 @@ export const readSourceVersionAs = async (
   return read === null
     ? null
     : { source, version, text: read.text, addedAt: read.addedAt };
+};
+
+/** Where a page of a listing starts: after this source, as its producer named it. */
+export interface SourcesAfter {
+  addedAt: Date;
+  source: SourceRef;
+}
+
+const sourcesAfterSchema = z.strictObject({
+  addedAt: z.date(),
+  source: sourceRefSchema,
+});
+
+/**
+ * A source, as a listing names it: its current version, when that was
+ * added, its first line (of its first passage, as its text gives it, for
+ * a title: empty when that passage opens with no line of text), whether
+ * it is the reader's alone (nobody else may read it, admins included),
+ * and how many of its versions the reader may read.
+ */
+export interface ListedSource {
+  source: SourceRef;
+  version: number;
+  addedAt: Date;
+  firstLine: string;
+  personal: boolean;
+  versions: number;
+}
+
+/** A page of sources, and where the next one starts: null at the last. */
+export interface SourcePage {
+  sources: ListedSource[];
+  next: SourcesAfter | null;
+}
+
+/**
+ * A page of the sources the member `personId` may read, of every
+ * producer's kind (never an instruction file), newest first by when their
+ * current version was added, after `after` when given: what they may not
+ * read takes no place in it. Refused once they are no longer a member.
+ */
+export const listSourcesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  { after }: { after?: SourcesAfter } = {}
+): Promise<SourcePage> => {
+  const from =
+    after === undefined ? undefined : checked(sourcesAfterSchema, after);
+  const { sources, more } = await brain(env).listSources({
+    reader: await readerOf(env, personId),
+    prefixes: producerKinds.map((kind) => `${kind}:`),
+    ...(from === undefined
+      ? {}
+      : { after: { addedAt: from.addedAt, source: sourceKeyOf(from.source) } }),
+  });
+  const listed = sources.map(
+    ({
+      source,
+      version,
+      addedAt,
+      opening,
+      personal,
+      versions,
+    }): ListedSource => ({
+      source: sourceRefOf(source),
+      version,
+      addedAt,
+      firstLine: firstLineOf(opening),
+      personal,
+      versions,
+    })
+  );
+  const last = listed.at(-1);
+  return {
+    sources: listed,
+    next:
+      more && last !== undefined
+        ? { addedAt: last.addedAt, source: last.source }
+        : null,
+  };
+};
+
+/** A version of a source, as a listing names it. */
+export interface ListedVersion {
+  version: number;
+  addedAt: Date;
+}
+
+/** A page of versions, and the version the next one starts below: null at the last. */
+export interface VersionPage {
+  versions: ListedVersion[];
+  before: number | null;
+}
+
+const versionsWantedSchema = z.strictObject({
+  source: sourceRefSchema,
+  before: z.int().positive().optional(),
+});
+
+/**
+ * A page of the versions of `source` the member `personId` may read,
+ * newest first, below `before` when given: only while they may read its
+ * current version, as `readSourceVersionAs` reads them; none, alike, for
+ * a source there isn't. Refused once they are no longer a member.
+ */
+export const listVersionsAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted: { source: SourceRef; before?: number }
+): Promise<VersionPage> => {
+  const { source, before } = checked(versionsWantedSchema, wanted);
+  const { versions, more } = await brain(env).listVersions({
+    source: sourceKeyOf(source),
+    reader: await readerOf(env, personId),
+    ...(before === undefined ? {} : { before }),
+  });
+  const last = versions.at(-1);
+  return {
+    versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
+    before: more && last !== undefined ? last.version : null,
+  };
 };
 
 // Erasure: for good, apart from ordinary removal, where a new version
@@ -787,19 +927,35 @@ export const brainWorkOverview = async (env: BrainEnv): Promise<WorkOverview> =>
   await brain(env).workOverview();
 
 /**
- * The store's steps and the report's (`brainSteps`) are the same keys: a
- * step either names and the other doesn't fails to compile here, so none
- * is dropped silently.
+ * The names the store keys something by, when the report names the same
+ * ones: a name either has and the other doesn't makes this `never`, so
+ * the report's list fails to compile and none is dropped silently.
  */
-type StoreStep = keyof WorkOverview["stepsFailed"];
-type SameSteps = [StoreStep] extends [BrainStep]
-  ? [BrainStep] extends [StoreStep]
-    ? readonly StoreStep[]
+type SameNames<Store extends string, Report extends string> = [Store] extends [
+  Report,
+]
+  ? [Report] extends [Store]
+    ? readonly Store[]
     : never
   : never;
 
 /** Every step the store names, in the tick's order. */
-const reportedSteps = brainSteps satisfies SameSteps;
+const reportedSteps = brainSteps satisfies SameNames<
+  keyof WorkOverview["stepsFailed"],
+  BrainStep
+>;
+
+/** Every way of recall the store counts. */
+const reportedWays = brainSearchWays satisfies SameNames<
+  keyof WorkOverview["recall"]["ways"],
+  BrainSearchWay
+>;
+
+/** Every reason the store counts a recall without meaning by. */
+const reportedReasons = brainWithoutMeaningReasons satisfies SameNames<
+  keyof WorkOverview["recall"]["withoutMeaning"],
+  BrainWithoutMeaningReason
+>;
 
 /** A step's last failure as the staff report says it. */
 const failureOf = (
@@ -818,6 +974,21 @@ const stepsFailedOf = (
       reportedSteps.map((step) => [step, failureOf(steps[step])])
     )
   );
+
+/** A way's counts as the report says them, field by field. */
+const wayOf = ({ recalls, failed }: WayCounts) => ({ recalls, failed });
+
+/** Recall by each way and without meaning, as the report says it: counts. */
+const recallOf = (recall: WorkOverview["recall"]): BrainReport["recall"] =>
+  brainReportSchema.shape.recall.parse({
+    since: recall.since.toISOString(),
+    ways: Object.fromEntries(
+      reportedWays.map((way) => [way, wayOf(recall.ways[way])])
+    ),
+    withoutMeaning: Object.fromEntries(
+      reportedReasons.map((reason) => [reason, recall.withoutMeaning[reason]])
+    ),
+  });
 
 /**
  * The Brain as Grasp's staff see it (brain-report.ts): its overview, field
@@ -876,6 +1047,7 @@ export const brainStaffReport = async (env: BrainEnv): Promise<BrainReport> => {
       byReason: overview.erasures.byReason,
     },
     stepsFailed: stepsFailedOf(overview.stepsFailed),
+    recall: recallOf(overview.recall),
   };
 };
 

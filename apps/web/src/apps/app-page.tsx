@@ -1,6 +1,6 @@
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { buttonVariants, Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,45 +9,52 @@ import {
 } from "@grasp-os/ui/components/dropdown-menu";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   LayoutGridIcon,
+  Maximize2Icon,
   MoreHorizontalIcon,
-  PencilIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
+import type { Crumb } from "../frame/site-header.tsx";
+import { pageHref, useAppAddress } from "../pages/app-address.ts";
+import { PageFrame } from "../pages/page-frame.tsx";
 import { buildsApp } from "./app-role.ts";
-import { StatusBadge } from "./app-status.tsx";
+import type { AppSettingsSection } from "./app-settings.tsx";
+import { StatusBadge, statusOf } from "./app-status.tsx";
+import { AppWorkspace } from "./app-workspace.tsx";
+import type {
+  ReadOnlyShown,
+  WorkspaceEnv,
+  WorkspaceView,
+} from "./app-workspace.tsx";
 
-// An App as its people use it (/apps/$app): the live App, its current
-// version, full width, under a slim bar with its name and its pages
-// (core's pages) as tabs. Nothing here builds it: its builders get Edit,
-// which opens its workspace (/apps/$app/edit, app-workspace.tsx), where the
-// chat builds a preview and Publish makes it live. Its settings, under
-// "…", are for everyone who opens it, each section as they may see it
-// (app-settings.tsx).
+// An App at its address (/apps/$app): its workspace for who builds it
+// (app-workspace.tsx); for anyone else the live App, its current version,
+// full width, under the one bar every App has (frame/item-shell.tsx), with
+// nothing that builds it. An archived App opens nothing for them, as
+// nobody uses one until it is restored. Its settings, under "…", are for
+// everyone who opens it, each section as they may see it (app-settings.tsx).
 
 /** "…": the open page at full size, and the App's settings. */
 const MoreMenu = ({
   app,
   name,
   fullPage,
-  builds,
 }: {
   app: string;
   name: string;
   fullPage: ReactNode;
-  builds: boolean;
 }) => {
   const { t } = useLingui();
   return (
@@ -66,18 +73,7 @@ const MoreMenu = ({
       <DropdownMenuContent align="end">
         {fullPage}
         <DropdownMenuItem
-          render={
-            // Its builders change the settings beside the chat.
-            builds ? (
-              <Link
-                params={{ app }}
-                search={{ view: "settings" }}
-                to="/apps/$app/edit"
-              />
-            ) : (
-              <Link params={{ app }} to="/apps/$app/settings" />
-            )
-          }
+          render={<Link params={{ app }} to="/apps/$app/settings" />}
         >
           <SettingsIcon />
           <Trans>Settings</Trans>
@@ -88,15 +84,7 @@ const MoreMenu = ({
 };
 
 /** No page to show: archived, or nothing built yet. */
-const NoPage = ({
-  app,
-  archived,
-  editable,
-}: {
-  app: string;
-  archived: boolean;
-  editable: boolean;
-}) => (
+const NoPage = ({ archived }: { archived: boolean }) => (
   <div className="flex flex-1 items-center justify-center p-6">
     <Empty>
       <EmptyHeader>
@@ -121,85 +109,148 @@ const NoPage = ({
           )}
         </EmptyDescription>
       </EmptyHeader>
-      {editable ? (
-        <EmptyContent>
-          <Link
-            className={buttonVariants()}
-            params={{ app }}
-            to="/apps/$app/edit"
-          >
-            <PencilIcon data-icon="inline-start" />
-            {archived ? <Trans>Restore it</Trans> : <Trans>Build it</Trans>}
-          </Link>
-        </EmptyContent>
-      ) : null}
     </Empty>
   </div>
 );
 
-/**
- * The live App: its bar, then its open page (`children`), or that it
- * has none. Only one who builds it (`buildsApp`, by their role in this
- * App) gets Edit.
- */
-export const AppPage = ({
+/** The live App: its bar, then its open page (`children`), or that it has none. */
+const AppPage = ({
   app,
+  back,
   opens,
-  identity,
   fullPage,
   children,
 }: {
   app: ViewedApp;
+  /** The way back: the Apps, or the project it was opened from. */
+  back: Crumb;
   /** Whether its pages open: it has some, and isn't archived. */
   opens: boolean;
-  identity: Pick<Identity, "staff">;
   /** "Open full page", as a menu item, while a page is open. */
   fullPage: ReactNode;
   children: ReactNode;
 }) => {
   const { name } = app;
-  const builds = buildsApp(app, identity);
-  const archived = app.status === "archived";
   return (
-    <div className="flex min-h-0 flex-1 flex-col text-sm">
-      <div className="bg-background flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2 md:px-6">
-        <span className="flex min-w-0 items-center gap-2.5">
-          <span
-            aria-hidden="true"
-            className="bg-muted text-foreground inline-flex size-7 flex-none items-center justify-center rounded-lg"
-          >
-            <LayoutGridIcon className="size-4" />
-          </span>
-          <h1 className="truncate text-base font-medium">{name}</h1>
-          {/* Who uses it sees it only published; its builders see when it isn't. */}
-          {app.status === "published" ? null : (
-            <StatusBadge status={app.status} />
-          )}
-        </span>
-        <span className="ml-auto flex items-center gap-1">
-          {builds ? (
-            <Link
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-              params={{ app: app.id }}
-              to="/apps/$app/edit"
-            >
-              <PencilIcon data-icon="inline-start" />
-              <Trans>Edit</Trans>
-            </Link>
-          ) : null}
-          <MoreMenu
-            app={app.id}
-            builds={builds}
-            fullPage={fullPage}
-            name={name}
-          />
-        </span>
-      </div>
-      {opens ? (
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-      ) : (
-        <NoPage app={app.id} archived={archived} editable={builds} />
-      )}
-    </div>
+    <ItemShell
+      bar={
+        <ItemBar
+          actions={<MoreMenu app={app.id} fullPage={fullPage} name={name} />}
+          back={back}
+          name={name}
+          // Who uses it sees it only live; anything else says so.
+          state={
+            statusOf(app) === "live" ? undefined : <StatusBadge app={app} />
+          }
+        />
+      }
+    >
+      {opens ? children : <NoPage archived={app.archived} />}
+    </ItemShell>
   );
 };
+
+/**
+ * The live App, for one who uses it: its pages run as one single page app
+ * in the frame under its bar, routed by the App's own router; where it is
+ * goes in the address (pages/app-address.ts). "Open full page" opens the
+ * route open now outside the shell (apps.$app.full.tsx).
+ */
+const LiveApp = ({
+  app,
+  back,
+  pages,
+}: {
+  app: ViewedApp;
+  back: Crumb;
+  pages: boolean;
+}) => {
+  const { id } = app;
+  const router = useRouter();
+  const { t } = useLingui();
+  const address = useAppAddress({
+    root: `/apps/${id}`,
+    sub: `/apps/${id}/pages`,
+  });
+  const opens = pages && !app.archived;
+  return (
+    <AppPage
+      app={app}
+      back={back}
+      fullPage={
+        opens ? (
+          <DropdownMenuItem
+            render={
+              // Where the App is, its search and hash as the App wrote
+              // them, full page: outside the shell, so a document of
+              // its own.
+              <a
+                aria-label={t`Open full page`}
+                href={pageHref(
+                  { root: `/apps/${id}/full`, sub: `/apps/${id}/full` },
+                  address.at ?? "/"
+                )}
+              />
+            }
+          >
+            <Maximize2Icon />
+            <Trans>Open full page</Trans>
+          </DropdownMenuItem>
+        ) : null
+      }
+      opens={opens}
+    >
+      {opens ? (
+        <PageFrame
+          app={id}
+          at={address.at}
+          // The App's bar holds the page's heading, its name.
+          embedded
+          onMoved={address.handleMoved}
+          // Loading the App again reads its current version again too.
+          onReload={() => {
+            void router.invalidate();
+          }}
+          ownPath={address.own}
+        />
+      ) : null}
+    </AppPage>
+  );
+};
+
+/**
+ * An App, opened at its address: its workspace for one who builds it
+ * (`buildsApp`), with Grasp's chat about it beside; the live App, with
+ * nothing that builds it, for anyone else.
+ */
+export const OpenedApp = ({
+  app,
+  back,
+  pages,
+  identity,
+  handedOver,
+  ...at
+}: {
+  app: ViewedApp;
+  back: Crumb;
+  /** Whether it has pages to open. */
+  pages: boolean;
+  identity: Identity;
+  /** The chat the person came from, building this App in Chat. */
+  handedOver: string | undefined;
+  view: WorkspaceView;
+  env: WorkspaceEnv;
+  shown: ReadOnlyShown | undefined;
+  section: AppSettingsSection | undefined;
+}) =>
+  buildsApp(app, identity) ? (
+    <AppWorkspace
+      app={app}
+      back={back}
+      handedOver={handedOver}
+      identity={identity}
+      {...at}
+    />
+  ) : (
+    <LiveApp app={app} back={back} pages={pages} />
+  );

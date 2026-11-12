@@ -1804,18 +1804,15 @@ export const listPermissions = async (
 };
 
 /**
- * Whether `by` making a version of the App that holds `permission` current
- * would ask an admin for it again, as `madeCurrent` does: one that changes
+ * Whether `by` publishing a draft of the App that holds `permission` would
+ * ask an admin for it again, as `madeCurrent` does: one that changes
  * things, unless `by` could grant it (one of the organization's own
- * admins) or the permissions are kept (`keep`, an App's first version
- * copied from a blueprint, made current for the first time).
+ * admins).
  */
 export const askedAgainBy = (
   by: Pick<Identity, "role" | "staff">,
-  permission: Permission,
-  keep: boolean
+  permission: Permission
 ): boolean =>
-  !keep &&
   !isMemberAdmin(by) &&
   permission.actions.some((action) => changesThings(permission.object, action));
 

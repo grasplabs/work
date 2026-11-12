@@ -37,19 +37,36 @@ const firstAgent: Agent = {
   job: "Answers from what the company told Grasp, and helps people in their own apps.",
   instructions: "",
   modelRole: null,
+  model: null,
   state: "on",
   changedBy: null,
   changedAt: null,
 };
 
-/**
- * The agent with this ID, or undefined when the company has none: an ID
- * nobody made, or one that could never be an agent's.
- */
-export const readAgent = async (
+/** An agent's row as its record; undefined for one an admin deleted. */
+export const agentOfRow = (
+  row: typeof agents.$inferSelect
+): Agent | undefined =>
+  row.state === "deleted"
+    ? undefined
+    : {
+        id: row.id,
+        name: row.name,
+        face: row.face,
+        job: row.job,
+        instructions: row.instructions,
+        modelRole: row.modelRole,
+        model: row.model,
+        state: row.state,
+        changedBy: row.changedBy,
+        changedAt: row.changedAt.toISOString(),
+      };
+
+/** What core keeps under an agent's ID: the agent, that it was deleted, or nothing. */
+const kept = async (
   env: Env,
   id: string
-): Promise<Agent | undefined> => {
+): Promise<Agent | "deleted" | undefined> => {
   if (!workspaceAgentIdSchema.safeParse(id).success) {
     return undefined;
   }
@@ -62,34 +79,40 @@ export const readAgent = async (
     // A copy: what a caller does to it never reaches the next read.
     return id === firstAgentId ? { ...firstAgent } : undefined;
   }
-  return {
-    id: row.id,
-    name: row.name,
-    face: row.face,
-    job: row.job,
-    instructions: row.instructions,
-    modelRole: row.modelRole,
-    state: row.state,
-    changedBy: row.changedBy,
-    changedAt: row.changedAt.toISOString(),
-  };
+  return agentOfRow(row) ?? "deleted";
+};
+
+/**
+ * The agent with this ID, or undefined when the company has none: an ID
+ * nobody made, one an admin deleted, or one that could never be an
+ * agent's.
+ */
+export const readAgent = async (
+  env: Env,
+  id: string
+): Promise<Agent | undefined> => {
+  const found = await kept(env, id);
+  return found === "deleted" ? undefined : found;
 };
 
 /**
  * The agent a chat's turn runs as, or undefined for an ID the company
- * keeps no agent under. Throws `agent.paused` for one an admin paused,
- * which takes no turn.
+ * keeps no agent under. Throws `agent.paused` for one an admin paused and
+ * `agent.unknown` for one an admin deleted: neither takes a turn.
  *
- * An ID without a record still takes its turn, told nothing more: until
- * an agent can be deleted, no chat can hold the ID of one that is gone,
- * and a Workspace object is free to name its own agent, as it always was.
- * Refusing such an ID belongs with deleting agents.
+ * An ID nobody ever made still takes its turn, told nothing more: a
+ * Workspace object is free to name its own agent, as it always was. A
+ * deleted agent's row stays for this, so a chat that still names it is
+ * told apart from that.
  */
 export const turnAgent = async (
   env: Env,
   id: string
 ): Promise<Agent | undefined> => {
-  const agent = await readAgent(env, id);
+  const agent = await kept(env, id);
+  if (agent === "deleted") {
+    throw agentErrors.create("agent.unknown");
+  }
   if (agent?.state === "paused") {
     throw agentErrors.create("agent.paused");
   }

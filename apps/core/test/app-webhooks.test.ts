@@ -28,7 +28,6 @@ import { drainWebhookDeliveries } from "../src/app-webhooks.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { commitApp, testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { published } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   webhookReceivedUrl,
@@ -169,7 +168,6 @@ const notesApp = async (builder: Person) => {
     files,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
   return { app: id, version };
 };
 
@@ -183,7 +181,7 @@ const openNotes = async () => {
     personApi("admin"),
   ]);
   const { app, version } = await notesApp(builder);
-  await published(app);
+  await builder.api.apps.versions.publish(app, version);
   const { lease } = await builder.api.pages.open(app);
   const release = await loadRelease(env, app, version);
   return { builder, admin, app, lease, release };
@@ -548,7 +546,8 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       refused: Array.from({ length: 7 }, () => "webhook.invalid_url"),
       noEvents: "webhook.invalid",
-      // A draft's user has no role in it yet: as an App that isn't there.
+      // Nothing of it live yet, its user has no role in it: as an App that
+      // isn't there.
       byUser: "app.not_found",
       byStaff: "role.forbidden",
       secret: true,
@@ -676,16 +675,16 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     });
   });
 
-  it("tells the App's publish and a version made current, with the change, and audits each delivery by its origin", async () => {
+  it("tells the App's first live version and each version published after, with the change, and audits each delivery by its origin", async () => {
     const builder = await personApi("builder");
-    const { app } = await notesApp(builder);
+    const { app, version: first } = await notesApp(builder);
     const url = receiver();
     const { webhook } = await builder.api.apps.webhooks.add(app, {
       url,
       events: ["published", "changed"],
     });
 
-    await builder.api.apps.publish(app);
+    await builder.api.apps.versions.publish(app, first);
     const { version } = await commitApp(
       builder.api.apps.files,
       app,
@@ -694,16 +693,16 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       }),
       "Second"
     );
-    await builder.api.apps.versions.setCurrent(app, version);
+    await builder.api.apps.versions.publish(app, version);
     await drainWebhookDeliveries(env);
     const payloads = await payloadsAt(url);
     const logged = await allEvents();
 
     expect({
-      payloads: payloads.map(({ event, version: told }) => ({
-        event,
-        version: told,
-      })),
+      // Delivered in no order of their own.
+      payloads: payloads
+        .map(({ event, version: told }) => `${event}:${told}`)
+        .toSorted(),
       calls: logged
         .filter(
           ({ action, detail }) =>
@@ -717,11 +716,14 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
           status: detail?.status,
         })),
     }).toStrictEqual({
+      // The first live version publishes the App, and changes it as
+      // every version that goes live does.
       payloads: [
-        { event: "published", version: 1 },
-        { event: "changed", version },
+        `changed:${first}`,
+        `changed:${version}`,
+        `published:${first}`,
       ],
-      calls: Array.from({ length: 2 }, () => ({
+      calls: Array.from({ length: 3 }, () => ({
         source: "connect",
         target: { type: "app", id: app },
         origin: webhookReceiverOrigin,
@@ -733,7 +735,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
 
   it("tries a failing receiver again under the same ID, and gives a delivery up after its last try, audited", async () => {
     const builder = await personApi("builder");
-    const { app } = await notesApp(builder);
+    const { app, version } = await notesApp(builder);
     const flaky = receiver("/fail-1");
     const down = receiver("/status/500");
     const [first, second] = await Promise.all(
@@ -749,7 +751,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       throw new Error("Expected two webhooks");
     }
 
-    await builder.api.apps.publish(app);
+    await builder.api.apps.versions.publish(app, version);
     await drainWebhookDeliveries(env, { maxAttempts: 2 });
     const afterOne = await deliveriesOf(first.webhook.id);
     await Promise.all([dueNow(first.webhook.id), dueNow(second.webhook.id)]);
@@ -792,7 +794,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
 
   it("follows no redirect, and sends nothing to a URL connect refuses, whatever core kept", async () => {
     const builder = await personApi("builder");
-    const { app } = await notesApp(builder);
+    const { app, version } = await notesApp(builder);
     const redirecting = receiver("/redirect");
     const { webhook } = await builder.api.apps.webhooks.add(app, {
       url: redirecting,
@@ -806,7 +808,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       .bind(inside, app, builder.userId, Date.now())
       .run();
 
-    await builder.api.apps.publish(app);
+    await builder.api.apps.versions.publish(app, version);
     await drainWebhookDeliveries(env, { maxAttempts: 1 });
     const logged = await allEvents();
 
@@ -1030,7 +1032,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       events: ["form_sent"],
     });
     const other = await personApi("builder");
-    const { app: racing } = await notesApp(other);
+    const { app: racing, version: racingVersion } = await notesApp(other);
     const raced = receiver();
     const { webhook: racedHook } = await other.api.apps.webhooks.add(racing, {
       url: raced,
@@ -1041,7 +1043,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     await open.builder.api.apps.archive(open.app);
     await open.builder.api.apps.remove(open.app);
     // One removed as the drain is about to send what it queued.
-    await other.api.apps.publish(racing);
+    await other.api.apps.versions.publish(racing, racingVersion);
     await env.DB.prepare("UPDATE apps SET removed_at = ? WHERE id = ?")
       .bind(Date.now(), racing)
       .run();
@@ -1099,7 +1101,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
 
   it("counts each delivery a full webhook misses, for its settings to show", async () => {
     const builder = await personApi("builder");
-    const { app } = await notesApp(builder);
+    const { app, version } = await notesApp(builder);
     const url = receiver();
     const { webhook } = await builder.api.apps.webhooks.add(app, {
       url,
@@ -1120,7 +1122,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       )
       .run();
 
-    await builder.api.apps.publish(app);
+    await builder.api.apps.versions.publish(app, version);
     const [listed] = await builder.api.apps.webhooks.list(app);
     const { results } = await env.DB.prepare(
       "SELECT count(*) AS waiting FROM app_webhook_deliveries WHERE webhook_id = ? AND delivered_at IS NULL"
@@ -1396,8 +1398,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       url,
       events: ["form_sent"],
     });
-    const { id } = await open.builder.api.chats.forApp(open.app);
-    const preview = await open.builder.api.chats.preview(id, open.app);
+    const preview = await open.builder.api.apps.drafts.preview(open.app);
     const drafted = { builder: open.builder, lease: preview.lease ?? "" };
     const added = await sentOnly(
       open,

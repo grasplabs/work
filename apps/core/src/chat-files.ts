@@ -16,7 +16,7 @@ import {
   localExtractor,
 } from "./knowledge/extract.ts";
 import type { LocalExtractorEnv } from "./knowledge/extract.ts";
-import { hasText, signatures } from "./knowledge/uploads.ts";
+import { hasText, signatures } from "./knowledge/upload-checks.ts";
 
 // Reading a file attached to a chat's question (`chats.attachFile`): its
 // text, as the agent reads it. Checked as a Knowledge upload is, by what

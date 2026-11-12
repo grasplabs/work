@@ -58,8 +58,8 @@ const readIn = (said: string, pattern: RegExp): string => {
   return found;
 };
 
-/** The App an App's own chat builds, as its system prompt names it (core's agent.ts). */
-const ownApp = /This chat is the App (?<found>\S+)'s own chat/u;
+/** The App a question is about, as the note beside it names it (core's agent.ts). */
+const ownApp = /workspace of the App .*? \((?<found>[^)\s]+)\): /u;
 
 /**
  * The agent says `text` and writes `files` into its draft of the App
@@ -105,8 +105,17 @@ const sharedTable = (
 /** `files` as the agent writes them: never the definition, its config or its schema. */
 const codeOf = withoutDefinition;
 
-/** The workflow open beside a chat, as its first message names it (web's draw-in-chat.ts). */
-const besideWorkflow = /\(ID (?<found>[^)\s]+)\) is open beside this chat/u;
+/**
+ * The workflow a chat's question was asked beside, as core's note on its
+ * subject names it (core's agent.ts, the web's chat-subject.ts).
+ */
+const besideWorkflow = /page of the workflow ".*?" \((?<found>[^)\s]+)\)/u;
+
+/** The App the agent plans for the contact list (`buildsApp`): its name. */
+export const appPlanned = "Sales contacts";
+
+/** The workflow the agent plans for suppliers' invoices (`drawsWorkflow`). */
+export const workflowPlanned = "Supplier payments";
 
 /** What the agent says once it wrote the contact list (`buildsApp`). */
 export const appReady = "Your contact list is ready to try in the preview.";
@@ -124,14 +133,38 @@ export const modelScripts = {
     ],
   },
   /**
-   * A new workflow drawn in its chat: the person answers the page's own
-   * first question, which business process it is for, and Grasp asks on.
+   * The agent asks for an App's npm packages, on a card in its chat (the
+   * request itself is written as its resolve proposes it: a local stack
+   * reaches no registry, e2e/dependency-request.ts), and carries on once
+   * the builder approves them there.
+   */
+  asksPackages: {
+    opener: "Use an npm package for this App's page.",
+    replies: [
+      says("I asked for the packages it needs: approve them on the card."),
+      says("They are approved, so the page uses them now."),
+    ],
+  },
+  /**
+   * Something new from Make something that runs on its own: the person
+   * says what they want done, Grasp proposes a workflow, and once they say
+   * Build it, asks on.
    */
   drawsWorkflow: {
-    opener: "Which business process is this workflow for?",
+    opener: "Pay our suppliers' invoices once they are checked.",
     replies: [
+      calls("planswf01", "proposePlan", {
+        parts: [
+          {
+            kind: "workflow",
+            name: workflowPlanned,
+            does: "Once an invoice is checked, it is paid.",
+          },
+        ],
+        who: "The finance team",
+      }),
       says(
-        "Purchase-to-Pay, then. Where does a supplier's invoice come in, and who looks at it first?"
+        "Where does a supplier's invoice come in, and who looks at it first?"
       ),
     ],
   },
@@ -204,15 +237,26 @@ export const modelScripts = {
     ],
   },
   /**
-   * A new App built in its own chat: the agent reads how an App's
-   * project is laid out in the deployment's docs, writes a contact
-   * list's files into its draft, and says it is ready to try. It never proposes it: the builder
-   * publishes the draft themselves.
+   * A new App from Make something: the agent proposes a page the team
+   * opens, and once the person says Build it, reads how an App's project
+   * is laid out in the deployment's docs, writes a contact list's files
+   * into its draft, and says it is ready to try. It never shares it: the
+   * builder does.
    */
   buildsApp: {
     opener:
       "A contact list for the sales team: each contact's name, added from its page.",
     replies: [
+      calls("plansapp1", "proposePlan", {
+        parts: [
+          {
+            kind: "app",
+            name: appPlanned,
+            does: "Each contact's name, added from its page.",
+          },
+        ],
+        who: "The sales team",
+      }),
       calls("findsapp1", "readDocs", { path: "/guides/project" }),
       // Only once the docs answered with the page: a read that failed
       // ends the script.
@@ -235,13 +279,24 @@ export const modelScripts = {
     ],
   },
   /**
-   * A new workflow drawn in its chat, for Opportunity-to-Cash: the agent saves
-   * an invoice approval, a person's decision, as the draft's first
-   * revision, and says so.
+   * A new workflow from Make something: the agent proposes something that
+   * runs on its own, and once the person says Build it, saves an invoice
+   * approval, a person's decision, as the draft's first revision, and
+   * says so.
    */
   drawsApproval: {
-    opener: "Which business process is this workflow for? Opportunity-to-Cash",
+    opener: "Approve each invoice: the approver I name decides on it.",
     replies: [
+      calls("plansapr1", "proposePlan", {
+        parts: [
+          {
+            kind: "workflow",
+            name: "Invoice approval",
+            does: "Each invoice waits for the approver you name.",
+          },
+        ],
+        who: "The finance team",
+      }),
       (said) =>
         calls("editswf01", "editWorkflow", {
           workflow: readIn(said, besideWorkflow),
@@ -346,7 +401,7 @@ export const scriptedAnswer = (body: unknown): Answer | undefined => {
   const { system, messages } = request.data;
   const opened = textOf(messages.find(({ role }) => role === "user")?.content);
   // The longest opener the chat opened with: one script's opener may
-  // begin another's (the process question, then which process).
+  // begin another's.
   const [script] = Object.values<ModelScript>(modelScripts)
     .filter(({ opener }) => opened.includes(opener))
     .toSorted((a, b) => b.opener.length - a.opener.length);

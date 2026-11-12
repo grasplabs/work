@@ -121,7 +121,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       }),
       "Second"
     );
-    await builder.api.apps.versions.setCurrent(app, version);
+    await builder.api.apps.versions.publish(app, version);
     await expect(reader?.read()).rejects.toThrow(
       "That reference belongs to another version"
     );

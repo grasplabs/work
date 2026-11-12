@@ -20,8 +20,8 @@ import { signedInApi } from "./sign-in.ts";
 // What App code keeps of one invocation never acts in another (GRA-383,
 // GRA-387), through the real Loader: every invocation runs in a fresh
 // isolate of its own, and its channel stops working when it ends, on a
-// page's calls and, below, on a chat's preview of its draft
-// (sealed-previews.ts), across two people's chats. The
+// page's calls and, below, on the App's preview of its draft
+// (draft-runs.ts), across two people who build it. The
 // held-call reproduction from GRA-383, the channel kept past its call,
 // and state one caller leaves for the next. A call cut short at its
 // deadline is app-functions.test.ts's ("a call past its deadline").
@@ -143,7 +143,7 @@ describe(
   "an invocation's authority in a draft's preview",
   { timeout: 180_000 },
   () => {
-    it("never reaches another person's preview, held open alongside it, nor outlives its call, nor leaves anything for the next", async () => {
+    it("never reaches another person's call of the App's preview, held open alongside it, nor outlives its call, nor leaves anything for the next", async () => {
       const owner = await signedInApi(idp, "builder");
       const { id } = await owner.api.apps.create({ name: "Isolation" });
       const app = appIdSchema.parse(id);
@@ -162,48 +162,45 @@ describe(
 export const Route = createFileRoute("/")({ component: () => <p>Notes</p> });
 `,
       };
-      const [ownDraft, theirDraft] = await Promise.all([
-        chatWithDraft(owner, app, drafted),
-        chatWithDraft(other, app, drafted),
-      ]);
+      // One draft, which both build, its preview on one store of test
+      // data: each person's calls are invocations of their own all the same.
+      const { revision } = await chatWithDraft(owner, app, drafted);
       type Drafter = typeof owner;
       const previewed = async (
         by: Drafter,
-        { chatId, revision }: typeof ownDraft,
         path: string,
         input: Json = {}
       ): Promise<unknown> =>
         outcome(
           await previewCall(
             by,
-            chatId,
             app,
-            await requestFor(by, { chatId, app, revision }, path, input)
+            await requestFor({ app, revision }, path, input)
           )
         );
 
-      const held = previewed(owner, ownDraft, "notes.hold");
+      const held = previewed(owner, "notes.hold");
       await vi.waitFor(
         async () => {
-          await expect(
-            previewed(owner, ownDraft, "notes.titles")
-          ).resolves.toStrictEqual(["A holding"]);
+          await expect(previewed(owner, "notes.titles")).resolves.toStrictEqual(
+            ["A holding"]
+          );
         },
         { timeout: 10_000, interval: 100 }
       );
       // The other person's preview calls while A holds, A's channel kept in
       // module state.
-      const used = await previewed(other, theirDraft, "notes.useKept");
-      const theirs = await previewed(other, theirDraft, "notes.titles");
-      await previewed(owner, ownDraft, "notes.create", { title: "release" });
+      const used = await previewed(other, "notes.useKept");
+      const theirs = await previewed(other, "notes.titles");
+      await previewed(owner, "notes.create", { title: "release" });
       const unheld = await held;
-      const kept = await previewed(other, theirDraft, "notes.keepAfter");
+      const kept = await previewed(other, "notes.keepAfter");
       await scheduler.wait(1000);
-      const after = await previewed(other, theirDraft, "notes.titles");
-      await previewed(owner, ownDraft, "notes.poison");
+      const after = await previewed(other, "notes.titles");
+      await previewed(owner, "notes.poison");
       const probed = [
-        await previewed(other, theirDraft, "notes.probe"),
-        await previewed(owner, ownDraft, "notes.probe"),
+        await previewed(other, "notes.probe"),
+        await previewed(owner, "notes.probe"),
       ];
 
       expect({
@@ -215,10 +212,13 @@ export const Route = createFileRoute("/")({ component: () => <p>Notes</p> });
         probed,
       }).toStrictEqual({
         used: "nothing kept",
-        theirs: [],
+        // The test data they share: A's note, held, and nothing of A's
+        // channel.
+        theirs: ["A holding"],
         released: null,
         kept: null,
-        after: [],
+        // Nothing the kept work would have written.
+        after: ["A holding", "release"],
         probed: [
           ["clean", "clean", "clean"],
           ["clean", "clean", "clean"],

@@ -186,6 +186,7 @@ describe("the console's provisioning probe", () => {
           // Every Durable Object namespace, in core's jurisdiction.
           WORKSPACES: true,
           APPS: true,
+          APP_PREVIEWS: true,
           AUDIT_LOG: true,
           BUILTINS: true,
           CLOCK: true,

@@ -11,8 +11,10 @@ import {
   personErasureSchema,
   recallRequestSchema,
   sourceErasureSchema,
+  sourceListRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
+  versionListRequestSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
@@ -25,12 +27,16 @@ import type {
   RecallRequest,
   Pack,
   SourceErasure,
+  SourceList,
+  SourceListRequest,
   SourceVersion,
   SourceVersionRef,
   StaffActionOutcome,
   VectorSearch,
   VectorsFound,
   VectorsToPut,
+  VersionList,
+  VersionListRequest,
   VersionRequest,
   WorkOverview,
 } from "./contract.ts";
@@ -48,6 +54,13 @@ import {
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
 import { sweepFiles } from "./files.ts";
+import { listSources, listVersions } from "./listing.ts";
+import {
+  countingInto,
+  countWithoutMeaning,
+  newRecallCounts,
+  recallOverviewOf,
+} from "./recall-counts.ts";
 import { recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
@@ -138,6 +151,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     embedding: null,
   };
   #sweepAfter = 0;
+
+  /**
+   * Recall by each way and without meaning, since this instance started:
+   * in memory, gone with it, as `#stepsFailed` (recall-counts.ts).
+   */
+  readonly #recallCounts = newRecallCounts();
 
   /**
    * Where this instance is with its erasure ledger: read through, a replay
@@ -283,7 +302,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /** A pack of what the reader may read for the question, within its budget. */
   async recall(request: RecallRequest): Promise<Pack> {
     await this.#ready();
-    return recall(this.ctx.storage.sql, checked(recallRequestSchema, request));
+    const asked = checked(recallRequestSchema, request);
+    if (asked.withoutMeaning !== undefined) {
+      countWithoutMeaning(this.#recallCounts, asked.withoutMeaning);
+    }
+    return recall(
+      this.ctx.storage.sql,
+      asked,
+      countingInto(this.#recallCounts)
+    );
   }
 
   /** A version, current or history, whole: if the reader may read it. */
@@ -301,6 +328,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return await readCurrent(
       this.#sources,
       checked(currentRequestSchema, request)
+    );
+  }
+
+  /** A page of the sources the reader may read, newest first. */
+  async listSources(request: SourceListRequest): Promise<SourceList> {
+    await this.#ready();
+    return listSources(
+      this.ctx.storage.sql,
+      checked(sourceListRequestSchema, request)
+    );
+  }
+
+  /** A page of the versions of a source the reader may read, newest first. */
+  async listVersions(request: VersionListRequest): Promise<VersionList> {
+    await this.#ready();
+    return listVersions(
+      this.ctx.storage.sql,
+      checked(versionListRequestSchema, request)
     );
   }
 
@@ -531,6 +576,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       storeBytes: this.ctx.storage.sql.databaseSize,
       words: wordsRebuilding(this.ctx.storage.sql) ? "rebuilding" : "current",
       erasures: erasuresOverview(this.ctx.storage.sql),
+      recall: recallOverviewOf(this.#recallCounts),
     };
   }
 

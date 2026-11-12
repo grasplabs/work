@@ -226,7 +226,7 @@ export const versionErrors = defineErrorFamily({
   "version.export_secret_found":
     "A file of this App or of a workflow it binds holds what looks like a secret, so it can't be exported. Remove it from that file, publish or seal again, then export.",
   "version.format_unsupported":
-    "This version was sealed in a release format this platform doesn't read. Publish a new version and make it current.",
+    "This version was sealed in a release format this platform doesn't read. Publish a new version.",
   "version.manifest_corrupt":
     "This version's sealed manifest no longer matches its hash.",
   "version.artifact_corrupt":
@@ -237,11 +237,11 @@ export const versionErrors = defineErrorFamily({
   "version.functions_in_use":
     "This version removes or changes App functions that workflows call. These details name each workflow and function: keep them as they are (renaming one in the definition keeps it), or ask an admin to revoke the workflow's permission first.",
   "version.tests_failed":
-    "This version's App tests fail, so it can't be made current.",
+    "This version's App tests fail, so it can't be published.",
   "version.tests_unavailable":
-    "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host (SANDBOX_HOST bound to the sandbox supervisor). Until it's bound, a version with App tests can't be made current here.",
+    "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host (SANDBOX_HOST bound to the sandbox supervisor). Until it's bound, a version with App tests can't be published here.",
   "version.invalid_migration":
     "One of this version's migrations doesn't transform records to this version's schema: set its toSchema to the schema hash these details name.",
   "version.migration_fixtures_failed":
-    "One of this version's migrations failed on its fixtures as the version was sealed, so it runs on no records and the version can't be made current. These details name the migration, the fixture and why.",
+    "One of this version's migrations failed on its fixtures as the version was sealed, so it runs on no records and the version can't be published. These details name the migration, the fixture and why.",
 });

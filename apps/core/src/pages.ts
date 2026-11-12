@@ -128,8 +128,8 @@ export type BuildEnv = PackageBuildEnv;
 
 /**
  * Which build profile a build is for (spec 19.2.1): `production`, what a
- * version's saves, reviews, seals and opens build; `preview`, what a
- * chat's draft builds, checks and seals. Each profile has cache keys and
+ * version's saves, reviews, seals and opens build; `preview`, what an
+ * App's draft builds, checks and seals. Each profile has cache keys and
  * page artifact hashes of its own, so a preview build never stands in
  * for a production one, even of the same files.
  */
@@ -137,7 +137,7 @@ export type BuildProfile = "preview" | "production";
 
 /** How a build is asked for. */
 export interface BuildOptions {
-  /** Its profile: `production` unless a chat's draft asks. */
+  /** Its profile: `production` unless an App's draft asks. */
   readonly profile?: BuildProfile;
   /**
    * False for what a preview's frame and a draft's write build: pages
@@ -168,7 +168,7 @@ const compilerCalls = {
 type BuildKind = keyof typeof compilerCalls;
 
 /**
- * The compiler call a build of `kind` for `profile` runs: a chat's draft's
+ * The compiler call a build of `kind` for `profile` runs: an App's draft's
  * pages are built instrumented for React Fast Refresh, on the preview
  * kit (spec 19.2.1); every other build is the same for both profiles.
  */
@@ -815,7 +815,7 @@ export const versionPages = async (
   version: number | null,
   /** Whose pages they are: the App's ID. */
   app: string,
-  /** `preview` for a chat's draft. */
+  /** `preview` for an App's draft. */
   profile: BuildProfile,
   { checks = true }: Pick<BuildOptions, "checks"> = {}
 ): Promise<PageBuildResult> => {

@@ -1,23 +1,26 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { appReady, modelScripts } from "./model-scripts.ts";
+import { appPlanned, appReady, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 
-// An App, end to end, as a builder makes one: New App, what to build, the
-// App's own chat building it (the stack's scripted model reads the
+// An App, end to end, as a builder makes one: Make something, what they
+// want to get done, Grasp's plan, Build it, and the chat building it (the
+// stack's scripted model proposes a page the team opens, then reads the
 // deployment's docs, writes the App's files and says it's ready, e2e/
-// model-scripts.ts), the draft's page in the workspace's preview, then
-// Publish changes, as the chat never proposed it, and its review made
-// current and published. Shared with someone as a user, they open the
-// live App and add a contact on its page, which the App's data shows
-// its builder.
+// model-scripts.ts), the builder landing in the App to try it, then Share
+// with your team, which makes it the App's first version and shares it in
+// one step, and says so. Shared with someone, they open the App and add a
+// contact on its page, which the App's data shows its builder.
 
 /** A turn of the agent's, its model's calls and the tools they call. */
 const agentTurn = { timeout: 30_000 };
 
 /** A page's first build, or a read from core on a loaded stack. */
 const built = { timeout: 20_000 };
+
+/** How much of the end of their ID tells a person apart from a namesake (people-apart.ts). */
+const namesakeIdEnd = 6;
 
 // Never tried again, as the serial journeys aren't (playwright.config.ts):
 // a flaky journey shows as itself, with the trace of the run that failed,
@@ -27,7 +30,7 @@ const built = { timeout: 20_000 };
 test.use({ trace: "retain-on-failure", actionTimeout: built.timeout });
 test.describe.configure({ retries: 0 });
 
-test("a builder has an App built in its chat, publishes it, and someone it is shared with adds a contact its data then shows", async ({
+test("a builder makes an App from what they want done, shares it with their team, and someone it is shared with adds a contact its data then shows", async ({
   pageOf,
 }) => {
   // Its longest waits, one after another: two of the agent's turns and
@@ -38,27 +41,42 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   const { opener } = modelScripts.buildsApp;
   const page = await pageOf(builder);
 
-  // New App: what to build, which makes the App with its own chat and
-  // opens its workspace, the chat building it there.
-  await page.goto("/apps/new");
+  // Make something: Chat's page, what they want done, and Grasp's plan
+  // for it in the chat. Nothing is made until Build it; then Grasp builds
+  // it in the chat, ticking off what it does, and offers to open the App,
+  // where the same chat docks beside it.
+  await page.goto("/apps");
+  await page.getByRole("link", { name: "Make something" }).click();
+  await expect(page).toHaveURL(/\/\?make=app$/u);
   await expect(
-    page.getByRole("heading", { name: "What do you want to build?" })
+    page.getByRole("heading", { name: "What do you want to get done?" })
   ).toBeVisible();
-  const ask = page.getByRole("textbox", { name: "Describe the App" });
+  const ask = page.getByRole("textbox", { name: "Your question" });
   await ask.fill(opener);
   await ask.press("Enter");
-  await expect(page).toHaveURL(/\/apps\/[^/]+\/edit/u, built);
-  const app = new URL(page.url()).pathname.split("/").at(-2) ?? "";
+  const plan = page.getByRole("region", {
+    name: "Here's what Grasp will make",
+  });
+  await expect(plan.getByText(appPlanned)).toBeVisible(agentTurn);
+  // Build it lands on the App at once, being set up while the chat
+  // beside it builds it.
+  await plan.getByRole("button", { name: "Build it" }).click();
+  await expect(page).toHaveURL(/\/apps\/[^/?]+$/u);
+  await expect(page.getByText(`Setting up ${appPlanned}…`)).toBeVisible(built);
+  const app = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
-  // The chat reads how an App is written, writes it, and says so.
+  // The chat read how an App is written, wrote it, and said so.
   const chat = page.getByRole("region", { name: "Chat" });
   await expect(chat.getByText("Read /guides/project in the docs")).toBeVisible(
     agentTurn
   );
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
+  // Where it stands, in the bar: beside the docked chat it gives way to
+  // the name and Share, so it is there, unseen.
+  await expect(page.getByText("Only you see this")).toBeAttached();
 
   // The preview is the draft's page, on a store of its own.
-  const preview = page.getByRole("region", { name: /^Preview of /u });
+  const preview = page.getByRole("region", { name: /, your version$/u });
   const frame = preview.frameLocator("iframe");
   // Its first load waits for core to build the draft, behind any update
   // ahead of it: as long as an agent's turn.
@@ -69,40 +87,25 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
     frame.getByRole("list", { name: "Contacts" }).getByRole("listitem")
   ).toHaveText(["Ada Lovelace"], built);
 
-  // The chat never proposed it: Publish changes does, as the builder,
-  // and opens its review, where it is made current and published.
-  await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await page.getByRole("menuitem", { name: /^Publish changes/u }).click();
-  const review = page.getByRole("dialog", { name: "Publish version 1" });
-  await review
-    .getByRole("button", { name: "Make version 1 current and publish" })
-    .click(built);
-  await expect(review).toBeHidden(built);
-  await expect(page.getByRole("button", { name: "Published" })).toBeVisible(
-    built
-  );
-
-  // Shared with someone, as a user. Everyone the stack signs in is
-  // called Person, and a builder sees names, not emails: they are told
-  // apart by the ID each option goes by.
-  await page.getByRole("button", { name: "Share", exact: true }).click();
-  await page
-    .getByRole("option", { name: "Person" })
-    .and(page.locator(`[data-value="person:${user.userId}"]`))
-    .click();
-  // Shared once its Sharing lists them, as a user.
-  await page
-    .getByRole("navigation", { name: "Workspace views" })
-    .getByRole("link", { name: "Settings" })
-    .click();
-  await page.getByRole("link", { name: "Sharing" }).click();
-  await expect(page.getByLabel("Role of Person")).toBeVisible(built);
+  // The chat never shares it: the builder does, with whom they pick, which
+  // checks the draft, makes it the App's first version and shares it, in
+  // one step. Everyone the stack signs in is called Person, and a builder
+  // sees names, not emails: they are told apart by the ID each goes by.
+  await page.getByRole("button", { name: "Share with your team" }).click(built);
+  const sharing = page.getByRole("dialog");
+  await sharing
+    .getByRole("checkbox", {
+      name: `Person (ID …${user.userId.slice(-namesakeIdEnd)})`,
+    })
+    .check();
+  await sharing.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(page.getByText("Shared with Person")).toBeVisible(built);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);
   await used.goto(`/apps/${app}`);
   await expect(
-    used.getByRole("heading", { level: 1, name: opener })
+    used.getByRole("heading", { level: 1, name: appPlanned })
   ).toBeVisible(built);
   const appPage = used.frameLocator('iframe[title="App"]');
   const contacts = appPage
@@ -114,8 +117,9 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   await appPage.getByRole("button", { name: "Add contact" }).click();
   await expect(contacts).toHaveText(["Grace Hopper"], built);
 
-  // The App's data shows its builder the contact they added, a row of its
-  // table's grid.
+  // Shared, with nothing changed since, the workspace is what the team
+  // sees: its Data shows its builder the contact they added, a row of its
+  // table's grid, and none of the preview's.
   await page
     .getByRole("navigation", { name: "Workspace views" })
     .getByRole("link", { name: "Data" })

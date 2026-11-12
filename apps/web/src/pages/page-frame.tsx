@@ -11,10 +11,8 @@ import {
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { i18n as pageI18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useBlocker } from "@tanstack/react-router";
@@ -26,18 +24,14 @@ import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { LinkConfirmDialog } from "../link-confirmation.tsx";
 import type { PendingLink } from "../link-confirmation.tsx";
 import { useCore } from "../use-core.ts";
+import { FrameFailure } from "./frame-failure.tsx";
 import { frameQuestions } from "./frame-questions.ts";
 import type { Asked } from "./frame-questions.ts";
 import { LeaveConfirmDialog } from "./leave-confirm-dialog.tsx";
 import { frameLocation, locationHold, pageAt } from "./location-hold.ts";
 import type { LocationHold } from "./location-hold.ts";
 import { runPreview, runPage } from "./page-host.ts";
-import type {
-  DraftRevisions,
-  FailureReason,
-  FrameLocation,
-  PageState,
-} from "./page-host.ts";
+import type { DraftRevisions, FrameLocation, PageState } from "./page-host.ts";
 
 /**
  * What a frame's page asks the person to confirm: a decision's answer,
@@ -64,79 +58,47 @@ const pausedFor = (question: FrameQuestion): Error => {
   return refusal;
 };
 
-const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
-  forbidden: msg`You can't open this App's pages: your role doesn't allow it, or the App has read data you can't read.`,
-  "not-found": msg`This App has no such page.`,
-  "not-running": msg`This App has no version to run yet.`,
-  broken: msg`This page doesn't build. Ask a builder to fix it.`,
-  "timed-out": msg`This page didn't start in time.`,
-  left: msg`This page left its frame and was stopped.`,
-  disconnected: msg`This page lost its connection to Grasp and was stopped.`,
-  unreviewed: msg`Grasp couldn't confirm this page's code for you. Reload to try again.`,
-  revoked: msg`This version of the App was revoked, and the page was stopped. An admin can make another version current.`,
-  "principal-changed": msg`Someone else signed in on this browser, so this page was stopped. Try again to open it as the person signed in now.`,
-  corrupt: msg`This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin.`,
-  "not-sealed": msg`This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again.`,
-  "version-revoked": msg`This version of the App was revoked and no longer runs. An admin can make another version current.`,
-  unsupported: msg`This browser is too old for App pages. Update it, or open this page in a current Chrome, Edge, Firefox or Safari.`,
-  unknown: msg`The page couldn't be loaded.`,
-};
-
-interface StatusProps {
-  state: PageState;
-  onReload: () => void;
-}
-
-/** What the page says about the page, and how to load it again. */
-const PageStatus = ({ state, onReload }: StatusProps) => {
-  const { t, i18n } = useLingui();
-  if (state.status === "loading" || state.status === "running") {
-    return null;
-  }
+/**
+ * What the frame's bar says of a page that runs: that
+ * its preview is fixing a problem, or that a new version waits for its
+ * unsaved edits.
+ */
+const RunningStatus = ({ state }: { state: PageState }) => {
   if (state.status === "fixing") {
     // Calm, and never what went wrong: the agent hears that.
     return (
-      <div className="flex items-center gap-2 border-b p-3 print:hidden">
+      <output className="text-muted-foreground flex items-center gap-2 text-xs">
         <Spinner />
-        <output className="text-sm">{t`Fixing a problem…`}</output>
-      </div>
+        <Trans>Fixing a problem…</Trans>
+      </output>
     );
   }
-  let message = i18n._(failureMessages.unknown);
   if (state.status === "updated") {
     // Only a page holding unsaved edits shows this: one with nothing
     // to lose switches at once.
-    message = t`A new version of this App is ready. It opens once your changes are saved.`;
-  } else if (state.status === "signed-out") {
-    message = t`Your session has ended. Sign in again to go on.`;
-  } else if (state.status === "failed") {
-    message = i18n._(failureMessages[state.reason]);
+    return (
+      <output className="text-muted-foreground text-xs">
+        <Trans>
+          A new version is ready: it opens once your changes are saved.
+        </Trans>
+      </output>
+    );
   }
-  return (
-    <div className="flex items-center justify-between gap-4 border-b p-3 print:hidden">
-      <output className="text-sm">{message}</output>
-      {state.status === "signed-out" ? null : (
-        <Button onClick={onReload} size="sm" variant="outline">
-          {state.status === "updated" ? t`Switch now` : t`Try again`}
-        </Button>
-      )}
-    </div>
-  );
+  return null;
 };
 
 /**
- * What a frame runs: the pages of App `app`, or, with `chatId`, a
- * preview of that chat's draft of `app`. Plain values, so the frame starts
- * again only when one of them changes, never because the page drew itself
- * again.
+ * What a frame runs: the pages of App `app`, or, with `preview`, a
+ * preview of the App's draft. Plain values, so the frame starts again only
+ * when one of them changes, never because the page drew itself again.
  */
 interface FrameSource {
   app: string;
-  chatId?: string;
-  /** With `chatId`: the version of the chat's draft to preview, read-only. */
+  preview?: true;
+  /** With `preview`: the draft's undo point to preview, read-only. */
+  point?: number;
+  /** With `preview`: the App's version to preview, read-only. */
   version?: number;
-  /** Running beside the page (the shell's panel), outliving its navigations. */
-  beside?: boolean;
 }
 
 /**
@@ -146,7 +108,7 @@ interface FrameSource {
 const start = (
   frame: HTMLIFrameElement,
   core: CoreConnection,
-  { app, chatId, version }: FrameSource,
+  { app, preview, point, version }: FrameSource,
   onState: (state: PageState) => void,
   onOpened: (appName: string) => void,
   confirm: (review: PendingConfirmation) => Promise<boolean>,
@@ -155,14 +117,18 @@ const start = (
   leaveGuard: (guarded: boolean) => void,
   revisions: DraftRevisions
 ): (() => void) =>
-  chatId === undefined
+  preview === undefined
     ? runPage(frame, core, app, onState, onOpened, confirm, confirmLink, {
         location,
         leaveGuard,
       })
     : runPreview(
         frame,
-        { chatId, app, ...(version === undefined ? {} : { version }) },
+        {
+          app,
+          ...(point === undefined ? {} : { point }),
+          ...(version === undefined ? {} : { version }),
+        },
         location,
         onState,
         onOpened,
@@ -217,17 +183,13 @@ const startAsking = (
 
 interface FrameProps extends FrameSource {
   /**
-   * With `chatId`: the newest revision of the chat's draft, which the
+   * With `preview`: the newest revision of the App's draft, which the
    * preview open in the frame takes as it changes, without starting
    * again (page-host.ts `runPreview`).
    */
   revision?: number;
-  /**
-   * With `chatId`: told the App's version the preview shows each time it
-   * shows another, or undefined while it shows the draft's own changes
-   * (`PreviewRefresh.appVersion`).
-   */
-  onShows?: (appVersion: number | undefined) => void;
+  /** With `preview`: told its test data doesn't fit the draft's data model. */
+  onTestDataStale?: () => void;
   title: string;
   onState: (state: PageState) => void;
   onOpened: (appName: string) => void;
@@ -237,6 +199,8 @@ interface FrameProps extends FrameSource {
   location: { readonly current: LocationHold };
   /** Whether the pages hold unsaved edits now. */
   onGuard: (guarded: boolean) => void;
+  /** Out of sight: its page failed, and what failed shows in its place. */
+  hidden: boolean;
 }
 
 /**
@@ -245,16 +209,18 @@ interface FrameProps extends FrameSource {
  */
 const Frame = ({
   app,
-  chatId,
+  preview,
+  point,
   version,
   revision,
-  onShows,
+  onTestDataStale,
   title,
   onState,
   onOpened,
   onAsk,
   location,
   onGuard,
+  hidden,
 }: FrameProps) => {
   const core = useCore();
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
@@ -263,7 +229,7 @@ const Frame = ({
   const revisions = useRef<DraftRevisions>({
     latest: revision,
     listener: undefined,
-    onShows,
+    onTestDataStale,
   });
   useEffect(() => {
     if (revision !== undefined) {
@@ -272,8 +238,8 @@ const Frame = ({
     }
   }, [revision]);
   useEffect(() => {
-    revisions.current.onShows = onShows;
-  }, [onShows]);
+    revisions.current.onTestDataStale = onTestDataStale;
+  }, [onTestDataStale]);
   useEffect(
     () =>
       frame
@@ -282,7 +248,8 @@ const Frame = ({
             core,
             {
               app,
-              ...(chatId === undefined ? {} : { chatId }),
+              ...(preview === undefined ? {} : { preview }),
+              ...(point === undefined ? {} : { point }),
               ...(version === undefined ? {} : { version }),
             },
             onState,
@@ -297,7 +264,8 @@ const Frame = ({
       frame,
       core,
       app,
-      chatId,
+      preview,
+      point,
       version,
       onState,
       onOpened,
@@ -308,7 +276,7 @@ const Frame = ({
   );
   return (
     <iframe
-      className="w-full flex-1 border-0"
+      className={hidden ? "hidden" : "w-full flex-1 border-0"}
       ref={setFrame}
       referrerPolicy="no-referrer"
       sandbox="allow-scripts"
@@ -318,7 +286,7 @@ const Frame = ({
 };
 
 /**
- * Asks once, when another version of the App was made current while its
+ * Asks once, when another version of the App went live while its
  * page holds unsaved edits or a change it hasn't heard back about,
  * whether to save first, the page switching once nothing is left
  * unsaved, or to switch now (spec 11.5, 10.7.7): in Grasp's own dialog,
@@ -373,34 +341,92 @@ const UpdateConfirmDialog = ({
 type Update = "none" | "asking" | "saving";
 
 /**
- * What `source` names, running in a sandboxed frame, inside the page's
- * own chrome: `label` and the App's name, which say an App drew what's
- * below. A page can draw anything in its frame, a fake sign-in prompt
- * too; the chrome is how a person tells the App's part from Grasp's. It
- * doesn't print: printed, the page is the page alone, filling the
- * paper, and the page's own print styles decide what's on it.
+ * The bar over a frame: the page's own chrome, `label` and the App's
+ * name, which say an App drew what's below (`chrome`); or none, in the
+ * App's workspace, whose own bar names the App already (`bare`): there
+ * only what the page is doing shows, while it does (`RunningStatus`).
+ */
+export type FrameBar = { kind: "chrome"; label: string } | { kind: "bare" };
+
+/** Whether `RunningStatus` has anything to say of `state`. */
+const saysSomething = (state: PageState): boolean =>
+  state.status === "fixing" || state.status === "updated";
+
+/** Fix with Grasp for the frame `ended` at `path`, when it is offered. */
+const fixOf = (
+  onFix: FrameFix | undefined,
+  ended: Extract<PageState, { status: "failed" | "signed-out" }>,
+  path: string
+): (() => void) | undefined =>
+  onFix === undefined
+    ? undefined
+    : () => {
+        onFix(ended, path);
+      };
+
+/** The bar over a frame (`FrameBar`), with what it says of its page. */
+const FrameTop = ({
+  bar,
+  embedded,
+  appName,
+  state,
+}: {
+  bar: FrameBar;
+  embedded: boolean;
+  appName: string;
+  state: PageState;
+}) => {
+  const Title = embedded ? "h2" : "h1";
+  if (bar.kind === "bare") {
+    return saysSomething(state) ? (
+      <div className="flex flex-none items-center border-b px-3 py-1 print:hidden">
+        <RunningStatus state={state} />
+      </div>
+    ) : null;
+  }
+  return (
+    <header className="flex items-center gap-2 border-b p-3 print:hidden">
+      <Badge variant="secondary">{bar.label}</Badge>
+      <Title className="text-sm font-medium">{appName}</Title>
+      <span className="flex flex-1 justify-end">
+        <RunningStatus state={state} />
+      </span>
+    </header>
+  );
+};
+
+/**
+ * What `source` names, running in a sandboxed frame, under its `bar`.
+ * A page can draw anything in its frame, a fake sign-in prompt too; the
+ * chrome is how a person tells the App's part from Grasp's. It doesn't
+ * print: printed, the page is the page alone, filling the paper, and the
+ * page's own print styles decide what's on it. Once the page failed, or
+ * its person signed out, what happened shows where the page was
+ * (`FrameFailure`), with Fix with Grasp (`onFix`, given the path the
+ * page was at) where the preview's draft broke it.
  */
 const FramedPage = ({
   source,
   revision,
-  onShows,
+  onTestDataStale,
   title,
-  label,
+  bar,
   embedded,
   at,
   onMoved,
   ownPath,
   onReload,
   onEnded,
-  onGuardChange,
+  onRunning,
+  onFix,
 }: {
   source: FrameSource;
-  /** A chat's preview's: the draft's newest revision (`FrameProps`). */
+  /** The App's preview's: the draft's newest revision (`FrameProps`). */
   revision?: number;
-  /** A chat's preview's: told the App's version it shows (`FrameProps`). */
-  onShows?: (appVersion: number | undefined) => void;
+  /** The App's preview's: told its test data doesn't fit (`FrameProps`). */
+  onTestDataStale?: () => void;
   title: string;
-  label: string;
+  bar: FrameBar;
   embedded: boolean;
   /**
    * Where the page's address says the App is: `/` for its first route,
@@ -417,9 +443,10 @@ const FramedPage = ({
   ownPath?: (pathname: string) => boolean;
   onReload?: () => void;
   onEnded?: PageEnded;
-  onGuardChange?: (guarded: boolean) => void;
+  /** Told each time the page started and runs. */
+  onRunning?: () => void;
+  onFix?: FrameFix;
 }) => {
-  const Title = embedded ? "h2" : "h1";
   const [state, setState] = useState<PageState>({ status: "loading" });
   // Told once the page failed or its person signed out: the frame is
   // emptied then, and whatever holds it may let it go.
@@ -427,9 +454,16 @@ const FramedPage = ({
   useEffect(() => {
     endedTo.current = onEnded;
   }, [onEnded]);
+  const runningTo = useRef(onRunning);
+  useEffect(() => {
+    runningTo.current = onRunning;
+  }, [onRunning]);
   useEffect(() => {
     if (state.status === "failed" || state.status === "signed-out") {
       endedTo.current?.(state);
+    }
+    if (state.status === "running") {
+      runningTo.current?.();
     }
   }, [state]);
   const [appName, setAppName] = useState("");
@@ -448,20 +482,9 @@ const FramedPage = ({
   // A failed or signed-out page is emptied: nothing of it is left to lose.
   const holdsEdits =
     guarded && (state.status === "running" || state.status === "updated");
-  // Beside the page (the shell's panel), the page's own navigations leave
-  // the page where it is, so only closing the tab is confirmed here; its
-  // own closing is the panel's to confirm (`onGuardChange`).
-  const beside = source.beside === true;
-  const guardTo = useRef(onGuardChange);
-  useEffect(() => {
-    guardTo.current = onGuardChange;
-  }, [onGuardChange]);
-  useEffect(() => {
-    guardTo.current?.(holdsEdits);
-  }, [holdsEdits]);
   const leaving = useBlocker({
     shouldBlockFn: ({ next }) =>
-      holdsEdits && !beside && ownPath?.(next.pathname) !== true,
+      holdsEdits && ownPath?.(next.pathname) !== true,
     enableBeforeUnload: () => holdsEdits,
     withResolver: true,
   });
@@ -469,8 +492,13 @@ const FramedPage = ({
   // drawing the page again restarts nothing, and a fresh start opens
   // where the last one was.
   const location = useRef<LocationHold>(locationHold(at ?? "/"));
+  // Where the App's router is, as the bar shows it.
+  const [path, setPath] = useState(at ?? "/");
   useEffect(() => {
-    location.current.moved = onMoved;
+    location.current.moved = (href, push) => {
+      setPath(href);
+      onMoved?.(href, push);
+    };
   }, [onMoved]);
   // The page's address moved on its own (Back, Forward, a link of the
   // page's): the frame's router follows, never its own move coming back
@@ -478,6 +506,7 @@ const FramedPage = ({
   useEffect(() => {
     if (at !== undefined) {
       pageAt(location.current, at);
+      setPath(location.current.href);
     }
   }, [at]);
 
@@ -499,7 +528,7 @@ const FramedPage = ({
     setAttempt((last) => last + 1);
     reloadTo.current?.();
   };
-  // A chat's preview that failed to start (its first build didn't build,
+  // The App's preview that failed to start (its first build didn't build,
   // its page wasn't there, it didn't start in time) takes no updates:
   // only a running frame follows the draft's revisions. So a newer
   // revision than the one it failed at starts it afresh, as a draft that
@@ -521,7 +550,7 @@ const FramedPage = ({
       reloadTo.current?.();
     }
   }, [state, revision]);
-  // Another version made current: a page with nothing unsaved switches
+  // Another version went live: a page with nothing unsaved switches
   // at once; one holding edits asks once first (spec 11.5).
   const changeState = (next: PageState) => {
     if (next.status === "updated" && !guardedNow.current) {
@@ -546,13 +575,23 @@ const FramedPage = ({
       reload();
     }
   };
+  const ended =
+    state.status === "failed" || state.status === "signed-out"
+      ? state
+      : undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-2 border-b p-3 print:hidden">
-        <Badge variant="secondary">{label}</Badge>
-        <Title className="text-sm font-medium">{appName}</Title>
-      </header>
-      <PageStatus onReload={reload} state={state} />
+      <FrameTop appName={appName} bar={bar} embedded={embedded} state={state} />
+      {ended === undefined ? null : (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
+          <FrameFailure
+            onFix={fixOf(onFix, ended, path)}
+            onRetry={reload}
+            preview={source.preview === true}
+            state={ended}
+          />
+        </div>
+      )}
       <DecisionConfirmDialog
         onCancel={(review) => {
           if (question?.kind === "decision" && question.review === review) {
@@ -598,6 +637,7 @@ const FramedPage = ({
       />
       <Frame
         app={source.app}
+        hidden={ended !== undefined}
         location={location}
         onAsk={setAsked}
         onGuard={changeGuard}
@@ -605,10 +645,11 @@ const FramedPage = ({
         onOpened={setAppName}
         onState={changeState}
         title={title}
-        {...(source.chatId === undefined ? {} : { chatId: source.chatId })}
+        {...(source.preview === undefined ? {} : { preview: source.preview })}
+        {...(source.point === undefined ? {} : { point: source.point })}
         {...(source.version === undefined ? {} : { version: source.version })}
         {...(revision === undefined ? {} : { revision })}
-        {...(onShows === undefined ? {} : { onShows })}
+        {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
       />
     </div>
   );
@@ -622,24 +663,31 @@ interface PageFrameProps {
   onMoved?: (href: string, push: boolean) => void;
   /** Whether the page going to `pathname` stays on the App's own page. */
   ownPath?: (pathname: string) => boolean;
-  /** Beside the page (the shell's panel): its navigations outlive the page's. */
-  beside?: boolean;
   /**
    * Inside a page with a heading of its own (the App's page): the App's
    * name is a second-level heading, not the page's.
    */
   embedded?: boolean;
+  /**
+   * No bar over it (`FrameBar`), rather than the page's own chrome: the
+   * App's live page in its workspace, whose own bar names it.
+   */
+  bare?: boolean;
   /** Also called when the person loads the App's pages again. */
   onReload?: () => void;
   /** Called once the pages failed or their person signed out. */
   onEnded?: PageEnded;
-  /** Told whether the pages hold edits leaving would lose, as that changes. */
-  onGuardChange?: (guarded: boolean) => void;
 }
 
 /** How a frame ended: it failed, and why, or its person signed out. */
 export type PageEnded = (
   ended: Extract<PageState, { status: "failed" | "signed-out" }>
+) => void;
+
+/** Asks Grasp to fix what failed in a preview, at the path it was at. */
+export type FrameFix = (
+  ended: Extract<PageState, { status: "failed" | "signed-out" }>,
+  path: string
 ) => void;
 
 /** An App's pages, running in a sandboxed frame (`FramedPage`). */
@@ -648,68 +696,94 @@ export const PageFrame = ({
   at,
   onMoved,
   ownPath,
-  beside = false,
   embedded = false,
+  bare = false,
   onReload,
   onEnded,
-  onGuardChange,
 }: PageFrameProps) => {
   const { t } = useLingui();
   return (
     <FramedPage
+      bar={bare ? { kind: "bare" } : { kind: "chrome", label: t`App page` }}
       embedded={embedded}
-      label={t`App page`}
-      source={{ app, ...(beside ? { beside } : {}) }}
+      source={{ app }}
       title={t`App`}
       {...(at === undefined ? {} : { at })}
       {...(onMoved === undefined ? {} : { onMoved })}
       {...(ownPath === undefined ? {} : { ownPath })}
       {...(onReload === undefined ? {} : { onReload })}
       {...(onEnded === undefined ? {} : { onEnded })}
-      {...(onGuardChange === undefined ? {} : { onGuardChange })}
     />
   );
 };
 
 /**
- * The pages of the chat's draft of `app`, running in a sandboxed frame
- * as a preview: its server code changes nothing and reads no real data,
- * and what goes wrong goes to the agent. With `version`, of that earlier
- * version of the draft, read-only. `onEnded` is told once it failed,
- * `onShows` which version of the App it shows (`FrameProps`). Without
- * `version`, `revision`, the draft's newest, comes into the open frame as
- * it changes: each write shows without starting it again, at the route
- * it shows.
+ * The pages of the draft of `app`, running in a sandboxed frame as a
+ * preview: its server code changes nothing and reads no real data, and
+ * what goes wrong goes to the agent. With `point`, of that undo point of
+ * the draft, or with `version`, of that version of the App, read-only.
+ * `onEnded` is told once it failed (`FrameProps`). Without either, `revision`, the draft's
+ * newest, comes into the open frame as it changes: each write shows
+ * without starting it again, at the route it shows. In the workspace,
+ * with no bar of its own (`bare`); on the draft's full page
+ * (apps.$app.draft.tsx), at `at` with the page's address following it
+ * (`onMoved`, `ownPath`), under the page's own chrome.
  */
 export const PreviewFrame = ({
-  chatId,
   app,
+  point,
   version,
   revision,
+  at,
+  onMoved,
+  ownPath,
+  bare = true,
   onEnded,
-  onShows,
+  onRunning,
+  onTestDataStale,
+  onFix,
 }: {
-  chatId: string;
   app: string;
-  version?: number;
+  point?: number | undefined;
+  version?: number | undefined;
   revision?: number;
+  at?: string | undefined;
+  onMoved?: (href: string, push: boolean) => void;
+  ownPath?: (pathname: string) => boolean;
+  bare?: boolean;
   onEnded?: PageEnded;
-  onShows?: (appVersion: number | undefined) => void;
+  onRunning?: () => void;
+  onTestDataStale?: () => void;
+  onFix?: FrameFix;
 }) => {
   const { t } = useLingui();
+  const latest = point === undefined && version === undefined;
   return (
     <FramedPage
-      embedded
-      label={
-        version === undefined
-          ? t`Preview: changes nothing, reads no real data`
-          : t`Version ${version}: read-only preview`
+      bar={
+        bare
+          ? { kind: "bare" }
+          : {
+              kind: "chrome",
+              label: t`Preview: changes nothing, reads no real data`,
+            }
       }
-      source={{ chatId, app, ...(version === undefined ? {} : { version }) }}
-      title={t`Preview of the draft`}
-      {...(version === undefined && revision !== undefined ? { revision } : {})}
+      embedded
+      source={{
+        app,
+        preview: true,
+        ...(point === undefined ? {} : { point }),
+        ...(version === undefined ? {} : { version }),
+      }}
+      title={t`Your version of the App`}
+      {...(latest && revision !== undefined ? { revision } : {})}
+      {...(at === undefined ? {} : { at })}
+      {...(onMoved === undefined ? {} : { onMoved })}
+      {...(ownPath === undefined ? {} : { ownPath })}
       {...(onEnded === undefined ? {} : { onEnded })}
-      {...(onShows === undefined ? {} : { onShows })}
+      {...(onRunning === undefined ? {} : { onRunning })}
+      {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
+      {...(latest && onFix !== undefined ? { onFix } : {})}
     />
   );
 };

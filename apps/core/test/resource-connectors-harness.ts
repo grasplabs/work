@@ -259,7 +259,7 @@ export const mailerApp = async (
     options.files ?? mailFiles(options.contract),
     "First"
   );
-  await builder.api.apps.versions.setCurrent(created.id, 1);
+  await builder.api.apps.versions.publish(created.id, 1);
   const connectionId = await connectShared(admin);
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },
@@ -657,7 +657,7 @@ export const contactsApp = async (
   const builder = await signedInApi(idp, "builder");
   const created = await builder.api.apps.create({ name: "Contacts" });
   await commitApp(builder.api.apps.files, created.id, crmFiles(), "First");
-  await builder.api.apps.versions.setCurrent(created.id, 1);
+  await builder.api.apps.versions.publish(created.id, 1);
   const crm = await crmConnection();
   await options.before?.(crm);
   const requested = await builder.api.permissions.request({

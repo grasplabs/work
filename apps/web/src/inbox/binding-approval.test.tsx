@@ -100,7 +100,6 @@ const shown = async () => {
       data: { page: { notifications: [], unread: 0, more: false } },
     },
     reconnect: { state: "ready", data: [] },
-    versions: { state: "ready", data: [] },
     requests: undefined,
     decisions: { state: "ready", data: [] },
     workflowGoLives: { state: "ready", data: [] },
@@ -212,7 +211,7 @@ describe("a workflow's bindings in the inbox", () => {
     }).toStrictEqual({
       approve: [undefined, undefined],
       grant: true,
-      leads: ["/workflows/workflow-quotes?tab=files"],
+      leads: ["/workflows/workflow-quotes?view=settings&section=files"],
     });
   });
 });

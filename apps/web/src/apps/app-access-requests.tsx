@@ -586,7 +586,7 @@ export const AppAccessRequests = ({
   return (
     <RequestsView
       app={app.id}
-      asks={app.status !== "archived"}
+      asks={!app.archived}
       onAsked={() => {
         setAsked((count) => count + 1);
       }}

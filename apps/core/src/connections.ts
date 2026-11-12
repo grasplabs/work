@@ -1,4 +1,10 @@
-import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
+import type {
+  Agent,
+  AgentDocument,
+  AgentSettings,
+  AgentUsage,
+  AgentWake,
+} from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   catalogLogoPath,
@@ -47,12 +53,19 @@ import { z } from "zod";
 import {
   changeAgent,
   listAgents,
+  deleteAgent,
   makeAgent,
   readAgentSettings,
   setAgentPaused,
   setAgentReach,
   setAgentToolClass,
 } from "./agent-builder.ts";
+import {
+  addAgentDocument,
+  listAgentDocuments,
+  removeAgentDocument,
+} from "./agent-documents.ts";
+import { agentsUsage } from "./agent-usage.ts";
 import {
   deleteAgentWake,
   listAgentWakes,
@@ -76,6 +89,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { errorResponse } from "./errors.ts";
+import { spendMonth } from "./model-spend.ts";
 import { startOAuthConnection } from "./oauth-relay.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -742,6 +756,13 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
+  async agentsUsage(): Promise<AgentUsage[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await agentsUsage(this.#env, spendMonth(this.#env));
+    });
+  }
+
   async makeAgent(input: unknown): Promise<Agent> {
     return await withPerson(
       this.#check,
@@ -758,6 +779,39 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async setAgentPaused(agentId: unknown, paused: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setAgentPaused(this.#env, identity, agentId, paused);
+    });
+  }
+
+  async deleteAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await deleteAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async agentDocuments(agentId: unknown): Promise<AgentDocument[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentDocuments(this.#env, identity, agentId)
+    );
+  }
+
+  async addAgentDocument(
+    agentId: unknown,
+    file: unknown
+  ): Promise<AgentDocument> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await addAgentDocument(this.#env, identity, agentId, file)
+    );
+  }
+
+  async removeAgentDocument(
+    agentId: unknown,
+    documentId: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await removeAgentDocument(this.#env, identity, agentId, documentId);
     });
   }
 

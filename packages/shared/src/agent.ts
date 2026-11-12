@@ -1,3 +1,4 @@
+import { agentDocumentsMax } from "./agents.ts";
 import {
   chatFileMaxBytes,
   chatFilesMax,
@@ -16,12 +17,26 @@ export const agentErrors = defineErrorFamily({
   "agent.record_invalid": "That isn't an agent's name, job or instructions.",
   "agent.unknown": "The company has no such agent.",
   "agent.name_taken": "Another agent already has that name.",
+  "agent.first_stays":
+    "The company's first agent can't be deleted. Pause it to stop it answering.",
+  "agent.model_unknown":
+    "That isn't a model your organization has chosen. Pick one in Settings › Models.",
+  // An agent's documents (core's agent-documents.ts).
+  "agent.too_many_documents": `An agent keeps at most ${agentDocumentsMax} documents. Remove one to add another.`,
+  "agent.document_unsupported":
+    "A document is a PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV or JSON file, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json.",
+  "agent.document_too_large": `A document is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB.`,
+  "agent.document_busy":
+    "The document's text couldn't be read just now. Add it again in a moment.",
+  "agent.document_unknown": "The agent has no such document.",
+  "agent.document_named":
+    "The agent already has another document with that name. Remove it first, or rename the file.",
   // An agent's wake-ups (core's agent-wakes.ts).
   "agent.wake_invalid":
     "That isn't a wake-up: it needs a schedule that names a time to come, a person of the company, and what to ask.",
   "agent.wake_unknown": "The agent has no such wake-up.",
   "agent.settings_elsewhere":
-    "Who reaches the company's first agent, and what it may do, is set in Settings › Stephen.",
+    "Who reaches the company's first agent, and what it may do, is set on its own page, under Access.",
   "agent.unattended":
     "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
   "agent.busy":
@@ -45,6 +60,10 @@ export const agentErrors = defineErrorFamily({
   "agent.too_many_files": `A question carries at most ${chatFilesPerQuestionMax} files, and a chat keeps at most ${chatFilesMax}. Start a new chat to attach more.`,
   "agent.file_busy":
     "The file's text couldn't be read just now. Attach it again in a moment.",
+  "agent.plan_not_found":
+    "There's no such plan in this chat, or it was built already.",
+  "agent.plan_needs_connection":
+    "This plan needs a connection that isn't there yet. Connect it, then build it.",
   "agent.file_not_found":
     "There's no such file in this chat, or another question carried it already. Attach it again.",
   "agent.run_revoked":

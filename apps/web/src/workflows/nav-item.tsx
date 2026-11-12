@@ -7,7 +7,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@grasp-os/ui/components/sidebar";
-import { Plural, Trans } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
 
@@ -50,6 +50,7 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
  * the person is in Workflows.
  */
 export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
+  const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const { value: waiting } = useFrameRead(readCount);
   const shown = waiting !== undefined && waiting > 0;
@@ -63,6 +64,7 @@ export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
       <SidebarMenuButton
         isActive={inWorkflows && !onRequests}
         render={<Link to="/workflows" />}
+        tooltip={t`Workflows`}
       >
         <WorkflowIcon />
         <span>

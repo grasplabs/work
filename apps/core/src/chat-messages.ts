@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import {
   chatAskSchema,
+  chatPlanSchema,
   chatCitationsMax,
   chatToolPreviewChars,
   citedQuoteMax,
@@ -16,6 +17,7 @@ import type {
   ChatCode,
   ChatMessage,
   ChatPartial,
+  ChatPlanned,
   ChatReasoning,
   ChatReplyEnd,
   ChatReplyUsage,
@@ -23,6 +25,7 @@ import type {
 } from "@grasp-os/shared/chat";
 import { thinkingStepSchema } from "@grasp-os/shared/thinking";
 import type { ThinkingStep } from "@grasp-os/shared/thinking";
+import { z } from "zod";
 
 import { isDedicatedTool, showThinkingName } from "./agent-messages.ts";
 import { contextWindowOf, modelFailureOf } from "./models.ts";
@@ -31,6 +34,14 @@ import { contextWindowOf, modelFailureOf } from "./models.ts";
 // reads it: their questions, the agent's answers with the code it ran and
 // what the model thought before them, and each code step's result. The
 // agent's instructions, and the APIs and the memory it was shown, stay out.
+
+/** What a Build it shows: the plan it built, by its call, and what that made. */
+export const shownBuiltSchema = z.object({
+  plan: z.string(),
+  app: z.object({ id: z.string(), name: z.string() }).optional(),
+  workflow: z.object({ id: z.string(), name: z.string() }).optional(),
+});
+export type ShownBuilt = z.infer<typeof shownBuiltSchema>;
 
 /**
  * The step of thinking a `show_thinking` call showed, as core accepted it
@@ -126,6 +137,22 @@ const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
       const ask = chatAskSchema.safeParse(part.arguments);
       if (ask.success) {
         return { callId: part.id, ...ask.data };
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The plan a response proposed (`proposePlan`), as the tool took it: its
+ * first call the tool took; none when it proposed none.
+ */
+const plannedOf = (message: AssistantMessage): ChatPlanned | undefined => {
+  for (const part of message.content) {
+    if (part.type === "toolCall" && part.name === "proposePlan") {
+      const plan = chatPlanSchema.safeParse(part.arguments);
+      if (plan.success) {
+        return { callId: part.id, ...plan.data };
       }
     }
   }
@@ -497,9 +524,11 @@ export const noteLinksOf = (
  * An answer cites the notes `given` holds (`citedIn`): the documents its
  * chat's code was given before it; it thought for `thinkingMs`, as core
  * kept it. It asks the person questions only in a chat whose agent is
- * offered `askQuestions` (`asking`, Grasp's own app): one a chat app's
+ * offered `askQuestions` (`asking`, Grasp's own app), and proposes a
+ * plan (`proposePlan`) only there too: one a chat app's
  * model calls anyway was never offered, so it shows as the failed call it
- * is, never as questions.
+ * is, never as questions. The person's Build it shows what it built
+ * (`built`).
  */
 export const chatMessageOf = (
   id: number,
@@ -507,17 +536,25 @@ export const chatMessageOf = (
   createdAt: Date,
   given: (documentId: string) => boolean = givenNothing,
   thinkingMs: number | null = null,
-  asking = false
+  asking = false,
+  built?: ShownBuilt
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
-    return { id, role: "user", text: textOf(message.content), at };
+    return {
+      id,
+      role: "user",
+      text: textOf(message.content),
+      ...(built === undefined ? {} : { built }),
+      at,
+    };
   }
   if (message.role === "assistant") {
     const usage = usageOf(message);
     const { text, citations } = citedIn(textOf(message.content), given);
     const reasoning = reasoningOf(message, thinkingMs);
     const asked = asking ? askedOf(message) : undefined;
+    const planned = asking ? plannedOf(message) : undefined;
     return {
       id,
       role: "assistant",
@@ -527,6 +564,7 @@ export const chatMessageOf = (
       tools: toolsOf(message),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(asked === undefined ? {} : { asked }),
+      ...(planned === undefined ? {} : { planned }),
       end: ends[message.stopReason],
       ...(message.stopReason === "error"
         ? { failure: modelFailureOf(message.errorMessage) }

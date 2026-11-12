@@ -1,7 +1,4 @@
-import type {
-  WorkflowLifecycle,
-  WorkflowStage,
-} from "@grasp-os/shared/workflow-lifecycle";
+import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import { liveStages } from "@grasp-os/shared/workflow-lifecycle";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
@@ -22,22 +19,21 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon, PauseIcon, PlayIcon, SendIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
-import { formatDate } from "../format.ts";
+import { formatDate, formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";
 
 // Whether an independent workflow runs, and the one place to pause it
-// (prototype `components/workflow-status.tsx`): beside its name, "Live
-// since …" with Pause behind it, or "Paused" with Resume; before it went
-// live, its stage word. Core's lifecycle (`workflowResources.lifecycle`)
+// (prototype `components/workflow-status.tsx`): at the end of its bar,
+// "Runs for <who> since …" with Pause behind it, or "Paused" with
+// Resume; before it went live, "Only you see this", as only its builders
+// try it, with asking to go live behind it. Core's lifecycle (`workflowResources.lifecycle`)
 // decides who may change it: whoever may not sees the word alone.
 //
 // Pausing stops real work, so it asks first and says what it stops: core
@@ -48,19 +44,10 @@ import { useGrace } from "../use-grace.ts";
 //
 // The version waiting to go live is approved or sent back on the page too
 // (`GoLiveDecision`), by whoever core lets decide it (`canDecide`), as in
-// the inbox: the page's one highlighted action.
+// the inbox: then the page's one highlighted action, in place of this.
 
 /** How long a pause can be taken back before core is asked, in seconds. */
 const graceSeconds = 5;
-
-/** The words for a stage before a version went live. */
-const stageWords: Readonly<Record<WorkflowStage, MessageDescriptor>> = {
-  mapped: msg({ message: "Mapped", context: "workflow stage" }),
-  designed: msg({ message: "Designed", context: "workflow stage" }),
-  testing: msg({ message: "Testing", context: "workflow stage" }),
-  live: msg({ message: "Live", context: "workflow stage" }),
-  scaling: msg({ message: "Scaling", context: "workflow stage" }),
-};
 
 /**
  * The published version a builder may ask to go live: the latest, when it
@@ -80,7 +67,7 @@ const goLiveCandidate = (lifecycle: WorkflowLifecycle): number | null => {
 
 /** What the status control says, and what it offers the reader. */
 export interface StatusView {
-  /** Its word: the stage's before it went live, "Live since", or "Paused". */
+  /** Its word: "Only you see this" before it went live, who it runs for, or "Paused". */
   shows: "stage" | "live" | "paused";
   /** When the live version was approved, if one went live. */
   liveSince: string | null;
@@ -178,11 +165,11 @@ const PauseQuestion = ({
 };
 
 /**
- * The dot beside the status word, as the prototype has it: ink for a
- * stage before it went live, agreed while live, attention while paused.
+ * The dot beside the status word: attention before it went live, as only
+ * its builders try it, and while paused; agreed while it runs.
  */
 const dotClass: Readonly<Record<StatusView["shows"], string>> = {
-  stage: "bg-foreground size-1.5 rounded-full",
+  stage: "bg-status-attention size-1.5 rounded-full",
   live: "bg-status-agreed size-1.5 rounded-full",
   paused: "bg-status-attention size-1.5 rounded-full",
 };
@@ -197,6 +184,7 @@ const StatusMenu = ({
   word,
   name,
   busy,
+  highlight,
   onPause,
   onResume,
   onAskToGoLive,
@@ -205,6 +193,8 @@ const StatusMenu = ({
   word: string;
   name: string;
   busy: boolean;
+  /** Whether it is the page's one lime action. */
+  highlight: boolean;
   onPause: () => void;
   onResume: () => void;
   onAskToGoLive: (version: number) => void;
@@ -215,7 +205,7 @@ const StatusMenu = ({
     return (
       <span className="flex items-center gap-2 font-medium">
         <StatusDot shows={view.shows} />
-        {word}
+        <span className="max-w-48 truncate">{word}</span>
       </span>
     );
   }
@@ -227,12 +217,13 @@ const StatusMenu = ({
             aria-label={t`${word}. Change whether ${name} runs`}
             disabled={busy}
             size="sm"
-            variant="ghost"
+            variant={highlight ? "highlight" : "outline"}
           />
         }
       >
         <StatusDot shows={view.shows} />
-        {word}
+        {/* Capped, so who it runs for never takes the name's room. */}
+        <span className="max-w-48 truncate">{word}</span>
         <ChevronDownIcon data-icon="inline-end" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
@@ -256,7 +247,7 @@ const StatusMenu = ({
               }}
             >
               <SendIcon />
-              <Trans>Ask to go live with version {askable}</Trans>
+              <Trans>Ask to run version {askable} for the team</Trans>
             </DropdownMenuItem>
           )}
         </DropdownMenuGroup>
@@ -265,18 +256,28 @@ const StatusMenu = ({
   );
 };
 
+/**
+ * The status control, in the workflow's bar: its word, and the menu of
+ * what the reader may change, the page's one lime action unless another
+ * is (`highlight`).
+ */
 export const WorkflowStatus = ({
   workflow,
   name,
   lifecycle,
+  highlight = true,
+  who,
   onChange,
 }: {
   workflow: string;
   name: string;
   lifecycle: WorkflowLifecycle;
+  highlight?: boolean;
+  /** Whom it is shared with, by name; none where the page doesn't read it. */
+  who?: readonly string[] | undefined;
   onChange: (lifecycle: WorkflowLifecycle) => void;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const [asking, setAsking] = useState(false);
@@ -350,47 +351,38 @@ export const WorkflowStatus = ({
 
   const view = statusOf(lifecycle);
   const since = view.liveSince === null ? "" : formatDate(view.liveSince);
+  const users = formatList(who ?? []);
+  const runsFor =
+    who === undefined || who.length === 0
+      ? t`Runs for your team since ${since}`
+      : t`Runs for ${users} since ${since}`;
   const words: Readonly<Record<StatusView["shows"], string>> = {
-    stage: i18n._(stageWords[lifecycle.stage]),
-    live: t`Live since ${since}`,
+    stage: t`Only you see this`,
+    live: runsFor,
     paused: t({ message: "Paused", context: "a workflow someone paused" }),
   };
-  const { waiting, liveVersion } = view;
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusMenu
-          busy={busy}
-          name={name}
-          onAskToGoLive={(version) => {
-            void change("requestGoLive", {
-              version,
-              revision: lifecycle.revision,
-            });
-          }}
-          onPause={() => {
-            setAsking(true);
-          }}
-          onResume={() => {
-            void change("resume", { revision: lifecycle.revision });
-          }}
-          view={view}
-          word={words[view.shows]}
-        />
-        {/* Which version is live, for everyone: not only in the menu of
-            those who may change it. */}
-        {liveVersion === null || view.liveSince === null ? null : (
-          <span className="text-muted-foreground">
-            {t`Version ${liveVersion} went live on ${since}`}
-          </span>
-        )}
-        {waiting === null ? null : (
-          <span className="text-muted-foreground">
-            <Trans>Version {waiting} waits to go live</Trans>
-          </span>
-        )}
-      </div>
+    <span className="flex items-center gap-2">
       <ErrorText>{failure}</ErrorText>
+      <StatusMenu
+        busy={busy}
+        highlight={highlight}
+        name={name}
+        onAskToGoLive={(version) => {
+          void change("requestGoLive", {
+            version,
+            revision: lifecycle.revision,
+          });
+        }}
+        onPause={() => {
+          setAsking(true);
+        }}
+        onResume={() => {
+          void change("resume", { revision: lifecycle.revision });
+        }}
+        view={view}
+        word={words[view.shows]}
+      />
       <PauseQuestion
         name={name}
         onOpenChange={setAsking}
@@ -400,7 +392,34 @@ export const WorkflowStatus = ({
         }}
         open={asking}
       />
-    </div>
+    </span>
+  );
+};
+
+/**
+ * Which version is live, since when, and which waits to go live, for
+ * everyone: not only in the status menu of those who may change it.
+ */
+export const LiveFacts = ({ lifecycle }: { lifecycle: WorkflowLifecycle }) => {
+  const { t } = useLingui();
+  const { waiting, liveVersion, liveSince } = statusOf(lifecycle);
+  const since = liveSince === null ? "" : formatDate(liveSince);
+  if (liveVersion === null && waiting === null) {
+    return <Trans>It doesn’t run for anyone yet.</Trans>;
+  }
+  return (
+    <span className="flex flex-col gap-1">
+      {liveVersion === null || liveSince === null ? null : (
+        <span>{t`Version ${liveVersion} has run for the team since ${since}`}</span>
+      )}
+      {waiting === null ? null : (
+        <span className="text-muted-foreground">
+          <Trans>
+            Version {waiting} waits for approval to run for the team
+          </Trans>
+        </span>
+      )}
+    </span>
   );
 };
 
@@ -477,7 +496,7 @@ export const GoLiveDecision = ({
   return (
     <div className="flex max-w-sm flex-col items-start gap-2">
       <fieldset
-        aria-label={t`Let version ${version} of ${who} go live`}
+        aria-label={t`Let version ${version} of ${who} run for the team`}
         className="flex flex-wrap gap-2"
       >
         <Button
@@ -490,7 +509,7 @@ export const GoLiveDecision = ({
           {choice.change ? (
             <Trans>Approve the change</Trans>
           ) : (
-            <Trans>Approve and go live</Trans>
+            <Trans>Approve, and it runs for the team</Trans>
           )}
         </Button>
         <Button

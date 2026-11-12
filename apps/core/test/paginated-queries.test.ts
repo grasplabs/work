@@ -101,8 +101,7 @@ const openedApp = async () => {
     files,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
-  await builder.api.apps.publish(id);
+  await builder.api.apps.versions.publish(id, version);
   const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
   return {
@@ -510,8 +509,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       }),
       "Second"
     );
-    await opened.builder.api.apps.versions.setCurrent(opened.app, version);
-    await opened.builder.api.apps.publish(opened.app);
+    await opened.builder.api.apps.versions.publish(opened.app, version);
     // A write reads every page again, under the new version: the list
     // starts again with one first page as long as it was, showing what it
     // showed meanwhile.

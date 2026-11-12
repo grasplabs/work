@@ -292,7 +292,7 @@ describe("binding a workflow its App's current version declares", () => {
     const racing = {
       ...env,
       DB: racingDb(async () => {
-        await builder.api.apps.versions.setCurrent(app, another);
+        await builder.api.apps.versions.publish(app, another);
       }, /insert into "app_workflow_bindings"/iu),
     };
 

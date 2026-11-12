@@ -25,7 +25,7 @@ import { ThumbsDownIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 
 import { setActiveChat } from "../../chat/active-chat.ts";
-import { setDockMode } from "../../chat/dock-mode.ts";
+import { openChat } from "../../chat/chat-layout.ts";
 import { readChoice, resolveChoice } from "../../chat/model-choice.ts";
 import type { Session } from "../../core.ts";
 import { ErrorText } from "../../error-text.tsx";
@@ -198,7 +198,7 @@ export const useAskGrasp = () => {
       return false;
     }
     setActiveChat(chatId);
-    setDockMode("frame");
+    openChat();
     return true;
   };
   return {

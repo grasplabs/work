@@ -2,7 +2,11 @@
  * Workspace Durable Object SQLite: chats, agent state, and its person's
  * dashboard and email preferences. Migrates itself on first wake-up after a release.
  */
-import type { ChatChannel, ChatFileType } from "@grasp-os/shared/chat";
+import type {
+  ChatChannel,
+  ChatFileType,
+  ChatPlanKind,
+} from "@grasp-os/shared/chat";
 import type { DashboardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
 import type { CustomWidgetId } from "@grasp-os/shared/widgets";
@@ -68,6 +72,17 @@ export const chats = sqliteTable(
      * every call, as for any chat.
      */
     appId: text("app_id"),
+    /**
+     * What "Make something" started the chat to make (`ChatMake`): an App
+     * or a workflow; null for any other chat. Kept for good, so a reload
+     * offers what it came for.
+     */
+    makeKind: text("make_kind").$type<ChatPlanKind>(),
+    /**
+     * The project Build it makes things in, shared with everyone in it,
+     * for a chat "Make something" started in one; null otherwise.
+     */
+    makeProject: text("make_project"),
   },
   // A person's list, most recently active first.
   (table) => [
@@ -97,6 +112,12 @@ export const chatMessages = sqliteTable(
      * kept before it was timed.
      */
     thinkingMs: integer("thinking_ms"),
+    /**
+     * For the person's Build it (`ChatsApi.build`): the plan it built and
+     * what that made, as JSON (`ChatMessage.built`); null for any other
+     * message.
+     */
+    built: text(),
   },
   (table) => [index("chat_messages_chat").on(table.chatId, table.id)]
 );
@@ -200,6 +221,11 @@ export const chatRunSources = sqliteTable(
     primaryKey({ columns: [table.chatId, table.runId, table.sourceId] }),
   ]
 );
+
+// Unused since the App's one shared draft (app-drafts.ts) replaced each
+// chat's drafts and their previews: nothing reads or writes these, and a
+// chat's rows go with it. Kept so a roll back to the release before still
+// has them; dropped in a later release (expand, then contract).
 
 /**
  * A chat's drafts: one per App its agent writes to, over the version it
@@ -445,7 +471,7 @@ export const chatCodeRuns = sqliteTable(
     /**
      * Always written; null on a run an earlier release opened, kept so a
      * rollback's code still writes here. Its draft writes never amend a
-     * turn's version (draft-versions.ts).
+     * turn's undo point (app-drafts.ts).
      */
     turnId: text("turn_id"),
     sourceHash: text("source_hash").notNull(),
@@ -638,6 +664,11 @@ export const customWidgets = sqliteTable(
   (table) => [primaryKey({ columns: [table.personId, table.id] })]
 );
 
+// Unused since each App's one preview (app-preview.ts) replaced each
+// chat's: nothing reads or writes these. Kept so a roll back to the
+// release before still has them; dropped in a later release (expand, then
+// contract).
+
 /**
  * Unused since a draft's preview seals the draft where it runs it
  * (draft-runs.ts): kept while a release that writes it may serve or be
@@ -671,10 +702,10 @@ export const previewReleaseArtifacts = sqliteTable(
 );
 
 /**
- * The throwaway stores a chat's previews of its drafts of an App run on
- * (draft-runs.ts), first at the draft's `revision`: kept so deleting the
- * chat, or erasing or removing its person, empties them at once rather
- * than a day after their last use, when each empties itself anyway.
+ * The throwaway stores a chat's previews of its drafts of an App ran on.
+ * Unused since each App's one preview keeps its own (app-preview.ts):
+ * nothing reads or writes it. Kept so a roll back to the release before
+ * still has it; dropped in a later release (expand, then contract).
  */
 export const previewStores = sqliteTable("preview_stores", {
   storeId: text("store_id").primaryKey(),

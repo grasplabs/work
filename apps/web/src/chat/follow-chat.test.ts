@@ -21,7 +21,7 @@ const update = (changes: Partial<ChatUpdate> = {}): ChatUpdate => ({
   running: false,
   stopped: null,
   held: 0,
-  drafts: 0,
+  worked: 0,
   ...changes,
 });
 

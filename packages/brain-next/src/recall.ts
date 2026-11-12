@@ -9,6 +9,7 @@ import type { Exact } from "./exact.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Found } from "./pack.ts";
 import { readableSql } from "./reader-sets.ts";
+import type { WayRunner } from "./recall-counts.ts";
 import { nearChunks } from "./vectors.ts";
 import { sequenceOf, termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
@@ -289,9 +290,6 @@ const byWords = (
   reader: Reader,
   asOf: AsOf
 ): { found: Found[]; terms: Set<number> } => {
-  if (telling.length === 0) {
-    return { found: [], terms: new Set() };
-  }
   // The moment, if any, follows the five bindings of each statement.
   const as = asOf.length > 0 ? 6 : undefined;
   const rows = sql
@@ -344,21 +342,18 @@ const byExact = (
   asOf: AsOf,
   byWordsRank: ReadonlyMap<number, number>
 ): { lists: Found[][]; parts: Set<number>; capped: Set<number> } => {
-  const rows =
-    exacts.length === 0
-      ? []
-      : sql
-          .exec<Row & { parts: string; past: string }>(
-            exactSql(asOf.length > 0 ? 5 : undefined),
-            JSON.stringify(
-              exacts.map(({ query, near }, part) => ({ part, query, near }))
-            ),
-            reader.person,
-            JSON.stringify(reader.groups),
-            exactCandidatesMax,
-            ...asOf
-          )
-          .toArray();
+  const rows = sql
+    .exec<Row & { parts: string; past: string }>(
+      exactSql(asOf.length > 0 ? 5 : undefined),
+      JSON.stringify(
+        exacts.map(({ query, near }, part) => ({ part, query, near }))
+      ),
+      reader.person,
+      JSON.stringify(reader.groups),
+      exactCandidatesMax,
+      ...asOf
+    )
+    .toArray();
   const capped = new Set(rows.flatMap(({ past }) => indexesOf(past)));
   // Each chunk's words are cut once, however many parts it may hold.
   const sequences = new Map<number, string[]>();
@@ -397,28 +392,20 @@ const byExact = (
 /**
  * The meaning way: the chunks the reader may read whose vectors of the
  * question's model and build are nearest its vector, best first, at most
- * `recallLimit` (vectors.ts `nearChunks`). None without a vector, for a
- * question of no word (an empty question finds nothing by any way), and
- * as of a moment: vectors are kept for current versions only, so the scan
- * can't tell which were current then, and nearer chunks added since would
- * take every place.
+ * `recallLimit` (vectors.ts `nearChunks`).
  */
 const byMeaning = (
   sql: SqlStorage,
-  meaning: RecallRequest["meaning"],
-  hasWords: boolean,
-  reader: Reader,
-  asOf: AsOf
+  meaning: NonNullable<RecallRequest["meaning"]>,
+  reader: Reader
 ): Found[] =>
-  meaning === undefined || !hasWords || asOf.length > 0
-    ? []
-    : nearChunks(
-        sql,
-        vectorModelNameOf(meaning.model),
-        meaning.vector,
-        reader,
-        recallLimit
-      ).map((chunk) => ({ ...chunk, found: "meaning" }));
+  nearChunks(
+    sql,
+    vectorModelNameOf(meaning.model),
+    meaning.vector,
+    reader,
+    recallLimit
+  ).map((chunk) => ({ ...chunk, found: "meaning" }));
 
 /**
  * What the reader may read for the question, as a pack within its budget
@@ -428,10 +415,19 @@ const byMeaning = (
  * the parts of the question neither words nor exact found: its exact
  * parts, but those capped, then its telling words, but those of its IDs.
  * Meaning finds no word, so it never takes one off that list.
+ *
+ * A way runs, through `way` (which counts it), only when the
+ * question has something for it: telling words, exact parts, or a vector
+ * for a question of some word (an empty question finds nothing by any
+ * way), and by meaning never as of a moment: vectors are kept for current
+ * versions only, so the scan can't tell which were current then, and
+ * nearer chunks added since would take every place. A way that throws
+ * fails the recall.
  */
 export const recall = (
   sql: SqlStorage,
-  { question, reader, budget, asOf, meaning }: RecallRequest
+  { question, reader, budget, asOf, meaning }: RecallRequest,
+  way: WayRunner
 ): Pack => {
   const exacts = exactsOf(question);
   const terms = termsOf(question);
@@ -440,14 +436,22 @@ export const recall = (
     exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words)
   );
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  const words = byWords(sql, terms, reader, at);
-  const exact = byExact(
-    sql,
-    exacts,
-    reader,
-    at,
-    new Map(words.found.map(({ row }, rank) => [row, rank]))
-  );
+  const words =
+    terms.telling.length === 0
+      ? { found: [], terms: new Set<number>() }
+      : way("words", () => byWords(sql, terms, reader, at));
+  const exact =
+    exacts.length === 0
+      ? { lists: [], parts: new Set<number>(), capped: new Set<number>() }
+      : way("exact", () =>
+          byExact(
+            sql,
+            exacts,
+            reader,
+            at,
+            new Map(words.found.map(({ row }, rank) => [row, rank]))
+          )
+        );
   const notFound = [
     ...exacts
       .filter((_, index) => !exact.parts.has(index) && !exact.capped.has(index))
@@ -458,13 +462,12 @@ export const recall = (
       )
       .map(({ word }) => word),
   ];
-  const meant = byMeaning(
-    sql,
-    meaning,
-    terms.telling.length + exacts.length > 0,
-    reader,
-    at
-  );
+  const meant =
+    meaning === undefined ||
+    terms.telling.length + exacts.length === 0 ||
+    asOf !== undefined
+      ? []
+      : way("meaning", () => byMeaning(sql, meaning, reader));
   return packOf(
     fuse([...exact.lists, words.found, meant]),
     { terms: terms.telling, exacts },

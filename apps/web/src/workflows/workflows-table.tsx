@@ -69,7 +69,7 @@ const RunCount = ({
     aria-label={label}
     className="relative z-10 underline-offset-4 hover:underline"
     params={{ workflow: workflow.workflowId }}
-    search={{ tab: "runs" }}
+    search={{ view: "runs" }}
     to="/workflows/$workflow"
   >
     {children}
@@ -180,11 +180,7 @@ const WorkflowLink = ({ workflow }: { workflow: WorkflowSummary }) => (
 
 /** The version new runs run, or that none is published yet. */
 const Version = ({ version }: { version: number | null }) =>
-  version === null ? (
-    <Trans>Not published</Trans>
-  ) : (
-    <Trans>Version {version}</Trans>
-  );
+  version === null ? <Trans>Draft</Trans> : <Trans>Version {version}</Trans>;
 
 /** A workflow's owner: who created it, named when pointed at. */
 const Owner = ({ workflow }: { workflow: WorkflowSummary }) => {

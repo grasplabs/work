@@ -25,6 +25,7 @@ import type {
   HookApi,
 } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { chatAskLimits } from "@grasp-os/shared/chat";
 import { z } from "zod";
 
 import { readDocs, searchDocs } from "./agent-docs.ts";
@@ -32,9 +33,12 @@ import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { dedicatedTools, durableTool } from "./agent-tools.ts";
 import {
   askQuestions,
+  aboutNotes,
   executeCode,
   instructions,
   filesNoteText,
+  makeQuestionsLeft,
+  proposePlan,
   readApi,
   resultRunId,
   sectionNames,
@@ -42,7 +46,7 @@ import {
   withheldAssistant,
   withheldResult,
 } from "./agent.ts";
-import type { CodeRuns, TurnContext } from "./agent.ts";
+import type { CodeRuns, QuestionAbout, TurnContext } from "./agent.ts";
 
 // The chat agent as a pi-durable extension (GRA-1529): its tools, the
 // sections of its system prompt and the hooks that keep what a chat can no
@@ -187,15 +191,19 @@ const recallRunOf = (part: {
     : undefined;
 
 /**
- * A question as the model reads it: the person's words, the note of the
- * files it carries, and what the recall before it found, each a part.
+ * A question as the model reads it: the person's words, what it is about
+ * (`aboutNotes`: its subject and mentions), the note of the files it
+ * carries, and what the recall before it found, each a part. Kept with the question, so a summary of
+ * the chat keeps what each question was about too.
  */
 export const questionContent = (
   text: string,
   files: readonly { id: string; type: string }[],
-  recall?: { runId: string; text: string }
+  recall?: { runId: string; text: string },
+  about: QuestionAbout = {}
 ): UserMessage["content"] => [
   { type: "text", text },
+  ...aboutNotes(about).map((note) => ({ type: "text" as const, text: note })),
   ...(files.length === 0
     ? []
     : [{ type: "text" as const, text: filesNoteText(files) }]),
@@ -598,12 +606,21 @@ const guarded = async (
  * and the chat's sections (each tagged by itself, as the model has always
  * read them), `executeCode` in our locked isolate, `readApi`, the docs'
  * tools in a chat that builds, the dedicated tools the chat's APIs allow, the thinking tool where it may,
- * `askQuestions` in Grasp's own chat only, and the guards before every
+ * `askQuestions` in Grasp's own chat only (bounded in a chat "Make
+ * something" started), `proposePlan` there for who builds, and the guards before every
  * request and compaction.
  */
 export const chatAgent = (agent: ChatAgent): Extension => {
   const { apis, scope, runs, assets } = agent;
   const sections = sectionsOf(apis, agent.context);
+  // A chat "Make something" started counts its questions before a plan.
+  const asksLeft =
+    agent.context.make === undefined
+      ? chatAskLimits.questions
+      : makeQuestionsLeft(agent.history);
+  // Who builds proposes what to make, in Grasp's own chat, any of theirs.
+  const plans =
+    agent.context.builds === true && agent.context.channel === undefined;
   const tools: AgentTool[] = [
     executeCode(agent),
     readApi(apis),
@@ -613,8 +630,13 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     ...dedicatedTools({ apis, scope, runs }, agent.history),
     ...(agent.thinking === undefined ? [] : [agent.thinking]),
     // A chat app's chat asks in words: the questions take the composer's
-    // place, which only Grasp's own chat has.
-    ...(agent.context.channel === undefined ? [askQuestions()] : []),
+    // place, which only Grasp's own chat has. A chat "Make something"
+    // started asks a few in all, then proposes what to make: its questions
+    // are counted from the transcript, so none is offered once spent.
+    ...(agent.context.channel === undefined && asksLeft > 0
+      ? [askQuestions(asksLeft)]
+      : []),
+    ...(plans ? [proposePlan()] : []),
   ];
   return defineExtension({
     name: chatAgentName(scope.chatId),

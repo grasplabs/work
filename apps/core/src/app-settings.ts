@@ -10,6 +10,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
+import { openToUsersSql } from "./app-access.ts";
 import { appFor, toApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
@@ -95,8 +96,8 @@ const requireAudience = async (
 /**
  * That `userId` (an ID, or a column holding one) may answer for `app` now,
  * as SQL: a current member of the
- * organization who can open it (`openTo`) as its status lets them
- * (app-access.ts). A draft or an archived App is open only to whoever
+ * organization who can open it (`openTo`) as whether it is live lets them
+ * (app-access.ts). An App not live yet, or archived, is open only to whoever
  * builds it: an admin, or a builder by role in the organization who owns
  * it or with whom it is shared as a builder, as a person, through a
  * team or through a project.
@@ -104,7 +105,7 @@ const requireAudience = async (
 const mayAnswer = (userId: string | SQLiteColumn, app: string): SQL => sql`(
   ${activeMember(userId)} AND ${openTo(userId, app)}
   AND (
-    EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'published')
+    EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${openToUsersSql})
     OR ${activeMember(userId, ["admin"])}
     OR (${activeMember(userId, ["builder"])} AND (
       EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${userId})

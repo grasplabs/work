@@ -99,7 +99,7 @@ const endReveal = (): void => {
 
 /** The platform shows underneath once its frame has something in it. */
 const platformShows = (): boolean => {
-  const inset = document.querySelector('[data-slot="sidebar-inset"]');
+  const inset = document.querySelector('[data-slot="app-shell-content"]');
   return inset !== null && inset.childElementCount > 0;
 };
 

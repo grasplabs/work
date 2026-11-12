@@ -24,7 +24,7 @@ const choose = async (
   await page.getByRole("menuitem", { name: format }).click();
 };
 
-/** Chooses `format` from Download in the open chat's menu, in the header. */
+/** Chooses `format` from Download in the open chat's menu, in its header. */
 const downloadChat = async (
   page: Page,
   format: "Markdown (.md)" | "PDF"
@@ -173,12 +173,12 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   await page.goto("/");
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page).toHaveURL(/[?&]chat=/u);
-  const messages = page.getByRole("list", { name: "Messages" });
+  // It opens full screen in Grasp's chat, named once core has said its
+  // title, which the export is named after.
+  const messages = page
+    .getByRole("region", { name: question })
+    .getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  // The new chat opens before Chat has read its list again, under a
-  // stand-in title: the export is named once the chat's own title is in.
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(question);
   const chat = page.waitForEvent("download");
   await downloadChat(page, "Markdown (.md)");
   const chatFile = await chat;

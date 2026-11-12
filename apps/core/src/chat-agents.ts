@@ -5,6 +5,7 @@ import { listAgents } from "./agent-builder.ts";
 import { agentFor } from "./agent-reach.ts";
 import { workspaceAgentIdSchema } from "./agent-scope.ts";
 import { firstAgentId, turnAgent } from "./agents.ts";
+import { modelSettings } from "./models.ts";
 
 // The company's agents a person may talk to in Grasp's own chat: the ones
 // that are on and whose audience takes them in (agent-reach.ts). A person
@@ -25,7 +26,10 @@ export const chatAgentsFor = async (
   env: Env,
   userId: string
 ): Promise<ChatAgent[]> => {
-  const all = await listAgents(env);
+  const [all, { models: chosen }] = await Promise.all([
+    listAgents(env),
+    modelSettings(env),
+  ]);
   const on = all.filter(({ state }) => state === "on");
   const reached = await Promise.all(
     on.map(async ({ id }) => {
@@ -35,7 +39,14 @@ export const chatAgentsFor = async (
   );
   return on
     .filter((_, index) => reached[index] === true)
-    .map(({ id, name, face, job }) => ({ id, name, face, job }));
+    .map(({ id, name, face, job, model }) => ({
+      id,
+      name,
+      face,
+      job,
+      // Only one its turns will use (workspace.ts, `#turnModel`).
+      model: model !== null && chosen.includes(model) ? model : null,
+    }));
 };
 
 /**

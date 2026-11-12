@@ -217,6 +217,11 @@ const calls = {
     await page.pushed;
     return subscription;
   },
+  "authenticate.apps.drafts.watch": async (drafts, { app, held }) => {
+    const page = pageStub();
+    // Held, and let go of, as a page does: it pushes only after a write.
+    return holding(held, await drafts.watch(app, page.stub));
+  },
   "authenticate.pages.watchVersion": async (pages, { app, held }) => {
     const page = pageStub();
     const subscription = holding(
@@ -458,6 +463,8 @@ describe("what a browser reaches over core's connection", () => {
     expect(walked.targets).toStrictEqual(
       expect.arrayContaining([
         "authenticate: SessionRpc",
+        "authenticate.apps.drafts: AppDraftsRpc",
+        "authenticate.apps.drafts.watch: Subscription",
         "authenticate.apps.files: AppFilesRpc",
         "authenticate.chats.watch: Subscription",
         "authenticate.pages.frame: PageFrameRpc",

@@ -64,8 +64,10 @@ function ItemSeparator({
   );
 }
 
+// A row that is a button reads from the left, as a row of text does, and
+// one a person picked (`aria-pressed`) shows it as its hover does.
 const itemVariants = cva(
-  "group/item focus-visible:border-ring focus-visible:ring-ring/50 [a]:hover:bg-muted [button]:hover:bg-muted flex w-full flex-wrap items-center rounded-md border text-sm transition-colors duration-100 outline-none focus-visible:ring-[3px] [a]:transition-colors",
+  "group/item focus-visible:border-ring focus-visible:ring-ring/50 [a]:hover:bg-muted [button]:hover:bg-muted aria-pressed:bg-muted flex w-full flex-wrap items-center rounded-md border text-sm transition-colors duration-100 outline-none focus-visible:ring-[3px] [a]:transition-colors [button]:text-left",
   {
     variants: {
       variant: {
@@ -79,6 +81,9 @@ const itemVariants = cva(
           "[button]:text-muted-foreground [button]:hover:text-foreground rounded-lg border-0 text-left disabled:pointer-events-none disabled:opacity-50",
         // A row of a card list (`ItemGroup variant="card"`), under a line.
         // Disabled as a button is: faded, and nothing to press.
+        // A card standing on its own, as one beside a chat's box: the box's
+        // surface and corners, so the two read as one family.
+        card: "bg-card [a]:hover:bg-muted/40 [button]:hover:bg-muted/40 border-border rounded-xl shadow-xs",
         row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 in-[li:last-child]:border-b-0 aria-disabled:pointer-events-none aria-disabled:opacity-50",
       },
       size: {
@@ -132,6 +137,8 @@ const itemMediaVariants = cva(
       variant: {
         default: "bg-transparent",
         icon: "[&_svg:not([class*='size-'])]:size-4",
+        // The icon on a tile of its own, centred on the item's text.
+        tile: "bg-muted text-foreground size-9 rounded-lg group-has-data-[slot=item-description]/item:translate-y-0 group-has-data-[slot=item-description]/item:self-center [&_svg:not([class*='size-'])]:size-4",
         image:
           "size-10 overflow-hidden rounded-sm group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 [&_img]:size-full [&_img]:object-cover",
       },

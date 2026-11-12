@@ -32,7 +32,7 @@ declare global {
  */
 const noMoreConnectionsMs = 2000;
 
-const timedOut = "This page didn't start in time.";
+const timedOut = "This page didn't start";
 
 /**
  * A new App named `name` running the sample, released by `builder`, and

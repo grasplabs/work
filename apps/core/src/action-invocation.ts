@@ -12,7 +12,7 @@ import type {
   AppErrorPayload,
   FunctionResult,
 } from "@grasp-os/shared/functions";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -104,11 +104,11 @@ export interface InvocationOpen {
   readonly access: string;
   readonly app: AppId;
   /**
-   * The builder's draft it runs on, in this chat of theirs (draft-runs.ts),
-   * rather than the App's current release: from core's lease, never the
-   * request.
+   * Whether it runs on the App's draft (draft-runs.ts), as it is when its
+   * run starts, rather than the App's current release: from core's lease,
+   * never the request.
    */
-  readonly draft?: ChatId;
+  readonly draft?: true;
   /** The object's own name (`invocationName`), which the App's object holds. */
   readonly name: string;
   readonly call: FunctionRequest;
@@ -662,12 +662,12 @@ export class ActionInvocation extends DurableObject<Env> {
     // before any of the App's code runs: no receipt is kept
     // (`keepsReceipt`), so the same key may be sent again and runs in the
     // new version. A builder's draft runs as it is when its run starts.
-    let runsOn: { readonly version: number } | { readonly draft: ChatId };
+    let runsOn: { readonly version: number } | { readonly draft: true };
     try {
       runsOn =
         spec.draft === undefined
           ? { version: await currentVersionOf(this.env, spec.app) }
-          : { draft: spec.draft };
+          : { draft: true };
     } catch (error) {
       return resultOf(refused(error));
     }
@@ -768,7 +768,7 @@ export class ActionInvocation extends DurableObject<Env> {
             : await invokeDraftAction(
                 this.env,
                 spec.by,
-                await draftRunOf(this.env, spec.by, spec.app, runsOn.draft),
+                await draftRunOf(this.env, spec.by, spec.app),
                 spec.call,
                 runs
               );
@@ -920,8 +920,8 @@ export const invocationName = async (
     draft,
   }: {
     streaming: boolean;
-    /** A builder's draft's: its chat, and its preview's seed (draft-runs.ts). */
-    draft?: { readonly chatId: ChatId; readonly seed: string };
+    /** The App's draft's: its preview's seed (draft-runs.ts). */
+    draft?: { readonly seed: string };
   }
 ): Promise<string> => {
   const { name } = call.reference;
@@ -929,9 +929,7 @@ export const invocationName = async (
   // A release's as it always was; a draft's apart, and new once its
   // preview's data is dropped, so nothing it kept outlives that.
   return await sha256Hex(
-    canonicalJson(
-      draft === undefined ? named : [...named, draft.chatId, draft.seed]
-    )
+    canonicalJson(draft === undefined ? named : [...named, "draft", draft.seed])
   );
 };
 

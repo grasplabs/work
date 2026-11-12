@@ -62,16 +62,6 @@ const revokedRow = async (
     .run();
 };
 
-/** Whether `call` threw `code`, the way the object's RPC hands it on. */
-const refusedWith = async (call: () => unknown) => {
-  try {
-    await call();
-  } catch (error) {
-    return agentErrors.codeOf(error) ?? "failed";
-  }
-  return "admitted";
-};
-
 describe("chat agent code run leases", () => {
   it("keeps a record of every run: its call, its module's hash, the agent and runtime it ran on, and how it ended", async () => {
     const code = "export default async () => 6 * 7;";
@@ -96,27 +86,23 @@ describe("chat agent code run leases", () => {
     });
   });
 
-  it("refuses every write of a run whose lease closed, in the write's own transaction", async () => {
+  it("admits no write of a run whose lease closed, whatever it writes", async () => {
     const { stub, chat } = await newChat();
     const chatId = chatIdSchema.parse(chat.id);
-    const write = (runId: string, revision: number) => async () =>
-      await stub.saveDraft(
-        chatId,
-        "app-1",
-        null,
-        { "a.md": "a" },
-        [],
-        revision,
-        { runId }
-      );
+    // What a write asks right before it lands (agent-scope.ts,
+    // `admitEffect`): an App's draft, which lives in core's database, too.
+    const admitted = async (runId: string) => {
+      const { call } = await stub.admitFromCodeRun(chatId, runId);
+      return call;
+    };
 
-    // Open: written. Ended (completed, cancelled, timed out): refused.
+    // Open: admitted. Ended (completed, cancelled, timed out): refused.
     const ended = await stub.openCodeRun(
       chatId,
       crypto.randomUUID(),
       testRunOpening
     );
-    const first = await refusedWith(write(ended, 0));
+    const first = await admitted(ended);
     await stub.closeCodeRun(chatId, ended, "wall_expired");
     // Revoked while open: refused as revoked, however it then ends.
     const revoked = await stub.openCodeRun(
@@ -128,31 +114,16 @@ describe("chat agent code run leases", () => {
 
     expect({
       first,
-      afterEnd: await refusedWith(write(ended, 1)),
-      discardAfterEnd: await refusedWith(
-        async () => await stub.dropDraft(chatId, "app-1", { runId: ended })
-      ),
-      afterRevoke: await refusedWith(write(revoked, 1)),
-      createAfterRevoke: await refusedWith(
-        async () => await stub.takeCreate(chatId, 3, revoked)
-      ),
-      unknownRun: await refusedWith(write(crypto.randomUUID(), 1)),
+      afterEnd: await admitted(ended),
+      afterRevoke: await admitted(revoked),
+      unknownRun: await admitted(crypto.randomUUID()),
       ending: await stub.closeCodeRun(chatId, revoked, "completed"),
-      draft: await stub.draft(chatId, "app-1"),
     }).toStrictEqual({
-      first: "admitted",
-      afterEnd: "agent.run_ended",
-      discardAfterEnd: "agent.run_ended",
-      afterRevoke: "agent.run_revoked",
-      createAfterRevoke: "agent.run_revoked",
-      unknownRun: "agent.run_ended",
+      first: "open",
+      afterEnd: "ended",
+      afterRevoke: "revoked",
+      unknownRun: "ended",
       ending: "revoked",
-      draft: {
-        base: null,
-        changes: { "a.md": "a" },
-        definition: null,
-        revision: 1,
-      },
     });
     await expect(
       runRecords(stub, chat.id).then((records) =>

@@ -1,11 +1,11 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Kbd } from "@grasp-os/ui/components/kbd";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -17,41 +17,57 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
+  BotIcon,
   BrainIcon,
   FolderIcon,
   LayoutGridIcon,
   MessagesSquareIcon,
-  WorkflowIcon,
+  SearchIcon,
+  SettingsIcon,
 } from "lucide-react";
-import { Fragment, useEffect } from "react";
+import { useEffect } from "react";
 import type { ComponentType, SVGProps } from "react";
 
+import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { DashboardItem } from "../dashboard/nav-item.tsx";
+import { shortcutLabel } from "../shortcuts.ts";
 import { WorkflowsItem } from "../workflows/nav-item.tsx";
 import { IntegrationsIcon } from "./integrations-icon.tsx";
 import { PersonMenu } from "./person-menu.tsx";
 import { SidebarBrand } from "./sidebar-brand.tsx";
 import { SurfaceNav } from "./surface-nav.tsx";
 
-// The product's sections, down the left beside every signed-in page. What
-// only admins use is in the person menu at its foot. Staff who reach the
-// onboarding alone get none: Grasp steers the onboarding from its admin.
+// The app's sidebar, down the left beside every signed-in page, as
+// Shopify's admin has it: the organization and the sidebar's own fold on
+// top, with search under it; the product's sections; the Apps' own
+// entries; and at the foot Settings and the person signed in. Folded, it
+// is a rail of icons, each named on hover, the groups parted by hairlines.
+// What only admins use is in the person menu. Staff who reach the
+// onboarding alone get none of the sections: Grasp steers the onboarding
+// from its admin.
 
 interface Section {
-  to: "/" | "/brain" | "/projects" | "/apps" | "/workflows" | "/integrations";
+  to: "/" | "/brain" | "/projects" | "/apps" | "/agents" | "/integrations";
   label: MessageDescriptor;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
 
-const sections: readonly Section[] = [
-  { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
-  { to: "/brain", label: msg`Brain`, icon: BrainIcon },
-  { to: "/projects", label: msg`Projects`, icon: FolderIcon },
-  { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon },
-  { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
-  { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
-];
+const chat: Section = { to: "/", label: msg`Chat`, icon: MessagesSquareIcon };
+const brain: Section = { to: "/brain", label: msg`Brain`, icon: BrainIcon };
+const projects: Section = {
+  to: "/projects",
+  label: msg`Projects`,
+  icon: FolderIcon,
+};
+const apps: Section = { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon };
+// The company's agents: the ones a person may ask, and for admins all of them.
+const agents: Section = { to: "/agents", label: msg`Agents`, icon: BotIcon };
+const integrations: Section = {
+  to: "/integrations",
+  label: msg`Integrations`,
+  icon: IntegrationsIcon,
+};
 
 /** A section's entry: Chat is itself; any other holds the pages under it. */
 const SectionItem = ({ section }: { section: Section }) => {
@@ -63,6 +79,7 @@ const SectionItem = ({ section }: { section: Section }) => {
       <SidebarMenuButton
         isActive={matchRoute({ to, fuzzy: to !== "/" }) !== false}
         render={<Link to={to} />}
+        tooltip={i18n._(label)}
       >
         <Icon />
         <span>{i18n._(label)}</span>
@@ -71,7 +88,51 @@ const SectionItem = ({ section }: { section: Section }) => {
   );
 };
 
-/** The app's sidebar: the mark and the organization, the sections and the person signed in. */
+/** Search, under the organization: the person's chats, ⌘K away anywhere. */
+const SearchItem = () => {
+  const { t } = useLingui();
+  const openChats = useChatsWindow();
+  return (
+    // As much room above it, from the brand, as below it, to the sections.
+    <SidebarMenu className="mt-2">
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          onClick={() => {
+            openChats(true);
+          }}
+          tooltip={t`Search chats`}
+          variant="field"
+        >
+          <SearchIcon />
+          <span>{t`Search chats`}</span>
+          <Kbd className="ml-auto">{shortcutLabel(chatsKey)}</Kbd>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+};
+
+/** Settings, at the foot: the person's own, and for admins the organization's. */
+const SettingsItem = () => {
+  const { t } = useLingui();
+  const matchRoute = useMatchRoute();
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          isActive={matchRoute({ to: "/settings", fuzzy: true }) !== false}
+          render={<Link to="/settings/profile" />}
+          tooltip={t`Settings`}
+        >
+          <SettingsIcon />
+          <span>{t`Settings`}</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+};
+
+/** The app's sidebar: the organization, search, the sections, Settings and the person signed in. */
 export const AppSidebar = ({
   core,
   identity,
@@ -91,50 +152,37 @@ export const AppSidebar = ({
       }),
     [router, setOpenMobile]
   );
+  const sections = identity.onboardingOnly !== true;
   return (
-    <Sidebar collapsible="offcanvas" label={t`Sidebar`} variant="inset">
+    <Sidebar collapsible="icon" label={t`Sidebar`} variant="inset">
       <SidebarHeader>
         <SidebarBrand core={core} />
+        {sections ? <SearchItem /> : null}
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <nav aria-label={t`Main`}>
-              <SidebarMenu>
-                {identity.onboardingOnly === true ? null : (
-                  <>
-                    {sections.slice(0, 1).map((section) => (
-                      <SectionItem key={section.to} section={section} />
-                    ))}
-                    <DashboardItem />
-                    {sections.slice(1).map((section) => {
-                      if (section.to === "/apps") {
-                        return (
-                          <Fragment key={section.to}>
-                            <SectionItem section={section} />
-                            <SurfaceNav core={core} />
-                          </Fragment>
-                        );
-                      }
-                      // With how many workflows need the person.
-                      if (section.to === "/workflows") {
-                        return (
-                          <WorkflowsItem
-                            key={section.to}
-                            requests={isAdmin(identity.role)}
-                          />
-                        );
-                      }
-                      return <SectionItem key={section.to} section={section} />;
-                    })}
-                  </>
-                )}
-              </SidebarMenu>
-            </nav>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {sections ? (
+          <>
+            <SidebarGroup>
+              <nav aria-label={t`Main`}>
+                <SidebarMenu>
+                  <SectionItem section={chat} />
+                  <DashboardItem />
+                  <SectionItem section={brain} />
+                  <SectionItem section={projects} />
+                  <SectionItem section={apps} />
+                  {/* With how many workflows need the person. */}
+                  <WorkflowsItem requests={isAdmin(identity.role)} />
+                  <SectionItem section={agents} />
+                  <SectionItem section={integrations} />
+                </SidebarMenu>
+              </nav>
+            </SidebarGroup>
+            <SurfaceNav core={core} />
+          </>
+        ) : null}
       </SidebarContent>
       <SidebarFooter>
+        <SettingsItem />
         <PersonMenu core={core} identity={identity} />
       </SidebarFooter>
     </Sidebar>

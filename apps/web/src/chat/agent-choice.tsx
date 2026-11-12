@@ -26,6 +26,13 @@ export const startingAgent = (
 ): ChatAgent | undefined =>
   agents.find(({ id }) => id === picked) ?? agents.at(0);
 
+/** The model the agent `agentId` answers with, where an admin gave it one. */
+export const agentModelOf = (
+  agents: readonly ChatAgent[],
+  agentId: string | undefined
+): string | undefined =>
+  agents.find(({ id }) => id === agentId)?.model ?? undefined;
+
 /** Which agent answers a new chat, where the person has more than one. */
 export const AgentPicker = ({
   agents,

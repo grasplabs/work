@@ -6,10 +6,12 @@
 // of icons as wide as the site header's square for the sidebar trigger, so
 // its edge continues the line beside that trigger and nothing moves when it
 // folds. On a phone neither shows: the page offers its list another way.
-// Whether it is folded is the page's to keep.
+// Whether it is folded is the page's to keep. Built on the kit's Panel, as
+// every collapsible region is.
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Panel } from "@grasp-os/ui/components/panel";
 import {
   Tooltip,
   TooltipContent,
@@ -19,24 +21,11 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-
-/** How long a sidebar takes to open or fold: `duration-200` in its classes. */
-const foldMs = 200;
 
 const motionReduced = (): boolean =>
   matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-const pageSidebarVariants = cva(
-  "ease-sidebar hidden flex-none overflow-hidden border-r transition-all duration-200 motion-reduce:transition-none md:flex",
-  {
-    variants: {
-      folded: { true: "w-12", false: "w-72" },
-    },
-    defaultVariants: { folded: false },
-  }
-);
 
 const pageSidebarInnerVariants = cva("flex flex-none flex-col", {
   variants: {
@@ -69,8 +58,10 @@ function PageSidebar({
   landmark?: "complementary" | "navigation";
   className?: string;
   children: ReactNode;
-} & VariantProps<typeof pageSidebarVariants>) {
-  const shut = folded === true;
+  /** Folded to its rail. */
+  folded?: boolean;
+}) {
+  const shut = folded;
   const Landmark = landmark === "navigation" ? "nav" : "aside";
   const [was, setWas] = useState({
     folded: shut,
@@ -85,26 +76,23 @@ function PageSidebar({
       setLeaving(shut && !motionReduced() ? was.open : null);
     }
   }
-  // The rail takes over once the width has shrunk. A timer rather than
-  // `transitionend`, which never comes where no transition runs, as on a
-  // phone, where the sidebar is hidden.
-  useEffect(() => {
-    const timer =
-      leaving === null
-        ? undefined
-        : setTimeout(() => {
-            setLeaving(null);
-          }, foldMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [leaving]);
   return (
-    <Landmark
-      aria-label={label}
+    // The kit's Panel on the content's left edge, as every collapsible
+    // region is: 288 pixels open, a 48-pixel rail folded.
+    <Panel
+      side="left"
+      open={!shut}
+      size="18rem"
+      collapsedSize="3rem"
+      render={<Landmark aria-label={label} />}
       data-slot="page-sidebar"
       data-folded={shut}
-      className={cn(pageSidebarVariants({ folded: shut }), className)}
+      bordered
+      // The rail takes over once the width has shrunk.
+      onOpenChangeComplete={() => {
+        setLeaving(null);
+      }}
+      className={cn("hidden md:flex", className)}
     >
       {leaving === null ? (
         <div
@@ -122,7 +110,7 @@ function PageSidebar({
           {leaving}
         </div>
       )}
-    </Landmark>
+    </Panel>
   );
 }
 

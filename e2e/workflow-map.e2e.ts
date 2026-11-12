@@ -23,7 +23,7 @@ const workflowMap = "workflow-map";
  */
 const installedMs = 30_000;
 
-/** An App `admin` created from the workflow map, current. */
+/** An App `admin` created from the workflow map, live. */
 const mapFor = async (admin: Person): Promise<string> => {
   const { core, api } = apiOf(admin);
   try {
@@ -46,10 +46,9 @@ const mapFor = async (admin: Person): Promise<string> => {
     ).toStrictEqual([
       { object: { type: "platform" }, actions: ["statistics"] },
     ]);
-    await api.apps.versions.setCurrent(created.app.id, 1);
-    // Published, for the people it is shared with (a draft is its
+    // Live, for the people it is shared with (until then, its
     // builders' alone).
-    await api.apps.publish(created.app.id);
+    await api.apps.versions.publish(created.app.id, 1);
     return created.app.id;
   } finally {
     core[Symbol.dispose]();

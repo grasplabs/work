@@ -67,7 +67,7 @@ const released = async (
     files,
     "Next"
   );
-  await builder.api.apps.versions.setCurrent(app, version);
+  await builder.api.apps.versions.publish(app, version);
   return version;
 };
 
@@ -151,7 +151,6 @@ const openedApp = async (
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   const version = await released(builder, id, files);
-  await builder.api.apps.publish(id);
   if (ordinary) {
     await ordinaryData(id);
   }

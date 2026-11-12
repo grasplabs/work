@@ -44,8 +44,8 @@ const eventNames = {
     context: "a webhook event: the App was published",
   }),
   changed: msg({
-    message: "A new version goes live",
-    context: "a webhook event: a version of the App was made current",
+    message: "A new version is published",
+    context: "a webhook event: a version of the App went live",
   }),
 } as const satisfies Record<AppWebhookEvent, unknown>;
 

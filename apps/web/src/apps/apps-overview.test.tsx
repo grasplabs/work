@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { AppOverview, AppStatus } from "@grasp-os/shared/apps";
+import type { AppOverview } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -19,18 +19,18 @@ import { AppsOverview } from "./apps-overview.tsx";
 // The Apps page as people read it, from the Apps core lists
 // (`apps.overview`): each App one card that opens the live App, however
 // many pages it has, the newest first, with where it stands; a search
-// over their names; New App for who builds.
+// over their names; Make something for who builds.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-/** An App made at `createdAt`, standing at `status`, with pages or not. */
+/** An App made at `createdAt`, live with pages or not yet, archived or not. */
 const overview = (
   name: string,
   createdAt: string,
   pages: boolean,
-  status: AppStatus = "published"
+  archived = false
 ): AppOverview => ({
   app: {
     id: appIdSchema.parse(crypto.randomUUID()),
@@ -42,8 +42,8 @@ const overview = (
     process: null,
     blueprint: null,
     currentVersion: pages ? 1 : null,
-    pendingVersion: null,
-    status,
+    liveLabel: pages ? "26.11.1" : null,
+    archived,
     link: null,
     createdAt,
     role: "builder",
@@ -99,9 +99,9 @@ const search = async (value: string): Promise<void> => {
   });
 };
 
-const newApp = (): string | null | undefined =>
+const makeLink = (): string | null | undefined =>
   [...document.querySelectorAll("a")]
-    .find((link) => link.textContent === "New App")
+    .find((link) => link.textContent === "Make something")
     ?.getAttribute("href");
 
 describe(AppsOverview, () => {
@@ -114,37 +114,26 @@ describe(AppsOverview, () => {
   });
 
   it("lists each App once, the newest first, with where it stands, each opening the live App", async () => {
-    const invoices = overview(
-      "Invoices",
-      "2026-10-01T08:00:00.000Z",
-      true,
-      "published"
-    );
-    const holidays = overview(
-      "Holidays",
-      "2026-10-20T08:00:00.000Z",
-      false,
-      "draft"
-    );
-    const old = overview(
-      "Old desk",
-      "2026-09-01T08:00:00.000Z",
-      true,
-      "archived"
-    );
+    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", true);
+    const holidays = overview("Holidays", "2026-10-20T08:00:00.000Z", false);
+    const old = overview("Old desk", "2026-09-01T08:00:00.000Z", true, true);
     await shown([invoices, old, holidays]);
 
-    expect({ cards: cards(), newApp: newApp() }).toStrictEqual({
+    expect({ cards: cards(), makeLink: makeLink() }).toStrictEqual({
       cards: [
-        { name: "Holidays", href: `/apps/${holidays.app.id}`, status: "Draft" },
+        {
+          name: "Holidays",
+          href: `/apps/${holidays.app.id}`,
+          status: "Only you see this",
+        },
         {
           name: "Invoices",
           href: `/apps/${invoices.app.id}`,
-          status: "Published",
+          status: "Your team uses it",
         },
         { name: "Old desk", href: `/apps/${old.app.id}`, status: "Archived" },
       ],
-      newApp: "/apps/new",
+      makeLink: "/?make=app",
     });
   });
 
@@ -170,10 +159,10 @@ describe(AppsOverview, () => {
     });
   });
 
-  it("offers New App to who builds alone, also before there is any App, and tells someone who doesn't build where Apps shared with them show", async () => {
+  it("offers Make something to who builds alone, also before there is any App, and tells someone who doesn't build where Apps shared with them show", async () => {
     await shown([], true);
     const builder = {
-      newApp: newApp(),
+      makeLink: makeLink(),
       said: document.body.textContent.includes("No Apps yet"),
     };
     act(() => {
@@ -183,15 +172,15 @@ describe(AppsOverview, () => {
     await shown([], false);
 
     const user = {
-      newApp: newApp(),
+      makeLink: makeLink(),
       said: document.body.textContent.includes(
         "The Apps your colleagues share with you show here."
       ),
     };
 
     expect({ builder, user }).toStrictEqual({
-      builder: { newApp: "/apps/new", said: true },
-      user: { newApp: undefined, said: true },
+      builder: { makeLink: "/?make=app", said: true },
+      user: { makeLink: undefined, said: true },
     });
   });
 });

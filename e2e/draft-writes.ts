@@ -2,111 +2,59 @@ import { createHash } from "node:crypto";
 
 import { canonicalJson } from "@grasp-os/shared/json";
 
-import { origin } from "./stack.ts";
+import { execute, quoted } from "./connections-seed.ts";
 
-// A chat's draft written straight into its Workspace object, as the
-// agent's `env.build.write` leaves it, through the local dev server's own
-// tools (as connections-seed.ts writes into connect's database): the local
+// An App's draft written straight into core's database, as a chat's
+// agent's `env.build.write` leaves it, through wrangler on the stack's
+// local state (as connections-seed.ts writes into connect's): the local
 // stack reaches no model.
-
-/** Where the local dev server runs SQL in a Durable Object's storage. */
-const explorer = new URL("/cdn-cgi/local/explorer/api/", origin);
-
-const namespacesSchema = {
-  parse: (value: unknown): { id: string; class: string }[] => {
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      !("result" in value) ||
-      !Array.isArray(value.result)
-    ) {
-      throw new TypeError("The dev server listed no Durable Objects");
-    }
-    return value.result.flatMap((entry: unknown) =>
-      typeof entry === "object" &&
-      entry !== null &&
-      "id" in entry &&
-      typeof entry.id === "string" &&
-      "class" in entry &&
-      typeof entry.class === "string"
-        ? [{ id: entry.id, class: entry.class }]
-        : []
-    );
-  },
-};
 
 /** The SHA-256 of `text`'s UTF-8 bytes, as hex, as core hashes them. */
 const sha256 = (text: string): string =>
   createHash("sha256").update(text, "utf-8").digest("hex");
 
 /**
- * Writes a draft of `app` over `base`, with `files`, into `chatId` in
- * `userId`'s Workspace object (core's chats-rpc.ts names it), as its
- * agent's first write does: the draft, and its version 1 as core's
- * draft-versions.ts keeps it.
+ * Writes the draft of `app` over `base`, with `files`, as `userId`'s agent
+ * in chat `chatId` writes it: the draft at its next revision (a publish
+ * leaves a draft behind, empty over the version it made live) holding
+ * only `files`, and its next undo point, naming the chat, as core's
+ * app-drafts.ts keeps them. With `definition` (its text, as
+ * `definitionText` writes it), the draft's own App definition too, as the
+ * agent's definition tools leave it; without, the base's.
  */
 export const writeDraft = async (
   userId: string,
   chatId: string,
   app: string,
   base: number,
-  files: Record<string, string>
+  files: Record<string, string>,
+  definition: string | null = null
 ): Promise<void> => {
-  const listed = await fetch(
-    new URL("workers/durable_objects/namespaces", explorer)
-  );
-  const workspaces = namespacesSchema
-    .parse(await listed.json())
-    .find((namespace) => namespace.class === "Workspace");
-  if (workspaces === undefined) {
-    throw new Error("The dev server has no Workspace objects");
-  }
   const hashes = Object.fromEntries(
     Object.entries(files).map(([path, content]) => [path, sha256(content)])
   );
   const now = Date.now();
-  const written = await fetch(
-    new URL(
-      `workers/durable_objects/namespaces/${encodeURIComponent(workspaces.id)}/query`,
-      explorer
-    ),
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        durable_object_name: `person:${userId}`,
-        queries: [
-          {
-            sql: "INSERT INTO chat_drafts (chat_id, app_id, base, revision, updated_at) VALUES (?, ?, ?, 1, ?)",
-            params: [chatId, app, base, now],
-          },
-          ...Object.entries(files).map(([path, content]) => ({
-            sql: "INSERT INTO chat_draft_files (chat_id, app_id, path, content) VALUES (?, ?, ?, ?)",
-            params: [chatId, app, path, content],
-          })),
-          {
-            sql: "INSERT INTO chat_draft_versions (chat_id, app_id, number, revision, base, content_hash, created_at) VALUES (?, ?, 1, 1, ?, ?, ?)",
-            params: [
-              chatId,
-              app,
-              base,
-              sha256(canonicalJson({ base, files: hashes, definition: null })),
-              now,
-            ],
-          },
-          ...Object.entries(files).map(([path, content]) => ({
-            sql: "INSERT INTO chat_draft_contents (chat_id, app_id, sha256, content) VALUES (?, ?, ?, ?)",
-            params: [chatId, app, hashes[path], content],
-          })),
-          ...Object.entries(hashes).map(([path, hash]) => ({
-            sql: "INSERT INTO chat_draft_version_files (chat_id, app_id, number, path, sha256) VALUES (?, ?, 1, ?, ?)",
-            params: [chatId, app, path, hash],
-          })),
-        ],
-      }),
-    }
+  const id = quoted(app);
+  const defined = definition === null ? "NULL" : quoted(definition);
+  const point = `(SELECT MAX(number) FROM app_draft_points WHERE app_id = ${id})`;
+  await execute(
+    [
+      `INSERT INTO app_drafts (app_id, base, revision, definition, updated_at, updated_by) VALUES (${id}, ${base}, 1, ${defined}, ${now}, ${quoted(userId)}) ON CONFLICT(app_id) DO UPDATE SET base = excluded.base, revision = app_drafts.revision + 1, definition = excluded.definition, updated_at = excluded.updated_at, updated_by = excluded.updated_by;`,
+      `DELETE FROM app_draft_files WHERE app_id = ${id};`,
+      ...Object.entries(files).map(
+        ([path, content]) =>
+          `INSERT INTO app_draft_files (app_id, path, content) VALUES (${id}, ${quoted(path)}, ${quoted(content)});`
+      ),
+      `INSERT INTO app_draft_points (app_id, number, revision, base, definition, content_hash, person_id, chat_id, created_at) SELECT ${id}, COALESCE(MAX(number), 0) + 1, (SELECT revision FROM app_drafts WHERE app_id = ${id}), ${base}, ${defined}, ${quoted(sha256(canonicalJson({ base, files: hashes, definition: definition === null ? null : sha256(definition) })))}, ${quoted(userId)}, ${quoted(chatId)}, ${now} FROM app_draft_points WHERE app_id = ${id};`,
+      ...Object.entries(files).map(
+        ([path, content]) =>
+          `INSERT OR IGNORE INTO app_draft_contents (app_id, sha256, content) VALUES (${id}, ${quoted(hashes[path] ?? "")}, ${quoted(content)});`
+      ),
+      ...Object.entries(hashes).map(
+        ([path, hash]) =>
+          `INSERT INTO app_draft_point_files (app_id, number, path, sha256) VALUES (${id}, ${point}, ${quoted(path)}, ${quoted(hash)});`
+      ),
+    ].join("\n"),
+    "core"
   );
-  if (!written.ok) {
-    throw new Error(`The draft wasn't written: ${await written.text()}`);
-  }
 };

@@ -14,8 +14,9 @@ import type { LucideIcon } from "lucide-react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 
-// How the Code view (app-code.tsx) shows code: @pierre/diffs draws a file,
-// and a file's change, as a code editor does, in a shadow root of its own,
+// How the Code view (app-code.tsx) shows code, and Publish
+// (publish.tsx) a file's change: @pierre/diffs draws a file, and a
+// change, as a code editor does, in a shadow root of its own,
 // with line numbers, a gutter, scrolling sideways for long lines, and only
 // the lines in sight (its virtualizer), so a file of thousands of lines
 // scrolls smoothly. It highlights with its own highlighter, Highlights
@@ -39,30 +40,64 @@ const fileOptions: FileOptions<undefined, undefined> = {
   overflow: "scroll",
 };
 
-/** How a diff shows its two versions: one column, or side by side. */
-export type DiffLayout = "unified" | "split";
-
 /**
- * A file's change, read-only, under a header that stays while it scrolls.
- * Each hunk opens with its `@@ -a,b +c,d @@` line, as git prints it: the
- * library's other separators say "N unmodified lines" in English only.
+ * A file's change, read-only, in one column, for the narrow room of a
+ * sheet. Each hunk opens with its `@@ -a,b +c,d @@` line, as git prints
+ * it: the library's other separators say "N unmodified lines" in English
+ * only.
  */
-const diffOptions = (
-  layout: DiffLayout
-): FileDiffOptions<undefined, undefined> => ({
+const diffOptions: FileDiffOptions<undefined, undefined> = {
   theme,
   preferredHighlighter: "highlights",
-  diffStyle: layout,
+  diffStyle: "unified",
   diffIndicators: "classic",
   hunkSeparators: "metadata",
   lineDiffType: "word-alt",
-  stickyHeader: true,
+  disableFileHeader: true,
   overflow: "scroll",
-});
+};
+
+/**
+ * `text` ending in a newline, unless it is empty: a diff of such texts
+ * never has the library's "No newline at end of file" marker, which it
+ * draws in English only.
+ */
+const ended = (text: string): string =>
+  text === "" || text.endsWith("\n") ? text : `${text}\n`;
+
+/** How a file changed: an added one all added, a deleted one all removed. */
+export const CodeDiff = ({ diff }: { diff: FileDiff }) => {
+  const { path } = diff;
+  if (diff.change === "added") {
+    return (
+      <MultiFileDiff
+        newFile={{ name: path, contents: ended(diff.after) }}
+        oldFile={null}
+        options={diffOptions}
+      />
+    );
+  }
+  if (diff.change === "deleted") {
+    return (
+      <MultiFileDiff
+        newFile={null}
+        oldFile={{ name: path, contents: ended(diff.before) }}
+        options={diffOptions}
+      />
+    );
+  }
+  return (
+    <MultiFileDiff
+      newFile={{ name: path, contents: ended(diff.after) }}
+      oldFile={{ name: path, contents: ended(diff.before) }}
+      options={diffOptions}
+    />
+  );
+};
 
 /**
  * Where code scrolls: the virtualizer draws only the lines of its files
- * and diffs in sight of it.
+ * in sight of it.
  */
 export const CodeScroller = ({
   className,
@@ -89,66 +124,6 @@ export const CodeFile = ({ path, text }: { path: string; text: string }) => (
     options={fileOptions}
   />
 );
-
-/**
- * `text` ending in a newline, unless it is empty: an empty file has no
- * line to end, and a newline would draw one. A diff of such texts never has the
- * library's "No newline at end of file" marker, which it draws in English
- * only; a change of the final newline alone is the page's to say
- * (`onlyFinalNewline`).
- */
-const ended = (text: string): string =>
-  text === "" || text.endsWith("\n") ? text : `${text}\n`;
-
-/** The lines of `text`; its last newline ends a line, not starts one. */
-const lineCount = (text: string): number =>
-  text === "" ? 0 : ended(text).split("\n").length - 1;
-
-/** The lines a diff of `diff` compares: its old and new lines together. */
-export const comparedLines = (diff: FileDiff): number =>
-  (diff.change === "added" ? 0 : lineCount(diff.before)) +
-  (diff.change === "deleted" ? 0 : lineCount(diff.after));
-
-/** Whether `diff` changes nothing but whether its file ends in a newline. */
-export const onlyFinalNewline = (diff: FileDiff): boolean =>
-  diff.change === "modified" && ended(diff.before) === ended(diff.after);
-
-/** How a file changed: an added one all added, a deleted one all removed. */
-export const CodeDiff = ({
-  diff,
-  layout,
-}: {
-  diff: FileDiff;
-  layout: DiffLayout;
-}) => {
-  const options = diffOptions(layout);
-  const { path } = diff;
-  if (diff.change === "added") {
-    return (
-      <MultiFileDiff
-        newFile={{ name: path, contents: ended(diff.after) }}
-        oldFile={null}
-        options={options}
-      />
-    );
-  }
-  if (diff.change === "deleted") {
-    return (
-      <MultiFileDiff
-        newFile={null}
-        oldFile={{ name: path, contents: ended(diff.before) }}
-        options={options}
-      />
-    );
-  }
-  return (
-    <MultiFileDiff
-      newFile={{ name: path, contents: ended(diff.after) }}
-      oldFile={{ name: path, contents: ended(diff.before) }}
-      options={options}
-    />
-  );
-};
 
 /** The icon of a file's type, by its extension. */
 const iconsByExtension: Readonly<Record<string, LucideIcon>> = {

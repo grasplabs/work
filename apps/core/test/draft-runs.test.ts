@@ -9,43 +9,41 @@ import { testApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { livePushes, notesFiles, previewDraftsOf } from "./preview-drafts.ts";
 import {
-  chatsOf,
   outcome,
   previewCall,
   previewLease,
+  previewOf,
   previewStores,
   previewWatch,
   requestFor,
   storeEmptied,
 } from "./previews.ts";
 import { outcome as refusalOf, signedInApi } from "./sign-in.ts";
-// A builder's preview of their draft (draft-runs.ts), from the page's
-// side: the draft run through the normal runner on the path every page
-// calls on, under the lease its preview opened with, on a throwaway store
-// of its own with no resources, and what it fails with kept for the
-// agent's check of the draft.
+// An App's preview of its one shared draft (draft-runs.ts), from the
+// page's side: the draft run through the normal runner on the path every
+// page calls on, under the lease its preview opened with, as whoever
+// calls, on one throwaway store of test data its builders share, with no
+// resources, and what it fails with kept for the next check of the draft.
 
 const idp = mockIdp();
 const { setUp } = previewDraftsOf(idp);
 
 describe("a draft's preview", { timeout: 180_000 }, () => {
   it("runs the draft's code on its own store, never the App's, and follows its live query", async () => {
-    const { builder, app, chatId, revision } = await setUp();
-    const at = { chatId, app, revision };
+    const { builder, app, revision } = await setUp();
+    const at = { app, revision };
     const live = livePushes();
     await previewWatch(
       builder,
-      chatId,
       app,
-      await requestFor(builder, at, "notes.titles"),
+      await requestFor(at, "notes.titles"),
       live.push
     );
     const created = outcome(
       await previewCall(
         builder,
-        chatId,
         app,
-        await requestFor(builder, at, "notes.create", { title: "Draft" })
+        await requestFor(at, "notes.create", { title: "Draft" })
       )
     );
     await live.until((latest) => {
@@ -57,10 +55,8 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
     const real = outcome(
       await previewCall(
         builder,
-        chatId,
         app,
         await requestFor(
-          builder,
           { ...at, revision: { appVersion: 1 } },
           "notes.titles"
         ),
@@ -74,30 +70,15 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
   });
 
   it("reaches no outside system, and keeps what the draft's code threw for the agent's check", async () => {
-    const { builder, app, chatId, revision } = await setUp();
-    const at = { chatId, app, revision };
+    const { builder, app, revision } = await setUp();
+    const at = { app, revision };
     const consulted = outcome(
-      await previewCall(
-        builder,
-        chatId,
-        app,
-        await requestFor(builder, at, "notes.consult")
-      )
+      await previewCall(builder, app, await requestFor(at, "notes.consult"))
     );
     const broken = outcome(
-      await previewCall(
-        builder,
-        chatId,
-        app,
-        await requestFor(builder, at, "notes.broken")
-      )
+      await previewCall(builder, app, await requestFor(at, "notes.broken"))
     );
-    const reports = await chatsOf(builder).previewReports(
-      chatId,
-      app,
-      revision,
-      0
-    );
+    const reports = await previewOf(app).reports(revision, 0);
     expect({
       consulted,
       broken,
@@ -115,16 +96,16 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
   });
 
   it("runs an action under its key once, as a release's page does", async () => {
-    const { builder, app, chatId, revision } = await setUp();
-    const at = { chatId, app, revision };
+    const { builder, app, revision } = await setUp();
+    const at = { app, revision };
     const keyed = JSON.stringify({
-      ...JSON.parse(await requestFor(builder, at, "notes.forgiving")),
+      ...JSON.parse(await requestFor(at, "notes.forgiving")),
       idempotencyKey: crypto.randomUUID(),
     });
-    const lease = await previewLease(builder, chatId, app);
+    const lease = await previewLease(builder, app);
     const [first, again] = [
-      await previewCall(builder, chatId, app, keyed, lease),
-      await previewCall(builder, chatId, app, keyed, lease),
+      await previewCall(builder, app, keyed, lease),
+      await previewCall(builder, app, keyed, lease),
     ];
     expect({ first: outcome(first), again: outcome(again) }).toStrictEqual({
       first: null,
@@ -133,9 +114,9 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
   });
 
   it("takes a write of its pages while its server code doesn't build, on the references it last built, its calls saying why", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
+    const { builder, app, revision, write } = await setUp();
     // Opened once its server code built: its references are kept.
-    await previewLease(builder, chatId, app);
+    await previewLease(builder, app);
     const drafted = notesFiles("drafted");
     const broken = await write(
       {
@@ -150,16 +131,10 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
       },
       revision
     );
-    const update = await builder.api.chats.previewUpdate(
-      chatId,
-      app,
-      broken,
-      {}
-    );
+    const update = await builder.api.apps.drafts.previewUpdate(app, broken, {});
     const titles = outcome(
       await previewCall(
         builder,
-        chatId,
         app,
         JSON.stringify({
           reference: { name: "notes.titles", kind: "query" },
@@ -179,14 +154,11 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
   });
 
   it("starts a new store when the draft's schema changes", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const create = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.create",
-      { title: "Before" }
-    );
-    await previewCall(builder, chatId, app, create);
+    const { builder, app, revision, write } = await setUp();
+    const create = await requestFor({ app, revision }, "notes.create", {
+      title: "Before",
+    });
+    await previewCall(builder, app, create);
     // The same App, with a table more.
     const next = await write(
       testApp({
@@ -208,13 +180,8 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
     const titles = outcome(
       await previewCall(
         builder,
-        chatId,
         app,
-        await requestFor(
-          builder,
-          { chatId, app, revision: next },
-          "notes.titles"
-        )
+        await requestFor({ app, revision: next }, "notes.titles")
       )
     );
     expect(titles).toStrictEqual([]);
@@ -223,129 +190,137 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
 
 /**
  * `setUp`'s preview with a note written to its throwaway store, and that
- * store's ID, as its chat keeps it.
+ * store's ID, as the App's preview keeps it.
  */
 const withNote = async () => {
   const drafted = await setUp();
-  const { builder, app, chatId, revision } = drafted;
-  const at = { chatId, app, revision };
+  const { builder, app, revision } = drafted;
+  const at = { app, revision };
   await previewCall(
     builder,
-    chatId,
     app,
-    await requestFor(builder, at, "notes.create", { title: "Typed in" })
+    await requestFor(at, "notes.create", { title: "Typed in" })
   );
-  const [store] = await previewStores(builder, chatId, app);
+  const [store] = await previewStores(app);
   if (store === undefined) {
     throw new Error("The preview kept no store.");
   }
   const titles = async (): Promise<unknown> =>
     outcome(
-      await previewCall(
-        builder,
-        chatId,
-        app,
-        await requestFor(builder, at, "notes.titles")
-      )
+      await previewCall(builder, app, await requestFor(at, "notes.titles"))
     );
-  return { ...drafted, storeId: store.store_id, titles };
+  return { ...drafted, storeId: store, titles };
 };
 
 describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
-  it("is emptied for good at once when its chat is deleted", async () => {
-    const { builder, chatId, storeId } = await withNote();
-    await builder.api.chats.remove(chatId);
-    await vi.waitFor(
-      async () => {
-        await expect(storeEmptied(storeId)).resolves.toBeTruthy();
-      },
-      { timeout: 10_000, interval: 100 }
+  it("is shared by every builder of the App, each calling as themselves", async () => {
+    const { builder, app, revision, titles } = await withNote();
+    const other = await signedInApi(idp, "builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: other.userId,
+      role: "builder",
+    });
+    const theirs = outcome(
+      await previewCall(
+        other,
+        app,
+        await requestFor({ app, revision }, "notes.titles")
+      )
     );
+    expect({ theirs, mine: await titles() }).toStrictEqual({
+      theirs: ["Typed in"],
+      mine: ["Typed in"],
+    });
   });
 
-  it("is emptied for good when its draft is discarded, and the next draft starts on an empty store", async () => {
-    const { builder, app, chatId, write, storeId, titles } = await withNote();
+  it("is emptied for good at once when a builder resets the test data, and the next call starts on an empty store", async () => {
+    const { builder, app, storeId, titles } = await withNote();
     const before = await titles();
-    await builder.api.chats.discardDraft(chatId, app);
-    await vi.waitFor(
-      async () => {
-        await expect(storeEmptied(storeId)).resolves.toBeTruthy();
-      },
-      { timeout: 10_000, interval: 100 }
-    );
-    // A new draft with the same schema.
-    const { revision } = await chatsOf(builder).previewDraft(
-      chatId,
-      builder.userId,
-      app
-    );
-    await write(
-      { "server/notes.ts": notesFiles("again").files["server/notes.ts"] ?? "" },
-      revision
-    );
-    expect({ before, after: await titles() }).toStrictEqual({
+    await builder.api.apps.drafts.resetTestData(app);
+    const emptied = await storeEmptied(storeId);
+    expect({ before, emptied, after: await titles() }).toStrictEqual({
       before: ["Typed in"],
+      emptied: true,
       after: [],
     });
   });
 
-  it("never makes again the store of a call that read the preview's seed before its draft was discarded", async () => {
-    const { builder, app, chatId, revision } = await setUp();
-    const chats = chatsOf(builder);
-    // A call under way read the seed, then the draft was discarded.
-    const { seed } = await chats.previewRun(chatId, builder.userId, app);
-    await builder.api.chats.discardDraft(chatId, app);
-    const storeId = `throwaway-${crypto.randomUUID()}`;
-    const kept = await refusalOf(
-      chats.keepPreviewStore(chatId, builder.userId, app, {
-        storeId,
-        seed,
-        revision,
-      })
+  it("keeps its test data when the draft is discarded, for the next draft over the same schema", async () => {
+    const { builder, app, write, titles } = await withNote();
+    const { revision } = await builder.api.apps.drafts.get(app);
+    await builder.api.apps.drafts.discard(app, revision);
+    await write(
+      { "server/notes.ts": notesFiles("again").files["server/notes.ts"] ?? "" },
+      revision + 1
     );
-    const recorded = await previewStores(builder, chatId, app);
-    expect({
-      kept,
-      recorded: recorded.map(({ store_id: id }) => id),
-    }).toStrictEqual({ kept: "app.preview_outdated", recorded: [] });
+    await expect(titles()).resolves.toStrictEqual(["Typed in"]);
   });
 
-  it("refuses the commit of a call still under way when its draft is discarded, and the next draft starts empty", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const at = { chatId, app, revision };
-    // Writes once a wait is over.
-    const late = previewCall(
-      builder,
-      chatId,
-      app,
-      await requestFor(builder, at, "notes.late")
+  it("forgets a person an admin erased, and keeps everyone else", async () => {
+    const { storeId } = await withNote();
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "builder");
+    const store = inJurisdiction(env, env.DATA_STORES).getByName(
+      storeIdSchema.parse(storeId)
     );
+    const preferencesOf = async (who: string): Promise<number> =>
+      await runInDurableObject(
+        store,
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM sdk_preferences WHERE person_id = ?",
+              who
+            )
+            .one().count
+      );
+    await runInDurableObject(store, (_instance, state) => {
+      for (const who of [person.userId, other.userId]) {
+        state.storage.sql.exec(
+          "INSERT INTO sdk_preferences (person_id, revision, value_json, updated_at) VALUES (?, 1, '{}', ?)",
+          who,
+          Date.now()
+        );
+      }
+    });
+    await admin.api.members.remove(person.userId);
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    expect({
+      theirs: await preferencesOf(person.userId),
+      others: await preferencesOf(other.userId),
+    }).toStrictEqual({ theirs: 0, others: 1 });
+  });
+
+  it("never makes again the store of a call that read the preview's seed before its test data was reset", async () => {
+    const { builder, app } = await setUp();
+    // A call under way read the seed, then the test data was reset.
+    const { seed } = await previewOf(app).run();
+    await builder.api.apps.drafts.resetTestData(app);
+    const storeId = `throwaway-${crypto.randomUUID()}`;
+    const kept = await refusalOf(previewOf(app).keepStore({ storeId, seed }));
+    expect({ kept, recorded: await previewStores(app) }).toStrictEqual({
+      kept: "app.preview_outdated",
+      recorded: [],
+    });
+  });
+
+  it("refuses the commit of a call still under way when its test data is reset, and the next call starts empty", async () => {
+    const { builder, app, revision } = await setUp();
+    const at = { app, revision };
+    // Writes once a wait is over.
+    const late = previewCall(builder, app, await requestFor(at, "notes.late"));
     await vi.waitFor(
       async () => {
-        await expect(previewStores(builder, chatId, app)).resolves.toHaveLength(
-          1
-        );
+        await expect(previewStores(app)).resolves.toHaveLength(1);
       },
       { timeout: 10_000, interval: 100 }
     );
-    await builder.api.chats.discardDraft(chatId, app);
+    await builder.api.apps.drafts.resetTestData(app);
     const settled = outcome(await late);
-    const { revision: now } = await chatsOf(builder).previewDraft(
-      chatId,
-      builder.userId,
-      app
-    );
-    await write(
-      { "server/notes.ts": notesFiles("again").files["server/notes.ts"] ?? "" },
-      now
-    );
     const titles = outcome(
-      await previewCall(
-        builder,
-        chatId,
-        app,
-        await requestFor(builder, { ...at, revision: now + 1 }, "notes.titles")
-      )
+      await previewCall(builder, app, await requestFor(at, "notes.titles"))
     );
     expect({ settled: typeof settled, titles }).toStrictEqual({
       // Refused, whatever the code: it wrote nothing anywhere.
@@ -354,22 +329,16 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
     });
   });
 
-  it("is emptied for good when an admin removes its person", async () => {
-    const { builder, storeId } = await withNote();
-    const admin = await signedInApi(idp, "admin");
-    await admin.api.members.remove(builder.userId);
+  it("is emptied for good when its App is removed", async () => {
+    const { builder, app, storeId } = await withNote();
+    await builder.api.apps.archive(app);
+    await builder.api.apps.remove(app);
     await expect(storeEmptied(storeId)).resolves.toBeTruthy();
   });
 
   it("is never held again once emptied, by a call that was already under way", async () => {
-    const { builder, chatId, storeId } = await withNote();
-    await builder.api.chats.remove(chatId);
-    await vi.waitFor(
-      async () => {
-        await expect(storeEmptied(storeId)).resolves.toBeTruthy();
-      },
-      { timeout: 10_000, interval: 100 }
-    );
+    const { builder, app, storeId } = await withNote();
+    await builder.api.apps.drafts.resetTestData(app);
     const held = await refusalOf(
       holdThrowawayStore(
         env,
