@@ -269,6 +269,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /** Whether this person's own store was erased whole: then it refuses every call. */
   #erased = false;
 
+  /**
+   * The calls under way that may write to the store's part of the bucket:
+   * adds and ticks (`#writing`).
+   */
+  readonly #writes = new Set<Promise<unknown>>();
+
   /** Whether this instance made its schema current (`#start`). */
   #opened = false;
 
@@ -522,10 +528,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addSource(source: NewSource): Promise<SourceVersionRef> {
     const adding = checked(newSourceSchema, source);
     this.#mayKeep(adding.access);
-    await this.#readyToWrite();
-    const added = await addVersion(this.#sources, adding, { indexed: true });
-    await this.#armAlarm();
-    return added;
+    return await this.#writing(async () => {
+      await this.#readyToWrite();
+      const added = await addVersion(this.#sources, adding, { indexed: true });
+      await this.#armAlarm();
+      return added;
+    });
   }
 
   /**
@@ -535,10 +543,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
     const adding = checked(newInstructionsSchema, source);
     this.#mayKeep(adding.access);
-    await this.#readyToWrite();
-    const added = await addVersion(this.#sources, adding, { indexed: false });
-    await this.#armAlarm();
-    return added;
+    return await this.#writing(async () => {
+      await this.#readyToWrite();
+      const added = await addVersion(this.#sources, adding, {
+        indexed: false,
+      });
+      await this.#armAlarm();
+      return added;
+    });
+  }
+
+  /**
+   * `write` run as one of the calls under way that may write to the
+   * store's part of the bucket (`#eraseWhole` waits for them).
+   */
+  async #writing<T>(write: () => Promise<T>): Promise<T> {
+    const running = write();
+    this.#writes.add(running);
+    try {
+      return await running;
+    } finally {
+      this.#writes.delete(running);
+    }
   }
 
   /** A pack of what the reader may read for the question, within its budget. */
@@ -638,6 +664,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         throw new Error(erasureUnrecorded);
       }
     }
+    // An add or a tick that started before the erasure may still write
+    // a file or a vector under the store's prefix after this deletes what
+    // it lists: while one is under way, the erasure isn't finished, and
+    // the caller's next call deletes what it wrote.
+    const quiet = this.#writes.size === 0;
     let done = false;
     try {
       done = await deleteStoreObjects(this.#bucket, [
@@ -647,7 +678,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     } catch {
       // Nothing of the error is kept: it may name a key.
     }
-    if (!done) {
+    if (!(done && quiet)) {
       throw new Error(stillDeleting);
     }
   }
@@ -664,6 +695,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * none starves the next, and the queue runs whatever the others did.
    */
   async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+    await this.#writing(async () => {
+      await this.#workNow(ask, at, embedders);
+    });
+  }
+
+  /** `work`, as one of the calls that may write to the bucket. */
+  async #workNow(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
@@ -709,12 +747,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * What the store's own alarm works with: the host's model calls and
    * embedders, as its clock gives them to the shared store's tick. The
    * host's subclass gives them; null, as here, works nothing on an alarm.
+   * A field, not a method: no caller reaches it over RPC, which exposes
+   * only the class's methods.
    */
-  // oxlint-disable-next-line class-methods-use-this -- a hook the host's subclass overrides
-  protected async alarmHost(): Promise<AlarmHost | null> {
-    await Promise.resolve();
-    return null;
-  }
+  protected readonly alarmHost: (() => Promise<AlarmHost>) | null = null;
 
   /**
    * A person's own store's tick, on the alarm it set itself (`#armAlarm`):
@@ -731,8 +767,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (this.#erased) {
       return;
     }
-    const host = await this.alarmHost();
-    if (host !== null) {
+    if (this.alarmHost !== null) {
+      const host = await this.alarmHost();
       await this.work(host.ask, new Date(), host.embedders);
     }
   }

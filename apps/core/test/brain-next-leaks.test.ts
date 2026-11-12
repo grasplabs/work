@@ -287,6 +287,8 @@ const storeMethods = (): string[] => {
     }
   }
   names.delete("constructor");
+  // The runtime's own handler, which no caller reaches over RPC.
+  names.delete("alarm");
   return [...names];
 };
 

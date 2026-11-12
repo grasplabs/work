@@ -14,7 +14,7 @@ const quietAsk: AskModel = async () => {
 /** The store, its own alarm working as a host with no model works it. */
 export class BrainStore extends Store {
   // oxlint-disable-next-line class-methods-use-this -- the store's hook for its host
-  protected override async alarmHost(): Promise<AlarmHost> {
+  protected override readonly alarmHost = async (): Promise<AlarmHost> => {
     await Promise.resolve();
     return {
       ask: quietAsk,
@@ -26,5 +26,5 @@ export class BrainStore extends Store {
         },
       },
     };
-  }
+  };
 }

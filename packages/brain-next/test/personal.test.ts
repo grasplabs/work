@@ -165,6 +165,31 @@ const restore = async (store: Store, copy: Copy): Promise<void> => {
   await kill(store);
 };
 
+/** R2's call `name` on the host's bucket, as the store would make it. */
+const r2 = async (name: string, args: unknown[]): Promise<unknown> => {
+  const bucket = env.BRAIN_OBJECTS;
+  const method: unknown = Reflect.get(bucket, name);
+  if (typeof method !== "function") {
+    throw new TypeError(`R2 has no ${name}`);
+  }
+  const result: unknown = await Reflect.apply(method, bucket, args);
+  return result;
+};
+
+/** R2's calls by name. */
+const r2Calls = ["get", "head", "put", "delete", "list"] as const;
+
+/** The store's bucket swapped for `to`. */
+const swapBucket = async (store: Store, to: unknown): Promise<void> => {
+  await runInDurableObject(store, (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: to });
+  });
+};
+
 /**
  * Makes the store's bucket fail `failing` (R2's calls by name) from now
  * on, until `heal` is called.
@@ -173,38 +198,55 @@ const breakBucket = async (
   store: Store,
   failing: readonly string[]
 ): Promise<{ heal: () => Promise<void> }> => {
-  const bucket = env.BRAIN_OBJECTS;
-  const broken = Object.fromEntries(
-    ["get", "head", "put", "delete", "list"].map((name) => [
-      name,
-      failing.includes(name)
-        ? async () => {
-            await Promise.resolve();
-            throw new Error("Broken by the test");
-          }
-        : async (...args: unknown[]) => {
-            const method: unknown = Reflect.get(bucket, name);
-            if (typeof method !== "function") {
-              throw new TypeError(`R2 has no ${name}`);
+  await swapBucket(
+    store,
+    Object.fromEntries(
+      r2Calls.map((name) => [
+        name,
+        failing.includes(name)
+          ? async () => {
+              await Promise.resolve();
+              throw new Error("Broken by the test");
             }
-            const result: unknown = await Reflect.apply(method, bucket, args);
-            return result;
-          },
-    ])
+          : async (...args: unknown[]) => await r2(name, args),
+      ])
+    )
   );
-  const swap = async (to: unknown) => {
-    await runInDurableObject(store, (instance) => {
-      const objectEnv: unknown = Reflect.get(instance, "env");
-      if (typeof objectEnv !== "object" || objectEnv === null) {
-        throw new TypeError("The store has no env");
-      }
-      Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: to });
-    });
-  };
-  await swap(broken);
   return {
     heal: async () => {
-      await swap(bucket);
+      await swapBucket(store, env.BRAIN_OBJECTS);
+    },
+  };
+};
+
+/**
+ * Holds the store's writes of versions' files from now on: `reached`
+ * once one waits, which writes when `release` is called.
+ */
+const holdFileWrites = async (
+  store: Store
+): Promise<{ reached: Promise<"reached">; release: () => void }> => {
+  const reached = Promise.withResolvers<"reached">();
+  const released = Promise.withResolvers<"released">();
+  await swapBucket(
+    store,
+    Object.fromEntries(
+      r2Calls.map((name) => [
+        name,
+        async (...args: unknown[]) => {
+          if (name === "put" && String(args[0]).includes("/sources/")) {
+            reached.resolve("reached");
+            await released.promise;
+          }
+          return await r2(name, args);
+        },
+      ])
+    )
+  );
+  return {
+    reached: reached.promise,
+    release: () => {
+      released.resolve("released");
     },
   };
 };
@@ -577,6 +619,25 @@ describe("a person's own store", () => {
     await expect(
       keysUnder(`${await ownPrefix()}sources/`)
     ).resolves.toStrictEqual([]);
+  });
+
+  // Partial failure: an add under way as the erasure runs writes after it.
+  it("is not erased while an add under way may still write a file, and is once it has ended", async () => {
+    const { reached, release } = await holdFileWrites(own());
+    const adding = Promise.allSettled([add(own(), "Late file", theirs())]);
+    await reached;
+
+    await expect(
+      called(own().erasePerson({ person, reason: "person_erased" }))
+    ).rejects.toThrow(/still deleting its files/u);
+    release();
+    const [outcome] = await adding;
+    expect(outcome?.status).toBe("rejected");
+
+    await own().erasePerson({ person, reason: "person_erased" });
+    await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
+      `${await ownPrefix()}erased`,
+    ]);
   });
 
   it("wakes itself while it has work, and sleeps once it has none", async () => {
