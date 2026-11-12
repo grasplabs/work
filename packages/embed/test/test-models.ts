@@ -53,12 +53,18 @@ const bytesOf = new Map<EmbedModel, Record<Which, ArrayBuffer>>([
  * only the first time any object meets the text, as an object whose
  * memory runs short might), or runs out
  * of a call's tokens after its first
- * `budgetTexts` texts, deferring the rest (`budget`). A call of several
- * texts breaks whole, as an object ending or hanging does.
+ * `budgetTexts` texts, deferring the rest (`budget`), or holds every call
+ * until the test mends it (`held`: a gate, so nothing hangs on a clock),
+ * or embeds every text as a vector the Brain can't use: all not a number
+ * (`nan`) or all zero (`zeros`), as a module gone wrong might. A call of
+ * several texts breaks whole, as an object ending or hanging does.
  */
 export type Breakage =
   | "crash"
   | "slow"
+  | "held"
+  | "nan"
+  | "zeros"
   | "poison"
   | "trap"
   | "trap-once"
@@ -75,6 +81,12 @@ const trappedOnce = new Set<string>();
 
 /** How many texts of a call a `budget` embedder embeds before it defers the rest. */
 export const budgetTexts = 2;
+
+/** How often a held embedder looks whether the test opened its gate. */
+const heldPollMs = 10;
+
+/** The longest a held embedder waits before it fails the call. */
+const heldMostMs = 30_000;
 
 /** How late a slow embedder answers: well past the time tests give a batch. */
 export const slowMs = 5000;
@@ -101,10 +113,23 @@ export class BreakableEmbedder extends Embedder {
   }
 
   override async embedMany(
-    texts: readonly string[]
+    texts: readonly string[],
+    giveUpAt?: number
   ): ReturnType<Embedder["embedMany"]> {
     calls.push({ object: this.ctx.id.toString(), texts: [...texts] });
-    const breakage = await this.ctx.storage.get<Breakage>("breakage");
+    let breakage = await this.ctx.storage.get<Breakage>("breakage");
+    const heldUntil = Date.now() + heldMostMs;
+    while (breakage === "held") {
+      if (Date.now() > heldUntil) {
+        throw new Error(
+          `Held for ${heldMostMs} ms and never mended: a test left its gate shut`
+        );
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the gate: look again until the test mends it
+      await scheduler.wait(heldPollMs);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      breakage = await this.ctx.storage.get<Breakage>("breakage");
+    }
     const poisoned = texts.some((text) => text.includes(poisonWord));
     if (breakage === "crash" || (breakage === "poison" && poisoned)) {
       this.ctx.abort("Broken by the test");
@@ -122,7 +147,8 @@ export class BreakableEmbedder extends Embedder {
         trappedOnce.add(text);
       }
       const embedded = await super.embedMany(
-        texts.filter((_, at) => trapping[at] !== true)
+        texts.filter((_, at) => trapping[at] !== true),
+        giveUpAt
       );
       const { identity } = await this.loaded();
       return texts.map((_, at) =>
@@ -136,13 +162,25 @@ export class BreakableEmbedder extends Embedder {
       );
     }
     if (breakage === "budget") {
-      const embedded = await super.embedMany(texts.slice(0, budgetTexts));
+      const embedded = await super.embedMany(
+        texts.slice(0, budgetTexts),
+        giveUpAt
+      );
       return [
         ...embedded,
         ...texts.slice(budgetTexts).map(() => ({ kind: "deferred" as const })),
       ];
     }
-    return await super.embedMany(texts);
+    const embedded = await super.embedMany(texts, giveUpAt);
+    if (breakage === "nan" || breakage === "zeros") {
+      const value = breakage === "nan" ? Number.NaN : 0;
+      return embedded.map((result) =>
+        result.kind === "embedded"
+          ? { ...result, vector: result.vector.map(() => value) }
+          : result
+      );
+    }
+    return embedded;
   }
 
   /** Test-only: breaks this object, or mends it (null). */

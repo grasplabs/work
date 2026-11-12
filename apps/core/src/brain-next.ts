@@ -21,6 +21,7 @@ import type {
   Pack,
   PackItem,
   Reader,
+  RecallRequest,
   SourceId,
   StepFailure,
   WorkOverview,
@@ -34,6 +35,7 @@ import type {
 } from "@grasp-os/shared/brain-report";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
+import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -42,7 +44,7 @@ import { z } from "zod";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { inJurisdiction } from "./durable-objects.ts";
-import { embedInBulk, embedderModel } from "./embedder.ts";
+import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
@@ -210,7 +212,8 @@ export interface Recall {
    * moments a version the reader may not read was current, the source
    * answers nothing, so stepping `asOf` shows when such a version was
    * added and replaced; its existence shows in the version numbers
-   * already.
+   * already. As of a moment, recall is by words and exact parts alone,
+   * never by meaning: vectors are kept for current versions only.
    */
   asOf?: Date;
 }
@@ -318,26 +321,68 @@ export const addSource = async (
   return { source, version };
 };
 
+/** Whether `vector` is one the Brain takes: finite numbers, not all zero. */
+const isUsableVector = (vector: readonly number[]): boolean =>
+  vector.length > 0 &&
+  vector.every((value) => Number.isFinite(value)) &&
+  vector.some((value) => value !== 0);
+
+/**
+ * `question`'s vector by core's question embedder, for the Brain to
+ * search by meaning too; none while no model ships, for a question of
+ * whitespace (which words a question holds is the Brain's to say, so a
+ * question of punctuation alone is still embedded, and the Brain finds
+ * nothing for it), or when the embedder gave no vector the Brain can use
+ * in time: logged with why, nothing of the question or the person, and
+ * recall goes ahead by words and exact parts.
+ */
+const meaningOf = async (
+  env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
+  question: string
+): Promise<RecallRequest["meaning"]> => {
+  if (question.trim() === "") {
+    return undefined;
+  }
+  const embedded = await questionVectorOf(env, question);
+  if (embedded === null) {
+    return undefined;
+  }
+  if (embedded.kind === "vector" && isUsableVector(embedded.vector)) {
+    return { model: embedded.model, vector: embedded.vector };
+  }
+  log.warn("brain.recall.without_meaning", {
+    reason: embedded.kind === "none" ? embedded.reason : "unusable",
+  });
+  return undefined;
+};
+
 /**
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
  * `tokensOf`), and, with `asOf`, of each source as it was then: the
- * Brain's `recall`. Every item cites its source, version and place; the
- * pack says what was not found and whether the budget cut it short, all
- * from what they may read alone. Refused once they are no longer a
- * member, or when `personId` isn't an ID.
+ * Brain's `recall`, by words, exact parts and, once a model ships, by
+ * meaning: the question is embedded while its reader is read. Every item
+ * cites its source, version and place; the pack says what was not found
+ * and whether the budget cut it short, all from what they may read alone.
+ * Refused once they are no longer a member, or when `personId` isn't an
+ * ID.
  */
 export const recallAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
   { question, budget, asOf }: Recall
 ): Promise<RecalledPack> => {
-  const reader = await readerOf(env, personId);
+  const [reader, meaning] = await Promise.all([
+    readerOf(env, personId),
+    // As of a moment the Brain never searches by meaning: nothing to embed.
+    asOf === undefined ? meaningOf(env, question) : undefined,
+  ]);
   const { items, notFound, truncated } = await brain(env).recall({
     question,
     reader,
     budget,
     ...(asOf === undefined ? {} : { asOf }),
+    ...(meaning === undefined ? {} : { meaning }),
   });
   return {
     items: items.map(({ source, version, position, text, whole, found }) => ({

@@ -179,17 +179,50 @@ export const readerSchema = z.strictObject({
 });
 export type Reader = z.infer<typeof readerSchema>;
 
+/** Which model and build made a vector, as the host's embedder says. */
+export const embedModelSchema = z.strictObject({
+  name: wellFormedString().min(1).max(128),
+  build: z.string().regex(/^[0-9a-f]{1,64}$/u),
+});
+export type EmbedModel = z.infer<typeof embedModelSchema>;
+
+/**
+ * The name the store keeps a model's vectors under: the model and its
+ * build, so vectors of two builds are never compared.
+ */
+export const vectorModelNameOf = ({ name, build }: EmbedModel): string =>
+  `${name}@${build}`;
+
+/** Most dimensions of a vector. */
+export const vectorDimensionsMax = 4096;
+
+/** A vector: finite numbers, never all zero (it has no direction). */
+const vectorSchema = z
+  .array(z.number())
+  .min(1)
+  .max(vectorDimensionsMax)
+  .refine((vector) => vector.some((value) => value !== 0), {
+    message: "Is all zeros",
+  });
+
 /**
  * A recall: a question, in the reader's words, the reader, how many tokens
- * the pack may hold (`tokensOf`), and, to read the past, the moment the
+ * the pack may hold (`tokensOf`), to read the past, the moment the
  * sources are read as of: what each was then, to the millisecond and
- * including it (for "on a day", the day's last millisecond).
+ * including it (for "on a day", the day's last millisecond); and, to
+ * search by meaning too, the question's vector (`meaning`) by the host's
+ * model and the build that made it. The store makes no outside call, so
+ * the host embeds the question first; without a vector, and always as of
+ * a moment, recall is by words and exact parts alone.
  */
 export const recallRequestSchema = z.strictObject({
   question: wellFormedString().max(questionMaxLength),
   reader: readerSchema,
   budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
   asOf: z.date().optional(),
+  meaning: z
+    .strictObject({ model: embedModelSchema, vector: vectorSchema })
+    .optional(),
 });
 export type RecallRequest = z.infer<typeof recallRequestSchema>;
 
@@ -202,10 +235,13 @@ export interface SourceVersionRef {
 /**
  * How recall found a chunk: as the question wrote one of its IDs or
  * quoted phrases (`exact`); by its telling words in any form
- * (`words`); or by its commonest words alone (`stop words`), which say
- * little: a chunk found so is no answer by itself.
+ * (`words`); by its commonest words alone (`stop words`), which say
+ * little: a chunk found so is no answer by itself; or by meaning alone
+ * (`meaning`): its vector is near the question's and neither other way
+ * listed it, so it may share no word with the question (one in another
+ * language, say). A chunk several ways found says the first of these.
  */
-export type FoundBy = "exact" | "words" | "stop words";
+export type FoundBy = "exact" | "words" | "stop words" | "meaning";
 
 /**
  * An item of a pack: a passage of a version of a source, cited by the
@@ -599,20 +635,6 @@ export interface EmbeddingOverview {
   rebuilt: boolean;
 }
 
-/** Which model and build made a vector, as the host's embedder says. */
-export const embedModelSchema = z.strictObject({
-  name: wellFormedString().min(1).max(128),
-  build: z.string().regex(/^[0-9a-f]{1,64}$/u),
-});
-export type EmbedModel = z.infer<typeof embedModelSchema>;
-
-/**
- * The name the store keeps a model's vectors under: the model and its
- * build, so vectors of two builds are never compared.
- */
-export const vectorModelNameOf = ({ name, build }: EmbedModel): string =>
-  `${name}@${build}`;
-
 /**
  * Most passages one embed request names: one batch of an item
  * (embedding.ts `embedBatch`), one call of the embedder.
@@ -704,9 +726,6 @@ export const personErasureSchema = z.strictObject({
 });
 export type PersonErasure = z.infer<typeof personErasureSchema>;
 
-/** Most dimensions of a vector. */
-export const vectorDimensionsMax = 4096;
-
 /** Most vectors one put takes. */
 export const vectorsPerPutMax = 256;
 
@@ -717,15 +736,6 @@ export const vectorSearchLimitMax = 50;
 export const modelNameMaxLength = 256;
 
 const modelNameSchema = wellFormedString().min(1).max(modelNameMaxLength);
-
-/** A vector: finite numbers, never all zero (it has no direction). */
-const vectorSchema = z
-  .array(z.number())
-  .min(1)
-  .max(vectorDimensionsMax)
-  .refine((vector) => vector.some((value) => value !== 0), {
-    message: "Is all zeros",
-  });
 
 /**
  * The embedding model vectors come from, as its caller names it: the
@@ -824,14 +834,21 @@ export interface Brain {
    * newer; passages holding only its commonest words after them, and only
    * when the others are fewer than the limit), and exact (for each of its
    * IDs and quoted phrases, the passages holding it as written, in
-   * the words way's order, then shorter, then newer). The lists are fused
-   * by rank and packed to the budget: each passage's best part first,
-   * then whole passages.
+   * the words way's order, then shorter, then newer). Given the question's
+   * vector (`meaning`), a third: the passages whose vectors of that model
+   * and build are nearest it (as `searchVectors`, at most `recallLimit`);
+   * none when the store holds no vectors of that build or the vector has
+   * other dimensions than theirs, so a vector never fails a recall. The
+   * lists are fused by rank and packed to the budget: each passage's best
+   * part first, then whole passages. Meaning never makes a word found:
+   * what was not found is the words way's and the exact way's alone.
    *
    * The versions searched are the current ones; as of a moment, each
    * source's version current then, only if the reader is among that
    * version's readers and among the current version's now (as
    * `readVersion`): so narrowing a source hides its past from recall too.
+   * As of a moment, never by meaning, whatever vector is given: vectors
+   * are kept for current versions only.
    * Nothing in a pack (its items, their order, what was not found, being
    * cut short) depends on what the reader may not read.
    */

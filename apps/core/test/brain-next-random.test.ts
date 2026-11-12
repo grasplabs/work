@@ -60,6 +60,11 @@ import { testBinding } from "./test-env.ts";
 //   stop words alone. Not found: the IDs no readable current chunk holds,
 //   as written, then the telling words none holds in any form, folded,
 //   but the IDs' own. Never cut short.
+// - By meaning (GRA-1769): half the questions are asked of the store with
+//   a vector of their own too, for the scenario's model. Its list, given
+//   after the words list: the chunks a vector search returns (below), at
+//   most `recallLimit`; a chunk it alone holds is found "meaning". It
+//   changes nothing of what is not found.
 // - History: a version, whole, to a person among its readers and among
 //   the current version's readers, with the teams they are in now; to
 //   anyone else exactly what a source no one added answers (null).
@@ -450,7 +455,7 @@ const expectedOf = (
 };
 
 /** How the pack says a chunk was found. */
-type FoundBy = "exact" | "words" | "stop words";
+type FoundBy = "exact" | "words" | "stop words" | "meaning";
 
 /** A chunk the pack expects, by the list or lists that hold it. */
 interface Packed extends ExpectedChunk {
@@ -562,7 +567,8 @@ const packOf = (
   membership: Membership,
   asked: readonly Token[],
   written: (token: Token) => string,
-  wordOf: (token: Token) => string
+  wordOf: (token: Token) => string,
+  meant: readonly ExpectedChunk[]
 ): { chunks: Packed[]; notFound: string[] } => {
   // The IDs, each once, in the question's order: the words of roots a and
   // b.
@@ -577,6 +583,7 @@ const packOf = (
       chunk,
       found: chunk.telling > 0 ? ("words" as const) : ("stop words" as const),
     })),
+    meant.map((chunk) => ({ chunk, found: "meaning" as const })),
   ]);
   const missing = ids.filter((id) => !exact.held.has(id));
   // The telling words, each once, in the question's order; a question of
@@ -774,6 +781,7 @@ const scenario = (people: readonly string[], seed: number) => {
     planned.flatMap((source) => {
       const version = currentOf(source);
       return version.paragraphs.map((_, position) => ({
+        planned: source,
         version,
         chunk: {
           source: `${source.source.producer}:${source.source.id}`,
@@ -877,6 +885,76 @@ const scenario = (people: readonly string[], seed: number) => {
     ];
   };
 
+  /** `person`'s teams, as core names its groups. */
+  const groupsOf = (person: number): string[] =>
+    teamIds
+      .filter((_, team) => membership.has(memberKey(person, team)))
+      .map((id) => `team:${id}`);
+
+  /**
+   * The current chunks `person` may read nearest `question`, by cosine,
+   * ties to the chunk added first, at most `limit`, each with its cosine.
+   */
+  const nearest = (person: number, question: number[], limit: number) => {
+    const cosineOf = (chunk: ChunkRef): number =>
+      (vectors.get(placeKey(chunk)) ?? []).reduce(
+        (sum, value, index) => sum + value * (question[index] ?? 0),
+        0
+      ) / vectorDimensions;
+    return currentChunks()
+      .filter(({ version }) => isAmong(version.readers, person, membership))
+      .map((each) => ({ ...each, score: cosineOf(each.chunk) }))
+      .toSorted(
+        (a, b) =>
+          b.score - a.score ||
+          (addOrder.get(a.version) ?? 0) - (addOrder.get(b.version) ?? 0) ||
+          a.chunk.position - b.chunk.position
+      )
+      .slice(0, limit);
+  };
+
+  /**
+   * What `person` recalls for `question`, through core, or, by meaning
+   * too (`vector`), of the store, as core would ask it with a model: its
+   * items citing sources as core names them.
+   */
+  const recallOf = async (
+    person: number,
+    question: string,
+    vector: number[] | undefined
+  ) => {
+    if (vector === undefined) {
+      return await recallAs(env, personId(person), {
+        question,
+        budget: { tokens: recallBudgetMax },
+      });
+    }
+    const at = vectorModel.name.lastIndexOf("@");
+    const pack = await brainStore().recall({
+      question,
+      reader: { person: personId(person), groups: groupsOf(person) },
+      budget: { tokens: recallBudgetMax },
+      meaning: {
+        model: {
+          name: vectorModel.name.slice(0, at),
+          build: vectorModel.name.slice(at + 1),
+        },
+        vector,
+      },
+    });
+    return {
+      ...pack,
+      // Each source as the plan names it; one the plan doesn't know as
+      // none, which the comparison shows.
+      items: pack.items.map((item) => ({
+        ...item,
+        source: planned.find(
+          ({ source }) => `${source.producer}:${source.id}` === item.source
+        )?.source ?? { producer: "upload" as const, id: item.source },
+      })),
+    };
+  };
+
   /** Asks as `person` once; what went wrong, with what bears on it. */
   const ask = async (moment: string, person: number): Promise<string[]> => {
     // Mostly forms with a stop word now and then; sometimes stop words
@@ -889,10 +967,23 @@ const scenario = (people: readonly string[], seed: number) => {
       draws.chance(0.2) ? wordOf(token).toUpperCase() : wordOf(token)
     );
     const question = writtenAs.join(" ");
-    const answer = await recallAs(env, personId(person), {
-      question,
-      budget: { tokens: recallBudgetMax },
-    });
+    const vector = draws.chance(0.5) ? signs() : undefined;
+    const answer = await recallOf(person, question, vector);
+    const meant =
+      vector === undefined
+        ? []
+        : nearest(person, vector, recallLimit).map(
+            ({ planned: source, version, chunk }) => ({
+              name: `s${source.index} v${version.version} c${chunk.position}`,
+              planned: source,
+              version,
+              position: chunk.position,
+              length: version.lengths[chunk.position] ?? 0,
+              telling: 0,
+              stops: 0,
+              exact: 0,
+            })
+          );
     // Each word as the question first wrote it.
     const written = (token: Token): string =>
       writtenAs[asked.indexOf(token)] ?? wordOf(token);
@@ -902,7 +993,8 @@ const scenario = (people: readonly string[], seed: number) => {
       membership,
       asked,
       written,
-      wordOf
+      wordOf,
+      meant
     );
     const problems = problemsOf({
       got: answer.items.map(({ source, version, text }) =>
@@ -929,7 +1021,7 @@ const scenario = (people: readonly string[], seed: number) => {
       return [];
     }
     return [
-      `${moment}, p${person} asks "${asked.join(" ")}":`,
+      `${moment}, p${person} asks "${asked.join(" ")}"${vector === undefined ? "" : ` by meaning too, nearest [${meant.map(({ name }) => name).join(", ")}]`}:`,
       ...problems,
       ...context(person),
       `sources holding its words: ${planned
@@ -1010,30 +1102,13 @@ const scenario = (people: readonly string[], seed: number) => {
     person: number
   ): Promise<string[]> => {
     const question = signs();
-    const groups = teamIds
-      .filter((_, team) => membership.has(memberKey(person, team)))
-      .map((id) => `team:${id}`);
     const { chunks } = await brainStore().searchVectors({
       model: vectorModel.name,
       vector: question,
-      reader: { person: personId(person), groups },
+      reader: { person: personId(person), groups: groupsOf(person) },
       limit: vectorLimit,
     });
-    const cosineOf = (chunk: ChunkRef): number =>
-      (vectors.get(placeKey(chunk)) ?? []).reduce(
-        (sum, value, index) => sum + value * (question[index] ?? 0),
-        0
-      ) / vectorDimensions;
-    const expected = currentChunks()
-      .filter(({ version }) => isAmong(version.readers, person, membership))
-      .map(({ version, chunk }) => ({ version, chunk, score: cosineOf(chunk) }))
-      .toSorted(
-        (a, b) =>
-          b.score - a.score ||
-          (addOrder.get(a.version) ?? 0) - (addOrder.get(b.version) ?? 0) ||
-          a.chunk.position - b.chunk.position
-      )
-      .slice(0, vectorLimit);
+    const expected = nearest(person, question, vectorLimit);
     const described = (found: FoundChunk): string =>
       `${placeKey(found)} ${roundedScore(found.score)}`;
     const got = chunks.map(described);

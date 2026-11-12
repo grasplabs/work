@@ -217,8 +217,17 @@ export class Embedder extends DurableObject<EmbedderEnv> {
    * `maxTokensPerCall` tokens: the texts after are `deferred`. Throws, and
    * answers nothing, when the model can't run at all (its files missing or
    * damaged): that is the embedder's failure, not a text's.
+   *
+   * `giveUpAt` (ms since the epoch, by the caller's clock) is when the
+   * caller stops waiting: from then on each text left is `deferred`
+   * without being tokenised or run, checked as each text starts, after
+   * the model is loaded. So a call that waited behind others, or for a
+   * load, while its caller gave up costs the object nothing more.
    */
-  async embedMany(texts: readonly string[]): Promise<EmbedResult[]> {
+  async embedMany(
+    texts: readonly string[],
+    giveUpAt?: number
+  ): Promise<EmbedResult[]> {
     if (texts.length > maxTextsPerCall) {
       throw new RangeError(
         `An embedder call takes at most ${maxTextsPerCall} texts: send more as several calls.`
@@ -234,13 +243,21 @@ export class Embedder extends DurableObject<EmbedderEnv> {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one text at a time: after a trap, the next one loads a fresh instance
-      let [result, used] = await this.embedOne(text, maxTokensPerCall - tokens);
+      let [result, used] = await this.embedOne(
+        text,
+        maxTokensPerCall - tokens,
+        giveUpAt
+      );
       tokens += used;
       if (result.kind === "failed" && result.reason === "kernel") {
         // The trap may be the instance's (one worn by what ran before it),
         // not the text's: once more on the fresh one, then it is final.
         // oxlint-disable-next-line no-await-in-loop -- as above
-        [result, used] = await this.embedOne(text, maxTokensPerCall - tokens);
+        [result, used] = await this.embedOne(
+          text,
+          maxTokensPerCall - tokens,
+          giveUpAt
+        );
         tokens += used;
       }
       results.push(result);
@@ -249,14 +266,18 @@ export class Embedder extends DurableObject<EmbedderEnv> {
   }
 
   /**
-   * One text of a call, within `budget` tokens, and the tokens the encoder
-   * was given for it: a trapped attempt's too.
+   * One text of a call, within `budget` tokens and before `giveUpAt`, and
+   * the tokens the encoder was given for it: a trapped attempt's too.
    */
   private async embedOne(
     text: unknown,
-    budget: number
+    budget: number,
+    giveUpAt: number | undefined
   ): Promise<[EmbedResult, number]> {
     const loaded = await this.loaded();
+    if (giveUpAt !== undefined && Date.now() >= giveUpAt) {
+      return [deferred, 0];
+    }
     if (!isText(text)) {
       return [
         { kind: "failed", reason: "not-text", model: loaded.identity },

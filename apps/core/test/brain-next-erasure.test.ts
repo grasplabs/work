@@ -2570,3 +2570,145 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
     }
   });
 });
+
+/**
+ * A scene for the vector scan beside an erasure: `reader`'s own source of
+ * a few chunks with codes, and one live passage their team reads, also
+ * with a code. The scan may offer a code only of a current version the
+ * reader may read (vectors.ts), so the erased chunks' codes must leave it
+ * as the erasure hides them, whatever happens to its ledger write: else,
+ * past the candidates the scan keeps, nearer hidden chunks would crowd out
+ * live ones (packages/brain-next/test/meaning.test.ts shows it with 300).
+ */
+const erasedBesideLive = async () => {
+  const reader = await person();
+  const team = await teamOf(reader);
+  const model = modelOf(8);
+  const live = newSource();
+  const erased = newSource();
+  const livePassages = await chunkedSource(
+    live,
+    { kind: "audience", group: `team:${team}` },
+    1,
+    "Live"
+  );
+  await putCodes(model, livePassages);
+  await putCodes(
+    model,
+    await chunkedSource(erased, { kind: "owner", person: reader }, 3, "Erased")
+  );
+  const erasedRows = await chunkRowsOf(erased);
+  const at = model.name.lastIndexOf("@");
+  /** The codes of the erased chunks the scan can still offer. */
+  const inScan = async (): Promise<number> => {
+    const { codes } = await vectorsOf(erasedRows, []);
+    return codes;
+  };
+  /** The sources recall by meaning cites for the reader. */
+  const foundByMeaning = async (): Promise<string[]> => {
+    const { items } = await brain().recall({
+      question: "Unheardof",
+      reader: { person: reader, groups: [`team:${team}`] },
+      budget: { tokens: recallBudgetMax },
+      meaning: {
+        model: {
+          name: model.name.slice(0, at),
+          build: model.name.slice(at + 1),
+        },
+        vector: Array.from({ length: 8 }, () => 1),
+      },
+    });
+    return [...new Set(items.map(({ source }) => source))];
+  };
+  return { reader, erased, live: keyOf(live), inScan, foundByMeaning };
+};
+
+type Scene = Awaited<ReturnType<typeof erasedBesideLive>>;
+
+/** How long a test waits for the store to reach its held ledger write. */
+const heldWriteMs = 30_000;
+
+describe("the vector scan beside an erasure", { timeout: 120_000 }, () => {
+  const erasures = [
+    {
+      name: "a source's",
+      erase: async (scene: Scene) => {
+        await eraseSource(env, { source: scene.erased, reason: "deleted" });
+      },
+    },
+    {
+      name: "a person's",
+      erase: async (scene: Scene) => {
+        await erasePerson(env, {
+          personId: scene.reader,
+          reason: "person_erased",
+        });
+      },
+    },
+  ];
+
+  it.for(erasures)(
+    "takes the erased chunks' codes out of the scan as $name erasure hides them, while its ledger write waits",
+    async ({ erase }) => {
+      const scene = await erasedBesideLive();
+      const before = await scene.inScan();
+      const gate = await holdNextBucketPut();
+      const erasing = settled(erase(scene));
+      const waitUntil = Date.now() + heldWriteMs;
+      while (!gate.reached) {
+        if (Date.now() > waitUntil) {
+          throw new Error(
+            `The erasure didn't reach its ledger write in ${heldWriteMs} ms`
+          );
+        }
+        // oxlint-disable-next-line no-await-in-loop -- until the erasure writes its ledger
+        await scheduler.wait(10);
+      }
+
+      const inScan = await scene.inScan();
+      const overview = await brainWorkOverview(env);
+      const found = await scene.foundByMeaning();
+      gate.released = true;
+      const returned = await erasing;
+
+      expect({
+        before,
+        waiting: { inScan, erasing: overview.erasing > 0, found },
+        returned,
+        afterErasure: await scene.foundByMeaning(),
+      }).toStrictEqual({
+        before: 3,
+        waiting: { inScan: 0, erasing: true, found: [scene.live] },
+        returned: { value: undefined },
+        afterErasure: [scene.live],
+      });
+    }
+  );
+
+  it.for(erasures)(
+    "keeps the erased chunks' codes out of the scan after $name erasure whose ledger write failed, and after it is erased again",
+    async ({ erase }) => {
+      const scene = await erasedBesideLive();
+      const switched = await failLedgerWrites();
+
+      const failed = await settled(erase(scene));
+      const unwritten = await scene.inScan();
+      switched.failing = false;
+      const retried = await settled(erase(scene));
+
+      expect({
+        failed: "error" in failed,
+        unwritten,
+        retried,
+        afterRetry: await scene.inScan(),
+        found: await scene.foundByMeaning(),
+      }).toStrictEqual({
+        failed: true,
+        unwritten: 0,
+        retried: { value: undefined },
+        afterRetry: 0,
+        found: [scene.live],
+      });
+    }
+  );
+});

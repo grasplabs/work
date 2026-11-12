@@ -32,7 +32,9 @@ const fusionK = 60;
  * several ways above one found by one. Ties go to the chunk with the
  * better rank in a list, then to the list given first. A chunk in several
  * lists keeps how the first list given found it. Only ranks count, never
- * a list's own scores, so a new way (vectors, GRA-1769) is one more list.
+ * a list's own scores (a cosine and a count of words don't compare), so
+ * vectors are one more list, given last: a chunk found by meaning alone
+ * says so.
  */
 export const fuse = (lists: readonly (readonly Found[])[]): Found[] => {
   const scored = new Map<
@@ -157,7 +159,11 @@ const windowOf = (text: string, start: number, end: number): string => {
  * text holds an exact part that no piece holds whole (it crosses where a
  * long sentence is cut), a window of at most `quoteMaxLength` around it
  * instead, so a quote of a chunk found as exact always holds what it was
- * found by.
+ * found by. A chunk found by meaning alone may hold none of the question's
+ * words: then every part ties and the quote is its first sentence, its
+ * opening, the one part that claims nothing about which sentence carries
+ * the meaning (the store has a vector of the chunk only, never of its
+ * sentences).
  */
 export const quoteOf = (
   text: string,
