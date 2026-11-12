@@ -433,6 +433,134 @@ export const readSourceVersionAs = async (
     : { source, version, text: read.text, addedAt: read.addedAt };
 };
 
+/** Where a page of a listing starts: after this source, as its producer named it. */
+export interface SourcesAfter {
+  addedAt: Date;
+  source: SourceRef;
+}
+
+const sourcesAfterSchema = z.strictObject({
+  addedAt: z.date(),
+  source: sourceRefSchema,
+});
+
+/**
+ * A source, as a listing names it: its current version, when that was
+ * added, its first line (of its first passage, as its text gives it, for
+ * a title: empty when that passage opens with no line of text), whether
+ * it is the reader's alone (nobody else may read it, admins included),
+ * and how many of its versions the reader may read.
+ */
+export interface ListedSource {
+  source: SourceRef;
+  version: number;
+  addedAt: Date;
+  firstLine: string;
+  personal: boolean;
+  versions: number;
+}
+
+/** A page of sources, and where the next one starts: null at the last. */
+export interface SourcePage {
+  sources: ListedSource[];
+  next: SourcesAfter | null;
+}
+
+/** The first line of `opening` that holds text, trimmed. */
+const firstLineOf = (opening: string): string =>
+  opening
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "") ?? "";
+
+/**
+ * A page of the sources the member `personId` may read, of every
+ * producer's kind (never an instruction file), newest first by when their
+ * current version was added, after `after` when given: what they may not
+ * read takes no place in it. Refused once they are no longer a member.
+ */
+export const listSourcesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  { after }: { after?: SourcesAfter } = {}
+): Promise<SourcePage> => {
+  const from =
+    after === undefined ? undefined : checked(sourcesAfterSchema, after);
+  const { sources, more } = await brain(env).listSources({
+    reader: await readerOf(env, personId),
+    prefixes: producerKinds.map((kind) => `${kind}:`),
+    ...(from === undefined
+      ? {}
+      : { after: { addedAt: from.addedAt, source: sourceKeyOf(from.source) } }),
+  });
+  const listed = sources.map(
+    ({
+      source,
+      version,
+      addedAt,
+      opening,
+      personal,
+      versions,
+    }): ListedSource => ({
+      source: sourceRefOf(source),
+      version,
+      addedAt,
+      firstLine: firstLineOf(opening),
+      personal,
+      versions,
+    })
+  );
+  const last = listed.at(-1);
+  return {
+    sources: listed,
+    next:
+      more && last !== undefined
+        ? { addedAt: last.addedAt, source: last.source }
+        : null,
+  };
+};
+
+/** A version of a source, as a listing names it. */
+export interface ListedVersion {
+  version: number;
+  addedAt: Date;
+}
+
+/** A page of versions, and the version the next one starts below: null at the last. */
+export interface VersionPage {
+  versions: ListedVersion[];
+  before: number | null;
+}
+
+const versionsWantedSchema = z.strictObject({
+  source: sourceRefSchema,
+  before: z.int().positive().optional(),
+});
+
+/**
+ * A page of the versions of `source` the member `personId` may read,
+ * newest first, below `before` when given: only while they may read its
+ * current version, as `readSourceVersionAs` reads them; none, alike, for
+ * a source there isn't. Refused once they are no longer a member.
+ */
+export const listVersionsAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted: { source: SourceRef; before?: number }
+): Promise<VersionPage> => {
+  const { source, before } = checked(versionsWantedSchema, wanted);
+  const { versions, more } = await brain(env).listVersions({
+    source: sourceKeyOf(source),
+    reader: await readerOf(env, personId),
+    ...(before === undefined ? {} : { before }),
+  });
+  const last = versions.at(-1);
+  return {
+    versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
+    before: more && last !== undefined ? last.version : null,
+  };
+};
+
 // Erasure: for good, apart from ordinary removal, where a new version
 // keeps the one before as history. Each erasure is in the Brain's ledger
 // before it returns, and nothing it covers is found or read from then on;

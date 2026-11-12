@@ -13,7 +13,9 @@
  * `instructionProbes` one per export of core's `instruction-files.ts` (the
  * rules over the instruction files brain-next.ts names), `storeProbes` one
  * per public method of the Brain's store (its contract, and anything else
- * a holder of its namespace could call). A member without a probe fails
+ * a holder of its namespace could call), `sourcesProbes` one per method of
+ * the Brain's Sources page's RPC (`session.brainSources`, as the signed-in
+ * person). A member without a probe fails
  * the type check and the harness; a module of core that imports
  * brain-next.ts fails lint unless brain-next-modules.ts names its surface
  * here. A new member is one more probe in its list; a new module is its
@@ -29,6 +31,8 @@ import {
   brainOf,
   currentReadMax,
   instructionsMaxLength,
+  listPageMax,
+  listPrefixesMax,
   modelNameMaxLength,
   questionMaxLength,
   readerGroupsMax,
@@ -63,6 +67,7 @@ import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
 import * as coreBrain from "../src/brain-next.ts";
+import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import type {
   InstructionFile,
   InstructionFileVersion,
@@ -820,6 +825,29 @@ const requeueMarked = async (
   ];
 };
 
+/**
+ * The sources of `hiddenVersions` the reader may read no version of: each
+ * of whose first three versions is hidden (the harness names every
+ * version of such a source, `everyVersionOf`). A source whose current
+ * version they may read, with an earlier one hidden, isn't one.
+ */
+const whollyHidden = (
+  hiddenVersions: Probing["hiddenVersions"]
+): SourceRef[] => {
+  const versionsOf = new Map<string, { source: SourceRef; count: number }>();
+  for (const { source } of hiddenVersions) {
+    const key = keyOf(source);
+    const known = versionsOf.get(key);
+    versionsOf.set(key, { source, count: (known?.count ?? 0) + 1 });
+  }
+  return [...versionsOf.values()]
+    .filter(({ count }) => count >= 3)
+    .map(({ source }) => source);
+};
+
+/** A moment past any a source is added at: a page after it starts at the newest. */
+const pastAll = new Date(8.64e15);
+
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
 
@@ -882,6 +910,124 @@ export const coreProbes = {
       ...(await refusedChange(markers)),
       ...(await otherKindOf(hiddenVersions)),
     ];
+  },
+  listSourcesAs: async ({ personId, hiddenVersions, markers }) => {
+    const list = async (
+      name: string,
+      after?: { addedAt: Date; source: SourceRef },
+      as = personId,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.listSourcesAs(
+            env,
+            as,
+            after === undefined ? {} : { after }
+          ),
+        about
+      );
+    const asked: Answer[] = [
+      await list("every source they may read"),
+      await list(
+        "after a source no one added",
+        { addedAt: pastAll, source: missingSource() },
+        personId,
+        "nothing"
+      ),
+    ];
+    for (const [index, { source }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await list(
+        `after hidden source ${index}`,
+        { addedAt: pastAll, source },
+        personId,
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    asked.push(
+      await list("as someone who isn't a member", undefined, stranger()),
+      await list(
+        "after an unknown producer named by the markers",
+        unchecked({
+          addedAt: pastAll,
+          source: { producer: markers.join(""), id: "x" },
+        })
+      ),
+      await list(
+        "after a moment named by the markers",
+        unchecked({ addedAt: markers.join(" "), source: missingSource() })
+      )
+    );
+    return asked;
+  },
+  listVersionsAs: async ({ personId, hiddenVersions, markers }) => {
+    // Below a hidden version and one past it: what the reader may read
+    // of that source up to it, which for these is nothing.
+    const list = async (
+      name: string,
+      source: SourceRef,
+      before?: number,
+      as = personId,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.listVersionsAs(env, as, {
+            source,
+            ...(before === undefined ? {} : { before }),
+          }),
+        about
+      );
+    const asked: Answer[] = [
+      await list(
+        "a source no one added",
+        missingSource(),
+        undefined,
+        personId,
+        "nothing"
+      ),
+    ];
+    for (const [index, source] of whollyHidden(hiddenVersions).entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await list(
+        `hidden source ${index}`,
+        source,
+        undefined,
+        personId,
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    for (const [index, { source, version }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await list(
+        `up to hidden version ${index}`,
+        source,
+        version + 1,
+        personId,
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    const hidden = hiddenVersions[0]?.source ?? missingSource();
+    asked.push(
+      await list(
+        "as someone who isn't a member",
+        hidden,
+        undefined,
+        stranger()
+      ),
+      await list("below version 0", hidden, 0),
+      await list(
+        "an unknown producer named by the markers",
+        unchecked({ producer: markers.join(""), id: hidden.id })
+      )
+    );
+    return asked;
   },
   readSourceVersionAs: async ({ personId, hiddenVersions, markers }) => {
     const read = async (
@@ -2499,6 +2645,146 @@ export const storeProbes = {
       ),
     ];
   },
+  listSources: async ({ reader, hiddenVersions, markers }) => {
+    const list = async (
+      name: string,
+      prefixes: string[],
+      about?: Answer["about"],
+      more: Partial<{
+        after: { addedAt: Date; source: string };
+        limit: number;
+      }> = {}
+    ) =>
+      await answer(
+        name,
+        async () => await store().listSources({ reader, prefixes, ...more }),
+        about
+      );
+    const hidden = whollyHidden(hiddenVersions).map(keyOf);
+    const asked: Answer[] = [
+      await list("every upload they may read", ["upload:"]),
+      await list("every instruction file they may read", ["instructions:"]),
+      await list("a source no one added", [keyOf(missingSource())], "nothing"),
+    ];
+    for (const [index, source] of hidden.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await list(`hidden source ${index}`, [source], "hidden");
+      asked.push(answered);
+    }
+    // Every hidden source at once, in one page and one a page, where the
+    // pass has any.
+    const atOnce = hidden.slice(0, listPrefixesMax);
+    if (atOnce.length > 0) {
+      asked.push(
+        await list("every hidden source at once", atOnce, "hidden"),
+        await list("every hidden source, one a page", atOnce, "hidden", {
+          limit: 1,
+        })
+      );
+    }
+    asked.push(
+      await list(
+        "too many prefixes",
+        Array.from({ length: listPrefixesMax + 1 }, () => markers.join(""))
+      ),
+      await list("too long a page", ["upload:"], undefined, {
+        limit: listPageMax + 1,
+      }),
+      await list("no prefix", []),
+      await list(
+        "after a moment named by the markers",
+        ["upload:"],
+        undefined,
+        {
+          after: unchecked({ addedAt: markers.join(" "), source: "upload:x" }),
+        }
+      ),
+      await answer(
+        "too many groups",
+        async () =>
+          await store().listSources({
+            reader: {
+              ...reader,
+              groups: Array.from({ length: readerGroupsMax + 1 }, () =>
+                markers.join("")
+              ),
+            },
+            prefixes: ["upload:"],
+          })
+      ),
+      await answer(
+        "a request with an unknown field",
+        async () =>
+          await store().listSources(
+            unchecked({
+              reader,
+              prefixes: ["upload:"],
+              extra: markers.join(" "),
+            })
+          )
+      )
+    );
+    return asked;
+  },
+  listVersions: async ({ reader, hiddenVersions, markers }) => {
+    const list = async (
+      name: string,
+      source: string,
+      before?: number,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().listVersions({
+            source,
+            reader,
+            ...(before === undefined ? {} : { before }),
+          }),
+        about
+      );
+    const asked: Answer[] = [
+      await list(
+        "a source no one added",
+        keyOf(missingSource()),
+        undefined,
+        "nothing"
+      ),
+    ];
+    for (const [index, source] of whollyHidden(hiddenVersions).entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await list(
+        `hidden source ${index}`,
+        keyOf(source),
+        undefined,
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    for (const [index, { source, version }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await list(
+        `up to hidden version ${index}`,
+        keyOf(source),
+        version + 1,
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    const hidden = keyOf(hiddenVersions[0]?.source ?? missingSource());
+    asked.push(
+      await list("below version 0", hidden, 0),
+      await list("a source named by the markers, too long", hidden.repeat(300)),
+      await answer(
+        "a request with an unknown field",
+        async () =>
+          await store().listVersions(
+            unchecked({ source: hidden, reader, extra: markers.join(" ") })
+          )
+      )
+    );
+    return asked;
+  },
   readCurrent: async ({ reader, markers, hiddenInstructionFiles }) => {
     const read = async (
       name: string,
@@ -2746,6 +3032,146 @@ export const storeProbes = {
   ],
 } satisfies Record<StoreMember, Probe>;
 
+/** The Sources page's RPC for `personId`, signed in as a member. */
+const sourcesAs = (personId: string): BrainSourcesRpc =>
+  new BrainSourcesRpc(env, async () => await Promise.resolve(sessionOf(personId)));
+
+/** A source as the page names it after a list: its time as ISO 8601. */
+const pageAfter = (source: SourceRef) => ({
+  addedAt: pastAll.toISOString(),
+  source,
+});
+
+/**
+ * The Brain's Sources page (brain-sources-rpc.ts): each method as the
+ * signed-in person, over what core's members answer, with what a page
+ * sends back (a page's place, a version) and what a client outside
+ * TypeScript could send instead.
+ */
+export const sourcesProbes = {
+  list: async ({ personId, hiddenVersions, markers }) => {
+    const asked: Answer[] = [
+      await answer("every source they may read", async () =>
+        await sourcesAs(personId).list()
+      ),
+      await answer("a null page start", async () =>
+        await sourcesAs(personId).list(unchecked(null))
+      ),
+      await answer(
+        "after a source no one added",
+        async () => await sourcesAs(personId).list(pageAfter(missingSource())),
+        "nothing"
+      ),
+    ];
+    for (const [index, { source }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await answer(
+        `after hidden source ${index}`,
+        async () => await sourcesAs(personId).list(pageAfter(source)),
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    asked.push(
+      await answer("as someone who isn't a member", async () =>
+        await sourcesAs(stranger()).list()
+      ),
+      await answer("after a moment named by the markers", async () =>
+        await sourcesAs(personId).list({
+          addedAt: markers.join(" "),
+          source: missingSource(),
+        })
+      ),
+      await answer("after an unknown producer named by the markers", async () =>
+        await sourcesAs(personId).list(
+          pageAfter(unchecked({ producer: markers.join(""), id: "x" }))
+        )
+      )
+    );
+    return asked;
+  },
+  versions: async ({ personId, hiddenVersions, markers }) => {
+    const asked: Answer[] = [
+      await answer(
+        "a source no one added",
+        async () => await sourcesAs(personId).versions(missingSource()),
+        "nothing"
+      ),
+    ];
+    for (const [index, source] of whollyHidden(hiddenVersions).entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const answered = await answer(
+        `hidden source ${index}`,
+        async () => await sourcesAs(personId).versions(source),
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    const hidden = hiddenVersions[0]?.source ?? missingSource();
+    asked.push(
+      await answer("as someone who isn't a member", async () =>
+        await sourcesAs(stranger()).versions(hidden)
+      ),
+      await answer("an unknown producer named by the markers", async () =>
+        await sourcesAs(personId).versions(
+          unchecked({ producer: markers.join(""), id: hidden.id })
+        )
+      )
+    );
+    return asked;
+  },
+  read: async ({ personId, hiddenVersions, markers }) => {
+    const asked: Answer[] = [
+      await answer(
+        "a source no one added",
+        async () => await sourcesAs(personId).read(missingSource(), 1),
+        "nothing"
+      ),
+    ];
+    for (const [index, { source, version }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const answered = await answer(
+        `hidden version ${index}`,
+        async () => await sourcesAs(personId).read(source, version),
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    const hidden = hiddenVersions[0]?.source ?? missingSource();
+    asked.push(
+      await answer("as someone who isn't a member", async () =>
+        await sourcesAs(stranger()).read(hidden, 1)
+      ),
+      await answer("an unknown producer named by the markers", async () =>
+        await sourcesAs(personId).read(
+          unchecked({ producer: markers.join(""), id: hidden.id }),
+          1
+        )
+      )
+    );
+    return asked;
+  },
+  // The page's search is recall with its own budget, never as of a
+  // moment: every question of the markers and of their twins, as is.
+  search: async (probing) => [
+    ...(await askedOfMarkers(
+      probing,
+      [],
+      async ({ question }) => await sourcesAs(probing.personId).search(question)
+    )),
+    await answer("too long a question", async () =>
+      await sourcesAs(probing.personId).search(
+        `${probing.markers.join(" ")} `
+          .repeat(questionMaxLength)
+          .slice(0, questionMaxLength + 1)
+      )
+    ),
+    await answer("as someone who isn't a member", async () =>
+      await sourcesAs(stranger()).search(probing.markers.join(" "))
+    ),
+  ],
+} satisfies Record<"list" | "versions" | "read" | "search", Probe>;
+
 /** One way into the Brain: a module, or the store's class, and its probes. */
 interface Surface {
   name: string;
@@ -2762,6 +3188,7 @@ export const brainSurfaces = [
   { name: "core", module: coreBrain, probes: coreProbes },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
+  { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
 ] as const satisfies readonly Surface[];
 
 /**
