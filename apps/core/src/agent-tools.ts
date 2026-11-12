@@ -537,6 +537,37 @@ const definitions = (known: Map<string, string>) => {
       }
     }
   };
+  /**
+   * Refuses a replace or an edit of `paths` of the draft of `app`, whose
+   * files are `held` now, where the draft holds one otherwise than this
+   * chat last read or wrote it: someone else changed it since, and writing
+   * over it would lose their change. A file this chat never knew, or the
+   * draft doesn't hold, is the caller's to decide.
+   */
+  const requireAsKnown = async (
+    app: string,
+    held: Readonly<Record<string, string>>,
+    paths: readonly string[]
+  ): Promise<void> => {
+    const moved: string[] = [];
+    for (const path of paths) {
+      const content = held[path];
+      const knew = known.get(fileKey(app, path));
+      if (
+        content !== undefined &&
+        knew !== undefined &&
+        // oxlint-disable-next-line no-await-in-loop -- one hash at a time
+        (await sha256Hex(content)) !== knew
+      ) {
+        moved.push(path);
+      }
+    }
+    if (moved.length > 0) {
+      throw new Error(
+        `${moved.join(", ")} changed in the draft since you last read it, by someone else: read it again with readFile, and write it over what it holds now.`
+      );
+    }
+  };
   return [
     tool({
       name: "readFile",
@@ -598,24 +629,7 @@ const definitions = (known: Map<string, string>) => {
             `Read ${unread.join(", ")} with readFile before you replace it: the draft changed it already, and you haven't read it in this chat.`
           );
         }
-        const moved: string[] = [];
-        for (const path of paths) {
-          const held = draft.files[path];
-          const knew = known.get(fileKey(app, path));
-          if (
-            held !== undefined &&
-            knew !== undefined &&
-            // oxlint-disable-next-line no-await-in-loop -- one hash at a time
-            (await sha256Hex(held)) !== knew
-          ) {
-            moved.push(path);
-          }
-        }
-        if (moved.length > 0) {
-          throw new Error(
-            `${moved.join(", ")} changed in the draft since you last read it, by someone else: read it again with readFile, and write it over what it holds now.`
-          );
-        }
+        await requireAsKnown(app, draft.files, paths);
         const written = await exports
           .BuildApi({ props: scope })
           .write(app, files, { revision: draft.revision });
@@ -649,6 +663,7 @@ const definitions = (known: Map<string, string>) => {
           );
         }
         const { content, revision } = await fileOf(scope, app, path);
+        await requireAsKnown(app, { [path]: content }, [path]);
         const found = occurrences(content, oldText);
         if (found !== 1) {
           throw new Error(

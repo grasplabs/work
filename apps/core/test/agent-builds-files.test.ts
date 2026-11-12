@@ -188,6 +188,50 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("edits a file only as it last read it, never over another builder's change since, and again once it read that", async () => {
+    const edit = { oldText: "# Theirs", newText: "# Mine" };
+    const { builder, existing, chat } = await setUp((app) => [
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      says("Read."),
+      toolStep("editFile", { app, path: "AGENTS.md", ...edit }),
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      toolStep("editFile", { app, path: "AGENTS.md", ...edit }),
+      says("Edited."),
+    ]);
+    await chat.ask("Read the App's notes");
+    // Another builder's chat changes the file after the agent read it: the
+    // text the edit replaces is there, but the agent never saw it.
+    const draft = await readDraft(env, existing);
+    await saveDraft(
+      env,
+      appIdSchema.parse(existing),
+      { ...draft, base: 1 },
+      { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },
+      await agentWriting(builder, crypto.randomUUID())
+    );
+
+    await chat.ask("Edit them");
+
+    const [, refused, read, edited] = await toolResults(
+      chat.stub,
+      chat.chat.id
+    );
+    const { changes } = await readDraft(env, existing);
+    expect({
+      refused: [refused?.tool, refused?.isError],
+      says: refused?.text.includes("changed in the draft since you last read"),
+      read: [read?.tool, read?.text.includes("# Theirs")],
+      edited: [edited?.tool, edited?.isError],
+      draft: changes,
+    }).toStrictEqual({
+      refused: ["editFile", true],
+      says: true,
+      read: ["readFile", true],
+      edited: ["editFile", false],
+      draft: { "AGENTS.md": "# Mine\n" },
+    });
+  });
+
   it("saves what it writes fixed and formatted, as Ultracite would, and reports what is left by file", async () => {
     // Formatted as oxfmt formats it, a `var` that never changes is a
     // `const` and a body that only returns is the arrow's: each fixes
