@@ -21,6 +21,9 @@ export const brainModules = {
   // Answers the staff with core's brainStaffReport and actOnBrainForStaff,
   // through their schemas.
   "apps/core/src/brain-report.ts": "core",
+  // The Brain's Sources page, for people: its own surface, each method
+  // probed as the signed-in person.
+  "apps/core/src/brain-sources-rpc.ts": "sources",
   // Answers a person's or an admin's request with core's export and
   // restore functions, whose probes hold what they return, as they return
   // it.

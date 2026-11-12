@@ -1,14 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { OrgFlow } from "../../../admin/flow.tsx";
-import { useOrganization } from "../../../admin/organization.tsx";
-
-const Flow = () => {
-  const { admin } = useOrganization();
-  return <OrgFlow clientId={admin.client.id} flow={admin.snapshot.flow} />;
-};
-
-/** An organization's Flow: how much onboarding it goes through, as staff set it. */
+/** An organization's Flow is a tab of its Steps: its old address goes there. */
 export const Route = createFileRoute("/organizations/$clientId/flow")({
-  component: Flow,
+  beforeLoad: ({ params }) => {
+    // oxlint-disable-next-line typescript/only-throw-error -- the router's redirect is thrown, as it documents
+    throw redirect({
+      to: "/organizations/$clientId/steps",
+      params,
+      search: { tab: "flow" },
+      // Back goes past the old address, not into it again.
+      replace: true,
+    });
+  },
 });

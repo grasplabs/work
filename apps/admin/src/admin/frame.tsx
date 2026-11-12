@@ -9,7 +9,7 @@
  * Beside each organization, as the prototype has it, how many things need
  * Grasp there, as the admin's model works it out of what its core answered
  * (src/admin/views.ts). Beside Platform, how many companies' platforms
- * need a look, as the admin recorded them (`platformCounts`), and under it its releases.
+ * need a look, as the admin recorded them (`platformCounts`).
  * Beside Apps asked for, how many apps the companies asked for
  * (`askedApps`).
  */
@@ -30,9 +30,6 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
 import {
@@ -69,14 +66,6 @@ interface Place {
   to: "/" | "/integrations" | "/platform" | "/ask" | "/lab";
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
-  /** The pages under it, nested beneath its entry. */
-  under?: readonly SubPlace[];
-}
-
-/** A page under one of the admin's places, nested beneath its entry. */
-interface SubPlace {
-  to: "/platform/releases";
-  label: string;
 }
 
 const places: readonly Place[] = [
@@ -86,12 +75,7 @@ const places: readonly Place[] = [
     label: "Apps asked for",
     icon: WrenchIcon,
   },
-  {
-    to: "/platform",
-    label: "Platform",
-    icon: ServerIcon,
-    under: [{ to: "/platform/releases", label: "Releases" }],
-  },
+  { to: "/platform", label: "Platform", icon: ServerIcon },
   { to: "/ask", label: "Ask Grasp", icon: SparklesIcon },
   { to: "/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
 ];
@@ -172,7 +156,7 @@ const PlaceItem = ({
   badge?: PlaceBadge | null;
 }) => {
   const matchRoute = useMatchRoute();
-  const { to, label, icon: Icon, under = [] } = place;
+  const { to, label, icon: Icon } = place;
   // The overview is only itself; any other place holds the pages under it.
   const active = matchRoute({ to, fuzzy: to !== "/" }) !== false;
   return (
@@ -191,21 +175,6 @@ const PlaceItem = ({
           {badge.count}
           <span className="sr-only">{`: ${badge.words}`}</span>
         </SidebarMenuBadge>
-      )}
-      {under.length === 0 ? null : (
-        // Hidden while the sidebar is folded to icons: its entry leads there.
-        <SidebarMenuSub>
-          {under.map((sub) => (
-            <SidebarMenuSubItem key={sub.to}>
-              <SidebarMenuSubButton
-                isActive={matchRoute({ to: sub.to, fuzzy: true }) !== false}
-                render={<Link to={sub.to} />}
-              >
-                <span>{sub.label}</span>
-              </SidebarMenuSubButton>
-            </SidebarMenuSubItem>
-          ))}
-        </SidebarMenuSub>
       )}
     </SidebarMenuItem>
   );

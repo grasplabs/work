@@ -60,6 +60,7 @@
     "./audit-log": "./src/audit-log.ts",
     "./business-processes": "./src/business-processes.ts",
     "./brain": "./src/brain.ts",
+    "./brain-sources": "./src/brain-sources.ts",
     "./thinking": "./src/thinking.ts",
     "./brain-records": "./src/brain-records.ts",
     "./brain-report": "./src/brain-report.ts",

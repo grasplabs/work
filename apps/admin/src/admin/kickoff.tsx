@@ -375,8 +375,8 @@ const broughtWords = (transcript: AdminKickoffView["transcript"]): string => {
   }
   const at = transcript.at.slice(0, 16).replace("T", " ");
   return transcript.fileName === null
-    ? `Pasted on ${at} (UTC). Bring it in again to read it again.`
-    : `${transcript.fileName}, brought in on ${at} (UTC). Bring it in again to read it again.`;
+    ? `Pasted on ${at} (UTC).`
+    : `${transcript.fileName}, brought in on ${at} (UTC).`;
 };
 
 /** Client `clientId`'s kickoff as its core answers it, or why it isn't read. Never throws. */
@@ -402,6 +402,8 @@ const readKickoff = async (
 export const Kickoff = ({ clientId }: { clientId: string }) => {
   const [kickoff, setKickoff] = useState<AdminKickoffView | null>(null);
   const [unread, setUnread] = useState<string | null>(null);
+  // A transcript that is in stays one line until staff ask to replace it.
+  const [replacing, setReplacing] = useState(false);
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
@@ -416,18 +418,37 @@ export const Kickoff = ({ clientId }: { clientId: string }) => {
       current = false;
     };
   }, [clientId]);
+  const broughtIn = kickoff !== null && kickoff.transcript !== null;
   return (
     <>
-      <p className="text-muted-foreground border-t px-5 py-3">
-        {kickoff === null
-          ? (unread ?? "Reading where it stands in the company’s Grasp…")
-          : broughtWords(kickoff.transcript)}
-      </p>
-      <BringIn
-        clientId={clientId}
-        keep={setKickoff}
-        replacing={kickoff?.transcript !== null && kickoff !== null}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+        <p className="text-muted-foreground">
+          {kickoff === null
+            ? (unread ?? "Reading where it stands in the company’s Grasp…")
+            : broughtWords(kickoff.transcript)}
+        </p>
+        {broughtIn && !replacing ? (
+          <Button
+            onClick={() => {
+              setReplacing(true);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            Replace
+          </Button>
+        ) : null}
+      </div>
+      {broughtIn && !replacing ? null : (
+        <BringIn
+          clientId={clientId}
+          keep={(next) => {
+            setKickoff(next);
+            setReplacing(false);
+          }}
+          replacing={broughtIn}
+        />
+      )}
       {kickoff?.read === true ? (
         <ol aria-label="What it brought, and what it left open">
           {kickoff.fields.map((field) => (

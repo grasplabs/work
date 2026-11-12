@@ -8,6 +8,7 @@ import {
   instructionsTextSchema,
   isOverInstructionsLimit,
   principalMaxLength,
+  questionMaxLength,
   sourceIdMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
@@ -47,6 +48,7 @@ import type {
   BrainStep,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
+import { firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
@@ -71,8 +73,11 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // A source is named by the producer that adds it (one of `producerKinds`)
 // and that producer's own id for it; the Brain's key for it is made only
 // here (`sourceKeyOf`), so one producer can never name another's sources.
-// `addSource` and `readSourceVersionAs` are server-side functions for
-// producers: never reached by people, Apps or the SDK directly.
+// `addSource` is a server-side function for producers: never reached by
+// people, Apps or the SDK directly. People read sources only through the
+// functions ending in `As` (the Brain's Sources page reaches
+// `listSourcesAs`, `listVersionsAs`, `readSourceVersionAs` and `recallAs`
+// through `session.brainSources`), which read as them.
 //
 // Every argument is checked here, strictly, before anything is named for
 // the Brain: an empty or missing ID would otherwise become a principal
@@ -198,6 +203,9 @@ const newSourceSchema = z.strictObject({
   text: wellFormedString(),
   readers: sourceReadersSchema,
 });
+
+/** A question as the Brain takes one (`recallRequestSchema`). */
+const questionSchema = wellFormedString().max(questionMaxLength);
 
 const versionRefSchema = z.strictObject({
   source: sourceRefSchema,
@@ -385,8 +393,10 @@ const meaningOf = async (
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question, budget, asOf }: Recall
+  { question: asked, budget, asOf }: Recall
 ): Promise<RecalledPack> => {
+  // As the Brain checks it, before the embedder sees any of it.
+  const question = checked(questionSchema, asked);
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId),
     // As of a moment the Brain never searches by meaning: nothing to embed.
@@ -437,6 +447,127 @@ export const readSourceVersionAs = async (
   return read === null
     ? null
     : { source, version, text: read.text, addedAt: read.addedAt };
+};
+
+/** Where a page of a listing starts: after this source, as its producer named it. */
+export interface SourcesAfter {
+  addedAt: Date;
+  source: SourceRef;
+}
+
+const sourcesAfterSchema = z.strictObject({
+  addedAt: z.date(),
+  source: sourceRefSchema,
+});
+
+/**
+ * A source, as a listing names it: its current version, when that was
+ * added, its first line (of its first passage, as its text gives it, for
+ * a title: empty when that passage opens with no line of text), whether
+ * it is the reader's alone (nobody else may read it, admins included),
+ * and how many of its versions the reader may read.
+ */
+export interface ListedSource {
+  source: SourceRef;
+  version: number;
+  addedAt: Date;
+  firstLine: string;
+  personal: boolean;
+  versions: number;
+}
+
+/** A page of sources, and where the next one starts: null at the last. */
+export interface SourcePage {
+  sources: ListedSource[];
+  next: SourcesAfter | null;
+}
+
+/**
+ * A page of the sources the member `personId` may read, of every
+ * producer's kind (never an instruction file), newest first by when their
+ * current version was added, after `after` when given: what they may not
+ * read takes no place in it. Refused once they are no longer a member.
+ */
+export const listSourcesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  { after }: { after?: SourcesAfter } = {}
+): Promise<SourcePage> => {
+  const from =
+    after === undefined ? undefined : checked(sourcesAfterSchema, after);
+  const { sources, more } = await brain(env).listSources({
+    reader: await readerOf(env, personId),
+    prefixes: producerKinds.map((kind) => `${kind}:`),
+    ...(from === undefined
+      ? {}
+      : { after: { addedAt: from.addedAt, source: sourceKeyOf(from.source) } }),
+  });
+  const listed = sources.map(
+    ({
+      source,
+      version,
+      addedAt,
+      opening,
+      personal,
+      versions,
+    }): ListedSource => ({
+      source: sourceRefOf(source),
+      version,
+      addedAt,
+      firstLine: firstLineOf(opening),
+      personal,
+      versions,
+    })
+  );
+  const last = listed.at(-1);
+  return {
+    sources: listed,
+    next:
+      more && last !== undefined
+        ? { addedAt: last.addedAt, source: last.source }
+        : null,
+  };
+};
+
+/** A version of a source, as a listing names it. */
+export interface ListedVersion {
+  version: number;
+  addedAt: Date;
+}
+
+/** A page of versions, and the version the next one starts below: null at the last. */
+export interface VersionPage {
+  versions: ListedVersion[];
+  before: number | null;
+}
+
+const versionsWantedSchema = z.strictObject({
+  source: sourceRefSchema,
+  before: z.int().positive().optional(),
+});
+
+/**
+ * A page of the versions of `source` the member `personId` may read,
+ * newest first, below `before` when given: only while they may read its
+ * current version, as `readSourceVersionAs` reads them; none, alike, for
+ * a source there isn't. Refused once they are no longer a member.
+ */
+export const listVersionsAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted: { source: SourceRef; before?: number }
+): Promise<VersionPage> => {
+  const { source, before } = checked(versionsWantedSchema, wanted);
+  const { versions, more } = await brain(env).listVersions({
+    source: sourceKeyOf(source),
+    reader: await readerOf(env, personId),
+    ...(before === undefined ? {} : { before }),
+  });
+  const last = versions.at(-1);
+  return {
+    versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
+    before: more && last !== undefined ? last.version : null,
+  };
 };
 
 // Erasure: for good, apart from ordinary removal, where a new version

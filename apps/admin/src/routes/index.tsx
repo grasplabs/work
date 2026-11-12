@@ -1,12 +1,5 @@
-import {
-  ADMIN_PHASES,
-  healthOf,
-  phaseOf,
-} from "@grasp-os/shared/admin/admin-health";
-import type {
-  AdminPhase,
-  HealthLevel,
-} from "@grasp-os/shared/admin/admin-health";
+import { ADMIN_PHASES, phaseOf } from "@grasp-os/shared/admin/admin-health";
+import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
 import { portfolioOf } from "@grasp-os/shared/admin/admin-view";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { Button } from "@grasp-os/ui/components/button";
@@ -22,7 +15,6 @@ import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { WithAdmins } from "../admin/admins.tsx";
 import { PageLoading } from "../admin/failure.tsx";
@@ -50,9 +42,6 @@ import {
   whole,
 } from "../admin/words.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
-import { fetchGridLive } from "../clients/functions.ts";
-import type { LiveStatus, Reach } from "../clients/grid.ts";
-import type { ClientDriftState } from "../rollout/drift.ts";
 
 interface AdminSearch {
   /** Only the organizations in this phase. */
@@ -62,15 +51,11 @@ interface AdminSearch {
 /** At most this many of what needs Grasp on the overview: the rest is on each organization's own. */
 const todayItems = 8;
 
+/** From this many organizations on, they can be shown by phase: fewer are all in sight at once. */
+const phaseTabsFrom = 9;
+
 /** How many dots say how much is known. */
 const knowledgeDots = 20;
-
-const healthMark: Record<HealthLevel, string> = {
-  none: "bg-border",
-  good: "bg-status-agreed",
-  watch: "bg-status-attention/40",
-  attention: "bg-status-attention",
-};
 
 /** A cell with nothing to say: a dash, never a made-up number. */
 const Nothing = () => <span className="text-muted-foreground">–</span>;
@@ -95,78 +80,17 @@ const NameLink = ({
   </Link>
 );
 
-/**
- * Every active company's own platform, read from its account once the
- * overview shows (`gridLive`, kept a minute): null while it is read,
- * `failed` when it couldn't be.
- */
-type Live = Readonly<Record<string, LiveStatus>> | "failed" | null;
-
-const reachWords: Record<Reach, string> = {
-  reachable: "Reachable",
-  unreachable: "Not reachable",
-  no_route: "No route",
-  unknown: "Reach not known",
-};
-
-const driftWords: Record<ClientDriftState, string> = {
-  in_sync: "in sync",
-  drifted: "drifted",
-  split: "split",
-  off_pin: "off its pin",
-  unknown: "drift not known",
-};
-
-/**
- * A company's own platform as its account shows it now, as the admin's
- * list of clients had it: whether the router reaches it and whether it
- * drifted, then whether it runs the shared secrets. A dash for one that isn't live.
- */
-const PlatformCell = ({ live, id }: { live: Live; id: string }) => {
-  if (live === null) {
-    return <span className="text-muted-foreground">Reading…</span>;
-  }
-  const own = live === "failed" ? undefined : live[id];
-  if (own === undefined) {
-    return <Nothing />;
-  }
-  const attention =
-    own.reach === "unreachable" ||
-    own.reach === "no_route" ||
-    own.drift === "drifted" ||
-    own.drift === "split" ||
-    own.drift === "off_pin" ||
-    own.sharedSecretsCurrent === false;
-  const secrets = own.sharedSecretsCurrent === false ? "secrets behind" : null;
-  return (
-    <span className="flex flex-col">
-      <span className={cn(attention && "text-status-attention")}>
-        {`${reachWords[own.reach]}, ${driftWords[own.drift]}`}
-      </span>
-      {secrets === null ? null : (
-        <span className="text-muted-foreground text-xs">{secrets}</span>
-      )}
-    </span>
-  );
-};
-
 /** One organization whose core answered: everything the model worked out of it. */
 const AnsweredRow = ({
   view,
   id,
   name,
-  live,
 }: {
   view: AdminView;
   id: string;
   name: string;
-  live: Live;
 }) => {
   const { contract } = view;
-  const health = healthOf(view);
-  const needing = health.filter(
-    (signal) => signal.level === "attention"
-  ).length;
   const stage = stageWords[view.stage];
   const lines = stageLines(view);
   const line = lines[view.stage];
@@ -246,26 +170,6 @@ const AnsweredRow = ({
           </span>
         </span>
       </TableCell>
-      <TableCell className="hidden @4xl:table-cell" variant="card">
-        <span className="flex items-center gap-1">
-          {health.map((signal) => (
-            <span
-              aria-hidden
-              className={cn("size-2 rounded-full", healthMark[signal.level])}
-              key={signal.area}
-            />
-          ))}
-          <span className="sr-only">
-            {`Needs Grasp in ${needing} of ${health.length} areas`}
-          </span>
-        </span>
-      </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @4xl:table-cell"
-        variant="card"
-      >
-        <PlatformCell id={id} live={live} />
-      </TableCell>
       <TableCell className="hidden text-right @6xl:table-cell" variant="card">
         {view.usage.thisMonth.spend > 0 ? (
           <span className="tabular-nums">
@@ -294,10 +198,8 @@ const AnsweredRow = ({
  */
 const UnreadRow = ({
   admin,
-  live,
 }: {
   admin: Extract<ClientAdmin, { state: "unreachable" }>;
-  live: Live;
 }) => {
   const words = unreadWords(admin);
   const why = `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
@@ -331,15 +233,6 @@ const UnreadRow = ({
       <TableCell className="hidden @5xl:table-cell" variant="card">
         <Nothing />
       </TableCell>
-      <TableCell className="hidden @4xl:table-cell" variant="card">
-        <Nothing />
-      </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @4xl:table-cell"
-        variant="card"
-      >
-        <PlatformCell id={admin.client.id} live={live} />
-      </TableCell>
       <TableCell className="hidden text-right @6xl:table-cell" variant="card">
         <Nothing />
       </TableCell>
@@ -350,53 +243,14 @@ const UnreadRow = ({
   );
 };
 
-const OrganizationRow = ({
-  organization,
-  live,
-}: {
-  organization: Organization;
-  live: Live;
-}) => {
+const OrganizationRow = ({ organization }: { organization: Organization }) => {
   const { admin, view } = organization;
   if (admin.state === "unreachable") {
-    return <UnreadRow admin={admin} live={live} />;
+    return <UnreadRow admin={admin} />;
   }
   return view === null ? null : (
-    <AnsweredRow
-      id={admin.client.id}
-      live={live}
-      name={admin.client.name}
-      view={view}
-    />
+    <AnsweredRow id={admin.client.id} name={admin.client.name} view={view} />
   );
-};
-
-/** Every active company's own platform, or `failed` when it couldn't be read. Never throws. */
-const readLive = async (): Promise<Live> => {
-  try {
-    return await fetchGridLive();
-  } catch {
-    return "failed";
-  }
-};
-
-/** Every active company's own platform, read once the overview shows. */
-const useLive = (): Live => {
-  const [live, setLive] = useState<Live>(null);
-  useEffect(() => {
-    let current = true;
-    void (async () => {
-      const read = await readLive();
-      // A page left before its answer came doesn't take it.
-      if (current) {
-        setLive(read);
-      }
-    })();
-    return () => {
-      current = false;
-    };
-  }, []);
-  return live;
 };
 
 /** What the contract column says: unknown until the company's core holds one. */
@@ -588,7 +442,6 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
   const organizations = organizationsOf(admins);
-  const live = useLive();
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
   );
@@ -603,33 +456,35 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
       <Portfolio unread={organizations.length - views.length} views={views} />
       <NeedsToday organizations={organizations} />
       {/* The organizations by phase: where each is, from the first conversation until it works in Grasp. */}
-      <Tabs
-        onValueChange={(value: string) => {
-          const chosen = ADMIN_PHASES.find((each) => each === value);
-          void navigate({
-            to: "/",
-            search: chosen === undefined ? {} : { phase: chosen },
-          });
-        }}
-        value={phase ?? "all"}
-      >
-        <TabsList aria-label="Show organizations" variant="line">
-          <TabsTrigger className="flex-none" value="all">
-            All
-            <span className="text-muted-foreground tabular-nums">
-              {organizations.length}
-            </span>
-          </TabsTrigger>
-          {ADMIN_PHASES.map((each) => (
-            <TabsTrigger className="flex-none" key={each} value={each}>
-              {phaseWords[each]}
+      {organizations.length < phaseTabsFrom && phase === undefined ? null : (
+        <Tabs
+          onValueChange={(value: string) => {
+            const chosen = ADMIN_PHASES.find((each) => each === value);
+            void navigate({
+              to: "/",
+              search: chosen === undefined ? {} : { phase: chosen },
+            });
+          }}
+          value={phase ?? "all"}
+        >
+          <TabsList aria-label="Show organizations" variant="line">
+            <TabsTrigger className="flex-none" value="all">
+              All
               <span className="text-muted-foreground tabular-nums">
-                {views.filter((view) => phaseOf(view) === each).length}
+                {organizations.length}
               </span>
             </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+            {ADMIN_PHASES.map((each) => (
+              <TabsTrigger className="flex-none" key={each} value={each}>
+                {phaseWords[each]}
+                <span className="text-muted-foreground tabular-nums">
+                  {views.filter((view) => phaseOf(view) === each).length}
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
       {/* Then the organizations themselves: what needs Grasp at one is on its own page, a click away. */}
       <section className="bg-card @container overflow-hidden rounded-xl border text-sm">
         <Table>
@@ -644,12 +499,6 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
               </TableHead>
               <TableHead className="hidden @5xl:table-cell" variant="card">
                 Contract
-              </TableHead>
-              <TableHead className="hidden @4xl:table-cell" variant="card">
-                Health
-              </TableHead>
-              <TableHead className="hidden @4xl:table-cell" variant="card">
-                Its platform
               </TableHead>
               <TableHead
                 className="hidden text-right @6xl:table-cell"
@@ -669,7 +518,6 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
             {shown.map((organization) => (
               <OrganizationRow
                 key={organization.admin.client.id}
-                live={live}
                 organization={organization}
               />
             ))}

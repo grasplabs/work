@@ -19,8 +19,10 @@ import {
   storeKindOf,
   recallRequestSchema,
   sourceErasureSchema,
+  sourceListRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
+  versionListRequestSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
@@ -43,12 +45,16 @@ import type {
   Pack,
   RestoreStatus,
   SourceErasure,
+  SourceList,
+  SourceListRequest,
   SourceVersion,
   SourceVersionRef,
   StaffActionOutcome,
   VectorSearch,
   VectorsFound,
   VectorsToPut,
+  VersionList,
+  VersionListRequest,
   VersionRequest,
   WorkOverview,
 } from "./contract.ts";
@@ -95,6 +101,7 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
+import { listSources, listVersions } from "./listing.ts";
 import {
   countingInto,
   countWithoutMeaning,
@@ -731,6 +738,30 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return (await this.#readable())
       ? await readCurrent(this.#sources, asked)
       : [];
+  }
+
+  /**
+   * A page of the sources the reader may read, newest first: none in a
+   * store that holds nothing (never written, or erased whole).
+   */
+  async listSources(request: SourceListRequest): Promise<SourceList> {
+    const asked = checked(sourceListRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? listSources(this.ctx.storage.sql, asked)
+      : { sources: [], more: false };
+  }
+
+  /**
+   * A page of the versions of a source the reader may read, newest first:
+   * none in a store that holds nothing (never written, or erased whole).
+   */
+  async listVersions(request: VersionListRequest): Promise<VersionList> {
+    const asked = checked(versionListRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? listVersions(this.ctx.storage.sql, asked)
+      : { versions: [], more: false };
   }
 
   /**

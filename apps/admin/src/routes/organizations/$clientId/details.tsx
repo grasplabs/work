@@ -3,11 +3,18 @@ import type { ContactRole } from "@grasp-os/shared/admin/onboarding-admin";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { createFileRoute } from "@tanstack/react-router";
-import { ExternalLinkIcon, MailIcon } from "lucide-react";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@grasp-os/ui/components/tabs";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { MailIcon } from "lucide-react";
 
 import { AttioLink } from "../../../admin/attio-link.tsx";
+import { OrgContract } from "../../../admin/org-contract.tsx";
+import { OrgMembers } from "../../../admin/org-members.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { Section } from "../../../admin/section.tsx";
 import { sourceNames } from "../../../admin/sections.ts";
@@ -23,9 +30,10 @@ import type { Crm, CrmDeal, CrmRecords } from "../../../crm/crm.ts";
 /**
  * An organization's Details, as the prototype has them
  * (grasplabs/prototype `components/admin/org-details.tsx` and the Attio
- * panel of `source-panels.tsx`): the company itself, who Grasp deals with
- * there, one for each thing, the company as Grasp's Attio has it with its
- * people and deals, the calls with it, and its papers.
+ * panel of `source-panels.tsx`): who Grasp deals with there, one for each
+ * thing, the company as Grasp's Attio has it with its people and deals,
+ * the calls with it, and its papers. Its contract and its members are
+ * tabs beside them (org-contract.tsx, org-members.tsx).
  *
  * Read only: the prototype corrects the papers and the contacts here, but
  * the company's own Grasp takes nothing from the admin yet, so nothing
@@ -58,49 +66,13 @@ const initialsOf = (name: string): string =>
     .slice(0, 2)
     .join("") || name.charAt(0).toUpperCase();
 
-/** The company: its name, what it does and where, how many people, and its website. */
-const Company = () => {
-  const { view } = useOrganization();
-  const { org, company } = view;
-  const people = view.people.length;
-  const teams = view.teams.length;
+/** What the company does and where, once that is known: a line, no card of its own. */
+const About = () => {
+  const { org } = useOrganization().view;
   const about = [org.about, org.place]
     .filter((part) => part !== "")
     .join(" · ");
-  const teamWords = `${teams} ${teams === 1 ? "team" : "teams"}`;
-  return (
-    <section className="bg-card flex flex-wrap items-start justify-between gap-x-8 gap-y-3 rounded-xl border px-5 py-4">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <PageHeaderTitle render={<h2>{org.name}</h2>} />
-        <p className="text-muted-foreground">
-          {about === "" ? "What it does is not known yet" : about}
-        </p>
-        <p className="text-muted-foreground text-xs">
-          {people > 0
-            ? `${people} ${people === 1 ? "person" : "people"} in ${teamWords}`
-            : "Its people are not known until its own list is in"}
-        </p>
-      </div>
-      {company.url === "" ? null : (
-        <Button
-          nativeButton={false}
-          render={
-            <a
-              aria-label={`Open ${company.url} in a new tab`}
-              href={`https://${company.url}`}
-              rel="noopener noreferrer"
-              target="_blank"
-            />
-          }
-          size="sm"
-          variant="outline"
-        >
-          {company.url}
-          <ExternalLinkIcon data-icon="inline-end" />
-        </Button>
-      )}
-    </section>
-  );
+  return about === "" ? null : <p className="text-muted-foreground">{about}</p>;
 };
 
 /** Who Grasp deals with there: one person for each thing, or what that one is for. */
@@ -462,17 +434,69 @@ const Papers = () => {
   );
 };
 
-const Details = () => (
-  <>
-    <Company />
-    <Contacts />
-    <CrmPart />
-    <Calls />
-    <Papers />
-  </>
-);
+const detailTabs = ["details", "contract", "members"] as const;
+type DetailTab = (typeof detailTabs)[number];
 
-/** An organization's Details: the company, who Grasp deals with, the CRM, its calls and its papers. */
+const tabWords: Record<DetailTab, string> = {
+  details: "Details",
+  contract: "Contract",
+  members: "Members",
+};
+
+/** The tab in the address; the details, the first, have none. */
+interface DetailsSearch {
+  tab?: Exclude<DetailTab, "details">;
+}
+
+const Details = () => {
+  const { tab = "details" } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  return (
+    <Tabs
+      onValueChange={(value: string) => {
+        const chosen = detailTabs.find((each) => each === value);
+        void navigate({
+          search:
+            chosen === undefined || chosen === "details" ? {} : { tab: chosen },
+        });
+      }}
+      value={tab}
+    >
+      <TabsList aria-label="Details" variant="line">
+        {detailTabs.map((each) => (
+          <TabsTrigger className="flex-none" key={each} value={each}>
+            {tabWords[each]}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <TabsContent value="details">
+        <div className="mt-4 flex flex-col gap-6">
+          <About />
+          <Contacts />
+          <CrmPart />
+          <Calls />
+          <Papers />
+        </div>
+      </TabsContent>
+      <TabsContent value="contract">
+        <div className="mt-4 flex flex-col gap-6">
+          <OrgContract />
+        </div>
+      </TabsContent>
+      <TabsContent value="members">
+        <div className="mt-4 flex flex-col gap-6">
+          <OrgMembers />
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+};
+
+/** An organization's Details, its tab in the address: the company, its contract and its members. */
 export const Route = createFileRoute("/organizations/$clientId/details")({
+  validateSearch: (search: Record<string, unknown>): DetailsSearch => {
+    const tab = detailTabs.find((each) => each === search.tab);
+    return tab === undefined || tab === "details" ? {} : { tab };
+  },
   component: Details,
 });
