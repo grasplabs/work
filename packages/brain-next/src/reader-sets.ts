@@ -47,6 +47,21 @@ const keyOf = (principals: readonly Principal[]): string =>
     .toSorted(byCodeUnits)
     .join(",")}]`;
 
+/**
+ * Whether the set of readers keyed `key` (`readerSetKeyOf`) is one person
+ * alone: what is drawn from such an item is theirs alone, and lies only
+ * in their own store.
+ */
+export const isOneReaderKey = (key: string): boolean => {
+  const principals: unknown = JSON.parse(key);
+  return (
+    Array.isArray(principals) &&
+    principals.length === 1 &&
+    Array.isArray(principals[0]) &&
+    principals[0][0] === "person"
+  );
+};
+
 /** The key of the set of readers `access` names. */
 export const readerSetKeyOf = (access: Access): string =>
   keyOf(principalsOf(access));

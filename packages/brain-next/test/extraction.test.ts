@@ -115,6 +115,11 @@ const checkedSchema = z.object({
   ),
 });
 
+/** A check call's message, as far as which statements it shows. */
+const checkedIndexesSchema = z.object({
+  statements: z.array(z.object({ index: z.int() })),
+});
+
 /** What the check call of `token`'s text was shown, beside the text: the day written, each value and end. */
 const checkedOf = (token: string) => {
   const input = calls.find(
@@ -1461,6 +1466,254 @@ describe("extracting memories", () => {
       customers: count,
       first: [`${nameOf(0)} is active (1).`],
       last: [`${nameOf(count - 1)} is active (1).`],
+    });
+  });
+
+  it("reads a version near the queue's request limit in pieces that fit it, asking each piece once", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = `Cust${token}`;
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    // Short lines: JSON escapes each line break, so the text alone is
+    // below the queue's limit and the checker's message would be past it.
+    const line = "abcdefghijklmn\n";
+    const text = `${token} ${name} is active.\n${line.repeat(
+      Math.floor(960_000 / line.length)
+    )}`;
+    await added(text, audience(group), { extract: fromOutside() });
+    for (let round = 0; round < 4; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one piece a tick at most
+      await tick(1, 1_000_000);
+    }
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
+    expect({
+      firstPieceAsked: callsOf(token).filter(
+        ({ purpose }) => purpose === "brain.extract"
+      ).length,
+      read: read.map(({ value }) => value),
+    }).toStrictEqual({ firstPieceAsked: 1, read: ["active"] });
+  });
+
+  it("asks of a version just under the queue's request limit, a piece that fits at a time", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    answers.set(token, answering({ entities: [], memories: [] }));
+    const source = unique("big");
+    await added(
+      `${token} ${"abcd efgh. ".repeat(Math.floor(998_500 / 11))}`,
+      audience(group),
+      { extract: fromOutside(), source }
+    );
+    const before = calls.length;
+    for (let round = 0; round < 4; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one piece a tick at most
+      await tick(1, 1_000_000);
+    }
+    const asked = calls
+      .slice(before)
+      .filter(({ purpose }) => purpose === "brain.extract");
+    const left = await runInDurableObject(
+      shared(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec("SELECT 1 FROM work_items WHERE key = ?", source)
+          .toArray().length
+    );
+
+    expect({
+      pieces: asked.length > 1,
+      fit: asked.every(
+        ({ system, input }) => system.length + input.length <= 1_000_000
+      ),
+      left,
+    }).toStrictEqual({ pieces: true, fit: true, left: 0 });
+  });
+
+  it("checks more statements than one message of the queue's limit holds, in messages that fit, when the window is unknown", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Ledger");
+    const count = 700;
+    const factOf = (index: number) => `${name} fact ${index}`;
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: Array.from({ length: count }, (_, index) => ({
+          about: "c",
+          type: "fact",
+          statement: `${factOf(index)} ${"s".repeat(950)}`,
+          quote: factOf(index),
+        })),
+      })
+    );
+    const text = `${token} ${"Nothing to keep here. ".repeat(18_000)} ${Array.from(
+      { length: count },
+      (_, index) => `${factOf(index)}.`
+    ).join(" ")}`;
+    await added(text, audience(group), { extract: fromOutside() });
+    await tick();
+    const reader = { person: unique("p"), groups: [group] };
+    const entities = await entitiesNamed(reader, name);
+    const memories =
+      entities[0] === undefined
+        ? []
+        : await memoriesAbout(entities[0].id, reader);
+    const checks = calls.filter(
+      ({ purpose, input }) =>
+        purpose === "brain.extract.check" && input.includes(token)
+    );
+
+    expect({
+      checks: checks.length > 1,
+      fit: checks.every(
+        ({ system, input }) => system.length + input.length <= 1_000_000
+      ),
+      entities: entities.length,
+      memories: memories.length,
+    }).toStrictEqual({
+      checks: true,
+      fit: true,
+      entities: 1,
+      memories: count,
+    });
+  });
+
+  it("keeps one entity for one proposed entity when a piece takes more than one add", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Acme");
+    const count = 150;
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: Array.from({ length: count }, (_, index) => ({
+          about: "c",
+          type: "fact",
+          statement: `${name} fact ${index}.`,
+          quote: `${name} fact ${index}`,
+        })),
+      })
+    );
+    await added(
+      `${token}: ${Array.from(
+        { length: count },
+        (_, index) => `${name} fact ${index}.`
+      ).join(" ")}`,
+      audience(group),
+      { extract: fromOutside() }
+    );
+    await tick();
+    const reader = { person: unique("p"), groups: [group] };
+    const entities = await entitiesNamed(reader, name);
+    const memories = await Promise.all(
+      entities.map(async ({ id }) => {
+        const about = await memoriesAbout(id, reader);
+        return about.length;
+      })
+    );
+
+    expect(memories).toStrictEqual([count]);
+  });
+
+  it("keeps only what each check message's verdict names of its own statements", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Batch");
+    // Statements long enough that two fit one checker message and a third
+    // doesn't, in a window that takes the whole text as one piece.
+    const text = `${token}: ${name} fact 0. ${name} fact 1. ${name} fact 2.`;
+    const window =
+      2 * (tokensOf(proposeInstructions) + tokensOf(checkInstructions) + 200);
+    const checkTokens =
+      window - Math.floor(window / 4) - tokensOf(checkInstructions);
+    const digits = Math.min(
+      950,
+      Math.floor((checkTokens - tokensOf(text) - 200) / 2.2)
+    );
+    const seen: number[][] = [];
+    answers.set(token, (request) => {
+      if (request.purpose === "brain.extract") {
+        return answering({
+          entities: [{ key: "c", kind: "customer", names: [name] }],
+          memories: [0, 1, 2].map((index) => ({
+            about: "c",
+            type: "fact",
+            statement: `${name} fact ${index} ${"7".repeat(digits)}`,
+            quote: `${name} fact ${index}`,
+          })),
+        })(request);
+      }
+      const shown = checkedIndexesSchema
+        .parse(JSON.parse(request.input))
+        .statements.map(({ index }) => index);
+      seen.push(shown);
+      // The first message's verdict rejects all it shows; the second's
+      // names the first's statements too.
+      return JSON.stringify({ supported: shown.includes(0) ? [] : [0, 1, 2] });
+    });
+    await added(text, audience(group), { extract: fromOutside() });
+    await tick(1, window);
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
+    expect({
+      seen,
+      kept: read.map(({ statement }) => statement.slice(0, name.length + 7)),
+    }).toStrictEqual({
+      seen: [[0, 1], [2]],
+      kept: [`${name} fact 2`],
+    });
+  });
+
+  it("fails a piece that can't hold even one character, asking nothing and never going round", async () => {
+    const token = unique("t");
+    const name = unique("Emoji");
+    const group = unique("g");
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    // A character the token estimate counts as four, first, in a window
+    // whose piece holds three.
+    await added(`😀 ${token}: ${name} is active.`, audience(group), {
+      extract: fromOutside(),
+    });
+    const window =
+      2 * (tokensOf(proposeInstructions) + tokensOf(checkInstructions) + 3);
+    await tick(1, window);
+    const asked = callsOf(token).length;
+    // Past the failure's wait, with a window that holds the text.
+    await tick(2, null);
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
+    expect({ asked, read: read.map(({ value }) => value) }).toStrictEqual({
+      asked: 0,
+      read: ["active"],
     });
   });
 });

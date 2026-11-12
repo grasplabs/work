@@ -23,7 +23,7 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
-import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { isOneReaderKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
@@ -197,9 +197,8 @@ const holdVersion = (
   why: string
 ): void => {
   const [found] = sql
-    .exec<{ alone: number }>(
-      `SELECT (json_array_length(reader_sets.key) = 1
-          AND reader_sets.key ->> '$[0][0]' = 'person') AS alone
+    .exec<{ readers: string }>(
+      `SELECT reader_sets.key AS readers
       FROM source_versions
       JOIN reader_sets ON reader_sets.id = source_versions.reader_set
       WHERE source = ? AND version = ?
@@ -211,7 +210,7 @@ const holdVersion = (
   if (found === undefined) {
     throw refused(why);
   }
-  if (shared && found.alone === 1) {
+  if (shared && isOneReaderKey(found.readers)) {
     throw refused(
       "what one person alone may read is kept in that person's own store"
     );

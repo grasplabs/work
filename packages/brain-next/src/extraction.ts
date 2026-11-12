@@ -15,14 +15,18 @@ import {
   newMemoriesSchema,
   newMemorySchema,
   principalMaxLength,
+  quoteMaxLength,
   sourceIdSchema,
   speakerSchema,
+  statementMaxLength,
   tokensOf,
+  valueMaxLength,
   versionSchema,
   workPriorities,
 } from "./contract.ts";
 import type {
   Access,
+  AddedMemories,
   AttributeRule,
   EntityKind,
   Extract,
@@ -32,11 +36,17 @@ import type {
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
+import { isOneReaderKey } from "./reader-sets.ts";
 import { addMemories } from "./remember.ts";
 import { dayOf, endOfDay, resolveWhen, whenSchema } from "./when.ts";
 import type { Resolved, When } from "./when.ts";
 import { sequenceOf } from "./words.ts";
-import { defineWork, enqueueWork, WorkError } from "./work.ts";
+import {
+  defineWork,
+  enqueueWork,
+  WorkError,
+  workRequestMaxLength,
+} from "./work.ts";
 import type { WorkContext, WorkDefinition } from "./work.ts";
 
 /** An entity as an add takes it, its names and identifiers given. */
@@ -106,7 +116,11 @@ const payloadSchema = z.strictObject({
   /**
    * What a run of this piece kept, in its adds, recorded before its first
    * add (`WorkContext.keep`): a rerun writes these and asks the model
-   * nothing. Each memory as JSON, its end as milliseconds.
+   * nothing. Each memory as JSON, its end as milliseconds. Its size is
+   * what the piece kept: each memory within the contract's bounds, as
+   * many as the model's answer held (at most a quarter of its window).
+   * A record past the size the platform takes for one stored value
+   * fails the attempt, and the item parks as any failure does.
    */
   kept: z
     .array(
@@ -503,37 +517,57 @@ const statementOf = (
       : dayOf(new Date(validUntil.getTime() - 1), timeZone).toString(),
 });
 
+/** A checker message, and the indexes of the statements it shows. */
+interface CheckMessage {
+  input: string;
+  indexes: ReadonlySet<number>;
+}
+
+/**
+ * The most characters a checker message may hold: the queue's limit on a
+ * request (`workRequestMaxLength`), less the checker's instructions.
+ */
+const checkCharsMax = workRequestMaxLength - checkInstructions.length;
+
 /**
  * The checker's messages for `memories`: the text, the day written, and as
  * many statements as fit in `tokens` (the window less the instructions and
- * the answer's share); all in one when the window is unknown. A statement
- * that doesn't fit beside the text even alone goes in a message of its
- * own, which the model then refuses: the item's failure.
+ * the answer's share), when the window is known, and in the queue's limit
+ * on a request (`checkCharsMax`), always. A piece leaves room for one
+ * statement at the contract's bounds (`checkRoom`), so each message holds
+ * at least one.
  */
 const checkMessagesOf = (
   text: string,
   drawing: Drawing,
   memories: readonly NewMemory[],
   tokens: number | null
-): string[] => {
+): CheckMessage[] => {
   const messageOf = (statements: ReturnType<typeof statementOf>[]) =>
     JSON.stringify({ text, written: drawing.said.toString(), statements });
-  const messages: string[] = [];
+  const messages: CheckMessage[] = [];
   let batch: ReturnType<typeof statementOf>[] = [];
+  const close = () => {
+    messages.push({
+      input: messageOf(batch),
+      indexes: new Set(batch.map(({ index }) => index)),
+    });
+    batch = [];
+  };
   for (const [index, memory] of memories.entries()) {
     const statement = statementOf(memory, index, drawing.timeZone);
+    const message = messageOf([...batch, statement]);
     if (
-      tokens !== null &&
       batch.length > 0 &&
-      tokensOf(messageOf([...batch, statement])) > tokens
+      (message.length > checkCharsMax ||
+        (tokens !== null && tokensOf(message) > tokens))
     ) {
-      messages.push(messageOf(batch));
-      batch = [];
+      close();
     }
     batch.push(statement);
   }
   if (batch.length > 0) {
-    messages.push(messageOf(batch));
+    close();
   }
   return messages;
 };
@@ -546,7 +580,7 @@ const supportedOf = async (
   { entities, memories }: Candidates
 ): Promise<Candidates> => {
   const supported = new Set<number>();
-  for (const input of checkMessagesOf(
+  for (const { input, indexes } of checkMessagesOf(
     text,
     drawing,
     memories,
@@ -563,8 +597,12 @@ const supportedOf = async (
     if (!verdict.success) {
       throw new WorkError("invalid_answer");
     }
+    // Only what this message showed: a verdict never speaks for a
+    // statement it wasn't shown.
     for (const index of verdict.data.supported) {
-      supported.add(index);
+      if (indexes.has(index)) {
+        supported.add(index);
+      }
     }
   }
   return keeping(
@@ -673,42 +711,76 @@ interface Piece {
 /** Sentences, as Unicode's rules cut them (`Intl.Segmenter`), for cutting pieces. */
 const sentences = new Intl.Segmenter("en", { granularity: "sentence" });
 
+/** `text`'s length as a JSON string holds it, its escapes included, less the quotes. */
+const escapedLength = (text: string): number => JSON.stringify(text).length - 2;
+
+/**
+ * The room a checker message keeps past its text for one statement at the
+ * contract's bounds (statement, quote and value, each escaped at most six
+ * characters a character), its other fields and the day written.
+ */
+const checkRoom =
+  6 * (statementMaxLength + quoteMaxLength + valueMaxLength) + 256;
+
+/**
+ * The most characters of a piece, as a JSON string holds them: the
+ * queue's limit on a request (`workRequestMaxLength`), less the longer of
+ * the two instructions and the room for a statement beside it.
+ */
+const pieceCharsMax =
+  workRequestMaxLength -
+  Math.max(proposeInstructions.length, checkInstructions.length) -
+  checkRoom;
+
 /**
  * The piece of `text` from `from`: whole sentences while they fit in
- * `tokens` (the Brain's estimate, `tokensOf`), at least one, a sentence
- * longer than that cut where it no longer fits; all the rest when the
- * host knows no bound. The next piece starts where this one ends: no text
- * is read twice, so no fact is drawn twice.
+ * `tokens` (the Brain's estimate, `tokensOf`; no bound when the host knows
+ * none) and in `chars` (as a JSON string holds them: the queue's limit on
+ * a request), at least one, a sentence longer than that cut where it no
+ * longer fits. The next piece starts where this one ends: no text is read
+ * twice, so no fact is drawn twice. When not even one character fits,
+ * the item fails (`window_too_small`), never going round.
  */
 export const pieceOf = (
   text: string,
   from: number,
-  tokens: number | null
+  tokens: number | null,
+  chars: number = pieceCharsMax
 ): Piece & { next: number } => {
   const rest = text.slice(from);
-  if (tokens === null || tokensOf(rest) <= tokens) {
+  const fits = (usedTokens: number, usedChars: number) =>
+    (tokens === null || usedTokens <= tokens) && usedChars <= chars;
+  if (fits(tokens === null ? 0 : tokensOf(rest), escapedLength(rest))) {
     return { text: rest, end: text.length, last: true, next: text.length };
   }
   let end = 0;
-  let used = 0;
+  let usedTokens = 0;
+  let usedChars = 0;
   for (const { segment, index } of sentences.segment(rest)) {
     const cost = tokensOf(segment);
-    if (used + cost > tokens) {
+    const length = escapedLength(segment);
+    if (!fits(usedTokens + cost, usedChars + length)) {
       break;
     }
-    used += cost;
+    usedTokens += cost;
+    usedChars += length;
     end = index + segment.length;
   }
   if (end === 0) {
     // One sentence longer than a piece: as many characters as fit.
     for (const character of rest) {
       const cost = tokensOf(character);
-      if (used + cost > tokens) {
+      const length = escapedLength(character);
+      if (!fits(usedTokens + cost, usedChars + length)) {
         break;
       }
-      used += cost;
+      usedTokens += cost;
+      usedChars += length;
       end += character.length;
     }
+  }
+  if (end === 0) {
+    throw new WorkError("window_too_small");
   }
   return {
     text: rest.slice(0, end),
@@ -768,11 +840,54 @@ const addsOf = (entities: NewEntity[], memories: NewMemory[]): Candidates[] => {
 const add = async (
   { storage, shared }: WorkContext,
   adding: z.input<typeof newMemoriesSchema>
-): Promise<void> => {
+): Promise<AddedMemories> =>
   await addMemories(
     { storage, db: drizzle(storage), shared },
     newMemoriesSchema.parse(adding)
   );
+
+/**
+ * Writes `adds` of a piece, in order, under `change` and `:1`, `:2` and
+ * so on, the version's mark (`extracted`) with the last. An entity the
+ * adds share is one entity: each later add names it by the id an earlier
+ * one answered. A rerun gets the same ids, as an add repeated answers
+ * what it first added.
+ */
+const writeAdds = async (
+  context: WorkContext,
+  {
+    adds,
+    change,
+    access,
+    extracted,
+  }: {
+    adds: readonly Candidates[];
+    change: string;
+    access: Access;
+    extracted: { source: SourceId; version: number } | undefined;
+  }
+): Promise<void> => {
+  const ids = new Map<string, string>();
+  for (const [index, adding] of adds.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- one add after another, in order
+    const added = await add(context, {
+      change: index === 0 ? change : `${change}:${index}`,
+      access,
+      memories: adding.memories,
+      entities: adding.entities.map((entity) => {
+        const id = ids.get(entity.key);
+        return id === undefined ? entity : { ...entity, id };
+      }),
+      ...(extracted !== undefined && index === adds.length - 1
+        ? { extracted }
+        : {}),
+    });
+    for (const [key, id] of Object.entries(added.entities)) {
+      if (!ids.has(key)) {
+        ids.set(key, id);
+      }
+    }
+  }
 };
 
 /** `payload` without what a run of its piece kept: for the next piece. */
@@ -861,8 +976,12 @@ const extractWork: WorkDefinition<Payload> = defineWork({
     const access = accessOfKey(found.readers);
     // Nobody may read it, nor anything drawn from it: no call. Nor for
     // what one person alone may read in the shared store, which keeps no
-    // memory of theirs: that person's own store draws from what it holds.
-    if (access.kind === "none" || (access.kind === "owner" && context.shared)) {
+    // memory of theirs (remember.ts refuses it by the same rule): that
+    // person's own store draws from what it holds.
+    if (
+      access.kind === "none" ||
+      (context.shared && isOneReaderKey(found.readers))
+    ) {
       return;
     }
     const whole = await textOf(context, found.file);
@@ -890,19 +1009,12 @@ const extractWork: WorkDefinition<Payload> = defineWork({
     if (adds !== undefined && currentOf(sql, source, version) === undefined) {
       return;
     }
-    for (const [index, adding] of (adds ?? []).entries()) {
-      // oxlint-disable-next-line no-await-in-loop -- one add after another, in order
-      await add(context, {
-        change: index === 0 ? change : `${change}:${index}`,
-        access: accessOfKey(found.readers),
-        ...adding,
-        // The version's mark with its last piece's last add, after all of
-        // the piece's memories.
-        ...(piece.last && index === (adds ?? []).length - 1
-          ? { extracted: { source, version } }
-          : {}),
-      });
-    }
+    await writeAdds(context, {
+      adds: adds ?? [],
+      change,
+      access,
+      extracted: piece.last ? { source, version } : undefined,
+    });
     // The next piece, while the version is still current: checked and put
     // on the queue in one synchronous step, so it never replaces a newer
     // version's item.
