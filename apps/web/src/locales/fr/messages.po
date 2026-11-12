@@ -1776,6 +1776,14 @@ msgctxt "who reaches a table's records"
 msgid "Access"
 msgstr "Accès"
 
+#: src/agents/agent-page.tsx
+msgid "Access isn't shown"
+msgstr "L'accès n'est pas affiché"
+
+#: src/agents/agents-overview.tsx
+msgid "Access not shown"
+msgstr "Accès non affiché"
+
 #: src/apps/access-view.tsx
 msgid "Access to {name}"
 msgstr "Accès à {name}"
@@ -8974,6 +8982,10 @@ msgstr "Non servi"
 msgid "Not shared with the project"
 msgstr "Non partagé avec le projet"
 
+#: src/agents/agent-page.tsx
+msgid "Not shown"
+msgstr "Non affiché"
+
 #: src/workflows/requests/request-parts.tsx
 msgid "Not sorted yet"
 msgstr "Pas encore classé"
@@ -9434,6 +9446,10 @@ msgstr "Seule une personne connectée à l'espace de travail l'ouvre."
 #: src/apps/app-data-model.tsx
 msgid "Only the App's builders"
 msgstr "Seulement les créateurs de l’App"
+
+#: src/agents/agent-page.tsx
+msgid "Only the company's own admins see it"
+msgstr "Seuls les administrateurs de l'entreprise le voient"
 
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
@@ -15798,6 +15814,10 @@ msgstr "Qui peut la lire"
 #: src/agents/agent-page.tsx
 msgid "Who may use {name}"
 msgstr "Qui peut utiliser {name}"
+
+#: src/agents/agent-page.tsx
+msgid "Who may use {name} and what it may do couldn't be read. Only the company's own admins see it. If that is you, load the page again."
+msgstr "Impossible de lire qui peut utiliser {name} et ce qu'il peut faire. Seuls les administrateurs de l'entreprise le voient. Si c'est votre cas, rechargez la page."
 
 #: src/agents/agent-page.tsx
 msgid "Who may use it"

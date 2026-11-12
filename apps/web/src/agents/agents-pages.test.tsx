@@ -478,5 +478,55 @@ describe("the company's agents, on pages of their own", () => {
         )
       ).toStrictEqual([true, true, true, true, true]);
     });
+
+    it("says an agent's access isn't shown where core didn't say it, never that it answers everyone", async () => {
+      // As for an admin among Grasp's staff, whom core refuses the read.
+      const unread: ManagedAgents = { ...managed, settings: {} };
+      await mounted(
+        <AgentsOverview
+          makes={false}
+          managed={unread}
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      const [firstCard, clairesCard] = cards();
+      const onCards = {
+        first: firstCard?.text.includes("Everyone with Grasp"),
+        claire: clairesCard?.text.includes("Access not shown"),
+        claireEveryone: clairesCard?.text.includes("Everyone"),
+      };
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await mounted(
+        <AgentPage
+          agent={claire}
+          editable={false}
+          first={false}
+          models={[]}
+          onTab={() => {}}
+          people={[]}
+          settings={undefined}
+          tab="access"
+          teams={teams}
+          usable={false}
+          usage={undefined}
+          wakes={[]}
+        />
+      );
+      const panel = document.querySelector("[role='tabpanel']:not([hidden])");
+      expect({
+        ...onCards,
+        access: panel?.textContent?.includes("Access isn't shown"),
+        everyone: document.body.textContent?.includes("Everyone"),
+      }).toStrictEqual({
+        first: true,
+        claire: true,
+        claireEveryone: false,
+        access: true,
+        everyone: false,
+      });
+    });
   });
 });

@@ -122,6 +122,51 @@ const useMoment = () => {
     }).format(new Date(iso));
 };
 
+/** What a glance says: what holds, and a line under it. */
+interface Said {
+  value: string;
+  line?: string;
+}
+
+/**
+ * Whom an agent answers and how much it may do, at a glance. The first
+ * agent's is the company's own, set under Access. Another agent's that
+ * core didn't say (as it won't for Grasp's staff) is said to be not
+ * shown, never passed off as anyone's.
+ */
+const useAccessGlances = (
+  first: boolean,
+  settings: AgentSettings | undefined,
+  teams: StephenReach["teams"]
+): { who: Said; may: Said } => {
+  const { t } = useLingui();
+  const audienceLine = useAudienceLine(teams);
+  if (first) {
+    return {
+      who: {
+        value: t`Everyone with Grasp`,
+        line: t`In Grasp's chat. Chat apps are under Access.`,
+      },
+      may: { value: t`Set per app`, line: t`For each app, under Access` },
+    };
+  }
+  if (settings === undefined) {
+    const unread = {
+      value: t`Not shown`,
+      line: t`Only the company's own admins see it`,
+    };
+    return { who: unread, may: unread };
+  }
+  const classes = classesOn(settings);
+  return {
+    who: { value: audienceLine(settings.audience) },
+    may: {
+      value: t`${classes.on} of ${classes.of}`,
+      line: t`Kinds of work the company has turned on`,
+    },
+  };
+};
+
 /** The agent at a glance: whether it answers, whom, how much it may do, and when it works on its own. */
 const Glances = ({
   agent,
@@ -137,9 +182,8 @@ const Glances = ({
   wakes: readonly AgentWake[];
 }) => {
   const { t } = useLingui();
-  const audienceLine = useAudienceLine(teams);
   const moment = useMoment();
-  const classes = settings === undefined ? undefined : classesOn(settings);
+  const { who, may } = useAccessGlances(first, settings, teams);
   const scheduled = wakesOn(wakes).length;
   const next = nextWakeAt(wakes);
   return (
@@ -153,32 +197,8 @@ const Glances = ({
         }
         value={agent.state === "on" ? t`On` : t`Paused`}
       />
-      <Glance
-        label={t`Who may use it`}
-        line={
-          first || settings === undefined
-            ? t`In Grasp's chat. Chat apps are under Access.`
-            : undefined
-        }
-        value={
-          first || settings === undefined
-            ? t`Everyone with Grasp`
-            : audienceLine(settings.audience)
-        }
-      />
-      <Glance
-        label={t`What it may do`}
-        line={
-          classes === undefined
-            ? t`For each app, under Access`
-            : t`Kinds of work the company has turned on`
-        }
-        value={
-          classes === undefined
-            ? t`Set per app`
-            : t`${classes.on} of ${classes.of}`
-        }
-      />
+      <Glance label={t`Who may use it`} line={who.line} value={who.value} />
+      <Glance label={t`What it may do`} line={may.line} value={may.value} />
       <Glance
         label={t`Works on its own`}
         line={next === undefined ? undefined : t`Next: ${moment(next)}`}
@@ -268,9 +288,19 @@ const Access = ({
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
-  if (first || settings === undefined) {
-    // The first agent's is its own, larger set (`FirstAccess`).
+  if (first) {
+    // The first agent's is its own, larger set (`StephenSettings`).
     return null;
+  }
+  if (settings === undefined) {
+    // Core didn't say, as it won't for Grasp's staff: said, never left
+    // blank or shown as anyone's.
+    return (
+      <SettingsSection
+        description={t`Who may use ${name} and what it may do couldn't be read. Only the company's own admins see it. If that is you, load the page again.`}
+        title={t`Access isn't shown`}
+      />
+    );
   }
   return (
     <>

@@ -127,6 +127,24 @@ interface Shown {
     | undefined;
 }
 
+/**
+ * Whom an agent answers, on its card: the first agent everyone with
+ * Grasp; another its own audience (`line`), or that it isn't shown where
+ * core didn't say, never passed off as everyone.
+ */
+const AudienceFact = ({
+  first,
+  line,
+}: {
+  first: boolean;
+  line: string | undefined;
+}) => {
+  if (first) {
+    return <Trans>Everyone with Grasp</Trans>;
+  }
+  return line ?? <Trans>Access not shown</Trans>;
+};
+
 /** What an admin's card says of an agent under its job. */
 const ManagedFacts = ({
   managed,
@@ -143,11 +161,12 @@ const ManagedFacts = ({
   return (
     <div className="text-muted-foreground flex flex-col gap-1.5 text-xs">
       <Fact icon={<UsersRoundIcon />}>
-        {first || settings === undefined ? (
-          <Trans>Everyone with Grasp</Trans>
-        ) : (
-          audienceLine(settings.audience)
-        )}
+        <AudienceFact
+          first={first}
+          line={
+            settings === undefined ? undefined : audienceLine(settings.audience)
+          }
+        />
       </Fact>
       {classes === undefined ? null : (
         <Fact icon={<WrenchIcon />}>
