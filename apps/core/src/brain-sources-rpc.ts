@@ -142,6 +142,8 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
         await recallAs(this.#env, person.userId, {
           question,
           budget: { tokens: brainSearchBudget },
+          // Their own Brain page: what is theirs alone is theirs to find.
+          personal: true,
         })
     );
   }

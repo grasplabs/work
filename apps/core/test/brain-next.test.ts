@@ -102,6 +102,7 @@ const recalledAs = async (
   question: string
 ): Promise<SourceRef[]> => {
   const { items: chunks } = await recallAs(env, personId, {
+    personal: true,
     question,
     budget: { tokens: recallBudgetMax },
   });
@@ -389,6 +390,7 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one person at a time
       await expect(
         recallAs(env, asGiven, {
+          personal: true,
           question: "anything",
           budget: { tokens: recallBudgetMax },
         })

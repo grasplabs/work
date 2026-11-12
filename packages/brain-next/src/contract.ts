@@ -18,6 +18,9 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/** What a store has of a key (`Brain.keyState`). */
+export type KeyState = "free" | "held" | "erased";
+
 /**
  * What an add says that an erasure closed: to an erased source, whose key
  * is closed for good, or for a person alone that began before that
@@ -26,6 +29,13 @@ export const sourceTextMaxBytes = 1_000_000;
  * any other failure by comparing it whole.
  */
 export const erasedSource = "The Brain refused it: what this adds was erased";
+
+/**
+ * What a person's own store erased whole answers an add, or any call that
+ * would write: they were erased, for good, so the add is refused as
+ * `erasedSource` is, and never tried again.
+ */
+export const storeErased = "The Brain refused it: this store was erased";
 
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
@@ -1913,6 +1923,15 @@ export interface Brain {
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
+   * What this store has of the key `source`, whoever may read it: `erased`
+   * when an erasure closed it, `held` when a version of it is kept
+   * (current or history), `free` when it was never given it. For the host
+   * only, before it keeps a source in another store (one person's own):
+   * a key lives in one store. A person's own store erased whole holds
+   * nothing: `free`.
+   */
+  keyState: (source: SourceId) => Promise<KeyState>;
+  /**
    * The sources whose current version the reader may read, among those
    * whose key starts with one of the prefixes asked: newest first by when
    * their current version was added, then by key, a page at a time. Each
@@ -2132,6 +2151,20 @@ export type StoreKind =
   | { kind: "shared" }
   | { kind: "person"; person: string }
   | { kind: "unknown" };
+
+/**
+ * What erasing a person's own store whole answers while it is still
+ * deleting: its record written and its storage gone, its files waiting
+ * out the time an add under way has to write one. The expected answer
+ * for a while after every such erasure, not a failure: the host keeps the
+ * erasure pending and calls again (`isStillDeleting`).
+ */
+export const stillDeleting =
+  "The Brain erased this store and is still deleting its files: erase it again";
+
+/** Whether `error` is the answer `stillDeleting`, as it crosses RPC. */
+export const isStillDeleting = (error: unknown): boolean =>
+  error instanceof Error && error.message === stillDeleting;
 
 /**
  * Whose the store named `name` is. A name is all a store knows of itself
