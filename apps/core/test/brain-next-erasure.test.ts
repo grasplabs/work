@@ -49,6 +49,7 @@ import {
   wordOf,
 } from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // Erasure (GRA-1729), through core's functions into the Brain's store and
@@ -427,13 +428,13 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     // The queue embeds it, with the embed package's test model.
     const { model } = await embedInProcess([]);
     const name = vectorModelNameOf(model);
-    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work(
-      async () => {
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work({
+      ask: async () => {
         await Promise.resolve();
         return { kind: "answer", text: "" };
       },
-      new Date(),
-      {
+      at: new Date(),
+      embedders: {
         model,
         embed: async ({ texts: asked }) => {
           const embedded = await embedInProcess(asked);
@@ -443,8 +444,14 @@ describe("erasing a source", { timeout: 120_000 }, () => {
             results: embedded.vectors,
           };
         },
-      }
-    );
+      },
+      handOvers: {
+        handOver: async () => {
+          await Promise.resolve();
+          return { kind: "nothing" };
+        },
+      },
+    });
     const hashes = await Promise.all(texts.map(hashOf));
     const kept = async () => {
       const objects = await Promise.all(
@@ -664,14 +671,14 @@ describe("erasing a source", { timeout: 120_000 }, () => {
         },
       });
     });
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     gate.released = true;
     // A store of its own bucket again.
     await killStore();
     const inDoubt = await settled(add(newSource(), text, owner(reader)));
     const keptInDoubt = await fileOf(text);
     later(fileGraceMs + 1);
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     const swept = await fileOf(text);
     const again = newSource();
     await add(again, text, owner(reader));
@@ -1112,8 +1119,8 @@ describe("queued work about what is erased", { timeout: 120_000 }, () => {
 
     await eraseShared(source, "deleted");
     const atOnce = await queuedAbout(source);
-    await workBrain(env, new Date());
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
+    await workBrain(env, new Date(), noProducers);
 
     expect({ before, atOnce, ran: handled.get(keyOf(source)) }).toStrictEqual({
       // Its own, and the embedding its add queued.
@@ -1146,7 +1153,7 @@ describe("queued work about what is erased", { timeout: 120_000 }, () => {
       }
     });
     await queueRecorded(source);
-    const ticking = settled(workBrain(env, new Date()));
+    const ticking = settled(workBrain(env, new Date(), noProducers));
     await vi.waitFor(() => {
       expect(gate.reached).toBeTruthy();
     });
@@ -1160,7 +1167,7 @@ describe("queued work about what is erased", { timeout: 120_000 }, () => {
     const model = modelOf();
     await putCodes(model, chunks);
     const rows = await chunkRowsOf(source);
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
 
     expect({
       queuedAtOnce,
@@ -1325,7 +1332,7 @@ describe(
 
       await eraseShared(stuck, "deleted");
       await eraseShared(free, "deleted");
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       const failing = await brainWorkOverview(env);
       const whileStuck = {
         erasing: failing.erasing,
@@ -1336,7 +1343,7 @@ describe(
       await runInDurableObject(store(), (_instance, state) => {
         state.storage.sql.exec("DROP TRIGGER test_stuck_version");
       });
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       const after = await brainWorkOverview(env);
 
       expect({
@@ -1380,7 +1387,7 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
       recalled: await recalledAs(reader, wordOf(mark)),
       ledger: await ledgerCount(source),
     };
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     const written = await ledgerCount(source);
     const { stepsFailed } = await brainWorkOverview(env);
     await restoreStore(backup);
@@ -1595,7 +1602,7 @@ describe(
         // Its parts so far, and no entry: not yet in the ledger.
         entries: await ledgerOf(leaver),
       };
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       const parts = await ledgerPartsOf(leaver);
       const entries = await ledgerOf(leaver);
       await tickUntilErased(5);
@@ -1932,11 +1939,11 @@ describe(
         // Added for them after the call that failed, before its retry.
         await add(newSource(), `Since ${wordOf(since)}`, owner(leaver));
         if (tick === "failing") {
-          await workBrain(env, new Date());
+          await workBrain(env, new Date(), noProducers);
         }
         switched.failing = false;
         if (tick === "writing") {
-          await workBrain(env, new Date());
+          await workBrain(env, new Date(), noProducers);
         }
         const retried = await settled(
           erasePersonShared({ personId: leaver, reason: "person_erased" })
@@ -2006,7 +2013,7 @@ describe(
         }
       });
       await queueRecorded(source);
-      const ticking = settled(workBrain(env, new Date()));
+      const ticking = settled(workBrain(env, new Date(), noProducers));
       await vi.waitFor(() => {
         expect(gate.reached).toBeTruthy();
       });
@@ -2034,7 +2041,7 @@ describe(
       await add(source, `Under way ${wordOf(newMark())}`, owner(reader));
       const gate = holdHandlerOf(source);
       await queueRecorded(source);
-      const ticking = settled(workBrain(env, new Date()));
+      const ticking = settled(workBrain(env, new Date(), noProducers));
       await vi.waitFor(() => {
         expect(gate.reached).toBeTruthy();
       });
@@ -2063,7 +2070,7 @@ describe(
       const first = holdHandlerOf(erased);
       const second = holdHandlerOf(next);
       await queueRecorded(erased);
-      const ticking = settled(workBrain(env, new Date()));
+      const ticking = settled(workBrain(env, new Date(), noProducers));
       await vi.waitFor(() => {
         expect(first.reached).toBeTruthy();
       });

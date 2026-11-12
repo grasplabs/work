@@ -1,3 +1,4 @@
+import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { SkillsOverview } from "@grasp-os/shared/skills";
@@ -6,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
+import { erasePerson } from "../src/brain-next.ts";
 import {
   readSkillFor,
   selectSkillsFor,
@@ -13,8 +15,13 @@ import {
 } from "../src/brain-skills.ts";
 import type { SkillAt } from "../src/brain-skills.ts";
 import { skillShares } from "../src/db/core/schema.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
+import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Writing skills and sharing one with the company (GRA-1754), from the
@@ -97,6 +104,40 @@ const keptText = async (id: string): Promise<(string | null)[]> => {
     .from(skillShares)
     .where(eq(skillShares.id, id));
   return rows.map(({ text }) => text);
+};
+
+/** The Brain's namespace, as core reaches it. */
+const namespace = () => inJurisdiction(env, env.BRAIN_STORE);
+
+/** What the shared store and `personId`'s own have of `key`. */
+const keptWhere = async (personId: string, key: string) => ({
+  shared: await brainOf(namespace()).keyState(key),
+  own: await personalBrainOf(namespace(), personId).keyState(key),
+});
+
+/** The chat's code: the skills `env.skills` selects for quoting a tender. */
+const selectsForATender = codeStep(
+  'export default async (self, env) => { const { skills } = await env.skills.select({ task: "quote a tender" }); return skills.map(({ scope, name }) => scope + ":" + name).join(",") || "none"; };'
+);
+
+/** Every string in `value`, however deep: what a request to the model carried. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap((each: unknown) => stringsIn(each));
+  }
+  return [];
+};
+
+/** What each of the chat's code runs returned. */
+const returnedIn = async (
+  stub: Parameters<typeof codeResults>[0],
+  chatId: string
+): Promise<string[]> => {
+  const results = await codeResults(stub, chatId);
+  return results.map(({ text }) => text);
 };
 
 /** A fresh skill name. */
@@ -441,6 +482,137 @@ describe("writing and sharing skills", setUpTime, () => {
       noCard: "skills.invalid",
       badName: "skills.invalid",
       badYaml: "skills.invalid",
+    });
+  });
+
+  it("keeps a person's own skill in their own store alone, and the company's in the shared one only once approved", async () => {
+    const [author, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const name = nameOf("count-the-till");
+    const saved = await author.api.skills.save(skillText(name, "Count it"));
+    const own = await keptWhere(author.userId, `skill:person:${name}`);
+    const share = await author.api.skills.share(name, saved.version);
+    const asked = await keptWhere(author.userId, `skill:company:${name}`);
+    await admin.api.skills.approve(share.id);
+
+    expect({
+      own,
+      asked,
+      approved: await keptWhere(author.userId, `skill:company:${name}`),
+    }).toStrictEqual({
+      own: { shared: "free", own: "held" },
+      asked: { shared: "free", own: "free" },
+      approved: { shared: "held", own: "free" },
+    });
+  });
+
+  it("steers only the turns its person asks in their own chat: never a woken turn, a thread others share, or anyone else's chat", async () => {
+    const [author, other] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("quote-a-tender");
+    await author.api.skills.save(skillText(name, "Quote a tender"));
+    const listed = `- ${name} (person`;
+    /** Whether each request to the model listed the skill. */
+    const listedIn = (requests: { body: unknown }[]) =>
+      requests.map(({ body }) =>
+        stringsIn(body).some((text) => text.includes(listed))
+      );
+
+    const own = await chatOf(
+      author.userId,
+      selectsForATender,
+      says("Done."),
+      selectsForATender,
+      says("Done.")
+    );
+    await own.ask("Quote a tender.");
+    await own.stub.askUnattended(own.chat.id, {
+      text: "Quote a tender.",
+      model,
+    });
+    const ownTurns = {
+      selected: await returnedIn(own.stub, own.chat.id),
+      listed: listedIn(own.provider.requests),
+    };
+
+    const others = await chatOf(other.userId, selectsForATender, says("Done."));
+    await others.ask("Quote a tender.");
+
+    const group = workspace(env, personalWorkspaceId(author.userId));
+    const groupProvider = await fakeProvider(selectsForATender, says("Done."));
+    const { chatId } = await group.askThrough(
+      author.userId,
+      crypto.randomUUID(),
+      "slack",
+      "Quote a tender.",
+      undefined,
+      {
+        thread: `C-${unique()}`,
+        kind: "group",
+        audience: { members: [author.userId, other.userId], outsiders: false },
+      }
+    );
+
+    expect({
+      ownTurns,
+      othersChat: {
+        selected: await returnedIn(others.stub, others.chat.id),
+        listed: listedIn(others.provider.requests),
+      },
+      sharedThread: {
+        selected: await returnedIn(group, chatId),
+        listed: listedIn(groupProvider.requests),
+      },
+    }).toStrictEqual({
+      ownTurns: {
+        selected: [`Returned:\nperson:${name}`, "Returned:\nnone"],
+        listed: [true, true, false, false],
+      },
+      othersChat: {
+        selected: ["Returned:\nnone"],
+        listed: [false, false],
+      },
+      sharedThread: { selected: ["Returned:\nnone"], listed: [false, false] },
+    });
+  });
+
+  it("goes with its person's erasure, and leaves what they shared with the company", async () => {
+    const [author, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const shared = nameOf("close-the-books");
+    const kept = nameOf("my-own-way");
+    const first = await author.api.skills.save(skillText(shared, "Close it"));
+    await author.api.skills.save(skillText(kept, "Mine"));
+    const share = await author.api.skills.share(shared, first.version);
+    await admin.api.skills.approve(share.id);
+    const before = await usable(author.userId, true, [shared, kept]);
+
+    const erasing = {
+      personId: author.userId,
+      reason: "person_erased",
+    } as const;
+    await Promise.allSettled([erasePerson(env, erasing)]);
+    await ageOwnErasure(author.userId);
+    await erasePerson(env, erasing);
+
+    expect({
+      before,
+      theirs: await usable(author.userId, true, [shared, kept]),
+      members: await usable(member.userId, true, [shared, kept]),
+    }).toStrictEqual({
+      before: [
+        ["company", shared],
+        ["person", kept],
+      ],
+      theirs: [["company", shared]],
+      members: [["company", shared]],
     });
   });
 });

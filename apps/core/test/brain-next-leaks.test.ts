@@ -9,6 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
+import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import {
@@ -25,6 +26,7 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import { selectSkillsFor } from "../src/brain-skills.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { published } from "./apps.ts";
@@ -35,8 +37,16 @@ import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import {
+  builder,
+  definitionOf,
+  ended,
+  published as publishedWorkflow,
+  start,
+} from "./workflow-resource-runs-harness.ts";
 
 // The marker test (GRA-1722): the gate every later Brain issue keeps
 // green. Unique marker words are planted in sources a reader may not
@@ -557,8 +567,8 @@ describe(
         narrowedId
       );
       // First for the outsider's own team, then narrowed to the holder
-      // alone: refused, as a source keeps the kind of readers it was first
-      // added with, so the version for the holder alone is kept nowhere.
+      // alone: refused, as a source keeps the readers it was first added
+      // for, so the version for the holder alone is kept nowhere.
       const toHolder = await add("Shared plan for the quarter", {
         kind: "team",
         teamId: ownTeam,
@@ -1002,7 +1012,7 @@ describe(
       ]);
       await ageOwnErasure(holder);
       await erasePerson(env, { personId: holder, reason: "person_erased" });
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       await restoreStore(backup);
 
       const erased = [own, teamSource, upload, chat, run].flatMap((source) =>
@@ -1061,6 +1071,60 @@ describe(
         findings: [],
         prompted: [],
       });
+    });
+
+    it("gives away nothing core's producers handed over to whoever the producer would not let read it", async () => {
+      await answeringProvider(() => {});
+      // Planted through each producer, as core hands them over: a run that
+      // ended for the person it acted for. Then core's surfaces are probed
+      // as the outsider and as an admin, neither of whom reads it.
+      const [otherAdmin, { userId: outsider }, runner] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInWithRole(idp, "user"),
+        builder(),
+      ]);
+      const sharedWord = `s${unique()}`;
+      const markers = { "a run of someone else": markerWord() };
+      const { "a run of someone else": runMarker } = markers;
+      const workflow = await publishedWorkflow(
+        runner,
+        definitionOf([], { value: { status: `${sharedWord} ${runMarker}` } })
+      );
+      const { runId } = await start(runner, workflow.id);
+      await ended(runner, workflow.id, runId);
+      await drainAuditOutboxes(env);
+      await relayHandOvers(env);
+      await workBrain(env, new Date(), producersOf(env));
+
+      const probing = (personId: string): Probing => ({
+        personId,
+        reader: { person: personId, groups: [] },
+        personal: true,
+        sharedWord,
+        markers: Object.values(markers),
+        hiddenVersions: everyVersionOf({ producer: "run", id: runId ?? "" }),
+        hiddenInstructionFiles: [],
+        instructionGroups: [],
+      });
+      const among = surfaces.filter(([name]) => name.startsWith("core "));
+      const findings = [
+        ...(await findingsOf("the outsider", probing(outsider), markers, {
+          among,
+        })),
+        ...(await findingsOf(
+          "an admin who doesn't read it",
+          probing(otherAdmin.userId),
+          markers,
+          { among }
+        )),
+      ];
+      const runnerFinds = await textsFor(runner.userId, runMarker);
+
+      expect({
+        findings,
+        // The runner does find theirs.
+        runner: runnerFinds.length,
+      }).toStrictEqual({ findings: [], runner: 1 });
     });
   }
 );

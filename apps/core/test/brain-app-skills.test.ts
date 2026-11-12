@@ -9,6 +9,7 @@ import type { FunctionAnswer } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
+import { addOwnSkill } from "../src/brain-next.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { saveDocument } from "../src/knowledge/person-writes.ts";
 import {
@@ -40,6 +41,8 @@ import type { Fixture } from "./sealed-apps.ts";
 // 5. A retained binding keeps selecting after the Brain's grant is gone.
 // 6. Adding the skill operations to the contract breaks the approval of
 //    every App that doesn't use them.
+// 7. A skill its owner wrote for themselves (GRA-1754) steers an App run
+//    for them, whose answer others may read.
 
 /** An App whose actions select a skill and read a pinned one. */
 const skillsFiles = (): TestApp =>
@@ -346,6 +349,21 @@ describe("an App's skills", setUpTime, () => {
     }).toStrictEqual({
       before: { picked: "refunds", read: true },
       after: { failed: "permission.unavailable" },
+    });
+  });
+
+  it("never selects a skill its owner wrote for themselves, for a task only that skill fits", async () => {
+    const { sealed, grantBrain } = await skillsApp();
+    await grantBrain();
+    await addOwnSkill(env, sealed.owner.userId, {
+      change: crypto.randomUUID(),
+      text: skillText("invoices", "tasks: [invoice]"),
+    });
+    const invoice = await called(sealed, "pick", { type: "invoice" });
+
+    expect(pickOf(invoice.result)).toStrictEqual({
+      picked: "no_match",
+      read: false,
     });
   });
 

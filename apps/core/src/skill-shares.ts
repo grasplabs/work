@@ -122,9 +122,6 @@ const shareOf = (row: ShareRow): SkillShare => ({
   version: row.version,
 });
 
-/** Most shares a page lists of each kind. */
-const sharesListed = 100;
-
 /** The share `id`, or `skills.not_found`. */
 const shareById = async (env: Env, id: unknown): Promise<ShareRow> => {
   const parsed = identifierSchema.safeParse(id);
@@ -172,8 +169,7 @@ export const skillsOverview = async (
       .from(skillShares)
       .leftJoin(users, eq(users.id, skillShares.requestedBy))
       .where(eq(skillShares.requestedBy, by.userId))
-      .orderBy(desc(skillShares.requestedAt), desc(skillShares.id))
-      .limit(sharesListed),
+      .orderBy(desc(skillShares.requestedAt), desc(skillShares.id)),
   ]);
   const company = listed.filter(({ scope }) => scope === "company");
   const companyNames = new Set(company.map(({ name }) => name));
@@ -189,7 +185,6 @@ export const skillsOverview = async (
           )
         )
         .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
-        .limit(sharesListed)
     : null;
   return {
     own: listed.filter(({ scope }) => scope === "person").map(listedOf),
@@ -330,7 +325,8 @@ export const shareOwnSkill = async (
 /**
  * Approves the share `id` as the admin `by`: records the decision, adds
  * its text as the next version of the company's skill of its name, then
- * records that version and drops the text. A share approved before whose
+ * records that version, drops the text and audits the approval, one
+ * event with the version (or `approve_failed` when the add fails). A share approved before whose
  * add didn't finish is finished. `skills.not_found` for a share there
  * isn't or that was declined or replaced.
  */
@@ -343,7 +339,9 @@ export const approveShare = async (
   const row = await shareById(env, id);
   const db = drizzle(env.DB);
   if (row.status === "pending") {
-    await auditedBatch(env, db, [
+    // The decision, before the Brain's add: its one event is written
+    // with the add's outcome, below.
+    await drizzle(env.DB).batch([
       db
         .update(skillShares)
         .set({
@@ -354,7 +352,6 @@ export const approveShare = async (
         .where(
           and(eq(skillShares.id, row.id), eq(skillShares.status, "pending"))
         ),
-      outboxedIfChanged(db, shareEntry(by, "approved", row.id)),
     ]);
   }
   // As it is now: approved by this call or one before, or not at all.
@@ -374,8 +371,8 @@ export const approveShare = async (
     }));
   } catch (error) {
     // The decision stands, and its outcome is said: not added yet.
-    // Approving it again finishes it.
-    await appendAuditEvent(env, shareEntry(by, "publish_failed", decided.id));
+    // Approving it again finishes it, and says so then.
+    await appendAuditEvent(env, shareEntry(by, "approve_failed", decided.id));
     throw error;
   }
   await auditedBatch(env, db, [
@@ -389,7 +386,7 @@ export const approveShare = async (
           isNull(skillShares.version)
         )
       ),
-    outboxedIfChanged(db, shareEntry(by, "published", decided.id, { version })),
+    outboxedIfChanged(db, shareEntry(by, "approved", decided.id, { version })),
   ]);
   return shareOf(await shareById(env, decided.id));
 };
@@ -469,7 +466,6 @@ export const waitingShares = async (
     .from(skillShares)
     .leftJoin(users, eq(users.id, skillShares.requestedBy))
     .where(eq(skillShares.status, "pending"))
-    .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
-    .limit(sharesListed);
+    .orderBy(asc(skillShares.requestedAt), asc(skillShares.id));
   return rows.map(shareOf);
 };

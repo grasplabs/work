@@ -114,7 +114,11 @@ export const skillsApi: AgentApi = {
   summary,
   types: skillsTypes(true),
   declaration: skillsDeclaration(true),
-  stub: (scope) => exports.SkillsApi({ props: { ...scope, personal: true } }),
+  // Not in a turn nobody asked for (`unattended`), as the turn's list.
+  stub: (scope) =>
+    exports.SkillsApi({
+      props: { ...scope, personal: scope.unattended !== true },
+    }),
 };
 
 /** `env.skills` in a chat others share: Grasp's and the company's alone. */

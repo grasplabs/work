@@ -2097,13 +2097,17 @@ export class Workspace extends DurableObject<Env> {
     // The skills the chat may use, from the Brain: guidance every member
     // may read, as the company's instruction file, never a grant
     // (brain-skills.ts). Their own skills only in their own chat, which
-    // reaches them alone. Recorded as the code's calls are, by count. A
+    // reaches them alone, and only in a turn they asked for: a turn woken
+    // by a schedule or an event acts with nobody there to see what their
+    // skills steer. Recorded as the code's calls are, by count. A
     // Brain that can't answer leaves the turn without them, not without
     // an answer: missing guidance is no question of access.
     let skills: Awaited<ReturnType<typeof skillsFor>> = [];
     let unavailable = false;
     try {
-      skills = await skillsFor(this.env, authority, { personal: !shared });
+      skills = await skillsFor(this.env, authority, {
+        personal: !shared && scope.unattended !== true,
+      });
     } catch (error) {
       unavailable = true;
       log.warn("skills.turn_unavailable", {

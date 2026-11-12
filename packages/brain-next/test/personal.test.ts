@@ -10,6 +10,7 @@ import type {
   Access,
   AskModel,
   Embedders,
+  HandOvers,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -544,10 +545,10 @@ describe("a person's own store", () => {
     await shared().eraseSource({ source: erased.source, reason: "deleted" });
 
     expect({
-      kept: await called(shared().holdsSource(kept.source)),
-      erased: await called(shared().holdsSource(erased.source)),
-      never: await called(shared().holdsSource(`test:${crypto.randomUUID()}`)),
-    }).toStrictEqual({ kept: true, erased: true, never: false });
+      kept: await called(shared().keyState(kept.source)),
+      erased: await called(shared().keyState(erased.source)),
+      never: await called(shared().keyState(`test:${crypto.randomUUID()}`)),
+    }).toStrictEqual({ kept: "held", erased: "erased", never: "free" });
   });
 
   it("keeps nothing anyone but its person may read", async () => {
@@ -901,6 +902,8 @@ describe("a person's own store", () => {
       current: await called(
         own().readCurrent({ sources: [kept.source], reader })
       ),
+      // It holds nothing, the key it once held included.
+      holds: await called(own().keyState(kept.source)),
       // Erasing one of its sources after it: nothing is left to erase.
       sourceErased: await called(
         own().eraseSource({ source: kept.source, reason: "deleted" })
@@ -909,6 +912,7 @@ describe("a person's own store", () => {
       found: nothingFound,
       version: null,
       current: [],
+      holds: "free",
       sourceErased: "erased",
     });
     await expect(add(own(), "A late add", theirs())).rejects.toThrow(erased);
@@ -964,6 +968,16 @@ describe("a person's own store", () => {
     await expect(
       own().readVersion({ ...kept, reader: me() })
     ).resolves.toMatchObject({ text: "Still theirs" });
+  });
+
+  // A store never written has no add that could still write a file.
+  it("erased whole before its first write, is erased at once, keeping only the record of it", async () => {
+    await expect(
+      called(own().erasePerson({ person, reason: "person_erased" }))
+    ).resolves.toBeUndefined();
+    await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
+      `${await ownPrefix()}erased`,
+    ]);
   });
 
   it("answers that it is still deleting until its files are gone, and only then that it is erased", async () => {
@@ -1168,9 +1182,25 @@ const noModel: Embedders = {
   },
 };
 
+/**
+ * No side of hand-overs: a person's own store never queues one, so a tick
+ * of it is given one that hands nothing over.
+ */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 /** A tick of this test's person's store, as its alarm runs one with no model. */
 const tick = async (): Promise<void> => {
-  await own().work(quietAsk, new Date(), noModel);
+  await own().work({
+    ask: quietAsk,
+    at: new Date(),
+    embedders: noModel,
+    handOvers: noHandOvers,
+  });
 };
 
 /** Runs `change` in this test's person's store, in its own storage. */
@@ -1300,11 +1330,16 @@ const leavingWork: Record<string, () => Promise<void>> = {
   },
 };
 
-/** The methods that only read, or take work away (`erasePerson` erases it all). */
+/**
+ * The methods that only read, or take work away (`erasePerson` erases it
+ * all), or that a person's own store refuses (`handOver`: the shared
+ * store's alone).
+ */
 const leavingNone = [
   "erasePerson",
   "find",
-  "holdsSource",
+  "handOver",
+  "keyState",
   "listSources",
   "listVersions",
   "readCurrent",

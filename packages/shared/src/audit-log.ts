@@ -141,13 +141,26 @@ const typeRules: readonly {
   // Two entities of different collections decided to be one, or not
   // (GRA-1080): their IDs and evidence, never a name.
   { action: "brain.entity_match", type: "decision" },
+  // Core handing a source over to the new Brain (GRA-1727): started, handed
+  // over or refused, by ids alone.
+  { action: "brain.source", type: "action" },
+  // A Grasp staff member reading the client's Brain report, and asking for
+  // an action on it and its outcome (core's brain-report.ts).
+  { action: "admin.brain.read", type: "read" },
+  { action: "admin.brain.action", type: "action" },
+  // A command Grasp's admin gives the deployment, whatever came of it
+  // (core's admin-command.ts), and Grasp staff reading the deployment's
+  // snapshot and its kickoff (admin-snapshot.ts, admin-kickoff.ts).
+  { action: "admin.command", type: "action" },
+  { action: "admin.snapshot.read", type: "read" },
+  { action: "admin.kickoff.read", type: "read" },
   { action: "knowledge.search", type: "read" },
-  // A person asking to share a skill, an admin approving or declining it,
-  // its text added as the company's, and a company skill retired
+  // A person asking to share a skill, an admin approving it (once its
+  // text is the company's) or declining it, an approval whose add failed,
+  // and a company skill retired
   // (GRA-1754): by the share's ID or the skill's name, never its text.
   { action: "skill.share.requested", type: "action" },
-  { action: "skill.share.published", type: "action" },
-  { action: "skill.share.publish_failed", type: "action" },
+  { action: "skill.share.approve_failed", type: "action" },
   { action: "skill.share", type: "decision" },
   { action: "skill.retired", type: "config" },
   // A skill selected for a task, or none (GRA-310): which, never its text.

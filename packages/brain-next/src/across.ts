@@ -4,11 +4,9 @@ import type {
   FoundPassage,
   Finding,
   ListedSource,
-  ListedVersion,
   OrderedPassage,
   Pack,
   SourceList,
-  VersionList,
 } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
 import { byBytes, byNearness } from "./order.ts";
@@ -253,25 +251,4 @@ export const sourcesAcross = (
     limit
   );
   return { sources: items, more };
-};
-
-/**
- * The page of a source's versions one store holding all of `lists` would
- * list (each a store's `listVersions` of the same request): highest
- * number first, as the stores order them.
- */
-export const versionsAcross = (
-  lists: readonly VersionList[],
-  limit?: number
-): VersionList => {
-  const { items, more } = pageAcross(
-    lists.map(({ versions, more: more_ }) => ({
-      items: versions,
-      more: more_,
-    })),
-    (a: ListedVersion, b: ListedVersion) =>
-      b.version - a.version || b.addedAt.getTime() - a.addedAt.getTime(),
-    limit
-  );
-  return { versions: items, more };
 };

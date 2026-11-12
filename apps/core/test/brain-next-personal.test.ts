@@ -30,6 +30,7 @@ import type {
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { ageOwnErasure, breakOwnStore } from "./brain-next-own-store.ts";
+import { holdNextBucketPut, ledgerOf } from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -97,6 +98,86 @@ const add = async (
   readers: SourceReaders
 ): Promise<void> => {
   await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text,
+    readers,
+  });
+};
+
+/**
+ * Core's env with the store named `name` failing its `method` on the
+ * calls numbered in `failing` (from 1), as a store out of reach would:
+ * every other call reaches the store itself. A failing call fails only
+ * once a shared store's erasure started beside it has landed, so what
+ * runs beside a failure is seen, with no clock to wait on.
+ */
+const envFailing = (
+  name: string,
+  method: string,
+  failing: readonly number[]
+): Env => {
+  let calls = 0;
+  /** The shared store's erasure under way, if one is. */
+  let sharedErasing: Promise<unknown> | undefined;
+  const binding = env.BRAIN_STORE;
+  const getByName = (named: string) => {
+    const stub = binding.getByName(named);
+    if (named !== name && named !== "brain") {
+      return stub;
+    }
+    return new Proxy(stub, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        // Called through, never bound: an RPC stub takes `bind` for a
+        // method of the store.
+        const through = async (args: unknown[]): Promise<unknown> => {
+          const answered: unknown = await Reflect.apply(value, target, args);
+          return answered;
+        };
+        if (named === "brain" && property === "eraseSource") {
+          return async (...args: unknown[]) => {
+            const erasing = through(args);
+            sharedErasing = erasing.catch(() => "failed");
+            return await erasing;
+          };
+        }
+        if (named !== name || property !== method) {
+          return async (...args: unknown[]) => await through(args);
+        }
+        return async (...args: unknown[]) => {
+          calls += 1;
+          if (failing.includes(calls)) {
+            // Anything started beside this call has been called by now.
+            await Promise.resolve();
+            await sharedErasing;
+            throw new Error("Out of reach, for the test");
+          }
+          return await through(args);
+        };
+      },
+    });
+  };
+  return {
+    ...env,
+    BRAIN_STORE: new Proxy(binding, {
+      get: (target, property): unknown =>
+        property === "getByName" ? getByName : Reflect.get(target, property),
+    }),
+  };
+};
+
+/** Adds `text` to `source` for `readers` through core with `withEnv`. */
+const addWith = async (
+  withEnv: Env,
+  source: SourceRef,
+  text: string,
+  readers: SourceReaders
+): Promise<void> => {
+  await addSource(withEnv, {
     source,
     change: crypto.randomUUID(),
     text,
@@ -327,6 +408,41 @@ describe("what one person alone may read, in their own store", () => {
     });
   });
 
+  it("is closed in the shared store, which staff read, only once their own store's erasure returned", async () => {
+    const person = await member();
+    const word = markerWord();
+    const source = newSource();
+    const readers: SourceReaders = { kind: "owner", personId: person };
+    await add(source, `Their own ${word}`, readers);
+    const key = keyOf(source);
+    // Their own store's erasure fails once, as a store out of reach.
+    const failing = envFailing(`person:${person}`, "eraseSource", [1]);
+
+    const first = await outcomeOf(
+      eraseSource(failing, { source, readers, reason: "deleted" })
+    );
+    const sharedMeanwhile = await ledgerOf(key);
+    const foundMeanwhile = await textsFor(person, word, true);
+    await eraseSource(failing, { source, readers, reason: "deleted" });
+
+    const sharedAfter = await ledgerOf(key);
+
+    expect({
+      first,
+      sharedMeanwhile,
+      foundMeanwhile,
+      shared: sharedAfter.length,
+      found: await textsFor(person, word, true),
+    }).toStrictEqual({
+      first: "Error: Out of reach, for the test",
+      // Not erased in the shared ledger while their copy is still found.
+      sharedMeanwhile: [],
+      foundMeanwhile: [`Their own ${word}`],
+      shared: 1,
+      found: [],
+    });
+  });
+
   it("is erased in their own store by the readers its producer names, and its key closed", async () => {
     const person = await member();
     const word = markerWord();
@@ -435,7 +551,7 @@ describe("a source whose readers would change kind", () => {
     });
 
     expect({
-      narrowing: narrowing.includes("keeps the kind of readers"),
+      narrowing: narrowing.includes("keeps the readers it was first added for"),
       namesTheKey: narrowing.includes(source.id),
       colleague: await textsFor(colleague, word, true),
       person: await textsFor(person, word, true),
@@ -446,6 +562,122 @@ describe("a source whose readers would change kind", () => {
       colleague: [`The team's draft ${word}`],
       person: [`The team's draft ${word}`],
       theirsAlone: [],
+    });
+  });
+
+  it("fails, not refused, when the shared store can't be asked after it landed, leaving a copy only they can read", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    const theirs: SourceReaders = { kind: "owner", personId: person };
+    const text = `Theirs alone ${word}`;
+    // The shared store answers the first ask and not the second.
+    const failing = envFailing("brain", "keyState", [2]);
+    const gate = await holdNextBucketPut(`person:${person}`);
+    const adding = outcomeOf(addWith(failing, source, text, theirs));
+    await vi.waitFor(
+      () => {
+        expect(gate.reached).toBeTruthy();
+      },
+      { timeout: 10_000 }
+    );
+    await add(source, `The team's ${word}`, { kind: "team", teamId: team });
+    gate.released = true;
+    const first = await adding;
+
+    // The retry is refused at the first ask, and erases nothing.
+    const retry = await outcomeOf(add(source, text, theirs));
+    const colleagues = await listSourcesAs(env, colleague, {});
+    const theirsFound = await textsFor(person, word, true);
+
+    expect({
+      first,
+      retry: retry.includes("keeps the readers it was first added for"),
+      colleague: await textsFor(colleague, word, true),
+      colleagueListed: colleagues.sources
+        .filter(({ source: listed }) => listed.id === source.id)
+        .map(({ personal }) => personal),
+      colleagueRead: await historyAs(colleague, { source, version: 1 }),
+      // What is left is theirs alone, and goes with their erasure.
+      theirs: theirsFound.toSorted(),
+    }).toStrictEqual({
+      first: "Error: Out of reach, for the test",
+      retry: true,
+      colleague: [`The team's ${word}`],
+      colleagueListed: [false],
+      colleagueRead: `The team's ${word}`,
+      theirs: [`The team's ${word}`, text].toSorted(),
+    });
+  });
+
+  it("is refused without erasing an earlier version of theirs, when the shared store holds the key", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    const theirs: SourceReaders = { kind: "owner", personId: person };
+    // Theirs, then the team's (a producer's mistake): a real version of
+    // theirs under a key the shared store holds.
+    await add(source, `Theirs alone ${word}`, theirs);
+    await add(source, `The team's ${word}`, { kind: "team", teamId: team });
+
+    const later = await outcomeOf(add(source, `Theirs again ${word}`, theirs));
+    const theirsKept = await own(person).readCurrent({
+      sources: [keyOf(source)],
+      reader: { person, groups: [] },
+    });
+
+    expect({
+      later: later.includes("keeps the readers it was first added for"),
+      theirsKept: theirsKept.map(({ text }) => text),
+      colleague: await textsFor(colleague, word, true),
+    }).toStrictEqual({
+      later: true,
+      theirsKept: [`Theirs alone ${word}`],
+      colleague: [`The team's ${word}`],
+    });
+  });
+
+  it("is refused, and kept nowhere of theirs, when a team's add of the same new key lands while it is being added", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    // Theirs past the shared store's first answer and writing its file in
+    // their own store, as the team's lands in the shared one.
+    const gate = await holdNextBucketPut(`person:${person}`);
+    const adding = outcomeOf(
+      add(source, `Theirs alone ${word}`, { kind: "owner", personId: person })
+    );
+    await vi.waitFor(
+      () => {
+        expect(gate.reached).toBeTruthy();
+      },
+      { timeout: 10_000 }
+    );
+    const teamAdd = await outcomeOf(
+      add(source, `The team's ${word}`, { kind: "team", teamId: team })
+    );
+    gate.released = true;
+    const theirs = await adding;
+    const theirsKept = await own(person).readCurrent({
+      sources: [keyOf(source)],
+      reader: { person, groups: [] },
+    });
+
+    expect({
+      teamAdd,
+      theirs: theirs.includes("keeps the readers it was first added for"),
+      theirsKept,
+      found: await textsFor(person, word, true),
+      colleague: await textsFor(colleague, word, true),
+    }).toStrictEqual({
+      teamAdd: "answered",
+      theirs: true,
+      theirsKept: [],
+      found: [`The team's ${word}`],
+      colleague: [`The team's ${word}`],
     });
   });
 
@@ -527,7 +759,7 @@ describe("a source whose readers would change kind", () => {
 });
 
 describe("a person's own store failing", () => {
-  it("leaves shared history readable to them and others' recall whole, and fails only their own recall that reads it", async () => {
+  it("leaves what is shared readable, listed and loaded for them and others' recall whole, and fails only their own recall that reads it", async () => {
     const [person, colleague] = await Promise.all([member(), member()]);
     const team = await teamOf(person, colleague);
     const word = markerWord();
@@ -540,15 +772,40 @@ describe("a person's own store failing", () => {
       kind: "owner",
       personId: person,
     });
+    const company: InstructionFile = { scope: "company", name: "facts" };
+    const theirFile: InstructionFile = { scope: "person", personId: person };
+    await addInstructionFile(env, {
+      file: company,
+      change: crypto.randomUUID(),
+      text: "We sell bicycles",
+    });
+    await addInstructionFile(env, {
+      file: theirFile,
+      change: crypto.randomUUID(),
+      text: "Call me by my first name",
+    });
     const broken = await breakOwnStore(person);
     try {
+      const listed = await listSourcesAs(env, person, {});
+      const versions = await listVersionsAs(env, person, { source: teamNote });
+      const files = await readInstructionFilesAs(env, { userId: person }, [
+        company,
+        theirFile,
+      ]);
       expect({
         history: await historyAs(person, { source: teamNote, version: 1 }),
+        listed: listed.sources.map(({ source }) => source.id),
+        versions: versions.versions.map(({ version }) => version),
+        files: files.map(({ text }) => text),
         asApp: await textsFor(person, word, false),
         colleague: await textsFor(colleague, word, true),
         own: await outcomeOf(textsFor(person, word, true)),
       }).toStrictEqual({
         history: `The team's note ${word}`,
+        // Their own part goes missing, never the shared part.
+        listed: [teamNote.id],
+        versions: [1],
+        files: ["We sell bicycles"],
         asApp: [`The team's note ${word}`],
         colleague: [`The team's note ${word}`],
         own: "Error: The Brain can't read its erasure ledger yet, so it answers nothing: try again shortly",
@@ -598,20 +855,17 @@ describe("erasing a person", () => {
 
     // Recorded, but its files can't be deleted yet: still pending.
     const undeletable = await breakBucketOf(person, ["delete"]);
-    await expect(erasePerson(env, erasing)).rejects.toThrow(
-      /still deleting its files/u
-    );
+    const whileUndeletable = await erasePerson(env, erasing);
     const whileDeleting = await textsFor(person, word, true);
     await undeletable.heal();
     // Its files deleted, it is still deleting until an add under way
     // could have written its file: as if that time had passed.
-    await expect(erasePerson(env, erasing)).rejects.toThrow(
-      /still deleting its files/u
-    );
+    const withinGrace = await erasePerson(env, erasing);
     await ageOwnErasure(person);
-    await erasePerson(env, erasing);
+    const done = await erasePerson(env, erasing);
 
     expect({
+      answers: [whileUndeletable, withinGrace, done],
       beforeErasure,
       whileDeleting,
       afterwards: await textsFor(person, word, true),
@@ -627,6 +881,7 @@ describe("erasing a person", () => {
         () => true
       ),
     }).toStrictEqual({
+      answers: ["still_deleting", "still_deleting", "erased"],
       beforeErasure: [`Their own ${word}`, `The team's ${word} and more`],
       whileDeleting: [`The team's ${word} and more`],
       afterwards: [`The team's ${word} and more`],

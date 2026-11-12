@@ -21,7 +21,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { localExtractor } from "../knowledge/extract.ts";
+import { localExtractor } from "../files/extract.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
