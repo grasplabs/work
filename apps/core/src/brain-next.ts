@@ -348,13 +348,15 @@ const refusalOf = (state: KeyState): Error =>
  * asked before and again after: a shared source is never narrowed into a
  * person's own store, where its shared versions would stay readable to
  * those taken off. A shared add of the key that landed in between (two
- * producers at once) has the copy this add wrote erased and this add
- * refused; one after the second ask is a widening, which producers never
- * do. A refusal at the first ask erases nothing: it can't tell what an
- * earlier add of theirs kept from a copy a failed call left, and a
- * refused call never erases a person's own content. What a failed second
- * ask or clean-up leaves is theirs alone to read, and goes with their
- * erasure.
+ * producers at once) has the key erased and closed in their own store,
+ * every version of it, and this add refused; one after the second ask is
+ * a widening, which producers never do. So an earlier version of theirs
+ * is lost only when a team add of the same key lands between the two asks
+ * of a later add of theirs: a producer's bug. A refusal at the first ask
+ * erases nothing: it can't tell what an earlier add of theirs kept from a
+ * copy a failed call left, and a refused call never erases a person's own
+ * content. What a failed second ask or clean-up leaves is theirs alone to
+ * read, and goes with their erasure.
  */
 const keptIn = async <T>(
   env: BrainEnv,
