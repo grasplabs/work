@@ -1328,6 +1328,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addMemories(memories: NewMemories): Promise<AddedMemories> {
     const adding = checked(newMemoriesSchema, memories);
     this.#mayKeep(adding.access);
+    if (adding.reader !== undefined) {
+      this.#mayRead(adding.reader);
+    }
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await addMemories(
@@ -1375,7 +1378,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** Retires one of the writer's own memories (memories.ts). */
   async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
-    const { memory, writer } = checked(retireRequestSchema, request);
+    const { memory, writer, reader } = checked(retireRequestSchema, request);
+    this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
         return "nothing";
@@ -1383,6 +1387,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return retireMemory(this.ctx.storage.sql, {
         id: memory,
         writer,
+        reader,
         at: Date.now(),
       });
     });

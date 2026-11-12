@@ -8,12 +8,18 @@ import type {
   NewMemory,
   newMemoriesSchema,
 } from "./contract.ts";
-import { foldIdentifier, foldName, keepNames, linkedBy } from "./entities.ts";
+import {
+  foldIdentifier,
+  foldName,
+  keepNames,
+  linkedBy,
+  mayName,
+} from "./entities.ts";
 import { erasuresSoFar, isPersonErasedSince, subjectOf } from "./erasure.ts";
 import { hashOf } from "./files.ts";
 import { entityRowOf, lineageOfSource, lineageOfWriter } from "./memories.ts";
 import { readerSetOf } from "./reader-sets.ts";
-import { indexedOf } from "./words.ts";
+import { indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
 // Adding memories (contract.ts `addMemories`): checked whole first, then
@@ -128,7 +134,11 @@ const erasedPerson = "The Brain refused it: what this adds was erased";
  * the first holding one of its identifiers, or another entity of the add
  * with one of them, else a new one.
  */
-const entityRowsOf = (sql: SqlStorage, { entities }: Adding): number[] => {
+const entityRowsOf = (
+  sql: SqlStorage,
+  { entities, reader }: Adding,
+  readerSet: number
+): number[] => {
   const linked = new Map<string, number>();
   return entities.map((entity, index) => {
     const keys = entity.identifiers.map((id) =>
@@ -140,10 +150,16 @@ const entityRowsOf = (sql: SqlStorage, { entities }: Adding): number[] => {
         keys
           .map((key) => linked.get(key))
           .find((found) => found !== undefined) ??
-        linkedBy(sql, entity.kind, entity.identifiers);
+        linkedBy(sql, entity.kind, entity.identifiers, readerSet);
     } else {
       const known = entityRowOf(sql, entity.id);
-      if (known === undefined || known.kind !== entity.kind) {
+      // An id the add may not name is refused in the words of an unknown
+      // one: whether it exists is no answer of the store's.
+      if (
+        known === undefined ||
+        known.kind !== entity.kind ||
+        !mayName(sql, known.row, readerSet, reader)
+      ) {
         throw refused(`entity ${index} names no entity of its kind`);
       }
       ({ row } = known);
@@ -302,11 +318,41 @@ const writeMemory = (
       into.onlyFor
     )
     .one();
-  const { words, stems } = indexedOf(memory.statement, into.memo);
-  sql.exec("INSERT INTO memory_words (rowid, text) VALUES (?, ?)", row, words);
-  sql.exec("INSERT INTO memory_stems (rowid, stems) VALUES (?, ?)", row, stems);
+  indexMemoryWords(sql, row, memory.statement, into.memo);
   keepMentions(into, plan, row);
   return id;
+};
+
+/**
+ * Marks version `version` of `source` fully extracted at `at` (contract.ts
+ * `extracted`): every memory of an earlier version of it ends then
+ * (memories.ts). Once per version: a repeat changes nothing.
+ */
+const markExtracted = (
+  sql: SqlStorage,
+  { source, version }: { source: string; version: number },
+  at: number
+): void => {
+  const [found] = sql
+    .exec<{ row: number }>(
+      `SELECT row FROM source_versions
+      WHERE source = ? AND version = ?
+        AND row NOT IN (SELECT version_row FROM erasing_versions)`,
+      source,
+      version
+    )
+    .toArray();
+  if (found === undefined) {
+    throw refused("it marks extracted a version this store doesn't hold");
+  }
+  sql.exec(
+    `INSERT OR IGNORE INTO memory_extractions (version_row, lineage, version, at)
+    VALUES (?, ?, ?, ?)`,
+    found.row,
+    lineageOfSource(source),
+    version,
+    at
+  );
 };
 
 /**
@@ -324,7 +370,12 @@ export const addMemories = async (
   const key = await hashOf(encoder.encode(adding.change));
   const hash = await hashOf(
     encoder.encode(
-      JSON.stringify([adding.access, adding.entities, adding.memories])
+      JSON.stringify([
+        adding.access,
+        adding.entities,
+        adding.memories,
+        adding.extracted ?? null,
+      ])
     )
   );
   const onlyFor =
@@ -349,14 +400,14 @@ export const addMemories = async (
     if (onlyFor !== null && isPersonErasedSince(sql, onlyFor, soFar)) {
       throw new Error(erasedPerson);
     }
-    const rows = entityRowsOf(sql, adding);
+    const readerSet = readerSetOf(db, adding.access);
+    const rows = entityRowsOf(sql, adding, readerSet);
     const ids = rows.map(
       (row) =>
         sql
           .exec<{ id: string }>("SELECT id FROM entities WHERE row = ?", row)
           .one().id
     );
-    const readerSet = readerSetOf(db, adding.access);
     const into: Into = {
       sql,
       entities: adding.entities,
@@ -370,6 +421,9 @@ export const addMemories = async (
     const memories = adding.memories.map((memory, index) =>
       writeMemory(into, memory, planned[index], index)
     );
+    if (adding.extracted !== undefined) {
+      markExtracted(sql, adding.extracted, into.learnedAt);
+    }
     const answer: AddedMemories = {
       memories,
       entities: Object.fromEntries(
