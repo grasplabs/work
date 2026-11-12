@@ -1059,6 +1059,9 @@ const systemEventWords = ({
     case "provision.fail": {
       return "Its setting up stopped.";
     }
+    case "provision.worker_live": {
+      return `One of its Workers went live${target === null ? "" : ` on ${target}`}.`;
+    }
     case "client.rotation_live": {
       return "Its rotated secrets went live.";
     }
@@ -1122,9 +1125,12 @@ const History = ({ setup }: { setup: ClientSetup }) => (
       <Quiet>Nothing yet.</Quiet>
     ) : (
       <ul className="flex flex-col">
-        {setup.history.map((entry) => (
-          <HistoryRow entry={entry} key={entry.id} />
-        ))}
+        {setup.history
+          // How far a setting up is, noted as it goes: its steps say the same.
+          .filter(({ action }) => action !== "provision.progress")
+          .map((entry) => (
+            <HistoryRow entry={entry} key={entry.id} />
+          ))}
       </ul>
     )}
   </Section>
