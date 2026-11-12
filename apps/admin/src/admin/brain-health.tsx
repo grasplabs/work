@@ -9,9 +9,11 @@
  * read and action is in the company's audit log, by the staff member.
  *
  * Operational state only: counts, ages, kinds of work, error codes,
- * sizes, recall's counts, and erasures as counts alone. Amber
- * marks what needs someone: parked items, a store near its limit, a ledger
- * that isn't read through, a step that failed, a way of recall that failed.
+ * sizes, recall's counts, and erasures as counts alone. Amber marks what
+ * needs someone: parked items, a store near its limit, a ledger that
+ * isn't read through, a step that failed, a way of recall that failed.
+ * What is fine is said in a line or folded: the queue's one kind, upkeep
+ * that got through, the erasure counters, and the engine's rebuilds.
  */
 import {
   brainSearchWays,
@@ -29,6 +31,11 @@ import type {
 } from "@grasp-os/shared/brain-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
 import {
   Table,
   TableBody,
@@ -203,6 +210,9 @@ const Figures = ({ report }: { report: BrainReport }) => {
     ...queue.waiting.map(({ oldestAddedAt }) => Date.parse(oldestAddedAt))
   );
   const near = storeNearLimit(store);
+  // One kind of work has no table of its own (`Waiting`): the tile names it.
+  const [only] = queue.waiting.length === 1 ? queue.waiting : [];
+  const kind = only === undefined ? "" : `${only.kind}: `;
   return (
     <section
       aria-label="The Brain at work"
@@ -214,7 +224,7 @@ const Figures = ({ report }: { report: BrainReport }) => {
           sub={
             waiting === 0
               ? `${whole(queue.running)} running`
-              : `Oldest added ${agoWords(oldest, now)}, ${whole(queue.running)} running`
+              : `${kind}oldest added ${agoWords(oldest, now)}, ${whole(queue.running)} running`
           }
           value={whole(waiting)}
         />
@@ -254,16 +264,20 @@ const Figures = ({ report }: { report: BrainReport }) => {
   );
 };
 
-/** What waits, kind by kind, and whether the queue waits for its model. */
+/**
+ * What waits, kind by kind, once there is more than one kind (one alone
+ * is the tile's own number), and whether the queue waits for its model.
+ */
 const Waiting = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
   const { queue } = report;
   const pause = queue.paused;
+  const kinds = queue.waiting.length > 1;
+  if (pause === null && queue.overdue === 0 && !kinds) {
+    return null;
+  }
   return (
-    <Section
-      description="What the Brain still has to do, by kind of work. Items run in order of priority, a few at a time."
-      title="Queue"
-    >
+    <Section title="Queue">
       {pause === null ? null : (
         <SectionRow
           description={`Since ${agoWords(Date.parse(pause.since), now)}: ${pauseWords[pause.reason] ?? pause.reason}. It tries again ${inWords(Date.parse(pause.until), now)}.`}
@@ -280,11 +294,7 @@ const Waiting = ({ report }: { report: BrainReport }) => {
           <Badge variant="attention">{whole(queue.overdue)}</Badge>
         </SectionRow>
       ) : null}
-      {queue.waiting.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Nothing waits.
-        </p>
-      ) : (
+      {kinds ? (
         <div className="border-t">
           <Table>
             <TableHeader>
@@ -315,7 +325,7 @@ const Waiting = ({ report }: { report: BrainReport }) => {
             </TableBody>
           </Table>
         </div>
-      )}
+      ) : null}
     </Section>
   );
 };
@@ -409,8 +419,12 @@ const Parked = ({
   );
 };
 
-/** The embedding's progress over the current passages, and the re-embed. */
-const Embedding = ({
+/**
+ * The Brain's engine, folded: its word indexes and its embedding, with
+ * the rebuild of each, which staff rarely need. Open by itself while
+ * either is being rebuilt.
+ */
+const Engine = ({
   acting: { busy, act },
   report,
 }: {
@@ -418,96 +432,98 @@ const Embedding = ({
   report: BrainReport;
 }) => {
   const { embedding } = report;
-  if (embedding.model === null) {
-    return (
-      <EmptySection>
-        No embedding model runs yet, so the Brain recalls by words alone.
-      </EmptySection>
-    );
-  }
-  return (
-    <Section
-      action={
-        <Button
-          disabled={busy}
-          onClick={() => {
-            act({ type: "reembed" });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Re-embed
-        </Button>
-      }
-      description="How far the embedding model has come over the passages people can read now. A re-embed puts every passage without its vectors back on the queue, those passed over included."
-      title="Embedding"
-    >
-      <SectionRow label="Model">
-        <span className="font-mono text-xs">{embedding.model}</span>
-      </SectionRow>
-      <SectionRow label="Embedded">
-        <span className="tabular-nums">
-          {`${whole(embedding.embedded)} of ${whole(embedding.chunks)} ${plural(embedding.chunks, "passage", "passages")}`}
-        </span>
-      </SectionRow>
-      <SectionRow
-        description="Passages the model can't embed: found by words only, until a re-embed."
-        label="Passed over"
-      >
-        <span className="tabular-nums">{whole(embedding.passedOver)}</span>
-      </SectionRow>
-      <SectionRow
-        description={
-          embedding.rebuilding && report.queue.parkedCount > 0
-            ? "It waits on what it put on the queue, parked items included: see Parked above. Once the embedders work again, re-embed to put them back now."
-            : undefined
-        }
-        label="Rebuild"
-      >
-        {embedding.rebuilding ? (
-          <Badge>Under way</Badge>
-        ) : (
-          <Badge variant="passed">Done</Badge>
-        )}
-      </SectionRow>
-    </Section>
-  );
-};
-
-/** The word indexes, and their rebuild. */
-const Words = ({
-  acting: { busy, act },
-  report,
-}: {
-  acting: Acting;
-  report: BrainReport;
-}) => {
   const rebuilding = report.words === "rebuilding";
   return (
-    <Section
-      action={
-        <Button
-          disabled={busy || rebuilding}
-          onClick={() => {
-            act({ type: "rebuild_words" });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Rebuild
-        </Button>
-      }
-      description="What recall finds words by. A rebuild rewrites every passage's words from its text, 200 a minute; recall goes on meanwhile."
-      title="Word indexes"
-    >
-      <SectionRow label="Indexed by the current rules">
-        {rebuilding ? (
-          <Badge>Rebuilding</Badge>
-        ) : (
-          <Badge variant="passed">Current</Badge>
-        )}
-      </SectionRow>
-    </Section>
+    <Collapsible defaultOpen={rebuilding || embedding.rebuilding}>
+      <Section
+        action={
+          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+            Details
+          </CollapsibleTrigger>
+        }
+        description="Its word indexes and its embedding, and the rebuild of each."
+        title="Engine"
+      >
+        {/* Kept on the page while folded: found by the page's search. */}
+        <CollapsibleContent keepMounted>
+          <SectionRow
+            description="What recall finds words by. A rebuild rewrites every passage's words from its text, 200 a minute; recall goes on meanwhile."
+            label="Word indexes"
+          >
+            <span className="flex items-center gap-3">
+              {rebuilding ? (
+                <Badge>Rebuilding</Badge>
+              ) : (
+                <Badge variant="passed">Current</Badge>
+              )}
+              <Button
+                disabled={busy || rebuilding}
+                onClick={() => {
+                  act({ type: "rebuild_words" });
+                }}
+                size="sm"
+                variant="outline"
+              >
+                Rebuild
+              </Button>
+            </span>
+          </SectionRow>
+          {embedding.model === null ? (
+            <SectionRow label="Embedding">
+              <span className="text-muted-foreground">
+                No embedding model runs yet, so the Brain recalls by words
+                alone.
+              </span>
+            </SectionRow>
+          ) : (
+            <>
+              <SectionRow label="Embedding model">
+                <span className="font-mono text-xs">{embedding.model}</span>
+              </SectionRow>
+              <SectionRow label="Embedded">
+                <span className="tabular-nums">
+                  {`${whole(embedding.embedded)} of ${whole(embedding.chunks)} ${plural(embedding.chunks, "passage", "passages")}`}
+                </span>
+              </SectionRow>
+              <SectionRow
+                description="Passages the model can't embed: found by words only, until a re-embed."
+                label="Passed over"
+              >
+                <span className="tabular-nums">
+                  {whole(embedding.passedOver)}
+                </span>
+              </SectionRow>
+              <SectionRow
+                description={
+                  embedding.rebuilding && report.queue.parkedCount > 0
+                    ? "It waits on what it put on the queue, parked items included: see Parked above. Once the embedders work again, re-embed to put them back now."
+                    : "A re-embed puts every passage without its vectors back on the queue, those passed over included."
+                }
+                label="Embedding's rebuild"
+              >
+                <span className="flex items-center gap-3">
+                  {embedding.rebuilding ? (
+                    <Badge>Under way</Badge>
+                  ) : (
+                    <Badge variant="passed">Done</Badge>
+                  )}
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      act({ type: "reembed" });
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Re-embed
+                  </Button>
+                </span>
+              </SectionRow>
+            </>
+          )}
+        </CollapsibleContent>
+      </Section>
+    </Collapsible>
   );
 };
 
@@ -573,86 +589,106 @@ const Recall = ({ report }: { report: BrainReport }) => {
   );
 };
 
-/** The erasure ledger: its counts, by kind, by reason, and not yet written. */
+/**
+ * The erasure ledger in one line, its counters under it: by kind, by
+ * reason, and not yet written. Open by itself while an entry is still
+ * to write.
+ */
 const Ledger = ({ report }: { report: BrainReport }) => {
   const { ledger } = report;
   const unwritten = ledger.source.unwritten + ledger.person.unwritten;
   return (
-    <Section
-      description="Every erasure, counted: never which, or when. After a restore the Brain applies the ledger again before it answers."
-      title="Erasures"
-    >
-      <SectionRow
-        description="Erased sources and people, whole, with their ledger entry written."
-        label="In the ledger"
+    <Collapsible defaultOpen={unwritten > 0}>
+      <Section
+        action={
+          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+            Details
+          </CollapsibleTrigger>
+        }
+        description="Every erasure, counted: never which, or when."
+        title="Erasures"
       >
-        <span className="tabular-nums">
-          {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}, ${whole(ledger.person.written)} ${plural(ledger.person.written, "person", "people")}`}
-        </span>
-      </SectionRow>
-      <SectionRow
-        description="Erased and hidden, their ledger entry still to write: each tick tries again."
-        label="Not yet written"
-      >
-        {unwritten > 0 ? (
-          <Badge variant="attention">{whole(unwritten)}</Badge>
-        ) : (
-          <span className="tabular-nums">0</span>
-        )}
-      </SectionRow>
-      <SectionRow
-        description="Hidden already; the tick deletes what they held a batch at a time."
-        label="Still being deleted"
-      >
-        <span className="tabular-nums">{whole(ledger.erasing)}</span>
-      </SectionRow>
-      <SectionRow
-        description="Sources with versions kept but none current, so nobody can read them: what a replay can leave."
-        label="Sources without a current version"
-      >
-        <span className="tabular-nums">
-          {whole(ledger.sourcesWithoutCurrent)}
-        </span>
-      </SectionRow>
-      <SectionRow
-        description="Every erasure in the ledger, by why it was made."
-        label="By reason"
-      >
-        <span className="tabular-nums">
-          {formatList(
-            reasonOrder.map(
-              (reason) =>
-                `${whole(ledger.byReason[reason])} ${reasonWords[reason]}`
-            )
-          )}
-        </span>
-      </SectionRow>
-    </Section>
+        <SectionRow
+          description="Erased sources and people, whole, with their ledger entry written."
+          label="In the ledger"
+        >
+          <span className="flex items-center gap-3">
+            {unwritten > 0 ? (
+              <Badge variant="attention">
+                {`${whole(unwritten)} not yet written`}
+              </Badge>
+            ) : null}
+            <span className="tabular-nums">
+              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}, ${whole(ledger.person.written)} ${plural(ledger.person.written, "person", "people")}`}
+            </span>
+          </span>
+        </SectionRow>
+        <CollapsibleContent keepMounted>
+          <SectionRow
+            description="Erased and hidden, their ledger entry still to write: each tick tries again."
+            label="Not yet written"
+          >
+            <span className="tabular-nums">{whole(unwritten)}</span>
+          </SectionRow>
+          <SectionRow
+            description="Hidden already; the tick deletes what they held a batch at a time."
+            label="Still being deleted"
+          >
+            <span className="tabular-nums">{whole(ledger.erasing)}</span>
+          </SectionRow>
+          <SectionRow
+            description="Sources with versions kept but none current, so nobody can read them: what a replay can leave."
+            label="Sources without a current version"
+          >
+            <span className="tabular-nums">
+              {whole(ledger.sourcesWithoutCurrent)}
+            </span>
+          </SectionRow>
+          <SectionRow label="By reason">
+            <span className="tabular-nums">
+              {formatList(
+                reasonOrder.map(
+                  (reason) =>
+                    `${whole(ledger.byReason[reason])} ${reasonWords[reason]}`
+                )
+              )}
+            </span>
+          </SectionRow>
+        </CollapsibleContent>
+      </Section>
+    </Collapsible>
   );
 };
 
-/** The tick's own steps, and when each last failed since the store started. */
+/** The tick's own steps that failed since the store started, or one line when none did. */
 const Steps = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
+  const failing = brainSteps.flatMap((step) => {
+    const failed = report.stepsFailed[step];
+    return failed === null ? [] : [{ step, failed }];
+  });
   return (
     <Section
-      description="The Brain's own upkeep before its queue, each tick. A failure shows until a later tick gets through."
+      description={
+        failing.length > 0
+          ? "A failure shows until a later tick gets through."
+          : undefined
+      }
       title="Upkeep"
     >
-      {brainSteps.map((step) => {
-        const failed = report.stepsFailed[step];
-        return (
+      {failing.length === 0 ? (
+        <SectionRow label="Every step of its upkeep got through">
+          <Badge variant="passed">Fine</Badge>
+        </SectionRow>
+      ) : (
+        failing.map(({ step, failed }) => (
           <SectionRow key={step} label={stepWords[step]}>
-            {failed === null ? (
-              <Badge variant="passed">Fine</Badge>
-            ) : (
-              <Badge variant="attention">
-                {`${failed.reason === "timed_out" ? "Timed out" : "Failed"} ${agoWords(Date.parse(failed.at), now)}`}
-              </Badge>
-            )}
+            <Badge variant="attention">
+              {`${failed.reason === "timed_out" ? "Timed out" : "Failed"} ${agoWords(Date.parse(failed.at), now)}`}
+            </Badge>
           </SectionRow>
-        );
-      })}
+        ))
+      )}
     </Section>
   );
 };
@@ -682,11 +718,10 @@ const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
       <Figures report={report} />
       <Parked acting={acting} report={report} />
       <Waiting report={report} />
-      <Words acting={acting} report={report} />
-      <Embedding acting={acting} report={report} />
       <Recall report={report} />
       <Ledger report={report} />
       <Steps report={report} />
+      <Engine acting={acting} report={report} />
     </>
   );
 };

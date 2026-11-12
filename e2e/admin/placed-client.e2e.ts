@@ -9,6 +9,9 @@ import { z } from "zod";
  */
 const operationMs = 90_000;
 
+/** A little over one of the Setup's own refreshes while a deploy is due or out. */
+const followMs = 6000;
+
 /** What the admin's placed seed made (apps/admin/test/e2e-seed.ts). */
 const seededSchema = z.object({
   clientId: z.string(),
@@ -32,12 +35,14 @@ const visit = async (page: Page, path: string): Promise<void> => {
   await page.goto(path, { waitUntil: "networkidle" });
 };
 
-/** The Setup's Hosting section. */
+/** The Hosting section, under the Setup's settings. */
 const hosting = (page: Page) => page.getByRole("region", { name: "Hosting" });
 
 /**
  * Waits until the client's operation is done on `releaseId`, ticking the
- * reconciler as the admin's cron does and reading its Setup again.
+ * reconciler as the admin's cron does. Its Setup is opened once: it reads
+ * itself again while a deploy is due or out, so it shows where the deploy
+ * stands with nobody loading the page again.
  */
 const doneOn = async (
   page: Page,
@@ -45,19 +50,16 @@ const doneOn = async (
   clientId: string,
   releaseId: string
 ): Promise<void> => {
+  await visit(page, `/organizations/${clientId}/setup?tab=settings`);
+  const facts = hosting(page).getByRole("definition");
   await expect(async () => {
     const ticked = await request.post("/__e2e/tick");
     expect(ticked.status()).toBe(204);
-    await visit(page, `/organizations/${clientId}/setup`);
-    await hosting(page)
-      .getByRole("button", { name: "Show hosting details" })
-      .click();
-    const facts = hosting(page).getByRole("definition");
     await expect(
       facts.filter({ hasText: new RegExp(`^${releaseId}$`, "u") })
-    ).toBeVisible({ timeout: 1000 });
+    ).toBeVisible({ timeout: followMs });
     await expect(facts.filter({ hasText: /^done$/u })).toBeVisible({
-      timeout: 1000,
+      timeout: followMs,
     });
   }).toPass({ timeout: operationMs });
 };

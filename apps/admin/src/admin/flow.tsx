@@ -5,7 +5,6 @@ import {
   flowOpening,
   flowPresets,
   flowProblemOf,
-  flowScreens,
   withStepMoved,
 } from "@grasp-os/shared/onboarding-flow";
 import type {
@@ -14,14 +13,9 @@ import type {
   FlowProblem,
   FlowStep,
   OnboardingFlow,
-  SetupStepId,
 } from "@grasp-os/shared/onboarding-flow";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   SortableItem,
   SortableList,
@@ -31,7 +25,7 @@ import { Switch } from "@grasp-os/ui/components/switch";
 import { useId, useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
-import { EmptySection, Section, SectionRow } from "./section.tsx";
+import { EmptySection, Section } from "./section.tsx";
 
 // An organization's Flow: how much onboarding it goes through, as Grasp's
 // staff set it. Whether there is an onboarding at all, the admin's steps
@@ -39,44 +33,12 @@ import { EmptySection, Section, SectionRow } from "./section.tsx";
 // of this company (the first conversation, and each agreement). Staff
 // change a draft on the page: nothing reaches the company's Grasp until
 // they save, which gives one command with the whole flow
-// (`onboarding.flow`); taking all of it back gives it with none. Beside
-// the steps, what the company's admin will go through and how its Grasp
-// opens, so the flow is read as the company will meet it.
+// (`onboarding.flow`); taking all of it back gives it with none. No
+// onboarding at all is a preset like the others: picking another one
+// switches it back on. Beside the save, how the company's Grasp opens.
 
-/** Each of the admin's steps, as staff read it, and what the admin does on it. */
-const stepWords: Record<FlowStep, { name: string; about: string }> = {
-  welcome: {
-    name: "Welcome",
-    about: "Stephen says hello; they pick a language",
-  },
-  ai: {
-    name: "Its AI",
-    about: "Grasp’s AI, or the company’s own key and model",
-  },
-  about: { name: "How this works", about: "The story, and a sample interview" },
-  company: {
-    name: "Who’s who",
-    about: "The staff list, or its sign-in’s directory",
-  },
-  sources: {
-    name: "Where the work is written down",
-    about: "SharePoint, Drive, Teams and the like",
-  },
-  documents: { name: "Documents", about: "Whatever explains how they work" },
-  pulse: { name: "The tools people use", about: "Pulse on the work laptops" },
-  leads: {
-    name: "Team leads",
-    about: "The HR platform, then who leads which team",
-  },
-  interviews: {
-    name: "Interviews",
-    about:
-      "Telling the team, Stephen talking to them, what needs the admin, and the way in",
-  },
-};
-
-/** Each screen the admin sees, by name, for the path beside the steps. */
-const screenWords: Record<SetupStepId, string> = {
+/** Each of the admin's steps, as staff read it. */
+const stepWords: Record<FlowStep, string> = {
   welcome: "Welcome",
   ai: "Its AI",
   about: "How this works",
@@ -85,26 +47,14 @@ const screenWords: Record<SetupStepId, string> = {
   documents: "Documents",
   pulse: "The tools people use",
   leads: "Team leads",
-  team: "Telling the team",
-  listening: "Stephen talks to the team",
-  review: "What needs the admin",
-  open: "The way in",
+  interviews: "Interviews",
 };
 
 /** Each agreement Grasp can ask for, as the Steps page names them. */
-const agreementWords: Record<FlowAgreement, { name: string; about: string }> = {
-  processing: {
-    name: "Agreement on handling data",
-    about: "The data processing agreement, signed.",
-  },
-  assessment: {
-    name: "The company’s look at the risks",
-    about: "Its assessment of the risks to its people, done.",
-  },
-  council: {
-    name: "Works council",
-    about: "Agreed, or the company has none.",
-  },
+const agreementWords: Record<FlowAgreement, string> = {
+  processing: "Agreement on handling data",
+  assessment: "The company’s look at the risks",
+  council: "Works council",
 };
 
 /** The flows staff start from, in the order they are offered. */
@@ -124,9 +74,10 @@ const problemWords: Record<FlowProblem, string> = {
 
 /** How the company's Grasp opens in a flow, in a sentence. */
 const openingWords: Record<ReturnType<typeof flowOpening>, string> = {
-  go: "When Grasp gives its go, once the interviews told enough.",
-  finished: "When its admin finishes the last step.",
-  at_once: "At once: everyone signs in straight to the platform.",
+  go: "Its Grasp opens when Grasp gives its go, once the interviews told enough.",
+  finished: "Its Grasp opens when its admin finishes the last step.",
+  at_once:
+    "Its Grasp opens at once: everyone signs in straight to the platform.",
 };
 
 /** What a screen reader hears as a step is moved. */
@@ -139,16 +90,14 @@ const moveWords: SortableWords = {
   cancelled: (name) => `${name} left where it was.`,
 };
 
-/** A switch with what it switches, and what that is, beside it. */
+/** A switch with what it switches beside it. */
 const Switched = ({
   label,
-  description,
   checked,
   disabled,
   onChange,
 }: {
   label: string;
-  description?: string;
   checked: boolean;
   disabled: boolean;
   onChange: (checked: boolean) => void;
@@ -162,12 +111,7 @@ const Switched = ({
         id={id}
         onCheckedChange={onChange}
       />
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
-        {description === undefined ? null : (
-          <FieldDescription>{description}</FieldDescription>
-        )}
-      </div>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
     </Field>
   );
 };
@@ -186,7 +130,7 @@ const Steps = ({
     <SortableList
       aria-label="The admin’s steps, in order"
       disabled={disabled}
-      items={flow.steps.map(({ id }) => ({ id, name: stepWords[id].name }))}
+      items={flow.steps.map(({ id }) => ({ id, name: stepWords[id] }))}
       onMove={(id, to) => {
         const step = flow.steps.find((each) => each.id === id);
         if (step !== undefined) {
@@ -196,13 +140,12 @@ const Steps = ({
       words={moveWords}
     >
       {flow.steps.map((step) => {
-        const { name, about } = stepWords[step.id];
+        const name = stepWords[step.id];
         return (
           <SortableItem handleLabel={`Move ${name}`} id={step.id} key={step.id}>
             <div className="min-w-0 flex-1 py-2">
               <Switched
                 checked={step.on}
-                description={about}
                 disabled={disabled}
                 label={name}
                 onChange={(on) => {
@@ -222,31 +165,11 @@ const Steps = ({
   </div>
 );
 
-/** What the company's admin goes through in `flow`, and how its Grasp opens. */
-const Path = ({ flow }: { flow: OnboardingFlow }) => {
-  const screens = flowScreens(flow);
-  return (
-    <Section
-      description="As the company will meet it, once this flow is saved."
-      title="What its admin goes through"
-    >
-      <SectionRow label="The screens, in order">
-        {screens.length === 0 ? (
-          <span className="text-muted-foreground">None</span>
-        ) : (
-          <ol className="flex flex-col gap-0.5 sm:text-right">
-            {screens.map((screen) => (
-              <li key={screen}>{screenWords[screen]}</li>
-            ))}
-          </ol>
-        )}
-      </SectionRow>
-      <SectionRow label="Its Grasp opens">
-        <span className="sm:text-right">{openingWords[flowOpening(flow)]}</span>
-      </SectionRow>
-    </Section>
-  );
-};
+/** The preset `flow` is, as it stands; none once it was changed by hand. */
+const presetOf = (flow: OnboardingFlow): FlowPreset | undefined =>
+  presets.find(
+    ({ id }) => JSON.stringify(flowPresets[id]) === JSON.stringify(flow)
+  )?.id;
 
 /**
  * An organization's Flow, on what its Grasp says it is now (`flow`; none
@@ -272,6 +195,7 @@ export const OrgFlow = ({
     );
   }
   const flow = draft ?? saved;
+  const preset = presetOf(flow);
   const problem = flow.on ? flowProblemOf(flow.steps) : null;
   const changed =
     draft !== null && JSON.stringify(draft) !== JSON.stringify(saved);
@@ -282,55 +206,37 @@ export const OrgFlow = ({
   };
   return (
     <>
-      <Section
-        action={
-          <div className="flex flex-wrap gap-2">
-            {presets.map(({ id, name }) => (
-              <Button
-                disabled={busy}
-                key={id}
-                onClick={() => {
-                  setDraft(flowPresets[id]);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                {name}
-              </Button>
-            ))}
-          </div>
-        }
-        description="How much onboarding this company goes through. Start from one of these, then change it below."
-        title="The onboarding"
-      >
-        <SectionRow
-          description="Off: everyone signs in straight to the platform, and nobody is sent to the onboarding."
-          label="This company goes through an onboarding"
-        >
-          <Switch
-            aria-label="This company goes through an onboarding"
-            checked={flow.on}
+      <div className="flex flex-wrap items-center gap-2">
+        {presets.map(({ id, name }) => (
+          <Button
+            aria-pressed={id === preset}
             disabled={busy}
-            onCheckedChange={(on) => {
-              setDraft({ ...flow, on });
+            key={id}
+            onClick={() => {
+              setDraft(flowPresets[id]);
             }}
-          />
-        </SectionRow>
-      </Section>
-      <Section
-        description="Each can be switched off, and moved by its handle or from the keyboard. Who’s who stays above Team leads and Interviews, and the interviews’ screens always come last."
-        title="The admin’s steps"
-      >
+            size="sm"
+            variant={id === preset ? "secondary" : "outline"}
+          >
+            {name}
+          </Button>
+        ))}
+        {flow.on ? null : (
+          <span className="text-muted-foreground">
+            No onboarding: pick another to switch the steps back on.
+          </span>
+        )}
+      </div>
+      <Section title="The admin’s steps">
         <Steps disabled={busy || !flow.on} flow={flow} onChange={setDraft} />
       </Section>
       <Section
-        description="What Grasp does itself for this company, before its people are asked anything."
+        description="Interview links wait for each agreement that is on."
         title="Grasp’s steps"
       >
         <div className="flex flex-col gap-4 px-5 pb-5">
           <Switched
             checked={flow.grasp.kickoff}
-            description="The first conversation with its sponsor, brought in as a transcript."
             disabled={busy || !flow.on}
             label="The first conversation"
             onChange={(kickoff) => {
@@ -340,10 +246,9 @@ export const OrgFlow = ({
           {flowAgreements.map((agreement) => (
             <Switched
               checked={flow.grasp.agreements[agreement]}
-              description={`${agreementWords[agreement].about} Interview links wait for it while it is on.`}
               disabled={busy || !flow.on}
               key={agreement}
-              label={agreementWords[agreement].name}
+              label={agreementWords[agreement]}
               onChange={(on) => {
                 setDraft({
                   ...flow,
@@ -357,7 +262,6 @@ export const OrgFlow = ({
           ))}
         </div>
       </Section>
-      <Path flow={flow} />
       <div className="flex flex-col gap-2">
         {problem === null ? null : (
           <output className="text-status-attention">
@@ -403,6 +307,9 @@ export const OrgFlow = ({
               : "This is what the company’s Grasp keeps."}
           </span>
         </div>
+        <p className="text-muted-foreground">
+          {openingWords[flowOpening(flow)]}
+        </p>
       </div>
     </>
   );

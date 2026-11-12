@@ -1,9 +1,9 @@
 /**
  * What to take into the next conversation with a company, ported from the
  * prototype (grasplabs/prototype `components/admin/org-brief.tsx`): where
- * it stands, what to bring up with it, what Grasp doesn't know yet, and
- * once it is open where Grasp could do more. The same brief the
- * prototype's chat and MCP give (`briefOf`).
+ * it stands, what Grasp doesn't know yet, and once it is open where Grasp
+ * could do more, from the brief the chat and MCP give (`briefOf`). What
+ * to bring up is the list of what needs Grasp, beside it on the overview.
  */
 import { briefOf } from "@grasp-os/shared/admin/admin-brief";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
@@ -14,8 +14,8 @@ import { SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Section } from "./section.tsx";
-import { needSection, sectionTo } from "./sections.ts";
-import { knowledgeWords, needLine, stageWords, whole } from "./words.ts";
+import { sectionTo } from "./sections.ts";
+import { knowledgeWords, stageWords, whole } from "./words.ts";
 
 const linkClass =
   "focus-visible:ring-ring/50 rounded-sm text-left underline-offset-4 outline-none hover:underline focus-visible:ring-3";
@@ -53,7 +53,7 @@ export const OrgBrief = ({
   clientId: string;
 }) => {
   const brief = briefOf(view);
-  const { percent, questions } = brief;
+  const { questions } = brief;
   const where = view.open ? "Open since the go" : stageWords[brief.stage];
   return (
     <Section
@@ -68,26 +68,10 @@ export const OrgBrief = ({
           Prepare the call with Grasp
         </Link>
       }
-      description={`${where}. ${percent}% of what Grasp needs is known.`}
+      description={`${where}.`}
       title="Before the next call"
     >
       <CardContent>
-        {brief.bringUp.length > 0 ? (
-          <BriefList title="Bring up">
-            {brief.bringUp.map((need, index) => (
-              // The same need can stand twice, for two teams.
-              <BriefItem key={`${need.kind}-${index}`}>
-                <Link
-                  className={linkClass}
-                  params={{ clientId }}
-                  to={sectionTo[needSection(need)]}
-                >
-                  {needLine(need, view)}
-                </Link>
-              </BriefItem>
-            ))}
-          </BriefList>
-        ) : null}
         {/* Core gives how much is known without its parts: what nobody could answer still stands on its own. */}
         {brief.missing.length > 0 || questions > 0 ? (
           <BriefList title="Not known yet">
@@ -121,8 +105,7 @@ export const OrgBrief = ({
             ))}
           </BriefList>
         ) : null}
-        {brief.bringUp.length === 0 &&
-        brief.missing.length === 0 &&
+        {brief.missing.length === 0 &&
         questions === 0 &&
         brief.opportunities.length === 0 ? (
           <p className="text-muted-foreground">Nothing to bring up.</p>

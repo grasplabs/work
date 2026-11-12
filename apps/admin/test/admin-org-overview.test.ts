@@ -38,24 +38,6 @@ const readySnapshot = (name: string): AdminSnapshot => {
   };
 };
 
-/** A company whose people came in through its sign-in, its lead not named yet. */
-const peopleInSnapshot = (name: string): AdminSnapshot => ({
-  ...readySnapshot(name),
-  roster: {
-    teams: [{ id: "t-sales", name: "Sales", lead: null, does: "", off: false }],
-    people: [
-      {
-        id: "p-anna",
-        name: "Anna",
-        email: "anna@acme.test",
-        team: "t-sales",
-        title: "",
-        away: false,
-      },
-    ],
-  },
-});
-
 /**
  * A company told three days ago, on a plan of 21 days, with one team: its
  * lead Lisa, who has talked, and Tom, both sent their link.
@@ -130,13 +112,15 @@ const openSnapshot = (name: string): AdminSnapshot => {
   };
 };
 
-/** The health signal named `area`, from its link's start to its end. */
-const signalOf = (html: string, area: string): string => {
-  const start = html.indexOf('aria-label="How the company is doing"');
-  const at = html.indexOf(`aria-label="${area}: `, start);
-  return start === -1 || at === -1
+/** What needs Grasp at the company, its whole section. */
+const needsOf = (html: string): string => {
+  const at = html.indexOf("Needs Grasp</h2>");
+  return at === -1
     ? ""
-    : html.slice(html.lastIndexOf("<a", at), html.indexOf("</a>", at));
+    : html.slice(
+        html.lastIndexOf("<section", at),
+        html.indexOf("</section>", at)
+      );
 };
 
 /** The brief for the next call, its whole section. */
@@ -153,99 +137,66 @@ const briefOf = (html: string): string => {
 describe("an organization's overview", () => {
   useStoreSecrets({ deployer: token });
 
-  it("says how the company is doing, each signal opening its section, and what core doesn't hold as not found yet rather than none", async () => {
+  it("lists what needs Grasp, the most pressing first, each opening the section it is settled in", async () => {
     const acme = await liveClient();
     acme.core.admin = readySnapshot("Acme");
     const base = `/organizations/${acme.clientId}`;
 
     const { status, html } = await page(base);
+    const needs = needsOf(html);
+    // The go and both agreements; a contract core doesn't hold is nothing to settle.
+    const lines = [
+      "The company comes in once Grasp gives its go.",
+      "The agreement on handling data is not signed yet.",
+      "The company has not signed off its look at the risks yet.",
+    ];
 
     expect({
       status,
-      // Name, level and line, as each signal is announced; and where it goes.
-      signals: [
-        "Connections: Not yet. Sign-in not connected yet",
-        "Interviews: Not yet. Not started",
-        "Brain: Good. 85% known, opens at 80%",
-        "Workflows: Not yet. No workflows found yet",
-        "Account: Not yet. Contract not known yet",
-      ].map((label) => html.includes(`aria-label="${label}"`)),
-      opens: [
-        ["Connections", `${base}/integrations`],
-        ["Interviews", `${base}/interviews`],
-        ["Brain", `${base}/brain`],
-        ["Workflows", `${base}/workflows`],
-        ["Account", `${base}/contract`],
-      ].map(([area = "", to]) => signalOf(html, area).includes(`href="${to}"`)),
-      // Nothing core doesn't hold is counted as zero.
-      noZeros: !["0 connected", "0 of 0 known"].some((text) =>
-        html.includes(text)
-      ),
+      needs: lines.map((text) => needs.includes(text)),
+      contract: needs.includes("The contract is still being written."),
+      opensSteps: needs.includes(`href="${base}/steps"`),
       ported: !html.includes("This section isn’t in the admin yet."),
     }).toStrictEqual({
       status: 200,
-      signals: [true, true, true, true, true],
-      opens: [true, true, true, true, true],
-      noZeros: true,
+      needs: [true, true, true],
+      contract: false,
+      opensSteps: true,
       ported: true,
     });
   });
 
-  it("briefs the next call: where the company stands, and the most pressing of what to bring up, each opening where it is settled", async () => {
+  it("briefs the next call with where the company stands, leaving what to bring up to what needs Grasp beside it", async () => {
     const acme = await liveClient();
     acme.core.admin = readySnapshot("Acme");
-    const base = `/organizations/${acme.clientId}`;
 
-    const { html } = await page(base);
+    const { html } = await page(`/organizations/${acme.clientId}`);
     const brief = briefOf(html);
 
     expect({
-      stands: brief.includes("Agreed. 85% of what Grasp needs is known."),
-      // The go and both agreements; a contract core doesn't hold is nothing to bring up.
-      bringUp: [
-        "The company comes in once Grasp gives its go.",
-        "The agreement on handling data is not signed yet.",
-        "The company has not signed off its look at the risks yet.",
-        "The contract is still being written.",
-      ].map((text) => brief.includes(text)),
-      opensSteps: brief.includes(`href="${base}/steps"`),
+      stands: brief.includes("Agreed."),
+      prepares: brief.includes("Prepare the call with Grasp"),
+      // What needs Grasp stands once, in its own list.
+      bringUp: brief.includes("The company comes in once Grasp gives its go."),
       // Core gives how much is known without its parts, and no drawn work.
       notKnownYet: brief.includes("Not known yet"),
       couldDoMore: brief.includes("Where Grasp could do more"),
     }).toStrictEqual({
       stands: true,
-      bringUp: [true, true, true, false],
-      opensSteps: true,
+      prepares: true,
+      bringUp: false,
       notKnownYet: false,
       couldDoMore: false,
     });
   });
 
-  it("once the company is open, briefs it as open and sends its workflows to the hours they free, without calling none live a worry", async () => {
+  it("once the company is open, briefs it as open", async () => {
     const acme = await liveClient();
     acme.core.admin = openSnapshot("Acme");
-    const base = `/organizations/${acme.clientId}`;
-
-    const { html } = await page(base);
-
-    expect({
-      open: briefOf(html).includes("Open since the go"),
-      workflows: html.includes(
-        'aria-label="Workflows: Not yet. No workflows found yet"'
-      ),
-      toHours: signalOf(html, "Workflows").includes(`href="${base}/hours"`),
-    }).toStrictEqual({ open: true, workflows: true, toHours: true });
-  });
-
-  it("says the sign-in is connected once the company's people are in, before its team leads are named", async () => {
-    const acme = await liveClient();
-    acme.core.admin = peopleInSnapshot("Acme");
 
     const { html } = await page(`/organizations/${acme.clientId}`);
 
-    expect(html).toContain(
-      'aria-label="Connections: Not yet. Sign-in connected, team leads not named yet"'
-    );
+    expect(briefOf(html)).toContain("Open since the go");
   });
 
   it("counts the interviews' days to the company's own plan", async () => {
@@ -254,6 +205,6 @@ describe("an organization's overview", () => {
 
     const { html } = await page(`/organizations/${acme.clientId}`);
 
-    expect(signalOf(html, "Interviews")).toMatch(/talked, day \d+ of 21"/u);
+    expect(html.replaceAll(/<[^>]*>/gu, "")).toMatch(/Day \d+ of 21/u);
   });
 });

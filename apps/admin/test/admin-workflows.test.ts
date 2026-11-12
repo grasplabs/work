@@ -119,22 +119,21 @@ describe("an organization's workflows", () => {
       view.teams.find((each) => each.team.id === id)?.team.name ?? "";
 
     expect({
-      figures: [
-        "workflows known 0 of 1",
-        "still being mapped 1",
-        "things still missing 5",
-      ].map((text) => textOf(html).includes(text)),
       rows: (html.match(/<tr/gu) ?? []).length,
       orders: textOf(rowOf(html, orders.name)),
-      teams: html.includes('aria-label="Team"'),
+      // What Grasp can do for it is behind its row's menu.
+      menu: html.includes(`aria-label="What Grasp can do for ${orders.name}"`),
+      filters: ['aria-label="How far it is"', 'aria-label="Team"'].filter(
+        (text) => html.includes(text)
+      ),
       rules: html.includes("When one counts as known"),
     }).toStrictEqual({
-      figures: [true, true, true],
       // The head's row and one for the piece of work.
       rows: 2,
-      orders: `${orders.name} ${team(orders.team)} Being mapped 2 of 3 0 of 2 5 things missing Being mapped Count as known Draw again`,
-      // Its work is all one team's: no column to tell teams apart.
-      teams: false,
+      orders: `${orders.name} ${team(orders.team)} Being mapped 2 of 3 0 of 2 5 things missing Being mapped`,
+      menu: true,
+      // One workflow is read whole: nothing to narrow the list with.
+      filters: [],
       rules: true,
     });
   });
@@ -163,11 +162,10 @@ describe("an organization's workflows", () => {
     );
 
     expect({
-      known: textOf(html).includes("workflows known 1 of 1"),
       byHand: textOf(rowOf(html, orders.name)).includes(
         "Counted as known by Grasp"
       ),
       nothing: textOf(rowOf(everyone, orders.name)).includes("Nothing missing"),
-    }).toStrictEqual({ known: true, byHand: true, nothing: true });
+    }).toStrictEqual({ byHand: true, nothing: true });
   });
 });

@@ -3,7 +3,6 @@ import type {
   Organization,
   TeamFlag,
 } from "@grasp-os/shared/admin/admin-organization";
-import { organizationOf } from "@grasp-os/shared/admin/admin-organization";
 import { MIN_GROUP } from "@grasp-os/shared/admin/interviews";
 import { dateOn } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
@@ -19,21 +18,20 @@ import {
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
 /**
- * The organization as Grasp knows it, ported from the prototype
+ * The company's teams as Grasp knows them, ported from the prototype
  * (grasplabs/prototype `components/admin/org-organization.tsx`,
- * `org-team.tsx` and `organization-parts.ts`): the company, its figures,
- * every team as a card with its lead, its people as dots, its work and
- * what needs a look there; a card opens the team, with everyone in it,
- * the work it does and where that work goes. Every figure is the shared
- * model's (`organizationOf`).
+ * `org-team.tsx` and `organization-parts.ts`) and shown where the
+ * interviews are (the Teams tab of Interviews): every team as a row with
+ * where it stands, its people as dots and what needs a look there; a row
+ * opens the team, with everyone in it, the work it does and where that
+ * work goes. Every figure is the shared model's (`organizationOf`).
  *
- * Read only, as the admin is: the prototype puts the list right here
- * (a team or a person added, a lead named, a team asked in or left out,
- * the one reminder sent), which writes to the company's Grasp, and the
- * admin has no way to yet. A person opens nothing of their own: the
- * prototype's dialog leads to what they said, which the admin never
- * shows. Nor is where a piece of work goes said in the words of whoever
- * said it, when it isn't one of the company's own teams.
+ * Read only but for asking a team in, as the admin is: the prototype puts
+ * the list right here (a team or a person added, a lead named, a team
+ * left out), which the admin has no way to yet. A person opens nothing of
+ * their own: the prototype's dialog leads to what they said, which the
+ * admin never shows. Nor is where a piece of work goes said in the words
+ * of whoever said it, when it isn't one of the company's own teams.
  */
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Progress } from "@grasp-os/ui/components/progress";
@@ -47,23 +45,18 @@ import { ArrowLeftIcon, ArrowRightIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import {
-  Done,
-  Dot,
-  DotLegend,
-  Figure,
-  Initials,
-  markOf,
-  PeopleDots,
-} from "./parts.tsx";
+import { CommandButton } from "./commands.tsx";
+import { Dot, Figure, Initials, markOf, PeopleDots } from "./parts.tsx";
 import { EmptySection, Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
-import { formatDate, linkWords, workflowWords } from "./words.ts";
+import { formatDate, linkWords, talkedWords, workflowWords } from "./words.ts";
 
 /** `count` and the thing it counts: one for one, many for the rest. */
 const counted = (count: number, one: string, other: string): string =>
   `${count} ${count === 1 ? one : other}`;
 
+/** With more teams than this, the list can be searched and narrowed. */
+const SEARCH_FROM = 8;
 /** How many people a search shows by name before it asks for more of the name. */
 const mostFound = 6;
 /** How many of the people who do a piece of work show as their initials. */
@@ -126,7 +119,7 @@ const workTone = (work: WorkEvidence): string => {
 const teamName = (view: OrgView, id: string | null): string =>
   view.teams.find((each) => each.team.id === id)?.team.name ?? "";
 
-/** A link to one team's own page, or to all of them. */
+/** A link to one team, open where the teams are, or to all of them. */
 const TeamLink = ({
   clientId,
   team,
@@ -142,7 +135,7 @@ const TeamLink = ({
     {...props}
     params={{ clientId }}
     search={team === null ? {} : { team }}
-    to={sectionTo.organization}
+    to={sectionTo.interviews}
   />
 );
 
@@ -154,282 +147,8 @@ const WorkBar = ({ team }: { team: ChartTeam }) => (
   />
 );
 
-/** What a team card says at its foot when nothing about it needs a look. */
-const nextLine = (team: ChartTeam): string => {
-  const { next, lead } = team.view;
-  switch (next.kind) {
-    case "lead-unknown": {
-      return "The company still has to name the team lead.";
-    }
-    case "not-told": {
-      return "Gets its links once the team is told.";
-    }
-    case "lead": {
-      return `Waits for ${lead?.person.first ?? "the lead"} to talk first.`;
-    }
-    case "talking": {
-      return `${counted(next.left, "person", "people")} still to talk.`;
-    }
-    case "closed": {
-      return `Closed. ${counted(next.missed, "person", "people")} did not talk.`;
-    }
-    case "off":
-    case "done": {
-      return "";
-    }
-    default: {
-      return next satisfies never;
-    }
-  }
-};
-
-/** The foot of a team's card: whether it takes part, what stands out there, or what comes next. */
-const CardFoot = ({ team }: { team: ChartTeam }) => {
-  const each = team.view;
-  // No lead is said where the lead stands; the foot says what else stands out.
-  const flags = team.flags.filter((one) => one.kind !== "noLead");
-  const [flag] = flags;
-  if (each.off) {
-    return <span className="text-muted-foreground">Does not take part</span>;
-  }
-  if (flag !== undefined) {
-    return (
-      <span className="text-status-attention flex min-w-0 items-center gap-2">
-        <span
-          aria-hidden
-          className="bg-status-attention size-1.5 flex-none rounded-full"
-        />
-        <span className="truncate">{flagLine(flag)}</span>
-        {flags.length > 1 ? (
-          <span className="text-muted-foreground flex-none tabular-nums">
-            +{flags.length - 1}
-          </span>
-        ) : null}
-      </span>
-    );
-  }
-  if (each.next.kind === "done") {
-    return <Done>Everyone has talked.</Done>;
-  }
-  return (
-    <span className="text-muted-foreground truncate">{nextLine(team)}</span>
-  );
-};
-
-/** Who leads a team, on its card. */
-const CardLead = ({ team }: { team: ChartTeam }) => {
-  const { lead, off, next } = team.view;
-  if (lead !== null) {
-    return (
-      <div className="flex items-center gap-2.5">
-        <Initials name={lead.person.name} />
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate">{lead.person.name}</span>
-          <span className="text-muted-foreground text-xs">
-            {lead.state === "completed" ? "Team lead, has talked" : "Team lead"}
-          </span>
-        </span>
-      </div>
-    );
-  }
-  const waitsOnCompany = off || next.kind === "lead-unknown";
-  return (
-    <div className="flex items-center gap-2.5">
-      <span
-        aria-hidden
-        className="size-6 flex-none rounded-full border border-dashed"
-      />
-      <span className="flex min-w-0 flex-col">
-        <span
-          className={cn(
-            "truncate",
-            waitsOnCompany ? "text-muted-foreground" : "text-status-attention"
-          )}
-        >
-          No team lead named
-        </span>
-        <span className="text-muted-foreground text-xs">
-          Its people are each asked what they do
-        </span>
-      </span>
-    </div>
-  );
-};
-
-/**
- * One team as a card: what it does, who leads it, its people as dots, how
- * far its work is known, and the one thing that stands out there. A team
- * that does not take part is greyed.
- */
-const TeamCard = ({
-  view,
-  team,
-  clientId,
-}: {
-  view: OrgView;
-  team: ChartTeam;
-  clientId: string;
-}) => {
-  const each = team.view;
-  const { name } = each.team;
-  const people = each.people.length;
-  const works = team.works.length;
-  const talked = `${each.counts.completed} of ${each.asked} talked`;
-  return (
-    <li
-      className={cn(
-        "hover:border-foreground/25 relative flex flex-col rounded-xl border transition-colors",
-        each.off ? "bg-transparent" : "bg-card"
-      )}
-    >
-      <div className="flex flex-1 flex-col gap-3 px-4 pt-3.5 pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-col gap-0.5">
-            {/* The whole card opens the team: the name is the link, stretched over the card. */}
-            <TeamLink
-              aria-label={`Open ${name}`}
-              className={cn(
-                "focus-visible:after:ring-ring/50 truncate rounded-sm font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-3",
-                each.off && "text-muted-foreground"
-              )}
-              clientId={clientId}
-              team={each.team.id}
-            >
-              {name}
-            </TeamLink>
-            {each.team.does === "" ? null : (
-              <span className="text-muted-foreground line-clamp-1 text-xs">
-                {each.team.does}
-              </span>
-            )}
-          </div>
-          <span className="text-muted-foreground flex-none text-xs tabular-nums">
-            {counted(people, "person", "people")}
-          </span>
-        </div>
-
-        <CardLead team={team} />
-
-        {people > 0 ? (
-          <div className="flex items-start justify-between gap-4">
-            <span className="pt-1">
-              <PeopleDots label={talked} people={each.people} />
-            </span>
-            {view.told && !each.off ? (
-              <span
-                aria-hidden
-                className="text-muted-foreground flex-none text-xs tabular-nums"
-              >
-                {talked}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-
-        {works > 0 ? (
-          <div className="mt-auto flex flex-col gap-1.5">
-            <WorkBar team={team} />
-            <span className="text-muted-foreground flex items-baseline justify-between gap-3 text-xs tabular-nums">
-              <span>{counted(works, "piece of work", "pieces of work")}</span>
-              <span>{team.known} known</span>
-            </span>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="flex min-h-10 items-center justify-between gap-3 border-t px-4 py-2 text-xs">
-        <CardFoot team={team} />
-        {each.off ? null : (
-          <ArrowRightIcon
-            aria-hidden
-            className="text-muted-foreground size-3.5 flex-none"
-          />
-        )}
-      </div>
-    </li>
-  );
-};
-
-/** Where the list of people comes from, under the company's name. */
-const SOURCE_LINE = "The list as the company’s admin shared it.";
-
-/** The company's figures: its teams, its people, its team leads and its pieces of work. */
-const Figures = ({
-  view,
-  chart,
-  left,
-}: {
-  view: OrgView;
-  chart: Organization;
-  left: number;
-}) => {
-  const teams = chart.teams.length;
-  const unnamed = chart.taking - chart.leadsNamed;
-  let leadsSub = view.told ? "have talked" : "are named";
-  if (unnamed > 0) {
-    leadsSub = `${counted(unnamed, "team", "teams")} without a lead`;
-  }
-  return (
-    <div className="@container border-t">
-      <div className="bg-border grid grid-cols-2 gap-px @3xl:grid-cols-4">
-        <Figure
-          label="Teams"
-          ring={left > 0 ? { value: chart.taking, of: teams } : undefined}
-          sub={
-            left > 0
-              ? `${chart.taking} ${chart.taking === 1 ? "takes" : "take"} part`
-              : "All take part"
-          }
-          value={teams}
-        />
-        <Figure
-          label="People"
-          ring={
-            view.told ? { value: chart.talked, of: chart.asked } : undefined
-          }
-          sub={
-            view.told
-              ? `${chart.talked} of ${chart.asked} asked have talked`
-              : `${chart.asked} will be asked`
-          }
-          value={chart.people}
-        />
-        <Figure
-          attention={unnamed > 0}
-          label="Team leads"
-          ring={
-            view.told
-              ? { value: chart.leadsTalked, of: chart.leadsNamed }
-              : { value: chart.leadsNamed, of: chart.taking }
-          }
-          sub={leadsSub}
-          value={
-            view.told
-              ? `${chart.leadsTalked} of ${chart.leadsNamed}`
-              : `${chart.leadsNamed} of ${chart.taking}`
-          }
-        />
-        <Figure
-          label="Pieces of work"
-          ring={
-            chart.works > 0
-              ? { value: chart.known, of: chart.works }
-              : undefined
-          }
-          sub={
-            chart.works === 0
-              ? "Named by each team’s lead"
-              : `${chart.known} known`
-          }
-          value={chart.works}
-        />
-      </div>
-    </div>
-  );
-};
-
 /** Before anyone is on the list: the teams the sponsor named, if any, by name and size. */
-const NoTeams = ({ view }: { view: OrgView }) => {
+export const NoTeams = ({ view }: { view: OrgView }) => {
   const named = view.vision?.teams ?? [];
   const line =
     named.length > 0
@@ -566,8 +285,161 @@ const kept = (team: ChartTeam, filter: Filter): boolean => {
   }
 };
 
-/** Every team, to find one by its name or a person's in it, and to show only those that take part, are left out or need a look. */
-const AllTeams = ({
+/** The day `day` of the organization's interviews, as a date. */
+const dayDate = (view: OrgView, day: number): string =>
+  formatDate(dateOn(view.org, day));
+
+/** Where a team stands, in a few words. */
+const standsOf = (view: OrgView, team: ChartTeam["view"]): string => {
+  const { next, lead } = team;
+  switch (next.kind) {
+    case "off": {
+      return "Does not take part";
+    }
+    case "lead-unknown": {
+      return "The company still has to name its lead";
+    }
+    case "not-told": {
+      return "Gets its links once the team is told";
+    }
+    case "lead": {
+      if (lead === null) {
+        return "Its links go out on the first day";
+      }
+      return next.reminded
+        ? `${lead.person.first} was reminded and has not talked yet`
+        : `Waits for ${lead.person.first} to talk first`;
+    }
+    case "done": {
+      return "Everyone has talked";
+    }
+    case "closed": {
+      return `Closed. ${counted(next.missed, "person", "people")} did not talk`;
+    }
+    case "talking": {
+      return team.sent === null
+        ? "Links out"
+        : `Links out since ${dayDate(view, team.sent)}`;
+    }
+    default: {
+      return next satisfies never;
+    }
+  }
+};
+
+/** What needs a look at a team beyond where it stands, which already says a lead is missing or late. */
+const besideStanding = (team: ChartTeam): readonly TeamFlag[] =>
+  team.flags.filter(
+    (flag) =>
+      flag.kind !== "leadLate" &&
+      !(flag.kind === "noLead" && team.view.next.kind === "lead-unknown")
+  );
+
+/**
+ * One team in the list: its name, which opens it, who leads it and where
+ * it stands, what needs a look there, and its people as dots. A team that
+ * does not take part can be asked in until the interviews close.
+ */
+const TeamRow = ({
+  view,
+  team,
+  clientId,
+}: {
+  view: OrgView;
+  team: ChartTeam;
+  clientId: string;
+}) => {
+  const each = team.view;
+  const { lead, next } = each;
+  const { name } = each.team;
+  const people = each.people.length;
+  const talked = talkedWords(each.counts.completed, each.asked);
+  const line = [
+    lead !== null && next.kind !== "lead" ? lead.person.name : "",
+    standsOf(view, each),
+  ]
+    .filter((part) => part !== "")
+    .join(" · ");
+  const flags = each.off ? [] : besideStanding(team);
+  const [flag] = flags;
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 border-t px-5 py-3 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
+      <span className="flex min-w-0 flex-col">
+        <TeamLink
+          aria-label={`Open ${name}`}
+          className={cn(
+            "focus-visible:ring-ring/50 truncate rounded-sm outline-none hover:underline focus-visible:ring-3",
+            each.off && "text-muted-foreground"
+          )}
+          clientId={clientId}
+          team={each.team.id}
+        >
+          {name}
+        </TeamLink>
+        <span
+          className={cn(
+            "truncate text-xs",
+            next.kind === "lead" && next.reminded
+              ? "text-status-attention"
+              : "text-muted-foreground"
+          )}
+        >
+          {line}
+        </span>
+        {flag === undefined ? null : (
+          <span className="text-status-attention truncate text-xs">
+            {flagLine(flag)}
+            {flags.length > 1 ? (
+              <span className="text-muted-foreground tabular-nums">
+                {` +${flags.length - 1}`}
+              </span>
+            ) : null}
+          </span>
+        )}
+      </span>
+      <span className="col-span-2 flex min-w-0 items-center gap-4 md:col-span-1">
+        {each.off || !view.told ? (
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {counted(people, "person", "people")}
+          </span>
+        ) : (
+          <>
+            <span className="min-w-0 flex-1">
+              <PeopleDots label={talked} people={each.people} />
+            </span>
+            <span
+              aria-hidden
+              className="text-muted-foreground flex-none text-xs tabular-nums"
+            >
+              {talked}
+            </span>
+          </>
+        )}
+      </span>
+      {each.off && !view.closed ? (
+        <span className="col-start-2 row-start-1 md:col-start-auto md:row-start-auto">
+          <CommandButton
+            clientId={clientId}
+            command={{
+              type: "onboarding.ask_in",
+              payload: { team: each.team.id },
+            }}
+            label={`Ask ${name} in`}
+          >
+            Ask it in
+          </CommandButton>
+        </span>
+      ) : null}
+    </li>
+  );
+};
+
+/**
+ * Every team, and the work that goes between them. A long list can be
+ * searched by a team's name or a person's in it, and narrowed to the teams
+ * that take part, are left out or need a look.
+ */
+export const TeamList = ({
   view,
   chart,
   clientId,
@@ -578,6 +450,7 @@ const AllTeams = ({
 }) => {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const long = chart.teams.length > SEARCH_FROM;
   const left = chart.teams.filter((each) => each.view.off).length;
   const look = chart.teams.filter((each) => each.flags.length > 0).length;
   const counts: Record<Filter, number> = {
@@ -605,87 +478,70 @@ const AllTeams = ({
 
   return (
     <>
-      <Section
-        description={
-          <>
-            {view.org.about === "" && view.org.place === "" ? null : (
-              <p>
-                {[view.org.about, view.org.place]
-                  .filter((part) => part !== "")
-                  .join(" · ")}
-              </p>
-            )}
-            <p className="text-xs">{SOURCE_LINE}</p>
-          </>
-        }
-        title={view.org.name}
-      >
-        <Figures chart={chart} left={left} view={view} />
-      </Section>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {shownFilters.length > 1 ? (
-          <ToggleGroup
-            aria-label="Which teams to show"
-            className="flex-wrap"
-            onValueChange={(value) => {
-              setFilter(filters.find((each) => each === value[0]) ?? "all");
-            }}
-            size="sm"
-            spacing={0}
-            value={[filter]}
-            variant="outline"
-          >
-            {shownFilters.map((each) => (
-              <ToggleGroupItem key={each} value={each}>
-                {filterWords[each]}
-                <span className="text-muted-foreground tabular-nums">
-                  {counts[each]}
-                </span>
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        ) : (
-          <DotLegend />
-        )}
-        <div className="w-full sm:ml-auto sm:w-64">
-          <InputGroup>
-            <InputGroupInput
-              aria-label="Find a team or a person"
-              onChange={(event) => {
-                setQuery(event.target.value);
+      {long ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {shownFilters.length > 1 ? (
+            <ToggleGroup
+              aria-label="Which teams to show"
+              className="flex-wrap"
+              onValueChange={(value) => {
+                setFilter(filters.find((each) => each === value[0]) ?? "all");
               }}
-              placeholder="Find a team or a person"
-              value={query}
-            />
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-          </InputGroup>
+              size="sm"
+              spacing={0}
+              value={[filter]}
+              variant="outline"
+            >
+              {shownFilters.map((each) => (
+                <ToggleGroupItem key={each} value={each}>
+                  {filterWords[each]}
+                  <span className="text-muted-foreground tabular-nums">
+                    {counts[each]}
+                  </span>
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
+          <div className="w-full sm:ml-auto sm:w-64">
+            <InputGroup>
+              <InputGroupInput
+                aria-label="Find a team or a person"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                }}
+                placeholder="Find a team or a person"
+                value={query}
+              />
+              <InputGroupAddon>
+                <SearchIcon />
+              </InputGroupAddon>
+            </InputGroup>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {found.length > 0 ? (
         <Found clientId={clientId} found={found} view={view} />
       ) : null}
 
-      <div className="@container">
-        <ul className="grid gap-3 @2xl:grid-cols-2 @4xl:grid-cols-3">
-          {shown.map((each) => (
-            <TeamCard
-              clientId={clientId}
-              key={each.view.team.id}
-              team={each}
-              view={view}
-            />
-          ))}
-        </ul>
+      <Section title="Teams">
         {shown.length === 0 ? (
-          <p className="text-muted-foreground">No team matches.</p>
-        ) : null}
-      </div>
-
-      {shownFilters.length > 1 ? <DotLegend /> : null}
+          <p className="text-muted-foreground border-t px-5 py-4">
+            No team matches.
+          </p>
+        ) : (
+          <ul className="flex flex-col">
+            {shown.map((each) => (
+              <TeamRow
+                clientId={clientId}
+                key={each.view.team.id}
+                team={each}
+                view={view}
+              />
+            ))}
+          </ul>
+        )}
+      </Section>
 
       {chart.between.length > 0 ? (
         <Between chart={chart} clientId={clientId} view={view} />
@@ -1025,7 +881,7 @@ const TeamFlags = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
  * and how far each is known, the apps it works in, and where its work
  * comes from and goes to.
  */
-const OneTeam = ({
+export const OneTeam = ({
   view,
   team,
   clientId,
@@ -1110,34 +966,4 @@ const OneTeam = ({
       </div>
     </>
   );
-};
-
-/**
- * The organization as Grasp knows it: its teams as cards, or the team
- * `team` names, whole. A team the company doesn't have shows them all.
- */
-export const OrgOrganization = ({
-  view,
-  team,
-  clientId,
-  titles,
-}: {
-  view: OrgView;
-  /** The team that is open. */
-  team: string | undefined;
-  clientId: string;
-  /** Each person's title, by their id, as the company's list has it. */
-  titles: ReadonlyMap<string, string>;
-}) => {
-  const chart = organizationOf(view);
-  const open = chart.teams.find((each) => each.view.team.id === team);
-  if (open !== undefined) {
-    return (
-      <OneTeam clientId={clientId} team={open} titles={titles} view={view} />
-    );
-  }
-  if (chart.teams.length === 0) {
-    return <NoTeams view={view} />;
-  }
-  return <AllTeams chart={chart} clientId={clientId} view={view} />;
 };

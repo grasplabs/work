@@ -8,8 +8,7 @@
  * reads the Setup again after, whether it worked or not.
  *
  * Also what is read live of its account once the Setup shows (reach,
- * errors, drift, shared secrets), as the admin's grid read it,
- * and everything its audit log keeps of it.
+ * drift, shared secrets), as the admin's grid read it.
  */
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import {
@@ -30,14 +29,6 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { useRouter } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -55,7 +46,6 @@ import {
   setTeamsBotFn,
 } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
-import type { HistoryEntry } from "../clients/queries.ts";
 import type { StaffWindowSetup } from "../clients/setup.ts";
 import { SignInFields, signInOf, textOf } from "../clients/sign-in-fields.tsx";
 import type { TeamsBot } from "../clients/teams-bot.ts";
@@ -71,7 +61,8 @@ import type { ClientDriftState } from "../rollout/drift.ts";
 import { pinClientFn, setChannelFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
-import { Facts, Failure, Quiet } from "./setup-parts.tsx";
+import { Section } from "./section.tsx";
+import { Facts, Failure } from "./setup-parts.tsx";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
@@ -861,99 +852,35 @@ const readLive = async (clientId: string): Promise<LiveRead> => {
 };
 
 /**
- * What its account shows now, read once the Setup shows and kept a
- * minute, as the admin's grid read it: whether the router reaches its
- * core, its errors over the last day, its drift, whether it runs the
- * shared secrets. Only an active company is read.
+ * What its account shows now, read once the Setup shows, as the admin's
+ * grid read it: whether the router reaches its core, its drift, whether
+ * it runs the shared secrets. Said only when one of them is off: a
+ * company that is reachable, in sync and current is "Healthy" in its
+ * header already. Its Setup gives it a new key once what it runs
+ * changed, so it is read again after a deploy.
  */
-export const LiveNumbers = ({
-  clientId,
-  active,
-}: {
-  clientId: string;
-  active: boolean;
-}) => {
+export const LiveNumbers = ({ clientId }: { clientId: string }) => {
   const [live, setLive] = useState<LiveRead>(null);
   useEffect(() => {
     let current = true;
-    if (active) {
-      void (async () => {
-        const read = await readLive(clientId);
-        // A page left before its answer came doesn't take it.
-        if (current) {
-          setLive(read);
-        }
-      })();
-    }
+    void (async () => {
+      const read = await readLive(clientId);
+      // A page left before its answer came doesn't take it.
+      if (current) {
+        setLive(read);
+      }
+    })();
     return () => {
       current = false;
     };
-  }, [active, clientId]);
-  if (!active) {
-    return <Quiet>Read once it is live.</Quiet>;
+  }, [clientId]);
+  if (live === null || live === "failed") {
+    return null;
   }
-  if (live === null) {
-    return <Quiet>Reading its account…</Quiet>;
-  }
-  if (live === "failed") {
-    return <Quiet>Its account couldn’t be read just now.</Quiet>;
-  }
-  return <Facts rows={liveRows(live)} />;
+  const rows = liveRows(live);
+  return rows.some(({ attention }) => attention === true) ? (
+    <Section title="Its platform in numbers">
+      <Facts rows={rows} />
+    </Section>
+  ) : null;
 };
-
-// Everything the audit log keeps of it.
-
-/** Everything the audit log keeps of it, the newest first. */
-export const History = ({ history }: { history: HistoryEntry[] }) =>
-  history.length === 0 ? (
-    <Quiet>Nothing yet.</Quiet>
-  ) : (
-    <div className="@container border-t">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead variant="card">When (UTC)</TableHead>
-            <TableHead variant="card">Action</TableHead>
-            <TableHead className="hidden @xl:table-cell" variant="card">
-              By
-            </TableHead>
-            <TableHead className="hidden @2xl:table-cell" variant="card">
-              On
-            </TableHead>
-            <TableHead className="hidden @3xl:table-cell" variant="card">
-              Detail
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {history.map((entry) => (
-            <TableRow key={entry.id}>
-              <TableCell variant="card">
-                <span className="tabular-nums">{formatTime(entry.at)}</span>
-              </TableCell>
-              <TableCell variant="card">
-                <span className="font-mono text-xs">{entry.action}</span>
-              </TableCell>
-              <TableCell
-                className="hidden whitespace-normal @xl:table-cell"
-                variant="card"
-              >
-                <span className="text-muted-foreground">{entry.actor}</span>
-              </TableCell>
-              <TableCell className="hidden @2xl:table-cell" variant="card">
-                <span className="font-mono text-xs">{entry.target ?? ""}</span>
-              </TableCell>
-              <TableCell
-                className="hidden whitespace-normal @3xl:table-cell"
-                variant="card"
-              >
-                <span className="font-mono text-xs break-all">
-                  {entry.detail ?? ""}
-                </span>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );

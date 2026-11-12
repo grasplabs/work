@@ -38,7 +38,7 @@ describe("the admin's frame", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("lays out an organization as the prototype does: its column of sections in order, what waits where, and where the overview comes from", async () => {
+  it("lays out an organization: its column of sections in order, and what waits where", async () => {
     const acme = await liveClient();
     acme.core.admin = readySnapshot("Acme");
 
@@ -48,11 +48,8 @@ describe("the admin's frame", () => {
       "Overview",
       "Company",
       "Details",
-      "Contract",
-      "Members",
       "Onboarding",
       "Steps",
-      "Organization",
       "Interviews",
       "Workflows",
       "Platform",
@@ -62,7 +59,6 @@ describe("the admin's frame", () => {
       "Hours",
       "Records",
       "Brain",
-      "Data",
       "Log",
     ];
     const positions = titles.map((title) => column.indexOf(`>${title}</span>`));
@@ -81,28 +77,25 @@ describe("the admin's frame", () => {
       title: html.includes(`${acme.name}</h1>`),
       known: column.includes("85% known. Ready for Grasp’s go"),
       // The go and the agreements wait under Steps; a contract core doesn't hold waits nowhere.
-      waits: ["Steps", "Contract", "Members", "Interviews"].map((title) =>
+      waits: ["Steps", "Details", "Interviews"].map((title) =>
         columnEntryOf(column, title).includes("Something waits for Grasp")
       ),
+      // What is read says nothing of where it comes from.
       source: html.includes("From the company’s own Grasp."),
       // Every need of Acme, with where it is settled; none for a contract nobody knows of yet.
       needs: [
         "85% of what Grasp needs is known: enough to open at 80%. The company comes in once Grasp gives its go.",
         "The contract is still being written.",
       ].map((text) => html.includes(text)),
-      opensContract: html.includes(
-        `href="/organizations/${acme.clientId}/contract"`
-      ),
     }).toStrictEqual({
       status: 200,
       inOrder: true,
       onOverview: true,
       title: true,
       known: true,
-      waits: [true, false, false, false],
-      source: true,
+      waits: [true, false, false],
+      source: false,
       needs: [true, false],
-      opensContract: true,
     });
   });
 
@@ -146,54 +139,54 @@ describe("the admin's frame", () => {
     }).toStrictEqual({ status: 200, paused: true, toSteps: true });
   });
 
-  it("shows a section under its own path, titled, saying where what it shows comes from", async () => {
+  it("shows a section under its own path, titled, saying only where what isn't read yet will come from", async () => {
     const acme = await liveClient();
     acme.core.admin = readySnapshot("Acme");
     const base = `/organizations/${acme.clientId}`;
 
-    const contract = await page(`${base}/contract`);
+    const details = await page(`${base}/details`);
     const usage = await page(`${base}/ai-use`);
     const setup = await page(`${base}/setup`);
 
     expect({
-      statuses: [contract, usage, setup].map(({ status }) => status),
-      contract: {
-        title: contract.html.includes("Contract</h1>"),
-        about: contract.html.includes(
-          "The seats taken, the agreements, and what is billed."
+      statuses: [details, usage, setup].map(({ status }) => status),
+      details: {
+        title: details.html.includes("Details</h1>"),
+        about: details.html.includes(
+          "The company as its own papers have it, who Grasp deals with there, its contract and its members."
         ),
         // Not linked in Stripe yet.
-        source: contract.html.includes(
+        source: details.html.includes(
           "Its billing and invoices: from Stripe, once it is connected."
         ),
         current: columnEntryOf(
-          columnOf(contract.html, acme.name),
-          "Contract"
+          columnOf(details.html, acme.name),
+          "Details"
         ).includes('aria-current="page"'),
         overviewCurrent: columnEntryOf(
-          columnOf(contract.html, acme.name),
+          columnOf(details.html, acme.name),
           "Overview"
         ).includes('aria-current="page"'),
       },
       usage: [
         usage.html.includes("AI use</h1>"),
-        usage.html.includes("From the company’s own Grasp."),
+        usage.html.includes('data-slot="source-note"'),
       ],
       setup: [
         setup.html.includes("Setup</h1>"),
-        setup.html.includes("From this admin."),
+        setup.html.includes('data-slot="source-note"'),
       ],
     }).toStrictEqual({
       statuses: [200, 200, 200],
-      contract: {
+      details: {
         title: true,
         about: true,
         source: true,
         current: true,
         overviewCurrent: false,
       },
-      usage: [true, true],
-      setup: [true, true],
+      usage: [true, false],
+      setup: [true, false],
     });
   });
 
@@ -227,7 +220,7 @@ describe("the admin's frame", () => {
     };
 
     const { status, html } = await page(
-      `/organizations/${acme.clientId}/contract`
+      `/organizations/${acme.clientId}/details?tab=contract`
     );
     /** The part of the page titled `title`, up to the next part. */
     const partOf = (title: string): string => {
@@ -249,7 +242,6 @@ describe("the admin's frame", () => {
         contract: ["Not known yet", "Being written", "not sent yet", "€0"].some(
           (text) => html.includes(text)
         ),
-        seats: html.includes("are taken"),
         runs: html.includes("Still runs"),
         fee: html.includes("Fee a month"),
       },
@@ -278,7 +270,6 @@ describe("the admin's frame", () => {
       toCome: false,
       summary: {
         contract: false,
-        seats: true,
         runs: false,
         fee: false,
       },
@@ -297,7 +288,9 @@ describe("the admin's frame", () => {
     const acme = await liveClient();
     acme.core.admin = emptyAdminSnapshot("Acme");
 
-    const { html } = await page(`/organizations/${acme.clientId}/contract`);
+    const { html } = await page(
+      `/organizations/${acme.clientId}/details?tab=contract`
+    );
     const at = html.indexOf(">Agreed before the first interview</h2>");
     const part =
       at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));

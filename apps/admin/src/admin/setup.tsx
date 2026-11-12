@@ -1,22 +1,20 @@
 /**
  * An organization's Setup: the company's own Grasp as the admin runs
- * it, from the contract to every day after, ported from the prototype
- * (grasplabs/prototype `components/admin/org-setup.tsx`,
- * `platform-parts.tsx` and `platform-words.ts`). Unlike the other
- * sections it reads the admin's own records (src/clients/setup.ts):
- * how it stands and what needs a look, how it runs from its address to
- * its data, every deploy step by step, what runs in its Cloudflare
- * account, the releases it gets, and how its people sign in.
+ * it, ported from the prototype (grasplabs/prototype
+ * `components/admin/org-setup.tsx`, `platform-parts.tsx` and
+ * `platform-words.ts`). Unlike the other sections it reads the admin's
+ * own records (src/clients/setup.ts): how it stands and what needs a
+ * look, its setting up step by step, what runs in its account, what the
+ * admin's audit log keeps of it, the releases it gets, and how its
+ * people sign in.
  *
  * And what someone at Grasp does to it, where it shows
- * (src/admin/setup-actions.tsx): resume setting it up or confirm Workers
- * Paid, place it in a hosting destination, pin it, move it to another
- * channel, change how its people sign in, apply its settings, rotate its
- * secrets. Its account's numbers now (reach, errors, drift,
- * shared secrets, cost) are read live once the section shows; what the
- * admin doesn't keep day by day says so rather than show a number.
+ * (src/admin/setup-actions.tsx): resume setting it up, pin it, move it to
+ * another channel, change how its people sign in, apply its settings,
+ * rotate its secrets, offboard it. Its account now (reach, drift, shared
+ * secrets) is read live once the section shows, and said only when
+ * something is off.
  */
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -42,19 +40,12 @@ import {
 } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
-import {
-  ArrowDownIcon,
-  ArrowRightIcon,
-  CheckIcon,
-  CircleDashedIcon,
-  CircleIcon,
-  CopyIcon,
-  ExternalLinkIcon,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChevronDownIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import { useEffect, useReducer, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
+import type { HistoryEntry } from "../clients/queries.ts";
 import type { ClientSetup } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
@@ -81,11 +72,8 @@ import { thenRefresh, useAction } from "../use-action.ts";
 import { aiStatusLine, graspAiLine } from "./ai-status-words.ts";
 import { attentionWords } from "./platform-parts.tsx";
 import { Section } from "./section.tsx";
-import { sectionTo } from "./sections.ts";
-import type { OrgSection } from "./sections.ts";
 import {
   ApplySettings,
-  History,
   LiveNumbers,
   PinRelease,
   ChannelChange,
@@ -102,19 +90,12 @@ import { ErrorCode, Facts, Quiet } from "./setup-parts.tsx";
 import { formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
-export const setupTabs = [
-  "status",
-  "history",
-  "resources",
-  "releases",
-  "settings",
-] as const;
+export const setupTabs = ["status", "history", "releases", "settings"] as const;
 export type SetupTab = (typeof setupTabs)[number];
 
 const tabWords: Record<SetupTab, string> = {
   status: "Status",
   history: "History",
-  resources: "Resources",
   releases: "Releases",
   settings: "Settings",
 };
@@ -444,239 +425,6 @@ const Header = ({
   );
 };
 
-/** One part of how a company's platform runs: what it is and what it does. */
-const Part = ({
-  name,
-  does,
-  release,
-}: {
-  name: string;
-  does: string;
-  release?: string | null;
-}) => (
-  <div className="bg-background flex min-w-0 flex-1 flex-col gap-0.5 rounded-lg border px-3 py-2.5">
-    <span className="truncate font-medium">{name}</span>
-    <span className="text-muted-foreground text-xs">{does}</span>
-    {release === undefined || release === null ? null : (
-      <span className="text-muted-foreground mt-auto pt-1 font-mono text-xs">
-        {release}
-      </span>
-    )}
-  </div>
-);
-
-const Onward = () => (
-  <span
-    aria-hidden
-    className="text-muted-foreground flex flex-none items-center justify-center"
-  >
-    <ArrowDownIcon className="size-4 md:hidden" />
-    <ArrowRightIcon className="hidden size-4 md:block" />
-  </span>
-);
-
-/**
- * How a company's own Grasp runs, from its address to where its data is:
- * the router Grasp runs for every company, then in its own account core,
- * connect and what they keep, each Worker with its release.
- */
-const HowItRuns = ({
-  clientId,
-  setup,
-}: {
-  clientId: string;
-  setup: ClientSetup;
-}) => {
-  const releaseOfWorker = (worker: "core" | "connect") =>
-    setup.workers.find((each) => each.worker === worker)?.releaseId ?? null;
-  const { resources } = setup;
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2 md:flex-row md:items-stretch">
-        <Part
-          does="Where its people sign in, with their own accounts."
-          name={setup.provisioning.hostname ?? clientId}
-        />
-        <Onward />
-        <Part
-          does="Grasp’s own, in front of every company: sends each address to its account."
-          name="Router"
-        />
-        <Onward />
-        <Part
-          does="The app, its chat and its workflows."
-          name="Core"
-          release={releaseOfWorker("core")}
-        />
-        <Onward />
-        <Part
-          does="Its connections to its apps, each call in a sandbox of its own."
-          name="Connect"
-          release={releaseOfWorker("connect")}
-        />
-      </div>
-      {resources === null ? null : (
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {resources.databases.map((name) => (
-            <Part does={name} key={`d1-${name}`} name="Database" />
-          ))}
-          {resources.buckets.map((name) => (
-            <Part does={name} key={`r2-${name}`} name="Files" />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-/** Done, still to do, or not known here: each step of the checklist. */
-type CheckState = "done" | "todo" | "unknown";
-
-interface ChecklistStep {
-  id: string;
-  label: string;
-  state: CheckState;
-  /** The section it is done in. */
-  to: OrgSection;
-  /** Why it is not known here. */
-  why?: string;
-}
-
-const CheckMark = ({ state }: { state: CheckState }) => {
-  if (state === "done") {
-    return (
-      <CheckIcon
-        aria-hidden
-        className="text-status-agreed mt-0.5 size-4 flex-none"
-      />
-    );
-  }
-  const Icon = state === "unknown" ? CircleDashedIcon : CircleIcon;
-  return (
-    <Icon
-      aria-hidden
-      className="text-muted-foreground mt-0.5 size-4 flex-none"
-    />
-  );
-};
-
-const checkSaid: Record<CheckState, string> = {
-  done: "done",
-  todo: "to do",
-  unknown: "not known here",
-};
-
-/**
- * From the contract to the company working in it: what has to be in
- * place, in the order it comes. The contract and its agreements are known
- * once core holds them; until then they are not known here.
- */
-export const Checklist = ({
-  clientId,
-  setup,
-  view,
-  contractRead,
-}: {
-  clientId: string;
-  setup: ClientSetup;
-  view: AdminView;
-  contractRead: boolean;
-}) => {
-  const agreements = view.agreements.filter(({ state }) => state !== "none");
-  const known: ChecklistStep[] = [
-    {
-      id: "contract",
-      label: "The contract is signed",
-      state: view.contract.status === "signed" ? "done" : "todo",
-      to: "contract",
-    },
-    {
-      id: "agreements",
-      label: "The agreements are in place",
-      state: agreements.every(({ state }) => state === "signed")
-        ? "done"
-        : "todo",
-      to: "contract",
-    },
-    {
-      id: "platform",
-      label: "Its own platform is deployed, in the EU",
-      state: setup.provisioning.client?.status === "active" ? "done" : "todo",
-      to: "setup",
-    },
-    {
-      id: "address",
-      label:
-        "Its address works, and its people sign in with their own accounts",
-      state: view.stages.connected === "done" ? "done" : "todo",
-      to: "integrations",
-    },
-    {
-      id: "members",
-      label: "Its admin invited the first people",
-      state: view.members.length > 0 ? "done" : "todo",
-      to: "members",
-    },
-    {
-      id: "go",
-      label: "Grasp gave its go, and the company works in it",
-      state: view.open ? "done" : "todo",
-      to: "steps",
-    },
-  ];
-  // Until core holds the contract, neither it nor its agreements is known here.
-  const steps = known.map((step): ChecklistStep =>
-    !contractRead && step.to === "contract"
-      ? { ...step, state: "unknown", why: "Not known here yet." }
-      : step
-  );
-  const done = steps.filter(({ state }) => state === "done").length;
-  return (
-    <Section
-      description={`${done} of ${steps.length} in place.`}
-      title="From contract to go"
-    >
-      <ul className="flex flex-col">
-        {steps.map((step) => (
-          <li
-            className="flex items-center justify-between gap-4 border-t px-5 py-3"
-            key={step.id}
-          >
-            <span className="flex min-w-0 items-start gap-3">
-              <CheckMark state={step.state} />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span
-                  className={cn(
-                    step.state === "done" && "text-muted-foreground"
-                  )}
-                >
-                  {step.label}
-                  <span className="sr-only">{`: ${checkSaid[step.state]}`}</span>
-                </span>
-                {step.why === undefined ? null : (
-                  <span className="text-muted-foreground text-xs">
-                    {step.why}
-                  </span>
-                )}
-              </span>
-            </span>
-            {step.state === "todo" && step.to !== "setup" ? (
-              <Button
-                nativeButton={false}
-                render={<Link params={{ clientId }} to={sectionTo[step.to]} />}
-                size="sm"
-                variant="ghost"
-              >
-                Open
-              </Button>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-};
-
 /**
  * Retry now: resumes its provisioning as the staff member
  * (`retryProvisioningFn`), which starts a new episode of automatic
@@ -813,42 +561,6 @@ const placedOf = (hosting: ClientHostingView | null): boolean =>
   hosting !== null &&
   (hosting.placement !== null || hosting.operation !== null);
 
-/**
- * Where its Grasp is hosted: the destination it is placed in, or where it
- * would go, and provisioning it there. For a company being set up, or
- * one placed already.
- */
-const HostingSection = ({
-  setup,
-  hosting,
-}: {
-  setup: ClientSetup;
-  hosting: ClientHostingView | null;
-}) =>
-  hosting !== null &&
-  (placedOf(hosting) ||
-    setup.provisioning.client?.status === "provisioning") ? (
-    <Section
-      description="Where it runs and where it is placed. Grasp sets it up, and tries again, by itself."
-      title="Hosting"
-    >
-      <div className="border-t px-5 py-4">
-        <Collapsible>
-          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
-            Show hosting details
-          </CollapsibleTrigger>
-          {/* Kept on the page while folded: found by the page's search, and
-              its state kept between refreshes. */}
-          <CollapsibleContent keepMounted>
-            <div className="mt-4">
-              <ClientHosting view={hosting} />
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-      </div>
-    </Section>
-  ) : null;
-
 /** Milliseconds as seconds, to one decimal. */
 const secondsOf = (ms: number | null): string =>
   ms === null ? "No answers to time" : `up to ${(ms / 1000).toFixed(1)} s`;
@@ -867,7 +579,7 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
   const over = overBars(signals);
   return (
     <Section
-      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. A signal over its bar is marked, and the Setup says it needs a look.`}
+      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}.`}
       title="Stephen"
     >
       <Facts
@@ -922,7 +634,7 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
  */
 const AiStatus = ({ status }: { status: Promise<AiStatusReport | null> }) => (
   <Section
-    description="Read from its core now, from its real model calls. Its admins connect a provider in their own Settings."
+    description="Its admins connect a provider in their own Settings."
     title="AI"
   >
     <CardContent>
@@ -951,205 +663,6 @@ const AiStatus = ({ status }: { status: Promise<AiStatusReport | null> }) => (
   </Section>
 );
 
-const Status = ({
-  clientId,
-  setup,
-  needs,
-  checklist,
-  aiStatus,
-  progress,
-  hosting,
-}: {
-  clientId: string;
-  setup: ClientSetup;
-  needs: PlatformNeed[];
-  /** Its checklist, from what its core answers: filled in once that is in. */
-  checklist: ReactNode;
-  /** Its AI as its core reports it, read live and not awaited; null when unknown. */
-  aiStatus: Promise<AiStatusReport | null>;
-  hosting: ClientHostingView | null;
-  progress: ProvisioningProgress | null;
-}) => (
-  <>
-    <Header clientId={clientId} needs={needs} setup={setup} />
-    {progress !== null && showsProgress(progress) ? (
-      <ProvisioningProgressView progress={progress}>
-        <StoppedAction clientId={clientId} needs={needs} setup={setup} />
-      </ProvisioningProgressView>
-    ) : null}
-    {needs.length > 0 ? (
-      <Section description="The most pressing first." title="What needs a look">
-        <ul className="flex flex-col">
-          {needs.map((need) => (
-            <li
-              className="flex flex-col items-start gap-2 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
-              key={need.kind}
-            >
-              <span className="flex min-w-0 items-start gap-3">
-                <span
-                  aria-hidden
-                  className="bg-status-attention mt-1.5 size-2 flex-none rounded-full"
-                />
-                <span>{needWords(need)}</span>
-              </span>
-              <NeedAction clientId={clientId} need={need} />
-            </li>
-          ))}
-        </ul>
-      </Section>
-    ) : null}
-    <HostingSection hosting={hosting} setup={setup} />
-    {setup.provisioning.client?.status === "active" ? (
-      <AiStatus status={aiStatus} />
-    ) : null}
-    <Section
-      description="Read from its account now, and kept a minute. The admin doesn’t keep these day by day yet."
-      title="Its platform in numbers"
-    >
-      <LiveNumbers
-        active={setup.provisioning.client?.status === "active"}
-        clientId={clientId}
-      />
-    </Section>
-    <StephenWatched setup={setup} />
-    <Section
-      description="From its address to where its data is. Everything after the router runs in the EU, apart from every other company’s."
-      title="How it runs"
-    >
-      <div className="border-t px-5 py-4">
-        {setup.workers.length === 0 ? (
-          <p className="text-muted-foreground">
-            Nothing runs yet. Once it is set up, this is what runs, and where.
-          </p>
-        ) : (
-          <HowItRuns clientId={clientId} setup={setup} />
-        )}
-      </div>
-    </Section>
-    {checklist}
-  </>
-);
-
-/** What a channel change records besides. */
-const channelSchema = z.object({ channel: z.enum(channelIds) });
-
-/** What setting each sealed secret did, for its log. */
-const sealedSecretWords: Record<SealedSecretName, string> = {
-  TEAMS_BOT_SECRET: "Set its Teams bot's secret.",
-  SLACK_BOT_TOKEN: "Set its Slack app's bot token.",
-  SLACK_SIGNING_SECRET: "Set its Slack app's signing secret.",
-};
-
-/** Whether `target` names a sealed secret. */
-const isSealedSecretName = (
-  target: string | null
-): target is SealedSecretName =>
-  target !== null && Object.hasOwn(sealedSecretWords, target);
-
-/** What staff did by hand, in a sentence. */
-/** What staff did by hand that needs nothing of its event to say, in a sentence. */
-const plainEventWords: Readonly<Record<string, string>> = {
-  "client.create": "Added it.",
-  "client.rotate_secrets": "Rotated its secrets.",
-  "client.sign_in": "Changed how its people sign in.",
-  "client.teams_bot": "Changed its Teams bot.",
-  "client.staff_window": "Opened or closed Grasp's staff window.",
-};
-
-/** A move to another channel, in a sentence, from what its event records. */
-const channelChangeWords = (detail: string | null): string => {
-  const channel = channelSchema.safeParse(JSON.parse(detail ?? "null")).data
-    ?.channel;
-  return channel === undefined
-    ? "Moved it to another channel."
-    : `Moved it to ${channelWords[channel]}.`;
-};
-
-/** What staff did by hand, in a sentence. */
-const eventWords = ({
-  action,
-  target,
-  detail,
-}: ClientSetup["done"][number]): string => {
-  switch (action) {
-    case "client.place": {
-      return `Placed it in ${target ?? "a hosting destination"}.`;
-    }
-    case "client.provision_placed": {
-      return `Started provisioning it on ${target ?? "a release"}.`;
-    }
-    case "client.channel": {
-      return channelChangeWords(detail);
-    }
-    case "client.pin": {
-      return `Pinned it to ${target ?? "a release"}.`;
-    }
-    case "client.unpin": {
-      return "Let it follow its channel again.";
-    }
-    case "client.sealed_secret": {
-      return isSealedSecretName(target)
-        ? sealedSecretWords[target]
-        : "Set one of its secrets.";
-    }
-    case "client.apply_settings": {
-      return "Applied its settings.";
-    }
-    case "client.stripe_customer": {
-      return target === null
-        ? "Unlinked it from Stripe."
-        : `Linked it to ${target} in Stripe.`;
-    }
-    case "client.attio_company": {
-      return target === null
-        ? "Unlinked it from Attio."
-        : `Linked it to ${target} in Attio.`;
-    }
-    default: {
-      return plainEventWords[action] ?? action;
-    }
-  }
-};
-
-const Done = ({ setup }: { setup: ClientSetup }) => {
-  const { done, history } = setup;
-  return (
-    <>
-      {done.length > 0 ? (
-        <Section
-          description="What someone at Grasp did to its platform by hand, as the admin’s audit log keeps it."
-          title="Done here"
-        >
-          <ul className="flex flex-col">
-            {done.map((event) => (
-              <li
-                className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
-                key={event.id}
-              >
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>{eventWords(event)}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {event.actor}
-                  </span>
-                </span>
-                <span className="text-muted-foreground flex-none text-xs tabular-nums">
-                  {dayOf(event.at)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      ) : null}
-      <Section
-        description="Everything the admin’s audit log keeps of it, the newest first: what someone at Grasp did, and its provisioning and deploys."
-        title="Its history"
-      >
-        <History history={history} />
-      </Section>
-    </>
-  );
-};
-
 /** Whether it runs the shared secrets in Secrets Store now, in words. */
 const sharedSecretsWords = (current: boolean | null): string => {
   if (current === null) {
@@ -1173,7 +686,7 @@ const WhatRuns = ({ clientId }: { clientId: string }) => {
     }
     setReading(false);
   };
-  let said: ReactNode = "Read from its account when you ask.";
+  let said: ReactNode = "What Cloudflare says runs.";
   if (drift === "failed") {
     said = "Its account couldn’t be read. Try again in a while.";
   } else if (drift !== null) {
@@ -1265,128 +778,363 @@ const WhatRuns = ({ clientId }: { clientId: string }) => {
   );
 };
 
-const Resources = ({
+/**
+ * What runs in its account: each Worker as the admin made it live, what
+ * Cloudflare says runs when staff ask, and under a fold what its deploys
+ * keep there. Nothing before anything is live.
+ */
+const Workers = ({
   clientId,
   setup,
 }: {
   clientId: string;
   setup: ClientSetup;
 }) => {
-  const { provisioning, workers, resources } = setup;
-  const { client } = provisioning;
+  const { workers, resources } = setup;
+  if (workers.length === 0) {
+    return null;
+  }
+  const kept =
+    resources === null
+      ? []
+      : [
+          ...resources.databases.map((name) => ({ kind: "Database", name })),
+          ...resources.buckets.map((name) => ({ kind: "Files", name })),
+        ];
+  return (
+    <Section title="Its Workers">
+      <div className="@container border-t">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead variant="card">Worker</TableHead>
+              <TableHead className="hidden @lg:table-cell" variant="card">
+                Release
+              </TableHead>
+              <TableHead className="hidden @2xl:table-cell" variant="card">
+                Version
+              </TableHead>
+              <TableHead className="text-right" variant="card">
+                Made live
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {workers.map((worker) => (
+              <TableRow key={worker.worker}>
+                <TableCell variant="card">
+                  <span className="flex flex-col">
+                    <span className="capitalize">{worker.worker}</span>
+                    <span className="text-muted-foreground font-mono text-xs">
+                      {worker.scriptName}
+                    </span>
+                  </span>
+                </TableCell>
+                <TableCell className="hidden @lg:table-cell" variant="card">
+                  <span className="font-mono text-xs">
+                    {worker.releaseId ?? "–"}
+                  </span>
+                </TableCell>
+                <TableCell className="hidden @2xl:table-cell" variant="card">
+                  <span className="font-mono text-xs">
+                    {worker.versionId === null
+                      ? "–"
+                      : shortVersion(worker.versionId)}
+                  </span>
+                </TableCell>
+                <TableCell className="text-right" variant="card">
+                  <span className="tabular-nums">
+                    {worker.deployedAt === null
+                      ? "–"
+                      : dayOf(worker.deployedAt)}
+                  </span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <WhatRuns clientId={clientId} />
+      {kept.length === 0 ? null : (
+        <Collapsible>
+          <div className="border-t px-5 py-3">
+            <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
+              What it keeps
+              <ChevronDownIcon data-icon="inline-end" />
+            </CollapsibleTrigger>
+          </div>
+          {/* Kept on the page while folded: found by the page's search. */}
+          <CollapsibleContent keepMounted>
+            <ul className="flex flex-col">
+              {kept.map(({ kind, name }) => (
+                <li
+                  className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
+                  key={`${kind}-${name}`}
+                >
+                  <span>{kind}</span>
+                  <span className="text-muted-foreground font-mono text-xs">
+                    {name}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </Section>
+  );
+};
+
+/** What its account's live read depends on: the versions the admin made live, and its last deploy's standing. */
+const liveKeyOf = (setup: ClientSetup): string =>
+  [
+    ...setup.workers.map(({ worker, versionId }) => `${worker}:${versionId}`),
+    setup.deploy?.status ?? "none",
+  ].join(" ");
+
+const Status = ({
+  clientId,
+  setup,
+  needs,
+  aiStatus,
+  progress,
+}: {
+  clientId: string;
+  setup: ClientSetup;
+  needs: PlatformNeed[];
+  /** Its AI as its core reports it, read live and not awaited; null when unknown. */
+  aiStatus: Promise<AiStatusReport | null>;
+  progress: ProvisioningProgress | null;
+}) => {
+  const active = setup.provisioning.client?.status === "active";
   return (
     <>
-      <Section
-        description="In the hosting destination it is placed in (Hosting, on its Status), in the EU: the company’s data stays in its own resources there."
-        title="Its deployment"
-      >
-        <Facts
-          rows={[
-            { label: "Company", value: client.name },
-            {
-              label: "Address",
-              value: provisioning.hostname ?? "No domain set in the admin",
-            },
-            { label: "Added by", value: client.createdBy ?? "–" },
-            { label: "Added (UTC)", value: formatTime(client.createdAt) },
-          ]}
-        />
-      </Section>
-      <Section
-        description="What the admin made live, and what Cloudflare says runs."
-        title="Its Workers"
-      >
-        {workers.length === 0 ? (
-          <Quiet>Nothing is live yet.</Quiet>
-        ) : (
-          <div className="@container border-t">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead variant="card">Worker</TableHead>
-                  <TableHead className="hidden @lg:table-cell" variant="card">
-                    Release
-                  </TableHead>
-                  <TableHead className="hidden @2xl:table-cell" variant="card">
-                    Version
-                  </TableHead>
-                  <TableHead className="text-right" variant="card">
-                    Made live
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {workers.map((worker) => (
-                  <TableRow key={worker.worker}>
-                    <TableCell variant="card">
-                      <span className="flex flex-col">
-                        <span className="capitalize">{worker.worker}</span>
-                        <span className="text-muted-foreground font-mono text-xs">
-                          {worker.scriptName}
-                        </span>
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden @lg:table-cell" variant="card">
-                      <span className="font-mono text-xs">
-                        {worker.releaseId ?? "–"}
-                      </span>
-                    </TableCell>
-                    <TableCell
-                      className="hidden @2xl:table-cell"
-                      variant="card"
-                    >
-                      <span className="font-mono text-xs">
-                        {worker.versionId === null
-                          ? "–"
-                          : shortVersion(worker.versionId)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" variant="card">
-                      <span className="tabular-nums">
-                        {worker.deployedAt === null
-                          ? "–"
-                          : dayOf(worker.deployedAt)}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-        {workers.length === 0 ? null : <WhatRuns clientId={clientId} />}
-      </Section>
-      <Section
-        description="Found or made by every deploy, as the release it runs names them, all in the EU."
-        title="What it keeps"
-      >
-        {resources === null ? (
-          <Quiet>Nothing yet.</Quiet>
-        ) : (
+      <Header clientId={clientId} needs={needs} setup={setup} />
+      {progress !== null && showsProgress(progress) ? (
+        <ProvisioningProgressView progress={progress}>
+          <StoppedAction clientId={clientId} needs={needs} setup={setup} />
+        </ProvisioningProgressView>
+      ) : null}
+      {needs.length > 0 ? (
+        <Section title="What needs a look">
           <ul className="flex flex-col">
-            {[
-              ...resources.databases.map((name) => ({
-                kind: "Database",
-                name,
-              })),
-              ...resources.buckets.map((name) => ({ kind: "Files", name })),
-            ].map(({ kind, name }) => (
+            {needs.map((need) => (
               <li
-                className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
-                key={`${kind}-${name}`}
+                className="flex flex-col items-start gap-2 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                key={need.kind}
               >
-                <span>{kind}</span>
-                <span className="text-muted-foreground font-mono text-xs">
-                  {name}
+                <span className="flex min-w-0 items-start gap-3">
+                  <span
+                    aria-hidden
+                    className="bg-status-attention mt-1.5 size-2 flex-none rounded-full"
+                  />
+                  <span>{needWords(need)}</span>
                 </span>
+                <NeedAction clientId={clientId} need={need} />
               </li>
             ))}
           </ul>
-        )}
-      </Section>
+        </Section>
+      ) : null}
+      {active ? (
+        // Read again once what it runs changed: a deploy that ended.
+        <LiveNumbers clientId={clientId} key={liveKeyOf(setup)} />
+      ) : null}
+      {active ? <AiStatus status={aiStatus} /> : null}
+      <StephenWatched setup={setup} />
+      <Workers clientId={clientId} setup={setup} />
     </>
   );
 };
+
+/** What a channel change records besides. */
+const channelSchema = z.object({ channel: z.enum(channelIds) });
+
+/** What setting each sealed secret did, for its log. */
+const sealedSecretWords: Record<SealedSecretName, string> = {
+  TEAMS_BOT_SECRET: "Set its Teams bot's secret.",
+  SLACK_BOT_TOKEN: "Set its Slack app's bot token.",
+  SLACK_SIGNING_SECRET: "Set its Slack app's signing secret.",
+};
+
+/** Whether `target` names a sealed secret. */
+const isSealedSecretName = (
+  target: string | null
+): target is SealedSecretName =>
+  target !== null && Object.hasOwn(sealedSecretWords, target);
+
+/** What staff did by hand, in a sentence. */
+/** What staff did by hand that needs nothing of its event to say, in a sentence. */
+const plainEventWords: Readonly<Record<string, string>> = {
+  "client.create": "Added it.",
+  "client.rotate_secrets": "Rotated its secrets.",
+  "client.sign_in": "Changed how its people sign in.",
+  "client.teams_bot": "Changed its Teams bot.",
+  "client.staff_window": "Opened or closed Grasp's staff window.",
+  "client.retry": "Retried its deploy.",
+  "client.offboard": "Offboarded it.",
+};
+
+/** A move to another channel, in a sentence, from what its event records. */
+const channelChangeWords = (detail: string | null): string => {
+  const channel = channelSchema.safeParse(JSON.parse(detail ?? "null")).data
+    ?.channel;
+  return channel === undefined
+    ? "Moved it to another channel."
+    : `Moved it to ${channelWords[channel]}.`;
+};
+
+/** What staff did by hand, in a sentence. */
+const eventWords = ({
+  action,
+  target,
+  detail,
+}: Pick<HistoryEntry, "action" | "target" | "detail">): string => {
+  switch (action) {
+    case "client.place": {
+      return `Placed it in ${target ?? "a hosting destination"}.`;
+    }
+    case "client.provision_placed": {
+      return `Started provisioning it on ${target ?? "a release"}.`;
+    }
+    case "client.channel": {
+      return channelChangeWords(detail);
+    }
+    case "client.pin": {
+      return `Pinned it to ${target ?? "a release"}.`;
+    }
+    case "client.unpin": {
+      return "Let it follow its channel again.";
+    }
+    case "client.sealed_secret": {
+      return isSealedSecretName(target)
+        ? sealedSecretWords[target]
+        : "Set one of its secrets.";
+    }
+    case "client.apply_settings": {
+      return "Applied its settings.";
+    }
+    case "client.stripe_customer": {
+      return target === null
+        ? "Unlinked it from Stripe."
+        : `Linked it to ${target} in Stripe.`;
+    }
+    case "client.attio_company": {
+      return target === null
+        ? "Unlinked it from Attio."
+        : `Linked it to ${target} in Attio.`;
+    }
+    default: {
+      return plainEventWords[action] ?? action;
+    }
+  }
+};
+
+/** The step a provisioning event is the end of (src/hosting/operation.ts, `provisionSteps`). */
+const provisionStepOf =
+  /^provision\.(?<step>validated|resources|migrations|connect|core|probe|route)$/u;
+
+/** What the admin did by itself, in a sentence; null for an action it has no words for. */
+const systemEventWords = ({
+  action,
+  target,
+}: Pick<HistoryEntry, "action" | "target">): string | null => {
+  const on = target === null ? "" : ` of ${target}`;
+  switch (action) {
+    case "deploy.start": {
+      return `Started its deploy${on}.`;
+    }
+    case "deploy.done": {
+      return `Its deploy${on} is live.`;
+    }
+    case "deploy.fail": {
+      return `Its deploy${on} failed.`;
+    }
+    case "provision.start": {
+      return `Started setting it up${target === null ? "" : ` on ${target}`}.`;
+    }
+    case "provision.done": {
+      return `Set it up${target === null ? "" : ` on ${target}`}.`;
+    }
+    case "provision.fail": {
+      return "Its setting up stopped.";
+    }
+    case "provision.worker_live": {
+      return `One of its Workers went live${target === null ? "" : ` on ${target}`}.`;
+    }
+    case "client.rotation_live": {
+      return "Its rotated secrets went live.";
+    }
+    default: {
+      const step = provisionStepOf.exec(action)?.groups?.step;
+      return step === undefined ? null : `Its ${step} step is done.`;
+    }
+  }
+};
+
+/** An error's code in what an event records besides, when it records one. */
+const errorSchema = z.object({ error: z.string() });
+const errorOf = (detail: string | null): string | null => {
+  try {
+    return (
+      errorSchema.safeParse(JSON.parse(detail ?? "null")).data?.error ?? null
+    );
+  } catch {
+    return null;
+  }
+};
+
+/** One event of its history: what happened in a sentence, or its action as the log names it. */
+const HistoryRow = ({ entry }: { entry: HistoryEntry }) => {
+  const words = systemEventWords(entry) ?? eventWords(entry);
+  const said = words !== entry.action;
+  const error = errorOf(entry.detail);
+  return (
+    <li className="flex items-baseline justify-between gap-4 border-t px-5 py-3">
+      <span className="flex min-w-0 flex-col gap-0.5">
+        {said ? (
+          <span>{words}</span>
+        ) : (
+          <span className="font-mono text-xs break-all">
+            {entry.target === null
+              ? entry.action
+              : `${entry.action} ${entry.target}`}
+          </span>
+        )}
+        <span className="text-muted-foreground text-xs">
+          {entry.actor === "system" ? "Grasp, by itself" : entry.actor}
+          {error === null ? null : (
+            <>
+              {" · "}
+              <ErrorCode code={error} />
+            </>
+          )}
+        </span>
+      </span>
+      <span className="text-muted-foreground flex-none text-xs tabular-nums">
+        {formatTime(entry.at)}
+      </span>
+    </li>
+  );
+};
+
+/** Everything the admin's audit log keeps of it, the newest first. */
+const History = ({ setup }: { setup: ClientSetup }) => (
+  <Section description="Times in UTC." title="Its history">
+    {setup.history.length === 0 ? (
+      <Quiet>Nothing yet.</Quiet>
+    ) : (
+      <ul className="flex flex-col">
+        {setup.history
+          // How far a setting up is, noted as it goes: its steps say the same.
+          .filter(({ action }) => action !== "provision.progress")
+          .map((entry) => (
+            <HistoryRow entry={entry} key={entry.id} />
+          ))}
+      </ul>
+    )}
+  </Section>
+);
 
 /** Its last deploy, in a few words. */
 const deployFact = (deploy: NonNullable<ClientSetup["deploy"]>): string =>
@@ -1411,7 +1159,7 @@ const Releases = ({
   return (
     <>
       <Section
-        description="It gets each release promoted to its channel. A pinned company stays on its release: promotions skip it."
+        description="A pinned company stays on its release: promotions skip it."
         title="Where it gets releases"
       >
         <Facts
@@ -1486,8 +1234,8 @@ const Releases = ({
         }
         description={
           setup.moreReleases
-            ? `The latest ${releases.length} CI made, newest first: older ones are under all releases.`
-            : "As CI made them, the newest first."
+            ? `The latest ${releases.length}: older ones are under all releases.`
+            : undefined
         }
         title="Recent releases"
       >
@@ -1569,8 +1317,9 @@ const SealedFacts = ({
 };
 
 /**
- * The client's own Teams bot: its app id, tenant and secret's expiry, its
- * secret, setting each, and its app package for its IT.
+ * The client's own Teams bot: its app id, tenant and secret's expiry, and
+ * whether its secret is set; setting each, and its app package for its
+ * IT, under a fold, as most companies never have one.
  */
 const TeamsBotSection = ({
   clientId,
@@ -1585,61 +1334,71 @@ const TeamsBotSection = ({
   const botSecret = setup.sealedSecrets.find(
     ({ name }) => name === "TEAMS_BOT_SECRET"
   );
+  const none = bot === null && botSecret === undefined;
   return (
-    <Section
-      description="Its own Teams bot, registered in its own Entra: its connect sends as it and its core answers it, from the next deploy. The secret is kept sealed by the admin and given only to its connect."
-      title="Its Teams bot"
-    >
-      {bot === null && botSecret === undefined ? (
-        <Quiet>No bot set.</Quiet>
-      ) : (
-        <Facts
-          rows={[
-            ...(bot === null
-              ? []
-              : [
-                  { label: "App id", value: bot.appId },
-                  { label: "Tenant", value: bot.tenantId },
-                  {
-                    label: "Secret expires",
-                    value: formatDate(bot.secretExpiresOn),
-                  },
-                ]),
-            {
-              label: "Secret",
-              value:
-                botSecret === undefined
-                  ? "Not set"
-                  : `Set on ${dayOf(botSecret.setAt)} by ${botSecret.setBy}`,
-              attention: botSecret === undefined,
-            },
-            ...(setup.configPending
-              ? [
-                  {
-                    label: "Live",
-                    value: "With the next deploy",
-                    attention: true,
-                  },
-                ]
-              : []),
-          ]}
-        />
-      )}
-      {bot === null ? null : (
-        <CardContent>
-          <TeamsPackageDownload clientId={clientId} />
-        </CardContent>
-      )}
-      <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
-      <SealedSecretChange
-        clientId={clientId}
-        description="The bot app's client secret, from its registration in the company's own Entra. It is sealed and never shown again, here or anywhere; its connect gets it with the next deploy."
-        label="Client secret"
-        name="TEAMS_BOT_SECRET"
-        refresh={refresh}
-        set={botSecret !== undefined}
-      />
-    </Section>
+    <Collapsible>
+      <Section
+        action={
+          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+            {none ? "Set up" : "Change"}
+          </CollapsibleTrigger>
+        }
+        title="Its Teams bot"
+      >
+        {none ? (
+          <Quiet>No bot set.</Quiet>
+        ) : (
+          <Facts
+            rows={[
+              ...(bot === null
+                ? []
+                : [
+                    { label: "App id", value: bot.appId },
+                    { label: "Tenant", value: bot.tenantId },
+                    {
+                      label: "Secret expires",
+                      value: formatDate(bot.secretExpiresOn),
+                    },
+                  ]),
+              {
+                label: "Secret",
+                value:
+                  botSecret === undefined
+                    ? "Not set"
+                    : `Set on ${dayOf(botSecret.setAt)} by ${botSecret.setBy}`,
+                attention: botSecret === undefined,
+              },
+              ...(setup.configPending
+                ? [
+                    {
+                      label: "Live",
+                      value: "With the next deploy",
+                      attention: true,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        )}
+        {/* Kept on the page while folded: what staff typed stays between refreshes. */}
+        <CollapsibleContent keepMounted>
+          {bot === null ? null : (
+            <CardContent>
+              <TeamsPackageDownload clientId={clientId} />
+            </CardContent>
+          )}
+          <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
+          <SealedSecretChange
+            clientId={clientId}
+            description="The bot app's client secret, from its registration in the company's own Entra. It is sealed and never shown again, here or anywhere; its connect gets it with the next deploy."
+            label="Client secret"
+            name="TEAMS_BOT_SECRET"
+            refresh={refresh}
+            set={botSecret !== undefined}
+          />
+        </CollapsibleContent>
+      </Section>
+    </Collapsible>
   );
 };
 
@@ -1672,8 +1431,8 @@ const CopySlackManifest = ({
 );
 
 /**
- * The client's own Slack app: the manifest to create it from, whether its
- * bot token and signing secret are set, and setting them.
+ * The client's own Slack app: whether its bot token and signing secret
+ * are set; the manifest to create it from and setting them, under a fold.
  */
 const SlackAppSection = ({
   clientId,
@@ -1690,75 +1449,100 @@ const SlackAppSection = ({
   const token = sealedRow(setup, "SLACK_BOT_TOKEN", "Bot token");
   const signing = sealedRow(setup, "SLACK_SIGNING_SECRET", "Signing secret");
   return (
-    <Section
-      description="Its own Slack app, which sends to its core. The bot token is kept sealed and given only to its connect, the signing secret only to its core, with each deploy."
-      title="Its Slack app"
-    >
-      {hostname === null ? (
-        <Quiet>Give the admin a domain first: the app sends to it.</Quiet>
-      ) : (
-        <>
-          <Facts
-            rows={[{ label: "Request URL", value: slackRequestUrl(hostname) }]}
+    <Collapsible>
+      <Section
+        action={
+          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+            {token === null && signing === null ? "Set up" : "Change"}
+          </CollapsibleTrigger>
+        }
+        title="Its Slack app"
+      >
+        <SealedFacts
+          none="No bot token or signing secret set."
+          rows={[token, signing]}
+          setup={setup}
+        />
+        {/* Kept on the page while folded: what staff typed stays between refreshes. */}
+        <CollapsibleContent keepMounted>
+          {hostname === null ? (
+            <Quiet>Give the admin a domain first: the app sends to it.</Quiet>
+          ) : (
+            <>
+              <Facts
+                rows={[
+                  { label: "Request URL", value: slackRequestUrl(hostname) },
+                ]}
+              />
+              <CopySlackManifest clientName={clientName} hostname={hostname} />
+            </>
+          )}
+          <SealedSecretChange
+            clientId={clientId}
+            description="The app's Bot User OAuth Token (xoxb-), from OAuth & Permissions once it's installed. It is sealed and never shown again; its connect gets it with the next deploy."
+            label="Bot token"
+            name="SLACK_BOT_TOKEN"
+            refresh={refresh}
+            set={token !== null}
           />
-          <CopySlackManifest clientName={clientName} hostname={hostname} />
-        </>
-      )}
-      <SealedFacts
-        none="No bot token or signing secret set."
-        rows={[token, signing]}
-        setup={setup}
-      />
-      <SealedSecretChange
-        clientId={clientId}
-        description="The app's Bot User OAuth Token (xoxb-), from OAuth & Permissions once it's installed. It is sealed and never shown again; its connect gets it with the next deploy."
-        label="Bot token"
-        name="SLACK_BOT_TOKEN"
-        refresh={refresh}
-        set={token !== null}
-      />
-      <SealedSecretChange
-        clientId={clientId}
-        description="The app's Signing Secret, from Basic Information. It is sealed and never shown again; its core gets it with the next deploy."
-        label="Signing secret"
-        name="SLACK_SIGNING_SECRET"
-        refresh={refresh}
-        set={signing !== null}
-      />
-    </Section>
+          <SealedSecretChange
+            clientId={clientId}
+            description="The app's Signing Secret, from Basic Information. It is sealed and never shown again; its core gets it with the next deploy."
+            label="Signing secret"
+            name="SLACK_SIGNING_SECRET"
+            refresh={refresh}
+            set={signing !== null}
+          />
+        </CollapsibleContent>
+      </Section>
+    </Collapsible>
   );
 };
+
+/**
+ * Where its Grasp is hosted: the destination it is placed in, or where it
+ * would go, its operation there, and offboarding it. For a company being
+ * set up, or one placed already.
+ */
+const HostingSection = ({
+  setup,
+  hosting,
+}: {
+  setup: ClientSetup;
+  hosting: ClientHostingView | null;
+}) =>
+  hosting !== null &&
+  (placedOf(hosting) ||
+    setup.provisioning.client?.status === "provisioning") ? (
+    <Section title="Hosting">
+      <div className="border-t px-5 py-4">
+        <ClientHosting view={hosting} />
+      </div>
+    </Section>
+  ) : null;
 
 const Settings = ({
   clientId,
   setup,
+  hosting,
   refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
+  hosting: ClientHostingView | null;
   refresh: Refresh;
 }) => {
   const { signIn, account } = setup;
   const { client } = setup.provisioning;
-  const providers = [
-    ...(signIn?.entraTenantId === undefined ? [] : ["Microsoft Entra ID"]),
-    ...(signIn?.googleHostedDomain === undefined ? [] : ["Google Workspace"]),
-  ];
   const waiting = secretsWaiting(account);
   return (
     <>
-      <Section
-        description="As someone at Grasp gave it. Every deploy sets it on core."
-        title="How its people sign in"
-      >
+      <Section title="How its people sign in">
         {signIn === null ? (
           <Quiet>Not given yet.</Quiet>
         ) : (
           <Facts
             rows={[
-              { label: "With", value: providers.join(", ") },
-              { label: "Email domains", value: signIn.domains.join(", ") },
-              { label: "First admins", value: signIn.admins.join(", ") },
               {
                 label: "Last changed",
                 value:
@@ -1796,10 +1580,7 @@ const Settings = ({
         />
       </Section>
       {client === null ? null : (
-        <Section
-          description="A change to its settings reaches it with a deploy."
-          title="Applying its settings"
-        >
+        <Section title="Applying its settings">
           <ApplySettings
             active={client.status === "active"}
             clientId={clientId}
@@ -1810,7 +1591,7 @@ const Settings = ({
         </Section>
       )}
       <Section
-        description="Derived for this company alone, never stored. New ones reach it with its next deploy; the old ones keep working a while after."
+        description="New ones reach it with its next deploy; the old ones keep working a while after."
         title="Its secrets"
       >
         {account === null ? (
@@ -1853,12 +1634,23 @@ const Settings = ({
           />
         </>
       )}
+      <HostingSection hosting={hosting} setup={setup} />
     </>
   );
 };
 
-/** How often the Setup is read again while setting it up moves on by itself. */
+/** What a Setup holds stays as it was first given. */
+const keep = <T,>(held: T): T => held;
+
+/** How often the Setup is read again while something moves on by itself. */
 const followMs = 5000;
+
+/**
+ * How often a live company's Setup is read again while nothing is known
+ * to move: a release promoted to its channel, on Platform or by someone
+ * else, shows without the page being loaded again.
+ */
+const watchMs = 30_000;
 
 /** Phases that move on without the page: its operation works on its own. */
 const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
@@ -1866,42 +1658,74 @@ const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
 ]);
 
 /**
- * Reads the Setup again every few seconds while setting the company up
- * moves on by itself: its run, or its operation in a hosting destination.
+ * Whether the reconciler is deploying it, or will at its next tick
+ * (src/rollout/reconciler.ts): a deploy is out, or one of its Workers
+ * runs another release than it should and that release didn't fail on it
+ * (a failed deploy waits for staff).
+ */
+const deployMoves = ({ provisioning, deploy, target, workers }: ClientSetup) =>
+  provisioning.client?.status === "active" &&
+  (deploy?.status === "deploying" ||
+    (target !== null &&
+      workers.some(({ releaseId }) => releaseId !== target) &&
+      !(deploy?.status === "failed" && deploy.releaseId === target)));
+
+/**
+ * How often the Setup reads itself again, in milliseconds; null when
+ * nothing on it changes by itself. Every few seconds while setting the
+ * company up moves on (its run, or its operation in a hosting
+ * destination) or a deploy is out or due; now and then for any other live
+ * company, whose next deploy starts elsewhere.
+ */
+export const followPaceOf = (
+  setup: ClientSetup,
+  hosting: ClientHostingView | null
+): number | null => {
+  const settingUp =
+    hosting !== null && placedOf(hosting)
+      ? hosting.going
+      : working.has(setup.provisioning.phase);
+  if (settingUp || deployMoves(setup)) {
+    return followMs;
+  }
+  return setup.provisioning.client?.status === "active" ? watchMs : null;
+};
+
+/**
+ * Reads the Setup again at its pace (`followPaceOf`) while the page is
+ * looked at, and at once when it is looked at again: a tab left open
+ * through a rollout shows where it stands on coming back to it.
  */
 const useFollow = (
   setup: ClientSetup,
   hosting: ClientHostingView | null,
   refresh: Refresh
 ) => {
-  const following =
-    hosting !== null && placedOf(hosting)
-      ? hosting.going
-      : working.has(setup.provisioning.phase);
+  const pace = followPaceOf(setup, hosting);
   useEffect(() => {
-    const timer = following
-      ? setInterval(() => {
-          void refresh();
-        }, followMs)
-      : undefined;
+    const read = () => {
+      if (pace !== null && document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+    const timer = pace === null ? undefined : setInterval(read, pace);
+    document.addEventListener("visibilitychange", read);
     return () => {
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", read);
     };
-  }, [following, refresh]);
+  }, [pace, refresh]);
 };
 
 /**
- * The company's own Grasp, tab by tab: how it stands, its deploys, its
- * account, its releases and its settings. Its `checklist` comes from
- * what its core answers, and fills in once that is in (never when it
- * doesn't answer: being set up, or not reachable), while the rest shows
- * at once and stays as it is.
+ * The company's own Grasp, tab by tab: how it stands, its history, its
+ * releases and its settings, from what the admin recorded, so it shows
+ * whether or not its core answers.
  */
 export const OrgSetup = ({
   clientId,
   setup,
   tab,
-  checklist,
   aiStatus,
   progress,
   releases,
@@ -1910,7 +1734,6 @@ export const OrgSetup = ({
   clientId: string;
   setup: ClientSetup;
   tab: SetupTab;
-  checklist: ReactNode;
   /** Its AI as its core reports it, read live and not awaited; null when unknown. */
   aiStatus: Promise<AiStatusReport | null>;
   /** Every imported release, newest first. */
@@ -1919,6 +1742,9 @@ export const OrgSetup = ({
   /** Its setting up, line by line; null when there's no such client. */
   progress: ProvisioningProgress | null;
 }) => {
+  // Its AI as first read, never replaced: the Setup reads itself again
+  // without asking its core again each time (the route's loader).
+  const [ai] = useReducer(keep, aiStatus);
   const navigate = useNavigate();
   const refresh = useRefreshSetup();
   useFollow(setup, hosting, refresh);
@@ -1944,24 +1770,17 @@ export const OrgSetup = ({
       <TabsContent value="status">
         <div className="flex flex-col gap-6 pt-4">
           <Status
+            aiStatus={ai}
             clientId={clientId}
-            hosting={hosting}
-            progress={progress}
             needs={needs}
-            aiStatus={aiStatus}
-            checklist={checklist}
+            progress={progress}
             setup={setup}
           />
         </div>
       </TabsContent>
       <TabsContent value="history">
         <div className="flex flex-col gap-6 pt-4">
-          <Done setup={setup} />
-        </div>
-      </TabsContent>
-      <TabsContent value="resources">
-        <div className="flex flex-col gap-6 pt-4">
-          <Resources clientId={clientId} setup={setup} />
+          <History setup={setup} />
         </div>
       </TabsContent>
       <TabsContent value="releases">
@@ -1976,7 +1795,12 @@ export const OrgSetup = ({
       </TabsContent>
       <TabsContent value="settings">
         <div className="flex flex-col gap-6 pt-4">
-          <Settings clientId={clientId} refresh={refresh} setup={setup} />
+          <Settings
+            clientId={clientId}
+            hosting={hosting}
+            refresh={refresh}
+            setup={setup}
+          />
         </div>
       </TabsContent>
     </Tabs>

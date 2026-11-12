@@ -14,21 +14,14 @@ import { Channels, PromotionHistory } from "../../admin/channel-parts.tsx";
 import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
-import type { StaffEvent } from "../../admin/platform-data.ts";
 import { channelsId, PlatformNav } from "../../admin/platform-nav.tsx";
-import {
-  eventWords,
-  needWords,
-  StandingMark,
-} from "../../admin/platform-parts.tsx";
+import { needWords, StandingMark } from "../../admin/platform-parts.tsx";
 import { PlatformSpendPanel } from "../../admin/platform-spend.tsx";
 import { companiesOf } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../../admin/readiness.ts";
-import { SharedSecrets } from "../../admin/secrets-parts.tsx";
 import { Section } from "../../admin/section.tsx";
-import { formatDate } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import { fetchPlatformSpend } from "../../platform-ai-functions.ts";
@@ -36,9 +29,6 @@ import { channelWords } from "../../rollout/channel-words.ts";
 
 /** What the live reads gave for each company: null while reading, `failed` if they did. */
 type Live = Record<string, LiveStatus> | "failed" | null;
-
-/** A day, as the admin's pages say it. */
-const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
 
 /** A company's row: how it stands, then its figures; it opens its Setup. */
 const CompanyRow = ({
@@ -93,21 +83,35 @@ const CompanyRow = ({
   </TableRow>
 );
 
-/** What the table says of where its figures come from. */
-const everyCompanyLine = (live: Live): string => {
+/** What the list says of its figures while they are read, or when they couldn't be. */
+const needsALookLine = (live: Live): string | undefined => {
   if (live === null) {
-    return "The ones that need a look first, each account's figures being read now. A row opens its Setup.";
+    return "Each account's figures are being read now.";
   }
   return live === "failed"
-    ? "The ones that need a look first. The accounts couldn't be read just now, so their figures are left out. A row opens its Setup."
-    : "The ones that need a look first. A row opens its Setup.";
+    ? "The accounts couldn't be read just now, so their figures are left out."
+    : undefined;
 };
 
-/** Every company, the ones that need a look first. */
-const EveryCompany = ({ rows, live }: { rows: GridRow[]; live: Live }) => {
-  const read = live === null || live === "failed" ? {} : live;
+/**
+ * The companies whose platform needs a look, isn't set up yet or, once the
+ * accounts were read, didn't answer: nothing when every one is healthy,
+ * for each stands under its channel above with the release it runs.
+ */
+const NeedsALook = ({ rows, live }: { rows: GridRow[]; live: Live }) => {
+  const answered = live !== null && live !== "failed";
+  // Until the accounts are read, one that isn't read yet is no finding.
+  const companies = companiesOf(rows, answered ? live : {}).filter(
+    ({ standing }) =>
+      standing === "attention" ||
+      standing === "setup" ||
+      (standing === "unread" && answered)
+  );
+  if (companies.length === 0) {
+    return null;
+  }
   return (
-    <Section description={everyCompanyLine(live)} title="Every company">
+    <Section description={needsALookLine(live)} title="Needs a look">
       <div className="@container border-t">
         <Table className="table-fixed">
           <TableHeader>
@@ -125,7 +129,7 @@ const EveryCompany = ({ rows, live }: { rows: GridRow[]; live: Live }) => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {companiesOf(rows, read).map(({ row, standing, needs }) => (
+            {companies.map(({ row, standing, needs }) => (
               <CompanyRow
                 key={row.id}
                 needs={needs}
@@ -140,37 +144,6 @@ const EveryCompany = ({ rows, live }: { rows: GridRow[]; live: Live }) => {
   );
 };
 
-/** What someone at Grasp did, as the admin's audit log keeps it. */
-const DoneHere = ({
-  events,
-  names,
-}: {
-  events: StaffEvent[];
-  names: ReadonlyMap<string, string>;
-}) =>
-  events.length === 0 ? null : (
-    <Section
-      description="What someone at Grasp did, as the admin keeps it."
-      title="Done here"
-    >
-      <ul className="flex flex-col">
-        {events.map((event) => (
-          <li
-            className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
-            key={event.id}
-          >
-            <span className="min-w-0">
-              {eventWords(event, (id) => names.get(id) ?? id)}
-            </span>
-            <span className="text-muted-foreground flex-none text-xs tabular-nums">
-              {dayOf(event.at)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-
 /** The live figures of every active company, read once the page shows. */
 const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
   try {
@@ -183,8 +156,8 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
 /**
  * Every company's own Grasp at once: what blocks onboarding, the three
  * release channels with each company's state against them and the moves
- * each may make, rolling out shared secrets, every company the ones that
- * need a look first, what Grasp's own AI costs, and what staff did.
+ * each may make, the companies that need a look, and what Grasp's own AI
+ * costs. Shared secrets and what staff did are on Maintenance.
  */
 const PlatformPage = () => {
   const { rows, platform, readiness, spend } = Route.useLoaderData();
@@ -202,10 +175,9 @@ const PlatformPage = () => {
       current = false;
     };
   }, []);
-  const names = new Map(rows.map(({ id, name }) => [id, name]));
   return (
     <AdminPage
-      description="Every company runs its own Grasp, in the EU, apart from every other company’s. Each follows a channel: Edge gets every release as it lands, Beta what was on Edge, Stable what was on Beta. The admin deploys each company to its channel’s release by itself."
+      description="Every company runs its own Grasp and follows a channel: Edge, then Beta, then Stable."
       title="Platform"
     >
       <PlatformNav />
@@ -213,10 +185,8 @@ const PlatformPage = () => {
         <ReadinessPanel readiness={readiness} />
         <Channels channels={platform.channels} id={channelsId} />
         <PromotionHistory history={platform.history} />
-        <SharedSecrets />
-        <EveryCompany live={live} rows={rows} />
+        <NeedsALook live={live} rows={rows} />
         <PlatformSpendPanel spend={spend} />
-        <DoneHere events={platform.events} names={names} />
       </div>
     </AdminPage>
   );
