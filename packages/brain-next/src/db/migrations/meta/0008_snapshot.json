@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4cb18778-ca36-4415-9419-676cd7371971",
+  "id": "0d9f30bc-7c7e-4a6d-a949-058a76137f64",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -749,13 +749,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "only_for": {
-          "name": "only_for",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -802,13 +795,6 @@
           "name": "memories_readers_idx",
           "columns": [
             "readers"
-          ],
-          "isUnique": false
-        },
-        "memories_only_for_idx": {
-          "name": "memories_only_for_idx",
-          "columns": [
-            "only_for"
           ],
           "isUnique": false
         }
@@ -1076,13 +1062,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "only_for": {
-          "name": "only_for",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -1108,13 +1087,6 @@
             "version"
           ],
           "isUnique": false
-        },
-        "memory_extractions_only_for_idx": {
-          "name": "memory_extractions_only_for_idx",
-          "columns": [
-            "only_for"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -1130,6 +1102,35 @@
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "memory_stamps": {
+      "name": "memory_stamps",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "latest": {
+          "name": "latest",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "memory_stamps_one": {
+          "name": "memory_stamps_one",
+          "value": "id = 1"
+        }
+      }
     },
     "reader_set_members": {
       "name": "reader_set_members",

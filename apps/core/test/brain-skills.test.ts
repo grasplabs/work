@@ -319,6 +319,7 @@ describe("skills in the Brain", setUpTime, () => {
     const pack = await recallAs(env, userId, {
       question: words,
       budget: { tokens: recallBudgetMax },
+      personal: true,
     });
 
     expect({

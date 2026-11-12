@@ -15,6 +15,7 @@ import { addSource, eraseSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
 import { openRpc, signedIn, signedInApi, staffPerson } from "./sign-in.ts";
 
@@ -128,8 +129,14 @@ describe("the Brain's sources, as a person reads them", () => {
     const shared = newSource();
     const nobody = newSource();
     await add(own, `Salary review\n${word()}`, owner(writer.userId));
-    // Its first version is the writer's alone; its second the team's.
-    await add(shared, `Draft minutes ${word()}`, owner(writer.userId));
+    // Its first version is the writer's alone, a team of theirs, as a
+    // source keeps its kind of readers (one person's own is in their own
+    // store); its second the team's.
+    await add(
+      shared,
+      `Draft minutes ${word()}`,
+      await soleReadersOf(writer.userId)
+    );
     const sharedText = `\n  Board minutes  \n${word()}`;
     await add(shared, sharedText, {
       kind: "team",
@@ -249,6 +256,7 @@ describe("the Brain's sources, as a person reads them", () => {
           await recallAs(env, reader.userId, {
             question,
             budget: { tokens: brainSearchBudget },
+            personal: true,
           })
       )
     );
@@ -279,6 +287,7 @@ describe("the Brain's sources, as a person reads them", () => {
       recallAs(env, userId, {
         question: tooLong,
         budget: { tokens: brainSearchBudget },
+        personal: true,
       })
     ).rejects.toThrow(/^Refused: /u);
   });
@@ -337,7 +346,11 @@ describe("the Brain's sources, as a person reads them", () => {
     if (erased === undefined) {
       throw new Error("No source was added");
     }
-    await eraseSource(env, { source: erased, reason: "deleted" });
+    await eraseSource(env, {
+      source: erased,
+      readers: owner(reader.userId),
+      reason: "deleted",
+    });
     const again = await reader.api.brainSources.list();
 
     expect({

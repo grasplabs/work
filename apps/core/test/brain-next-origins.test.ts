@@ -1,12 +1,15 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
+import type { Reader } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { runSource, uploadSource } from "../src/brain-next-origins.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
-import type { SourceRef } from "../src/brain-next.ts";
+import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
+import { finishedByTheClock } from "./brain-next-own-store.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import {
   holdNextBucketPut,
@@ -53,29 +56,44 @@ const refusedAsErased =
 /** The Brain's contract on its store, for a reader core no longer has. */
 const brain = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
 
-/** Adds `text` to `source`, read by `personId` alone, as a producer would. */
+/**
+ * Adds `text` to `source` as a producer would, read by `readers`: one
+ * person's own by default, which goes to that person's own store.
+ */
 const handOver = async (
   source: SourceRef,
   text: string,
-  personId: string
+  readers: SourceReaders
 ): Promise<number> => {
   const { version } = await addSource(env, {
     source,
     change: crypto.randomUUID(),
     text,
-    readers: { kind: "owner", personId },
+    readers,
   });
   return version;
 };
 
+/** Readers of `personId` alone. */
+const ownedBy = (personId: string): SourceReaders => ({
+  kind: "owner",
+  personId,
+});
+
+/** The Brain's reader of `readers`'s person: the person and the team, if any. */
+const readerOf = (personId: string, readers: SourceReaders): Reader => ({
+  person: personId,
+  groups: readers.kind === "team" ? [`team:${readers.teamId}`] : [],
+});
+
 /** A text holding `mark` where recall finds it by its word. */
 const markedText = (mark: string): string => `What was said: ${wordOf(mark)}.`;
 
-/** How many passages `personId` recalls for `mark`, as the store reads. */
-const recalled = async (personId: string, mark: string): Promise<number> => {
+/** How many passages `reader` recalls for `mark`, as the shared store reads. */
+const recalled = async (reader: Reader, mark: string): Promise<number> => {
   const { items } = await brain().recall({
     question: wordOf(mark),
-    reader: { person: personId, groups: [] },
+    reader,
     budget: { tokens: recallBudgetMax },
   });
   return items.length;
@@ -119,7 +137,13 @@ const failNextBucketPut = async (): Promise<void> => {
 };
 
 describe("a run past its retention", { timeout: 120_000 }, () => {
-  /** A run of a builder's that ended, its result handed to the Brain. */
+  /**
+   * A run of a builder's that ended, its result handed to the Brain. For
+   * a team of the builder alone, so it is in the shared store, whose
+   * erasure the clock's ticks finish here (a person's own store does its
+   * own work: brain-next-personal.test.ts); retention erases a run's
+   * source in the shared store whatever its readers.
+   */
   const runInBrain = async () => {
     const builder = await signedIn("builder");
     const { id } = await publishedWorkflow(builder, greetingTasks());
@@ -127,8 +151,9 @@ describe("a run past its retention", { timeout: 120_000 }, () => {
     await endedRun(builder, id, runId);
     const mark = newMark();
     const source = runSource(runId);
-    await handOver(source, markedText(mark), builder.userId);
-    return { builder, mark, source };
+    const readers = await soleReadersOf(builder.userId);
+    await handOver(source, markedText(mark), readers);
+    return { reader: readerOf(builder.userId, readers), readers, mark, source };
   };
 
   /** The run retention's sweep, as of 31 days on. */
@@ -137,17 +162,17 @@ describe("a run past its retention", { timeout: 120_000 }, () => {
   };
 
   it("erases what the Brain took in of it with its details, and a late hand-over is refused", async () => {
-    const { builder, mark, source } = await runInBrain();
-    const before = await recalled(builder.userId, mark);
+    const { reader, readers, mark, source } = await runInBrain();
+    const before = await recalled(reader, mark);
 
     await sweep();
     const late = await settled(
-      handOver(source, markedText(newMark()), builder.userId)
+      handOver(source, markedText(newMark()), readers)
     );
 
     expect({
       before,
-      after: await recalled(builder.userId, mark),
+      after: await recalled(reader, mark),
       late,
       ledger: await inLedger(source),
       left: await leftOf([mark]),
@@ -161,7 +186,7 @@ describe("a run past its retention", { timeout: 120_000 }, () => {
   });
 
   it("marks nothing while the Brain can't record the erasure, still removes what needs no Brain, and the next sweep erases it", async () => {
-    const { builder, mark, source } = await runInBrain();
+    const { reader, mark, source } = await runInBrain();
     // A snapshot no start names: retention removes it whatever the Brain does.
     const orphan = crypto.randomUUID();
     await env.DB.prepare(
@@ -194,7 +219,7 @@ describe("a run past its retention", { timeout: 120_000 }, () => {
       orphanKept: orphanKept?.n,
       marked: marked?.removed,
       swept: typeof swept?.removed,
-      after: await recalled(builder.userId, mark),
+      after: await recalled(reader, mark),
       ledger: await inLedger(source),
       left: await leftOf([mark]),
     }).toStrictEqual({
@@ -220,9 +245,14 @@ describe("a person erased", { timeout: 120_000 }, () => {
     ];
     for (const [index, source] of sources.entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await handOver(source, markedText(marks[index] ?? ""), person.userId);
+      await handOver(
+        source,
+        markedText(marks[index] ?? ""),
+        ownedBy(person.userId)
+      );
     }
     const before = await recallAs(env, person.userId, {
+      personal: true,
       question: marks.map(wordOf).join(" "),
       budget: { tokens: recallBudgetMax },
     });
@@ -235,6 +265,7 @@ describe("a person erased", { timeout: 120_000 }, () => {
       String(person.person.name)
     );
     await runMinuteTasks();
+    await finishedByTheClock(person.userId);
     const done = await admin.api.members.erasure(person.userId);
     const erased = await leftOf(marks);
     await restoreStore(copy);
@@ -252,7 +283,10 @@ describe("a person erased", { timeout: 120_000 }, () => {
         brain: done.erasure?.areas.find(({ area }) => area === "brain_sources"),
       },
       recalled: await Promise.all(
-        marks.map(async (mark) => await recalled(person.userId, mark))
+        marks.map(
+          async (mark) =>
+            await recalled({ person: person.userId, groups: [] }, mark)
+        )
       ),
       // A retry writes the erasure the failed call recorded, then its own.
       inLedger: entries.length > 0,
@@ -280,12 +314,13 @@ describe("a person erased", { timeout: 120_000 }, () => {
     const person = await signedInApi(idp, "builder");
     await admin.api.members.remove(person.userId);
     const late = newMark();
-    const gate = await holdNextBucketPut();
+    // Their own store's write: a hand-over for them alone is kept there.
+    const gate = await holdNextBucketPut(`person:${person.userId}`);
     const handing = settled(
       handOver(
         uploadSource(crypto.randomUUID()),
         markedText(late),
-        person.userId
+        ownedBy(person.userId)
       )
     );
     await vi.waitFor(
@@ -300,16 +335,24 @@ describe("a person erased", { timeout: 120_000 }, () => {
       String(person.person.name)
     );
     gate.released = true;
+    const handed = await handing;
+    await finishedByTheClock(person.userId);
+    const done = await admin.api.members.erasure(person.userId);
 
     expect({
-      completed: typeof erasure.completedAt,
-      handed: await handing,
-      recalled: await recalled(person.userId, late),
+      // Not finished while the hand-over was under way in their store.
+      pending: erasure.completedAt,
+      completed: typeof done.erasure?.completedAt,
+      handed,
+      recalled: await recalled({ person: person.userId, groups: [] }, late),
       left: await leftOf([late]),
     }).toStrictEqual({
+      pending: null,
       completed: "string",
+      // Their own store was erased while it wrote: refused as such.
       handed: {
-        error: refusedAsErased,
+        error:
+          "Error: What this adds was erased: it stays erased, and isn't added.",
       },
       recalled: 0,
       left: nothingLeft,

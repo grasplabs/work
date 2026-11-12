@@ -27,6 +27,9 @@ import {
   storeKindOf,
   recallRequestSchema,
   sourceErasureSchema,
+  sourceIdSchema,
+  stillDeleting,
+  storeErased as erasedWhole,
   sourceListRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
@@ -53,6 +56,7 @@ import type {
   CurrentRequest,
   Embedders,
   ErasureReason,
+  KeyState,
   Finding,
   HandOverRequest,
   HandOvers,
@@ -66,6 +70,7 @@ import type {
   RecallRequest,
   Pack,
   SourceErasure,
+  SourceId,
   SourceList,
   SourceListRequest,
   SourceVersion,
@@ -95,8 +100,10 @@ import {
   erasuresOverview,
   erasureDue,
   erasuresUnfinished,
+  isErased,
   isStoreErased,
   storeErasedAt,
+  subjectOf,
   keepMissingSubjects,
   replayMemoryErasures,
   ledgerPrefix,
@@ -119,9 +126,11 @@ import { listSources, listVersions } from "./listing.ts";
 import {
   confirmMemory,
   listContested,
+  readMoment,
   readMemories,
   retireMemory,
 } from "./memories.ts";
+import { rebuildMissingSets } from "./reader-sets.ts";
 import {
   countingInto,
   countWithoutMeaning,
@@ -223,6 +232,10 @@ const sharedOnly = "The Brain refused it: only the shared store takes this";
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
 
+/** What the shared store answers memories only one person may read. */
+const sharedNotOwn =
+  "The Brain refused it: memories only one person may read are kept in that person's own store";
+
 /** What a read of memories under an attribute it can't have answers. */
 const noSuchAttribute =
   "The Brain refused it: the attribute is not one the entity's kind has";
@@ -231,19 +244,12 @@ const noSuchAttribute =
 const noOnes =
   "The Brain refused it: this store's name doesn't say whose it is";
 
-/** What a person's own store answers once it was erased whole. */
-const erasedWhole = "The Brain refused it: this store was erased";
-
 /**
  * What a call that changed a person's own store answers when it could not
  * set when the store wakes for what it left: done, but to repeat.
  */
 const alarmUnset =
   "The Brain did it but couldn't schedule what it left to finish: try again";
-
-/** What erasing a person's own store answers while files are left to delete. */
-const stillDeleting =
-  "The Brain erased this store and is still deleting its files: erase it again";
 
 /** What erasing a person's own store answers when its record couldn't be written. */
 const erasureUnrecorded =
@@ -463,6 +469,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // readers it dropped are made again from their keys.
       this.ctx.storage.transactionSync(() => {
         replayMemoryErasures(this.ctx.storage.sql);
+        rebuildMissingSets(this.ctx.storage.sql);
       });
       this.#opened = true;
       this.#schema = true;
@@ -506,25 +513,26 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * The latest moment this instance gave a read to page from (`#readMoment`):
-   * every write after it is stamped past it (`#writeMoment`), so no later
-   * page of that read sees what was written after its first.
+   * The moment a page is read at, which its cursor carries (`at`,
+   * `cursorAt`), and the moment what the store learned is read at
+   * (`learned`): a later page's, its cursor's; a first page's, `asOf` or
+   * the moment a read of now is given (memories.ts `readMoment`), and what
+   * was learned by the earlier of the two: every write made before the
+   * read is at or before it, every write after it later (`stampWrite`),
+   * an `asOf` ahead of it included. The dates a fact is true are judged
+   * at `at`.
    */
-  #issuedAt = 0;
-
-  /** The moment a first page is read at: `asOf`, or now, kept as issued. */
-  #readMoment(asOf?: Date): number {
-    if (asOf !== undefined) {
-      return asOf.getTime();
+  #pageMoments(
+    after: { at: Date; learned?: Date } | undefined,
+    asOf?: Date
+  ): { at: number; cursorAt: number; learned: number } {
+    if (after !== undefined) {
+      const at = after.at.getTime();
+      return { at, cursorAt: at, learned: after.learned?.getTime() ?? at };
     }
-    const now = Date.now();
-    this.#issuedAt = Math.max(this.#issuedAt, now);
-    return now;
-  }
-
-  /** The moment a write is stamped at: now, past every moment issued to a read. */
-  #writeMoment(): number {
-    return Math.max(Date.now(), this.#issuedAt + 1);
+    const given = readMoment(this.ctx.storage.sql);
+    const at = asOf?.getTime() ?? given;
+    return { at, cursorAt: at, learned: Math.min(at, given) };
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */
@@ -678,7 +686,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addVersion(this.#sources, adding, { indexed: true });
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: true })
+      );
     });
   }
 
@@ -691,8 +701,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addVersion(this.#sources, adding, { indexed: false });
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: false })
+      );
     });
+  }
+
+  /**
+   * `add` run, refused as an erased store refuses (`erasedWhole`) when
+   * this person's own store was erased whole while it ran: its storage
+   * is gone under it, and what went wrong is never the database's words.
+   */
+  async #unlessErasedMeanwhile<T>(add: () => Promise<T>): Promise<T> {
+    try {
+      return await add();
+    } catch (error) {
+      if (this.#erased) {
+        // Nothing of the error is kept: it is the database's.
+        throw new Error(erasedWhole, { cause: error });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -792,6 +821,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
+   * What this store has of the key `source` (contract.ts): `free` for a
+   * person's own store erased whole, which holds nothing.
+   */
+  async keyState(source: SourceId): Promise<KeyState> {
+    const key = checked(sourceIdSchema, source);
+    if (await this.#erasedWhole()) {
+      return "free";
+    }
+    await this.#ready();
+    if (!this.#schema) {
+      return "free";
+    }
+    if (isErased(this.ctx.storage.sql, await subjectOf(key))) {
+      return "erased";
+    }
+    const held =
+      this.ctx.storage.sql
+        .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
+        .toArray().length > 0;
+    return held ? "held" : "free";
+  }
+
+  /**
    * A page of the sources the reader may read, newest first: none in a
    * store that holds nothing (never written, or erased whole).
    */
@@ -866,11 +918,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * couldn't be written.
    */
   async #eraseWhole(reason: ErasureReason): Promise<void> {
+    // Whether the store was never written when this call erased it: an
+    // add makes the schema before it writes a file, so no add of an
+    // earlier instance can still land under its prefix.
+    let neverWritten = false;
     if (!this.#erased) {
       const recorded = await this.ctx.blockConcurrencyWhile(async () => {
         if (this.#erased) {
           return true;
         }
+        neverWritten = !hasSchema(this.ctx.storage.sql);
         try {
           await recordStoreErased(this.#bucket, reason, Date.now());
         } catch {
@@ -890,9 +947,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // this instance, the erasure isn't finished. Nor is it while one that
     // an earlier instance started (reset meanwhile, so no longer seen
     // here) may still land: until the grace an add has to write its file
-    // (files.ts `fileGraceMs`) has passed since the record. Both are read
-    // before the listing, so what lands after it is deleted by a later
-    // call: the caller calls again until one is done.
+    // (files.ts `fileGraceMs`) has passed since the record, unless the
+    // store was never written. Both are read before the listing, so what
+    // lands after it is deleted by a later call: the caller calls again
+    // until one is done.
     const quiet = this.#writes.size === 0;
     let done = false;
     try {
@@ -903,7 +961,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         vectorsPrefix,
         ledgerPrefix,
       ]);
-      done = quiet && settled && emptied;
+      done = quiet && (settled || neverWritten) && emptied;
     } catch {
       // Nothing of the error is kept: it may name a key.
     }
@@ -1427,15 +1485,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addMemories(memories: NewMemories): Promise<AddedMemories> {
     const adding = checked(newMemoriesSchema, memories);
     this.#mayKeep(adding.access);
+    // Content only one person may read lies only in their own store.
+    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
+      throw new Error(sharedNotOwn);
+    }
     if (adding.reader !== undefined) {
       this.#mayRead(adding.reader);
     }
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addMemories(
-        { storage: this.ctx.storage, db: this.#db },
-        adding,
-        () => this.#writeMoment()
+      // As a source's add: one cut off by an erasure of this person's own
+      // store answers as an erased store does, never in the database's
+      // words (its hashing before its transaction leaves room for one).
+      return await this.#unlessErasedMeanwhile(
+        async () =>
+          await addMemories(
+            {
+              storage: this.ctx.storage,
+              db: this.#db,
+              shared: this.#kind.kind === "shared",
+            },
+            adding
+          )
       );
     });
   }
@@ -1476,7 +1547,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       entity: asked.entity,
       reader: asked.reader,
       ...(attribute === undefined ? {} : { attribute }),
-      at: asked.after?.at.getTime() ?? this.#readMoment(asked.asOf),
+      ...this.#pageMoments(asked.after, asked.asOf),
       history: asked.history ?? false,
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
@@ -1493,7 +1564,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return listContested(this.ctx.storage.sql, {
       ...(asked.entity === undefined ? {} : { entity: asked.entity }),
       reader: asked.reader,
-      at: asked.after?.at.getTime() ?? this.#readMoment(),
+      ...this.#pageMoments(asked.after),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
@@ -1507,11 +1578,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       if (!(await this.#readable())) {
         return "nothing";
       }
-      return retireMemory(this.ctx.storage.sql, {
-        id: memory,
-        reader,
-        at: this.#writeMoment(),
-      });
+      return this.ctx.storage.transactionSync(() =>
+        retireMemory(this.ctx.storage.sql, { id: memory, reader })
+      );
     });
   }
 
@@ -1524,11 +1593,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         return "nothing";
       }
       return this.ctx.storage.transactionSync(() =>
-        confirmMemory(this.ctx.storage.sql, {
-          id: memory,
-          reader,
-          at: this.#writeMoment(),
-        })
+        confirmMemory(this.ctx.storage.sql, { id: memory, reader })
       );
     });
   }
@@ -1542,7 +1607,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,
-      at: asked.after?.at.getTime() ?? this.#readMoment(),
+      ...this.#pageMoments(asked.after),
       ...(asked.kind === undefined ? {} : { kind: asked.kind }),
       ...(asked.identifier === undefined
         ? {}
@@ -1563,7 +1628,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return readEntityNames(this.ctx.storage.sql, {
       entity: asked.entity,
       reader: asked.reader,
-      at: asked.after?.at.getTime() ?? this.#readMoment(),
+      ...this.#pageMoments(asked.after),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
