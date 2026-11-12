@@ -113,6 +113,7 @@ import { z } from "zod";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
+import { handOverProducers } from "../brain-hand-overs.ts";
 import {
   keepOnboardingRecords,
   purgeOnboardingDrawings,
@@ -612,26 +613,18 @@ const admissionSql = (person: string): SQL =>
 const foldedAddress = (email: string): string => email.trim().toLowerCase();
 
 /**
- * What the new Brain is owed (`newBrainWork`), for core to do
- * (onboarding/new-brain.ts).
+ * An erasure the onboarding still owes the new Brain (`owedErasures`), for
+ * core to do with `eraseSource` (onboarding/new-brain.ts): a source it
+ * gave that no longer stands.
  */
-export type NewBrainItem =
+export type OwedErasure =
   | {
-      kind: "eraseInterview";
+      kind: "interview";
       source: string;
       account: string;
       reason: "deleted" | "withdrawn";
     }
-  | { kind: "keepInterview"; source: string; account: string; text: string }
-  | { kind: "eraseClaim"; source: string; team: string }
-  | { kind: "keepClaim"; source: string; text: string; team: string };
-
-/** What core did of an item of `newBrainWork`. */
-export type NewBrainDone =
-  | { kind: "interviewErased"; source: string }
-  | { kind: "interviewKept"; source: string }
-  | { kind: "claimErased"; source: string }
-  | { kind: "claimKept"; source: string };
+  | { kind: "claim"; source: string; team: string };
 
 /**
  * What someone's interview in the new Brain is settled from, as SQL over
@@ -1676,6 +1669,7 @@ export class Onboarding extends DurableObject<Env> {
     if (rewritten) {
       this.#deliverAudit();
       await this.#armDrawing();
+      this.#decideInterviews();
     }
     return rewritten;
   }
@@ -1733,6 +1727,7 @@ export class Onboarding extends DurableObject<Env> {
       // Whatever the cache doesn't take now waits for the alarm.
       await this.forgetLinesNow();
       await this.#armDrawing();
+      this.#decideInterviews();
     }
     return rewritten;
   }
@@ -2254,6 +2249,7 @@ export class Onboarding extends DurableObject<Env> {
     });
     if (changed) {
       await this.#alarmBy(Date.parse(now) + drawAfterMs);
+      this.#decideInterviews();
     }
     return answered({ approved: true, receipt, at: now });
   }
@@ -4662,7 +4658,7 @@ export class Onboarding extends DurableObject<Env> {
         .set({
           keyMark: null,
           // Their account no longer reads anything of the onboarding's:
-          // their interview leaves the new Brain (`newBrainWork`).
+          // their interview leaves the new Brain (`owedErasures`).
           account: null,
           erasedAt: sql`coalesce(${links.erasedAt}, ${now})`,
         })
@@ -4674,6 +4670,7 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(linkAddresses.person, person))
         .run();
     });
+    this.#decideInterviews();
   }
 
   /**
@@ -4857,6 +4854,7 @@ export class Onboarding extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     try {
       // Erasure first (GRA-329): nothing else that fails holds it up.
+      this.#decideInterviews();
       try {
         await this.purgeBrain();
       } catch (error) {
@@ -6153,6 +6151,8 @@ export class Onboarding extends DurableObject<Env> {
       this.#brainSettled(teamId, dueAt);
       return changed || since.length > 0 || stale.length > 0;
     });
+    // The claims it noted reach the hand-over with their events.
+    this.#deliverAudit();
     // Someone it rests on deleted their interview while it was given, or a
     // claim it gave before isn't the team's now: taken out again at once,
     // or by the alarm.
@@ -6249,6 +6249,7 @@ export class Onboarding extends DurableObject<Env> {
     });
     if (linked) {
       this.#deliverAudit();
+      this.#decideInterviews();
     }
     return linked;
   }
@@ -6277,10 +6278,10 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * People whose interview the new Brain may hold otherwise than it
-   * should: what it was last settled from changed
-   * (`interviewMarkSql`), or a source of theirs still waits to be added
-   * or erased, or they left the list.
+   * People whose interview the new Brain may hold otherwise than the
+   * store last decided: what it was decided from changed
+   * (`interviewMarkSql`), or they left the list with a source of theirs
+   * still standing.
    */
   #interviewsDue(): string[] {
     return this.ctx.storage.sql
@@ -6289,8 +6290,8 @@ export class Onboarding extends DurableObject<Env> {
           WHERE (${interviewMarkSql}) IS NOT l.brain_mark
         UNION
         SELECT b.person AS person FROM brain_interviews b
-          WHERE b.added = 0 OR b.erase = 1
-            OR NOT EXISTS (SELECT 1 FROM links l WHERE l.person = b.person)`
+          WHERE b.erase = 0
+            AND NOT EXISTS (SELECT 1 FROM links l WHERE l.person = b.person)`
       )
       .toArray()
       .map(({ person }) => person);
@@ -6358,15 +6359,12 @@ export class Onboarding extends DurableObject<Env> {
       }
     }
     if (wanted !== null && mark !== null && standing === undefined) {
+      const source = crypto.randomUUID();
       this.#db
         .insert(brainInterviews)
-        .values({
-          source: crypto.randomUUID(),
-          person,
-          account: wanted.account,
-          mark,
-        })
+        .values({ source, person, account: wanted.account, mark })
         .run();
+      this.#noteBrainSource("interview", source, person);
     }
     this.#db
       .update(links)
@@ -6377,125 +6375,158 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * What the new Brain is owed now (GRA-1790, GRA-1741), for core to do
-   * (onboarding/new-brain.ts): erasures first, then adds, decided in one
-   * transaction. Each interview owed is decided first
-   * (`#decideInterview`): at most everyone on the list, which
-   * `onboardingPeopleMax` bounds. Safe to hand out twice: every add is
-   * keyed by its source's own id, every erasure can be repeated, and an
-   * erased key takes no add again.
+   * Notes, in the caller's transaction, that the new Brain is to take the
+   * source `source` of `kind`: an audit event naming it, which the outbox's
+   * drain notes as a hand-over (brain-hand-overs.ts), in the same
+   * transaction as the row that says it stands. What it holds is read when
+   * the hand-over runs (`interviewToHand`, `claimToHand`), never here.
    */
-  newBrainWork(): NewBrainItem[] {
-    return this.ctx.storage.transactionSync(() => this.#newBrainWork());
-  }
-
-  /** `newBrainWork`, in its transaction. */
-  #newBrainWork(): NewBrainItem[] {
-    const texts = new Map<string, string>();
-    for (const person of this.#interviewsDue()) {
-      const text = this.#decideInterview(person);
-      if (text !== null) {
-        texts.set(person, text);
-      }
-    }
-    const interviewRows = this.#db.select().from(brainInterviews).all();
-    const claimRows = this.#db.select().from(brainClaims).all();
-    const roster = this.#roster();
-    const erasures: NewBrainItem[] = interviewRows.flatMap(
-      ({ source, person, account, erase }) =>
-        erase
-          ? [
-              {
-                kind: "eraseInterview" as const,
-                source,
-                account,
-                reason:
-                  this.#withdrawnAt(person) === null
-                    ? ("deleted" as const)
-                    : ("withdrawn" as const),
-              },
-            ]
-          : []
+  #noteBrainSource(
+    kind: "interview" | "claim",
+    source: string,
+    about: string | null
+  ): void {
+    const at = new Date().toISOString();
+    const {
+      actions: [action],
+      target: targetType,
+    } = handOverProducers[kind];
+    this.#db
+      .insert(events)
+      .values({ at, by: whoIs({ type: "system" }), what: action, about })
+      .run();
+    const event = createAuditEvent(
+      {
+        actor: { type: "system" },
+        action,
+        target: { type: targetType, id: source },
+        detail: {},
+      },
+      "core"
     );
-    const claimErasures: NewBrainItem[] = claimRows.flatMap(
-      ({ source, team, erase }) =>
-        erase ? [{ kind: "eraseClaim" as const, source, team }] : []
-    );
-    const adds: NewBrainItem[] = [
-      ...interviewRows.flatMap(({ source, person, account, added, erase }) => {
-        const text = texts.get(person);
-        return !added && !erase && text !== undefined
-          ? [{ kind: "keepInterview" as const, source, account, text }]
-          : [];
-      }),
-      ...claimRows.flatMap(({ source, text, team, added, erase }) =>
-        !added && !erase && roster?.teams.some(({ id }) => id === team) === true
-          ? [{ kind: "keepClaim" as const, source, text, team }]
-          : []
-      ),
-    ];
-    return [...erasures, ...claimErasures, ...adds];
+    this.#db
+      .insert(auditOutbox)
+      .values({
+        id: event.id,
+        event: JSON.stringify(event),
+        createdAt: new Date(),
+      })
+      .run();
   }
 
   /**
-   * Notes what the new Brain did of `newBrainWork`. A claim kept whose row
-   * was marked to be erased or went meanwhile answers true: core erases
-   * that source at once and notes that.
+   * Decides, in one transaction, what the new Brain is to hold of every
+   * interview whose decision is due (`#decideInterview`): at most everyone
+   * on the list, which `onboardingPeopleMax` bounds. Each new source is
+   * noted for the hand-over (`#noteBrainSource`); each that no longer
+   * stands is owed an erasure (`owedErasures`). Run after every change
+   * that may move one, and by the alarm.
    */
-  newBrainDone(done: NewBrainDone): boolean {
-    return this.ctx.storage.transactionSync(() => {
-      switch (done.kind) {
-        case "interviewErased": {
-          this.#db
-            .delete(brainInterviews)
-            .where(eq(brainInterviews.source, done.source))
-            .run();
-          return false;
-        }
-        case "interviewKept": {
-          // Added only while still standing: one marked to go meanwhile is
-          // erased next, which a late add can't undo (an erased key is
-          // closed).
-          this.#db
-            .update(brainInterviews)
-            .set({ added: true })
-            .where(
-              and(
-                eq(brainInterviews.source, done.source),
-                eq(brainInterviews.erase, false)
-              )
+  #decideInterviews(): void {
+    const decided = this.ctx.storage.transactionSync(() => {
+      const due = this.#interviewsDue();
+      for (const person of due) {
+        this.#decideInterview(person);
+      }
+      return due.length > 0;
+    });
+    if (decided) {
+      this.#deliverAudit();
+    }
+  }
+
+  /**
+   * The interview `source` as the hand-over adds it now: its account and
+   * the text it stands for, only while it is the one the store decided
+   * for that person's interview as it is now. Null otherwise: withdrawn,
+   * deleted, begun anew, edited, unlinked, erased or gone.
+   */
+  interviewToHand(source: string): { account: string; text: string } | null {
+    this.#decideInterviews();
+    const [row] = this.#db
+      .select()
+      .from(brainInterviews)
+      .where(eq(brainInterviews.source, source))
+      .all();
+    if (row === undefined || row.erase) {
+      return null;
+    }
+    const wanted = this.#interviewWanted(row.person);
+    return wanted === null ||
+      wanted.account !== row.account ||
+      this.#interviewMark(row.person) !== row.mark
+      ? null
+      : wanted;
+  }
+
+  /**
+   * The claim `source` as the hand-over adds it now: its sentence and its
+   * team, only while it stands (five or more back it, and its team may
+   * have claims shown, `teamMayClaim`). Null otherwise.
+   */
+  claimToHand(source: string): { text: string; team: string } | null {
+    const [row] = this.#db
+      .select()
+      .from(brainClaims)
+      .where(eq(brainClaims.source, source))
+      .all();
+    if (
+      row === undefined ||
+      row.erase ||
+      !teamMayClaim(this.#tellers(row.team).length)
+    ) {
+      return null;
+    }
+    return { text: row.text, team: row.team };
+  }
+
+  /**
+   * Every erasure the onboarding still owes the new Brain: each source it
+   * noted that no longer stands, until core says it is erased
+   * (`erasedFromBrain`). Interviews are decided first.
+   */
+  owedErasures(): OwedErasure[] {
+    this.#decideInterviews();
+    const owedInterviews: OwedErasure[] = this.#db
+      .select()
+      .from(brainInterviews)
+      .where(eq(brainInterviews.erase, true))
+      .all()
+      .map(({ source, person, account }) => ({
+        kind: "interview",
+        source,
+        account,
+        reason: this.#withdrawnAt(person) === null ? "deleted" : "withdrawn",
+      }));
+    const claims: OwedErasure[] = this.#db
+      .select()
+      .from(brainClaims)
+      .where(eq(brainClaims.erase, true))
+      .all()
+      .map(({ source, team }) => ({ kind: "claim", source, team }));
+    return [...owedInterviews, ...claims];
+  }
+
+  /** Forgets the owed erasure of `source` of `kind`: core's `eraseSource` of it returned. */
+  erasedFromBrain(kind: OwedErasure["kind"], source: string): void {
+    this.ctx.storage.transactionSync(() => {
+      if (kind === "interview") {
+        this.#db
+          .delete(brainInterviews)
+          .where(
+            and(
+              eq(brainInterviews.source, source),
+              eq(brainInterviews.erase, true)
             )
-            .run();
-          return false;
-        }
-        case "claimErased": {
-          this.#db
-            .delete(brainClaims)
-            .where(eq(brainClaims.source, done.source))
-            .run();
-          return false;
-        }
-        case "claimKept": {
-          // Added only while still standing: one the recount dropped
-          // meanwhile, or that went, is erased by core at once (true).
-          const [row] = this.#db
-            .select({ erase: brainClaims.erase })
-            .from(brainClaims)
-            .where(eq(brainClaims.source, done.source))
-            .all();
-          if (row === undefined || row.erase) {
-            return true;
-          }
-          this.#db
-            .update(brainClaims)
-            .set({ added: true })
-            .where(eq(brainClaims.source, done.source))
-            .run();
-          return false;
-        }
-        default: {
-          return done satisfies never;
-        }
+          )
+          .run();
+      } else {
+        this.#db
+          .delete(brainClaims)
+          .where(
+            and(eq(brainClaims.source, source), eq(brainClaims.erase, true))
+          )
+          .run();
       }
     });
   }
@@ -6506,13 +6537,10 @@ export class Onboarding extends DurableObject<Env> {
    * only once it doesn't.
    */
   interviewOwed(person: string): boolean {
+    this.#decideInterviews();
     const [row] = this.ctx.storage.sql
       .exec<{ owed: number }>(
-        `SELECT EXISTS (SELECT 1 FROM links l WHERE l.person = ?1
-            AND (${interviewMarkSql}) IS NOT l.brain_mark)
-          OR EXISTS (SELECT 1 FROM brain_interviews b WHERE b.person = ?1
-            AND (b.added = 0 OR b.erase = 1
-              OR NOT EXISTS (SELECT 1 FROM links l WHERE l.person = b.person))) AS owed`,
+        "SELECT EXISTS (SELECT 1 FROM brain_interviews WHERE person = ? AND erase = 1) AS owed",
         person
       )
       .toArray();
@@ -6543,10 +6571,12 @@ export class Onboarding extends DurableObject<Env> {
     const kept = new Set(held.map(({ record }) => record));
     for (const { record, text } of shown) {
       if (!kept.has(record)) {
+        const source = crypto.randomUUID();
         this.#db
           .insert(brainClaims)
-          .values({ source: crypto.randomUUID(), record, team, text })
+          .values({ source, record, team, text })
           .run();
+        this.#noteBrainSource("claim", source, null);
       }
     }
   }
@@ -7772,6 +7802,9 @@ export class Onboarding extends DurableObject<Env> {
       this.#queueLines(keys);
     });
     await this.#armDrawing();
+    // What the new Brain holds of their interview is decided again: an
+    // erasure owed, before anything else (`owedErasures`).
+    this.#decideInterviews();
     try {
       await this.purgeBrain();
     } catch (error) {

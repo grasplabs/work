@@ -1,107 +1,119 @@
 import { log } from "@grasp-os/shared/log";
 
-import { addSource, eraseSource } from "../brain-next.ts";
+import { erasureBegun } from "../brain-hand-overs.ts";
+import { eraseSource } from "../brain-next.ts";
+import type { Handed, SourceRef } from "../brain-next.ts";
 import { onboardingStore } from "./store.ts";
-import type { NewBrainItem } from "./store.ts";
+import type { OwedErasure } from "./store.ts";
 
 // What the onboarding gives the new Brain (GRA-1790, GRA-1741), and takes
-// back. The onboarding's store decides what and when, from its own
-// records (`newBrainWork`); core does it here, since the store can't reach
-// the Brain itself, and tells the store what was done (`newBrainDone`):
+// back. The onboarding's store decides what stands, from its own records,
+// and notes each new source with an audit event its outbox's drain turns
+// into a hand-over (brain-hand-overs.ts). Core's hand-over reads it here,
+// as the store holds it when the hand-over runs (brain-sources.ts
+// `producers`), and adds it through `addSource`:
 //
-// - A person's interview: the facts they approved, as a source
-//   `interview:<id>` only the account linked to them reads. The id is
-//   minted by the store for one text; a changed text is a new source and
-//   the old one is erased.
-// - A team's claim: a source `claim:<id>` holding the claim's sentence
-//   alone (no names, no quotes), readable by the people of that staff-list
-//   team who signed in, added only once five or more back it (counted by
-//   the store, never in the Brain) and erased for good once fewer do. The
-//   id is minted by the store each time the claim stands: an erased key is
-//   closed, so a claim backed again later is a new source.
+// - A person's interview (`interview:<id>`): the facts they approved,
+//   readable by the account linked to them alone, so it is kept in their
+//   own store. The id is minted by the store for one decision of it; a
+//   decision that moves is a new source, and the old one is erased.
+// - A team's claim (`claim:<id>`): its sentence alone (no names, no
+//   quotes), readable by the people of that staff-list team who signed
+//   in, only while five or more back it and seven or more of the team
+//   were interviewed (counted by the store, never in the Brain).
 //
-// Run on core's clock every minute, and at once after anything that takes
-// an interview out (links.ts, admin-command.ts, interview-erasure.ts,
-// person-erasure.ts). Two runs at once do no harm: every add is keyed,
-// every erasure can be repeated, and an erased key takes no add again.
+// What no longer stands is erased with `eraseSource`, directly: at once
+// after anything that takes an interview out (links.ts, admin-command.ts,
+// interview-erasure.ts, person-erasure.ts), and on core's clock until done
+// (`eraseOwedOnboardingSources`). A hand-over that runs after its source
+// stopped standing adds nothing, and one whose add lands after the erasure
+// is refused by the closed key.
 
-type Done = Parameters<ReturnType<typeof onboardingStore>["newBrainDone"]>[0];
+/** An interview's source, by the store's id for it. */
+export const interviewSource = (id: string): SourceRef => ({
+  producer: "interview",
+  id,
+});
 
-/** Does one item; answers what was done. */
-const doItem = async (env: Env, item: NewBrainItem): Promise<Done | null> => {
-  switch (item.kind) {
-    case "eraseInterview": {
-      await eraseSource(env, {
-        source: { producer: "interview", id: item.source },
-        readers: { kind: "owner", personId: item.account },
-        reason: item.reason,
-      });
-      return { kind: "interviewErased", source: item.source };
-    }
-    case "keepInterview": {
-      await addSource(env, {
-        source: { producer: "interview", id: item.source },
-        // A source stands for one text: its id is its change's key.
-        change: item.source,
-        text: item.text,
-        readers: { kind: "owner", personId: item.account },
-      });
-      return { kind: "interviewKept", source: item.source };
-    }
-    case "eraseClaim": {
-      await eraseSource(env, {
-        source: { producer: "claim", id: item.source },
-        readers: { kind: "interviews", teamId: item.team },
-        reason: "deleted",
-      });
-      return { kind: "claimErased", source: item.source };
-    }
-    case "keepClaim": {
-      await addSource(env, {
-        source: { producer: "claim", id: item.source },
-        change: item.source,
-        text: item.text,
-        readers: { kind: "interviews", teamId: item.team },
-      });
-      // Dropped meanwhile: erased now, before anyone reads it as standing.
-      if (
-        await onboardingStore(env).newBrainDone({
-          kind: "claimKept",
-          source: item.source,
-        })
-      ) {
-        await eraseSource(env, {
-          source: { producer: "claim", id: item.source },
-          readers: { kind: "interviews", teamId: item.team },
-          reason: "deleted",
-        });
-        return { kind: "claimErased", source: item.source };
-      }
-      return null;
-    }
-    default: {
-      return item satisfies never;
-    }
+/** A team claim's source, by the store's id for it. */
+export const claimSource = (id: string): SourceRef => ({
+  producer: "claim",
+  id,
+});
+
+const gone: Handed = { kind: "gone" };
+
+/**
+ * Interview `id` as the onboarding holds it now: its approved facts, for
+ * its linked account alone; nothing once it no longer stands; erased once
+ * that account's erasure began.
+ */
+export const interviewOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).interviewToHand(id);
+  if (held === null) {
+    return gone;
   }
+  const readers = { kind: "owner", personId: held.account } as const;
+  if (await erasureBegun(env, held.account)) {
+    return { kind: "erased", readers };
+  }
+  return {
+    kind: "source",
+    // A source stands for one decision: its id is its change's key.
+    change: id,
+    text: held.text,
+    whenTooLarge: "An interview whose approved facts were too large to keep.",
+    readers,
+  };
+};
+
+/** Team claim `id` as the onboarding holds it now: its sentence, for its team; nothing once it no longer stands. */
+export const claimOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).claimToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: id,
+        text: held.text,
+        whenTooLarge: "A claim of the team's too large to keep.",
+        readers: { kind: "interviews", teamId: held.team },
+      };
+};
+
+/** Erases one owed source from the Brain, with the readers it was added for. */
+const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
+  if (owed.kind === "interview") {
+    await eraseSource(env, {
+      source: interviewSource(owed.source),
+      readers: { kind: "owner", personId: owed.account },
+      reason: owed.reason,
+    });
+    return;
+  }
+  await eraseSource(env, {
+    source: claimSource(owed.source),
+    readers: { kind: "interviews", teamId: owed.team },
+    reason: "deleted",
+  });
 };
 
 /**
- * Gives the new Brain what the onboarding owes it, in the order the store
- * answers (erasures first). Each failure is logged by
- * name alone and left for the next run.
+ * Erases every source the onboarding still owes the Brain an erasure of
+ * (`owedErasures`), each then forgotten there. Each failure is logged by
+ * name alone and left for the next run: core's clock runs it every
+ * minute, until none is owed.
  */
-export const keepOnboardingBrain = async (env: Env): Promise<void> => {
+export const eraseOwedOnboardingSources = async (env: Env): Promise<void> => {
   const store = onboardingStore(env);
-  for (const item of await store.newBrainWork()) {
+  for (const owed of await store.owedErasures()) {
     try {
-      // oxlint-disable-next-line no-await-in-loop -- in order, one at a time
-      const done = await doItem(env, item);
-      if (done !== null) {
-        // oxlint-disable-next-line no-await-in-loop -- in order, one at a time
-        await store.newBrainDone(done);
-      }
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await erase(env, owed);
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await store.erasedFromBrain(owed.kind, owed.source);
     } catch (error) {
-      log.error("onboarding.new_brain_failed", {
+      log.error("onboarding.brain_erasure_failed", {
         error: error instanceof Error ? error.name : "unknown",
       });
     }
@@ -109,26 +121,28 @@ export const keepOnboardingBrain = async (env: Env): Promise<void> => {
 };
 
 /**
- * `keepOnboardingBrain`, then throws while the new Brain may still hold
- * `person`'s interview: for core's erasures, which let go only once it
- * doesn't.
+ * `eraseOwedOnboardingSources`, then throws while the Brain may still hold
+ * `person`'s interview: for core's erasures and purges, which let go only
+ * once it doesn't.
  */
 export const eraseOnboardingInterview = async (
   env: Env,
   person: string
 ): Promise<void> => {
-  await keepOnboardingBrain(env);
+  await eraseOwedOnboardingSources(env);
   if (await onboardingStore(env).interviewOwed(person)) {
     throw new Error("The Brain still holds their interview.");
   }
 };
 
-/** `keepOnboardingBrain` where a failure must not fail what ran before it. */
-export const keepOnboardingBrainQuietly = async (env: Env): Promise<void> => {
+/** `eraseOwedOnboardingSources` where a failure must not fail what ran before it. */
+export const eraseOwedOnboardingSourcesQuietly = async (
+  env: Env
+): Promise<void> => {
   try {
-    await keepOnboardingBrain(env);
+    await eraseOwedOnboardingSources(env);
   } catch (error) {
-    log.error("onboarding.new_brain_failed", {
+    log.error("onboarding.brain_erasure_failed", {
       error: error instanceof Error ? error.name : "unknown",
     });
   }

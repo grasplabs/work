@@ -133,13 +133,19 @@ const coreOutbox = (env: OutboxEnv): Outbox => ({
 
 /**
  * A Durable Object's own outbox, an `audit_outbox` table in its SQLite
- * (the Workspace object's: chats made, renamed and deleted), written in
- * the same transaction as the change. Its rows go in rowid order. A row
- * the log can't take is recorded with an `audit.gap`, as any outbox's, and
- * removed: the object keeps no rejected table.
+ * (the Workspace object's: chats made, renamed and deleted; the
+ * onboarding's), written in the same transaction as the change. Its rows
+ * go in rowid order. A row the log can't take is recorded with an
+ * `audit.gap`, as any outbox's, and removed: the object keeps no rejected
+ * table. Its events note what core hands over to the new Brain
+ * (`noteHandOvers`) before they leave it, as core's own outbox's do: an
+ * event notes one only when a producer registered its action.
  */
-const objectOutbox = (storage: SqlStorage): Outbox => ({
+const objectOutbox = (env: Pick<Env, "DB">, storage: SqlStorage): Outbox => ({
   name: "workspace",
+  required: async (events) => {
+    await noteHandOvers(env, events);
+  },
   take: async () =>
     await Promise.resolve(
       storage
@@ -399,10 +405,10 @@ const drainLogged = async (
  * object can try again later (its alarm) while any are.
  */
 export const drainObjectOutbox = async (
-  env: AuditLogEnv,
+  env: AuditLogEnv & Pick<Env, "DB">,
   storage: SqlStorage
 ): Promise<number> => {
-  await drainLogged(env, objectOutbox(storage), drainMaxBatches);
+  await drainLogged(env, objectOutbox(env, storage), drainMaxBatches);
   const [left] = storage
     .exec<{ count: number }>("SELECT count(*) AS count FROM audit_outbox")
     .toArray();

@@ -5,12 +5,17 @@ import {
   sourceIdMaxLength,
 } from "@grasp-os/brain-next/contract";
 import { createAuditEvent } from "@grasp-os/shared/audit";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { drainAuditOutboxes, outboxedEvent } from "../src/audit-outbox.ts";
+import {
+  drainAuditOutboxes,
+  drainObjectOutbox,
+  outboxedEvent,
+} from "../src/audit-outbox.ts";
 import { noteHandOvers } from "../src/brain-hand-overs.ts";
 import {
   erasePerson,
@@ -23,6 +28,7 @@ import type { SourceRef } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { brainHandOvers, personErasures } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 import { shareWorkflowResource } from "../src/workflow-resources.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
@@ -750,6 +756,66 @@ describe("how a hand-over fails closed", () => {
     }).toStrictEqual({
       whileFailing: { inOutbox: true, noted: [] },
       after: { inOutbox: false, noted: [id] },
+    });
+  });
+
+  it("notes a Durable Object's hand-overs from its own outbox, once, also when a drain is cut off before the object drops its events", async () => {
+    // An interview the onboarding decided stands, as its own outbox holds
+    // the event that says so until a drain takes it.
+    const id = crypto.randomUUID();
+    const event = createAuditEvent(
+      {
+        actor: { type: "system" },
+        action: "onboarding.interview.brain_source",
+        target: { type: "onboarding_interview", id },
+      },
+      "core"
+    );
+    const outboxed = await runInDurableObject(
+      onboardingStore(env),
+      async (_, state) => {
+        const { sql } = state.storage;
+        sql.exec(
+          "INSERT INTO audit_outbox (id, event, created_at) VALUES (?, ?, ?)",
+          event.id,
+          JSON.stringify(event),
+          Date.now()
+        );
+        // Cut off after the log took the event and its hand-over was
+        // noted, before the object dropped it: as a crash between the two.
+        const cutOff = new Proxy(sql, {
+          get: (target, name): unknown => {
+            const member: unknown = Reflect.get(target, name);
+            if (name !== "exec" || typeof member !== "function") {
+              return typeof member === "function"
+                ? member.bind(target)
+                : member;
+            }
+            return (query: string, ...bindings: unknown[]): unknown => {
+              if (query.startsWith("DELETE FROM audit_outbox")) {
+                throw new Error("The object went away");
+              }
+              return Reflect.apply(member, target, [query, ...bindings]);
+            };
+          },
+        });
+        const leftAfterCut = await drainObjectOutbox(env, cutOff);
+        const notedAfterCut = await notedAmong([id]);
+        // Drained again, whole.
+        const left = await drainObjectOutbox(env, sql);
+        return { leftAfterCut, notedAfterCut, left };
+      }
+    );
+    const rows = await drizzle(env.DB)
+      .select({ sourceId: brainHandOvers.sourceId })
+      .from(brainHandOvers)
+      .where(inArray(brainHandOvers.sourceId, [id]));
+
+    expect({ ...outboxed, intents: rows.length }).toStrictEqual({
+      leftAfterCut: 1,
+      notedAfterCut: [id],
+      left: 0,
+      intents: 1,
     });
   });
 });

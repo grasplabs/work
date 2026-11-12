@@ -632,11 +632,13 @@ export const mailOutbox = sqliteTable(
 );
 
 /**
- * Each interview handed to the Brain as a source (GRA-1790), under an id
- * minted here for one text of it: the facts the person approved, readable
- * by their linked account alone. A text that changes is a new source, and
- * the old one is erased; a row stays until the Brain's erasure of it
- * returned (`erase`), so no source is ever there without a row naming it.
+ * Each interview the Brain is to take as a source (GRA-1790), under an id
+ * minted here for one decision of it: the facts the person approved,
+ * readable by their linked account alone, handed over by core's hand-over
+ * (brain-sources.ts), which reads them as they are then. A decision that
+ * moves is a new source, and the old one is owed an erasure; a row stays
+ * until the Brain's erasure of it returned (`erase`), so no source is ever
+ * there without a row naming it.
  */
 export const brainInterviews = sqliteTable(
   "brain_interviews",
@@ -651,8 +653,6 @@ export const brainInterviews = sqliteTable(
      * stands for one text, so a mark that moved makes a new one.
      */
     mark: text().notNull(),
-    /** Whether it was added: false until the Brain answered the add. */
-    added: integer({ mode: "boolean" }).notNull().default(false),
     /** Whether it is to be erased: set once, never cleared. */
     erase: integer({ mode: "boolean" }).notNull().default(false),
   },
@@ -677,8 +677,6 @@ export const brainClaims = sqliteTable(
     record: text().notNull(),
     team: text().notNull(),
     text: text().notNull(),
-    /** Whether it was added: false until the Brain answered the add. */
-    added: integer({ mode: "boolean" }).notNull().default(false),
     /** Whether it is to be erased: set once, never cleared. */
     erase: integer({ mode: "boolean" }).notNull().default(false),
   },

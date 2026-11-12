@@ -1,16 +1,20 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import {
   erasePerson,
   listSourcesAs,
   listVersionsAs,
   readSourceVersionAs,
   recallAs,
+  workBrain,
 } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { keepOnboardingBrain } from "../src/onboarding/new-brain.ts";
+import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
@@ -163,6 +167,23 @@ const holdingAdds = (holds: (source: string) => boolean) => {
   };
 };
 
+/** The queue's clock across this file: only forward, as core's clock goes. */
+const clock = { at: Date.now() };
+
+/**
+ * Hands over what the onboarding noted, as core does: its outbox drained
+ * (which notes each hand-over), the hand-overs relayed to the Brain's
+ * queue, and the Brain ticked with core's producers, through `into`.
+ */
+const handOverNow = async (into: Env = env): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), async (_, state) => {
+    await drainObjectOutbox(env, state.storage.sql);
+  });
+  await relayHandOvers(env);
+  clock.at = Math.max(clock.at, Date.now()) + 1;
+  await workBrain(into, new Date(clock.at), producersOf(into));
+};
+
 /** Where the Brain keeps the source `key`: its state in the shared store and in `person`'s own. */
 const keptIn = async (key: string, person: string) => {
   const stores = inJurisdiction(env, env.BRAIN_STORE);
@@ -249,12 +270,9 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await mapped(ids, {
       facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
     });
-    // Nobody has an account yet: nothing is owed to the Brain.
+    // Nobody has an account yet: nothing is handed over.
     const store = onboardingStore(env);
-    const owed = await store.newBrainWork();
-    expect(owed.filter(({ kind }) => kind === "keepInterview")).toStrictEqual(
-      []
-    );
+    await handOverNow();
     // An admin puts their own address on Lea's entry after her link went
     // out, and signs in with it.
     const taken = `admin-${unique()}@acme.test`;
@@ -282,9 +300,9 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
         .map(({ actor, detail }) => ({ actor, detail }))
     ).toStrictEqual([{ actor: { type: "person", userId: lea }, detail: {} }]);
     const max = await signsIn(addressOf(ids.max));
-    await keepOnboardingBrain(env);
+    await handOverNow();
     // Handing it over again makes no second source.
-    await keepOnboardingBrain(env);
+    await handOverNow();
     const key = await interviewKeyOf(lea);
     expect({
       lea: await recalled(lea, marker),
@@ -327,7 +345,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
     expect({
       recalled: await recalled(lea, marker),
-      owed: await store.newBrainWork(),
+      owed: await store.owedErasures(),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       recalled: [],
@@ -343,7 +361,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
     });
     const lea = await signsIn(addressOf(ids.lea));
-    await keepOnboardingBrain(env);
+    await handOverNow();
     const key = await interviewKeyOf(lea);
     // Her own store goes whole (core's erasure of her), then she withdraws:
     // erasing her interview in a store erased whole returns at once.
@@ -358,7 +376,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
     expect({
       erased,
-      owed: await onboardingStore(env).newBrainWork(),
+      owed: await onboardingStore(env).owedErasures(),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       erased: "erased",
@@ -394,7 +412,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     const again = await store.sendAgain(ids.lea, { type: "system" });
     const colleague = await signsIn(wrong);
     const lea = await signsIn(addressOf(ids.lea));
-    await keepOnboardingBrain(env);
+    await handOverNow();
     expect({
       again,
       colleague: await recalled(colleague, marker),
@@ -424,7 +442,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     ]);
     const colleague = await signsIn(wrong);
     const max = await signsIn(addressOf(ids.max));
-    await keepOnboardingBrain(env);
+    await handOverNow();
     expect({
       reminded: reminded.includes(ids.max),
       colleague: await recalled(colleague, marker),
@@ -440,7 +458,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     });
     const lea = await signsIn(addressOf(ids.lea));
     const held = holdingAdds((source) => source.startsWith("interview:"));
-    const handing = keepOnboardingBrain(held.env);
+    const handing = handOverNow(held.env);
     const key = await held.arrived;
     // She withdraws while her interview's add is in flight, before her own
     // store was ever written: the withdrawal erases it, and the add lands
@@ -451,7 +469,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     const { own } = await keptIn(key, lea);
     expect({
       recalled: await recalled(lea, marker),
-      owed: await onboardingStore(env).newBrainWork(),
+      owed: await onboardingStore(env).owedErasures(),
       held: own === "held",
     }).toStrictEqual({ recalled: [], owed: [], held: false });
   });
@@ -506,7 +524,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
         cites: ["Tickets arrive in Zendesk.", ...fourOfThem.slice(0, 1)],
       },
     ]);
-    await keepOnboardingBrain(env);
+    await handOverNow();
     const outsider = await signsIn(`outsider-${unique()}@acme.test`);
     const listed = await claimsOf(max);
     expect({
@@ -538,7 +556,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       listed: await claimsOf(max),
       version: await readSourceVersionAs(env, max, { source, version: 1 }),
       versions,
-      owed: await onboardingStore(env).newBrainWork(),
+      owed: await onboardingStore(env).owedErasures(),
     }).toStrictEqual({
       max: [],
       listed: [],
@@ -551,7 +569,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
   it("are none in a team of fewer than two more interviewed than the floor, whatever backs them", async () => {
     const { ids, max } = await drawnTeam({ small: true });
     await intakeOf(ids, [zendeskClaim]);
-    await keepOnboardingBrain(env);
+    await handOverNow();
     expect({
       max: await recalled(max, "Zendesk", "claim"),
       listed: await claimsOf(max),
@@ -566,7 +584,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
   });
 
   it("are not noted from an intake whose backers changed while it ran", async () => {
-    const { ids } = await drawnTeam({ drained: true });
+    const { ids, max } = await drawnTeam({ drained: true });
     let edited = false;
     const reply = claimsReply([zendeskClaim]);
     const { result: gave } = await answeringWith(
@@ -587,22 +605,27 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       },
       async () => await onboardingStore(env).intakeNext()
     );
-    // Nothing of a claim was noted: none to add, none to erase.
-    const owed = await onboardingStore(env).newBrainWork();
+    // Nothing of a claim was noted: none handed over, none to erase.
+    await handOverNow();
+    const owed = await onboardingStore(env).owedErasures();
     expect({
       gave,
       edited,
-      claims: owed.filter(
-        ({ kind }) => kind === "keepClaim" || kind === "eraseClaim"
-      ),
-    }).toStrictEqual({ gave: `brain:${ids.team}`, edited: true, claims: [] });
+      listed: await claimsOf(max),
+      claims: owed.filter(({ kind }) => kind === "claim"),
+    }).toStrictEqual({
+      gave: `brain:${ids.team}`,
+      edited: true,
+      listed: [],
+      claims: [],
+    });
   });
 
-  it("are erased at once when the recount drops them while their add is in flight", async () => {
+  it("stay erased when the recount drops them while their add is in flight", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
     const held = holdingAdds((source) => source.startsWith("claim:"));
-    const handing = keepOnboardingBrain(held.env);
+    const handing = handOverNow(held.env);
     await held.arrived;
     // Pim leaves the list while the claim's add is in flight: the recount
     // drops it below five.
@@ -616,12 +639,14 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       ),
       { type: "system" }
     );
+    // Core erases it as it still owes the Brain that, while the add waits.
+    await eraseOwedOnboardingSources(env);
     held.release();
     await handing;
     expect({
       max: await recalled(max, "Zendesk", "claim"),
       listed: await claimsOf(max),
-      owed: await onboardingStore(env).newBrainWork(),
+      owed: await onboardingStore(env).owedErasures(),
     }).toStrictEqual({ max: [], listed: [], owed: [] });
   });
 });

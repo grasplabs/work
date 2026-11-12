@@ -3,7 +3,6 @@ CREATE TABLE `brain_claims` (
 	`record` text NOT NULL,
 	`team` text NOT NULL,
 	`text` text NOT NULL,
-	`added` integer DEFAULT false NOT NULL,
 	`erase` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
@@ -13,7 +12,6 @@ CREATE TABLE `brain_interviews` (
 	`person` text NOT NULL,
 	`account` text NOT NULL,
 	`mark` text NOT NULL,
-	`added` integer DEFAULT false NOT NULL,
 	`erase` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
