@@ -82,18 +82,41 @@ export class PairsEmbedder extends Embedder {
 
 /** A text holding this word makes a `TrappingEmbedder`'s module trap as it runs the encoder. */
 export const trapWord = "kerneltrap";
+/**
+ * A text holding this word makes a `TrappingEmbedder`'s module trap the
+ * first time the object meets the text, as an instance worn out by what
+ * ran before it can, and run it like any other after.
+ */
+export const trapOnceWord = "flakytrap";
 /** A text holding this word ends a `TrappingEmbedder`'s object as it reaches it. */
 export const abortWord = "objectabort";
 
+/** Fills the module's whole memory with 0xff: whatever runs in it next gives other bits, or traps. */
+const spoil = (engine: object): void => {
+  const exports: unknown = Reflect.get(engine, "exports");
+  if (
+    typeof exports === "object" &&
+    exports !== null &&
+    "memory" in exports &&
+    exports.memory instanceof WebAssembly.Memory
+  ) {
+    new Uint8Array(exports.memory.buffer).fill(0xff);
+  }
+};
+
 /**
  * An embedder of the int8 model that breaks on certain texts: its module
- * traps on a text holding `trapWord`, as a kernel that fails does, and its
- * object ends on one holding `abortWord`, as one that runs out of memory
- * does. Every other text runs as in any embedder.
+ * traps on a text holding `trapWord` (always) or `trapOnceWord` (the first
+ * time), as a kernel that fails does, spoiling its whole memory first, so
+ * an instance used again after a trap gives other bits; and its object
+ * ends on one holding `abortWord`, as one that runs out of memory does.
+ * Every other text runs as in any embedder.
  */
 export class TrappingEmbedder extends Embedder {
   protected override readonly model = int8Model;
   private readonly broken = new WeakSet<object>();
+  /** The texts with `trapOnceWord` that trapped already, for the life of the object. */
+  private readonly trapped = new Set<string>();
 
   protected override async loaded(): Promise<Loaded> {
     const loaded = await super.loaded();
@@ -107,11 +130,16 @@ export class TrappingEmbedder extends Embedder {
         if (text.includes(abortWord)) {
           this.ctx.abort("Ended by the test");
         }
-        trapNext = text.includes(trapWord);
+        const once = text.includes(trapOnceWord) && !this.trapped.has(text);
+        if (once) {
+          this.trapped.add(text);
+        }
+        trapNext = text.includes(trapWord) || once;
         return tokenize(text);
       };
       engine.embed = (...args) => {
         if (trapNext) {
+          spoil(engine);
           throw new WebAssembly.RuntimeError("unreachable");
         }
         return embed(...args);

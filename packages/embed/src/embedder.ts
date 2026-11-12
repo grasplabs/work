@@ -4,9 +4,9 @@
  *
  * On first use it copies the model's files from the model files bucket
  * into its own storage, checking each against its SHA-256: the tokenizer
- * and encoder in parts, the token table a row per token. It then reads the
- * whole table back once and records how many rows of which width it holds
- * (`model_record`). Then, and after every eviction, it reads the tokenizer
+ * and encoder in parts, the token table a row per token, exactly as many
+ * rows as its header names, and records the model's files and the table's
+ * rows and width (`loaded_model`). Then, and after every eviction, it reads the tokenizer
  * and encoder into a fresh instance of the module, checks the token table
  * against that record through its primary key alone (its last ID, and the
  * width of its first and last rows: well under a millisecond, where
@@ -21,8 +21,9 @@
  * missing or of the wrong width anywhere, or a table that disagrees with
  * its record) is damaged storage: the object forgets its copy and refuses,
  * and the next call copies the model from the bucket again. So no vector
- * is ever made from a damaged table, though a row in the middle is only
- * checked once a text needs it.
+ * is ever made from a row that is missing or of the wrong width, though a
+ * row in the middle is only checked once a text needs it. A row's content
+ * is checked once, by the file's hash as it is copied.
  *
  * A call embeds up to `maxTextsPerCall` texts (`embedMany`), one after
  * another, and answers each on its own: a text that fails costs its
@@ -63,8 +64,9 @@ export interface Embedding {
  * - `too-long`: past the module's 256 KiB text buffer, where cutting it
  *   could change its tokens; the caller cuts it first;
  * - `not-text`: not a string;
- * - `kernel`: the module trapped on it; the object loads a fresh instance
- *   for the next text.
+ * - `kernel`: the module trapped on it twice, on the instance that ran it
+ *   and on a fresh one; the object loads a fresh instance for the next
+ *   text.
  */
 export type EmbedFailure = "too-long" | "not-text" | "kernel";
 
@@ -94,8 +96,9 @@ export const maxTextsPerCall = 16;
  * and 0.61 ms a token on Cloudflare, against the 30 s a Durable Object
  * request may use). It is 16 texts of 512 tokens: with a model that reads
  * at most 512, a call of 16 always fits; with one that reads 1,024, 8 full
- * texts do. A first text always fits, as no model reads more than 1,024.
- * A caller that wants shorter calls sends fewer texts.
+ * texts do. The first text of a call always runs, whatever its length,
+ * so every call embeds at least one. A caller that wants shorter calls
+ * sends fewer texts.
  */
 export const maxTokensPerCall = 8192;
 
@@ -167,14 +170,26 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       "CREATE TABLE IF NOT EXISTS token_row (id INTEGER PRIMARY KEY, row BLOB NOT NULL)"
     );
     // One row once every file is in and checked: the model's files, by
-    // hash, and the token table as read back after the copy.
-    sql.exec(`CREATE TABLE IF NOT EXISTS model_record (
-      id INTEGER PRIMARY KEY CHECK (id = 1), files TEXT NOT NULL, format TEXT NOT NULL,
-      rows INTEGER NOT NULL, row_bytes INTEGER NOT NULL)`);
-    // The record before it kept the table's rows and width. Without it,
-    // the model is copied again; an older release that finds it gone does
-    // the same.
-    sql.exec("DROP TABLE IF EXISTS loaded_model");
+    // hash, and the token table's rows and their width as copied.
+    sql.exec(`CREATE TABLE IF NOT EXISTS loaded_model (
+      id INTEGER PRIMARY KEY CHECK (id = 1), files TEXT NOT NULL, format TEXT NOT NULL)`);
+    // The rows and width came later, so they are added where missing and
+    // may be null: an older release, rolled back to, clears this row with
+    // the rest whenever it copies a model, and writes its own without them.
+    // A row without them is one this release didn't write: copied again.
+    const columns = new Set(
+      sql
+        .exec<{ name: string }>(
+          "SELECT name FROM pragma_table_info('loaded_model')"
+        )
+        .toArray()
+        .map(({ name }) => name)
+    );
+    for (const column of ["rows", "row_bytes"]) {
+      if (!columns.has(column)) {
+        sql.exec(`ALTER TABLE loaded_model ADD COLUMN ${column} INTEGER`);
+      }
+    }
   }
 
   /** The model it runs; a `ModelFilesError` while it has none. */
@@ -214,11 +229,16 @@ export class Embedder extends DurableObject<EmbedderEnv> {
         results.push(deferred);
         continue;
       }
+      // The first text always runs, whatever its length.
+      const budget = tokens === 0 ? Infinity : maxTokensPerCall - tokens;
       // oxlint-disable-next-line no-await-in-loop -- one text at a time: after a trap, the next one loads a fresh instance
-      const [result, used] = await this.embedOne(
-        text,
-        maxTokensPerCall - tokens
-      );
+      let [result, used] = await this.embedOne(text, budget);
+      if (result.kind === "failed" && result.reason === "kernel") {
+        // The trap may be the instance's (one worn by what ran before it),
+        // not the text's: once more on the fresh one, then it is final.
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        [result, used] = await this.embedOne(text, budget);
+      }
       results.push(result);
       tokens += used;
     }
@@ -312,19 +332,24 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     return loaded;
   }
 
-  /** The token table as recorded after its copy, when the storage holds this model's files. */
+  /**
+   * The token table as recorded after its copy, when the storage holds this
+   * model's files and this release recorded them in full.
+   */
   private recorded(): TableRecord | null {
     const [stored] = this.ctx.storage.sql
       .exec<{
         files: string;
         format: string;
-        rows: number;
-        row_bytes: number;
-      }>("SELECT files, format, rows, row_bytes FROM model_record")
+        rows: number | null;
+        row_bytes: number | null;
+      }>("SELECT files, format, rows, row_bytes FROM loaded_model")
       .toArray();
     if (
       stored?.files !== filesOf(this.running) ||
-      !isRowFormat(stored.format)
+      !isRowFormat(stored.format) ||
+      stored.rows === null ||
+      stored.row_bytes === null
     ) {
       return null;
     }
@@ -366,7 +391,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
    * returns the error that says so.
    */
   private damaged(): ModelFilesError {
-    this.ctx.storage.sql.exec("DELETE FROM model_record");
+    this.ctx.storage.sql.exec("DELETE FROM loaded_model");
     this.loading = undefined;
     return new ModelFilesError(
       `${this.running.name}'s token table in storage is damaged: the next call copies it from the model files bucket again.`
@@ -375,14 +400,14 @@ export class Embedder extends DurableObject<EmbedderEnv> {
 
   /**
    * Copies the model's files from the bucket into storage, after clearing
-   * whatever was there, checks the token table as stored, and records the
-   * model once all of them are in. Returns the token table as recorded.
+   * whatever was there, and records the model once all of them are in and
+   * checked. Returns the token table as recorded.
    */
   private async copyFiles(): Promise<TableRecord> {
     const { sql } = this.ctx.storage;
     const clear = (): void => {
       this.ctx.storage.transactionSync(() => {
-        sql.exec("DELETE FROM model_record");
+        sql.exec("DELETE FROM loaded_model");
         sql.exec("DELETE FROM model_part");
         sql.exec("DELETE FROM token_row");
       });
@@ -394,9 +419,8 @@ export class Embedder extends DurableObject<EmbedderEnv> {
         await this.copyWhole(file);
       }
       const table = await this.copyTokens();
-      this.checkCopiedTable(table);
       sql.exec(
-        "INSERT INTO model_record (id, files, format, rows, row_bytes) VALUES (1, ?, ?, ?, ?)",
+        "INSERT INTO loaded_model (id, files, format, rows, row_bytes) VALUES (1, ?, ?, ?, ?)",
         filesOf(this.running),
         table.format,
         table.rows,
@@ -406,27 +430,6 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     } catch (error) {
       clear();
       throw error;
-    }
-  }
-
-  /**
-   * Fails unless storage holds `table`'s rows, every one at its width: the
-   * one time every row is read, so a wake can trust the record.
-   */
-  private checkCopiedTable(table: TableRecord): void {
-    const [found] = this.ctx.storage.sql
-      .exec<{ rows: number; least: number | null; most: number | null }>(
-        "SELECT COUNT(*) AS rows, MIN(LENGTH(row)) AS least, MAX(LENGTH(row)) AS most FROM token_row"
-      )
-      .toArray();
-    if (
-      found?.rows !== table.rows ||
-      found.least !== table.rowBytes ||
-      found.most !== table.rowBytes
-    ) {
-      throw new ModelFilesError(
-        `${this.running.name}'s token table in storage isn't the ${table.rows} rows of ${table.rowBytes} bytes copied into it.`
-      );
     }
   }
 

@@ -31,6 +31,7 @@ import {
   floatModel,
   int8Model,
   abortWord,
+  trapOnceWord,
   trapWord,
 } from "./worker.ts";
 import type {
@@ -887,6 +888,25 @@ describe("embedder, several texts a call", () => {
     expect(results[4]).toStrictEqual({ kind: "failed", reason: "kernel" });
   });
 
+  it("tries a text whose module trapped once more on a fresh instance, and embeds it when that runs", async () => {
+    await upload(int8Model, int8Files);
+    const [a, b] = [0, 1].map((i) => reference.embeddings[i]?.text ?? "");
+    const flaky = `Ein Satz, den eine abgenutzte Instanz nicht schafft: ${trapOnceWord}.`;
+    const [results, alone] = await Promise.all([
+      env.TRAPPING.getByName("trapped-once").embedMany([
+        a ?? "",
+        flaky,
+        b ?? "",
+      ]),
+      env.INT8.getByName("trapped-once").embed(flaky),
+    ]);
+    expect(outcomes(results)).toStrictEqual([
+      int8Bits[0],
+      bitsOf(alone.vector),
+      int8Bits[1],
+    ]);
+  });
+
   it("takes at most 16 texts a call, and refuses more, embedding none", async () => {
     await upload(int8Model, int8Files);
     const stub = env.INT8.getByName("many-bound");
@@ -1018,9 +1038,9 @@ describe("embedder, waking", () => {
         "last",
         "UPDATE token_row SET row = row || x'00' WHERE id = (SELECT MAX(id) FROM token_row)",
       ],
-      ["record-fewer", "UPDATE model_record SET rows = rows - 1"],
-      ["record-more", "UPDATE model_record SET rows = rows + 1"],
-      ["record-width", "UPDATE model_record SET row_bytes = row_bytes + 1"],
+      ["record-fewer", "UPDATE loaded_model SET rows = rows - 1"],
+      ["record-more", "UPDATE loaded_model SET rows = rows + 1"],
+      ["record-width", "UPDATE loaded_model SET row_bytes = row_bytes + 1"],
     ] as const;
     const outcome = await Promise.all(
       cases.map(async ([name, query]) => {
@@ -1058,6 +1078,57 @@ describe("embedder, waking", () => {
     expect([model.name, bitsOf(vector)]).toStrictEqual([
       "fixture-deep-int8",
       deepInt8Bits[0],
+    ]);
+  });
+
+  it("copies its model again after an older release ran another model in its storage, and names each vector by the model that made it", async () => {
+    // An older release rolled back to (one that kept no row count or width)
+    // runs the deep model, whose table has as many rows of the same width
+    // as this one's; then this release runs again.
+    await upload(int8Model, int8Files);
+    const text = reference.embeddings[0]?.text ?? "";
+    const stub = env.INT8.getByName("rolled-back");
+    await stub.embed(text);
+    await evict(stub);
+    await runInDurableObject(env.INT8.getByName("rolled-back"), (_, state) => {
+      const { sql } = state.storage;
+      // What the older release's constructor and copy do, with its files.
+      sql.exec(`CREATE TABLE IF NOT EXISTS loaded_model (
+        id INTEGER PRIMARY KEY CHECK (id = 1), files TEXT NOT NULL, format TEXT NOT NULL)`);
+      state.storage.transactionSync(() => {
+        sql.exec("DELETE FROM loaded_model");
+        sql.exec("DELETE FROM model_part");
+        sql.exec("DELETE FROM token_row");
+        sql.exec(
+          "INSERT INTO model_part (file, part, bytes) VALUES ('tokenizer', 0, ?), ('encoder', 0, ?)",
+          new Uint8Array(tokenizer),
+          new Uint8Array(deepEncoderInt8)
+        );
+        const rows = new Uint8Array(deepTokensInt8).subarray(32);
+        const width = 4 + 128;
+        for (let id = 0; id * width < rows.byteLength; id += 1) {
+          sql.exec(
+            "INSERT INTO token_row (id, row) VALUES (?, ?)",
+            id,
+            rows.subarray(id * width, (id + 1) * width)
+          );
+        }
+        sql.exec(
+          "INSERT INTO loaded_model (id, files, format) VALUES (1, ?, 'int8')",
+          [
+            deepInt8Model.tokenizer.sha256,
+            deepInt8Model.encoder.sha256,
+            deepInt8Model.tokens.sha256,
+          ].join(" ")
+        );
+      });
+    });
+    await evict(env.INT8.getByName("rolled-back"));
+    const { vector, model } =
+      await env.INT8.getByName("rolled-back").embed(text);
+    expect([model.name, bitsOf(vector)]).toStrictEqual([
+      "fixture-int8",
+      int8Bits[0],
     ]);
   });
 });
