@@ -13,6 +13,7 @@ import type {
 } from "./contract.ts";
 import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
+import { readMoment } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import type { WayRunner } from "./recall-counts.ts";
 import { findMemories, memoriesByTheirWords } from "./recall-memories.ts";
@@ -442,9 +443,11 @@ export const find = (
   const exacts = exactsOf(question);
   const terms = termsOf(question);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  // Memories are read as of the moment asked, or now: their two clocks
-  // say what was believed and true then (recall-memories.ts).
-  const memoriesAt = asOf?.getTime() ?? Date.now();
+  // Memories are read as of the moment asked, or the store's read moment
+  // (memories.ts `readMoment`), never the caller's clock: a memory written
+  // in the same millisecond is seen. Their two clocks say what was
+  // believed and true then, one moment for both (recall-memories.ts).
+  const memoriesAt = asOf?.getTime() ?? readMoment(sql);
   const {
     memoryWords,
     ...words

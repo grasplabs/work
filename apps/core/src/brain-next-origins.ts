@@ -1,5 +1,5 @@
 import { eraseSource } from "./brain-next.ts";
-import type { SourceRef } from "./brain-next.ts";
+import type { SourceReaders, SourceRef } from "./brain-next.ts";
 
 // What core hands the Brain comes from an origin core keeps (an upload, a
 // workflow run), and each origin's sources are named here alone, one
@@ -37,21 +37,22 @@ type ErasureReason = Parameters<typeof eraseSource>[1]["reason"];
 const erasingAtOnce = 8;
 
 /**
- * Erases every one of `sources` for `reason`, a few at a time; throws
- * once one failed, after those under way with it settled. Safe to repeat:
- * a source erased before is erased again alike, so whoever retries
- * passes them all again.
+ * Erases every one of `sources` for `reason`, each with the readers its
+ * producer adds it with (which say whose own store it may be in), a few
+ * at a time; throws once one failed, after those under way with it
+ * settled. Safe to repeat: a source erased before is erased again alike,
+ * so whoever retries passes them all again.
  */
 export const eraseSources = async (
   env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
-  sources: readonly SourceRef[],
+  sources: readonly { source: SourceRef; readers: SourceReaders }[],
   reason: ErasureReason
 ): Promise<void> => {
   for (let at = 0; at < sources.length; at += erasingAtOnce) {
     // oxlint-disable-next-line no-await-in-loop -- a few at a time
     const settled = await Promise.allSettled(
-      sources.slice(at, at + erasingAtOnce).map(async (source) => {
-        await eraseSource(env, { source, reason });
+      sources.slice(at, at + erasingAtOnce).map(async ({ source, readers }) => {
+        await eraseSource(env, { source, readers, reason });
       })
     );
     const failed = settled.find((each) => each.status === "rejected");

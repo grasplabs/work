@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import { brainEvalPeople } from "../apps/core/test/fixtures/brain-eval/company.ts";
@@ -6,7 +10,10 @@ import {
   answerInput,
   answerSystem,
   answeringPassageOf,
+  everythingCapOf,
   everythingFor,
+  judgeInput,
+  judgeSystem,
   judgedCorrect,
   outputTokensMax,
   packTokens,
@@ -20,12 +27,23 @@ import {
   brainEvalSet,
   mayRead,
 } from "../apps/core/test/fixtures/brain-eval/set.ts";
+import {
+  realProviderTakes,
+  unreachableModel,
+} from "../apps/core/test/real-providers.ts";
 // By relative path, as the set's own checks read the Brain's chunker
 // (fixtures/brain-eval/set.ts): the repository's root depends on no package.
 // oxlint-disable-next-line no-restricted-imports -- see above
 import { tokensOf } from "../packages/brain-next/src/contract.ts";
-import { modelReport, summarizeModelRun } from "./brain-eval-model-scoring.ts";
+import {
+  keptAs,
+  modelReport,
+  modelResultsFolder,
+  readRun,
+  summarizeModelRun,
+} from "./brain-eval-model-scoring.ts";
 import type { ModelResult } from "./brain-eval-model-scoring.ts";
+import { lastRunIn } from "./brain-eval-scoring.ts";
 
 // The Brain evaluation's run against a model (GRA-1813), its pure parts:
 // what "everything" gives the model, the most a question can cost, and
@@ -132,14 +150,21 @@ describe("the most a question can cost", () => {
       const passage = answeringPassageOf(sources, question);
       const most = questionTokensMax(question, everything.tokens, passage);
       // What the run sends at most: both answers with their contexts (the
-      // pack at its budget), both verdicts with the passage and an answer
-      // at its limit.
+      // pack at its budget), and both verdicts, each with the passage and
+      // the model's answer read back at its limit, `outputTokensMax` of the
+      // provider's own tokens, which the provider counts as it does the
+      // spend the budget is checked against.
+      const verdict =
+        tokensOf(judgeSystem) +
+        tokensOf(judgeInput(question.question, passage, "")) +
+        outputTokensMax;
       const sent =
         tokensOf(answerSystem) +
         tokensOf(answerInput(question.question, everything.text)) +
         tokensOf(answerSystem) +
         tokensOf(answerInput(question.question, "")) +
-        packTokens;
+        packTokens +
+        2 * verdict;
       return most.input >= sent && most.output === 4 * outputTokensMax
         ? []
         : [question.id];
@@ -163,6 +188,49 @@ describe("the most a question can cost", () => {
     });
 
     expect(wrong).toStrictEqual([]);
+  });
+});
+
+/** The cut `value` says, or "refused". */
+const capRead = (value: string | undefined): number | null | "refused" => {
+  try {
+    return everythingCapOf(value);
+  } catch {
+    return "refused";
+  }
+};
+
+describe("what a run is given", () => {
+  it('refuses an "everything" with no room in it, rather than sending none', () => {
+    expect(() => everythingFor(sources, "eva", 0)).toThrow(
+      /leaves no room for it/u
+    );
+  });
+
+  it("reads the cut below the window one way: unset for the window, else a whole number above 0", () => {
+    expect(
+      [undefined, "", "5000", "0", "-1", "1.5", "lots"].map(capRead)
+    ).toStrictEqual([
+      null,
+      null,
+      5000,
+      "refused",
+      "refused",
+      "refused",
+      "refused",
+    ]);
+  });
+
+  it("refuses, before a run, a model of the catalog no run can reach", () => {
+    expect({
+      openai: realProviderTakes("openai/gpt-4"),
+      anthropic: realProviderTakes("anthropic/claude-sonnet-5"),
+      said: unreachableModel("openai/gpt-4"),
+    }).toStrictEqual({
+      openai: false,
+      anthropic: true,
+      said: "A run reaches Anthropic, Mistral and OpenRouter models of the gateway's catalog, not openai/gpt-4",
+    });
   });
 });
 
@@ -258,7 +326,7 @@ describe("scoring the run", () => {
 
     const text = modelReport(
       summarizeModelRun([leaked, result("q", true, true)], price),
-      { asked: 2, stoppedAtBudget: true, spentUsd: 0.5 },
+      { asked: 2, stoppedAtBudget: true, failed: false, spentUsd: 0.5 },
       10
     );
 
@@ -267,5 +335,141 @@ describe("scoring the run", () => {
       stopped: text.includes("STOPPED AT THE BUDGET after 2 of 10 questions"),
       secret: text.includes("the secret salary"),
     }).toStrictEqual({ leak: true, stopped: true, secret: false });
+  });
+
+  it("reports a run a failed call stopped, with the results asked before it", () => {
+    const text = modelReport(
+      summarizeModelRun([result("q", true, false)], price),
+      { asked: 1, stoppedAtBudget: false, failed: true, spentUsd: 0.1 },
+      10
+    );
+
+    expect({
+      failed: text.includes(
+        "FAILED after 1 of 10 questions: a call failed, or the run was cut off (see the run's output). The results above are those asked before it."
+      ),
+      counted: /^All answerable\s+1\s/mu.test(text),
+    }).toStrictEqual({ failed: true, counted: true });
+  });
+
+  it("keeps what a run cut off before its end line printed, marked failed, its spend unknown", () => {
+    const printed = [result("a", true, true), result("b", false, true)];
+
+    const kept = keptAs(null, undefined, printed, 0);
+
+    expect(kept).toStrictEqual({
+      end: { asked: 2, stoppedAtBudget: false, failed: true, spentUsd: null },
+      failed: true,
+      partial: false,
+      suffix: "-failed",
+    });
+  });
+
+  it("keeps a run stopped at its budget as partial, and a whole one as it is", () => {
+    const printed = [result("a", true, true)];
+    const stopped = {
+      asked: 1,
+      stoppedAtBudget: true,
+      failed: false,
+      spentUsd: 1,
+    };
+    const whole = {
+      asked: 1,
+      stoppedAtBudget: false,
+      failed: false,
+      spentUsd: 1,
+    };
+
+    expect([
+      keptAs(0, stopped, printed, 0).suffix,
+      keptAs(0, stopped, printed, 0).partial,
+      keptAs(0, whole, printed, 0).suffix,
+      keptAs(0, whole, printed, 1).suffix,
+      keptAs(0, { ...whole, asked: 2 }, printed, 0).suffix,
+    ]).toStrictEqual(["-partial", true, "", "-failed", "-failed"]);
+  });
+});
+
+/** What a run prints before its first question. */
+const infoLine = `BRAIN_EVAL_MODEL_RUN ${JSON.stringify({
+  set: "s",
+  setDigest: "d",
+  model: "mistral/mistral-large-latest",
+  questions: 10,
+  packTokens: 4000,
+  everythingTokens: null,
+  budgetUsd: 1,
+  packSearch: "words and exact parts",
+})}`;
+
+/** A result line, as a run prints it. */
+const resultLine = (id: string): string =>
+  `BRAIN_EVAL_MODEL_RESULT ${JSON.stringify(result(id, true, false))}`;
+
+describe("reading a run back", () => {
+  it("keeps every whole result once, and counts what it can't read: a cut line, a garbled one, one not a result, two run together", () => {
+    const whole = resultLine("whole");
+    const output = [
+      "workerd says hello",
+      infoLine,
+      whole,
+      // Cut short by a crash.
+      resultLine("cut").slice(0, 60),
+      // Garbled.
+      "BRAIN_EVAL_MODEL_RESULT {not json}",
+      // Whole JSON, not a result.
+      'BRAIN_EVAL_MODEL_RESULT {"id":"odd"}',
+      // A cut line and a whole one run together.
+      `${resultLine("first").slice(0, 70)}${resultLine("second")}`,
+      // Printed twice.
+      whole,
+    ].join("\n");
+
+    const read = readRun(output);
+
+    expect({
+      info: read.info?.model,
+      end: read.end,
+      results: read.results.map(({ id }) => id),
+      unread: read.unread,
+    }).toStrictEqual({
+      info: "mistral/mistral-large-latest",
+      end: undefined,
+      results: ["whole", "second"],
+      unread: 4,
+    });
+  });
+
+  it("refuses a run's info or end line in a format it doesn't read, rather than reading the run as cut off", () => {
+    const strangeEnd = `BRAIN_EVAL_MODEL_END ${JSON.stringify({ asked: 1, finished: true })}`;
+    const strangeInfo = `BRAIN_EVAL_MODEL_RUN ${JSON.stringify({ set: "s" })}`;
+
+    expect(() =>
+      readRun([infoLine, resultLine("a"), strangeEnd].join("\n"))
+    ).toThrow(/can't read/u);
+    expect(() => readRun(strangeInfo)).toThrow(/can't read/u);
+  });
+
+  it("leaves a model run's results out of the evaluation's own baseline", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "brain-eval-"));
+    try {
+      writeFileSync(
+        path.join(dir, "2026-11-12T10-00-00.000Z-0123abcd.json"),
+        "{}"
+      );
+      mkdirSync(path.join(dir, modelResultsFolder));
+      writeFileSync(
+        path.join(
+          dir,
+          modelResultsFolder,
+          "model-2026-11-12T11-00-00.000Z-0123abcd-failed.json"
+        ),
+        "{}"
+      );
+
+      expect(lastRunIn(dir)).toBe("2026-11-12T10-00-00.000Z-0123abcd.json");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

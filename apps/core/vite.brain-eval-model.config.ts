@@ -1,5 +1,4 @@
-import { execFileSync } from "node:child_process";
-
+import { everythingCapOf } from "./test/fixtures/brain-eval/everything.ts";
 import { coreProject } from "./vite.config.ts";
 
 // The Brain evaluation against a real model (GRA-1813), on request only:
@@ -36,16 +35,10 @@ const named = process.env.BRAIN_MODEL;
 const model =
   named === undefined || named === "" ? "mistral/mistral-large-latest" : named;
 
-/** Tokens "everything" is cut at below the model's window; none while unset. */
-const everythingTokens = Number(
-  process.env.BRAIN_EVAL_EVERYTHING_TOKENS ?? "0"
+/** Tokens "everything" is cut at below the model's window; null for the window. */
+const everythingTokens = everythingCapOf(
+  process.env.BRAIN_EVAL_EVERYTHING_TOKENS
 );
-
-const git = (...args: string[]): string =>
-  execFileSync("git", args, {
-    cwd: import.meta.dirname,
-    encoding: "utf-8",
-  }).trim();
 
 /** Hours a run may take before Vitest stops it. */
 const maxHours = 4;
@@ -65,7 +58,6 @@ export default coreProject(
         model,
         budgetUsd,
         everythingTokens,
-        sha: git("rev-parse", "HEAD"),
       },
     },
   }

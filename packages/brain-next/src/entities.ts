@@ -12,7 +12,7 @@ import type {
   Identifier,
   Reader,
 } from "./contract.ts";
-import { visibleSql } from "./memories.ts";
+import { readMoment, visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import { foldForSearch } from "./words.ts";
 
@@ -234,8 +234,8 @@ ORDER BY first, id
 LIMIT ?5`;
 
 /**
- * `?1` the entities asked (JSON rows): each one's earliest name a memory
- * the reader may read gave (by when that memory was learned, then its
+ * `?1` the entities asked (JSON rows), `?4` the moment read at: each
+ * one's earliest name a memory the reader may read, learned by then, gave (by when that memory was learned, then its
  * id), or null.
  */
 const firstNameSql = `
@@ -244,7 +244,7 @@ SELECT asked.value AS entity, (
   SELECT entity_names.value FROM entity_names
   JOIN memories AS m ON m.row = entity_names.memory
   WHERE entity_names.entity = asked.value AND entity_names.type = 'name'
-    AND ${visibleSql("m")}
+    AND m.learned_at <= ?4 AND ${visibleSql("m")}
   ORDER BY m.learned_at, m.id, entity_names.folded
   LIMIT 1
 ) AS name
@@ -254,7 +254,8 @@ FROM json_each(?1) AS asked`;
 export const asSeen = (
   sql: SqlStorage,
   found: readonly { row: number; id: string; kind: string }[],
-  reader: Reader
+  reader: Reader,
+  at: number
 ): Entity[] => {
   if (found.length === 0) {
     return [];
@@ -265,7 +266,8 @@ export const asSeen = (
         firstNameSql,
         JSON.stringify(found.map(({ row }) => row)),
         reader.person,
-        JSON.stringify(reader.groups)
+        JSON.stringify(reader.groups),
+        at
       )
       .toArray()
       .map(({ entity, name }) => [entity, name])
@@ -313,6 +315,7 @@ export interface EntityNamesAsked {
   entity: EntityId;
   reader: Reader;
   at: number;
+  cursorAt: number;
   after?: EntityNamesCursor;
   limit: number;
 }
@@ -324,7 +327,7 @@ export interface EntityNamesAsked {
  */
 export const readEntityNames = (
   sql: SqlStorage,
-  { entity, reader, at, after, limit }: EntityNamesAsked
+  { entity, reader, at, cursorAt, after, limit }: EntityNamesAsked
 ): EntityNamesPage => {
   const [found] = sql
     .exec<{ row: number }>("SELECT row FROM entities WHERE id = ?", entity)
@@ -364,7 +367,7 @@ export const readEntityNames = (
     names,
     more: true,
     next: {
-      at: new Date(at),
+      at: new Date(cursorAt),
       learnedAt: new Date(last.learned),
       memory: last.memory,
       type: nameTypeSchema.parse(last.type),
@@ -377,6 +380,7 @@ export const readEntityNames = (
 export interface EntitiesAsked {
   reader: Reader;
   at: number;
+  cursorAt: number;
   kind?: EntityKind;
   identifier?: Identifier;
   name?: string;
@@ -391,7 +395,7 @@ export interface EntitiesAsked {
  */
 export const findEntities = (
   sql: SqlStorage,
-  { reader, at, kind, identifier, name, after, limit }: EntitiesAsked
+  { reader, at, cursorAt, kind, identifier, name, after, limit }: EntitiesAsked
 ): EntityPage => {
   const asked = [
     ...(identifier === undefined
@@ -413,7 +417,7 @@ export const findEntities = (
       at
     )
     .toArray();
-  const entities = asSeen(sql, found.slice(0, limit), reader);
+  const entities = asSeen(sql, found.slice(0, limit), reader, at);
   const last = found.at(limit - 1);
   if (found.length <= limit || last === undefined) {
     return { entities, more: false };
@@ -422,7 +426,7 @@ export const findEntities = (
     entities,
     more: true,
     next: {
-      at: new Date(at),
+      at: new Date(cursorAt),
       learnedAt: new Date(last.first),
       entity: last.id,
     },
@@ -449,5 +453,5 @@ export const readEntity = (
       JSON.stringify(reader.groups)
     )
     .toArray();
-  return asSeen(sql, found, reader).at(0) ?? null;
+  return asSeen(sql, found, reader, readMoment(sql)).at(0) ?? null;
 };

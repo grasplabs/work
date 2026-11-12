@@ -6,11 +6,10 @@ import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
 import {
   eraseMemoriesHiddenBy,
-  eraseMemoriesOf,
   eraseMemoriesOfSource,
   eraseMemoriesOn,
 } from "./forget.ts";
-import { readerSetKeyOf, rebuildMissingSets } from "./reader-sets.ts";
+import { readerSetKeyOf } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -77,11 +76,11 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 //
 // Memories go with what they rest on (forget.ts): those drawn from a
 // version are hidden with it (memories.ts reads none whose version an
-// erasure holds) and deleted with it; those only an erased person may
-// read are deleted in the erasure's own transaction, and again by a
-// replay, found by the person's SHA-256 they carry (`only_for`) and
-// learned up to the erasure. An entity no memory mentions any more goes
-// with them, its names and identifiers with it.
+// erasure holds) and deleted with it, and again by the replay at start
+// (`replayMemoryErasures`). No memory only one person may read is in the
+// shared store, and a person's own store is erased whole. An entity no
+// memory mentions any more goes with them, its names and identifiers
+// with it.
 //
 // Nothing an erasure answers depends on what it found: it is recorded
 // and answers alike for a source or person that held nothing.
@@ -582,15 +581,6 @@ const apply = (
       } else {
         versions.push(version);
       }
-    }
-  }
-  // The memories only the person may read, learned up to the erasure,
-  // go at once, with names no other memory gives (forget.ts): worked out
-  // again on a replay, from what each memory holds of who alone may read
-  // it, never from what the older copy's readers were.
-  if (entry.kind === "person") {
-    for (const readerSet of eraseMemoriesOf(sql, entry.subject, entry.at)) {
-      dropUnusedReaderSet(sql, readerSet);
     }
   }
   const stopped: string[] = [];
@@ -1219,16 +1209,15 @@ export const deleteStoreObjects = async (
 /**
  * Replays on memories what the erasures the store recorded since it last
  * did covered, as the store starts, in one transaction: a person's (the
- * memories only they read, learned up to it, and those on the versions it
- * hid) and a source's (every memory drawn from it). So an erasure an older
+ * memories on the versions it hid) and a source's (every memory drawn
+ * from it). So an erasure an older
  * release recorded, which knew no memories (an admin's rollback), reaches
  * them after the roll forward; one this release applied finds nothing
  * more. Only those above the mark (`memory_erasure_replay`) are read, and
  * the mark moves past them, so a start with none recorded since reads one
- * row. When it replayed one, the sets of readers an older release dropped
- * in that erasure's batches, which memories still name, are made again
- * from their keys: nothing but an erasure deletes a memory. Answers how
- * many it replayed.
+ * row. (The mark orders by `erasures`' rowid: a column of its own would
+ * be null on every row an older release writes.) Answers how many it
+ * replayed.
  */
 export const replayMemoryErasures = (sql: SqlStorage): number => {
   const through =
@@ -1244,9 +1233,8 @@ export const replayMemoryErasures = (sql: SqlStorage): number => {
       key: string;
       kind: string;
       subject: string;
-      erased_at: number;
     }>(
-      `SELECT rowid, key, kind, subject, erased_at FROM erasures
+      `SELECT rowid, key, kind, subject FROM erasures
       WHERE rowid > ? ORDER BY rowid`,
       through
     )
@@ -1256,12 +1244,9 @@ export const replayMemoryErasures = (sql: SqlStorage): number => {
     return 0;
   }
   const sets: number[] = [];
-  for (const { key, kind, subject, erased_at: at } of recorded) {
+  for (const { key, kind, subject } of recorded) {
     if (kind === "person") {
-      sets.push(
-        ...eraseMemoriesOf(sql, subject, at),
-        ...eraseMemoriesHiddenBy(sql, key)
-      );
+      sets.push(...eraseMemoriesHiddenBy(sql, key));
     } else {
       sets.push(...eraseMemoriesOfSource(sql, subject));
     }
@@ -1269,7 +1254,6 @@ export const replayMemoryErasures = (sql: SqlStorage): number => {
   for (const readerSet of new Set(sets)) {
     dropUnusedReaderSet(sql, readerSet);
   }
-  rebuildMissingSets(sql);
   sql.exec(
     `INSERT INTO memory_erasure_replay (id, through) VALUES (1, ?1)
     ON CONFLICT (id) DO UPDATE SET through = ?1`,

@@ -186,14 +186,24 @@ const foundOf = (
   extra: { words?: number; exact?: number; step?: number }
 ): FoundMemory => ({
   ...memoryOf(row),
-  row: row.row,
   words: extra.words ?? 0,
   exact: extra.exact ?? 0,
   step: extra.step ?? 0,
   context: null,
 });
 
-/** Runs `statement` with the reader's bindings around `first`. */
+/**
+ * Bindings a statement judging memories takes after its five (`?6` to
+ * `?19`, unused here), before `?20`, the moment the dates a fact is true
+ * are judged at (memories.ts `validSql`): unbound, so they are judged at
+ * `?4`, the one moment of the recall.
+ */
+const unusedBindings = 15;
+
+/**
+ * Runs `statement`, one that judges memories (memories.ts `memoriesSql`,
+ * `endedAtSql`), with the reader's bindings around `first`.
+ */
 const run = <T extends Record<string, SqlStorageValue>>(
   sql: SqlStorage,
   statement: string,
@@ -209,7 +219,8 @@ const run = <T extends Record<string, SqlStorageValue>>(
       reader.person,
       JSON.stringify(reader.groups),
       at,
-      limit
+      limit,
+      ...Array.from<null>({ length: unusedBindings }).fill(null)
     )
     .toArray();
 
@@ -314,8 +325,8 @@ const rivalsOf = (
     if (memory.contested && memory.attribute !== null) {
       const { entity } = sql
         .exec<{ entity: number }>(
-          "SELECT entity FROM memories WHERE row = ?",
-          memory.row
+          "SELECT entity FROM memories WHERE id = ?",
+          memory.id
         )
         .one();
       facts.set(JSON.stringify([entity, memory.attribute]), [

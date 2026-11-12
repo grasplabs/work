@@ -1,11 +1,13 @@
-import { exactCandidatesMax, recallLimit } from "./contract.ts";
+import { exactCandidatesMax, listPageMax, recallLimit } from "./contract.ts";
 import type {
   FoundBy,
   FoundMemory,
   FoundPassage,
   Finding,
+  ListedSource,
   OrderedPassage,
   Pack,
+  SourceList,
 } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
 import { byBytes, byNearness } from "./order.ts";
@@ -324,4 +326,41 @@ export const packAcross = (
       .map(({ word }) => word),
   ];
   return { ...pack, notFound };
+};
+
+/**
+ * One page of `limit` (`listPageMax` when left out) from `pages`, one per
+ * store, each the store's page for the same request: merged by `order`,
+ * the stores' own, so the page is the one a single store holding them all
+ * would answer; more follow when a store has more or the merge left some
+ * out. The last item is where the next page starts, in every store.
+ */
+const pageAcross = <T>(
+  pages: readonly { items: readonly T[]; more: boolean }[],
+  order: (a: T, b: T) => number,
+  limit = listPageMax
+): { items: T[]; more: boolean } => {
+  const merged = pages.flatMap(({ items }) => items).toSorted(order);
+  return {
+    items: merged.slice(0, limit),
+    more: merged.length > limit || pages.some(({ more }) => more),
+  };
+};
+
+/**
+ * The page of sources one store holding all of `lists` would list (each a
+ * store's `listSources` of the same request): newest current version
+ * first, then by key, as the stores order them.
+ */
+export const sourcesAcross = (
+  lists: readonly SourceList[],
+  limit?: number
+): SourceList => {
+  const { items, more } = pageAcross(
+    lists.map(({ sources, more: more_ }) => ({ items: sources, more: more_ })),
+    (a: ListedSource, b: ListedSource) =>
+      b.addedAt.getTime() - a.addedAt.getTime() || byBytes(b.source, a.source),
+    limit
+  );
+  return { sources: items, more };
 };

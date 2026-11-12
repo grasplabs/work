@@ -18,6 +18,9 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/** What a store has of a key (`Brain.keyState`). */
+export type KeyState = "free" | "held" | "erased";
+
 /**
  * What an add says that an erasure closed: to an erased source, whose key
  * is closed for good, or for a person alone that began before that
@@ -26,6 +29,13 @@ export const sourceTextMaxBytes = 1_000_000;
  * any other failure by comparing it whole.
  */
 export const erasedSource = "The Brain refused it: what this adds was erased";
+
+/**
+ * What a person's own store erased whole answers an add, or any call that
+ * would write: they were erased, for good, so the add is refused as
+ * `erasedSource` is, and never tried again.
+ */
+export const storeErased = "The Brain refused it: this store was erased";
 
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
@@ -1398,6 +1408,17 @@ const someText = (max: number) =>
   wellFormedString().regex(/\S/u, { message: "Holds no text" }).max(max);
 
 /**
+ * A name of an entity: some text, at most `valueMaxLength` characters, and
+ * no longer than that once folded as search folds it (`foldForSearch`:
+ * compatibility forms such as "ﬃ" expand), so every name an add keeps
+ * fits a `readEntityNames` cursor, which holds a name folded.
+ */
+const nameSchema = someText(valueMaxLength).refine(
+  (name) => foldForSearch(name).length <= valueMaxLength,
+  { message: `At most ${valueMaxLength} characters once folded` }
+);
+
+/**
  * An entity an add names, by a key of its own within the add (`key`,
  * which its memories use): the known entity `id`, or else one found by
  * its exact identifiers, the first entity of its kind holding any of
@@ -1410,7 +1431,7 @@ export const newEntitySchema = z.strictObject({
   key: wellFormedString().min(1).max(64),
   id: entityIdSchema.optional(),
   kind: z.enum(entityKinds),
-  names: z.array(someText(valueMaxLength)).max(namesPerEntityMax).default([]),
+  names: z.array(nameSchema).max(namesPerEntityMax).default([]),
   identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
 });
 export type NewEntity = z.input<typeof newEntitySchema>;
@@ -1596,18 +1617,26 @@ export interface Memory {
 
 /**
  * Where a page of `readMemories` ended: the moment the first page was
- * read (`at`: its `asOf`, or then), at which every later page is read
- * too, so nothing changed since skips or repeats an item; and its last
+ * read (`at`: its `asOf`, or then) and the moment what the store learned
+ * was read at (`learned`: the earlier of that and the moment the read was
+ * given; store-produced, passed back untouched, and never after `at`), at
+ * which every later page is read too; and its last
  * memory's place in the order (its attribute, whether the reader saw it
  * confirmed, when it was learned, its id). The next page starts after it.
  */
-export const memoriesCursorSchema = z.strictObject({
-  at: z.date(),
-  attribute: wellFormedString().min(1).max(64).nullable(),
-  confirmed: z.boolean(),
-  learnedAt: z.date(),
-  memory: memoryIdSchema,
-});
+export const memoriesCursorSchema = z
+  .strictObject({
+    at: z.date(),
+    learned: z.date(),
+    attribute: wellFormedString().min(1).max(64).nullable(),
+    confirmed: z.boolean(),
+    learnedAt: z.date(),
+    memory: memoryIdSchema,
+  })
+  .refine(({ at, learned }) => learned.getTime() <= at.getTime(), {
+    message: "Learned after the moment it reads at",
+    path: ["learned"],
+  });
 export type MemoriesCursor = z.infer<typeof memoriesCursorSchema>;
 
 /**
@@ -1806,7 +1835,9 @@ export const entityNamesCursorSchema = z.strictObject({
   learnedAt: z.date(),
   memory: memoryIdSchema,
   type: z.enum(["name", "email", "ref"]),
-  folded: wellFormedString().max(1000),
+  // As a name's folded form is held to (`nameSchema`); identifiers fold to
+  // no more than they are (an email lowercased, a reference as written).
+  folded: wellFormedString().max(valueMaxLength),
 });
 export type EntityNamesCursor = z.infer<typeof entityNamesCursorSchema>;
 
@@ -1951,14 +1982,13 @@ export interface ProposalPage {
 export type MemoryFoundBy = "words" | "entities" | "contested";
 
 /**
- * A memory one store found for a recall: its row in that store and what
- * its way orders it by, as the way's statement gave them; its passage
+ * A memory one store found for a recall, with what its way orders it by,
+ * as the way's statement gave them; its passage
  * around its quote (`context`: the chunk of its version holding the
  * quote, or none), and for the entities way how many steps from an
  * entity the question names (0 to 2).
  */
 export interface FoundMemory extends Memory {
-  row: number;
   words: number;
   exact: number;
   step: number;
@@ -2096,6 +2126,15 @@ export interface Brain {
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
+   * What this store has of the key `source`, whoever may read it: `erased`
+   * when an erasure closed it, `held` when a version of it is kept
+   * (current or history), `free` when it was never given it. For the host
+   * only, before it keeps a source in another store (one person's own):
+   * a key lives in one store. A person's own store erased whole holds
+   * nothing: `free`.
+   */
+  keyState: (source: SourceId) => Promise<KeyState>;
+  /**
    * The sources whose current version the reader may read, among those
    * whose key starts with one of the prefixes asked: newest first by when
    * their current version was added, then by key, a page at a time. Each
@@ -2230,18 +2269,37 @@ export interface Brain {
    * answers what it added.
    */
   addMemories: (memories: NewMemories) => Promise<AddedMemories>;
-  /** The memories about an entity the reader may read (`MemoriesRead`). */
+  /**
+   * A page of the memories about an entity the reader may read
+   * (`MemoriesRead`).
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by id. Nothing the reader may not read is ever returned.
+   */
   readMemories: (request: MemoriesRequest) => Promise<MemoriesRead>;
   /**
    * The contested facts the reader may read, those of the entity given or
    * any: never one only memories hidden from the reader would contest.
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by id. Nothing the reader may not read is ever returned.
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
    * Retires one of the reader's own memories (its lineage is the reader's
    * person, as writer) that they may read and that is current for them: it
-   * stops being current from now on, and stays as history. Nothing else
-   * changes: a memory it had ended stays ended. One already retired
+   * stops being current from now on, and stays as history. It no longer
+   * ends older memories, which may become current again. One already retired
    * answers `done` again, so a retry never reads as not found; one ended
    * otherwise, expired included, answers `nothing`, as one not theirs.
    */
@@ -2258,11 +2316,27 @@ export interface Brain {
   /**
    * The entities the reader may see that match, in the order of the first
    * memory they may read that mentions each.
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by entity id. Nothing the reader may not read is ever returned.
    */
   findEntities: (request: EntitiesRequest) => Promise<EntityPage>;
   /**
    * A page of the names and identifiers of an entity the reader may see
    * (`EntityNamesPage`).
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by type and value. Nothing the reader may not read is ever returned.
    */
   readEntityNames: (request: EntityNamesRequest) => Promise<EntityNamesPage>;
   /** An entity, if the reader may see it; null alike when there is none. */
@@ -2292,6 +2366,20 @@ export type StoreKind =
   | { kind: "shared" }
   | { kind: "person"; person: string }
   | { kind: "unknown" };
+
+/**
+ * What erasing a person's own store whole answers while it is still
+ * deleting: its record written and its storage gone, its files waiting
+ * out the time an add under way has to write one. The expected answer
+ * for a while after every such erasure, not a failure: the host keeps the
+ * erasure pending and calls again (`isStillDeleting`).
+ */
+export const stillDeleting =
+  "The Brain erased this store and is still deleting its files: erase it again";
+
+/** Whether `error` is the answer `stillDeleting`, as it crosses RPC. */
+export const isStillDeleting = (error: unknown): boolean =>
+  error instanceof Error && error.message === stillDeleting;
 
 /**
  * Whose the store named `name` is. A name is all a store knows of itself

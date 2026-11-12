@@ -52,8 +52,9 @@ const seenOf = (
 
 /**
  * A page of the card of the entity `entity` as `reader` sees it as of
- * `at` (milliseconds), after `after`, from at most `limit` memories; or
- * null when they may see no such entity.
+ * `at` (milliseconds, the store's read moment or the cursor's: store.ts
+ * `#pageMoments`, as `readMemories` is read), after `after`, from at most
+ * `limit` memories; or null when they may see no such entity.
  */
 export const readCard = (
   sql: SqlStorage,
@@ -61,12 +62,16 @@ export const readCard = (
     entity,
     reader,
     at,
+    cursorAt,
+    learned,
     after,
     limit,
   }: {
     entity: EntityId;
     reader: Reader;
     at: number;
+    cursorAt: number;
+    learned: number;
     after?: MemoriesCursor;
     limit: number;
   }
@@ -75,7 +80,7 @@ export const readCard = (
   if (found === undefined) {
     return null;
   }
-  const [card] = asSeen(sql, seenOf(sql, reader, [found.row]), reader);
+  const [card] = asSeen(sql, seenOf(sql, reader, [found.row]), reader, at);
   if (card === undefined) {
     return null;
   }
@@ -83,6 +88,8 @@ export const readCard = (
     entity: card.id,
     reader,
     at,
+    cursorAt,
+    learned,
     history: false,
     ...(after === undefined ? {} : { after }),
     limit,
@@ -127,7 +134,8 @@ export const readCard = (
           JSON.stringify([...new Set(relations.map(({ other }) => other))])
         )
         .toArray(),
-      reader
+      reader,
+      at
     ).map((other) => [other.id, other])
   );
   return {
