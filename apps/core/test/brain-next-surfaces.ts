@@ -2454,6 +2454,37 @@ const memoryProbes = {
       }),
     ];
   },
+  readEntityNames: async (probing) => {
+    const { reader } = probing;
+    const fixture = await memoryFixture(probing);
+    const read = async (
+      name: string,
+      entity: string,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await store().readEntityNames({ entity, reader }),
+        about
+      );
+    return [
+      await read("an entity no one added", crypto.randomUUID(), "nothing"),
+      await read(
+        "an entity only hidden memories name",
+        fixture.hidden,
+        "hidden"
+      ),
+      await read(
+        "an entity drawn from a hidden source",
+        fixture.drawn,
+        "hidden"
+      ),
+      await read(
+        "the reader's own, which hidden memories also name",
+        fixture.seen
+      ),
+    ];
+  },
   readEntity: async (probing) => {
     const { reader } = probing;
     const fixture = await memoryFixture(probing);

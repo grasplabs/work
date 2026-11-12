@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "23f2ebdf-be0c-4bcb-bbbd-50adec002d80",
+  "id": "4cb18778-ca36-4415-9419-676cd7371971",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -1002,6 +1002,35 @@
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "memory_erasure_replay": {
+      "name": "memory_erasure_replay",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "through": {
+          "name": "through",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "memory_erasure_replay_one": {
+          "name": "memory_erasure_replay_one",
+          "value": "id = 1"
+        }
+      }
     },
     "memory_extractions": {
       "name": "memory_extractions",

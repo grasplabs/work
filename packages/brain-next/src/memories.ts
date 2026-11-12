@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { memoryTypes, recallLimit, speakerSchema } from "./contract.ts";
+import {
+  factSidesShown,
+  memoryTypes,
+  recallLimit,
+  speakerSchema,
+} from "./contract.ts";
 import type {
   ContestedCursor,
   ContestedFact,
@@ -457,9 +462,10 @@ export const readMemories = (
  * `?1` the entity's row or null, `?6` the most facts, `?7` 1 to go on
  * after the fact whose place is `?8` (when its first memory the reader
  * may read was learned), `?9` (its entity's id) and `?10` (its
- * attribute): the current, contested memories of one-value attributes, of
- * the facts in that order, so where a fact stands, and whether it is
- * listed, depends on nothing hidden.
+ * attribute), `?11` the most sides of a fact to give: the current,
+ * contested memories of one-value attributes, of the facts in that order,
+ * so where a fact stands, and whether it is listed, depends on nothing
+ * hidden; each fact's first `?11` sides in `readMemories`' order.
  */
 // Its cost: without an entity, every current one-value memory the reader
 // may read is judged (with its ending and its rivals) before the facts
@@ -486,10 +492,17 @@ page AS (
   ORDER BY first, about, attribute
   LIMIT ?6
 )
-SELECT rows.* FROM rows
-JOIN page ON page.entity_row = rows.entity_row AND page.attribute = rows.attribute
-ORDER BY page.first, page.about, page.attribute, rows.confirmation IS NULL,
-  rows.learned_at DESC, rows.id DESC`,
+SELECT * FROM (
+  SELECT rows.*, page.first AS fact_first,
+    row_number() OVER (
+      PARTITION BY rows.entity_row, rows.attribute
+      ORDER BY rows.confirmation IS NULL, rows.learned_at DESC, rows.id DESC
+    ) AS side
+  FROM rows
+  JOIN page ON page.entity_row = rows.entity_row AND page.attribute = rows.attribute
+)
+WHERE side <= ?11
+ORDER BY fact_first, about, attribute, side`,
 });
 
 /**
@@ -519,7 +532,7 @@ export const listContested = (
   if (entity !== undefined) {
     const found = entityRowOf(sql, entity);
     if (found === undefined) {
-      return { facts: [], more: false };
+      return { facts: [], at: new Date(at), more: false };
     }
     entityRow = found.row;
   }
@@ -535,32 +548,44 @@ export const listContested = (
     after === undefined ? 0 : 1,
     after?.learnedAt.getTime() ?? 0,
     after?.entity ?? "",
-    after?.attribute ?? ""
+    after?.attribute ?? "",
+    factSidesShown + 1
   )) {
     const key = JSON.stringify([row.entity_row, row.attribute]);
     const fact = facts.get(key) ?? {
       about: row.about,
       attribute: row.attribute ?? "",
       memories: [],
-      first: row.learned_at,
+      more: false,
+      first: Number(row.fact_first),
     };
-    fact.first = Math.min(fact.first, row.learned_at);
-    fact.memories.push(memoryOf(row));
+    if (fact.memories.length < factSidesShown) {
+      fact.memories.push(memoryOf(row));
+    } else {
+      fact.more = true;
+    }
     facts.set(key, fact);
   }
   const all = [...facts.values()];
   const page = all
     .slice(0, limit)
-    .map(({ about, attribute, memories }) => ({ about, attribute, memories }));
+    .map(({ about, attribute, memories, more }) => ({
+      about,
+      attribute,
+      memories,
+      more,
+    }));
+  const moment = new Date(at);
   const last = all.at(limit - 1);
   if (all.length <= limit || last === undefined) {
-    return { facts: page, more: false };
+    return { facts: page, at: moment, more: false };
   }
   return {
     facts: page,
+    at: moment,
     more: true,
     next: {
-      at: new Date(at),
+      at: moment,
       learnedAt: new Date(last.first),
       entity: last.about,
       attribute: last.attribute,

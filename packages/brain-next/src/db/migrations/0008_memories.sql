@@ -79,6 +79,12 @@ CREATE TABLE `memory_confirmed_over` (
 );
 --> statement-breakpoint
 CREATE INDEX `memory_confirmed_over_memory_idx` ON `memory_confirmed_over` (`memory`);--> statement-breakpoint
+CREATE TABLE `memory_erasure_replay` (
+	`id` integer PRIMARY KEY NOT NULL,
+	`through` integer NOT NULL,
+	CONSTRAINT "memory_erasure_replay_one" CHECK(id = 1)
+);
+--> statement-breakpoint
 CREATE TABLE `memory_extractions` (
 	`source` text NOT NULL,
 	`version` integer NOT NULL,
