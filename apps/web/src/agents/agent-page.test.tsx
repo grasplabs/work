@@ -52,6 +52,7 @@ const stephen: Agent = {
   job: "Answers from what the company told Grasp.",
   instructions: "",
   modelRole: null,
+  model: null,
   state: "on",
   changedBy: null,
   changedAt: null,
@@ -65,6 +66,9 @@ const anna: Member = {
   joinedAt: "2026-01-05T09:00:00.000Z",
 };
 const people = [anna];
+
+/** The models the organization chose. */
+const models = ["anthropic/claude-sonnet-4-5"];
 
 /** Core's agents, kept as an admin makes and changes them, and each change asked. */
 const fakeConnections = () => {
@@ -102,6 +106,7 @@ const fakeConnections = () => {
       const made: Agent = {
         id: `agent-${agents.length}`,
         ...input,
+        model: input.model ?? null,
         state: "on",
         changedBy: "admin",
         changedAt: "2026-11-12T09:00:00.000Z",
@@ -232,7 +237,7 @@ const Page = ({
     open === "new" ? "overview" : (open.tab ?? "overview")
   );
   if (open === "new") {
-    return <NewAgent />;
+    return <NewAgent models={models} />;
   }
   const agent = data.agents.find(({ name }) => name === open.agent);
   if (agent === undefined) {
@@ -243,6 +248,7 @@ const Page = ({
       agent={agent}
       editable={editable}
       first={agent.id === data.agents.at(0)?.id}
+      models={models}
       onTab={setTab}
       people={people}
       settings={data.settings[agent.id]}
@@ -419,6 +425,7 @@ const claire = {
   job: "Chases unpaid invoices.",
   instructions: "Answer only about invoices.",
   face: "stephen",
+  model: null,
   modelRole: null,
 };
 
