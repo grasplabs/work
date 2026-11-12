@@ -12,9 +12,10 @@ import { installBuiltinBlueprint } from "./app-blueprints.ts";
 import { installShippedSkills } from "./brain-skills.ts";
 import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
 import { inJurisdiction } from "./durable-objects.ts";
-import { graspSkills, syncGraspSkills } from "./knowledge/grasp-skills.ts";
-import type { GraspSkill } from "./knowledge/grasp-skills.ts";
+import { syncGraspSkills } from "./knowledge/grasp-skills.ts";
 import { releaseContracts } from "./release-contracts.ts";
+import { shippedSkills } from "./shipped-skills.ts";
+import type { ShippedSkill } from "./shipped-skills.ts";
 import { ensureReleaseContract } from "./workflow-catalog.ts";
 
 // What ships with the release, installed once per release on the first
@@ -61,7 +62,8 @@ import { ensureReleaseContract } from "./workflow-catalog.ts";
 export interface ReleaseFingerprint {
   blueprintsDigest: string;
   contracts: readonly CatalogContractDefinition[];
-  skills: readonly GraspSkill[];
+  /** Grasp's own skills, each by its name (shipped-skills.ts). */
+  skills: readonly ShippedSkill[];
 }
 
 /** What a release installs: this one's unless a test passes another. */
@@ -76,7 +78,7 @@ export interface Release extends ReleaseFingerprint {
 export const thisRelease: ReleaseFingerprint = {
   blueprintsDigest,
   contracts: releaseContracts,
-  skills: graspSkills,
+  skills: shippedSkills,
 };
 
 /**
@@ -88,9 +90,6 @@ export const loadBuiltinRelease = async (): Promise<Release> => {
   const { default: blueprints } = await import("#blueprints");
   return { ...thisRelease, blueprints };
 };
-
-/** A Grasp skill's file, after its folder's name. */
-const skillFile = /\/SKILL\.md$/u;
 
 /** Where the singleton keeps the fingerprint of what it installed. */
 const installedKey = "installed";
@@ -163,7 +162,7 @@ export const fingerprintOf = async (of: ReleaseFingerprint): Promise<string> =>
       knowledgeSchema,
       blueprints: of.blueprintsDigest,
       contracts: of.contracts,
-      skills: of.skills.map(({ path, text }) => ({ path, text })),
+      skills: of.skills.map(({ name, text }) => ({ name, text })),
       // The skills go into the Brain too (GRA-1826): a release whose
       // skills didn't change installs them there once.
       skillsIn: ["knowledge", "brain"],
@@ -186,15 +185,12 @@ export const installBuiltins = async (
   }
   const blueprints = await installBlueprints(env, of.blueprints);
   const contracts = await installContracts(env, of.contracts);
-  const skills = await syncGraspSkills(env, of.skills);
-  // The same skills, by their folder's name (`<name>/SKILL.md`).
-  const brainSkills = await installShippedSkills(
+  // Knowledge keeps each at `<name>/SKILL.md`, until the cutover.
+  const skills = await syncGraspSkills(
     env,
-    of.skills.map(({ path, text }) => ({
-      name: path.replace(skillFile, ""),
-      text,
-    }))
+    of.skills.map(({ name, text }) => ({ path: `${name}/SKILL.md`, text }))
   );
+  const brainSkills = await installShippedSkills(env, of.skills);
   const complete = blueprints && contracts && skills && brainSkills;
   if (complete) {
     await storage.put(installedKey, fingerprint);

@@ -66,6 +66,9 @@ import type { Member } from "./auth/identity.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { shippedSkills } from "./shipped-skills.ts";
+import { skillCards, skillCardsKept } from "./skill-cards.ts";
+import type { SkillCardText } from "./skill-cards.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
 // people or teams: core names them as principals, a person by their user
@@ -1057,32 +1060,44 @@ const releaseReader: Reader = {
   groups: [companyGroup],
 };
 
+/** The names of Grasp's skills this release ships: the only ones it adds. */
+const shippedNames: ReadonlySet<string> = new Set(
+  shippedSkills.map(({ name }) => name)
+);
+
 /**
- * Adds `text` as the next version of `skill`, readable by every member,
- * unless it is the skill's current text already (`changed` false, and
- * nothing written); the one before stays as history. `change` is as
- * `addSource`'s. Refused (`skills.invalid`) when the text isn't a skill
- * named `skill.name` in the Agent Skills format, or is over
- * `instructionsMaxLength` UTF-16 units, an instruction file's limit. Two
- * adds at once may both say `changed`; the store still keeps one version
- * per text in a row.
+ * Adds `text` as the next version of the Grasp skill `name`, one this
+ * release ships, readable by every member, unless it is the skill's
+ * current text already (`changed` false, and nothing written); the one
+ * before stays as history. `change` is as `addSource`'s. Refused
+ * (`skills.invalid`) for a name the release doesn't ship, and when the
+ * text isn't a skill named `name` in the Agent Skills format or is over
+ * `instructionsMaxLength` UTF-16 units, an instruction file's limit: both
+ * fail the same way every time, until another release. Two adds at once
+ * may both say `changed`; the store still keeps one version per text in
+ * a row.
  *
- * For brain-skills.ts only, which adds Grasp's own from the release:
- * nothing here checks who adds, or audits it.
+ * Grasp's own skills only: the release's install (brain-skills.ts) is its
+ * one caller. Nothing here adds a company skill: that write needs its own
+ * authorization and audit (the approved publish, GRA-1754).
  */
-export const addSkill = async (
+export const addShippedSkill = async (
   env: BrainEnv,
-  added: { skill: Skill; change: string; text: string }
+  added: { name: string; change: string; text: string }
 ): Promise<SkillAt & { changed: boolean }> => {
-  const skill = skillErrors.parse("skills.invalid", skillSchema, added.skill);
-  const { change, text } = skillErrors.parse(
+  const { name, change, text } = skillErrors.parse(
     "skills.invalid",
-    z.strictObject({ change: changeSchema, text: instructionsTextSchema }),
-    { change: added.change, text: added.text }
+    z.strictObject({
+      name: skillNameSchema,
+      change: changeSchema,
+      text: instructionsTextSchema,
+    }),
+    added
   );
-  if (skillCardOf(text)?.name !== skill.name) {
+  if (!shippedNames.has(name) || skillCardOf(text)?.name !== name) {
     throw skillErrors.create("skills.invalid");
   }
+  const skill: Skill = { scope: "grasp", name };
   const source = skillKeyOf(skill);
   const [current] = await brain(env).readCurrent({
     sources: [source],
@@ -1107,37 +1122,30 @@ export const addSkill = async (
  */
 const companySkillsMax = 10 * listPageMax;
 
-/**
- * Each skill version's card, by its key and version, which never change
- * (the store never writes a version over); null for one whose text
- * declares no card of its own name. Read once per isolate. A card is only
- * ever used for a version the store answered its reader just now.
- */
-const cards = new Map<string, Omit<SkillCardAt, keyof SkillAt> | null>();
-
-/** Most cards kept: each is small. */
-const cardsKept = 1000;
+/** The isolate's skill cards (skill-cards.ts). */
+const cards = skillCards;
 
 const cardKeyOf = (source: SourceId, version: number): string =>
   `${source}\u0000${version}`;
 
-/** Keeps `card` as the card of `source` at `version`. */
+/**
+ * Keeps `card` as the card of `source` at `version` in the shared cache,
+ * emptying it first when full. A response holds the cards it needs in a
+ * map of its own, so emptying the cache never takes one from it.
+ */
 const keepCard = (
   source: SourceId,
   version: number,
-  card: Omit<SkillCardAt, keyof SkillAt> | null
+  card: SkillCardText | null
 ): void => {
-  if (cards.size >= cardsKept) {
+  if (cards.size >= skillCardsKept) {
     cards.clear();
   }
   cards.set(cardKeyOf(source, version), card);
 };
 
 /** The card `text` declares, if it is the one `source` names. */
-const declaredCard = (
-  source: SourceId,
-  text: string
-): Omit<SkillCardAt, keyof SkillAt> | null => {
+const declaredCard = (source: SourceId, text: string): SkillCardText | null => {
   const card = skillCardOf(text);
   return card !== null && card.name === skillOfKey(source)?.name
     ? { description: card.description }
@@ -1206,23 +1214,31 @@ const companySkillsAs = async (
         : undefined;
   } while (after !== undefined && listed.length < companySkillsMax);
   const kept = listed.slice(0, companySkillsMax);
+  // This response's cards, held here: those cached now, then those read.
+  // The shared cache may be emptied as they are kept (`keepCard`), so the
+  // response never reads from it after this.
+  const known = new Map<string, SkillCardText | null>();
+  for (const { source, version } of kept) {
+    const key = cardKeyOf(source, version);
+    const card = cards.get(key);
+    if (card !== undefined) {
+      known.set(key, card);
+    }
+  }
   const read = await readEachCurrent(
     brain(env),
     reader,
     kept
-      .filter(({ source, version }) => !cards.has(cardKeyOf(source, version)))
+      .filter(({ source, version }) => !known.has(cardKeyOf(source, version)))
       .map(({ source }) => source)
   );
-  const known = new Map(
-    read.map(({ source, version, text }) => {
-      const card = declaredCard(source, text);
-      keepCard(source, version, card);
-      return [cardKeyOf(source, version), card] as const;
-    })
-  );
+  for (const { source, version, text } of read) {
+    const card = declaredCard(source, text);
+    known.set(cardKeyOf(source, version), card);
+    keepCard(source, version, card);
+  }
   return kept.flatMap(({ source, version }) => {
-    const key = cardKeyOf(source, version);
-    const card = known.get(key) ?? cards.get(key);
+    const card = known.get(cardKeyOf(source, version));
     const skill = skillOfKey(source);
     return skill === null || card === undefined || card === null
       ? []
@@ -1288,8 +1304,9 @@ export const listSkillsAs = async (
     });
   const graspRead = await readEachCurrent(brain(env), reader, graspSources);
   const grasp = graspRead.flatMap(({ source, version, text }) => {
-    const key = cardKeyOf(source, version);
-    const card = cards.get(key) ?? declaredCard(source, text);
+    // Read now, so its card is held here before the cache is touched.
+    const card =
+      cards.get(cardKeyOf(source, version)) ?? declaredCard(source, text);
     keepCard(source, version, card);
     const skill = skillOfKey(source);
     return skill === null || card === null

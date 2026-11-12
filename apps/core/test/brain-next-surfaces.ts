@@ -78,6 +78,7 @@ import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
+import { shippedSkills } from "../src/shipped-skills.ts";
 import * as skillShares from "../src/skill-shares.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 
@@ -1476,50 +1477,58 @@ export const coreProbes = {
       "a marked item worked through core's clock after a re-embed"
     )),
   ],
-  // Adds without a check of who adds (brain-skills.ts adds the
-  // release's): a skill every member may read, so only its refusals,
-  // each holding the markers. A skill added with them would be the
-  // company's to read.
-  addSkill: async ({ markers }) => {
+  // Adds Grasp's own skills only, by the names the release ships, a
+  // skill every member may read: the release's own text, which holds no
+  // marker, then refusals each holding the markers. A skill added with
+  // them would be the company's to read.
+  addShippedSkill: async ({ markers }) => {
     const text = markedText(markers);
     const add = async (name: string, added: unknown) =>
       await answer(
         name,
-        async () => await coreBrain.addSkill(env, unchecked(added))
+        async () => await coreBrain.addShippedSkill(env, unchecked(added))
       );
-    const named = `---\nname: probe-${crypto.randomUUID()}\ndescription: ${text}\n---\n${text}`;
-    const plain = `probe-${crypto.randomUUID()}`;
+    const drawing = shippedSkills.find(
+      ({ name }) => name === "draw-a-workflow"
+    );
+    const named = (name: string) =>
+      `---\nname: ${name}\ndescription: ${text}\n---\n${text}`;
     return [
-      // Holding no marker: every member may read it.
-      await add("a skill of its own name", {
-        skill: { scope: "company", name: plain },
+      await add("the release's own", {
+        name: "draw-a-workflow",
         change: crypto.randomUUID(),
-        text: `---\nname: ${plain}\ndescription: A probe.\n---\nSteps.`,
+        text: drawing?.text,
       }),
       await add("text with no card", {
-        skill: { scope: "company", name: "unwritten" },
+        name: "draw-a-workflow",
         change: crypto.randomUUID(),
         text,
       }),
       await add("a card of another name", {
-        skill: { scope: "company", name: "unwritten" },
+        name: "draw-a-workflow",
         change: crypto.randomUUID(),
-        text: named,
+        text: named("run-a-baseline"),
+      }),
+      await add("a name the release doesn't ship", {
+        name: "unwritten",
+        change: crypto.randomUUID(),
+        text: named("unwritten"),
       }),
       await add("too much text", {
-        skill: { scope: "company", name: "unwritten" },
+        name: "draw-a-workflow",
         change: crypto.randomUUID(),
-        text: named.padEnd(instructionsMaxLength + 1, " x"),
+        text: named("draw-a-workflow").padEnd(instructionsMaxLength + 1, " x"),
       }),
       await add("a name of the markers", {
-        skill: { scope: "grasp", name: markers.join("\n") },
+        name: markers.join("\n"),
         change: crypto.randomUUID(),
-        text: named,
+        text: named("draw-a-workflow"),
       }),
-      await add("an unknown scope named by the markers", {
-        skill: { scope: markers.join(""), name: "unwritten" },
+      await add("a scope named by the markers", {
+        name: "draw-a-workflow",
+        scope: markers.join(""),
         change: crypto.randomUUID(),
-        text: named,
+        text: named("draw-a-workflow"),
       }),
     ];
   },
