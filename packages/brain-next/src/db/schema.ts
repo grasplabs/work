@@ -576,9 +576,7 @@ export const unembeddable = sqliteTable(
 // company export's files back into an empty shared store.
 
 /**
- * An export: whose (`scope`, and for a person the SHA-256 of their id, as
- * the erasure ledger names them: no plain id outlives an erasure of them),
- * and how far it has come. It is stale once the erasure ledger names a
+ * An export of the company's Brain, and how far it has come. It is stale once the erasure ledger names a
  * version it holds (`export_sources`), and its files are deleted
  * (exports.ts).
  */
@@ -586,13 +584,8 @@ export const exportsTable = sqliteTable(
   "exports",
   {
     id: text().primaryKey(),
-    scope: text({ enum: ["company", "person"] }).notNull(),
-    /** The SHA-256 of the person's id, in hex: for a person's export only. */
-    subject: text(),
     /** The deployment it is of, as the host names it: its manifest says so. */
     deployment: text().notNull(),
-    /** The person's set of readers when it started: null when they had none. */
-    readerSet: integer("reader_set"),
     /** The last version's row it takes: what was there when it started. */
     upTo: integer("up_to").notNull(),
     /** The last version's row written to a part. */
@@ -606,10 +599,7 @@ export const exportsTable = sqliteTable(
     startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
     finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
   },
-  (table) => [
-    index("exports_state_idx").on(table.state, table.finishedAt),
-    check("exports_scope", sql`${table.scope} IN ('company', 'person')`),
-  ]
+  (table) => [index("exports_state_idx").on(table.state, table.finishedAt)]
 );
 
 /**
@@ -661,10 +651,17 @@ export const restores = sqliteTable("restores", {
   manifest: text().notNull(),
   /** Parts checked so far, in a first pass before anything is written. */
   checked: integer().notNull(),
+  /** Whether a part checked so far failed: the restore fails once all are checked. */
+  damaged: integer({ mode: "boolean" }).notNull().default(false),
+  /**
+   * When it failed: the last version's row the store held then. A restart
+   * is refused once anything was added past it.
+   */
+  heldTo: integer("held_to"),
   /** The next part to write, once every part is checked. */
   part: integer().notNull(),
   restored: integer().notNull(),
-  state: text({ enum: ["running", "done", "failed"] }).notNull(),
+  state: text({ enum: ["running", "done", "failed", "abandoned"] }).notNull(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
 });

@@ -1025,17 +1025,6 @@ export const personErasureSchema = z.strictObject({
 export type PersonErasure = z.infer<typeof personErasureSchema>;
 
 /**
- * Whose content an export holds: the company's (everything the shared
- * store holds that more than one person, or no one known, may read), or
- * one person's (what they alone may read).
- */
-export const exportScopeSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("company") }),
-  z.strictObject({ kind: z.literal("person"), person: principalSchema }),
-]);
-export type ExportScope = z.infer<typeof exportScopeSchema>;
-
-/**
  * What every refusal of the store starts with: a call refused for what it
  * asked, never a fault. A host answers one as such (a conflict), not as an
  * error of its own.
@@ -1077,10 +1066,9 @@ export const deploymentSchema = wellFormedString().min(1).max(256);
 /** An export, by its id: random, made by the store. */
 export const exportIdSchema = z.uuid();
 
-/** An export to ask about, and for whom: only its own scope finds it. */
+/** An export to ask about. */
 export const exportRequestSchema = z.strictObject({
   id: exportIdSchema,
-  scope: exportScopeSchema,
 });
 export type ExportRequest = z.infer<typeof exportRequestSchema>;
 
@@ -1089,7 +1077,7 @@ export const exportFileNameSchema = z
   .string()
   .regex(/^(?:manifest\.json|part-\d{4}\.jsonl)$/u);
 
-/** A file of an export to read, and for whom. */
+/** A file of an export to read. */
 export const exportFileRequestSchema = exportRequestSchema.extend({
   file: exportFileNameSchema,
 });
@@ -1114,7 +1102,12 @@ export interface ExportStatus {
 /** Where a restore of a company export is, and how many versions it restored. */
 export interface RestoreStatus {
   export: string;
-  state: "running" | "done" | "failed";
+  /**
+   * Failed restores start again while the store holds nothing but what they
+   * wrote; abandoned once it took anything, or the ledger names what the
+   * export holds.
+   */
+  state: "running" | "done" | "failed" | "abandoned";
   restored: number;
 }
 
@@ -1381,23 +1374,18 @@ export interface Brain {
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
   /**
-   * Starts an export of `scope`, written by the queue a part a run as
-   * files in the store's part of the bucket (exports.ts): what the store
-   * holds as it starts, every version with its readers, current or
-   * history. A company's leaves out every version one person alone may
-   * read; a person's holds only those. A person's own store takes only its
-   * person's. While one of the same scope is being written, it answers
-   * with that one.
+   * Starts an export of the company's Brain for `deployment`, written by
+   * the queue a part a run as files in the store's part of the bucket
+   * (exports.ts): what the store holds as it starts, every version a group
+   * may read, with its readers, current or history. While one is being
+   * written, it answers with that one. A person's own store refuses.
    */
-  startExport: (
-    scope: ExportScope,
-    deployment: string
-  ) => Promise<{ id: string }>;
-  /** Where an export of the request's scope is: null for any other, alike. */
+  startExport: (deployment: string) => Promise<{ id: string }>;
+  /** Where an export is: null when there is none. */
   exportStatus: (request: ExportRequest) => Promise<ExportStatus | null>;
   /**
-   * A file of a done export of the request's scope, as written: null for
-   * any other, alike, and for one an erasure made stale.
+   * A file of a done export, as written: null for any other, alike, and
+   * for one the ledger made stale.
    */
   exportFile: (request: ExportFileRequest) => Promise<string | null>;
   /**

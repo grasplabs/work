@@ -26,18 +26,14 @@ CREATE TABLE `export_sweep` (
 --> statement-breakpoint
 CREATE TABLE `exports` (
 	`id` text PRIMARY KEY NOT NULL,
-	`scope` text NOT NULL,
-	`subject` text,
 	`deployment` text NOT NULL,
-	`reader_set` integer,
 	`up_to` integer NOT NULL,
 	`cursor` integer NOT NULL,
 	`state` text NOT NULL,
 	`parts` integer NOT NULL,
 	`versions` integer NOT NULL,
 	`started_at` integer NOT NULL,
-	`finished_at` integer,
-	CONSTRAINT "exports_scope" CHECK("exports"."scope" IN ('company', 'person'))
+	`finished_at` integer
 );
 --> statement-breakpoint
 CREATE INDEX `exports_state_idx` ON `exports` (`state`,`finished_at`);--> statement-breakpoint
@@ -45,6 +41,8 @@ CREATE TABLE `restores` (
 	`export` text PRIMARY KEY NOT NULL,
 	`manifest` text NOT NULL,
 	`checked` integer NOT NULL,
+	`damaged` integer DEFAULT false NOT NULL,
+	`held_to` integer,
 	`part` integer NOT NULL,
 	`restored` integer NOT NULL,
 	`state` text NOT NULL,

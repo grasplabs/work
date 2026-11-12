@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5ce33b4c-563a-4a7f-ad0f-1ca4720afc0f",
+  "id": "e5cdb146-51b8-47ce-9bc8-c47cc8d8330b",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -564,32 +564,11 @@
           "notNull": true,
           "autoincrement": false
         },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "deployment": {
           "name": "deployment",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "reader_set": {
-          "name": "reader_set",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "up_to": {
@@ -655,12 +634,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "exports_scope": {
-          "name": "exports_scope",
-          "value": "\"exports\".\"scope\" IN ('company', 'person')"
-        }
-      }
+      "checkConstraints": {}
     },
     "files": {
       "name": "files",
@@ -837,6 +811,21 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "damaged": {
+          "name": "damaged",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "held_to": {
+          "name": "held_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "part": {

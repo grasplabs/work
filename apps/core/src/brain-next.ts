@@ -26,7 +26,6 @@ import type {
   Brain,
   ErasureReason,
   Embedders,
-  ExportScope,
   ExportStatus,
   HandOverPriority,
   HandOverResult,
@@ -678,50 +677,25 @@ export const erasePerson = async (
 };
 
 // Exports and restores (@grasp-os/brain-next exports.ts, restore.ts): the
-// company's Brain, for an admin, and a person's own, for that person
-// alone. Who asks is core's to say, from the session it verified
-// (brain-next-exports.ts): an admin for the company, or a person for
-// their own, never one person for another. The Brain serves each export
-// only to an ask of its own scope, so an export of another scope answers
-// as one that doesn't exist.
-//
-// A person's export is, for now, the shared store's half alone: what the
-// shared store holds that they alone may read. Their own store's half
-// needs that store to wake itself for its queue, which core doesn't wire
-// yet (GRA-1762): it would wait without a word. Core's route says so.
+// company's Brain, for an admin; core's route checks who asks
+// (brain-next-exports.ts). A person's own export is for later, with the
+// store per person.
 
-/** Who asks for an export: an admin for the company, or a person for their own. */
-export type ExportAsker =
-  | { kind: "company" }
-  | { kind: "person"; personId: string };
+const exportRefSchema = z.strictObject({ id: exportIdSchema });
 
-const exportAskerSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("company") }),
-  z.strictObject({ kind: z.literal("person"), personId: idSchema }),
-]);
-
-/** Which store an export is in: the shared one, for now the only one. */
-const exportStores = ["shared"] as const;
-export type ExportStore = (typeof exportStores)[number];
-
-const exportRefSchema = z.strictObject({
-  store: z.enum(exportStores),
-  id: exportIdSchema,
-});
-
-/** An export, by its store and id. */
+/** An export, by its id. */
 export type ExportRef = z.infer<typeof exportRefSchema>;
 
 const exportFileRefSchema = exportRefSchema.extend({
   file: exportFileNameSchema,
 });
 
-/** A file of an export, by its store, id and name. */
+/** A file of an export, by its id and name. */
 export type ExportFileRef = z.infer<typeof exportFileRefSchema>;
 
 type ExportEnv = Pick<
   Env,
-  "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION" | "DB" | "CLIENT_ID"
+  "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION" | "CLIENT_ID"
 >;
 
 /**
@@ -734,31 +708,15 @@ type ExportEnv = Pick<
 const deploymentOf = (env: Pick<Env, "CLIENT_ID">): string =>
   env.CLIENT_ID ?? "local";
 
-/** `asker` as the Brain's scope. */
-const scopeOf = (asker: ExportAsker): ExportScope =>
-  asker.kind === "company"
-    ? { kind: "company" }
-    : { kind: "person", person: asker.personId };
-
 /**
- * Starts an export for `asker` (above), or answers with the one of theirs
- * being written: the company's, or a person's, in the shared store. A
- * person is refused once they have no current membership.
+ * Starts an export of the company's Brain, or answers with the one being
+ * written. Refused as `brain.export_refused` while a restore runs.
  */
 export const startBrainExport = async (
-  env: ExportEnv,
-  asker: ExportAsker
-): Promise<{ store: ExportStore; id: string }[]> => {
-  const asking = checked(exportAskerSchema, asker);
-  if (asking.kind === "person") {
-    await readerOf(env, asking.personId);
-  }
+  env: ExportEnv
+): Promise<{ id: string }> => {
   try {
-    const { id } = await brain(env).startExport(
-      scopeOf(asking),
-      deploymentOf(env)
-    );
-    return [{ store: "shared", id }];
+    return await brain(env).startExport(deploymentOf(env));
   } catch (error) {
     // Refused for the state the Brain is in (a restore runs).
     if (error instanceof Error && error.message.startsWith(refusalPrefix)) {
@@ -768,30 +726,22 @@ export const startBrainExport = async (
   }
 };
 
-/** Where `asker`'s export `ref` is: null for any other, alike. */
+/** Where export `ref` is: null when there is none. */
 export const brainExportStatus = async (
   env: ExportEnv,
-  asker: ExportAsker,
   ref: ExportRef
-): Promise<ExportStatus | null> => {
-  const asking = checked(exportAskerSchema, asker);
-  const { id } = checked(exportRefSchema, ref);
-  return await brain(env).exportStatus({ id, scope: scopeOf(asking) });
-};
+): Promise<ExportStatus | null> =>
+  await brain(env).exportStatus(checked(exportRefSchema, ref));
 
 /**
- * A file of `asker`'s done export `ref`: null for any other, alike, and
- * for one an erasure made stale.
+ * A file of done export `ref`: null for any other, alike, and for one the
+ * ledger made stale.
  */
 export const brainExportFile = async (
   env: ExportEnv,
-  asker: ExportAsker,
   ref: ExportFileRef
-): Promise<string | null> => {
-  const asking = checked(exportAskerSchema, asker);
-  const { id, file } = checked(exportFileRefSchema, ref);
-  return await brain(env).exportFile({ id, file, scope: scopeOf(asking) });
-};
+): Promise<string | null> =>
+  await brain(env).exportFile(checked(exportFileRefSchema, ref));
 
 /**
  * Starts restoring the company's export `exportId` into the shared store,

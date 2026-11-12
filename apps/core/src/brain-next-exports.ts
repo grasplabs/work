@@ -15,7 +15,6 @@ import {
   startBrainExport,
   startBrainRestore,
 } from "./brain-next.ts";
-import type { ExportAsker } from "./brain-next.ts";
 import { installShippedSkills } from "./brain-skills.ts";
 import { errorResponse } from "./errors.ts";
 
@@ -24,18 +23,16 @@ import { errorResponse } from "./errors.ts";
 // signed-in person's request from core's own pages, never another site's,
 // and every file an attachment never cached.
 //
-// - `POST /api/brain/exports` `{ scope }`: starts an export. The company's
-//   (`company`) for an admin, never staff; a person's own (`own`) for the
-//   signed-in person alone: no request names anyone else, so no admin can
-//   start or read one for someone.
-// - `GET /api/brain/exports?scope=&store=&id=`: where it is, with its files
-//   once done; `&file=` downloads one.
+// - `POST /api/brain/exports`: starts an export of the company's Brain,
+//   for an admin, never staff. A person's own export is for later.
+// - `GET /api/brain/exports?id=`: where it is, with its files once done;
+//   `&file=` downloads one. For an admin, never staff.
 // - `POST /api/brain/restore` `{ exportId }` and `GET ?id=`: an admin's
 //   restore of the company's export into a shared store that holds nothing.
 //
 // Each start is in the audit log before it applies, with its outcome after;
 // each download before its file is answered. Events name the export's
-// random id, its scope and the kind of file: no content, key or name.
+// random id and the kind of file: no content, key or name.
 
 /** Where exports are started, followed and downloaded. */
 export const brainExportsPath = "/api/brain/exports";
@@ -49,13 +46,7 @@ const sameSiteFetches = new Set(["same-origin", "none"]);
 /** The most bytes a start's body takes. */
 const bodyMaxBytes = 1024;
 
-const scopeSchema = z.enum(["company", "own"]);
-
-const startSchema = z.strictObject({ scope: scopeSchema });
-
 const readSchema = z.strictObject({
-  scope: scopeSchema,
-  store: z.literal("shared"),
   id: z.uuid(),
   file: z
     .string()
@@ -102,20 +93,6 @@ const personOf = async (
 /** Whether `person` may act for the company: an admin of it, never staff. */
 const actsForCompany = (person: Identity): boolean =>
   !person.staff && isAdmin(person.role);
-
-/**
- * Who `scope` asks as: the company for an admin, the person themselves
- * for their own; undefined when they may not.
- */
-const askerOf = (
-  person: Identity,
-  scope: z.infer<typeof scopeSchema>
-): ExportAsker | undefined => {
-  if (scope === "own") {
-    return { kind: "person", personId: person.userId };
-  }
-  return actsForCompany(person) ? { kind: "company" } : undefined;
-};
 
 /** A start's JSON body as `schema` reads it, or undefined. */
 const bodyOf = async <T>(
@@ -178,31 +155,24 @@ const audited = async <T>(
   return value;
 };
 
-/** Starts an export for the signed-in person: the company's, or their own. */
+/** Starts an export of the company's Brain, for an admin. */
 const startExport = async (
-  request: Request,
   env: Env,
   person: Identity,
   requestId: string
 ): Promise<Response> => {
-  const asked = await bodyOf(request, startSchema);
-  if (asked === undefined) {
-    return notFound(requestId);
-  }
-  const asker = askerOf(person, asked.scope);
-  if (asker === undefined) {
-    return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
-  }
-  let exports: Awaited<ReturnType<typeof startBrainExport>>;
+  let started: Awaited<ReturnType<typeof startBrainExport>>;
   try {
-    exports = await audited(
+    started = await audited(
       env,
       (step, outcome) =>
-        entryOf(person, `brain.export.${step}`, requestId, {
-          scope: asked.scope,
-          ...(outcome === undefined ? {} : { outcome }),
-        }),
-      async () => await startBrainExport(env, asker)
+        entryOf(
+          person,
+          `brain.export.${step}`,
+          requestId,
+          outcome === undefined ? {} : { outcome }
+        ),
+      async () => await startBrainExport(env)
     );
   } catch (error) {
     // Refused for the state the Brain is in: a conflict.
@@ -215,19 +185,10 @@ const startExport = async (
     }
     throw error;
   }
-  return answer({
-    exports,
-    ...(asked.scope === "own"
-      ? {
-          // Said plainly, as the export holds it (core's brain-next.ts).
-          holds:
-            "What the company's Brain holds that only you may read. What your own space in the Brain holds is not in this export yet.",
-        }
-      : {}),
-  });
+  return answer(started);
 };
 
-/** Where an export of the signed-in person's is, or one of its files. */
+/** Where an export is, or one of its files. */
 const readExport = async (
   request: Request,
   env: Env,
@@ -238,17 +199,12 @@ const readExport = async (
   if (asked === undefined) {
     return notFound(requestId);
   }
-  const asker = askerOf(person, asked.scope);
-  if (asker === undefined) {
-    return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
-  }
-  const ref = { store: asked.store, id: asked.id };
   if (asked.file === undefined) {
-    const status = await brainExportStatus(env, asker, ref);
+    const status = await brainExportStatus(env, { id: asked.id });
     return status === null ? notFound(requestId) : answer(status);
   }
   const { file } = asked;
-  const body = await brainExportFile(env, asker, { ...ref, file });
+  const body = await brainExportFile(env, { id: asked.id, file });
   if (body === null) {
     return notFound(requestId);
   }
@@ -257,8 +213,6 @@ const readExport = async (
   await appendAuditEvent(
     env,
     entryOf(person, "brain.export.downloaded", requestId, {
-      scope: asked.scope,
-      store: asked.store,
       exportId: asked.id,
       file: file === "manifest.json" ? "manifest" : "part",
     })
@@ -289,8 +243,11 @@ export const brainExportsResponse = async (
   if (person instanceof Response) {
     return person;
   }
+  if (!actsForCompany(person)) {
+    return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
+  }
   return request.method === "POST"
-    ? await startExport(request, env, person, requestId)
+    ? await startExport(env, person, requestId)
     : await readExport(request, env, person, requestId);
 };
 
@@ -347,12 +304,11 @@ export const brainRestoreResponse = async (
   } catch (error) {
     // Refused for the state the Brain is in, not for the request: a
     // conflict, its answer in the audit log as failed.
-    if (brainExportErrors.codeOf(error) === "brain.restore_refused") {
-      return errorResponse(
-        409,
-        brainExportErrors.create("brain.restore_refused"),
-        requestId
-      );
+    // Refused for the state the Brain is in, the skills' install meeting a
+    // restore that began meanwhile among it: a conflict.
+    const code = brainExportErrors.codeOf(error);
+    if (code === "brain.restore_refused" || code === "brain.restoring") {
+      return errorResponse(409, brainExportErrors.create(code), requestId);
     }
     throw error;
   }

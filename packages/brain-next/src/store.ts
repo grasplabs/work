@@ -1,3 +1,4 @@
+import { log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -13,7 +14,6 @@ import {
   exportFileRequestSchema,
   exportIdSchema,
   exportRequestSchema,
-  exportScopeSchema,
   isWholeKey,
   handOverRequestSchema,
   handOverResultSchema,
@@ -36,7 +36,6 @@ import type {
   ErasureReason,
   ExportFileRequest,
   ExportRequest,
-  ExportScope,
   ExportStatus,
   Finding,
   HandOverRequest,
@@ -96,9 +95,7 @@ import {
   exportsDue,
   exportsPrefix,
   exportsStep,
-  personKeyOf,
   startExport,
-  whoseOf,
 } from "./exports.ts";
 import {
   fileGraceMs,
@@ -1202,7 +1199,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     try {
       exportsStep(this.ctx.storage);
     } catch {
-      // Nothing of the error is kept.
+      // One fixed event, nothing of the error: it may be the database's
+      // own words.
+      log.error("brain.exports_step_failed", {});
     }
   }
 
@@ -1416,55 +1415,40 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       : { chunks: [] };
   }
 
-  /** Refuses `scope` on a person's own store unless it is that person's. */
-  #mayExport(scope: ExportScope): void {
-    if (
-      this.#kind.kind === "person" &&
-      (scope.kind !== "person" || scope.person !== this.#kind.person)
-    ) {
-      throw new Error(notTheirs);
-    }
-  }
-
   /**
-   * Starts an export of `scope` (exports.ts), or answers with the one of
-   * that scope being written. A person's own store takes only its
-   * person's, and makes its schema for it.
+   * Starts an export of the company's Brain (exports.ts), or answers with
+   * the one being written. A person's own store refuses: a person's own
+   * export is for later.
    */
-  async startExport(
-    scope: ExportScope,
-    deployment: string
-  ): Promise<{ id: string }> {
-    const asked = checked(exportScopeSchema, scope);
+  async startExport(deployment: string): Promise<{ id: string }> {
     const of = checked(deploymentSchema, deployment);
-    this.#mayExport(asked);
-    const whose = await whoseOf(asked);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
     return await this.#changing(async () => {
-      await this.#readyToWrite();
-      return {
-        id: startExport(this.ctx.storage, whose, personKeyOf(asked), of),
-      };
+      await this.#ready();
+      return { id: startExport(this.ctx.storage, of) };
     });
   }
 
-  /** Where an export of the request's scope is: null for any other, alike. */
+  /** Where an export is: null when there is none. A person's own store refuses. */
   async exportStatus(request: ExportRequest): Promise<ExportStatus | null> {
     const asked = checked(exportRequestSchema, request);
-    this.#mayExport(asked.scope);
-    const whose = await whoseOf(asked.scope);
-    return (await this.#readable())
-      ? exportStatus(this.ctx.storage.sql, asked, whose)
-      : null;
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#ready();
+    return exportStatus(this.ctx.storage.sql, asked);
   }
 
-  /** A file of a done export of the request's scope: null for any other, alike. */
+  /** A file of a done export: null for any other, alike. A person's own store refuses. */
   async exportFile(request: ExportFileRequest): Promise<string | null> {
     const asked = checked(exportFileRequestSchema, request);
-    this.#mayExport(asked.scope);
-    const whose = await whoseOf(asked.scope);
-    return (await this.#readable())
-      ? await exportFile(this.ctx.storage.sql, this.#bucket, asked, whose)
-      : null;
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#ready();
+    return await exportFile(this.ctx.storage.sql, this.#bucket, asked);
   }
 
   /**

@@ -45,72 +45,45 @@ const request = async (
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
 
-const startedSchema = z.object({
-  exports: z.array(z.object({ store: z.literal("shared"), id: z.uuid() })),
-  holds: z.string().optional(),
-});
+const startedSchema = z.object({ id: z.uuid() });
 
 const statusSchema = z.object({
   state: z.string(),
   files: z.array(z.string()),
 });
 
-/** Starts an export of `scope` on `cookie`: its exports by store, and what it says it holds. */
-const start = async (
-  cookie: string,
-  scope: "company" | "own"
-): Promise<{ exports: Record<string, string>; holds?: string }> => {
-  const response = await request(cookie, brainExportsPath, {
-    method: "POST",
-    body: { scope },
-  });
-  const { exports, holds } = startedSchema.parse(await response.json());
-  return {
-    exports: Object.fromEntries(exports.map(({ store, id }) => [store, id])),
-    ...(holds === undefined ? {} : { holds }),
-  };
+/** Starts an export of the company's Brain on `cookie`: its id. */
+const start = async (cookie: string): Promise<string> => {
+  const response = await request(cookie, brainExportsPath, { method: "POST" });
+  const { id } = startedSchema.parse(await response.json());
+  return id;
 };
 
-/** The query of an export of `scope` in `store`. */
-const queryOf = (
-  scope: "company" | "own",
-  store: string,
-  id: string,
-  file?: string
-): string =>
+/** The query of export `id`, or of one of its files. */
+const queryOf = (id: string, file?: string): string =>
   `${brainExportsPath}?${new URLSearchParams({
-    scope,
-    store,
     id,
     ...(file === undefined ? {} : { file }),
   }).toString()}`;
 
 /**
- * Ticks the shared store until each export in `exports` is written, then
- * reads every file of each on `cookie`.
+ * Ticks the shared store until export `id` is written, then reads every
+ * file of it on `cookie`.
  */
-const writtenFiles = async (
-  cookie: string,
-  scope: "company" | "own",
-  exports: Record<string, string>
-): Promise<string[]> => {
+const writtenFiles = async (cookie: string, id: string): Promise<string[]> => {
   await workBrain(env, new Date(), noProducers);
+  const response = await request(cookie, queryOf(id));
+  const status = statusSchema.parse(await response.json());
+  expect(status.state).toBe("done");
   const bodies: string[] = [];
-  for (const [store, id] of Object.entries(exports)) {
-    // oxlint-disable-next-line no-await-in-loop -- one export at a time
-    const response = await request(cookie, queryOf(scope, store, id));
-    // oxlint-disable-next-line no-await-in-loop -- one export at a time
-    const status = statusSchema.parse(await response.json());
-    expect(status.state).toBe("done");
-    for (const file of status.files) {
-      // oxlint-disable-next-line no-await-in-loop -- one file at a time
-      const downloaded = await request(cookie, queryOf(scope, store, id, file));
-      expect(downloaded.headers.get("content-disposition")).toMatch(
-        /^attachment;/u
-      );
-      // oxlint-disable-next-line no-await-in-loop -- one file at a time
-      bodies.push(await downloaded.text());
-    }
+  for (const file of status.files) {
+    // oxlint-disable-next-line no-await-in-loop -- one file at a time
+    const downloaded = await request(cookie, queryOf(id, file));
+    expect(downloaded.headers.get("content-disposition")).toMatch(
+      /^attachment;/u
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one file at a time
+    bodies.push(await downloaded.text());
   }
   return bodies;
 };
@@ -125,7 +98,7 @@ describe(
       const admin = await signedInWithRole(idp, "admin");
       const member = await signedInWithRole(idp, "user");
       const staff = await signedIn(idp, "grasp-staff", staffPerson());
-      const startCompany = { method: "POST", body: { scope: "company" } };
+      const startCompany = { method: "POST" };
       const restore = {
         method: "POST",
         body: { exportId: crypto.randomUUID() },
@@ -155,72 +128,7 @@ describe(
       ]);
     });
 
-    it("gives a person their own export, with only what they alone may read and a plain word of what it holds, which no admin can read (threats 2, 5, 12)", async () => {
-      const admin = await signedInWithRole(idp, "admin");
-      const member = await signedInWithRole(idp, "user");
-      const theirs = `theirs${crypto.randomUUID().replaceAll("-", "")}`;
-      const others = `others${crypto.randomUUID().replaceAll("-", "")}`;
-      await addSource(env, {
-        source: { producer: "upload", id: crypto.randomUUID() },
-        change: "1",
-        text: `Notes of ${theirs}`,
-        readers: { kind: "owner", personId: member.userId },
-      });
-      await addSource(env, {
-        source: { producer: "upload", id: crypto.randomUUID() },
-        change: "1",
-        text: `Notes of ${others}`,
-        readers: { kind: "owner", personId: admin.userId },
-      });
-
-      let exports: Record<string, string> = {};
-      let bodies: string[] = [];
-      let holds: string | undefined;
-      const events = await auditedDuring(async () => {
-        ({ exports, holds } = await start(member.session, "own"));
-        bodies = await writtenFiles(member.session, "own", exports);
-      });
-
-      const all = bodies.join("\n");
-      expect({
-        stores: Object.keys(exports),
-        // Said plainly: their own space's content is not in it yet.
-        saysOwnLeftOut: holds?.includes("not in this export yet"),
-        theirs: all.includes(theirs),
-        others: all.includes(others),
-      }).toStrictEqual({
-        stores: ["shared"],
-        saysOwnLeftOut: true,
-        theirs: true,
-        others: false,
-      });
-      // On record, naming no content.
-      const exportEvents = events.filter(({ action }) =>
-        action.startsWith("brain.export.")
-      );
-      expect(exportEvents.map(({ action }) => action)).toStrictEqual([
-        "brain.export.asked",
-        "brain.export.answered",
-        ...bodies.map(() => "brain.export.downloaded"),
-      ]);
-      expect(JSON.stringify(exportEvents)).not.toContain(theirs);
-
-      // The admin finds none of it, as the company or as themselves.
-      const asAdmin = await Promise.all(
-        [
-          queryOf("company", "shared", exports.shared ?? ""),
-          queryOf("own", "shared", exports.shared ?? ""),
-          queryOf("company", "shared", exports.shared ?? "", "manifest.json"),
-          queryOf("own", "shared", exports.shared ?? "", "manifest.json"),
-        ].map(async (path) => {
-          const { status } = await request(admin.session, path);
-          return status;
-        })
-      );
-      expect(asAdmin).toStrictEqual([404, 404, 404, 404]);
-    });
-
-    it("gives an admin the company's export, without anything one person alone may read (threat 4)", async () => {
+    it("gives an admin the company's export, without anything one person alone may read, on record without its content (threats 4, 12)", async () => {
       const admin = await signedInWithRole(idp, "admin");
       const member = await signedInWithRole(idp, "user");
       const shared = `shared${crypto.randomUUID().replaceAll("-", "")}`;
@@ -238,15 +146,31 @@ describe(
         readers: { kind: "owner", personId: member.userId },
       });
 
-      const { exports } = await start(admin.session, "company");
-      const bodies = await writtenFiles(admin.session, "company", exports);
+      let bodies: string[] = [];
+      const events = await auditedDuring(async () => {
+        bodies = await writtenFiles(admin.session, await start(admin.session));
+      });
       const all = bodies.join("\n");
+      const exportEvents = events.filter(({ action }) =>
+        action.startsWith("brain.export.")
+      );
 
-      expect(Object.keys(exports)).toStrictEqual(["shared"]);
       expect({
         shared: all.includes(shared),
         theirs: all.includes(theirs),
-      }).toStrictEqual({ shared: true, theirs: false });
+        // On record, naming no content.
+        actions: exportEvents.map(({ action }) => action),
+        named: JSON.stringify(exportEvents).includes(shared),
+      }).toStrictEqual({
+        shared: true,
+        theirs: false,
+        actions: [
+          "brain.export.asked",
+          "brain.export.answered",
+          ...bodies.map(() => "brain.export.downloaded"),
+        ],
+        named: false,
+      });
     });
 
     it("answers an export started, and an add made, while a restore runs with a code of their own: a conflict, never an error of core's", async () => {
@@ -265,7 +189,6 @@ describe(
       try {
         const started = await request(admin.session, brainExportsPath, {
           method: "POST",
-          body: { scope: "company" },
         });
         const { code } = z
           .object({ code: z.string() })

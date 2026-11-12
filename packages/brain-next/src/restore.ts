@@ -23,6 +23,7 @@ import {
   manifestFile,
   manifestSchema,
   namesAnySql,
+  partHoldingsOf,
   recordExportSources,
   recordRestoredExport,
   retireIfStale,
@@ -72,8 +73,10 @@ import type { WorkContext } from "./work.ts";
 // there, and it counts only the versions it wrote. A version already there
 // (written by a run the store stopped part-way) is passed over, so a run
 // repeated finds what the last one wrote and ends the same, and a failed
-// restore can always be started again from the same export, whose files
-// are never deleted while its restore runs or failed. It fails rather than
+// restore can be started again from the same export while the store holds
+// nothing but what it wrote: once anything is added, or the ledger names a
+// version the export holds, the restore is given up (`abandoned`), and its
+// export's files are no longer held (exports.ts `exportsStep`). It fails rather than
 // fill the store past its quota (contract.ts `storeBytesMax`). Its export
 // is recorded as one the store has (exports.ts `recordRestoredExport`), so
 // an erasure of what it holds deletes its files once the restore is done.
@@ -90,6 +93,7 @@ const refusals = {
   notEmpty: `${refusalPrefix} a restore goes only into a store that holds nothing`,
   running: `${refusalPrefix} a restore is under way`,
   notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
+  givenUp: `${refusalPrefix} that restore was given up: the store took something since, or the ledger names what the export holds`,
 } as const;
 
 /** A restore's row, as the store keeps it. */
@@ -97,6 +101,7 @@ interface RestoreRow extends Record<string, SqlStorageValue> {
   export: string;
   manifest: string;
   checked: number;
+  damaged: number;
   part: number;
   restored: number;
   state: RestoreStatus["state"];
@@ -124,6 +129,23 @@ export const restoreStatus = (
 };
 
 /**
+ * `?1` a failed restore's export: whether the store took anything but
+ * Grasp's own skills since it failed (`held_to`). Of SQL, so the tick asks
+ * it too (exports.ts).
+ */
+export const addedSinceSql = `EXISTS (
+  SELECT 1 FROM source_versions
+  WHERE source_versions.row > (
+    SELECT coalesce(held_to, 0) FROM restores WHERE restores.export = ?1
+  )
+    AND substr(source_versions.source, 1, ${shippedSkillsPrefix.length})
+      != '${shippedSkillsPrefix}'
+)`;
+
+const addedSince = (sql: SqlStorage, id: string): boolean =>
+  sql.exec(`SELECT 1 WHERE ${addedSinceSql}`, id).toArray().length > 0;
+
+/**
  * Why a restore of `id` may not start now, if it may not: one is under
  * way, or the store holds a version (but for a failed restore of `id`
  * started again, which finds what it wrote).
@@ -135,9 +157,10 @@ const refusalOf = (sql: SqlStorage, id: string): string | undefined => {
   ) {
     return refusals.running;
   }
-  // A failed restore of `id` starts again, whatever it wrote.
+  // A failed restore of `id` starts again while the store holds nothing
+  // but what it wrote.
   if (rowOf(sql, id)?.state === "failed") {
-    return undefined;
+    return addedSince(sql, id) ? refusals.givenUp : undefined;
   }
   // Grasp's own skills, which a release installs, don't count: no export
   // holds them, so a restore never meets them.
@@ -155,7 +178,7 @@ const refusalOf = (sql: SqlStorage, id: string): string | undefined => {
 
 /**
  * Whether this store's own record of export `id` says it may not be
- * restored: a person's, not done, or holding what an erasure took. An
+ * restored: not done, or holding what an erasure took. An
  * export it has no record of (its record lost with the store's storage) is
  * checked by the ledger alone, version by version.
  */
@@ -165,16 +188,10 @@ const unrestorable = (sql: SqlStorage, id: string): boolean => {
     return false;
   }
   const row = sql
-    .exec<{ scope: string; state: string }>(
-      "SELECT scope, state FROM exports WHERE id = ?",
-      id
-    )
+    .exec<{ state: string }>("SELECT state FROM exports WHERE id = ?", id)
     .toArray()
     .at(0);
-  return (
-    row !== undefined &&
-    (row.scope !== "company" || row.state !== "done" || isStale(sql, id))
-  );
+  return row !== undefined && (row.state !== "done" || isStale(sql, id));
 };
 
 /** The key of the restore of `id` on the queue. */
@@ -410,10 +427,14 @@ const settle = (
   state: "done" | "failed"
 ): void => {
   const { sql } = storage;
+  // Failed, it records the last row the store held, so a restart is
+  // refused once anything is added past it.
   const settled = sql
     .exec(
-      `UPDATE restores SET state = ?, finished_at = ?
-      WHERE export = ? AND state = 'running' RETURNING export`,
+      `UPDATE restores SET state = ?1, finished_at = ?2,
+        held_to = CASE WHEN ?1 = 'failed'
+          THEN (SELECT coalesce(max(row), 0) FROM source_versions) END
+      WHERE export = ?3 AND state = 'running' RETURNING export`,
       state,
       Date.now(),
       id
@@ -438,8 +459,45 @@ const settleNow = (
 };
 
 /**
+ * Part `index` of the export `id` checked (the first pass, above): the
+ * versions it holds recorded for the export, from its holdings file and
+ * from its lines when they check, whether or not it does, so an erasure of
+ * any of them reaches the export's files; and the restore marked damaged
+ * when it doesn't, which fails it once every part is checked.
+ */
+const checkPart = async (
+  storage: DurableObjectStorage,
+  bucket: BrainBucket,
+  id: string,
+  index: number,
+  part: Manifest["parts"][number]
+): Promise<void> => {
+  const [lines, holdings] = await Promise.all([
+    partLinesOf(bucket, id, part),
+    partHoldingsOf(bucket, id, index),
+  ]);
+  const fromLines: Held[] = await Promise.all(
+    (lines ?? []).map(
+      async ({ source, version }) => [await subjectOf(source), version] as const
+    )
+  );
+  storage.transactionSync(() => {
+    const { sql } = storage;
+    recordExportSources(sql, id, [...holdings, ...fromLines]);
+    sql.exec(
+      `UPDATE restores SET checked = checked + 1,
+        damaged = damaged OR ?3
+      WHERE export = ?1 AND checked = ?2 AND state = 'running'`,
+      id,
+      index,
+      lines === undefined ? 1 : 0
+    );
+  });
+};
+
+/**
  * One run of a restore: the next part checked, while any is unchecked;
- * then the next part written back.
+ * then, unless one was damaged, the next part written back.
  */
 const restorePart = async (
   id: string,
@@ -459,28 +517,18 @@ const restorePart = async (
     settleNow(storage, id, "done");
     return;
   }
-  const lines = await partLinesOf(bucket, id, part);
-  if (lines === undefined) {
+  if (checking) {
+    await checkPart(storage, bucket, id, index, part);
+    again(1);
+    return;
+  }
+  if (row.damaged === 1) {
     settleNow(storage, id, "failed");
     return;
   }
-  if (checking) {
-    const held: Held[] = await Promise.all(
-      lines.map(
-        async ({ source, version }) =>
-          [await subjectOf(source), version] as const
-      )
-    );
-    storage.transactionSync(() => {
-      recordExportSources(sql, id, held);
-      sql.exec(
-        `UPDATE restores SET checked = checked + 1
-        WHERE export = ? AND checked = ? AND state = 'running'`,
-        id,
-        index
-      );
-    });
-    again(1);
+  const lines = await partLinesOf(bucket, id, part);
+  if (lines === undefined) {
+    settleNow(storage, id, "failed");
     return;
   }
   // A store at its quota fails every write (contract.ts `storeBytesMax`).
@@ -537,6 +585,9 @@ const restorable = async (
 ): Promise<Manifest | RestoreStatus> => {
   const { sql } = storage;
   const before = rowOf(sql, id);
+  if (before?.state === "abandoned") {
+    throw new Error(refusals.givenUp);
+  }
   if (before !== undefined && before.state !== "failed") {
     return statusOf(before);
   }
@@ -587,6 +638,9 @@ export const startRestore = async (
   }
   return storage.transactionSync(() => {
     const started = rowOf(sql, id);
+    if (started?.state === "abandoned") {
+      throw new Error(refusals.givenUp);
+    }
     if (started !== undefined && started.state !== "failed") {
       return statusOf(started);
     }
@@ -601,7 +655,8 @@ export const startRestore = async (
       `INSERT INTO restores (export, manifest, checked, part, restored, state, started_at)
       VALUES (?, ?, 0, 0, 0, 'running', ?)
       ON CONFLICT (export) DO UPDATE SET manifest = excluded.manifest,
-        checked = 0, part = 0, restored = 0, state = 'running',
+        checked = 0, damaged = 0, held_to = NULL, part = 0, restored = 0,
+        state = 'running',
         started_at = excluded.started_at, finished_at = NULL`,
       id,
       JSON.stringify(manifest),
