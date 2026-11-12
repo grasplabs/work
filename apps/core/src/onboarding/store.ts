@@ -414,6 +414,40 @@ const gonePrefix = "gone:";
 /** How long after a purge of the brain failed it is tried again. */
 const purgeRetryMs = 60 * 1000;
 
+/** What the reminder rule (`owesReminder`) reads of one person. */
+interface ReminderFacts {
+  /** Their team isn't off and they aren't away (`takingPart`). */
+  takingPart: boolean;
+  email: string;
+  /** Their link, once out. */
+  link: { deletedAt: string | null } | undefined;
+  /** Their interview is finished. */
+  completed: boolean;
+  /** They withdrew from it, for good. */
+  withdrawn: boolean;
+}
+
+/**
+ * The one rule for whether someone is owed their reminder: taking part
+ * with an address, their link out and not deleted, their interview not
+ * finished, and not withdrawn. The scheduled reminder (`#remindable`),
+ * a failed one sent again and one about to go (`#reminderOwed`) all ask
+ * it, each reading the facts as suits it.
+ */
+const owesReminder = ({
+  takingPart: taking,
+  email,
+  link,
+  completed,
+  withdrawn,
+}: ReminderFacts): boolean =>
+  taking &&
+  email !== "" &&
+  link !== undefined &&
+  link.deletedAt === null &&
+  !completed &&
+  !withdrawn;
+
 /** The days of the week the admin's update goes out: Monday and Thursday. */
 const updateWeekdays: ReadonlySet<number> = new Set([1, 4]);
 
@@ -3216,34 +3250,43 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Whether someone is still owed their reminder, as `#remindable` holds
-   * it, now: taking part with an address, their link out and not deleted,
-   * their interview not finished, and they haven't withdrawn. Read when a
-   * failed reminder is sent again and again as it goes (`#mailWanted`):
-   * they may have finished in between.
+   * Whether `person` is still owed their reminder now (`owesReminder`),
+   * reading only what the rule needs of them: when a failed reminder is
+   * sent again, and again as it goes (`#mailWanted`), since they may have
+   * finished in between.
    */
   #reminderOwed(person: string): boolean {
-    const roster = this.#roster();
-    const one = roster?.people.find(({ id }) => id === person);
-    if (
-      roster === null ||
-      one === undefined ||
-      !takingPart(roster, one) ||
-      one.email === ""
-    ) {
+    const [one] = this.#db
+      .select()
+      .from(people)
+      .where(eq(people.id, person))
+      .all();
+    if (one === undefined) {
       return false;
     }
+    // Their team alone: all `takingPart` reads of the roster.
+    const theirs = this.#db
+      .select()
+      .from(teams)
+      .where(eq(teams.id, one.team))
+      .all();
     const [link] = this.#db
       .select({ deletedAt: links.deletedAt })
       .from(links)
       .where(eq(links.person, person))
       .all();
-    return (
-      link !== undefined &&
-      link.deletedAt === null &&
-      (this.#interviews().get(person)?.completedAt ?? null) === null &&
-      this.#withdrawnAt(person) === null
-    );
+    const [state] = this.#db
+      .select({ completedAt: interviewStates.completedAt })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    return owesReminder({
+      takingPart: takingPart({ teams: theirs, people: [one] }, one),
+      email: one.email,
+      link,
+      completed: (state?.completedAt ?? null) !== null,
+      withdrawn: this.#withdrawnAt(person) !== null,
+    });
   }
 
   /** Whether a mail about to go still should: a reminder only while it is owed. */
@@ -4409,18 +4452,29 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Someone's latest mail, when it failed for good, for staff: which, why
-   * and when. A mail sent or still queued since means it isn't.
+   * and when. A mail sent or still queued since means it isn't, unless it
+   * is their link that failed: the company's admin is told of that
+   * (`#linkMailFailed`) until it goes, so staff see it too, to send it
+   * again, though a reminder reached them since.
    */
   #failedMail(person: string): FailedMail | null {
-    const [latest] = mailAbout(this.ctx.storage.sql, person);
-    if (latest?.state !== "failed") {
+    const mails = mailAbout(this.ctx.storage.sql, person);
+    const [latest] = mails;
+    const link = mails.find(({ key }) => key.startsWith("link/"));
+    let failed: MailState | undefined;
+    if (latest?.state === "failed") {
+      failed = latest;
+    } else if (link?.state === "failed") {
+      failed = link;
+    }
+    if (failed === undefined) {
       return null;
     }
-    const [kind] = latest.key.split("/");
+    const [kind] = failed.key.split("/");
     return {
       kind: kind === "reminder" ? "reminder" : "link",
-      reason: latest.reason,
-      at: latest.settledAt ?? latest.queuedAt,
+      reason: failed.reason,
+      at: failed.settledAt ?? failed.queuedAt,
     };
   }
 
@@ -4955,18 +5009,42 @@ export class Onboarding extends DurableObject<Env> {
    * handed over on paper is the admin's to remind about.
    */
   #remindable(now: string): { person: string; sentAt: string }[] {
+    // Each read once for everyone: the roster can be thousands of people.
+    const roster = this.#roster();
+    if (roster === null) {
+      return [];
+    }
+    const byId = new Map(roster.people.map((person) => [person.id, person]));
+    const states = this.#interviews();
+    const withdrawn = new Set(
+      this.#db
+        .select({ person: participations.person })
+        .from(participations)
+        .where(isNotNull(participations.withdrawnAt))
+        .all()
+        .map(({ person }) => person)
+    );
     return this.#db
       .select()
       .from(links)
       .orderBy(asc(links.sentAt), asc(links.person))
       .all()
-      .filter(
-        (link) =>
+      .filter((link) => {
+        const one = byId.get(link.person);
+        return (
           link.remindedAt === null &&
           dayOf(now) >=
             addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays) &&
-          this.#reminderOwed(link.person)
-      )
+          one !== undefined &&
+          owesReminder({
+            takingPart: takingPart(roster, one),
+            email: one.email,
+            link,
+            completed: (states.get(link.person)?.completedAt ?? null) !== null,
+            withdrawn: withdrawn.has(link.person),
+          })
+        );
+      })
       .map(({ person, sentAt }) => ({ person, sentAt }));
   }
 

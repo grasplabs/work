@@ -1,6 +1,7 @@
 import { addDays } from "@grasp-os/shared/admin/org-record";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -585,6 +586,113 @@ describe("the interview link emails", () => {
         [`${pol}@acme.test`, "reminder"],
       ],
     });
+  });
+
+  it("show staff a failed link the admin is told of, though a reminder reached them since, so staff can send it again", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    const start = startMonday();
+    // Vic's link fails; the admin puts his address right before reminder
+    // day, so the reminder reaches him.
+    const mail = await captureMail(store, "E_RECIPIENT_SUPPRESSED");
+    const vicAt = async (email: string) =>
+      await api.onboarding.confirmRoster({
+        teams: [{ id: "law", name: "Legal", lead: null }],
+        people: [{ id: "vic", name: "Vic", email, team: "law" }],
+      });
+    await vicAt("vic@acme.test");
+    await api.onboarding.savePlan({ start, days: 14 });
+    await adminCommands().setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    await store.releaseDue(morning(start));
+    await store.deliverMail(Date.parse(morning(start)));
+    await vicAt("vic@acme-mail.test");
+    await store.remindDue(morning(start, 3));
+    await store.deliverMail(Date.parse(morning(start, 3)));
+    /** What the admin and staff are told of Vic's mail. */
+    const told = async () => {
+      const links = await api.onboarding.links();
+      const snapshot = await adminSnapshot();
+      return {
+        admin: links.find((link) => link.person === "vic")?.mailFailed,
+        staff:
+          snapshot.links.find((link) => link.person === "vic")?.failedMail
+            ?.kind ?? null,
+      };
+    };
+    const before = await told();
+    await adminCommands().sendMailAgain("vic");
+    await store.deliverMail(Date.parse(morning(start, 3)));
+    const after = await told();
+    expect({
+      tried: mail.tried.map(whichTo),
+      before,
+      after,
+    }).toStrictEqual({
+      tried: [
+        ["vic@acme.test", "link"],
+        ["vic@acme-mail.test", "reminder"],
+        ["vic@acme-mail.test", "link"],
+      ],
+      before: { admin: true, staff: "link" },
+      after: { admin: false, staff: null },
+    });
+  });
+
+  it("remind a company of hundreds with work that grows with its size, not with its size squared", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    await captureMail(store);
+    const size = 300;
+    const ids = Array.from({ length: size }, (_, index) => `big${index}`);
+    await api.onboarding.confirmRoster({
+      teams: [{ id: "big", name: "Operations", lead: null }],
+      people: ids.map((id) => ({
+        id,
+        name: id,
+        email: `${id}@acme.test`,
+        team: "big",
+      })),
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    await store.savePlan(
+      { start: addDays(today, -1), days: 14 },
+      { type: "system" }
+    );
+    await adminCommands().setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    await store.releaseDue();
+    await store.deliverMail();
+    // The rows the store's own database reads while it reminds them all.
+    const cursors: { rowsRead: number }[] = [];
+    await runInDurableObject(store, (_instance, state) => {
+      const { sql } = state.storage;
+      const exec = sql.exec.bind(sql);
+      Reflect.set(sql, "exec", (...args: Parameters<typeof exec>) => {
+        const cursor = exec(...args);
+        cursors.push(cursor);
+        return cursor;
+      });
+    });
+    const reminded = await store.remindDue(
+      `${addDays(today, 5)}T08:00:00.000Z`
+    );
+    await runInDurableObject(store, (_instance, state) => {
+      Reflect.deleteProperty(state.storage.sql, "exec");
+    });
+    const rowsRead = cursors.reduce((sum, { rowsRead: n }) => sum + n, 0);
+    expect({
+      reminded: reminded.length,
+      // About 40 a person now; 640 a person when each one read the whole
+      // roster and every interview again (2,000 people: millions of rows).
+      withinBound: rowsRead < size * 100,
+    }).toStrictEqual({ reminded: size, withinBound: true });
   });
 });
 
