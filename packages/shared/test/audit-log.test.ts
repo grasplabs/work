@@ -217,4 +217,13 @@ describe("audit event types", () => {
       ].map((action) => typeOf(action))
     ).toStrictEqual(["permission", "permission", "action"]);
   });
+
+  it("files a staff member's lookup of an erasure as a read, whatever it answered", () => {
+    expect(
+      ["erased", "erasing", "not_erased", "unavailable", "failed"].map(
+        (outcome) =>
+          typeOf("admin.brain.erasure.looked_up", { kind: "person", outcome })
+      )
+    ).toStrictEqual(["read", "read", "read", "read", "read"]);
+  });
 });

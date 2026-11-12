@@ -132,6 +132,10 @@ const typeRules: readonly {
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.
   { action: "staff.accessed", type: "read" },
+  // A Grasp staff member asking whether a source or a person was erased
+  // from the client's Brain (core's brain-report.ts): a read of its
+  // erasure ledger, whatever it answered.
+  { action: "admin.brain.erasure.looked_up", type: "read" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },
   // A purge rewriting answers, or forgetting who gave them.

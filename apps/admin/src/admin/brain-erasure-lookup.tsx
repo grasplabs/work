@@ -23,6 +23,8 @@ import { useId, useState } from "react";
 
 import { brainErasureFn } from "../clients/brain-functions.ts";
 import type { BrainErasureResult } from "../clients/brain.ts";
+import { answerKept, answerShown } from "./erasure-answer.ts";
+import type { LookupAnswer } from "./erasure-answer.ts";
 import { Section } from "./section.tsx";
 
 const kinds = [
@@ -84,29 +86,36 @@ export const BrainErasureLookupSection = ({
   const [kind, setKind] = useState<Kind>("source");
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
-  const [said, setSaid] = useState<{ text: string; wrong: boolean } | null>(
-    null
-  );
+  const [answer, setAnswer] = useState<LookupAnswer | null>(null);
+  const [lastAsked, setLastAsked] = useState(0);
+  // Only the answer to the lookup submitted last, while it is still what
+  // is typed (erasure-answer.ts).
+  const said = answerShown(answer, kind, typed, lastAsked);
   const lookUp = () => {
     const name = typed.trim();
     if (name === "") {
       return;
     }
+    const asked = lastAsked + 1;
+    const lookedUp = kind;
+    setLastAsked(asked);
+    setAnswer(null);
     setBusy(true);
-    setSaid(null);
     void (async () => {
       let next = { text: "That didn't work: try again.", wrong: true };
       try {
         next = saidOf(
-          kind,
+          lookedUp,
           await brainErasureFn({
-            data: { clientId, lookup: lookupOf(kind, name) },
+            data: { clientId, lookup: lookupOf(lookedUp, name) },
           })
         );
       } catch {
         // Said as failed: nothing of the error is for staff.
       }
-      setSaid(next);
+      setAnswer((kept) =>
+        answerKept(kept, { kind: lookedUp, name, asked, ...next })
+      );
       setBusy(false);
     })();
   };
@@ -133,7 +142,7 @@ export const BrainErasureLookupSection = ({
               )?.value;
               if (chosen !== undefined) {
                 setKind(chosen);
-                setSaid(null);
+                setAnswer(null);
               }
             }}
             value={kind}
@@ -155,6 +164,7 @@ export const BrainErasureLookupSection = ({
             maxLength={256}
             onChange={(event) => {
               setTyped(event.target.value);
+              setAnswer(null);
             }}
             required
             spellCheck={false}
