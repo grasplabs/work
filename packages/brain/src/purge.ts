@@ -80,13 +80,14 @@ import {
   rebuildSearchIndex,
   secureDeleteReady,
 } from "./search-erasure.ts";
+import type { Transcript } from "./transcript-schema.ts";
 import {
   replaceTranscript,
   rewrittenTranscript,
   storedTranscript,
   transcriptTexts,
 } from "./transcripts.ts";
-import type { ReadAt, Transcript } from "./transcripts.ts";
+import type { ReadAt } from "./transcripts.ts";
 import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 
 // Purging personal data from Knowledge, for good, when someone leaves or

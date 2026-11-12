@@ -12,7 +12,7 @@ import { readAgent } from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { readChatFile } from "./chat-files.ts";
 import { agentDocuments, agents } from "./db/core/schema.ts";
-import type { LocalExtractorEnv } from "./knowledge/extract.ts";
+import type { LocalExtractorEnv } from "./files/extract.ts";
 import { requireCompanyAdmin } from "./stephen-reach.ts";
 
 // An agent's documents: files the company's admins give an agent to

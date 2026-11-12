@@ -8,12 +8,9 @@ import type { Writer } from "../src/documents.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import { search } from "../src/search.ts";
-import {
-  listTranscripts,
-  readTranscript,
-  transcriptMaxTurns,
-} from "../src/transcripts.ts";
-import type { Transcript } from "../src/transcripts.ts";
+import { transcriptMaxTurns } from "../src/transcript-schema.ts";
+import type { Transcript } from "../src/transcript-schema.ts";
+import { listTranscripts, readTranscript } from "../src/transcripts.ts";
 import type { Caller } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
