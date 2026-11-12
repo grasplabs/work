@@ -3959,6 +3959,33 @@ export const storeProbes = {
       ),
     ];
   },
+  checkRestore: async (probing) => {
+    const { others } = await exportsFor(probing);
+    return [
+      await answer(
+        "someone else's marked export",
+        async () =>
+          await refusedWith(async () => {
+            await store().checkRestore(others, "test");
+          }),
+        "hidden"
+      ),
+      await answer(
+        "an export no one started",
+        async () =>
+          await refusedWith(async () => {
+            await store().checkRestore(crypto.randomUUID(), "test");
+          }),
+        "nothing"
+      ),
+      await answer("a person's own store", async () => {
+        await personalStore(probing.reader.person).checkRestore(others, "test");
+      }),
+      await answer("an export named by the markers", async () => {
+        await store().checkRestore(probing.markers.join(" "), "test");
+      }),
+    ];
+  },
   restoreStatus: async (probing) => {
     const { others } = await exportsFor(probing);
     return [

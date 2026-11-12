@@ -331,15 +331,17 @@ export const brainRestoreResponse = async (
           exportId: asked.exportId,
           ...(outcome === undefined ? {} : { outcome }),
         }),
-      async () => {
-        // Grasp's own skills first, whatever the release's install
-        // recorded: a restore never writes them (no export holds them) and
-        // adds nothing while it runs, so what is installed now is there
-        // when it is done, also in a store whose storage was lost after
-        // the release installed them.
-        await installShippedSkills(env);
-        return await startBrainRestore(env, asked.exportId);
-      }
+      // Grasp's own skills first, once the Brain says the restore may
+      // start, whatever the release's install recorded: a restore never
+      // writes them (no export holds them) and adds nothing while it runs,
+      // so what is installed now is there when it is done, also in a store
+      // whose storage was lost after the release installed them.
+      async () =>
+        await startBrainRestore(
+          env,
+          asked.exportId,
+          async () => await installShippedSkills(env)
+        )
     );
     return answer(status);
   } catch (error) {

@@ -249,7 +249,7 @@ describe(
       }).toStrictEqual({ shared: true, theirs: false });
     });
 
-    it("answers an export started, and an add made, while a restore runs with a code of their own: a conflict, never an error of core's (review round 2)", async () => {
+    it("answers an export started, and an add made, while a restore runs with a code of their own: a conflict, never an error of core's", async () => {
       const admin = await signedInWithRole(idp, "admin");
       const store = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
       const restoring = crypto.randomUUID();

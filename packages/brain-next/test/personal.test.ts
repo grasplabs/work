@@ -1320,6 +1320,7 @@ const leavingNone = [
   "restoreStatus",
   "searchVectors",
   // A person's own store refuses every restore.
+  "checkRestore",
   "startRestore",
   "workOverview",
 ];

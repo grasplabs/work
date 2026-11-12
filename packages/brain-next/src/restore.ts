@@ -15,13 +15,14 @@ import {
 } from "./contract.ts";
 import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
-import { isErased, keepSubject, subjectOf } from "./erasure.ts";
+import { keepSubject, subjectOf } from "./erasure.ts";
 import {
   exportKeyOf,
   exportLineSchema,
   isStale,
   manifestFile,
   manifestSchema,
+  namesAnySql,
   recordExportSources,
   recordRestoredExport,
   retireIfStale,
@@ -278,15 +279,10 @@ const passedOver = (
   line: ExportLine,
   subject: string
 ): "erased" | "there" | undefined => {
+  // The one rule of what the ledger names (exports.ts `namesAnySql`).
   if (
-    isErased(sql, subject) ||
-    sql
-      .exec(
-        "SELECT 1 FROM erased_versions WHERE subject = ? AND version = ? LIMIT 1",
-        subject,
-        line.version
-      )
-      .toArray().length > 0
+    sql.exec(namesAnySql, JSON.stringify([[subject, line.version]])).toArray()
+      .length > 0
   ) {
     return "erased";
   }
@@ -527,19 +523,18 @@ const restoreWork = defineWork({
 });
 
 /**
- * Starts restoring the company export `id` of `deployment` (above), or
- * answers with the restore of it under way or done; a failed one starts
- * again. Throws, starting nothing, when the store holds a version, a
- * restore is under way, or the export isn't a whole company export of
- * this deployment in the bucket. Asked again in the transaction that
- * records it, after the manifest was read.
+ * The manifest of the company export `id` of `deployment`, if a restore of
+ * it may start now (above), or a restore of it under way or done to answer
+ * with: throws, as `startRestore` refuses, when the store holds a version,
+ * a restore is under way, or the export isn't a whole company export of
+ * this deployment in the bucket.
  */
-export const startRestore = async (
+const restorable = async (
   storage: DurableObjectStorage,
   bucket: BrainBucket,
   id: string,
   deployment: string
-): Promise<RestoreStatus> => {
+): Promise<Manifest | RestoreStatus> => {
   const { sql } = storage;
   const before = rowOf(sql, id);
   if (before !== undefined && before.state !== "failed") {
@@ -555,6 +550,40 @@ export const startRestore = async (
   const manifest = await manifestOf(bucket, id, deployment);
   if (manifest === undefined) {
     throw new Error(refusals.notFound);
+  }
+  return manifest;
+};
+
+/**
+ * Whether a restore of the company export `id` of `deployment` may start
+ * now, starting nothing: throws as `startRestore` refuses. So the host
+ * can prepare the store for it first (core installs Grasp's own skills).
+ */
+export const checkRestore = async (
+  storage: DurableObjectStorage,
+  bucket: BrainBucket,
+  id: string,
+  deployment: string
+): Promise<void> => {
+  await restorable(storage, bucket, id, deployment);
+};
+
+/**
+ * Starts restoring the company export `id` of `deployment` (above), or
+ * answers with the restore of it under way or done; a failed one starts
+ * again. Throws, starting nothing, as `restorable` refuses. Asked again in
+ * the transaction that records it, after the manifest was read.
+ */
+export const startRestore = async (
+  storage: DurableObjectStorage,
+  bucket: BrainBucket,
+  id: string,
+  deployment: string
+): Promise<RestoreStatus> => {
+  const { sql } = storage;
+  const manifest = await restorable(storage, bucket, id, deployment);
+  if (!("format" in manifest)) {
+    return manifest;
   }
   return storage.transactionSync(() => {
     const started = rowOf(sql, id);

@@ -117,7 +117,7 @@ import {
   recallOverviewOf,
 } from "./recall-counts.ts";
 import { find, recall } from "./recall.ts";
-import { restoreStatus, startRestore } from "./restore.ts";
+import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import {
@@ -1481,6 +1481,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#ready();
       return await startRestore(this.ctx.storage, this.#bucket, asked, of);
     });
+  }
+
+  /**
+   * Whether a restore of the company export `id` of `deployment` may start
+   * now, starting nothing (restore.ts `checkRestore`): throws as
+   * `startRestore` refuses.
+   */
+  async checkRestore(id: string, deployment: string): Promise<void> {
+    const asked = checked(exportIdSchema, id);
+    const of = checked(deploymentSchema, deployment);
+    if (this.#kind.kind === "person") {
+      throw new Error(restoresShared);
+    }
+    await this.#ready();
+    await checkRestore(this.ctx.storage, this.#bucket, asked, of);
   }
 
   /** Where the restore of export `id` is: null when none was started. */

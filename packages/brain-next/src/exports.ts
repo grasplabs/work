@@ -127,11 +127,16 @@ const partFileOf = (index: number): string =>
 export const manifestFile = "manifest.json";
 
 /**
- * The versions an export holds, beside its manifest: each by its source's
- * key as the ledger names it and its number. For the sweep, which judges
- * export files the store has no record of by them (above); never served.
+ * The versions part `index` holds, beside it: each by its source's key as
+ * the ledger names it and its number. Written with the part, a part's
+ * worth; for the sweep, which judges export files the store has no record
+ * of by them (above); never served.
  */
-const holdsFile = "holds.json";
+const partHoldsFileOf = (index: number): string =>
+  `part-${String(index).padStart(4, "0")}.holds.json`;
+
+/** A part's holdings' file name. */
+const partHoldsPattern = /^part-\d{4}\.holds\.json$/u;
 
 const holdsSchema = z.array(
   z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().positive()])
@@ -223,7 +228,7 @@ const staleSql = `EXISTS (
 )`;
 
 /** `?1` versions as JSON (`[subject, version]` each): whether the ledger names one. */
-const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
+export const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
 WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
 LIMIT 1`;
 
@@ -460,53 +465,49 @@ const droppable = (sql: SqlStorage, id: string): boolean =>
     .toArray().length === 0;
 
 /**
- * Deleting the files of an export that is stale, failed, expired, or that
- * the store has no record of: a page a run, again while more are left;
- * asked first whether they may still go (`droppable`).
+ * One page of export `id`'s files deleted, when they may go (`droppable`,
+ * asked again after the listing: a restore may have recorded it meanwhile),
+ * and once none is left, the record of what they held, with what kept an
+ * erasure of it unfinished. Again while more are left. Part of an export's
+ * one kind of work (`exportWork`), so never while a run of the same export
+ * still writes a file.
  */
-const dropWork = defineWork({
-  kind: "brain.export_drop",
-  payload: exportPayload,
-  run: async ({ id }, { storage, bucket, again }) => {
-    if (!droppable(storage.sql, id)) {
-      return;
-    }
-    const page = await bucket.list({
-      prefix: exportPrefixOf(id),
-      limit: dropPage,
-    });
-    // Asked again after the listing: a restore may have recorded it
-    // meanwhile. A restore that records it during the delete itself only
-    // meets an export the rule already made stale (a restore refuses one
-    // the store has a row of in any other state), whose files hold what
-    // was erased: it fails, as it should, and starts again on none.
-    if (!droppable(storage.sql, id)) {
-      return;
-    }
-    if (page.objects.length > 0) {
-      await bucket.delete(page.objects.map(({ key }) => key));
-    }
-    if (page.truncated) {
-      again(page.objects.length);
-      return;
-    }
-    // Its files are gone: so is the record of what they held, and with it
-    // what kept an erasure of it unfinished.
-    storage.transactionSync(() => {
-      if (droppable(storage.sql, id)) {
-        storage.sql.exec("DELETE FROM export_sources WHERE export = ?", id);
-      }
-    });
-  },
-});
-
-/** Puts the deletion of export `id`'s files on the queue. */
-const enqueueDrop = (storage: DurableObjectStorage, id: string): void => {
-  enqueueWork(storage, dropWork, {
-    key: keyOf(id),
-    payload: { id },
-    priority: "asked",
+const dropFiles = async (
+  id: string,
+  { storage, bucket, again }: WorkContext
+): Promise<void> => {
+  if (!droppable(storage.sql, id)) {
+    return;
+  }
+  const page = await bucket.list({
+    prefix: exportPrefixOf(id),
+    limit: dropPage,
   });
+  if (!droppable(storage.sql, id)) {
+    return;
+  }
+  if (page.objects.length > 0) {
+    await bucket.delete(page.objects.map(({ key }) => key));
+  }
+  if (page.truncated) {
+    again(page.objects.length);
+    return;
+  }
+  storage.transactionSync(() => {
+    if (droppable(storage.sql, id)) {
+      storage.sql.exec("DELETE FROM export_sources WHERE export = ?", id);
+    }
+  });
+};
+
+/**
+ * Puts export `id`'s work on the queue: writing it while it is being
+ * written, deleting its files once it is not (`exportWork`). Set where that
+ * kind is defined, below: its run writes and retires, and retiring puts
+ * this work on the queue again.
+ */
+let enqueueExport: (storage: DurableObjectStorage, id: string) => void = () => {
+  throw new Error("The export's work is not defined yet");
 };
 
 /**
@@ -531,10 +532,10 @@ const retire = (
       ...params
     )
     .toArray();
-  // What they hold stays on record until their files are gone (`dropWork`).
+  // What they hold stays on record until their files are gone (`dropFiles`).
   for (const { id } of retired) {
     sql.exec("DELETE FROM export_parts WHERE export = ?", id);
-    enqueueDrop(storage, id);
+    enqueueExport(storage, id);
   }
 };
 
@@ -574,36 +575,87 @@ const sweepDue = (sql: SqlStorage): boolean =>
     .toArray().length > 0;
 
 /**
- * What export `id`'s files say it holds (`holdsFile`), as JSON for
- * `namesAnySql`, once its manifest is there too: none when either can't
- * be read.
+ * Whether the export files `key` names, of an export the store has no row
+ * of, may be dropped, by what that one file says (a run reads only it, and
+ * for a part's holdings whether the manifest is there): a manifest that
+ * can't be read or isn't a company's (nothing can serve or restore it); a
+ * part's holdings without a manifest beside them (an export never
+ * finished), or that can't be read, or that the ledger names. Answers how
+ * many reads it took, too. Other files say nothing: their export is judged
+ * by these.
  */
-const holdingsOf = async (
+const orphanFileDrops = async (
+  sql: SqlStorage,
   bucket: BrainBucket,
-  id: string
-): Promise<string | undefined> => {
+  id: string,
+  file: string
+): Promise<{ drop: boolean; reads: number }> => {
+  if (file === manifestFile) {
+    const object = await bucket.get(exportKeyOf(id, file));
+    if (object === null) {
+      return { drop: true, reads: 1 };
+    }
+    try {
+      const manifest = manifestSchema.safeParse(
+        JSON.parse(await object.text())
+      );
+      return {
+        drop: !manifest.success || manifest.data.scope !== "company",
+        reads: 1,
+      };
+    } catch {
+      return { drop: true, reads: 1 };
+    }
+  }
+  if (!partHoldsPattern.test(file)) {
+    return { drop: false, reads: 0 };
+  }
   const [manifest, holds] = await Promise.all([
     bucket.head(exportKeyOf(id, manifestFile)),
-    bucket.get(exportKeyOf(id, holdsFile)),
+    bucket.get(exportKeyOf(id, file)),
   ]);
   if (manifest === null || holds === null) {
-    return undefined;
+    return { drop: true, reads: 2 };
   }
   try {
     const held = holdsSchema.safeParse(JSON.parse(await holds.text()));
-    return held.success ? JSON.stringify(held.data) : undefined;
+    return {
+      drop:
+        !held.success ||
+        sql.exec(namesAnySql, JSON.stringify(held.data)).toArray().length > 0,
+      reads: 2,
+    };
   } catch {
-    return undefined;
+    return { drop: true, reads: 2 };
   }
 };
 
 /**
- * The sweep of `exports/` (above), from where the last run stopped: each
- * export listed that the store has no row of, whose manifest or holdings
- * are gone or whose holdings the ledger names, has the deletion of its
- * files put on the queue. Its place is saved after each export it
- * decides, with what it decided; it reads at most `sweepReads` manifests a
- * run, and goes on again while the listing does.
+ * The sweep's place saved at `key`, in one transaction with the deletion
+ * of export `id`'s files put on the queue when `drop` says so and the store
+ * still has no row of it (a restore may have recorded it meanwhile).
+ */
+const sweptKey = (
+  storage: DurableObjectStorage,
+  id: string,
+  key: string,
+  drop: boolean
+): void => {
+  storage.transactionSync(() => {
+    if (drop && rowOf(storage.sql, id) === undefined) {
+      enqueueExport(storage, id);
+    }
+    storage.sql.exec("UPDATE export_sweep SET cursor = ? WHERE id = 1", key);
+  });
+};
+
+/**
+ * The sweep of `exports/` (above), a key at a time from where the last run
+ * stopped: each file of an export the store has no row of that says its
+ * export may go (`orphanFileDrops`) puts the deletion of that export's
+ * files on the queue. Its place is saved after each key, with what it
+ * decided; it makes at most `sweepReads` reads a run, and goes on again
+ * while the listing does.
  */
 const sweepWork = defineWork({
   kind: "brain.export_sweep",
@@ -622,39 +674,21 @@ const sweepWork = defineWork({
       ...(cursor === null ? {} : { startAfter: cursor }),
       limit: sweepPage,
     });
-    // Each export listed, in order, with the last of its keys on the page.
-    const lastKeys = new Map<string, string>();
-    for (const { key } of page.objects) {
-      const [id] = key.slice(exportsPrefix.length).split("/");
-      if (id !== undefined && id !== "") {
-        lastKeys.set(id, key);
-      }
-    }
     let reads = 0;
-    for (const [id, lastKey] of lastKeys) {
+    for (const { key } of page.objects) {
       if (reads >= sweepReads) {
         again(reads);
         return;
       }
-      const known = rowOf(sql, id) !== undefined;
-      let held: string | undefined = "[]";
-      if (!known) {
-        reads += 1;
-        // oxlint-disable-next-line no-await-in-loop -- one export at a time, a run's few
-        held = await holdingsOf(bucket, id);
+      const [id = "", file = ""] = key.slice(exportsPrefix.length).split("/");
+      const unknown = id !== "" && file !== "" && rowOf(sql, id) === undefined;
+      let judged = { drop: false, reads: 0 };
+      if (unknown) {
+        // oxlint-disable-next-line no-await-in-loop -- a file at a time, a run's few reads
+        judged = await orphanFileDrops(sql, bucket, id, file);
       }
-      storage.transactionSync(() => {
-        // Asked again: a restore may have recorded it meanwhile.
-        const orphan =
-          !known &&
-          rowOf(sql, id) === undefined &&
-          (held === undefined ||
-            sql.exec(namesAnySql, held).toArray().length > 0);
-        if (orphan) {
-          enqueueDrop(storage, id);
-        }
-        sql.exec("UPDATE export_sweep SET cursor = ? WHERE id = 1", lastKey);
-      });
+      reads += judged.reads;
+      sweptKey(storage, id, key, judged.drop);
     }
     if (page.truncated) {
       again(Math.max(reads, 1));
@@ -836,9 +870,10 @@ const fail = (storage: DurableObjectStorage, id: string): void => {
 };
 
 /**
- * Writes what `row` holds and its manifest, from its parts, and settles it
- * done, in one transaction with expiring the done one of its scope it
- * replaces.
+ * Writes `row`'s manifest, from its parts, and settles it done, in one
+ * transaction with expiring the done one of its scope it replaces: unless
+ * it is stale by then (retired as erased) or a restore began since it
+ * started (retired as failed), and then the one before stays.
  */
 const finish = async (
   storage: DurableObjectStorage,
@@ -866,24 +901,36 @@ const finish = async (
       bytes,
     })),
   };
-  // What it holds, before the manifest that makes it whole (`holdsFile`).
-  const held = storage.sql
-    .exec<{ subject: string; version: number }>(
-      "SELECT subject, version FROM export_sources WHERE export = ? ORDER BY subject, version",
-      row.id
-    )
-    .toArray()
-    .map(({ subject, version }) => [subject, version]);
-  await bucket.put(exportKeyOf(row.id, holdsFile), JSON.stringify(held), {
-    httpMetadata: { contentType: "application/json" },
-  });
   await bucket.put(
     exportKeyOf(row.id, manifestFile),
     JSON.stringify(manifest),
     { httpMetadata: { contentType: "application/json" } }
   );
   storage.transactionSync(() => {
-    const done = storage.sql
+    const { sql } = storage;
+    if (rowOf(sql, row.id)?.state !== "writing") {
+      return;
+    }
+    // Stale as it finished: never done, and the one it would replace stays.
+    if (isStale(sql, row.id)) {
+      retire(storage, "erased", "exports.id = ?2", row.id);
+      return;
+    }
+    // A restore began since it started (or runs): what it holds is of the
+    // store before, and must not replace the restored backup.
+    const restoredSince =
+      isRestoring(sql) ||
+      sql
+        .exec(
+          "SELECT 1 FROM restores WHERE started_at >= ? LIMIT 1",
+          row.started_at
+        )
+        .toArray().length > 0;
+    if (restoredSince) {
+      retire(storage, "failed", "exports.id = ?2", row.id);
+      return;
+    }
+    const done = sql
       .exec(
         `UPDATE exports SET state = 'done', finished_at = ?
         WHERE id = ? AND state = 'writing' RETURNING id`,
@@ -977,6 +1024,11 @@ const writePart = async (
   );
   const body = joined(lines);
   const hash = await hashOf(body);
+  await bucket.put(
+    exportKeyOf(id, partHoldsFileOf(row.parts)),
+    JSON.stringify(held),
+    { httpMetadata: { contentType: "application/json" } }
+  );
   await bucket.put(exportKeyOf(id, partFileOf(row.parts)), body, {
     sha256: hash,
     httpMetadata: { contentType: "application/x-ndjson" },
@@ -1016,14 +1068,34 @@ const writePart = async (
   }
 };
 
-/** Writing an export, a part a run (`writePart`). */
+/**
+ * An export's one kind of work, under one key: a part written a run while
+ * it is being written (`writePart`), and its files deleted once it is not
+ * (`dropFiles`: stale, failed, replaced, or unknown to the store). The
+ * queue never runs two of one kind and key at once, so no file of a run
+ * still writing lands after its files were deleted.
+ */
 const exportWork = defineWork({
   kind: "brain.export",
   payload: exportPayload,
   run: async ({ id }, context) => {
-    await writePart(id, context);
+    if (rowOf(context.storage.sql, id)?.state === "writing") {
+      await writePart(id, context);
+      if (rowOf(context.storage.sql, id)?.state === "writing") {
+        return;
+      }
+    }
+    await dropFiles(id, context);
   },
 });
+
+enqueueExport = (storage, id) => {
+  enqueueWork(storage, exportWork, {
+    key: keyOf(id),
+    payload: { id },
+    priority: "asked",
+  });
+};
 
 /**
  * Starts an export of `whose` for `deployment`, of what the store holds
@@ -1082,11 +1154,7 @@ export const startExport = (
       upTo,
       Date.now()
     );
-    enqueueWork(storage, exportWork, {
-      key: keyOf(id),
-      payload: { id },
-      priority: "asked",
-    });
+    enqueueExport(storage, id);
     return id;
   });
 

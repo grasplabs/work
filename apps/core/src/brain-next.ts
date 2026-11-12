@@ -796,17 +796,22 @@ export const brainExportFile = async (
 /**
  * Starts restoring the company's export `exportId` into the shared store,
  * which must hold nothing, the erasure ledger applied over all it brings
- * back; nothing is added to the store while it runs. A restore the Brain
- * won't start (the store holds something, one is under way, or no whole
+ * back; nothing is added to the store while it runs. `prepare` runs once
+ * the Brain says the restore may start, before it does (core's route
+ * installs Grasp's own skills there). A restore the Brain won't start (the store holds something, one is under way, or no whole
  * export of this deployment's company has that id) is refused as
  * `brain.restore_refused`. For an admin only: core's route checks.
  */
 export const startBrainRestore = async (
   env: ExportEnv,
-  exportId: string
+  exportId: string,
+  prepare?: () => Promise<unknown>
 ): Promise<RestoreStatus> => {
   const id = checked(exportIdSchema, exportId);
   try {
+    // Checked first, so `prepare` runs only for a restore that may start.
+    await brain(env).checkRestore(id, deploymentOf(env));
+    await prepare?.();
     return await brain(env).startRestore(id, deploymentOf(env));
   } catch (error) {
     if (error instanceof Error && error.message.startsWith(refusalPrefix)) {

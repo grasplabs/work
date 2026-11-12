@@ -1410,6 +1410,12 @@ export interface Brain {
    * starts again.
    */
   startRestore: (id: string, deployment: string) => Promise<RestoreStatus>;
+  /**
+   * Whether a restore of the company export `id` of `deployment` may start
+   * now, starting nothing: throws as `startRestore` refuses. So the host
+   * can prepare the store first.
+   */
+  checkRestore: (id: string, deployment: string) => Promise<void>;
   /** Where the restore of export `id` is: null when none was started. */
   restoreStatus: (id: string) => Promise<RestoreStatus | null>;
 }

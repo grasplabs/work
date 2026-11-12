@@ -289,14 +289,15 @@ const until = async (done: () => boolean, what: string): Promise<void> => {
  */
 const holdingBucket = async (
   store: Store,
-  holds: (key: string) => boolean
+  holds: (key: string) => boolean,
+  call: (typeof r2Calls)[number] = "get"
 ): Promise<{
   reached: () => Promise<void>;
   release: () => void;
   heal: () => Promise<void>;
 }> => {
   const bucket = env.BRAIN_OBJECTS;
-  const call = async (name: string, args: unknown[]): Promise<unknown> => {
+  const through = async (name: string, args: unknown[]): Promise<unknown> => {
     const method: unknown = Reflect.get(bucket, name);
     if (typeof method !== "function") {
       throw new TypeError(`R2 has no ${name}`);
@@ -310,11 +311,11 @@ const holdingBucket = async (
       name,
       async (...args: unknown[]) => {
         const [key] = args;
-        if (name === "get" && typeof key === "string" && holds(key)) {
+        if (name === call && typeof key === "string" && holds(key)) {
           flags.reached = true;
           await until(() => flags.released, "the read's release");
         }
-        return await call(name, args);
+        return await through(name, args);
       },
     ])
   );
@@ -623,6 +624,82 @@ describe("exports and restores", () => {
         await held.heal();
       }
       expect(served).toBeNull();
+    });
+
+    it("deletes every file of a stale export, a part written while it was being retired among them (threat 9)", async () => {
+      const group = `team:${unique()}`;
+      const erased = `test:${unique()}`;
+      await add(shared(), erased, `first ${unique()}`, team(group));
+      for (let index = 0; index < 49; index += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(shared(), `test:${unique()}`, `filler ${index}`, team(group));
+      }
+      // Its second version is the next part's.
+      await add(shared(), erased, `second ${unique()}`, team(group), "2");
+      const { id } = await shared().startExport(company, "test");
+      const secondPart = `exports/${id}/part-0001.jsonl`;
+      const held = await holdingBucket(
+        shared(),
+        (key) => key === secondPart,
+        "put"
+      );
+      try {
+        const ticking = tick(shared());
+        await held.reached();
+        await shared().eraseSource({ source: erased, reason: "deleted" });
+        // Ticks while the part's write is held: the export is retired.
+        await tick(shared());
+        await tick(shared());
+        held.release();
+        await ticking;
+      } finally {
+        await held.heal();
+      }
+      await tick(shared());
+      await tick(shared());
+      const status = await shared().exportStatus({ id, scope: company });
+      expect({
+        state: status?.state,
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ state: "erased", files: [] });
+    });
+
+    it("keeps the older export when the newer one turns stale as it finishes (threat 6)", async () => {
+      const group = `team:${unique()}`;
+      await add(shared(), `test:${unique()}`, `kept ${unique()}`, team(group));
+      const { id: older } = await shared().startExport(company, "test");
+      await settled(shared(), older, company);
+      const erased = `test:${unique()}`;
+      await add(shared(), erased, `erased ${unique()}`, team(group));
+      const { id: newer } = await shared().startExport(company, "test");
+      const manifest = `exports/${newer}/manifest.json`;
+      const held = await holdingBucket(
+        shared(),
+        (key) => key === manifest,
+        "put"
+      );
+      try {
+        const ticking = tick(shared());
+        await held.reached();
+        await shared().eraseSource({ source: erased, reason: "deleted" });
+        held.release();
+        await ticking;
+      } finally {
+        await held.heal();
+      }
+      await tick(shared());
+      const olderNow = await shared().exportStatus({
+        id: older,
+        scope: company,
+      });
+      const newerNow = await shared().exportStatus({
+        id: newer,
+        scope: company,
+      });
+      expect({ older: olderNow?.state, newer: newerNow?.state }).toStrictEqual({
+        older: "done",
+        newer: "erased",
+      });
     });
 
     it("goes on after the store restarts", async () => {
@@ -1140,8 +1217,8 @@ describe("exports and restores", () => {
         held: await versionsHeld(),
       }).toStrictEqual({
         failed: "failed",
-        // Its manifest, its holdings and the part not lost.
-        filesKept: 3,
+        // Its manifest, each part's holdings and the part not lost.
+        filesKept: 4,
         again: "running",
         done: "done",
         restored: 60,
@@ -1218,6 +1295,35 @@ describe("exports and restores", () => {
         status: "done",
         current: ["a document", "a skill Grasp ships"],
       });
+    });
+
+    it("after a storage loss, deletes a person's export the store has no record of", async () => {
+      await putBack(shared(), emptyShared);
+      const person = unique();
+      const group = `team:${unique()}`;
+      await add(
+        shared(),
+        `test:${unique()}`,
+        `theirs ${unique()}`,
+        alone(person)
+      );
+      await add(shared(), `test:${unique()}`, "the team's", team(group));
+      const scope: ExportScope = { kind: "person", person };
+      const { id: theirs } = await shared().startExport(scope, "test");
+      await settled(shared(), theirs, scope);
+      const { id: whole } = await shared().startExport(company, "test");
+      await settled(shared(), whole, company);
+
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(whole, "test");
+      await restoreSettled(whole);
+      await shared().erasePerson({ person, reason: "person_erased" });
+      for (let ticks = 0; ticks < 5; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+
+      await expect(keysUnder(`exports/${theirs}/`)).resolves.toStrictEqual([]);
     });
 
     it("refuses a person's export, and a person's own store refuses any (threat 4)", async () => {
