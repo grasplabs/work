@@ -17,14 +17,13 @@ import {
 } from "@grasp-os/workflow-schema/format";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
-import { buildingAs, maxCreatesPerTurn } from "./agent-builds.ts";
+import { buildingAs } from "./agent-builds.ts";
 import { asPerson } from "./agent-person.ts";
 import { admitEffect } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { bindWorkflowToApp } from "./app-workflow-bindings.ts";
 import { appFor } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
-import { workspace } from "./durable-objects.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
 import {
@@ -39,15 +38,15 @@ import {
   publishWorkflowDraft,
   workflowDraft,
 } from "./workflow-drafts.ts";
-import { createWorkflowResource } from "./workflow-resources.ts";
 import {
   candidateRunFor,
   startCandidateRun,
 } from "./workflows/candidate-runs.ts";
 
 // Building independent workflows from a chat: `await
-// env.workflowBuild.edit(workflow, { ... })`. The chat's agent creates a
-// JSON workflow for its person, edits its draft, test-runs the draft's
+// env.workflowBuild.edit(workflow, { ... })`. The chat's agent edits the
+// draft of a JSON workflow its person builds (Build it made it, or they
+// did: the agent creates none, chats-rpc.ts `build`), test-runs the draft's
 // checkpoint, publishes it as the workflow's next version, binds that
 // version to an App by an alias, and asks for the permissions it needs:
 // each step exactly the function a person's session calls
@@ -63,8 +62,8 @@ import {
 //   `env.build` needs none: it is the person's own act, bounded by their
 //   role below, and grants nothing.
 // - The agent doing more than its person may. Each call is the person's
-//   own function, with the person's role read now: only a builder creates
-//   a workflow; only the workflow's builders read or edit its draft, test
+//   own function, with the person's role read now: only the workflow's
+//   builders read or edit its draft, test
 //   or publish it; only someone who builds the App and has a role in the
 //   workflow binds it; only its builders ask for its permissions. A
 //   workflow the person has no role in is "unavailable", as one that
@@ -95,16 +94,15 @@ import {
 //   restricted data writes no workflow, as it writes no App code
 //   (`buildingAs`): a definition and a test run's input are
 //   read by every builder of the workflow.
-// - A turn that runs away. A turn creates at most `maxCreatesPerTurn`
-//   Apps and workflows together, as a workflow can't be deleted free (each
-//   counts against its person's quota for good). Test runs have their own
+// - A turn that runs away. It creates nothing: a workflow is made only by
+//   Build it, once, from a plan the person saw. Test runs have their own
 //   limits per person; the rest is bounded by the calls a code run may
 //   make and the runs a turn may make (code-mode.ts).
 // - Two editors at once. An edit names the revision it read and is
 //   refused if anyone, the person in Grasp included, saved since
 //   (`workflow.draft_conflict`): nobody's edit is overwritten.
 // - Its record. Every call is audited as `agent.call`, and what it changes
-//   (`workflow.resource.created`, a draft saved, a version published, an
+//   (a draft saved, a version published, an
 //   App binding, a permission requested) as the agent acting for the
 //   person (`buildingAs` sets the actor).
 
@@ -196,38 +194,6 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
   readonly #admit = async (): Promise<void> => {
     await admitEffect(this.env, this.ctx.props);
   };
-
-  /**
-   * A new workflow owned by the person, named `name`: at most
-   * {@link maxCreatesPerTurn} Apps and workflows a turn, given back when
-   * it creates nothing.
-   */
-  async create(name: unknown): Promise<{ id: string; name: string }> {
-    return await this.#build(
-      "create",
-      async (by) => {
-        const { workspaceId, chatId, runId } = this.ctx.props;
-        const chats = workspace(this.env, workspaceId);
-        await this.#admit();
-        if (!(await chats.takeCreate(chatId, maxCreatesPerTurn, runId))) {
-          throw workflowResourceErrors.create("workflow.creates_exhausted");
-        }
-        try {
-          const created = await createWorkflowResource(
-            this.env,
-            by,
-            name,
-            this.#admit
-          );
-          return { id: created.id, name: created.name };
-        } catch (error) {
-          await chats.releaseCreate(chatId);
-          throw error;
-        }
-      },
-      (created) => ({ workflow: created.id })
-    );
-  }
 
   /**
    * The host catalog's contracts with their terms: what a definition can
@@ -604,8 +570,6 @@ const workflowBuildDeclaration = `/**
 workflowBuild: {
   /** The host catalog's contracts: what a definition's permissions can name besides other workflows. */
   catalog(): Promise<CatalogContract[]>;
-  /** Creates a workflow owned by the person; counts with \`env.build.create\`: at most ${maxCreatesPerTurn} a question. */
-  create(name: string): Promise<{ id: string; name: string }>;
   /** The draft; revision 0 is a starting definition nobody saved yet. */
   draft(workflow: string): Promise<WorkflowDraft>;
   /** Saves the whole draft over the revision you read; refused if anyone saved since. */

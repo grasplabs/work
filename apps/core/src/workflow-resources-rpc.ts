@@ -35,6 +35,7 @@ import {
 } from "./app-workflow-bindings.ts";
 import { askableFor } from "./channels/askable-workflows.ts";
 import { EventSourcesRpc } from "./event-sources-rpc.ts";
+import { makeInProject } from "./projects.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -136,10 +137,18 @@ export class WorkflowResourcesRpc
     return this.#sources;
   }
 
-  async create(name: string): Promise<WorkflowResource> {
+  async create(name: string, project?: string): Promise<WorkflowResource> {
     return await withPerson(
       this.#check,
-      async (person) => await createWorkflowResource(this.#env, person, name)
+      async (person) =>
+        await makeInProject(
+          this.#env,
+          person,
+          project,
+          "workflow",
+          async () => await createWorkflowResource(this.#env, person, name),
+          ({ id }) => id
+        )
     );
   }
 

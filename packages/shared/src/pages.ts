@@ -148,7 +148,7 @@ export interface SidebarApp {
 }
 
 /** Where the host places a surface (spec 34.1). */
-export const surfaceKinds = ["sidebar", "panel", "settings"] as const;
+export const surfaceKinds = ["sidebar", "settings"] as const;
 export type SurfaceKind = (typeof surfaceKinds)[number];
 
 /**

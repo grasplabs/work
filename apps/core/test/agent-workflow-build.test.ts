@@ -2,7 +2,6 @@ import { checkExpression } from "@grasp-os/runtime/check";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { roleErrors } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   stepListPaths,
@@ -108,8 +107,10 @@ describe("the agent building an independent workflow", () => {
   it("drafts, test-runs, publishes and binds a workflow as its person, recorded as the agent acting for them", async () => {
     const name = `summary-${unique()}`;
     const { app, person, chat, grant } = await setUp([]);
+    // Made as Build it makes one: the agent creates none.
+    const made = await person.api.workflowResources.create(name);
     const build = `export default async (self, env) => {
-      const created = await env.workflowBuild.create(${JSON.stringify(name)});
+      const created = { id: ${JSON.stringify(made.id)} };
       const started = await env.workflowBuild.draft(created.id);
       const saved = await env.workflowBuild.edit(created.id, {
         expectedRevision: started.revision,
@@ -171,6 +172,8 @@ describe("the agent building an independent workflow", () => {
       const changes = all.filter(
         ({ action, target }) =>
           action !== "agent.call" &&
+          // Made by the person, as Build it makes it.
+          action !== "workflow.created" &&
           // A run's own events are the system's, a test run's too.
           !action.startsWith("workflow.run.") &&
           (target?.id === built.id || action === "workflow.app_binding.bound")
@@ -195,7 +198,8 @@ describe("the agent building an independent workflow", () => {
 
   it("drafts a model step from the catalog it reads, one step at a time as the canvas does, and publishes it as a catalog binding, not code", async () => {
     const name = `expenses-${unique()}`;
-    const { admin, chat, grant } = await setUp([]);
+    const { admin, person, chat, grant } = await setUp([]);
+    const made = await person.api.workflowResources.create(name);
     const judge = `judge-${unique()}`;
     await admin.api.workflowResources.publishContract({
       key: judge,
@@ -219,7 +223,7 @@ describe("the agent building an independent workflow", () => {
     });
     const build = `export default async (self, env) => {
       const catalog = await env.workflowBuild.catalog();
-      const created = await env.workflowBuild.create(${JSON.stringify(name)});
+      const created = { id: ${JSON.stringify(made.id)} };
       const started = await env.workflowBuild.draft(created.id);
       const saved = await env.workflowBuild.edit(created.id, {
         expectedRevision: started.revision,
@@ -531,26 +535,35 @@ describe("the agent building an independent workflow", () => {
   });
 
   it("builds for a builder with no permission of the agent's own, and nothing for a person who doesn't build", async () => {
-    const calls = tryEach({
-      create: `typeof (await env.workflowBuild.create("made-${unique()}")).id`,
-    });
-    const ungranted = await setUp([codeStep(calls), says("Made.")]);
-    await ungranted.chat.ask("Build a workflow");
-    const user = await setUp([codeStep(calls), says("No.")], "user");
-    await user.grant();
-    await user.chat.ask("Build a workflow");
+    const calls = (workflow: string) =>
+      tryEach({
+        draft: `typeof (await env.workflowBuild.draft(${JSON.stringify(workflow)})).revision`,
+      });
+    const ungranted = await setUp([]);
+    const own = await ungranted.person.api.workflowResources.create(
+      `own-${unique()}`
+    );
+    await fakeProvider(codeStep(calls(own.id)), says("Read."));
+    await ungranted.chat.ask("Work on my workflow");
+    const theirs = await ungranted.builder.api.workflowResources.create(
+      `theirs-${unique()}`
+    );
+    const asUser = await setUp([], "user");
+    await asUser.grant();
+    await fakeProvider(codeStep(calls(theirs.id)), says("No."));
+    await asUser.chat.ask("Work on that workflow");
 
-    const [made] = await codeResults(
+    const [read] = await codeResults(
       ungranted.chat.stub,
       ungranted.chat.chat.id
     );
-    const [forUser] = await codeResults(user.chat.stub, user.chat.chat.id);
+    const [forUser] = await codeResults(asUser.chat.stub, asUser.chat.chat.id);
     expect({
-      ungranted: returned(made?.text),
+      ungranted: returned(read?.text),
       user: returned(forUser?.text),
     }).toStrictEqual({
-      ungranted: { create: "string" },
-      user: { create: roleErrors.create("role.forbidden").message },
+      ungranted: { draft: "number" },
+      user: { draft: unavailable },
     });
   });
 
@@ -647,10 +660,18 @@ describe("the agent building an independent workflow", () => {
   });
 
   it("writes no workflow from a restricted chat, though building needs no grant", async () => {
-    const calls = tryEach({
-      create: `(await env.workflowBuild.create("restricted-${unique()}")).id`,
-    });
-    const { chat } = await setUp([codeStep(calls), says("No.")]);
+    const { chat, person } = await setUp([]);
+    const own = await person.api.workflowResources.create(
+      `restricted-${unique()}`
+    );
+    await fakeProvider(
+      codeStep(
+        tryEach({
+          edit: `(await env.workflowBuild.edit(${JSON.stringify(own.id)}, { expectedRevision: 0, source: ${JSON.stringify(definitionOf())} })).revision`,
+        })
+      ),
+      says("No.")
+    );
     await runInDurableObject(chat.stub, (instance) =>
       instance.restrictChat(chatIdSchema.parse(chat.chat.id))
     );
@@ -659,30 +680,7 @@ describe("the agent building an independent workflow", () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
-      create: permissionErrors.create("permission.restricted").message,
-    });
-  });
-
-  it("creates at most three Apps and workflows a question", async () => {
-    const suffix = unique();
-    const calls = tryEach({
-      app: `(await env.build.create({ name: "One" })).name`,
-      first: `(await env.workflowBuild.create("first-${suffix}")).name`,
-      second: `(await env.workflowBuild.create("second-${suffix}")).name`,
-      third: `await env.workflowBuild.create("third-${suffix}")`,
-    });
-    const { chat, grant } = await setUp([codeStep(calls), says("Enough.")]);
-    await grant();
-
-    await chat.ask("Make many");
-
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
-      app: "One",
-      first: `first-${suffix}`,
-      second: `second-${suffix}`,
-      third: workflowResourceErrors.create("workflow.creates_exhausted")
-        .message,
+      edit: permissionErrors.create("permission.restricted").message,
     });
   });
 });

@@ -1,5 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import type { App, AppStatus } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -8,7 +8,6 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
-import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
 import { appFor, toApp } from "./apps.ts";
 import {
   auditedBatch,
@@ -23,74 +22,44 @@ import {
   stopsUnsettled,
 } from "./workflows/resource-runs.ts";
 
-// Where an App is in its life (`AppStatus`), and its builders moving it:
+// Archiving an App, and restoring it: whether an App is archived is all
+// of its status. An App is open to its builders alone until its first
+// publish makes a version live (app-publish.ts), and from then on to
+// everyone it is shared with too, unless archived: then nobody uses it,
+// its builders included, and nothing of it runs.
 //
-//   draft ──publish──▶ published ──unpublish──▶ draft
-//   draft, published ──archive──▶ archived ──restore──▶ draft
-//
-// The rules each status holds are enforced where an App is reached, not
-// here: only its builders and the admins have a role in a draft or an
-// archived App (app-access.ts); nobody uses an archived App, its builders
-// included (`usableApp`, apps.ts; `functionRoles`); only a published
-// App's triggers fire (workflows/triggers.ts, connector-events.ts,
-// inbound-email.ts), and no run of an archived App starts (`startRun`).
+// The rules are enforced where an App is reached, not here: only its
+// builders and the admins have a role in an App with no live version or
+// an archived one (app-access.ts); nobody uses an archived App
+// (`usableApp`, apps.ts; `functionRoles`); only a live App's triggers
+// fire (workflows/triggers.ts, connector-events.ts, inbound-email.ts),
+// and no run of an archived App starts (`startRun`).
 //
 // Threats, and what stands against each:
-// - Someone with only the user role reaching a draft or archived App by a
-//   path that skips the role check: every path asks `requireAppRole`,
-//   which reads the status with the role, or the SQL forms beside it
-//   (`appsFoundBy`, `stillOpenTo`), so none has a path of its own.
-// - Learning that a draft exists: it is answered as an App that isn't
-//   there (`app.not_found`), in lists and errors alike.
+// - Someone with only the user role reaching an App that isn't live, or
+//   is archived, by a path that skips the role check: every path asks
+//   `requireAppRole`, which reads the App's row with the role, or the SQL
+//   forms beside it (`appsFoundBy`, `stillOpenTo`), so none has a path of
+//   its own.
+// - Learning that an App that isn't live exists: it is answered as an App
+//   that isn't there (`app.not_found`), in lists and errors alike.
 // - A trigger or run outliving the archive: archiving stops the
 //   unfinished runs the App started (`stopRunsStartedBy`), the clock stops
-//   any left or started in a race with it (`cancelArchivedRuns`), and a start reads
-//   the status again once its row is written (`startRun`). A restore
-//   waits for the stops still settling (`cancelledBeforeRestore`).
-// - A transition by someone who lost their role: the role is read for the
-//   call, and the write only applies to the status read (`app.conflict`
-//   otherwise). Each transition is audited with the change itself.
-// - An old page still open after a restore: a restore lands in draft,
-//   so users stay out until a builder publishes it again.
+//   any left or started in a race with it (`cancelArchivedRuns`), and a
+//   start reads the App again once its row is written (`startRun`). A
+//   restore waits for the stops still settling (`cancelledBeforeRestore`).
+// - A change by someone who lost their role: the role is read for the
+//   call, and the write only applies to the archive read (`app.conflict`
+//   otherwise). Each is audited with the change itself.
 
-/** A transition: the statuses it starts from, and where it goes. */
-interface Transition {
-  readonly from: readonly AppStatus[];
-  readonly to: AppStatus;
-  readonly action:
-    | "app.published"
-    | "app.unpublished"
-    | "app.archived"
-    | "app.restored";
-}
-
-const transitions = {
-  publish: { from: ["draft"], to: "published", action: "app.published" },
-  unpublish: { from: ["published"], to: "draft", action: "app.unpublished" },
-  archive: {
-    from: ["draft", "published"],
-    to: "archived",
-    action: "app.archived",
-  },
-  restore: { from: ["archived"], to: "draft", action: "app.restored" },
-} as const satisfies Record<string, Transition>;
-
-export type AppTransition = keyof typeof transitions;
-
-/**
- * App `app`'s status, with when it last changed in ms (null while it never
- * has), read together: the fence a transition writes under.
- */
-const statusFenceOf = async (
-  env: Env,
-  app: string
-): Promise<{ status: AppStatus | undefined; at: number | null }> => {
+/** When App `app` was archived, in ms; null while it isn't. */
+const archivedAtOf = async (env: Env, app: string): Promise<number | null> => {
   const row = await drizzle(env.DB)
-    .select({ status: apps.status, at: apps.statusChangedAt })
+    .select({ at: apps.archivedAt })
     .from(apps)
     .where(eq(apps.id, app))
     .get();
-  return { status: row?.status, at: row?.at?.getTime() ?? null };
+  return row?.at?.getTime() ?? null;
 };
 
 /** Most runs of archived Apps one pass stops (`cancelArchivedRuns`). */
@@ -111,7 +80,7 @@ const maxCancelPages = 10;
  */
 const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
   const row = await drizzle(env.DB)
-    .select({ by: apps.statusChangedBy })
+    .select({ by: apps.archivedBy })
     .from(apps)
     .where(eq(apps.id, app.id))
     .get();
@@ -161,127 +130,96 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
 };
 
 /**
- * Moves the App `input` names along `transition`, for one of its builders:
- * answered as it is when it is where the transition goes already (nothing
- * written or audited); refused with `app.archived` for an archived App
- * other than by `restore`, and with `app.no_version` for publishing an App
- * no version of which is current. Leaving `published` tells the App's
- * people their access changed; archiving cancels its unfinished runs.
+ * Archives the App `input` names (`archived`), or restores it, for one of
+ * its builders: answered as it is when it is so already (nothing written
+ * or audited). Archiving tells the App's people their access changed,
+ * ends its visitors' sessions and stops its unfinished runs; a restore
+ * waits for those stops first.
  */
-export const changeStatus = async (
+export const setArchived = async (
   env: Env,
   by: Identity,
   input: unknown,
-  transition: AppTransition
+  archived: boolean
 ): Promise<App> => {
-  const { from, to, action }: Transition = transitions[transition];
-  // Grasp staff never change a client's App's status: whom it reaches is
-  // the client's decision, as whom it is shared with is (app-members.ts).
+  // Grasp staff never archive a client's App: whom it reaches is the
+  // client's decision, as whom it is shared with is (app-members.ts).
   requireNotStaff(by);
   const found = await appFor(env, by, input, "builder");
-  if (found.status === to) {
+  if (found.archived === archived) {
     return found;
   }
-  if (!from.includes(found.status)) {
-    throw appErrors.create(
-      found.status === "archived" ? "app.archived" : "app.conflict"
-    );
-  }
-  if (to === "published" && found.currentVersion === null) {
-    throw appErrors.create("app.no_version");
-  }
-  // The status as read, with when it last changed: the write applies only
-  // to that very state, so a cycle back to the same status meanwhile (a
-  // restore, a run started, an archive again) is a conflict, never a
-  // stale restore landing on the new archive.
-  const read = await statusFenceOf(env, found.id);
-  if (read.status !== found.status) {
+  // When it was archived, as read: a restore applies only to that very
+  // archive, so one archived again meanwhile is a conflict.
+  const fence = await archivedAtOf(env, found.id);
+  if (archived !== (fence === null)) {
     throw appErrors.create("app.conflict");
   }
-  const fence = read.at;
-  if (transition === "restore") {
+  if (!archived) {
     await cancelledBeforeRestore(env, found);
   }
   const db = drizzle(env.DB);
   const event = createAuditEvent(
     {
       actor: actorOf(by),
-      action,
+      action: archived ? "app.archived" : "app.restored",
       target: { type: "app", id: found.id },
-      detail: { from: found.status, to },
+      detail: {},
     },
     "core"
   );
-  // Later than the fence's time, so the next transition's fence differs.
+  // Later than the archive read, so a restore's fence differs from the
+  // next archive's.
   const now = new Date(Math.max(Date.now(), (fence ?? 0) + 1));
-  // Only from the status read: a change meanwhile is a conflict, never
+  const done = archived ? storedEvent(event.id) : sql`0`;
+  // Only over the archive read: a change meanwhile is a conflict, never
   // overwritten. The revocation is kept with the change, so a database
   // away after it loses nothing (access-revocations.ts).
   const [[changed], , revocations] = await auditedBatch(env, db, [
     db
       .update(apps)
-      .set({
-        status: to,
-        statusChangedAt: now,
-        statusChangedBy: { userId: by.userId, staff: by.staff },
-      })
+      .set(
+        archived
+          ? {
+              archivedAt: now,
+              archivedBy: { userId: by.userId, staff: by.staff },
+              // Kept for one release, for the release before (schema.ts).
+              status: "archived" as const,
+            }
+          : {
+              archivedAt: null,
+              archivedBy: null,
+              status: sql<
+                "draft" | "published"
+              >`CASE WHEN ${apps.currentVersion} IS NULL THEN 'draft' ELSE 'published' END`,
+            }
+      )
       .where(
         and(
           eq(apps.id, found.id),
-          eq(apps.status, found.status),
-          sql`${apps.statusChangedAt} IS ${fence}`,
-          // Removed meanwhile (app-removal.ts), it stays removed: a
-          // removal changes neither its status nor when that changed.
+          sql`${apps.archivedAt} IS ${fence}`,
+          // Removed meanwhile (app-removal.ts), it stays removed.
           isNull(apps.removedAt)
         )
       )
       .returning(),
     outboxedEventWhere(db, event, sql`changes() > 0`),
-    revocationsOf(
-      db,
-      eq(apps.id, found.id),
-      null,
-      // Everyone of a published App may lose it; an archived App's
-      // builders lose its use too, a draft's included.
-      found.status === "published" || to === "archived"
-        ? storedEvent(event.id)
-        : sql`0`
-    ),
-    // Every visitor's session ends with a published App (app-visitors.ts),
-    // in the same batch and only if the change won: a status changed with
-    // sessions left over would let a republish revive them.
+    // Everyone loses an archived App, its builders included.
+    revocationsOf(db, eq(apps.id, found.id), null, done),
+    // Every visitor's session ends with it (app-visitors.ts), in the same
+    // batch and only if the archive won: an archive with sessions left
+    // over would let a restore revive them.
     db
       .delete(appVisitorSessions)
-      .where(
-        and(
-          eq(appVisitorSessions.appId, found.id),
-          found.status === "published" ? storedEvent(event.id) : sql`0`
-        )
-      ),
-    // Its webhooks told it was published, with the change or not at all.
-    ...(to === "published"
-      ? queuedWebhookDeliveries(
-          db,
-          {
-            app: found.id,
-            event: "published",
-            dedupe: `published:${event.id}`,
-            version: "current",
-          },
-          storedEvent(event.id)
-        )
-      : []),
+      .where(and(eq(appVisitorSessions.appId, found.id), done)),
   ]);
   if (changed === undefined) {
     throw appErrors.create("app.conflict");
   }
   const app = toApp(changed);
-  if (found.status === "published" || to === "archived") {
-    // Open pages look again (access-revocations.ts), and stop where the
-    // status no longer serves them.
+  if (archived) {
+    // Open pages look again (access-revocations.ts), and stop.
     await tellKept(env, revocations);
-  }
-  if (to === "archived") {
     await stopRunsStartedBy(env, actorOf(by), app.id, now, archivedRunsPerPass);
   }
   return app;
@@ -305,13 +243,13 @@ export const cancelArchivedRuns = async (
       .select({
         app: apps.id,
         owner: apps.ownerId,
-        by: apps.statusChangedBy,
-        at: apps.statusChangedAt,
+        by: apps.archivedBy,
+        at: apps.archivedAt,
       })
       .from(apps)
       .where(
         and(
-          eq(apps.status, "archived"),
+          sql`${apps.archivedAt} IS NOT NULL`,
           sql`EXISTS (SELECT 1 FROM workflow_resource_runs r JOIN workflow_start_receipts s ON s.id = r.id WHERE s.invoker_type = 'app' AND s.invoker_id = ${apps.id} AND r.status IN ('starting', 'running', 'paused') AND (r.stop_requested_at IS NULL OR r.stop_requested_at <= ${Date.now() - stopRetryMs}))`,
           side
         )

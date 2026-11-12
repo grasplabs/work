@@ -370,7 +370,7 @@ describe("removing an App", slow, () => {
     await indexApps(env);
     // Removed, as if its entry's forgetting had failed: its note is left.
     await env.DB.prepare(
-      "UPDATE apps SET status = 'archived', removed_at = ?, removed_by = ?, current_version = NULL WHERE id = ?"
+      "UPDATE apps SET archived_at = ?1, removed_at = ?1, removed_by = ?2, current_version = NULL WHERE id = ?3"
     )
       .bind(Date.now(), owner.userId, app)
       .run();
@@ -414,7 +414,7 @@ describe("removing an App", slow, () => {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM app_entries WHERE app_id = ?").bind(app),
       env.DB.prepare(
-        "UPDATE apps SET status = 'archived', removed_at = ?, removed_by = ?, current_version = NULL WHERE id = ?"
+        "UPDATE apps SET archived_at = ?1, removed_at = ?1, removed_by = ?2, current_version = NULL WHERE id = ?3"
       ).bind(Date.now(), owner.userId, app),
     ]);
     await indexApps(env);
@@ -450,10 +450,10 @@ describe("removing an App", slow, () => {
     const raced = await Promise.all(
       outcomes.map(async ({ app, restored, removed }) => {
         const row = await env.DB.prepare(
-          "SELECT status, removed_at IS NOT NULL AS removed FROM apps WHERE id = ?"
+          "SELECT archived_at IS NOT NULL AS archived, removed_at IS NOT NULL AS removed FROM apps WHERE id = ?"
         )
           .bind(app)
-          .first<{ status: string; removed: number }>();
+          .first<{ archived: number; removed: number }>();
         const recorded = events
           .filter(({ target }) => target?.id === app)
           .map(({ action }) => action)
@@ -464,8 +464,8 @@ describe("removing an App", slow, () => {
           oneWon: (restored === "ok") !== (removed === "ok"),
           stored:
             removed === "ok"
-              ? row?.status === "archived" && row.removed === 1
-              : row?.status === "draft" && row.removed === 0,
+              ? row?.archived === 1 && row.removed === 1
+              : row?.archived === 0 && row.removed === 0,
           recorded:
             recorded.length === 1 &&
             recorded[0] === (removed === "ok" ? "app.removed" : "app.restored"),
@@ -512,7 +512,7 @@ describe("removing an App", slow, () => {
       await removedWith(sameArchive, settlingStop(sameArchive));
       await removedWith(newerArchive, [
         env.DB.prepare(
-          "UPDATE apps SET status_changed_at = status_changed_at + 60000 WHERE id = ?"
+          "UPDATE apps SET archived_at = archived_at + 60000 WHERE id = ?"
         ).bind(newerArchive),
         ...settlingStop(newerArchive),
       ]);
@@ -632,7 +632,7 @@ describe("removing an App", slow, () => {
         .run()
     );
     const restored = await outcome(
-      env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?")
+      env.DB.prepare("UPDATE apps SET archived_at = NULL WHERE id = ?")
         .bind(app)
         .run()
     );
@@ -653,23 +653,25 @@ describe("removing an App", slow, () => {
       ),
       direct: direct === "ok",
       restored: restored === "ok",
-      status: await env.DB.prepare("SELECT status FROM apps WHERE id = ?")
+      archived: await env.DB.prepare(
+        "SELECT archived_at IS NOT NULL AS archived FROM apps WHERE id = ?"
+      )
         .bind(app)
-        .first("status"),
+        .first("archived"),
     }).toStrictEqual({
       renamed: "ok",
       requested: "app.not_found",
       requests: 0,
       direct: false,
       restored: false,
-      status: "archived",
+      archived: 1,
     });
   });
 
   it("changes nothing when a restore lands first", async () => {
     const owner = await personApi("builder");
     const app = await archivedApp(owner);
-    // The restore wins; the App is a draft again, and stays.
+    // The restore wins; the App is usable again, and stays.
     await owner.api.apps.restore(app);
     const events = await auditedDuring(async () => {
       await outcome(owner.api.apps.remove(app));
@@ -680,11 +682,11 @@ describe("removing an App", slow, () => {
     expect({
       refused: await outcome(owner.api.apps.remove(app)),
       recorded: events.filter(({ action }) => action === "app.removed").length,
-      status: kept.status,
+      archived: kept.archived,
     }).toStrictEqual({
       refused: "app.remove_unarchived",
       recorded: 0,
-      status: "draft",
+      archived: false,
     });
   });
 });

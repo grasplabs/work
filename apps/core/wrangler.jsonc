@@ -107,6 +107,10 @@
     "bindings": [
       { "name": "WORKSPACES", "class_name": "Workspace" },
       { "name": "APPS", "class_name": "App" },
+      // One object per App, named by its ID: the preview of its draft, run
+      // for everyone who builds it, on one store of test data
+      // (src/app-preview.ts).
+      { "name": "APP_PREVIEWS", "class_name": "AppPreview" },
       { "name": "AUDIT_LOG", "class_name": "AuditLog" },
       // The one object that installs what ships with each release
       // (src/builtins.ts).
@@ -157,6 +161,7 @@
     { "tag": "v11", "deleted_classes": ["ModelLedger"] },
     { "tag": "v12", "new_sqlite_classes": ["BrainStore"] },
     { "tag": "v13", "new_sqlite_classes": ["Embedder"] },
+    { "tag": "v14", "new_sqlite_classes": ["AppPreview"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],

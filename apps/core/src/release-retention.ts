@@ -36,7 +36,7 @@ import { collectArtifacts, sweepArtifacts } from "./sealed-artifacts.ts";
 // What could go wrong, and what stops it:
 //
 // - A release is deleted while something still runs on it, or might: it
-//   is kept while it is the App's current or pending version, while it is
+//   is kept while it is the App's current version, while it is
 //   one of the App's last `keptReleases` releases (a rollback's), for a
 //   day after its seal (a publish under way), while an open page's lease
 //   on it holds (15 minutes from the last renewal), while any pin holds
@@ -111,8 +111,7 @@ const referenced = (now: Date): SQL =>
     ${sdkReleaseManifests.revokedAt} IS NOT NULL
     OR ${sdkReleaseManifests.sealedAt} > ${now.getTime() - sealGraceMs}
     OR EXISTS (SELECT 1 FROM apps WHERE apps.id = ${sdkReleaseManifests.appId}
-      AND (apps.current_version = ${sdkReleaseManifests.version}
-        OR apps.pending_version = ${sdkReleaseManifests.version}))
+      AND apps.current_version = ${sdkReleaseManifests.version})
     OR (SELECT COUNT(*) FROM sdk_release_manifests AS newer
       WHERE newer.app_id = ${sdkReleaseManifests.appId}
         AND newer.version > ${sdkReleaseManifests.version}) < ${keptReleases}

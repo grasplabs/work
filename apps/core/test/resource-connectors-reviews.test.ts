@@ -57,7 +57,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       mailFiles("microsoft-365.mail@1", `["send", "list", "createDraft"]`),
       "More"
     );
-    await mailer.builder.api.apps.versions.setCurrent(app, 2);
+    await mailer.builder.api.apps.versions.publish(app, 2);
     // An admin grants the connection again, approving the version: only
     // the binding, approved for the narrower declaration, is stale.
     await mailer.admin.api.permissions.grant(mailer.permission, { version: 2 });
@@ -141,7 +141,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       undeclaredMailFiles(),
       "Quiet"
     );
-    await mailer.builder.api.apps.versions.setCurrent(app, 2);
+    await mailer.builder.api.apps.versions.publish(app, 2);
     await mailer.admin.api.permissions.grant(mailer.permission, { version: 2 });
     const refused = await failure(
       async () =>

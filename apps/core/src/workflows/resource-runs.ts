@@ -1777,7 +1777,7 @@ export const stopRunsStartedBy = async (
         inArray(workflowResourceRuns.status, unended),
         stopDue(),
         lte(workflowResourceRuns.createdAt, before),
-        sql`EXISTS (SELECT 1 FROM apps WHERE apps.id = ${app} AND apps.status = 'archived')`
+        sql`EXISTS (SELECT 1 FROM apps WHERE apps.id = ${app} AND apps.archived_at IS NOT NULL)`
       )
     )
     .orderBy(asc(workflowResourceRuns.createdAt), asc(workflowResourceRuns.id))

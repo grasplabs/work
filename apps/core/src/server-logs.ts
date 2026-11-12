@@ -1,8 +1,8 @@
-import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import type { ServerLog } from "@grasp-os/shared/pages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { appHost, workspace } from "./durable-objects.ts";
+import { appHost, appPreview } from "./durable-objects.ts";
 
 // What an App's server code writes with `console`, which would otherwise
 // be lost: its isolate runs with no network (sandbox.ts), and the
@@ -13,12 +13,12 @@ import { appHost, workspace } from "./durable-objects.ts";
 //
 // - a live App's lines go to its error log (app-error-log.ts), in the
 //   App's own Durable Object, with its pages' problems;
-// - a draft's preview's lines go to the chat's Workspace object, for the
-//   agent's next check of the draft (preview-reports.ts): each isolate a
-//   draft's sealed preview runs a function in (draft-runs.ts), named
-//   by that function. Its
-//   props are core's, fixed as the isolate is made, never App code's: its
-//   lines reach only that chat's preview, at that revision.
+// - a draft's preview's lines go to the App's preview (app-preview.ts),
+//   for the next check of the draft by any builder's agent
+//   (preview-reports.ts): each isolate a draft's sealed preview runs a
+//   function in (draft-runs.ts), named by that function. Its props are
+//   core's, fixed as the isolate is made, never App code's: its lines
+//   reach only that App's preview, at that revision.
 //
 // Bounded twice: the first lines of each call, each held to size, and the
 // newest entries of each log. Only what the App's code wrote is kept, with
@@ -35,8 +35,8 @@ export interface TailOf {
   app: AppId;
   /** The live version that runs; null for a draft's preview. */
   version: number | null;
-  /** The chat's draft at `revision`, for a preview. */
-  preview?: { workspaceId: WorkspaceId; chatId: ChatId; revision: number };
+  /** The App's draft at `revision`, for its preview. */
+  preview?: { revision: number };
   /**
    * The function the isolate runs, for an App of spec 8's layout, whose
    * every isolate runs one (release-runner.ts): named as the lines'
@@ -101,12 +101,7 @@ export class AppTail extends WorkerEntrypoint<Env, TailOf> {
     }
     const { app, version, preview } = this.ctx.props;
     if (preview !== undefined) {
-      await workspace(this.env, preview.workspaceId).previewLogs(
-        preview.chatId,
-        app,
-        preview.revision,
-        logs
-      );
+      await appPreview(this.env, app).logs(preview.revision, logs);
     } else if (version !== null) {
       await appHost(this.env, app).logServer(version, logs);
     }

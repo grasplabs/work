@@ -51,6 +51,7 @@ import type {
 } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
@@ -696,6 +697,8 @@ describe("an App starting a workflow", () => {
       admin,
       startsOn({ type: "app", appId: appIdSchema.parse(app) }, workflow.id)
     );
+    // Live at version 1: those who only use it may.
+    await standInLive(app);
     // Ada and Eve send the same key through the same App.
     const key = `key-${unique()}`;
     const forAda = await startWorkflow(

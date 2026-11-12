@@ -1,23 +1,19 @@
-import { appErrors } from "@grasp-os/shared/apps";
-import { roleErrors } from "@grasp-os/shared/roles";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
-import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// `env.build.createFromBlueprint` in a chat's code: the chat's agent
-// creating an App from a blueprint for its person. These tests start from
-// the ways it can fail: the agent creates from a blueprint its person
-// couldn't create from themselves (of an App they have no role in, or as
-// someone who doesn't build), past the Apps a question may create, or
-// while blueprints are off; and what it creates or asks for isn't recorded
-// as the agent's.
+// `env.build.blueprints` in a chat's code: the blueprints a plan's App may
+// start from (`proposePlan`), as its person may start from them. The
+// agent creates no App: Build it makes one from the blueprint the plan
+// names (make.test.ts). These tests start from the ways it can fail: the
+// agent reads a blueprint its person couldn't start from (of an App they
+// have no role in).
 
 const idp = mockIdp();
 
@@ -94,116 +90,29 @@ const setUp = async (
     actions: ["read"],
     binding: "APP_LIBRARY",
   });
-  return { person, chat, ledgerBlueprint };
+  return { chat };
 };
 
 describe(
-  "creating Apps from blueprints from a chat",
+  "the blueprints a chat's plan may start from",
   { timeout: 60_000 },
   () => {
-    it("creates one as its person may, asking for what the blueprint declares, as the agent", async () => {
-      const { person, chat, ledgerBlueprint } = await setUp(() => [
-        codeStep(`export default async (self, env) => {
-        const listed = await env.build.blueprints();
-        const { id } = listed.find(({ name }) => name === "Ledger");
-        const created = await env.build.createFromBlueprint(id, { name: "My ledger" });
-        return {
-          listed: listed.map(({ name, version }) => ({ name, version })),
-          app: created.app.id,
-          name: created.app.name,
-          permissions: created.permissions.map(({ binding, status }) => ({ binding, status })),
-        };
-      };`),
-        says("Your ledger is there."),
-      ]);
-
-      await chat.ask("Make me a ledger like the team's");
-
-      const [result] = await codeResults(chat.stub, chat.chat.id);
-      const made = z
-        .object({ app: z.string() })
-        .loose()
-        .parse(returned(result?.text));
-      expect(made).toStrictEqual({
-        listed: [{ name: "Ledger", version: 1 }],
-        app: made.app,
-        name: "My ledger",
-        permissions: [{ binding: "HANDBOOK", status: "requested" }],
-      });
-      const agent = {
-        type: "agent",
-        agentId: chat.agent.agentId,
-        onBehalfOf: person.userId,
-      };
-      // The person's App, and what it asks for is asked by the agent for
-      // them, both as the audit log and the request say.
-      const listed = await person.api.apps.list();
-      const app = listed.find(({ id }) => id === made.app);
-      const requests = await person.api.permissions.list();
-      const request = requests.find(
-        ({ subject }) => subject.type === "app" && subject.appId === made.app
-      );
-      expect({ app, request }).toMatchObject({
-        app: { owner: person.userId, blueprint: ledgerBlueprint },
-        request: {
-          requestedBy: person.userId,
-          requestedVia: {
-            ...agent,
-            workspaceId: chat.id,
-            chatId: chat.chat.id,
-          },
-        },
-      });
-      await vi.waitFor(
-        async () => {
-          const events = await allEvents();
-          expect(
-            [
-              ["app.created", made.app],
-              ["app.committed", made.app],
-              ["permission.requested", request?.id],
-            ].map(
-              ([action, target]) =>
-                events.find(
-                  (event) =>
-                    event.action === action && event.target?.id === target
-                )?.actor
-            )
-          ).toStrictEqual([agent, agent, agent]);
-        },
-        { timeout: 10_000, interval: 50 }
-      );
-    });
-
-    it("creates only from what its person may, within a question's creates", async () => {
-      const attempts = ({ ledger, vault }: { ledger: string; vault: string }) =>
+    it("lists only those its person may start from, whether they build or not", async () => {
+      const listing = () => [
         codeStep(
           tryEach({
-            vault: `(await env.build.createFromBlueprint(${JSON.stringify(vault)}, { name: "Mine" })).app.name`,
-            notMarked: `(await env.build.createFromBlueprint("no-such-blueprint", { name: "Mine" })).app.name`,
-            first: `(await env.build.create({ name: "One" })).name`,
-            second: `(await env.build.create({ name: "Two" })).name`,
-            third: `(await env.build.createFromBlueprint(${JSON.stringify(ledger)}, { name: "Three" })).app.name`,
-            fourth: `(await env.build.createFromBlueprint(${JSON.stringify(ledger)}, { name: "Four" })).app.name`,
+            listed:
+              "(await env.build.blueprints()).map(({ name, version }) => ({ name, version }))",
           })
-        );
+        ),
+        says("Listed."),
+      ];
       // One chat at a time: the provider answers with the replies of the
       // chat set up last.
-      const builds = await setUp((apps) => [attempts(apps), says("Done.")]);
-      await builds.chat.ask("Make the Apps");
-      const uses = await setUp(
-        ({ ledger }) => [
-          codeStep(
-            tryEach({
-              listed: "(await env.build.blueprints()).length",
-              create: `(await env.build.createFromBlueprint(${JSON.stringify(ledger)}, { name: "Mine" })).app.name`,
-            })
-          ),
-          says("No."),
-        ],
-        "user"
-      );
-      await uses.chat.ask("Make me a ledger");
+      const builds = await setUp(listing);
+      await builds.chat.ask("What could I start from?");
+      const uses = await setUp(listing, "user");
+      await uses.chat.ask("What could I start from?");
 
       const results = await Promise.all(
         [builds, uses].map(async ({ chat }) => {
@@ -211,22 +120,10 @@ describe(
           return returned(result?.text);
         })
       );
+      // The Vault, of an App the person has no role in, is never listed.
       expect(results).toStrictEqual([
-        {
-          // Of an App the person has no role in: as if there were none.
-          vault: appErrors.create("app.not_found").message,
-          notMarked: appErrors.create("app.blueprint_not_found").message,
-          first: "One",
-          second: "Two",
-          third: "Three",
-          fourth: appErrors.create("app.creates_exhausted").message,
-        },
-        {
-          // Someone who uses Apps but doesn't build: their blueprints are
-          // listed, and none is created.
-          listed: 1,
-          create: roleErrors.create("role.forbidden").message,
-        },
+        { listed: [{ name: "Ledger", version: 1 }] },
+        { listed: [{ name: "Ledger", version: 1 }] },
       ]);
     });
   }

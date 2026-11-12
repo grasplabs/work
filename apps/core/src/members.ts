@@ -62,7 +62,6 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { workspace } from "./durable-objects.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
@@ -71,7 +70,6 @@ import {
   releaseAddress,
   removedPeople,
 } from "./person-erasure.ts";
-import { personalWorkspaceId } from "./personal-workspace.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -391,21 +389,12 @@ const removeMember = async (
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
-  try {
-    return {
-      connectionsDisconnected: await disconnectPersonal(env, by, target),
-    };
-  } finally {
-    // What they typed into their chats' previews goes too, whether or not
-    // their connections did: they never reach those again. A store it
-    // can't empty now empties itself a day after its last use
-    // (draft-runs.ts).
-    try {
-      await workspace(env, personalWorkspaceId(target)).emptyPreviewStores();
-    } catch (error) {
-      log.error("member.preview_empty_failed", errorFields(error));
-    }
-  }
+  // What they typed into Apps' previews stays with each App's test data,
+  // which its other builders share (app-preview.ts): no preview is theirs
+  // alone, and they no longer reach any.
+  return {
+    connectionsDisconnected: await disconnectPersonal(env, by, target),
+  };
 };
 
 /**

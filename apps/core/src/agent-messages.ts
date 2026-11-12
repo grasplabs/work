@@ -17,7 +17,6 @@ export const showThinkingName = "show_thinking";
  * each call as one line.
  */
 export const dedicatedToolNames = [
-  "createApp",
   "readFile",
   "writeFile",
   "editFile",

@@ -278,8 +278,7 @@ describe(
       const { runId } = startedOf(
         await called(builder, app, live, startCommand(reference))
       );
-      const { id: chat } = await builder.api.chats.forApp(app);
-      const { lease } = await builder.api.chats.preview(chat, app);
+      const { lease } = await builder.api.apps.drafts.preview(app);
       if (lease === undefined) {
         throw new Error("The preview opened with no lease.");
       }

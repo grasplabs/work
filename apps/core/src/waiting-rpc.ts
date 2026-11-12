@@ -326,30 +326,6 @@ const parts: Parts = {
     };
   },
   requests: requestItems,
-  // An archived App runs nothing: its version waits on nobody.
-  versions: async ({ apps }, { forMe }) => {
-    const listed = await apps.list();
-    return {
-      items: listed.flatMap((app): WaitingItem[] =>
-        app.pendingVersion === null ||
-        app.responsible !== forMe.userId ||
-        app.status === "archived"
-          ? []
-          : [
-              {
-                kind: "goLive",
-                id: `goLive:${app.id}:${app.pendingVersion}`,
-                at: null,
-                urgent: false,
-                waitsOn: forMe,
-                verdicts: [],
-                app: { id: app.id, name: app.name },
-                version: app.pendingVersion,
-              },
-            ]
-      ),
-    };
-  },
   // A go-live waits on the workflow's owner as such, else on an admin.
   workflowGoLives: async ({ lifecycles }, { forMe }) => {
     const waiting = await lifecycles.waiting();

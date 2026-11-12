@@ -85,12 +85,12 @@ describe("a chat's preview of its draft", { timeout: 60_000 }, () => {
     await release(builder, app, files);
     const published = await framed(builder.api.pages.open(app));
     // The draft changes one word of the page.
-    const { chatId } = await chatWithDraft(builder, app, {
+    await chatWithDraft(builder, app, {
       "src/routes/index.tsx": (
         files.files["src/routes/index.tsx"] ?? ""
       ).replace("Clicked", "Pressed"),
     });
-    const preview = await framed(builder.api.chats.preview(chatId, app));
+    const preview = await framed(builder.api.apps.drafts.preview(app));
 
     expect({
       published: {

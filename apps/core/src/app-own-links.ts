@@ -4,9 +4,10 @@ import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { openToUsersSql } from "./app-access.ts";
 import { editableApp, toApp, usableApp } from "./apps.ts";
 import { auditedBatch, outboxedEventWhere } from "./audit-outbox.ts";
 import { apps } from "./db/core/schema.ts";
@@ -20,7 +21,7 @@ import { requireNotStaff } from "./sharing.ts";
 //
 // - Someone opening an App through its link they may not use: the link
 //   opens only what `usableApp` lets the person use, read as them on
-//   every open, and only while the App is published. A draft's, an
+//   every open, and only while the App is live. One not live yet, an
 //   archived App's, or one they have no role in is answered as no App at
 //   all, as is a link nobody has, so a link tells nothing of what is
 //   behind it.
@@ -33,12 +34,12 @@ import { requireNotStaff } from "./sharing.ts";
 //   audit event with it (`app.link_taken`).
 // - A link changed by someone who doesn't build the App, or by Grasp
 //   staff: only its builders set it (`editableApp`), staff never, as with
-//   its status (app-status.ts). An archived App's link can't change.
+//   archiving it (app-status.ts). An archived App's link can't change.
 // - A change no one can trace: setting and taking off a link are audited
 //   with the change itself, in one batch.
-// - An unpublished App still reached by its link: the status is read with
-//   the link on every open, so taking it back to a draft or archiving it
-//   takes the link down at once, and publishing it again brings it back.
+// - An archived App still reached by its link: the App is read with the
+//   link on every open, so archiving it takes the link down at once, and
+//   restoring it brings it back.
 
 /**
  * Gives the App `input` names the link `link`, or takes its link off with
@@ -76,7 +77,7 @@ export const setAppLink = async (
       db
         .update(apps)
         .set({ link: wanted })
-        .where(and(eq(apps.id, found.id), sql`${apps.status} != 'archived'`))
+        .where(and(eq(apps.id, found.id), isNull(apps.archivedAt)))
         .returning(),
       outboxedEventWhere(db, event, sql`changes() > 0`),
     ]);
@@ -94,7 +95,7 @@ export const setAppLink = async (
 };
 
 /**
- * The App link `link` opens for `by`: one that is published and that they
+ * The App link `link` opens for `by`: one that is live and that they
  * may use now. Any other, or a link nobody has, is `app.not_found`.
  */
 export const openAppLink = async (
@@ -107,7 +108,7 @@ export const openAppLink = async (
     ? await drizzle(env.DB)
         .select({ id: apps.id })
         .from(apps)
-        .where(and(eq(apps.link, known.data), eq(apps.status, "published")))
+        .where(and(eq(apps.link, known.data), openToUsersSql))
         .get()
     : undefined;
   if (row === undefined) {

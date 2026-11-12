@@ -4,8 +4,7 @@ import type { OutputClass } from "@grasp-os/shared/data-policy";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { authErrors } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
-import { chatIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import {
@@ -99,18 +98,15 @@ export interface LeasedBuild {
 /**
  * What a frame runs, as core leased it: a build of the App's release,
  * whose calls the App's current release answers on the App's store; or a
- * build of a builder's draft in one of their chats, whose calls that
- * draft answers on a throwaway store with no resources (draft-runs.ts).
+ * build of the App's one shared draft, whose calls that draft answers as
+ * it is then, for the builder the lease is signed for, on the preview's
+ * test store with no resources (draft-runs.ts).
  * Which one is signed with the rest, so nothing a frame or a page sends
  * picks it, and no store is ever named at all: it follows from this.
  */
 export type PageLease =
   | { readonly kind: "release"; readonly build: LeasedBuild }
-  | {
-      readonly kind: "draft";
-      readonly artifact: string;
-      readonly chatId: ChatId;
-    };
+  | { readonly kind: "draft"; readonly artifact: string };
 
 /** What a lease signs: who was handed which build of which App, run on what. */
 const leased = (principal: string, app: AppId, lease: PageLease): Uint8Array =>
@@ -118,7 +114,7 @@ const leased = (principal: string, app: AppId, lease: PageLease): Uint8Array =>
     canonicalJson(
       lease.kind === "release"
         ? [principal, app, lease.build.artifact, lease.build.version, null]
-        : [principal, app, lease.artifact, null, lease.chatId]
+        : [principal, app, lease.artifact, null, "draft"]
     )
   );
 
@@ -129,10 +125,10 @@ export const leaseKey = (lease: PageLease | undefined): Json => {
   }
   return lease.kind === "release"
     ? ["release", lease.build.artifact, lease.build.version]
-    : ["draft", lease.artifact, lease.chatId];
+    : ["draft", lease.artifact];
 };
 
-/** How a lease names a draft: this, then the chat's ID in base64url. */
+/** How a lease names the App's draft, where a release's names a version. */
 const draftMark = "d";
 
 /**
@@ -157,14 +153,11 @@ export const leaseFor = async (
   const [artifact, target] =
     lease.kind === "release"
       ? [lease.build.artifact, String(lease.build.version)]
-      : [
-          lease.artifact,
-          `${draftMark}${toBase64Url(encoder.encode(lease.chatId))}`,
-        ];
+      : [lease.artifact, draftMark];
   return `${artifact}.${target}.${toBase64Url(new Uint8Array(mac))}`;
 };
 
-/** The longest a lease is: a hash, a version or a chat, two dots and a MAC. */
+/** The longest a lease is: a hash, a version or the draft, two dots and a MAC. */
 const leaseMaxLength = 256;
 
 /**
@@ -194,26 +187,12 @@ export const personRefusal = (
 /** A version as a lease writes it: a positive integer, in decimal. */
 const leasedVersion = /^[1-9]\d{0,9}$/u;
 
-/** The target a lease names, read back: a version, or a draft's chat. */
+/** The target a lease names, read back: a version, or the App's draft. */
 const targetOf = (artifact: string, target: string): PageLease | undefined => {
   if (leasedVersion.test(target)) {
     return { kind: "release", build: { artifact, version: Number(target) } };
   }
-  if (!target.startsWith(draftMark)) {
-    return undefined;
-  }
-  try {
-    const chat = chatIdSchema.safeParse(
-      new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-        fromBase64Url(target.slice(draftMark.length))
-      )
-    );
-    return chat.success
-      ? { kind: "draft", artifact, chatId: chat.data }
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  return target === draftMark ? { kind: "draft", artifact } : undefined;
 };
 
 /**

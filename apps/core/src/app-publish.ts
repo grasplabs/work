@@ -6,17 +6,31 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { checkFiles } from "./agent-builds.ts";
+import {
+  draftOf,
+  draftRevised,
+  emptiedWhenLive,
+  emptyDraft,
+  liveBase,
+} from "./app-drafts.ts";
 import { sealedEvidence, sealRelease } from "./app-releases.ts";
 import { requireAppTestsPass } from "./app-tests.ts";
 import {
   changeEntry,
+  changesAnything,
+  commitDraft,
+  draftDefinition,
+  draftFiles,
   editableApp,
   findVersion,
   isPublished,
   makeCurrent,
+  nextVersion,
   publishedSql,
   versionFiles,
 } from "./apps.ts";
@@ -24,8 +38,11 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { appVersions } from "./db/core/schema.ts";
 import { requireMigrationEvidence } from "./migration-run.ts";
 
-// Publishing a version of an App (spec 8, 16, 22): one function, run by
-// one of the App's builders as themselves. It builds and seals the
+// Publishing an App (spec 8, 16, 22, GRA-1665): one step, run by one of
+// the App's builders as themselves, from the App's one shared draft
+// (`publishDraft`: checked, then committed as its next version) or of one
+// of its versions again, to roll back (`publishVersion`). Either way one
+// function publishes the version (`publish`). It builds and seals the
 // version's release, bound to the App's store (app-releases.ts), checks
 // its migrations passed on their fixtures, runs its App tests on fixture
 // stores (app-tests.ts), marks the version `published`, and makes it
@@ -65,6 +82,16 @@ import { requireMigrationEvidence } from "./migration-run.ts";
 //   version unmarked and marks it `failed`, which nothing makes current,
 //   audited with its code (`internal.unexpected` for an error no code
 //   names), and is thrown as it came.
+// - A publish over a draft it never saw: the draft is published only at
+//   the revision the builder read (`app.conflict` once it moved), checked
+//   as the agent's turn checks it, and emptied over the new version in
+//   the batch that makes it live (app-drafts.ts, `emptiedWhenLive`), so
+//   it never keeps changes the live version has; a write that landed
+//   meanwhile keeps the draft as it is. A draft is published only over
+//   the version live (`app.conflict` otherwise), and committed exactly as
+//   checked, so nothing discarded, rolled back or failed comes back. A
+//   roll back moves the draft onto the version it makes live, discarding
+//   its unpublished changes only over the revision the builder read.
 // - Someone without the right: only the App's builders publish
 //   (`editableApp`, and again in `makeCurrent` and `sealRelease`); made
 //   current by someone who couldn't grant the App's permissions, its
@@ -188,23 +215,140 @@ const publish = async (
 };
 
 /**
+ * What empties the draft at `revision` over `version` with the publish;
+ * with `discards`, a roll back dropping its unpublished changes.
+ */
+const draftEmptied =
+  (
+    env: Env,
+    by: Identity,
+    app: AppId,
+    {
+      version,
+      revision,
+      discards,
+    }: { version: number; revision: number; discards: boolean }
+  ) =>
+  async (live: SQL) =>
+    await emptiedWhenLive(
+      drizzle(env.DB),
+      app,
+      { revision, base: version, by, at: new Date(), discards },
+      live
+    );
+
+/**
+ * Publishes App `app`'s draft at `revision`, the one `by` read, for `by`,
+ * one of its builders, themselves (`apps.drafts.publish`; a chat's agent
+ * never publishes): checked as the turn's check checks it (`checkFiles`,
+ * with what the App's preview of it ran into), committed as it was
+ * checked, over its base, as the App's next version (`commitDraft`),
+ * published and made live over its base, the draft emptied over it with
+ * the batch that does (`draftEmptied`). Refused with `app.conflict` once
+ * the draft moved past `revision` or its base is no longer the version
+ * live (`liveBase`), `app.draft_empty` when it changes nothing and
+ * `app.draft_failed` when its check fails, with nothing committed. A
+ * version committed whose publish fails is marked `failed` and never
+ * live, with no label; the draft keeps its changes over its base.
+ */
+export const publishDraft = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  revision: unknown,
+  message: unknown
+): Promise<App> => {
+  const found = await editableApp(env, by, app);
+  const draft = await draftOf(env, found.id);
+  if (
+    draft.revision !== revision ||
+    draft.base !== (await liveBase(env, found.id))
+  ) {
+    throw appErrors.create("app.conflict");
+  }
+  if (!changesAnything(draft)) {
+    throw appErrors.create("app.draft_empty");
+  }
+  const version = await nextVersion(env, found.id);
+  const files = await draftFiles(env, found.id, draft);
+  const check = await checkFiles(
+    env,
+    found.id,
+    draft,
+    Object.fromEntries(files)
+  );
+  if (!check.passed) {
+    throw appErrors.create("app.draft_failed");
+  }
+  const defined = await draftDefinition(env, found.id, draft);
+  await commitDraft(
+    env,
+    by,
+    found.id,
+    {
+      parent: draft.base,
+      version,
+      files,
+      definition: defined?.definition ?? null,
+    },
+    message
+  );
+  await publish(env, by, found.id, version);
+  const live = await makeCurrent(
+    env,
+    by,
+    found.id,
+    version,
+    found.currentVersion,
+    draftEmptied(env, by, found.id, {
+      version,
+      revision: draft.revision,
+      discards: false,
+    })
+  );
+  await draftRevised(env, found.id);
+  return live;
+};
+
+/**
  * Makes `version` of `app` the one that runs, for one of its builders:
  * published first unless it is already (see the header), then made
  * current over the version current now, or over `expected` when the
  * caller says what it expects is current (`app.conflict` when it isn't).
- * A version current already is answered as it is.
+ * The App's draft moves onto it, its unpublished changes discarded,
+ * audited, with the batch that makes it live: what a builder confirms
+ * rolling back, over `revision`, the draft's revision they read
+ * (`app.conflict` once it moved since, or when it has changes and none
+ * was given). A version live already only resets the draft.
  */
 export const publishVersion = async (
   env: Env,
   by: Identity,
   app: unknown,
   version: unknown,
+  revision?: unknown,
   expected?: unknown
 ): Promise<App> => {
   // An archived App is read-only until a builder restores it (app-status.ts).
   const found = await editableApp(env, by, app);
   const row = await findVersion(env, found.id, version);
+  const draft = await draftOf(env, found.id);
+  const discards = changesAnything(draft);
+  // Unpublished changes go only over the revision the builder read: never
+  // unseen.
+  if ((discards || revision !== undefined) && revision !== draft.revision) {
+    throw appErrors.create("app.conflict");
+  }
+  const resets = discards || draft.base !== row.version;
   if (found.currentVersion === row.version) {
+    if (resets) {
+      await emptyDraft(env, found.id, {
+        revision: draft.revision,
+        base: row.version,
+        by,
+        published: true,
+      });
+    }
     return found;
   }
   const basedOn =
@@ -217,5 +361,22 @@ export const publishVersion = async (
   if (!(await isPublished(env, found.id, row.version))) {
     await publish(env, by, found.id, row.version);
   }
-  return await makeCurrent(env, by, found.id, row.version, basedOn);
+  const live = await makeCurrent(
+    env,
+    by,
+    found.id,
+    row.version,
+    basedOn,
+    resets
+      ? draftEmptied(env, by, found.id, {
+          version: row.version,
+          revision: draft.revision,
+          discards,
+        })
+      : undefined
+  );
+  if (resets) {
+    await draftRevised(env, found.id);
+  }
+  return live;
 };

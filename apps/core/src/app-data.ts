@@ -330,7 +330,7 @@ type Reached = Map<string, { reads: number; rows: number }>;
  * `reached`, a read that failed after it looked at records included.
  */
 const readCounted = async (
-  open: Opened,
+  open: Pick<Opened, "store" | "scope">,
   request: ReadRequest,
   reached: Reached
 ): Promise<QueryAnswer> =>
@@ -349,7 +349,7 @@ const readCounted = async (
  * tables counted into `reached`.
  */
 const readPage = async (
-  open: Opened,
+  open: Pick<Opened, "store" | "scope">,
   table: string,
   size: number,
   cursor: string | null,
@@ -373,6 +373,34 @@ const readPage = async (
     records: items.map(recordOf),
     cursor: typeof next === "string" ? next : null,
   };
+};
+
+/**
+ * The tables of a draft's preview, as the browser lists them, and the
+ * newest records of one (`table`, from `cursor`), as `scope` reads them
+ * from `store`: the preview's test data (sealed-previews.ts), read the
+ * way the App's own data is, its counts and access included. Nothing is
+ * recorded of sensitive tables: the store holds test data only.
+ */
+export const testDataOf = async (
+  store: OpenStore,
+  scope: ReadScope,
+  tables: Readonly<Record<string, ManifestTable>>,
+  read: { table: string; cursor: string | null } | undefined
+): Promise<AppDataTable[] | AppDataPage> => {
+  if (read === undefined) {
+    return Object.entries(tables).map(tableView(await store.tableFacts()));
+  }
+  if (!Object.hasOwn(tables, read.table)) {
+    throw appDataErrors.create("app_data.no_table");
+  }
+  return await readPage(
+    { store, scope },
+    read.table,
+    appDataPageSize,
+    read.cursor,
+    new Map()
+  );
 };
 
 // CSV, as RFC 4180 has it: written here (quoting is all there is to it),

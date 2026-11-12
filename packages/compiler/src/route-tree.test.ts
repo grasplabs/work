@@ -79,7 +79,7 @@ describe("an App's route tree", () => {
       "src/routes/_layout.inbox.tsx": route("/_layout/inbox"),
       [file]: route(
         path,
-        'export const surface = { kind: "panel", title: "Around" };\n'
+        'export const surface = { kind: "sidebar", title: "Around" };\n'
       ),
     });
     expect({
@@ -152,7 +152,7 @@ describe("an App's route tree", () => {
       "src/routes/__root.tsx": root,
       "src/routes/notes.$id.tsx": route(
         "/notes/$id",
-        'export const surface = { kind: "panel", title: "Note" };\n'
+        'export const surface = { kind: "sidebar", title: "Note" };\n'
       ),
     });
     expect(tree).toMatchObject({

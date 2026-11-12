@@ -25,6 +25,15 @@ export const appHost = (
 ) => inJurisdiction(env, env.APPS).getByName(app);
 
 /**
+ * An App's preview of its draft (app-preview.ts), named by the App's ID:
+ * one per App, shared by everyone who builds it.
+ */
+export const appPreview = (
+  env: Pick<Env, "APP_PREVIEWS" | "DURABLE_OBJECT_JURISDICTION">,
+  app: AppId
+) => inJurisdiction(env, env.APP_PREVIEWS).getByName(app);
+
+/**
  * A chat's own object (chat-session.ts): its agent's turns, named by its
  * workspace and chat.
  */

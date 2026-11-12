@@ -164,7 +164,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       { "README.md": "Mailer." },
       "Docs"
     );
-    await mailer.builder.api.apps.versions.setCurrent(
+    await mailer.builder.api.apps.versions.publish(
       mailer.release.manifest.resourceId,
       2
     );

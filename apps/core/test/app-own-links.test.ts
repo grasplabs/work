@@ -14,7 +14,7 @@ import {
 
 // An App's own link (app-own-links.ts). These tests start from its threat
 // model: someone opening through a link an App they may not use, or one
-// that isn't published; a link standing for one of the workspace's pages;
+// that isn't live; a link standing for one of the workspace's pages;
 // two Apps with one link; a link changed by someone who doesn't build the
 // App, or by Grasp staff; and a change nobody audited.
 
@@ -22,7 +22,7 @@ const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-/** A builder's App, shared with `user` to use, left a draft. */
+/** A builder's App, shared with `user` to use, nothing of it live yet. */
 const appOf = async (builder: Person, user?: Person): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
   if (user !== undefined) {
@@ -50,7 +50,7 @@ const opening = async (person: Person, link: string): Promise<string> => {
 };
 
 describe("an App's link", () => {
-  it("opens a published App for those who may use it, and nothing else for anyone, as a link nobody has", async () => {
+  it("opens a live App for those who may use it, and nothing else for anyone, as a link nobody has", async () => {
     const [builder, user, outsider] = await Promise.all([
       signedInApi(idp, "builder"),
       signedInApi(idp, "user"),
@@ -60,40 +60,37 @@ describe("an App's link", () => {
     const link = newLink();
     const set = await builder.api.apps.setLink(app, link);
 
-    const asDraft = await Promise.all([
+    const notLive = await Promise.all([
       opening(builder, link),
       opening(user, link),
     ]);
     await published(app);
-    const asPublished = await Promise.all([
+    const live = await Promise.all([
       opening(builder, link),
       opening(user, link),
       opening(outsider, link),
       opening(user, newLink()),
       opening(user, "Not A Link!"),
     ]);
-    await builder.api.apps.unpublish(app);
-    const unpublished = await opening(user, link);
-    await published(app);
-    const republished = await opening(user, link);
     await builder.api.apps.archive(app);
     const archived = await Promise.all([
       opening(builder, link),
       opening(user, link),
     ]);
+    await builder.api.apps.restore(app);
+    const restored = await opening(user, link);
 
     expect({
       set: set.link,
-      asDraft,
-      asPublished,
-      unpublished,
-      republished,
+      notLive,
+      live,
       archived,
+      restored,
     }).toStrictEqual({
       set: link,
-      // Not even its builders: a draft has no link to open yet.
-      asDraft: ["app.not_found", "app.not_found"],
-      asPublished: [
+      // Not even its builders: nothing live has a link to open yet.
+      notLive: ["app.not_found", "app.not_found"],
+      live: [
         app,
         app,
         // No role in it: as for an App that isn't there.
@@ -101,9 +98,8 @@ describe("an App's link", () => {
         "app.not_found",
         "app.not_found",
       ],
-      unpublished: "app.not_found",
-      republished: app,
       archived: ["app.not_found", "app.not_found"],
+      restored: app,
     });
   });
 

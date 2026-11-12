@@ -19,7 +19,7 @@ import {
 } from "../src/release-retention.ts";
 import { artifactKey as keyOf } from "../src/sealed-artifacts.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { commitDefined, published } from "./apps.ts";
+import { commitDefined } from "./apps.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
 // App committed with given files, its store, and its seal.
@@ -66,7 +66,6 @@ export const appWith = async (
   const { id } = await createApp(env, owner, { name });
   // Published, for the people it is shared with: a draft is its builders'
   // alone (app-status.ts), and these tests aren't about its status.
-  await published(id);
   await commitDefined(env, owner, id, files, "First version");
   return { owner, app: id, store: await appStoreFor(env, owner, id) };
 };

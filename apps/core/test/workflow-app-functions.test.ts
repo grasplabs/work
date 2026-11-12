@@ -8,7 +8,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { publishVersion } from "../src/app-publish.ts";
+import { findApp } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
+import { reviewDraft } from "../src/version-review.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { appCallKey } from "../src/workflows/app-calls.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";
@@ -128,7 +130,7 @@ const published = async (
   by: Builder = builder
 ): Promise<unknown> => {
   const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
-  return await by.api.apps.versions.setCurrent(id, version).then(
+  return await by.api.apps.versions.publish(id, version).then(
     (current) => current,
     (error: unknown) => error
   );
@@ -363,7 +365,7 @@ export const create = mutation({
     await called(run, app, create, { title: "Still mine" });
     // Rolled back past the rename, the ID is `create` at its old path
     // again: the function it always was.
-    const rolledBack = await admin.api.apps.versions.setCurrent(app, 1).then(
+    const rolledBack = await admin.api.apps.versions.publish(app, 1).then(
       ({ currentVersion }) => currentVersion,
       (error: unknown) => error
     );
@@ -471,9 +473,7 @@ import { query } from "@server/_generated/server";
         "args: { title: v.string().min(1).max(200), due: v.string() },"
       )
     );
-    const rollback = await refusal(
-      builder.api.apps.versions.setCurrent(app, 1)
-    );
+    const rollback = await refusal(builder.api.apps.versions.publish(app, 1));
 
     // A new optional argument serves every call the workflow makes.
     const optional = await published(
@@ -964,12 +964,10 @@ export const archive = mutation({ args: {}, returns: v.null(), handler: async ()
     );
     held.resolve(true);
     const before = await idsOf(app);
-    const sealed = await builder.api.apps.versions
-      .setCurrent(app, version)
-      .then(
-        () => "ok",
-        (error: unknown) => error
-      );
+    const sealed = await builder.api.apps.versions.publish(app, version).then(
+      () => "ok",
+      (error: unknown) => error
+    );
     const again = await published(
       builder,
       app,
@@ -1019,8 +1017,8 @@ export const archive = mutation({ args: {}, returns: v.null(), handler: async ()
       status: await statusOf(),
       call: await outcome(called(run, app, create, { title: "a" })),
     };
-    // The builder's review of the next version says so; then the builder
-    // makes it current: it is asked for again, and the call refused
+    // The builder's review of a draft of the next version says so; then
+    // the builder makes it current: it is asked for again, and the call refused
     // until an admin grants it over that version.
     const { version: two } = await commitApp(
       builder.api.apps.files,
@@ -1028,11 +1026,16 @@ export const archive = mutation({ args: {}, returns: v.null(), handler: async ()
       withAgents("# Two\n"),
       "Two"
     );
-    const review = await builder.api.apps.versions.review(app, two);
+    const review = await reviewDraft(
+      env,
+      { userId: builder.userId, role: "builder", teams: [], staff: false },
+      await findApp(env, app),
+      { base: two, changes: {}, definition: null, revision: 0 }
+    );
     const reviewed = review.callers.find(
       ({ permission }) => permission.id === grant
     )?.askedAgain;
-    await builder.api.apps.versions.setCurrent(app, two);
+    await builder.api.apps.versions.publish(app, two);
     const byBuilder = {
       status: await statusOf(),
       call: await outcome(called(run, app, create, { title: "b" })),

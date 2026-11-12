@@ -273,7 +273,7 @@ export const openedApp = async (
     files,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
+  await builder.api.apps.versions.publish(id, version);
   const { lease } = await builder.api.pages.open(id);
   const { lease: adminLease } = await admin.api.pages.open(id);
   const release = await loadRelease(env, id, version);
@@ -618,6 +618,6 @@ export const published = async (opened: Opened): Promise<Release> => {
     changed,
     "Second"
   );
-  await opened.builderApi.api.apps.versions.setCurrent(opened.app, version);
+  await opened.builderApi.api.apps.versions.publish(opened.app, version);
   return await loadRelease(env, opened.app, version);
 };

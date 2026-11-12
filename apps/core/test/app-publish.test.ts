@@ -213,9 +213,9 @@ export const hello = query({
     await committed(owner, app, helloFiles("two"));
     await publishVersion(env, owner, app, 1);
     const wrong = await failure(
-      async () => await publishVersion(env, owner, app, 2, null)
+      async () => await publishVersion(env, owner, app, 2, undefined, null)
     );
-    const right = await publishVersion(env, owner, app, 2, 1);
+    const right = await publishVersion(env, owner, app, 2, undefined, 1);
     expect({ wrong, right: right.currentVersion }).toStrictEqual({
       wrong: "app.conflict",
       right: 2,

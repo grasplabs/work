@@ -1,7 +1,7 @@
 import { peopleReferences } from "@grasp-os/runtime/host";
 import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import {
   appFunctionPath,
   pageLeaseHeader,
@@ -217,7 +217,7 @@ const released = async (
     files,
     "Next"
   );
-  await builder.api.apps.versions.setCurrent(app, version);
+  await builder.api.apps.versions.publish(app, version);
   return version;
 };
 
@@ -612,7 +612,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     });
   });
 
-  it("keep no grant once it is taken away: fewer grants, another version, the list or unpublishing", async () => {
+  it("keep no grant once it is taken away: fewer grants, another version, the list or an archive", async () => {
     const domain = newDomain();
     const { builder, app, link, version } = await portal(domain);
     const mail = await mailbox();
@@ -634,13 +634,13 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       { kind: "domain", value: domain },
     ]);
     const ben = await visitor(mail, link, `ben@${domain}`);
-    await builder.api.apps.unpublish(app);
+    await builder.api.apps.archive(app);
     const sessions = await env.DB.prepare(
       "SELECT count(*) AS left FROM app_visitor_sessions WHERE app_id = ?"
     )
       .bind(app)
       .first();
-    const unpublished = await call(app, next, ben, "portal.mine");
+    const archived = await call(app, next, ben, "portal.mine");
 
     expect({
       granted,
@@ -649,16 +649,16 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       regranted,
       delisted,
       sessions,
-      unpublished,
+      archived,
     }).toStrictEqual({
       granted: [],
       withdrawn: "visitor.not_granted",
       newVersion: "visitor.not_granted",
       regranted: [],
       delisted: "visitor.signed_out",
-      // Unpublishing ends every visitor's session.
+      // Archiving ends every visitor's session.
       sessions: { left: 0 },
-      unpublished: "visitor.signed_out",
+      archived: "visitor.signed_out",
     });
   });
 
@@ -1048,8 +1048,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     // The builder's preview of a draft of the App, and the lease it opened
     // with; and a draft's lease signed for ana's own session, as core
     // never signs one, should a bug of its ever do so.
-    const chat = await builder.api.chats.forApp(app);
-    const preview = await builder.api.chats.preview(chat.id, app);
+    const preview = await builder.api.apps.drafts.preview(app);
     const sessions = await env.DB.prepare(
       "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
     )
@@ -1059,11 +1058,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       env,
       `visitor:${sessions.results[0]?.id ?? ""}`,
       appIdSchema.parse(app),
-      {
-        kind: "draft",
-        artifact: preview.artifact,
-        chatId: chatIdSchema.parse(chat.id),
-      }
+      { kind: "draft", artifact: preview.artifact }
     );
     const other = await portal(newDomain());
     const streamed = await routed(`${appFunctionPath}/${app}/stream`, {

@@ -1,6 +1,5 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
-import { appErrors } from "@grasp-os/shared/apps";
 import {
   actorOf,
   auditProvenanceMaxItems,
@@ -17,24 +16,25 @@ import {
   chatFilesMax,
   chatFilesPerQuestionMax,
   chatPlatformName,
+  chatMentionsMax,
+  chatPlanSchema,
   chatPlatformSchema,
+  chatSubjectSchema,
   chatToolEventsKept,
-  readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
   ChatCitedDocument,
-  ChatDraft,
-  ChatDraftVersion,
   ChatFile,
   ChatFileType,
+  ChatMake,
   ChatMessage,
   ChatOutput,
+  ChatPlan,
   ChatProvenance,
   ChatSearchHit,
   ChatSearchSnippet,
   ChatSummary,
-  PreviewProblem,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
 import { foldOf, hasEvery, searchWordsOf } from "@grasp-os/shared/chat-search";
@@ -55,23 +55,20 @@ import {
   withReference,
 } from "@grasp-os/shared/errors";
 import {
-  appIdSchema,
   chatIdSchema,
   identifierSchema,
-  storeIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
-import type { PageProblem, ServerLog } from "@grasp-os/shared/pages";
 import {
   bindingNameSchema,
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
-import { canBuild } from "@grasp-os/shared/roles";
+import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import { DurableObject } from "cloudflare:workers";
@@ -84,10 +81,10 @@ import {
   gt,
   inArray,
   isNull,
+  or,
   max,
   sql,
 } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -108,7 +105,6 @@ import type {
 import { inOwnWords } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
-import { changesAnything, latestVersion } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
@@ -134,7 +130,13 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
-import { chatMessageOf, noteLinksOf, partialOf } from "./chat-messages.ts";
+import {
+  chatMessageOf,
+  noteLinksOf,
+  partialOf,
+  shownBuiltSchema,
+} from "./chat-messages.ts";
+import type { ShownBuilt } from "./chat-messages.ts";
 import {
   saidOf,
   searchTermsOf,
@@ -155,7 +157,6 @@ import {
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { keptWidgetOf } from "./custom-widgets.ts";
 import type { KeptWidget } from "./custom-widgets.ts";
-import { emptyThrowawayStore } from "./data-stores.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
@@ -163,7 +164,9 @@ import {
   brainCaptureIntents,
   chatBuildJobs,
   chatCodeRuns,
+  chatDraftContents,
   chatDraftFiles,
+  chatDraftVersionFiles,
   chatDraftVersions,
   maxToolCallIdChars,
   chatDocuments,
@@ -178,11 +181,7 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
-  previewStores,
 } from "./db/workspace/schema.ts";
-import { isPageModules } from "./draft-references.ts";
-import type { PageModules } from "./draft-references.ts";
-import { DraftVersions } from "./draft-versions.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
@@ -198,10 +197,6 @@ import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
-import { PreviewBuilds } from "./preview-builds.ts";
-import type { PreviewBuilt } from "./preview-builds.ts";
-import { PreviewReports } from "./preview-reports.ts";
-import type { Reports } from "./preview-reports.ts";
 import type { WorkContext } from "./restricted.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -232,37 +227,6 @@ interface LiveTurn {
    * the prompt tokens they sent, recorded once the turn ends.
    */
   cache: { requests: number; inputTokens: number; cacheReadTokens: number };
-}
-
-/**
- * A chat's draft of an App (agent-builds.ts): the version it started
- * from, the changes its agent wrote over it, by path (null deletes a
- * file), and its own definition, as stored (`definitionText`), null
- * while it is its base's. `revision` is 0 while there is none.
- */
-export interface Draft {
-  base: number | null;
-  changes: Record<string, string | null>;
-  definition: string | null;
-  revision: number;
-}
-
-/**
- * Who writes a chat's draft: its agent, in its open code run `runId`; or
- * its person themselves, from the App's workspace (the Data view), the
- * write audited as `actor`'s with `detail`.
- */
-export type DraftWriter =
-  | { runId: string }
-  | {
-      personId: string;
-      actor: AuditActor;
-      detail: Record<string, AuditDetailValue>;
-    };
-
-/** What a chat's agent spent building Apps this turn: the Apps it created (agent-builds.ts). */
-interface TurnBuilds {
-  created: number;
 }
 
 /**
@@ -347,8 +311,92 @@ export const questionSchema = z.strictObject({
     .max(chatFilesPerQuestionMax)
     .refine((files) => new Set(files).size === files.length)
     .optional(),
+  /** What it is about, as core found it (`ChatsApi.send`): never the page's word alone. */
+  subject: chatSubjectSchema.extend({ name: z.string().min(1) }).optional(),
+  /**
+   * What the person picked with `@` in it, as core found each for them
+   * (`ChatsApi.send`), by name: never the page's word for a name.
+   */
+  mentions: z
+    .array(
+      z.discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.enum(["app", "workflow"]),
+          id: z.string().min(1),
+          name: z.string().min(1),
+        }),
+        z.strictObject({
+          kind: z.literal("person"),
+          id: z.string().min(1),
+          name: z.string().min(1),
+          role: roleSchema.optional(),
+          teams: z.array(z.string()).optional(),
+        }),
+      ])
+    )
+    .max(chatMentionsMax)
+    .optional(),
+  /**
+   * Build it, said to the chat's plan (by its call): what core made of it
+   * (`ChatsApi.build`), never the page's word.
+   */
+  built: z
+    .strictObject({
+      plan: z.string(),
+      app: z.strictObject({ id: z.string(), name: z.string() }).optional(),
+      workflow: z.strictObject({ id: z.string(), name: z.string() }).optional(),
+      project: z.string().optional(),
+    })
+    .optional(),
 });
 export type Question = z.input<typeof questionSchema>;
+
+/** What "Make something" started `chat` to make, as kept with it; null for any other chat. */
+export const makeOf = ({
+  makeKind,
+  makeProject,
+}: Pick<Chat, "makeKind" | "makeProject">): ChatMake | null =>
+  makeKind === null
+    ? null
+    : {
+        kind: makeKind,
+        ...(makeProject === null ? {} : { project: makeProject }),
+      };
+
+/** What a stored Build it built, as its message shows it; none for any other message. */
+const builtOf = (stored: string | null): ShownBuilt | undefined => {
+  if (stored === null) {
+    return undefined;
+  }
+  const parsed = shownBuiltSchema.safeParse(JSON.parse(stored));
+  return parsed.success ? parsed.data : undefined;
+};
+
+/**
+ * The turn's question (`TurnRequest`): as asked, with the files it carries,
+ * and what the chat was started to make (`make`), if anything.
+ */
+const turnQuestion = (
+  {
+    text,
+    model,
+    effort,
+    subject,
+    mentions,
+    built,
+  }: z.output<typeof questionSchema>,
+  files: { id: string; type: string }[],
+  make: ChatMake | null
+): TurnRequest["question"] => ({
+  text,
+  model,
+  ...(effort === undefined ? {} : { effort }),
+  files,
+  ...(subject === undefined ? {} : { subject }),
+  ...(mentions === undefined ? {} : { mentions }),
+  ...(make === null ? {} : { make }),
+  ...(built === undefined ? {} : { built }),
+});
 
 /**
  * What an answer may hold, as the person sees it labelled: everything the
@@ -542,9 +590,6 @@ const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 /** How long the alarm waits before delivering turns' outcomes again. */
 const captureRetryMs = 60 * 1000;
 
-/** How often a check waiting for a preview reads its reports again. */
-const previewPollMs = 100;
-
 /** Most chats a person keeps: delete one to make another. */
 export const maxChatsPerPerson = 500;
 
@@ -595,27 +640,20 @@ const stopReason = (chatId: ChatId, error: unknown): string => {
 const traceKeyPrefix = "trace:";
 
 /**
+ * The plans of a chat Build it made, as `built:<chat>`: the calls that
+ * proposed them (`takePlan`), so each is made once.
+ */
+const builtKeyPrefix = "built:";
+
+const builtSchema = z.array(z.string());
+
+/**
  * A chat whose turn runs, as `running:<chat>`: a copy of what its
  * `ChatSession` holds (`turnRunning`), for the chat's lists and watchers,
  * kept through a restart of this object. Never what decides a turn: that
  * object does.
  */
 const runningKeyPrefix = "running:";
-
-/**
- * The seed the throwaway stores of a chat's preview of an App are named by
- * (`Workspace.previewRun`), until its data is dropped.
- */
-const previewSeedKey = (chatId: ChatId, appId: string): string =>
-  `preview-seed:${chatId}:${appId}`;
-
-/**
- * The references a chat's draft of an App last generated, for its pages
- * to build against while its server code doesn't
- * (`Workspace.keepPreviewReferences`).
- */
-const previewReferencesKey = (chatId: ChatId, appId: string): string =>
-  `preview-references:${chatId}:${appId}`;
 
 /**
  * What of a chat's `ChatSession` its messages were kept of, as
@@ -813,29 +851,14 @@ export class Workspace extends DurableObject<Env> {
    */
   readonly #heldVersions = new Map<ChatId, number>();
 
-  /**
-   * What each chat's agent spent building Apps this turn: the repair
-   * loop's count and the Apps it created (agent-builds.ts). In memory: a
-   * restart ends the turn, and the next question starts them again anyway.
-   */
-  readonly #builds = new Map<ChatId, TurnBuilds>();
-
   /** Who follows each chat (`watch`), by chat and watch ID. */
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
 
-  /** Every version of the chats' drafts (draft-versions.ts). */
-  readonly #versions = new DraftVersions(this.#db);
-
-  /** What those previews ran into (preview-reports.ts). */
-  readonly #previewReports = new PreviewReports();
-  /** What bounds those previews' builds (preview-builds.ts). */
-  readonly #previewBuilds = new PreviewBuilds();
-
   /**
-   * Bumped whenever a chat's agent writes or drops a draft, so its
-   * watchers read the drafts again, and preview the latest. In memory only.
+   * Bumped whenever a chat's agent writes an App's draft, so its watchers
+   * read what it worked on again (`draftWritten`). In memory only.
    */
-  readonly #draftVersions = new Map<ChatId, number>();
+  readonly #worked = new Map<ChatId, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -864,7 +887,8 @@ export class Workspace extends DurableObject<Env> {
   #store(
     chatId: ChatId,
     message: Message,
-    thinkingMs: number | null = null
+    thinkingMs: number | null = null,
+    built: ShownBuilt | null = null
   ): { id: number; createdAt: Date } {
     const stored = this.#db
       .insert(chatMessages)
@@ -873,6 +897,7 @@ export class Workspace extends DurableObject<Env> {
         message: JSON.stringify(message),
         createdAt: new Date(),
         thinkingMs,
+        built: built === null ? null : JSON.stringify(built),
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
@@ -991,6 +1016,8 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         appId: chats.appId,
         via: chats.via,
+        makeKind: chats.makeKind,
+        makeProject: chats.makeProject,
         agentId: chats.agentId,
         said: sql<string>`'' || ${saidWords}`,
       })
@@ -1007,16 +1034,7 @@ export class Workspace extends DurableObject<Env> {
       })
       .slice(0, searchHitsMax);
     return found.map((row) => ({
-      chat: {
-        id: row.id,
-        title: row.title,
-        agentId: row.agentId,
-        createdAt: row.createdAt.toISOString(),
-        lastAt: row.lastAt.toISOString(),
-        running: this.#isRunning(row.id),
-        appId: row.appId,
-        via: row.via,
-      },
+      chat: this.#summaryOf(row),
       said: hasEvery(query, row.title) ? null : this.#saidAround(row.id, query),
     }));
   }
@@ -1031,15 +1049,25 @@ export class Workspace extends DurableObject<Env> {
     {
       thinkingMs,
       files = [],
-    }: { thinkingMs?: number; files?: readonly string[] } = {}
+      built,
+    }: {
+      thinkingMs?: number;
+      files?: readonly string[];
+      built?: ShownBuilt;
+    } = {}
   ): number {
     // A question and the files it carries are kept together: each file is
     // its, and no other's.
     const { id, createdAt } =
       files.length === 0
-        ? this.#store(chatId, message, thinkingMs ?? null)
+        ? this.#store(chatId, message, thinkingMs ?? null, built ?? null)
         : this.ctx.storage.transactionSync(() => {
-            const stored = this.#store(chatId, message, thinkingMs ?? null);
+            const stored = this.#store(
+              chatId,
+              message,
+              thinkingMs ?? null,
+              built ?? null
+            );
             this.#db
               .update(chatFiles)
               .set({ messageId: stored.id })
@@ -1060,10 +1088,25 @@ export class Workspace extends DurableObject<Env> {
         createdAt,
         message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
         thinkingMs ?? null,
-        message.role === "assistant" && this.#asksIn(chatId)
+        message.role === "assistant" && this.#asksIn(chatId),
+        built
       ),
       files.length === 0 ? undefined : this.#filesAfter(chatId, id - 1)
     );
+    // A plan names the chat after what it makes, as a first question named
+    // it after its words: the chat's own name, not the person's act.
+    if (shown?.role === "assistant" && shown.planned !== undefined) {
+      const [first] = shown.planned.parts;
+      const main =
+        shown.planned.parts.find(({ kind }) => kind === "app") ?? first;
+      if (main !== undefined) {
+        this.#db
+          .update(chats)
+          .set({ title: main.name })
+          .where(eq(chats.id, chatId))
+          .run();
+      }
+    }
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
       const output = this.#outputs.get(chatId);
@@ -1100,7 +1143,8 @@ export class Workspace extends DurableObject<Env> {
    *
    * Made through a chat platform (`via`, its adapter's name), it is that
    * platform's chat for good, and its agent's audit events name it; Grasp's
-   * own app (`web`) otherwise.
+   * own app (`web`) otherwise. Started by "Make something" (`make`), it
+   * keeps what it came to make, and the project Build it makes it in.
    */
   createChat(
     title: string,
@@ -1110,7 +1154,8 @@ export class Workspace extends DurableObject<Env> {
     via: ChatChannel = "web",
     thread?: string,
     /** The App the chat is for (`appChat`), if any. */
-    appId?: AppId
+    appId?: AppId,
+    make?: ChatMake
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -1142,6 +1187,8 @@ export class Workspace extends DurableObject<Env> {
           via: channel,
           thread: thread ?? null,
           appId: appId ?? null,
+          makeKind: make?.kind ?? null,
+          makeProject: make?.project ?? null,
         })
         .returning()
         .get();
@@ -1792,23 +1839,19 @@ export class Workspace extends DurableObject<Env> {
         () => this.#sources(chat.id)
       );
       this.#stopped.delete(chat.id);
-      // Each question gives the repair loop its full count again.
-      this.#builds.delete(chat.id);
       started?.();
       this.#changed(chat.id);
       if (onText !== undefined) {
         live.onText = throttled(onText);
       }
-      const { text, effort } = parsed.data;
       const end = await this.#runTurn({
         turnId: live.id,
         scope,
-        question: {
-          text,
-          model: asked,
-          ...(effort === undefined ? {} : { effort }),
+        question: turnQuestion(
+          { ...parsed.data, model: asked },
           files,
-        },
+          makeOf(chat)
+        ),
         shared,
         readsBrain: await hasBrainGrant(this.env, authority),
         context,
@@ -2083,8 +2126,6 @@ export class Workspace extends DurableObject<Env> {
     const { via } = this.#chat(work.chatId);
     // A chat that came through a chat platform: how to answer there.
     const channel = via === "web" ? undefined : await channelText();
-    // An App's own chat: the App its builds change.
-    const app = this.chatApp(work.chatId);
     // Only who builds reads Grasp's docs, in their own chat: thousands of
     // tokens in every request, of no use to anyone else. Building, an App
     // included, needs a role that builds (app-access.ts).
@@ -2103,7 +2144,6 @@ export class Workspace extends DurableObject<Env> {
       ...(agent?.model === null || agent?.model === undefined
         ? {}
         : { agentModel: agent.model }),
-      ...(app === null ? {} : { app }),
     };
   }
 
@@ -2358,7 +2398,13 @@ export class Workspace extends DurableObject<Env> {
     const before = copied.success ? copied.data : { through: 0 };
     let { through, answer } = before;
     let answered = false;
-    for (const { entryId, message, files = [], thinkingMs } of messages) {
+    for (const {
+      entryId,
+      message,
+      files = [],
+      thinkingMs,
+      built,
+    } of messages) {
       answered ||= message.role === "assistant";
       if (entryId <= before.through) {
         continue;
@@ -2378,7 +2424,11 @@ export class Workspace extends DurableObject<Env> {
       const id = this.#keep(
         chatId,
         via === "web" ? message : inOwnWords(message),
-        { files, ...(thinkingMs === undefined ? {} : { thinkingMs }) }
+        {
+          files,
+          ...(thinkingMs === undefined ? {} : { thinkingMs }),
+          ...(built === undefined ? {} : { built }),
+        }
       );
       if (message.role === "assistant") {
         answer = id;
@@ -2719,20 +2769,6 @@ export class Workspace extends DurableObject<Env> {
       return { call: lease.closed };
     }
     return { call: "open", openedAt: lease.openedAt };
-  }
-
-  /**
-   * Refuses a write of a code run whose lease is closed: checked in the
-   * same transaction as the write, so a run that ended or was revoked
-   * writes nothing after.
-   */
-  #requireOpenRun(chatId: ChatId, runId: string): void {
-    const { call } = this.admitFromCodeRun(chatId, runId);
-    if (call !== "open") {
-      throw agentErrors.create(
-        call === "revoked" ? "agent.run_revoked" : "agent.run_ended"
-      );
-    }
   }
 
   /**
@@ -3239,6 +3275,8 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         appId: chats.appId,
         via: chats.via,
+        makeKind: chats.makeKind,
+        makeProject: chats.makeProject,
       })
       .from(chats)
       .where(eq(chats.personId, personId))
@@ -3252,7 +3290,15 @@ export class Workspace extends DurableObject<Env> {
   #summaryOf(
     chat: Pick<
       typeof chats.$inferSelect,
-      "id" | "title" | "agentId" | "createdAt" | "lastAt" | "appId" | "via"
+      | "id"
+      | "title"
+      | "agentId"
+      | "createdAt"
+      | "lastAt"
+      | "appId"
+      | "via"
+      | "makeKind"
+      | "makeProject"
     >
   ): ChatSummary {
     return {
@@ -3264,22 +3310,33 @@ export class Workspace extends DurableObject<Env> {
       running: this.#isRunning(chat.id),
       appId: chat.appId,
       via: chat.via,
+      make: makeOf(chat),
     };
   }
 
   /**
-   * `personId`'s chat for App `appId`, the one they last used, as their
-   * list shows it; `null` while they have none. A chat others share on a
-   * chat platform is never one.
+   * `personId`'s chat for App `appId`: the one that last worked on it, as
+   * their list shows it, whether made for the App or one among `drafted`,
+   * whose agent wrote its draft (a chat started on Chat that built it), so
+   * the App's page carries on where they left it, with all it knows;
+   * `null` while they have none. A chat others share on a chat platform is
+   * never one.
    */
-  appChat(personId: string, appId: AppId): ChatSummary | null {
+  appChat(
+    personId: string,
+    appId: AppId,
+    drafted: readonly string[]
+  ): ChatSummary | null {
     const chat = this.#db
       .select()
       .from(chats)
       .where(
         and(
           eq(chats.personId, personId),
-          eq(chats.appId, appId),
+          or(
+            eq(chats.appId, appId),
+            sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`
+          ),
           isNull(chats.thread)
         )
       )
@@ -3291,6 +3348,74 @@ export class Workspace extends DurableObject<Env> {
   /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
   chatSummary(chatId: unknown, personId: string): ChatSummary {
     return this.#summaryOf(this.#ownChat(chatId, personId));
+  }
+
+  /**
+   * The plan of `personId`'s chat `chatId` proposed by the call `callId`
+   * (`proposePlan`), as the tool took it, taken for Build it
+   * (`ChatsApi.build`): once, so what it lists is made once. A call the
+   * chat doesn't hold, one that proposed nothing the tool took, or a plan
+   * taken already is `agent.plan_not_found`; while its agent works,
+   * `agent.busy`. `releasePlan` gives it back
+   * when Build it made nothing.
+   */
+  takePlan(
+    chatId: unknown,
+    personId: string,
+    callId: unknown
+  ): { plan: ChatPlan; make: ChatMake | null } {
+    const chat = this.#ownChat(chatId, personId);
+    const { id } = chat;
+    // Its question would be refused: nothing is made for it.
+    if (this.#turns.has(id) || this.#isRunning(id)) {
+      throw agentErrors.create("agent.busy");
+    }
+    const key = `${builtKeyPrefix}${id}`;
+    const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
+    const built = kept.success ? kept.data : [];
+    const transcript = this.#transcript(id);
+    const refused = new Set(
+      transcript.flatMap((message) =>
+        message.role === "toolResult" && message.isError
+          ? [message.toolCallId]
+          : []
+      )
+    );
+    const call = transcript
+      .flatMap((message) =>
+        message.role === "assistant" ? message.content : []
+      )
+      .find(
+        (part) =>
+          part.type === "toolCall" &&
+          part.name === "proposePlan" &&
+          part.id === callId
+      );
+    const plan =
+      call?.type === "toolCall" && !refused.has(call.id)
+        ? chatPlanSchema.safeParse(call.arguments)
+        : undefined;
+    if (
+      typeof callId !== "string" ||
+      plan?.success !== true ||
+      built.includes(callId)
+    ) {
+      throw agentErrors.create("agent.plan_not_found");
+    }
+    this.ctx.storage.kv.put(key, [...built, callId]);
+    return { plan: plan.data, make: makeOf(chat) };
+  }
+
+  /** Gives back a plan `takePlan` took, of which Build it made nothing. */
+  releasePlan(chatId: ChatId, callId: string): void {
+    const key = `${builtKeyPrefix}${chatId}`;
+    const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
+    if (kept.success) {
+      this.ctx.storage.kv.put(
+        key,
+        kept.data.filter((each) => each !== callId)
+      );
+    }
   }
 
   /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
@@ -3620,7 +3745,6 @@ export class Workspace extends DurableObject<Env> {
       );
       // Nor any workflow start its agent asked its person to confirm.
       await dropHeldStarts(this.env, { chatId: id });
-      const previewed = this.#previews(id);
       // What the Brain captured of its turns goes before it does: should
       // that fail, the chat stays (brain-capture.ts). After any delivery
       // under way, as for a person's erasure: one that records the chat's
@@ -3664,26 +3788,21 @@ export class Workspace extends DurableObject<Env> {
           .delete(chatToolEvents)
           .where(eq(chatToolEvents.chatId, id))
           .run();
-        this.#dropDrafts(
-          eq(chatDraftFiles.chatId, id),
-          eq(chatDrafts.chatId, id)
-        );
-        this.#versions.deleteChat(id);
+        // What an earlier release kept of the chat's own drafts (schema.ts):
+        // rows that name it, which go with it.
+        this.#dropChatDrafts(id);
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
       this.#deliverAudit();
-      for (const { appId } of previewed) {
-        this.#dropPreview(id, appId);
-      }
       this.#stopped.delete(id);
       this.#provenanceVersions.delete(id);
       this.#heldVersions.delete(id);
-      this.#draftVersions.delete(id);
-      this.#builds.delete(id);
+      this.#worked.delete(id);
       for (const watch of this.#watchers.get(id)?.values() ?? []) {
         watch[Symbol.dispose]();
       }
@@ -3743,11 +3862,6 @@ export class Workspace extends DurableObject<Env> {
         "person_removed"
       );
     }
-    // What they typed into their previews goes now, not a day after.
-    await this.#emptyPreviewStores();
-    for (const { chatId, appId } of this.#previews()) {
-      this.#dropPreview(chatId, appId);
-    }
     // Every event of what it did is in the log before its outbox goes.
     if ((await drainObjectOutbox(this.env, this.ctx.storage.sql)) > 0) {
       throw internalErrors.create("internal.unexpected");
@@ -3761,9 +3875,7 @@ export class Workspace extends DurableObject<Env> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // Its tables went with its storage: they are made again, empty, as for
-    // a new object, and nothing it held in memory of a chat stays. Its
-    // previews were dropped above (`#dropPreview`, every chat's); the
-    // preview updates it waits on hold only tokens, and end on their own.
+    // a new object, and nothing it held in memory of a chat stays.
     migrateOnWake(this.ctx, migrations);
     for (const kept of [
       this.#partials,
@@ -3771,8 +3883,7 @@ export class Workspace extends DurableObject<Env> {
       this.#outputs,
       this.#provenanceVersions,
       this.#heldVersions,
-      this.#draftVersions,
-      this.#builds,
+      this.#worked,
     ]) {
       kept.clear();
     }
@@ -3939,890 +4050,61 @@ export class Workspace extends DurableObject<Env> {
     return this.#ownChat(chatId, personId).id;
   }
 
-  // A chat's drafts of Apps (agent-builds.ts). Only core calls these, for
-  // the chat's agent, having checked the person's role in the App and the
-  // agent's permission first.
-
-  /** The chat's draft of App `appId`; revision 0 while it has none. */
-  draft(chatId: ChatId, appId: string): Draft {
-    const row = this.#db
-      .select()
-      .from(chatDrafts)
-      .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
-      .get();
-    if (row === undefined) {
-      return { base: null, changes: {}, definition: null, revision: 0 };
-    }
-    const files = this.#db
-      .select({ path: chatDraftFiles.path, content: chatDraftFiles.content })
-      .from(chatDraftFiles)
-      .where(
-        and(eq(chatDraftFiles.chatId, chatId), eq(chatDraftFiles.appId, appId))
-      )
-      .all();
-    return {
-      base: row.base,
-      changes: Object.fromEntries(
-        files.map(({ path, content }) => [path, content])
-      ),
-      definition: row.definition,
-      revision: row.revision,
-    };
-  }
+  // What a chat's agent writes of Apps' drafts (agent-builds.ts), which
+  // live in core's database (app-drafts.ts): only what the chat's thread
+  // shows of it. Only core calls these, for the chat's agent.
 
   /**
-   * The title of `personId`'s own chat `chatId`; `null` when it is gone,
-   * or not theirs. For a review of what the chat's agent proposed, read by
-   * the person it acted for alone: a title may quote their question.
+   * The turn and code step (its tool call's ID) of the chat's code run
+   * `runId`, from the run's own record: what a draft's undo point names,
+   * never what the run's code says. Nulls for a run that isn't there.
    */
-  chatTitle(chatId: unknown, personId: string): string | null {
-    const id = chatIdSchema.safeParse(chatId);
-    if (!id.success) {
-      return null;
-    }
-    const row = this.#db
-      .select({ title: chats.title, personId: chats.personId })
-      .from(chats)
-      .where(eq(chats.id, id.data))
-      .get();
-    return row?.personId === personId ? row.title : null;
-  }
-
-  /**
-   * `personId`'s own chat's drafts, the most recently written first:
-   * which Apps, over which version, and the paths each changes (none once
-   * proposed or discarded), and which of those it deletes.
-   */
-  drafts(chatId: unknown, personId: string): ChatDraft[] {
-    const { id } = this.#ownChat(chatId, personId);
-    // A chat's few drafts, read by their key and sorted here.
-    const rows = this.#db
-      .select()
-      .from(chatDrafts)
-      .where(eq(chatDrafts.chatId, id))
-      .all()
-      .toSorted(
-        (one, other) => other.updatedAt.getTime() - one.updatedAt.getTime()
-      );
-    // In key order: by App, then path. Whether each is deleted (it has no
-    // content), without reading any file's content.
-    const paths = this.#db
-      .select({
-        appId: chatDraftFiles.appId,
-        path: chatDraftFiles.path,
-        deleted: isNull(chatDraftFiles.content).mapWith(Boolean),
-      })
-      .from(chatDraftFiles)
-      .where(eq(chatDraftFiles.chatId, id))
-      .orderBy(asc(chatDraftFiles.appId), asc(chatDraftFiles.path))
-      .all();
-    // A draft whose changes are all gone (proposed, or discarded) keeps
-    // its row and its revision, which its preview, of the App's latest
-    // version now (`previewDraft`), goes on following.
-    return rows.map(
-      ({ appId, base, revision, updatedAt, callId, definition }) => {
-        const files = paths.filter((row) => row.appId === appId);
-        return {
-          app: appId,
-          base,
-          changed: files.map(({ path }) => path),
-          deleted: files
-            .filter(({ deleted }) => deleted)
-            .map(({ path }) => path),
-          definitionChanged: definition !== null,
-          revision,
-          updatedAt: updatedAt.toISOString(),
-          callId,
-        };
-      }
-    );
-  }
-
-  /**
-   * Writes `changes` into the chat's draft of App `appId`, over version
-   * `base`, and drops its changes to the paths in `unchanged` (back as the
-   * base has them), only over the revision `revision` the write read (0:
-   * there was none): `false`, and nothing written, when another write
-   * landed since, or the chat is gone. By `writer` (`DraftWriter`): the
-   * chat's code run, refused in the same transaction once it has closed;
-   * or the chat's own person, audited as theirs. Kept as the version of
-   * the run's turn, too (draft-versions.ts): the preview follows every
-   * write, the versions one per turn. With `definition`, the draft's own
-   * definition after the write (null: back to its base's), next to its
-   * files in the same transaction; without, the one it has stays.
-   */
-  saveDraft(
+  codeRunOf(
     chatId: ChatId,
-    appId: string,
-    base: number | null,
-    changes: Record<string, string | null>,
-    unchanged: readonly string[],
-    revision: number,
-    writer: DraftWriter,
-    definition?: string | null
-  ): boolean {
-    const saved = this.ctx.storage.transactionSync(() => {
-      if ("runId" in writer) {
-        this.#requireOpenRun(chatId, writer.runId);
-      } else {
-        this.#ownChat(chatId, writer.personId);
-      }
-      const [row] = this.#db
-        .select({ revision: chatDrafts.revision })
-        .from(chatDrafts)
-        .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
-        .all();
-      if (
-        (row?.revision ?? 0) !== revision ||
-        this.chatState(chatId) === undefined
-      ) {
-        return false;
-      }
-      const updatedAt = new Date();
-      // The code step and turn that write it, from the run's own record:
-      // never what the run's code says. None for the person's own write.
-      const run =
-        "runId" in writer
-          ? this.#db
-              .select({
-                callId: chatCodeRuns.toolCallId,
-                turnId: chatCodeRuns.turnId,
-              })
-              .from(chatCodeRuns)
-              .where(eq(chatCodeRuns.id, writer.runId))
-              .get()
-          : undefined;
-      const callId = run?.callId ?? null;
-      const defined = definition === undefined ? {} : { definition };
-      this.#db
-        .insert(chatDrafts)
-        .values({
-          chatId,
-          appId,
-          base,
-          revision: revision + 1,
-          updatedAt,
-          callId,
-          ...defined,
-        })
-        .onConflictDoUpdate({
-          target: [chatDrafts.chatId, chatDrafts.appId],
-          set: { base, revision: revision + 1, updatedAt, callId, ...defined },
-        })
-        .run();
-      for (const [path, content] of Object.entries(changes)) {
-        this.#db
-          .insert(chatDraftFiles)
-          .values({ chatId, appId, path, content })
-          .onConflictDoUpdate({
-            target: [
-              chatDraftFiles.chatId,
-              chatDraftFiles.appId,
-              chatDraftFiles.path,
-            ],
-            set: { content },
-          })
-          .run();
-      }
-      for (const path of unchanged) {
-        this.#db
-          .delete(chatDraftFiles)
-          .where(
-            and(
-              eq(chatDraftFiles.chatId, chatId),
-              eq(chatDraftFiles.appId, appId),
-              eq(chatDraftFiles.path, path)
-            )
-          )
-          .run();
-      }
-      this.#versions.keep(
-        chatId,
-        appId,
-        this.draft(chatId, appId),
-        { turnId: run?.turnId ?? null, callId },
-        updatedAt
-      );
-      if ("personId" in writer) {
-        this.#outboxed(writer.actor, "chat.draft_defined", chatId, {
-          app: appId,
-          revision: revision + 1,
-          ...writer.detail,
-        });
-      }
-      return true;
-    });
-    if (saved && "personId" in writer) {
-      this.#deliverAudit();
+    runId: string
+  ): { turnId: string | null; callId: string | null } {
+    const run = this.#db
+      .select({ callId: chatCodeRuns.toolCallId, turnId: chatCodeRuns.turnId })
+      .from(chatCodeRuns)
+      .where(and(eq(chatCodeRuns.id, runId), eq(chatCodeRuns.chatId, chatId)))
+      .get();
+    return { turnId: run?.turnId ?? null, callId: run?.callId ?? null };
+  }
+
+  /**
+   * Tells the chat's watchers its agent wrote an App's draft, so they read
+   * what it worked on again (`ChatsApi.worked`). The App's preview hears
+   * of the write from the write itself (app-drafts.ts).
+   */
+  draftWritten(chatId: unknown): void {
+    const chat = chatIdSchema.safeParse(chatId);
+    if (!chat.success) {
+      return;
     }
-    if (saved) {
-      this.#draftsChanged(chatId);
-    }
-    return saved;
-  }
-
-  /** Tells the chat's watchers its drafts changed. */
-  #draftsChanged(chatId: ChatId): void {
-    this.#draftVersions.set(chatId, (this.#draftVersions.get(chatId) ?? 0) + 1);
-    this.#changed(chatId);
+    this.#worked.set(chat.data, (this.#worked.get(chat.data) ?? 0) + 1);
+    this.#changed(chat.data);
   }
 
   /**
-   * Drops the chat's draft of App `appId`: for an open code run (`runId`,
-   * refused in the same transaction once it has closed), or, once a
-   * proposal committed it, only while it is still at the `revision` it
-   * committed: a proposal the run's lease admitted is followed through
-   * whatever came after. `false` when it changed since, or the chat is
-   * gone.
+   * Deletes what an earlier release kept of chat `id`'s own drafts and
+   * their previews (schema.ts: unused since the App's one shared draft):
+   * its rows name the chat, so they go with it.
    */
-  dropDraft(
-    chatId: ChatId,
-    appId: string,
-    by: { runId: string } | { revision: number }
-  ): boolean {
-    const dropped = this.ctx.storage.transactionSync(() => {
-      if ("runId" in by) {
-        this.#requireOpenRun(chatId, by.runId);
-      }
-      const now = this.draft(chatId, appId);
-      if ("revision" in by && now.revision !== by.revision) {
-        return false;
-      }
-      if (this.chatState(chatId) === undefined) {
-        return false;
-      }
-      // Its changes go; its revision goes on, a row made for it if there
-      // was none, so a write that read an earlier one (0, before the
-      // draft's first write landed, too) lands on nothing (`saveDraft`).
-      this.#db
-        .delete(chatDraftFiles)
-        .where(
-          and(
-            eq(chatDraftFiles.chatId, chatId),
-            eq(chatDraftFiles.appId, appId)
-          )
-        )
-        .run();
-      const updatedAt = new Date();
-      this.#db
-        .insert(chatDrafts)
-        .values({
-          chatId,
-          appId,
-          base: null,
-          revision: now.revision + 1,
-          definition: null,
-          updatedAt,
-          callId: null,
-        })
-        .onConflictDoUpdate({
-          target: [chatDrafts.chatId, chatDrafts.appId],
-          set: {
-            revision: now.revision + 1,
-            definition: null,
-            updatedAt,
-            callId: null,
-          },
-        })
-        .run();
-      return true;
-    });
-    if (dropped) {
-      this.#dropPreview(chatId, appId);
-      this.#draftsChanged(chatId);
-    }
-    return dropped;
-  }
-
-  /**
-   * The versions of `personId`'s own chat's draft of App `appId`, newest
-   * first (draft-versions.ts).
-   */
-  draftVersions(
-    chatId: unknown,
-    personId: string,
-    appId: string
-  ): ChatDraftVersion[] {
-    const { id } = this.#ownChat(chatId, personId);
-    return this.#versions.list(id, appId);
-  }
-
-  /**
-   * Version `number` of `personId`'s own chat's draft of App `appId`, as
-   * a draft at the revision it made: to preview, read-only.
-   */
-  draftVersion(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    number: unknown
-  ): Draft {
-    const { id } = this.#ownChat(chatId, personId);
-    return this.#versions.read(id, appId, number).draft;
-  }
-
-  /**
-   * Makes version `number` of `personId`'s own chat's draft of App
-   * `appId` the draft again, as its next version, audited as `by`'s: no
-   * version is changed. Over whatever the draft is now, as the person
-   * chose it; a write of the agent's that read the draft before lands on
-   * nothing (`saveDraft`).
-   */
-  restoreDraftVersion(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    number: unknown,
-    by: AuditActor
-  ): ChatDraftVersion {
-    const { id } = this.#ownChat(chatId, personId);
-    const restored = this.ctx.storage.transactionSync(() => {
-      const { version, draft } = this.#versions.read(id, appId, number);
-      const revision = this.draft(id, appId).revision + 1;
-      const updatedAt = new Date();
-      this.#db
-        .insert(chatDrafts)
-        .values({
-          chatId: id,
-          appId,
-          base: draft.base,
-          revision,
-          definition: draft.definition,
-          updatedAt,
-          callId: null,
-        })
-        .onConflictDoUpdate({
-          target: [chatDrafts.chatId, chatDrafts.appId],
-          set: {
-            base: draft.base,
-            revision,
-            definition: draft.definition,
-            updatedAt,
-            callId: null,
-          },
-        })
-        .run();
-      this.#db
-        .delete(chatDraftFiles)
-        .where(
-          and(eq(chatDraftFiles.chatId, id), eq(chatDraftFiles.appId, appId))
-        )
-        .run();
-      for (const [path, content] of Object.entries(draft.changes)) {
-        this.#db
-          .insert(chatDraftFiles)
-          .values({ chatId: id, appId, path, content })
-          .run();
-      }
-      const kept = this.#versions.keep(
-        id,
-        appId,
-        { ...draft, revision },
-        { restoredFrom: version.number },
-        updatedAt
-      );
-      this.#outboxed(by, "chat.draft_restored", id, {
-        app: appId,
-        version: kept.number,
-        restoredFrom: version.number,
-      });
-      return kept;
-    });
-    this.#deliverAudit();
-    this.#dropPreview(id, appId);
-    this.#draftsChanged(id);
-    return restored;
-  }
-
-  /**
-   * Discards `personId`'s own chat's draft of App `appId`, audited as
-   * `by`'s: its changes go, its versions stay (to restore one), and its
-   * revision goes on, so a write of the agent's that read the draft
-   * before lands on nothing (`saveDraft`). Whatever the draft is now, as
-   * the person chose it; a draft that changes nothing is discarded all the
-   * same, and audited once each time.
-   */
-  discardDraft(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    by: AuditActor
-  ): void {
-    const { id } = this.#ownChat(chatId, personId);
-    // No await from here to the outbox: the drop and its event are
-    // written together, as one of the object's turns.
-    const { revision } = this.draft(id, appId);
-    if (!this.dropDraft(id, appId, { revision })) {
-      throw appErrors.create("app.conflict");
-    }
-    this.#outboxed(by, "chat.draft_discarded", id, {
-      app: appId,
-      revision: revision + 1,
-    });
-    this.#deliverAudit();
-  }
-
-  /**
-   * Forgets what the chat's preview of App `appId` reported, and what its
-   * page last built against, and empties its throwaway stores: the draft
-   * was dropped, restored or the chat deleted, so what someone typed into
-   * the preview goes with it. Its next call runs on a store of a new name
-   * (`previewRun`), never one emptied here.
-   */
-  #dropPreview(chatId: ChatId, appId: string): void {
-    this.#previewReports.drop(chatId, appId);
-    this.ctx.storage.kv.delete(previewSeedKey(chatId, appId));
-    this.ctx.storage.kv.delete(previewReferencesKey(chatId, appId));
-    this.ctx.waitUntil(this.#emptyPreviewStores(chatId, appId));
-  }
-
-  /**
-   * What `personId`'s own chat's preview of App `appId` runs on now
-   * (`previewDraft`), and the seed its throwaway store is named by
-   * (draft-runs.ts): the same until the preview's data is dropped
-   * (`#dropPreview`), then a new one, so no call ever finds a store emptied
-   * for good again.
-   */
-  async previewRun(
-    chatId: unknown,
-    personId: string,
-    appId: string
-  ): Promise<{ draft: Draft; seed: string }> {
-    const draft = await this.previewDraft(chatId, personId, appId);
-    return { draft, seed: this.previewSeed(chatId, personId, appId) };
-  }
-
-  /**
-   * The seed of `personId`'s own chat's preview of App `appId`
-   * (`previewRun`), made on first use: what a draft action's invocation is
-   * named by too (page-calls.ts), so nothing it kept outlives the
-   * preview's data. `agent.chat_not_found` once the chat is gone.
-   */
-  previewSeed(chatId: unknown, personId: string, appId: string): string {
-    const chat = this.#ownChat(chatId, personId);
-    this.#previewsInChat(chat, appId);
-    const key = previewSeedKey(chat.id, appId);
-    const kept = this.ctx.storage.kv.get<string>(key);
-    if (kept !== undefined) {
-      return kept;
-    }
-    const seed = crypto.randomUUID();
-    this.ctx.storage.kv.put(key, seed);
-    return seed;
-  }
-
-  /**
-   * Keeps `references`, the page modules (draft-references.ts
-   * `PageModules`) the draft of App `appId` in `personId`'s own chat last
-   * generated, for its pages to build against while its server code
-   * doesn't (chats-rpc.ts).
-   */
-  keepPreviewReferences(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    references: PageModules | null
-  ): void {
-    const { id } = this.#ownChat(chatId, personId);
-    this.ctx.storage.kv.put(previewReferencesKey(id, appId), references);
-  }
-
-  /** The references `keepPreviewReferences` kept last, if any. */
-  previewReferencesKept(
-    chatId: unknown,
-    personId: string,
-    appId: string
-  ): PageModules | null | undefined {
-    const { id } = this.#ownChat(chatId, personId);
-    const kept = this.ctx.storage.kv.get(previewReferencesKey(id, appId));
-    // Anything but page modules is as good as none.
-    return kept === null || isPageModules(kept) ? kept : undefined;
-  }
-
-  /**
-   * Keeps that `storeId` is the throwaway store of `personId`'s own chat's
-   * preview of App `appId` (draft-runs.ts), so dropping the draft, deleting
-   * the chat or removing or erasing them empties it at once, rather than a
-   * day after its last use.
-   */
-  keepPreviewStore(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    {
-      storeId,
-      seed,
-      revision,
-    }: { storeId: string; seed: string; revision: number }
-  ): void {
-    const { id } = this.#ownChat(chatId, personId);
-    // Only a run of the preview as it is now: one that read its seed
-    // before its data was dropped never makes that store again.
-    if (this.ctx.storage.kv.get<string>(previewSeedKey(id, appId)) !== seed) {
-      throw appErrors.create("app.preview_outdated");
-    }
+  #dropChatDrafts(id: ChatId): void {
+    this.#db.delete(chatDraftFiles).where(eq(chatDraftFiles.chatId, id)).run();
     this.#db
-      .insert(previewStores)
-      .values({ storeId, chatId: id, appId, revision })
-      .onConflictDoNothing()
+      .delete(chatDraftVersionFiles)
+      .where(eq(chatDraftVersionFiles.chatId, id))
       .run();
-  }
-
-  /**
-   * Empties the throwaway stores of every chat's previews: what core asks
-   * once an admin removed the person this object is for (members.ts).
-   */
-  async emptyPreviewStores(): Promise<void> {
-    await this.#emptyPreviewStores();
-  }
-
-  /**
-   * Empties for good the throwaway stores of the chat `chatId`'s previews
-   * of App `appId`, or of every chat's, and forgets each once it is
-   * (`DataStore.emptyThrowaway`): a call still under way on one is refused.
-   */
-  async #emptyPreviewStores(chatId?: ChatId, appId?: string): Promise<void> {
-    const stores = this.#db
-      .select({ storeId: previewStores.storeId })
-      .from(previewStores)
-      .where(
-        chatId === undefined || appId === undefined
-          ? undefined
-          : and(
-              eq(previewStores.chatId, chatId),
-              eq(previewStores.appId, appId)
-            )
-      )
-      .all();
-    for (const { storeId } of stores) {
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await emptyThrowawayStore(this.env, storeIdSchema.parse(storeId));
-      this.#db
-        .delete(previewStores)
-        .where(eq(previewStores.storeId, storeId))
-        .run();
-    }
-  }
-
-  /**
-   * Keeps what a call of the preview of `personId`'s own chat's draft of
-   * App `appId` at `revision` failed with (`problem`), for the agent's
-   * next check (preview-reports.ts), and that the preview ran at all: only
-   * of the draft's own revision now, as an earlier page's calls decide
-   * nothing of the draft now.
-   */
-  previewCalled(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    revision: number,
-    problem: PreviewProblem | null
-  ): void {
-    const { id } = this.#ownChat(chatId, personId);
-    if (this.draft(id, appId).revision !== revision) {
-      return;
-    }
-    if (problem !== null) {
-      this.#previewReports.report(id, appId, revision, problem);
-    }
-    this.#previewReports.saw(id, appId, revision);
-  }
-
-  // A chat's preview of its draft of an App (draft-runs.ts), for the chat's
-  // own person and the chat's agent acting for them: core checks the
-  // person's role in the App first (chats-rpc.ts, agent-builds.ts).
-
-  /**
-   * What `personId`'s own chat previews of App `appId` (`#draftToPreview`),
-   * which they have open in the side panel now: its draft, or (`fallback`)
-   * the App's latest version in place of a draft whose page doesn't
-   * build.
-   */
-  async previewDraft(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    { fallback = false }: { fallback?: boolean } = {}
-  ): Promise<Draft> {
-    const latest = await this.#latestFor(chatId, personId, appId, fallback);
-    const { id, draft } = this.#draftToPreview(
-      chatId,
-      personId,
-      appId,
-      fallback,
-      latest
-    );
-    this.#previewReports.opened(id, appId);
-    return draft;
-  }
-
-  /**
-   * What `build` answers, a build of `what` (the kind of ask and its
-   * page) of `personId`'s own chat's preview of App `appId`, at
-   * `revision` (the draft's now when not named): one build per revision,
-   * shared by every ask for it while it runs (preview-builds.ts);
-   * `app.preview_outdated` for a revision the draft moved past. The
-   * caller builds; this only shares what it answers.
-   */
-  async previewBuild(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    what: string,
-    revision: number | undefined,
-    build: () => Promise<PreviewBuilt>
-  ): Promise<PreviewBuilt> {
-    // Only the draft's revision: what the build shows, the App's latest
-    // version too, the build itself reads (`previewDraft`, fresh).
-    const chat = this.#ownChat(chatId, personId);
-    this.#previewsInChat(chat, appId);
-    const { id } = chat;
-    const now = this.draft(id, appId).revision;
-    return await this.#previewBuilds.build(
-      `${id}:${appId}:${what}`,
-      revision ?? now,
-      now,
-      build
-    );
-  }
-
-  /**
-   * The App's latest version, which the chat's preview of App `appId`
-   * shows while its draft changes nothing, and (`fallback`) in place of a
-   * draft whose page doesn't build (`#draftToPreview`): null when it has
-   * none; undefined, not looked up, for the draft's own changes. Read from
-   * core's database as a preview opens or takes an update: a frame's calls
-   * name the version they run on. Only of an App the chat
-   * changes, or whose chat it is: `app.not_in_chat` for any other.
-   */
-  async #latestFor(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    fallback: boolean
-  ): Promise<number | null | undefined> {
-    const chat = this.#ownChat(chatId, personId);
-    const app = appIdSchema.parse(appId);
-    const drafted = this.#previewsInChat(chat, app);
-    const changes =
-      drafted &&
-      this.#db
-        .select({ path: chatDraftFiles.path })
-        .from(chatDraftFiles)
-        .where(
-          and(eq(chatDraftFiles.chatId, chat.id), eq(chatDraftFiles.appId, app))
-        )
-        .limit(1)
-        .get() !== undefined;
-    if (changes && !fallback) {
-      return undefined;
-    }
-    return await latestVersion(this.env, app);
-  }
-
-  /**
-   * Every preview chat `chatId` may run, or every chat's: of each App it
-   * has a draft of, even one with no changes left, and of the App whose
-   * chat it is, which it previews with no draft written
-   * (`#previewsInChat`). What a chat's deletion or its person's erasure
-   * stops.
-   */
-  #previews(chatId?: ChatId): { chatId: ChatId; appId: string }[] {
-    const drafted = this.#db
-      .select({ chatId: chatDrafts.chatId, appId: chatDrafts.appId })
-      .from(chatDrafts)
-      .where(chatId === undefined ? undefined : eq(chatDrafts.chatId, chatId))
-      .all();
-    const own = this.#db
-      .select({ chatId: chats.id, appId: chats.appId })
-      .from(chats)
-      .where(chatId === undefined ? undefined : eq(chats.id, chatId))
-      .all()
-      .flatMap(({ chatId: id, appId }) =>
-        appId === null ? [] : [{ chatId: id, appId }]
-      );
-    return [
-      ...new Map(
-        [...drafted, ...own].map((preview) => [
-          `${preview.chatId}:${preview.appId}`,
-          preview,
-        ])
-      ).values(),
-    ];
-  }
-
-  /**
-   * Whether `chat` has a draft of App `app`, rather than being only its
-   * own chat: `app.not_in_chat` when it is neither, as it has no preview
-   * of that App.
-   */
-  #previewsInChat(chat: Chat, app: string): boolean {
-    const drafted =
-      this.#db
-        .select({ revision: chatDrafts.revision })
-        .from(chatDrafts)
-        .where(and(eq(chatDrafts.chatId, chat.id), eq(chatDrafts.appId, app)))
-        .get() !== undefined;
-    if (!drafted && chat.appId !== app) {
-      throw appErrors.create("app.not_in_chat");
-    }
-    return drafted;
-  }
-
-  /**
-   * What `personId`'s own chat previews of App `appId`: its draft, over
-   * the version it began from; while the draft changes nothing (none
-   * written yet, or proposed, or discarded), the App's `latest` version
-   * (`#latestFor`, looked up first), at the draft's revision. So the
-   * preview always shows the App, and the draft's next write comes into
-   * the frame showing it, as any write does. With `fallback`, the App's
-   * latest version whatever the draft holds: what a preview shows while
-   * the draft's page doesn't build. A frame's calls name that version,
-   * so they run on its own server code (`#servedBuild`).
-   * `app.not_running` only for an App with no version and no changes,
-   * with nothing to show; `app.preview_outdated` for a draft whose changes
-   * went after the latest version wasn't looked up, which the preview
-   * asks for again.
-   */
-  #draftToPreview(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    fallback: boolean,
-    latest: number | null | undefined
-  ): { id: ChatId; draft: Draft } {
-    const { id } = this.#ownChat(chatId, personId);
-    const draft = this.draft(id, appId);
-    if (!fallback && changesAnything(draft)) {
-      return { id, draft };
-    }
-    if (latest === undefined) {
-      throw appErrors.create("app.preview_outdated");
-    }
-    if (latest === null) {
-      throw appErrors.create("app.not_running");
-    }
-    return {
-      id,
-      draft: {
-        base: latest,
-        changes: {},
-        definition: null,
-        revision: draft.revision,
-      },
-    };
-  }
-
-  /**
-   * Keeps `problem`, what the preview of `personId`'s own chat's draft of
-   * App `appId` at `at` reported on `page`, for the agent's next
-   * check (preview-reports.ts): only of the draft's own revision, which a
-   * frame names for what that revision's page ran into, an update of it
-   * the frame tried and rolled back too (@grasp-os/runtime's
-   * preview-updates.ts). Dropped for any other: an earlier page's
-   * problems decide nothing of the draft now. Never kept for a frame
-   * showing a version of the App, or a version of the draft opened
-   * read-only: nothing it reports is its draft's.
-   */
-  previewReport(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    at: unknown,
-    path: string,
-    problem: PageProblem
-  ): void {
-    const { id } = this.#ownChat(chatId, personId);
-    const draft = this.draft(id, appId);
-    if (at === readOnlyRevision || at !== draft.revision) {
-      return;
-    }
-    this.#previewReports.report(id, appId, draft.revision, {
-      source: "page",
-      at: path,
-      ...problem,
-    });
-  }
-
-  /**
-   * What the preview of the chat's draft of App `appId` at `revision` ran
-   * into, and what its server code logged, for the agent's checks of the
-   * draft (agent-builds.ts): while the person has it open in the side
-   * panel, waiting up to `waitMs` for it to report on that revision at
-   * all, as a check may come right after the write. `seen` is false when
-   * it didn't: nobody has it open (answered at once), or its pages
-   * neither called the server nor failed.
-   */
-  async previewReports(
-    chatId: ChatId,
-    appId: string,
-    revision: number,
-    waitMs: number
-  ): Promise<Reports> {
-    const until = Date.now() + waitMs;
-    let now = this.#previewReports.read(chatId, appId, revision);
-    while (
-      !now.seen &&
-      Date.now() < until &&
-      this.#previewReports.isOpen(chatId, appId)
-    ) {
-      // oxlint-disable-next-line no-await-in-loop -- polls until it reported, or the wait ends
-      await scheduler.wait(previewPollMs);
-      now = this.#previewReports.read(chatId, appId, revision);
-    }
-    return now;
-  }
-
-  /**
-   * Keeps what the server code of the chat's draft of App `appId` at
-   * `revision` wrote with `console` in its preview: for the preview's
-   * tail alone (server-logs.ts).
-   */
-  previewLogs(
-    chatId: ChatId,
-    appId: string,
-    revision: number,
-    logs: ServerLog[]
-  ): void {
-    this.#previewReports.log(chatId, appId, revision, logs);
-  }
-
-  /** Deletes the draft files and drafts the conditions name, in that order. */
-  #dropDrafts(files: SQL | undefined, drafts: SQL | undefined): void {
-    this.#db.delete(chatDraftFiles).where(files).run();
-    this.#db.delete(chatDrafts).where(drafts).run();
-  }
-
-  /** What the chat's agent spent building Apps this turn. */
-  #turnBuilds(chatId: ChatId): TurnBuilds {
-    const found = this.#builds.get(chatId);
-    if (found !== undefined) {
-      return found;
-    }
-    const made: TurnBuilds = { created: 0 };
-    this.#builds.set(chatId, made);
-    return made;
-  }
-
-  /**
-   * Takes one of the Apps the chat's agent may create this turn, for the
-   * code run `runId`, refused once that run has closed: `false` once it
-   * created `limit`.
-   */
-  takeCreate(chatId: ChatId, limit: number, runId: string): boolean {
-    this.#requireOpenRun(chatId, runId);
-    const turn = this.#turnBuilds(chatId);
-    if (turn.created >= limit) {
-      return false;
-    }
-    turn.created += 1;
-    return true;
-  }
-
-  /** Gives back an App taken with `takeCreate` that wasn't created. */
-  releaseCreate(chatId: ChatId): void {
-    const turn = this.#turnBuilds(chatId);
-    turn.created = Math.max(0, turn.created - 1);
+    this.#db
+      .delete(chatDraftContents)
+      .where(eq(chatDraftContents.chatId, id))
+      .run();
+    this.#db
+      .delete(chatDraftVersions)
+      .where(eq(chatDraftVersions.chatId, id))
+      .run();
+    this.#db.delete(chatDrafts).where(eq(chatDrafts.chatId, id)).run();
   }
 
   /**
@@ -4843,29 +4125,6 @@ export class Workspace extends DurableObject<Env> {
     this.#changed(chat.data);
   }
 
-  /**
-   * The Apps whose drafts the chat's agent wrote in turn `turnId`: those
-   * with a version of that turn's (draft-versions.ts), kept with the
-   * draft, so a restart forgets none.
-   */
-  turnDrafts(chatId: unknown, turnId: string): string[] {
-    const chat = chatIdSchema.safeParse(chatId);
-    if (!chat.success) {
-      return [];
-    }
-    return this.#db
-      .selectDistinct({ appId: chatDraftVersions.appId })
-      .from(chatDraftVersions)
-      .where(
-        and(
-          eq(chatDraftVersions.chatId, chat.data),
-          eq(chatDraftVersions.turnId, turnId)
-        )
-      )
-      .all()
-      .map(({ appId }) => appId);
-  }
-
   /** Tells the chat's watchers it changed, with the messages just stored. */
   #changed(chatId: ChatId, messages: readonly ChatMessage[] = []): void {
     for (const watch of this.#watchers.get(chatId)?.values() ?? []) {
@@ -4884,7 +4143,7 @@ export class Workspace extends DurableObject<Env> {
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,
       stopped: stopped ?? null,
       held: this.#heldVersions.get(chatId) ?? 0,
-      drafts: this.#draftVersions.get(chatId) ?? 0,
+      worked: this.#worked.get(chatId) ?? 0,
       checking: this.#checking.has(chatId),
     };
   }
@@ -4917,7 +4176,7 @@ export class Workspace extends DurableObject<Env> {
       .where(and(eq(chatMessages.chatId, chatId), gt(chatMessages.id, after)))
       .orderBy(asc(chatMessages.id))
       .all()
-      .flatMap(({ id, message, createdAt, thinkingMs }) => {
+      .flatMap(({ id, message, createdAt, thinkingMs, built }) => {
         const shown = withFiles(
           chatMessageOf(
             id,
@@ -4925,7 +4184,8 @@ export class Workspace extends DurableObject<Env> {
             createdAt,
             givenBy(id),
             thinkingMs,
-            asking
+            asking,
+            builtOf(built)
           ),
           carried
         );

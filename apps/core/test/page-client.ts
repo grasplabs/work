@@ -18,7 +18,6 @@ import { loadRelease } from "../src/app-releases.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { commitApp, definedWith, withFiles } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
-import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
 import type { apiOf } from "./notes-client-app.ts";
@@ -62,14 +61,13 @@ export const openedApp = async (appFiles: TestSource = files) => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  await published(id);
   const { version } = await commitApp(
     builder.api.apps.files,
     id,
     appFiles,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
+  await builder.api.apps.versions.publish(id, version);
   const { lease } = await builder.api.pages.open(id);
   const { lease: adminLease } = await admin.api.pages.open(id);
   const release = await loadRelease(env, id, version);
