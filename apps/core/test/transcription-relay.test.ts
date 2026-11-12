@@ -30,8 +30,8 @@ import { routed, signedInWithRole, unique } from "./sign-in.ts";
 // transcription.ts). Mistral's realtime transcription, Grasp's own by
 // default (@grasp-os/shared/platform-ai), reached through connect, is the
 // outside system: a fake behind connect's fetch that answers the first
-// audio of a stretch with a delta, and its flush with the rest of its
-// words (test/ai-providers-fake.ts). Connect, the store, the link checks and the
+// audio of a session with a delta, and the end of its audio with the rest
+// of its words and its whole text (test/ai-providers-fake.ts). Connect, the store, the link checks and the
 // audit log are real. The ways it can fail, tried here (GRA-361, C4 and
 // A1):
 //
@@ -342,11 +342,9 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       page.socket.send(new Uint8Array(1600).fill(7));
       const partial = await page.next();
       page.socket.send(JSON.stringify({ type: "commit" }));
-      // The rest of the stretch's words as they come, then its final.
-      const rest = await page.next();
       const final = await page.next();
       page.socket.close(1000, "Done");
-      return { ready: ready?.type, partial, rest, final };
+      return { ready: ready?.type, partial, final };
     });
 
     const [opened] = upstream.opened;
@@ -376,7 +374,6 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       ready: "ready",
       partial: { type: "partial", text: "Hello" },
-      rest: { type: "partial", text: "Hello there" },
       // The session times no words.
       final: { type: "final", text: "Hello there", words: [] },
       path: "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3-0",
@@ -385,8 +382,14 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       format: { encoding: "pcm_s16le", sample_rate: 16_000 },
       language: "nl",
       keyterms: true,
-      // Its settings before any audio, and a flush for the page's commit.
-      events: ["session.update", "input_audio.append", "input_audio.flush"],
+      // Its settings before any audio, and for the page's commit the end
+      // of its audio.
+      events: [
+        "session.update",
+        "input_audio.append",
+        "input_audio.flush",
+        "input_audio.end",
+      ],
       audio: 3196,
       samples: Array.from({ length: 8 }, () => 0x07_07),
     });
@@ -415,28 +418,28 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       page.socket.send(JSON.stringify({ type: "commit" }));
       // Nothing sent since: nothing to settle.
       page.socket.send(JSON.stringify({ type: "commit" }));
-      // The rest of the stretch's words, as they come, then its finals.
-      const heard = [await page.next(), await page.next(), await page.next()];
+      const finals = [await page.next(), await page.next()];
       page.socket.close(1000, "Done");
-      return heard;
+      return finals;
     });
 
     expect({
-      heard: result,
-      flushes: upstream.opened[0]?.events.filter(
-        (type) => type === "input_audio.flush"
-      ).length,
+      finals: result,
+      // The stretch's session, ended once; the next has nothing to end.
+      ended: upstream.opened.map(
+        ({ events }) =>
+          events.filter((type) => type === "input_audio.end").length
+      ),
     }).toStrictEqual({
-      heard: [
-        { type: "partial", text: "Hello there" },
+      finals: [
         { type: "final", text: "Hello there", words: [] },
         { type: "final", text: "", words: [] },
       ],
-      flushes: 2,
+      ended: [1, 0],
     });
   });
 
-  it("holds a stretch's final for words the session writes down a moment after the commit", async () => {
+  it("holds a stretch's final until the session says its whole text, however late its last words come", async () => {
     const { ada } = await openedTwo();
 
     const { result } = await relaying(async () => {
@@ -448,22 +451,20 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         link: ada,
       });
       await page.next();
-      // From here the session writes the rest of a stretch down late.
+      // The session says the stretch's whole text late.
       await actOnRealtime({ late: true });
       page.socket.send(tenthOfASecond());
       const first = await page.next();
       const committedAt = Date.now();
       page.socket.send(JSON.stringify({ type: "commit" }));
-      const rest = await page.next();
       const final = await page.next();
       const waited = Date.now() - committedAt;
       page.socket.close(1000, "Done");
-      return { first, rest, final, held: waited >= lateMs };
+      return { first, final, held: waited >= lateMs };
     });
 
     expect(result).toStrictEqual({
       first: { type: "partial", text: "Hello" },
-      rest: { type: "partial", text: "Hello there" },
       final: { type: "final", text: "Hello there", words: [] },
       held: true,
     });
@@ -484,23 +485,19 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       page.socket.send(tenthOfASecond());
       await page.next();
       page.socket.send(JSON.stringify({ type: "commit" }));
-      // The next stretch, at once: its words come behind its audio.
+      // The next stretch, at once: it has a session of its own.
       page.socket.send(tenthOfASecond());
-      const rest = await page.next();
       const final = await page.next();
       const next = await page.next();
       page.socket.send(JSON.stringify({ type: "commit" }));
-      const nextRest = await page.next();
       const nextFinal = await page.next();
       page.socket.close(1000, "Done");
-      return { rest, final, next, nextRest, nextFinal };
+      return { final, next, nextFinal };
     });
 
     expect(result).toStrictEqual({
-      rest: { type: "partial", text: "Hello there" },
       final: { type: "final", text: "Hello there", words: [] },
       next: { type: "partial", text: "Hello" },
-      nextRest: { type: "partial", text: "Hello there" },
       nextFinal: { type: "final", text: "Hello there", words: [] },
     });
   });

@@ -33,19 +33,21 @@ import { Resampler } from "./resampler.ts";
 // It goes through as it comes (resampler.ts), and nothing of it is kept:
 // not here, not in a log.
 //
-// Settling: the page counts on exactly one `final` for each of its
-// commits, in order, holding the whole stretch it closed, and goes on
-// sending the next stretch without waiting for it. The session sends
-// words only (`transcription.text.delta`, each final, to be added to the
-// ones before), behind the audio by `streamingDelayMs`, and names no end
-// of a stretch: its one `transcription.done` ends the whole session. So a
-// commit flushes the audio sent so far (`input_audio.flush`), which has
-// the session write down at once what it still held back, and the
-// stretch's final goes out `settleMs` after the commit, with the words
-// that came until then: the session says nothing when a flush is through.
-// `settleMs` is below `streamingDelayMs`, so no word of audio sent after
-// the commit can be among them: the next stretch's words come later, and
-// open it. A commit with nothing said settles as an empty final.
+// A session for each stretch: the page counts on exactly one `final` for
+// each of its commits, in order, holding the whole stretch it closed, and
+// goes on sending the next stretch without waiting for it. Mistral's
+// session sends words only (`transcription.text.delta`, each final, to be
+// added to the ones before), behind the audio by `streamingDelayMs`, and
+// says a stretch is whole in one way alone: once its audio is ended
+// (`input_audio.end`), it writes down what it still held back and sends
+// the whole text (`transcription.done`), which ends that session. So each
+// stretch has a session of its own: a commit ends the audio of the one
+// being said, whose `done` is the stretch's final, and opens the next,
+// which takes the audio that comes meanwhile once it is open. No word can
+// be in another stretch's final, and no final goes out before its words
+// are whole. A final that doesn't come within `doneWaitMs` fails the
+// whole listening, and the page has its stretches written down from their
+// recordings. A commit with nothing sent settles as an empty final.
 //
 // The realtime session takes names and terms to listen out for
 // (`context_bias`) and no free text, so what was said just before, which
@@ -65,15 +67,16 @@ const realtimePathOf = (model: string): string =>
 const streamingDelayMs = 480;
 
 /**
- * How long after a commit its stretch's final goes out, in ms: time for
- * the session to write down the audio flushed, and below
- * `streamingDelayMs`, the soonest a word of the next stretch can come.
+ * How long a stretch's whole text may take once its audio ended, in ms,
+ * before the listening counts as failed: well above the page's own wait
+ * for a stretch's words, after which it has the recording written down.
  */
-export const settleMs = 300;
+export const doneWaitMs = 5000;
 
 /** What the session sends, as far as the relay reads it: the first that fits. */
 const serverEventSchema = z.union([
   z.object({ type: z.literal("transcription.text.delta"), text: z.string() }),
+  z.object({ type: z.literal("transcription.done"), text: z.string() }),
   z.object({
     type: z.literal("error"),
     error: z.object({ code: z.union([z.number(), z.string()]).nullish() }),
@@ -133,48 +136,51 @@ class EventQueue implements AsyncIterable<TranscriptionEvent> {
   }
 }
 
-/** Where a stretch's words wait for its one final (`settlingOf`). */
-interface Settling {
-  /** The page asked to settle what it sent so far. */
-  pageCommitted: () => void;
-  /** The session wrote more words down. */
-  delta: (text: string) => void;
-  /** No final goes out any more. */
-  stop: () => void;
+/** One stretch of what someone says, and the session it is written down in. */
+interface Stretch {
+  /** Its session's socket, once open. */
+  socket: WebSocket | undefined;
+  /** What to send its session once it is open, in order. */
+  waiting: string[];
+  /** Whether any audio was sent to it. */
+  heard: boolean;
+  /** Its words so far, as the session wrote them. */
+  text: string;
+  /** Its audio ended: the page committed it. */
+  ending: boolean;
+  /** Its whole text, once the session said it is. */
+  written: PromiseWithResolvers<string>;
+  /** Fails the listening if its whole text doesn't come. */
+  overdue: ReturnType<typeof setTimeout> | undefined;
 }
 
-/**
- * One final for each of the page's commits, in order: the words that came
- * since the one before, until `settleMs` after the commit. Words that
- * come after it are the next stretch's.
- */
-const settlingOf = (events: EventQueue): Settling => {
-  /** The stretch being said, as the session wrote it so far. */
-  let saying = "";
-  /** The commits whose final hasn't gone out, each with its own wait. */
-  const settling = new Set<ReturnType<typeof setTimeout>>();
-  return {
-    pageCommitted: () => {
-      const wait = setTimeout(() => {
-        settling.delete(wait);
-        // The session times no words: a final carries its text alone.
-        events.push({ type: "committed", text: saying.trim(), words: [] });
-        saying = "";
-      }, settleMs);
-      settling.add(wait);
-    },
-    delta: (text) => {
-      // As Mistral sends it: each delta brings its own spaces.
-      saying += text;
-      events.push({ type: "partial", text: saying.trim() });
-    },
-    stop: () => {
-      for (const wait of settling) {
-        clearTimeout(wait);
-      }
-      settling.clear();
-    },
-  };
+const newStretch = (): Stretch => ({
+  socket: undefined,
+  waiting: [],
+  heard: false,
+  text: "",
+  ending: false,
+  written: Promise.withResolvers<string>(),
+  overdue: undefined,
+});
+
+/** Closes `socket` as it may still be: a socket closed already stays so. */
+const closeQuietly = (socket: WebSocket | undefined): void => {
+  try {
+    socket?.close(1000, "Done");
+  } catch {
+    // Closed already.
+  }
+};
+
+/** Sends `message` to a stretch's session, once it is open. */
+const tell = (stretch: Stretch, message: object): void => {
+  const text = JSON.stringify(message);
+  if (stretch.socket === undefined) {
+    stretch.waiting.push(text);
+  } else {
+    stretch.socket.send(text);
+  }
 };
 
 /**
@@ -195,88 +201,153 @@ const sessionUpdate = ({ language, keyterms }: TranscriptionOptions): string =>
 
 /**
  * Live transcription for a listening the gateway admitted: a realtime
- * session of its own at the provider, through connect.
+ * session at the provider for each stretch, through connect.
  */
 export const platformTranscription = (
   listening: Listening
 ): LiveTranscription => ({
   open: async (options): Promise<TranscriptionSession> => {
-    let socket: WebSocket;
+    const events = new EventQueue();
+    const resampler = new Resampler(options.sampleRate, sessionSampleRate);
+    /** The stretches whose sessions are open, or opening. */
+    const open = new Set<Stretch>();
+    let closed = false;
+    /** Ends the listening: every session closed, with `code` as why it failed. */
+    const end = (code?: string): void => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      if (code !== undefined) {
+        events.push({ type: "failed", code });
+      }
+      for (const stretch of open) {
+        clearTimeout(stretch.overdue);
+        closeQuietly(stretch.socket);
+      }
+      open.clear();
+      events.end();
+    };
+    /** Reads what a stretch's session sends, until its whole text came. */
+    const read = (stretch: Stretch, socket: WebSocket): void => {
+      socket.addEventListener("message", (event) => {
+        const heard = serverEventOf(event.data);
+        if (heard === undefined || closed) {
+          return;
+        }
+        if (heard.type === "transcription.done" && "text" in heard) {
+          clearTimeout(stretch.overdue);
+          open.delete(stretch);
+          stretch.written.resolve(heard.text.trim());
+          closeQuietly(socket);
+        } else if ("text" in heard) {
+          // As Mistral sends it: each delta brings its own spaces.
+          stretch.text += heard.text;
+          // Once committed, its words go out whole, as its final.
+          if (!stretch.ending) {
+            events.push({ type: "partial", text: stretch.text.trim() });
+          }
+        } else if ("error" in heard) {
+          // Only its code, which names no content.
+          log.warn("transcription.upstream_error", {
+            code: heard.error.code ?? undefined,
+          });
+          end("upstream_error");
+        }
+      });
+      socket.addEventListener("close", (event) => {
+        if (!open.has(stretch)) {
+          // Its whole text came: closed from here.
+          return;
+        }
+        // The session being said ending by itself ends the listening; one
+        // that owes its text, or closes any other way, fails it.
+        end(
+          event.code === 1000 && !stretch.ending ? undefined : "upstream_closed"
+        );
+      });
+      socket.addEventListener("error", () => {
+        if (open.has(stretch)) {
+          end("upstream_error");
+        }
+      });
+    };
+    /** Opens a stretch's session, and sends what waited for it. */
+    const start = async (stretch: Stretch): Promise<void> => {
+      open.add(stretch);
+      const socket = await listening.socket(realtimePathOf(listening.modelId));
+      if (closed) {
+        closeQuietly(socket);
+        return;
+      }
+      stretch.socket = socket;
+      read(stretch, socket);
+      socket.send(sessionUpdate(options));
+      for (const message of stretch.waiting.splice(0)) {
+        socket.send(message);
+      }
+    };
+    /** The stretch being said. */
+    let saying = newStretch();
     try {
-      socket = await listening.socket(realtimePathOf(listening.modelId));
+      await start(saying);
     } catch {
       throw transcriptionErrors.create("transcription.failed");
     }
-    socket.send(sessionUpdate(options));
-    const events = new EventQueue();
-    const settling = settlingOf(events);
-    const resampler = new Resampler(options.sampleRate, sessionSampleRate);
-    let closed = false;
-    /** Ends the session's events, with `code` as why unless it was closed. */
-    const end = (code?: string): void => {
-      if (!closed && code !== undefined) {
-        events.push({ type: "failed", code });
-      }
-      closed = true;
-      settling.stop();
-      events.end();
-    };
-    socket.addEventListener("message", (event) => {
-      const heard = serverEventOf(event.data);
-      if (heard === undefined) {
-        return;
-      }
-      if ("text" in heard) {
-        settling.delta(heard.text);
-      } else if ("error" in heard) {
-        // Only its code, which names no content.
-        log.warn("transcription.upstream_error", {
-          code: heard.error.code ?? undefined,
-        });
-        end("upstream_error");
-        try {
-          socket.close(1000, "Done");
-        } catch {
-          // Closed already.
-        }
-      }
-    });
-    socket.addEventListener("close", (event) => {
-      end(event.code === 1000 ? undefined : "upstream_closed");
-    });
-    socket.addEventListener("error", () => {
-      end("upstream_error");
-    });
-    const send = (event: object): void => {
-      if (!closed) {
-        socket.send(JSON.stringify(event));
-      }
+    /** The final before this one, gone out: finals go out in order. */
+    let before: Promise<void> = Promise.resolve();
+    /** Sends a stretch's final once it is whole, after the ones before it. */
+    const settle = async (
+      earlier: Promise<void>,
+      written: Promise<string>
+    ): Promise<void> => {
+      await earlier;
+      const text = await written;
+      // The session times no words: a final carries its text alone.
+      events.push({ type: "committed", text, words: [] });
     };
     return {
       send: (audio) => {
         const resampled = resampler.push(audio);
-        if (resampled.byteLength > 0) {
-          send({ type: "input_audio.append", audio: toBase64(resampled) });
+        if (resampled.byteLength > 0 && !closed) {
+          saying.heard = true;
+          tell(saying, {
+            type: "input_audio.append",
+            audio: toBase64(resampled),
+          });
         }
       },
       commit: () => {
-        if (!closed) {
-          settling.pageCommitted();
+        if (closed) {
+          return;
         }
-        // Has the session write down what it still held back.
-        send({ type: "input_audio.flush" });
+        const stretch = saying;
+        if (!stretch.heard) {
+          // Nothing sent since the commit before: nothing to write down.
+          before = settle(before, Promise.resolve(""));
+          return;
+        }
+        stretch.ending = true;
+        // Has the session write down what it still held back, then say
+        // the stretch's whole text.
+        tell(stretch, { type: "input_audio.flush" });
+        tell(stretch, { type: "input_audio.end" });
+        stretch.overdue = setTimeout(() => {
+          end("upstream_timeout");
+        }, doneWaitMs);
+        before = settle(before, stretch.written.promise);
+        saying = newStretch();
+        const next = saying;
+        void (async () => {
+          try {
+            await start(next);
+          } catch {
+            end("upstream_unopened");
+          }
+        })();
       },
       close: () => {
-        if (!closed) {
-          closed = true;
-          try {
-            socket.close(1000, "Done");
-          } catch {
-            // Closed already.
-          }
-        }
-        settling.stop();
-        events.end();
+        end();
       },
       events,
     };

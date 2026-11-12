@@ -14,9 +14,9 @@
  * character said, each said in `secondsPerCharacter`, a direction in
  * brackets not said, and a voice Grasp didn't choose refused; a recording
  * with `writtenText`; and a realtime transcription socket with a delta of
- * `partialText` for the first audio of each stretch, behind it by the
- * delay the session was told, and the rest of `writtenText` at once when
- * that audio is flushed, nothing for a flush with no audio. Every socket's opening, events and close are kept
+ * `partialText` for the first audio it gets, behind it by the delay the
+ * session was told, and once its audio is ended the rest of `writtenText`
+ * and the whole text as done, an empty one for a session with no audio. Every socket's opening, events and close are kept
  * (`realtimeControlUrl`).
  *
  * A key can instead be bridged to the test (`bridgeUrl`): each request
@@ -34,8 +34,8 @@ export const writtenText = "Hello there";
 /** The delta a realtime stretch is first heard as. */
 export const partialText = "Hello";
 
-/** How long after a flush the rest of a stretch comes, once tests ask for it late (`{ late: true }`). */
-export const lateMs = 150;
+/** How long after its audio ended a session's whole text comes, once tests ask for it late (`{ late: true }`). */
+export const lateMs = 400;
 
 /** Bytes of a line's WAV header, before its audio. */
 export const speechHeaderBytes = 44;
@@ -50,8 +50,8 @@ export const secondsPerCharacter = 0.025;
  * Where tests read the realtime sockets (GET: each one's opening, events,
  * audio bytes and close code, oldest first), and act as Mistral on those
  * open: POST `{ close: code }` closes them, `{ error: code }` sends an
- * error event on them, and `{ late: true }` has the rest of each stretch
- * come `lateMs` after its flush from then on.
+ * error event on them, and `{ late: true }` has their whole text come
+ * `lateMs` after their audio ended.
  */
 export const realtimeControlUrl = "https://ai-providers-control.test/realtime";
 
@@ -212,11 +212,11 @@ export const aiProvidersFake = () => {
     const asked: ({ close: number } | { error: number } | { late: true })[] =
       [];
     realtime.push({ record, asked });
-    /** Whether audio came since the last flush: a stretch being said. */
+    /** Whether audio came: a stretch being said. */
     let saying = false;
     /** The stretch's first word, on its way: behind the audio, as the session is told to write. */
     let first: ReturnType<typeof setTimeout> | undefined = undefined;
-    /** Whether the rest of a stretch comes late after its flush. */
+    /** Whether its whole text comes late after its audio ended. */
     let late = false;
     const send = (event: Record<string, unknown>): void => {
       if (record.closed === null) {
@@ -288,21 +288,26 @@ export const aiProvidersFake = () => {
             send({ type: "transcription.text.delta", text: "Hello" });
           }, delay);
         }
-      } else if (parsed.type === "input_audio.flush" && saying) {
-        saying = false;
-        // A flush has what is held back written down at once.
+      } else if (parsed.type === "input_audio.end") {
+        // The audio ended: what is held back is written down at once,
+        // and the whole text said.
+        const whole = saying ? "Hello there" : "";
+        const finish = (): void => {
+          if (saying) {
+            send({ type: "transcription.text.delta", text: " there" });
+          }
+          saying = false;
+          send({ type: "transcription.done", text: whole });
+        };
         if (first !== undefined) {
           clearTimeout(first);
           first = undefined;
           send({ type: "transcription.text.delta", text: "Hello" });
         }
-        const rest = { type: "transcription.text.delta", text: " there" };
         if (late) {
-          setTimeout(() => {
-            send(rest);
-          }, 150);
+          setTimeout(finish, 400);
         } else {
-          send(rest);
+          finish();
         }
       }
     });
