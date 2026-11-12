@@ -6,8 +6,8 @@
  * title, the description and a Co-authored-by trailer for each co-author of
  * those commits. A commit whose author is an agent (Claude Code on the web,
  * Cursor's or Codex's cloud agents, Copilot's coding agent) becomes such a
- * trailer, so the hook and CI pass each commit's author and committer in as
- * Co-authored-by lines.
+ * trailer, so the hook and CI pass each commit's author in as a
+ * Co-authored-by line.
  *
  * usage: check-attribution.ts [file]   reads stdin without a file
  */
@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 
 /** AI coding tools and their makers, as they appear in names, emails and bot logins. */
 const aiTools =
-  "claude|anthropic|openai|chatgpt|codex|copilot|cursor|gemini|google-labs-jules|aider|devin|windsurf|codeium|cline|opencode";
+  "claude|anthropic|openai|chatgpt|codex|copilot|cursor|gemini|google-labs-jules|aider|devin|windsurf|codeium|opencode|ampcode|warp\\.dev|warp-agent|openhands|all-hands|charm\\.land|amazon-q-developer|factory-droid";
 
 /** Co-authors that are AI tools, by name, email or bot login. */
 const aiCoAuthor = new RegExp(
@@ -29,7 +29,10 @@ const aiCoAuthor = new RegExp(
  * sentence that quotes one is left alone.
  */
 const aiFooters: readonly RegExp[] = [
-  new RegExp(`^[^\\p{L}\\p{N}]*generated (?:with|by) \\[?(?:${aiTools})`, "iu"),
+  new RegExp(
+    `^[^\\p{L}\\p{N}]*generated (?:with|by) \\[?(?:${aiTools}|crush)\\b`,
+    "iu"
+  ),
   /^\s*claude-session:/iu,
   /https:\/\/claude\.ai\/code\/session_/u,
 ];
