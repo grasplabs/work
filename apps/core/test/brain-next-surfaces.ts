@@ -724,11 +724,6 @@ const quietModel = async () => {
 };
 
 /**
- * The host's embedders, as a probe hands them: they run a model, and fail
- * every passage with the passages and the markers in their error, so
- * anything of an error that gets out shows.
- */
-/**
  * The host's embedders as a probe hands them when embedding is not what it
  * probes: they run no model, so the store embeds nothing, and embedding's
  * items, its parked ones as they come back too, settle at once. A probe
@@ -745,6 +740,11 @@ const noEmbedders: Embedders = {
   },
 };
 
+/**
+ * The host's embedders, as a probe hands them: they run a model, and fail
+ * every passage with the passages and the markers in their error, so
+ * anything of an error that gets out shows.
+ */
 const leakyEmbedders = (markers: readonly string[]): Embedders => ({
   model: { name: "probe-model", build: "0" },
   embed: async ({ texts }) => {
@@ -752,6 +752,7 @@ const leakyEmbedders = (markers: readonly string[]): Embedders => ({
     throw new Error(`Could not embed ${[...texts, ...markers].join(" ")}`);
   },
 });
+
 /**
  * Adds an item of `markedWork` that carries the markers and parks it as
  * its last failure would, without a tick: its id. For the probes of
@@ -1634,6 +1635,25 @@ const chunkedSource = async (
   }));
 };
 
+/**
+ * Erases the sources of `chunks` for good, once a vector probe is done
+ * with them: someone else's filler, a block's worth of passages or more,
+ * there only for the codes the probe put by hand. Left current, every
+ * later probe that runs the queue with a model would embed them all
+ * (`queuedVectors`), pass after pass, for no case of its own.
+ */
+const eraseFiller = async (
+  ...chunks: readonly (readonly ChunkRef[])[]
+): Promise<void> => {
+  const sources = new Set(
+    chunks.flatMap((each) => each.map(({ source }) => source))
+  );
+  for (const source of sources) {
+    // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+    await store().eraseSource({ source, reason: "deleted" });
+  }
+};
+
 /** `chunks`, each at `vector`. */
 const placedAt = (chunks: readonly ChunkRef[], vector: number[]): Coded[] =>
   chunks.map((chunk) => ({ chunk, vector }));
@@ -2257,27 +2277,21 @@ export const storeProbes = {
     const { question, modelWith, search } = await vectorScene(reader);
     const words = markedText(markers);
     const nothing = await modelWith();
+    const tailFiller = await chunkedSource(
+      { kind: "owner", person: stranger() },
+      rescoredMost + 44,
+      words
+    );
     const inTail = await modelWith(
       placedAt(firstChunksOf(hiddenVersions), question),
-      placedAt(
-        await chunkedSource(
-          { kind: "owner", person: stranger() },
-          rescoredMost + 44,
-          words
-        ),
-        question
-      )
+      placedAt(tailFiller, question)
     );
-    const inBlock = await modelWith(
-      placedAt(
-        await chunkedSource(
-          { kind: "owner", person: stranger() },
-          vectorBlockSize,
-          words
-        ),
-        question
-      )
+    const blockFiller = await chunkedSource(
+      { kind: "owner", person: stranger() },
+      vectorBlockSize,
+      words
     );
+    const inBlock = await modelWith(placedAt(blockFiller, question));
     const refused = async (name: string, request: unknown) =>
       await answer(
         name,
@@ -2348,6 +2362,9 @@ export const storeProbes = {
         ...request,
         extra: words,
       }),
+      await answer("the filler erased", async () => {
+        await eraseFiller(tailFiller, blockFiller);
+      }),
       ...(await queuedVectors({ reader, markers, hiddenVersions })),
     ];
   },
@@ -2381,6 +2398,7 @@ export const storeProbes = {
       );
       asked.push(answered);
     }
+    await eraseFiller(replaced, kept);
     return asked;
   },
   addInstructions: async ({ markers }) => {
