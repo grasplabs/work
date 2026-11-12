@@ -182,9 +182,12 @@ const cards = () =>
     };
   });
 
+/** The button named `name` on the open tab, or outside the tabs. */
 const buttonNamed = (name: string) =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+    (each) =>
+      each.textContent?.trim() === name &&
+      each.closest("[role='tabpanel'][hidden]") === null
   );
 
 /** One agent's page, as its route shows it. */
@@ -315,7 +318,9 @@ describe("the company's agents, on pages of their own", () => {
       await mounted(page(stephen, "access"));
       expect({
         link: document.querySelector("a[href='/settings/stephen']") !== null,
-        selects: document.querySelectorAll("[role='tabpanel'] button").length,
+        selects: document.querySelectorAll(
+          "[role='tabpanel']:not([hidden]) button"
+        ).length,
       }).toStrictEqual({ link: true, selects: 0 });
     });
 
