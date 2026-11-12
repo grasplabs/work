@@ -1359,6 +1359,45 @@ describe("exports and restores", () => {
       }).toStrictEqual({ place: heldKey.slice(0, 44), left: [] });
     });
 
+    it("goes on with a sweep pass whose item went before it ended, from its saved place (threat 6)", async () => {
+      await putBack(shared(), emptyShared);
+      const source = `test:${unique()}`;
+      await add(
+        shared(),
+        source,
+        `swept ${unique()}`,
+        team(`team:${unique()}`)
+      );
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // The store's storage lost, then the source erased: the export's files
+      // are unknown to the store and hold what was erased.
+      await putBack(shared(), emptyShared);
+      await shared().eraseSource({ source, reason: "deleted" });
+      // A pass started for that erasure and stopped at its first key, its
+      // item gone (as one parked for good): checked and started for alike.
+      await runInDurableObject(shared(), (_instance, state) => {
+        const { sql } = state.storage;
+        const { last } = sql
+          .exec<{ last: number }>(
+            "SELECT coalesce(max(rowid), 0) AS last FROM erasures"
+          )
+          .one();
+        sql.exec(
+          `INSERT OR REPLACE INTO export_sweep (id, through, checked, cursor)
+          VALUES (1, ?, ?, 'exports/')`,
+          last,
+          last
+        );
+        sql.exec("DELETE FROM work_items WHERE kind = 'brain.export_sweep'");
+      });
+      for (let ticks = 0; ticks < 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      await expect(keysUnder(`exports/${id}/`)).resolves.toStrictEqual([]);
+    });
+
     it("settles a restore whose item of the queue is gone as failed, with what it wrote, and lets it start again and finish (threat 9)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
@@ -1401,12 +1440,14 @@ describe("exports and restores", () => {
         stuck: stuck?.state,
         again: again.state,
         done: done?.state,
+        restored: done?.restored,
         held: await versionsHeld(),
       }).toStrictEqual({
         halfway: 50,
         stuck: "failed",
         again: "running",
         done: "done",
+        restored: 60,
         held: 60,
       });
     });

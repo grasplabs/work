@@ -1188,9 +1188,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * The tick's step for exports (exports.ts `exportsStep`): the stale
-   * marked erased, the stuck settled as failed, and a sweep of export files
-   * the store has no record of started, each in its own transaction. A
+   * The tick's step for exports (exports.ts `exportsStep`), in one
+   * transaction: the stuck settled as failed, failed restores given up,
+   * the stale retired, and a pass of the sweep of export files the store
+   * has no record of started. A
    * failure changes nothing and never reaches the queue: it is due again
    * next tick (`#nextWorkAt`), and meanwhile a stale export is served to
    * no one (`exportFile` asks itself).

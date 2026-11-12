@@ -54,11 +54,12 @@ import type { WorkContext } from "./work.ts";
 // and a person's erasure that hid a team source's history makes the
 // company export holding that history stale. A stale export is never served
 // (`exportFile` asks before and after it reads), a restore refuses it, and
-// its files are deleted by the queue (`dropWork`). The same rule is asked
-// of a part as it is recorded (an erasure that landed while its versions
-// were read), of a restored export once its restore is done, of every
-// export whenever an erasure was recorded since the tick last looked, and
-// of export files the store has no record of. Re-checking each file against
+// its files are deleted by the queue (`dropFiles`). The same rule is asked
+// of a part's holdings before its files are put, and of a part as it is
+// recorded, of an export as it finishes, of a restored export once its
+// restore is done, of every export the store has a row of once per new
+// erasure (the `checked` marker), and of export files the store has no
+// record of. Re-checking each file against
 // the ledger as it is read was the other way: it would leave erased content
 // in the bucket, and filtering a checked part breaks its checksum. A copy
 // someone already downloaded is outside the Brain's reach, and so outside
@@ -67,11 +68,15 @@ import type { WorkContext } from "./work.ts";
 // (`erasureHeldByExportFilesSql`).
 //
 // The files outlive the store's record of them when its storage is lost or
-// rolled back and its bucket kept. So each export writes the versions it
-// holds beside its manifest (`holdsFile`), and each erasure the store
-// records past its last sweep starts a sweep of `exports/` (`sweepWork`),
-// which deletes every export it has no row of whose manifest or holdings
-// are gone, or whose holdings the ledger names: the same rule. A restore
+// rolled back and its bucket kept. So each part's holdings are written
+// beside it (`partHoldsFileOf`), and the sweep of `exports/` (`sweepWork`)
+// deletes every export it has no row of whose manifest or holdings are
+// gone, or whose holdings the ledger names: the same rule. A pass of the
+// sweep is never restarted: it keeps the erasure it started for
+// (`through`) and its place, and when it ends past a newer erasure the tick
+// starts another; a pass whose item went (parked for good) goes on from its
+// place. So each pass ends, and every erasure is covered by the first whole
+// pass after it. A restore
 // records the export it restores, its versions as it checks them; while its
 // restore runs, or failed and may start again, its files are never deleted.
 //
@@ -561,13 +566,17 @@ const sweepQueuedSql = `EXISTS (
 /**
  * `?1` the parks that make an item parked for good: whether the tick has
  * an erasure to check every export against (recorded since it last did,
- * `checked`), or a pass of the sweep to start (an erasure past the one the
- * last pass started for, `through`, and no pass on the queue).
+ * `checked`), or a pass of the sweep to start while none is on the queue:
+ * an erasure past the one the last pass started for (`through`), or a pass
+ * whose item went before it ended (its place saved).
  */
 const sweepDueSql = `SELECT 1 WHERE
   ${lastErasureSql} > coalesce((SELECT checked FROM export_sweep WHERE id = 1), 0)
   OR (
-    ${lastErasureSql} > coalesce((SELECT through FROM export_sweep WHERE id = 1), 0)
+    (
+      ${lastErasureSql} > coalesce((SELECT through FROM export_sweep WHERE id = 1), 0)
+      OR (SELECT cursor FROM export_sweep WHERE id = 1) IS NOT NULL
+    )
     AND NOT ${sweepQueuedSql}
   )`;
 
@@ -765,11 +774,14 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
 
 /**
  * The tick's step for exports and restores, in one transaction: the stuck
- * settled as failed; and, once an erasure was recorded since the step last
- * looked, every export the ledger now makes stale retired (`staleSql`) and
- * a sweep of `exports/` started. Its rule is `exportsDue`. Between
- * erasures nothing can make an export stale: a part recorded and a
- * restore done are asked as they land (`recordPart`, `retireIfStale`).
+ * settled as failed and failed restores given up; once per new erasure
+ * (the `checked` marker), every export the ledger now makes stale retired
+ * (`staleSql`); and, when no pass of the sweep is on the queue, a pass
+ * started: from the first key when an erasure was recorded past the one
+ * the last pass started for (`through`), or from its saved place when a
+ * pass's item went before it ended. A pass is never restarted. Its rule is
+ * `exportsDue`. Between erasures nothing can make an export stale: a part
+ * and a restore done are asked as they land (`writePart`, `retireIfStale`).
  */
 export const exportsStep = (storage: DurableObjectStorage): void => {
   storage.transactionSync(() => {
@@ -777,10 +789,16 @@ export const exportsStep = (storage: DurableObjectStorage): void => {
     settleStuck(storage);
     giveUpRestores(storage);
     const at = sql
-      .exec<{ last: number; checked: number; through: number }>(
+      .exec<{
+        last: number;
+        checked: number;
+        through: number;
+        cursor: string | null;
+      }>(
         `SELECT ${lastErasureSql} AS last,
           coalesce((SELECT checked FROM export_sweep WHERE id = 1), 0) AS checked,
-          coalesce((SELECT through FROM export_sweep WHERE id = 1), 0) AS through`
+          coalesce((SELECT through FROM export_sweep WHERE id = 1), 0) AS through,
+          (SELECT cursor FROM export_sweep WHERE id = 1) AS cursor`
       )
       .one();
     sql.exec(
@@ -793,11 +811,17 @@ export const exportsStep = (storage: DurableObjectStorage): void => {
     const queued =
       sql.exec(`SELECT 1 WHERE ${sweepQueuedSql}`, workParksMax).toArray()
         .length > 0;
-    if (at.last > at.through && !queued) {
+    if (queued) {
+      return;
+    }
+    if (at.last > at.through) {
       sql.exec(
         "UPDATE export_sweep SET through = ?, cursor = NULL WHERE id = 1",
         at.last
       );
+    }
+    // A new pass, or one whose item went before it ended, from its place.
+    if (at.last > at.through || at.cursor !== null) {
       enqueueWork(storage, sweepWork, {
         key: "exports",
         payload: {},
