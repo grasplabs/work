@@ -319,6 +319,8 @@ const getMessage = defineTool({
     }),
   }),
   readOnly: true,
+  // One item's content: what the Brain keeps of a person's own (GRA-1730).
+  answersItem: true,
   reach: "own",
   resource: "mailbox",
   routes: [
@@ -382,6 +384,8 @@ const readAttachment = defineTool({
     content: z.string().nullable(),
   }),
   readOnly: true,
+  // One item's content: what the Brain keeps of a person's own (GRA-1730).
+  answersItem: true,
   reach: "own",
   // A workflow action may keep it as a file of its run (GRA-886).
   answersFile: true,

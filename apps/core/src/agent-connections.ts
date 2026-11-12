@@ -502,7 +502,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     // Recorded with the chat first: a run that ended since keeps nothing.
     // Kept in the Brain once the agent has its answer, never in its way.
     this.ctx.waitUntil(
-      captureRead(this.env, scope, connectionId, request.action, result)
+      captureRead(this.env, scope, connectionId, request.action, input, result)
     );
     await recordToolCall(this.env, scope, shown);
     return { output, pending: null };

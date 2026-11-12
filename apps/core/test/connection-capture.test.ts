@@ -133,29 +133,67 @@ const worldHolds = async (controlUrl: string, world: unknown) => {
   });
 };
 
-/** A message as Gmail holds it (`format=full`): `subject`, and `body`. */
-const gmailMessage = (id: string, subject: string, body: string) => ({
-  id,
-  threadId: id,
-  labelIds: ["INBOX"],
-  snippet: subject,
-  internalDate: String(Date.parse("2026-11-12T09:00:00Z")),
-  payload: {
+/** Text as Gmail's API encodes a part's data: its UTF-8 in base64url, unpadded. */
+const base64Url = (text: string): string => {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(text)) {
+    binary += String.fromCodePoint(byte);
+  }
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+};
+
+/**
+ * A message as Gmail holds it (`format=full`): `subject`, and `body`, and
+ * with `attachment` a text file in its part `1` too.
+ */
+const gmailMessage = (
+  id: string,
+  subject: string,
+  body: string,
+  attachment?: { name: string; text: string }
+) => {
+  const headers = [
+    { name: "From", value: "Ben <ben@acme.test>" },
+    { name: "Subject", value: subject },
+    { name: "Message-ID", value: `<${id}@mail.gmail.com>` },
+  ];
+  const text = {
     mimeType: "text/plain",
-    headers: [
-      { name: "From", value: "Ben <ben@acme.test>" },
-      { name: "Subject", value: subject },
-      { name: "Message-ID", value: `<${id}@mail.gmail.com>` },
-    ],
     body: {
       size: new TextEncoder().encode(body).byteLength,
-      data: btoa(body)
-        .replaceAll("+", "-")
-        .replaceAll("/", "_")
-        .replaceAll("=", ""),
+      data: base64Url(body),
     },
-  },
-});
+  };
+  return {
+    id,
+    threadId: id,
+    labelIds: ["INBOX"],
+    snippet: subject,
+    internalDate: String(Date.parse("2026-11-12T09:00:00Z")),
+    payload:
+      attachment === undefined
+        ? { ...text, headers }
+        : {
+            mimeType: "multipart/mixed",
+            headers,
+            parts: [
+              { partId: "0", ...text },
+              {
+                partId: "1",
+                filename: attachment.name,
+                mimeType: "text/plain",
+                body: {
+                  size: new TextEncoder().encode(attachment.text).byteLength,
+                  data: base64Url(attachment.text),
+                },
+              },
+            ],
+          },
+  };
+};
 
 /** A toolkit's answer naming the one item `id` it read, as `structured`. */
 const oneRead = (id: string, structured: Record<string, unknown>) => ({
@@ -228,7 +266,7 @@ const shown = ({ action, actor, detail }: AuditEvent) => ({
 });
 
 describe("what a chat's agent reads through a connection", setUpTime, () => {
-  it("keeps a message the person read from their own mail, for them alone, and their recall names the connection; a list of messages, never", async () => {
+  it("keeps a message the person read from their own mail, for them alone, and their recall names the connection; a list, never, even of one", async () => {
     const [person, stranger] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -248,13 +286,16 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       person.userId,
       step(calling("MAIL", "mail.get", { mailbox, message: quote })),
       says("Read it."),
-      step(calling("MAIL", "mail.list", { mailbox, search: marker })),
-      says("Listed them.")
+      // A search with exactly one hit: still a list, never kept.
+      step(
+        calling("MAIL", "mail.list", { mailbox, search: `order-${marker}` })
+      ),
+      says("Listed it.")
     );
     await grant(chat, connectionId, "MAIL", ["mail.get", "mail.list"]);
 
     await chat.ask("Read the quote.");
-    await chat.ask("List them.");
+    await chat.ask("List the order.");
     const events = await captures(connectionId, 2);
 
     const found = await recalled(person.userId, marker);
@@ -278,7 +319,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         {
           action: "brain.capture.skipped",
           onBehalfOf: person.userId,
-          detail: { reason: "list", items: 2, kept: 0, failed: 0, skipped: 2 },
+          detail: { reason: "list", items: 1, kept: 0, failed: 0, skipped: 1 },
         },
       ],
       items: [{ producer: "capture", quote: true, order: false }],
@@ -327,66 +368,6 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     ).toStrictEqual([{ version: 2, latest: true }]);
   });
 
-  it("keeps what two tools read of one item side by side: neither replaces the other", async () => {
-    const person = await signedInApi(idp, "user");
-    const [marker, inBody] = [markerOf(), markerOf()];
-    const id = `message-${marker}`;
-    const mail = await mailConnection(
-      [],
-      [...mailWithSearch, { name: "mail.read", read: true }],
-      { provider: "mail_own", owner: person.userId }
-    );
-    await mail.serves(
-      ["mail.search", "mail.read"].map((name) => ({
-        name,
-        inputSchema: { type: "object" },
-        annotations: { readOnlyHint: true },
-      }))
-    );
-    const answered = (message: Record<string, string>) => ({
-      content: [{ type: "text", text: JSON.stringify({ message }) }],
-      structuredContent: { message },
-      _meta: { [provenanceMetaKey]: [id] },
-    });
-    await mail.answers({
-      // A search's view of it, then the full read.
-      "mail.search": answered({ id, subject: `Quote ${marker}` }),
-      "mail.read": answered({
-        id,
-        subject: `Quote ${marker}`,
-        body: inBody,
-      }),
-    });
-    const chat = await chatOf(
-      person.userId,
-      step(
-        calling("MAIL", "mail.read", { id }),
-        calling("MAIL", "mail.search", { query: marker })
-      ),
-      says("Read it.")
-    );
-    await grant(chat, mail.id, "MAIL", ["mail.search", "mail.read"]);
-
-    await chat.ask("Read it.");
-    await captures(mail.id, 2);
-
-    const bySubject = await recalled(person.userId, `quote ${marker}`);
-    const byBody = await recalled(person.userId, inBody);
-    expect({
-      bySubject: bySubject.texts
-        .map(({ version, text }) => ({ version, full: text.includes(inBody) }))
-        .toSorted((one, other) => Number(one.full) - Number(other.full)),
-      // The full text is still found after the search read the item.
-      byBody: byBody.texts.length,
-    }).toStrictEqual({
-      bySubject: [
-        { version: 1, full: false },
-        { version: 1, full: true },
-      ],
-      byBody: 1,
-    });
-  });
-
   it("keeps nothing of a tool that reaches beyond the person's own things, counted as skipped", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
@@ -427,17 +408,14 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("is kept from the person's own toolkit when its server names the item, and never of a change", async () => {
+  it("keeps nothing a toolkit reads, even naming one item, as no toolkit tool is marked as answering one; nor a change", async () => {
     const person = await signedInApi(idp, "user");
     const [named, sent] = [markerOf(), markerOf()];
     const mail = await mailConnection([], mailWithSearch, {
       provider: "mail_own",
       owner: person.userId,
     });
-    await mail.answer(
-      "mail.search",
-      messagesRead([{ id: `message-${named}`, subject: named }])
-    );
+    await mail.answer("mail.search", oneRead(`message-${named}`, { named }));
     const chat = await chatOf(
       person.userId,
       step(
@@ -452,26 +430,26 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     await chat.ask("Send it.");
     await chat.ask("Find it.");
     const events = await captures(mail.id);
-    const found = await recalled(person.userId, named);
 
     expect({
       events: events.map(shown),
-      named: found.texts.map(({ text }) => text),
-      sent: await recalled(person.userId, sent),
+      recalled: await Promise.all(
+        [named, sent].map(
+          async (marker) => await recalled(person.userId, marker)
+        )
+      ),
     }).toStrictEqual({
       events: [
         {
-          action: "brain.capture.kept",
+          action: "brain.capture.skipped",
           onBehalfOf: person.userId,
-          detail: { items: 1, kept: 1, failed: 0, skipped: 0 },
+          detail: { reason: "list", items: 1, kept: 0, failed: 0, skipped: 1 },
         },
       ],
-      named: [
-        JSON.stringify({
-          messages: [{ id: `message-${named}`, subject: named }],
-        }),
+      recalled: [
+        { texts: [], elsewhere: [] },
+        { texts: [], elsewhere: [] },
       ],
-      sent: { texts: [], elsewhere: [] },
     });
   });
 
@@ -534,7 +512,8 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       captures(own.id),
     ]);
     const quiet = await allEvents();
-    const witnessed = await recalled(person.userId, witness);
+    // Its event, the last call's, in: the earlier calls' captures ended.
+    const witnessed = await captures(own.id);
 
     expect({
       shared: sharedEvents.map(shown),
@@ -543,7 +522,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           async (marker) => await recalled(person.userId, marker)
         )
       ),
-      witness: witnessed.texts.length,
+      witnessed: witnessed.map(shown),
       quiet: quiet.filter(
         ({ action, target }) =>
           action.startsWith("brain.capture.") &&
@@ -568,7 +547,13 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         { texts: [], elsewhere: [] },
         { texts: [], elsewhere: [] },
       ],
-      witness: 1,
+      witnessed: [
+        {
+          action: "brain.capture.skipped",
+          onBehalfOf: person.userId,
+          detail: { reason: "list", items: 1, kept: 0, failed: 0, skipped: 1 },
+        },
+      ],
       quiet: [],
     });
   });
@@ -577,28 +562,24 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const secret = `hunter2-${crypto.randomUUID()}`;
-    const mail = await mailConnection([], mailWithSearch, {
-      provider: "mail_own",
-      owner: person.userId,
+    const { connectionId, mailbox } = await ownGmail(person);
+    const id = `login-${marker}`;
+    await worldHolds(stephenGoogleUrl, {
+      mailbox,
+      events: [],
+      messages: [
+        gmailMessage(id, `Login ${marker}`, `Your password: ${secret}`),
+      ],
     });
-    await mail.answer(
-      "mail.search",
-      messagesRead([
-        {
-          id: `message-${marker}`,
-          subject: `Login ${marker} password: ${secret}`,
-        },
-      ])
-    );
     const chat = await chatOf(
       person.userId,
-      step(calling("MAIL", "mail.search", { query: marker })),
-      says("Found it.")
+      step(calling("MAIL", "mail.get", { mailbox, message: id })),
+      says("Read it.")
     );
-    await grant(chat, mail.id, "MAIL", ["mail.search"]);
+    await grant(chat, connectionId, "MAIL", ["mail.get"]);
 
-    await chat.ask("Find it.");
-    await captures(mail.id);
+    await chat.ask("Read it.");
+    await captures(connectionId);
     const own = await recalled(person.userId, `login ${marker}`);
     // As an App, a workflow or the SDK asks: the shared store alone.
     const asApp = await recalled(person.userId, `login ${marker}`, false);
@@ -609,111 +590,96 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const erased = await recalled(person.userId, `login ${marker}`);
 
     expect({
-      own: own.texts.map(({ text }) => text),
+      own: own.texts.map(({ text }) => ({
+        redacted: text.includes("password: [redacted]"),
+        secret: text.includes(secret),
+      })),
       asApp,
       erased,
     }).toStrictEqual({
-      own: [
-        JSON.stringify({
-          messages: [
-            {
-              id: `message-${marker}`,
-              subject: `Login ${marker} password: [redacted]`,
-            },
-          ],
-        }),
-      ],
+      own: [{ redacted: true, secret: false }],
       asApp: { texts: [], elsewhere: [] },
       erased: { texts: [], elsewhere: [] },
     });
   });
 
-  it("counts every call's items as kept, failed or skipped, and gives the agent its answer whatever the Brain did", async () => {
+  it("counts every call as kept, failed or skipped, by what its tool answers, and gives the agent its answer whatever the Brain did", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
-    const own = async () =>
-      await mailConnection([], mailWithSearch, {
-        provider: "mail_own",
-        owner: person.userId,
-      });
-    const [tooLarge, erased, list, file, text] = await Promise.all([
-      own(),
-      own(),
-      own(),
-      own(),
-      own(),
-    ]);
-    // Past the Brain's own limit once folded for its word index: refused.
-    await tooLarge.answer(
-      "mail.search",
-      oneRead(`large-${marker}`, { subject: "ﷺ".repeat(35_000) })
-    );
-    await erased.answer(
-      "mail.search",
-      oneRead(`erased-${marker}`, { subject: `Erased ${marker}` })
-    );
-    await list.answer(
-      "mail.search",
-      messagesRead([
-        { id: `one-${marker}`, subject: `One ${marker}` },
-        { id: `two-${marker}`, subject: `Two ${marker}` },
-      ])
-    );
-    // A file read as its bytes (`contentAs`): nothing to find in them.
-    await file.answer(
-      "mail.search",
-      oneRead(`file-${marker}`, { encoding: "base64", content: btoa(marker) })
-    );
-    await text.answer(
-      "mail.search",
-      oneRead(`text-${marker}`, {
-        encoding: "text",
-        content: `Notes ${marker}`,
-      })
-    );
-    // The erased item's key closed by an erasure before it is read.
+    const { connectionId: gmail, mailbox } = await ownGmail(person);
+    const { connectionId: outlook, mailbox: outlookBox } =
+      await ownMicrosoft(person);
+    const large = `large-${marker}`;
+    const erased = `erased-${marker}`;
+    const withFile = `file-${marker}`;
+    await worldHolds(stephenGoogleUrl, {
+      mailbox,
+      events: [],
+      messages: [
+        // Past the Brain's own limit once folded for its word index.
+        gmailMessage(large, `Large ${marker}`, "ﷺ".repeat(35_000)),
+        gmailMessage(erased, `Erased ${marker}`, "Gone."),
+        gmailMessage(withFile, `File ${marker}`, "See the notes.", {
+          name: "notes.txt",
+          text: `Notes ${marker}`,
+        }),
+      ],
+    });
+    // One To Do list: a list still, never kept.
+    await worldHolds(stephenGraphUrl, {
+      mailbox: outlookBox,
+      events: [],
+      messages: [],
+      todoLists: [
+        { id: `tasks-${marker}`, displayName: "Tasks", isOwner: true },
+      ],
+    });
+    // The erased message's key closed by an erasure before it is read.
     await eraseSource(env, {
       source: {
         producer: "capture",
-        id: await captureIdOf(
-          erased.id,
-          person.userId,
-          "mail.search",
-          `erased-${marker}`
-        ),
+        id: await captureIdOf(gmail, person.userId, "mail.get", erased),
       },
       readers: { kind: "owner", personId: person.userId },
       reason: "deleted",
     });
-    const connections = { tooLarge, erased, list, file, text };
+    const attachment = { mailbox, message: withFile, attachment: "1" };
+    const calls = [
+      calling("MAIL", "mail.get", { mailbox, message: large }),
+      calling("MAIL", "mail.get", { mailbox, message: erased }),
+      // As base64, the default: a file's bytes.
+      calling("MAIL", "mail.readAttachment", attachment),
+      calling("MAIL", "mail.readAttachment", { ...attachment, as: "text" }),
+      calling("OUTLOOK", "todo.lists", { mailbox: outlookBox }),
+    ];
     const chat = await chatOf(
       person.userId,
-      step(
-        ...Object.keys(connections).map((binding) =>
-          calling(binding.toUpperCase(), "mail.search", { query: marker })
-        )
-      ),
-      says("Found them.")
+      ...calls.flatMap((call) => [step(call), says("Done.")])
     );
-    for (const [binding, { id }] of Object.entries(connections)) {
-      // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-      await grant(chat, id, binding.toUpperCase(), ["mail.search"]);
-    }
+    await grant(chat, gmail, "MAIL", ["mail.get", "mail.readAttachment"]);
+    await grant(chat, outlook, "OUTLOOK", ["todo.lists"]);
 
-    await chat.ask("Find them.");
-    const events = await Promise.all(
-      Object.values(connections).map(async ({ id }) => await captures(id))
-    );
-    const found = await recalled(person.userId, marker);
+    for (const [index] of calls.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+      await chat.ask("Next.");
+      // oxlint-disable-next-line no-await-in-loop -- its capture first
+      await captures(
+        index === calls.length - 1 ? outlook : gmail,
+        index === calls.length - 1 ? 1 : index + 1
+      );
+    }
+    const [gmailEvents, outlookEvents] = await Promise.all([
+      captures(gmail, 4),
+      captures(outlook),
+    ]);
+    const found = await recalled(person.userId, `notes ${marker}`);
 
     expect({
-      events: events.map((each) => each.map(shown)),
-      kept: found.texts.map(({ text: kept }) =>
-        kept.includes(`Notes ${marker}`)
-      ),
-      // The model read the last answer the code got.
-      answered: JSON.stringify(chat.provider.requests.at(-1)?.body).includes(
-        `Notes ${marker}`
+      events: [...gmailEvents, ...outlookEvents].map(shown),
+      kept: found.texts.map(({ text }) => text.includes(`Notes ${marker}`)),
+      // The model read the answer of the read the Brain refused.
+      answered: JSON.stringify(chat.provider.requests[1]?.body).includes(
+        `Large ${marker}`
       ),
     }).toStrictEqual({
       events: [
@@ -734,14 +700,6 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         },
         {
           action: "brain.capture.skipped",
-          reason: "list",
-          items: 2,
-          kept: 0,
-          failed: 0,
-          skipped: 2,
-        },
-        {
-          action: "brain.capture.skipped",
           reason: "file",
           items: 1,
           kept: 0,
@@ -755,9 +713,19 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           failed: 0,
           skipped: 0,
         },
-      ].map(({ action, ...detail }) => [
-        { action, onBehalfOf: person.userId, detail },
-      ]),
+        {
+          action: "brain.capture.skipped",
+          reason: "list",
+          items: 1,
+          kept: 0,
+          failed: 0,
+          skipped: 1,
+        },
+      ].map(({ action, ...detail }) => ({
+        action,
+        onBehalfOf: person.userId,
+        detail,
+      })),
       kept: [true],
       answered: true,
     });

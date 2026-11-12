@@ -39,8 +39,4 @@ describe("a read's provenance at its provider's real lengths", () => {
       ],
     });
   });
-
-  it("would not fit a Graph attachment named with its message, so Microsoft 365 names it alone", () => {
-    expect(fits(`${graphMessage}/${graphAttachment}`)).toBeFalsy();
-  });
 });

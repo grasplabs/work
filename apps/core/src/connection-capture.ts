@@ -4,6 +4,7 @@ import type { ConnectResult, ConnectionOwner } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { redact } from "@grasp-os/shared/redact";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { chatAuthority } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
@@ -11,6 +12,7 @@ import { keepAuditEvent } from "./audit-outbox.ts";
 import { addSource } from "./brain-next.ts";
 import { captureIdOf } from "./connection-capture-key.ts";
 import { connectionOwnersOf } from "./connections.ts";
+import { nativeItemReads } from "./native-tool-classes.gen.ts";
 import { nativeClasses } from "./tool-classes.ts";
 
 // Capture (GRA-1730): what a chat's agent reads through its person's own
@@ -34,14 +36,16 @@ import { nativeClasses } from "./tool-classes.ts";
 //   another mailbox), are kept by nothing yet: a copy readable by its
 //   person alone would outlive their access at the source. They come back
 //   with native sync, which brings each item's readers.
-// - Only a read of one item (its provenance names exactly one), kept
-//   whole as that item's source for the tool, in the person's own store
-//   (owner content), credentials redacted (`redact`); never the call's
-//   input. A list or a search (several items) is not kept: a snippet
+// - Only a tool that answers one item's content, as its manifest declares
+//   (`answersItem`: Gmail's message and attachment reads, OneNote's page
+//   read), kept whole as that item's source for the tool, in the person's
+//   own store (owner content), credentials redacted (`redact`); never the
+//   call's input. What a tool is decides it, never how many items came
+//   back: a list or a search is never kept, even with one hit (a snippet
 //   beside the full copy is noise in recall, and every changed summary
-//   would be a version. Nor is a file read (`contentAs`'s base64): bytes
-//   are no text to find, and past the Brain's limit they would fail each
-//   time. No cap of its own: the Brain's own limit on a source refuses
+//   would be a version). Nor is a file's content read as base64 (the
+//   default of a tool that answers a file): bytes are no text to find.
+//   No Composio or MCP tool carries the mark today (GRA-1845). No cap of its own: the Brain's own limit on a source refuses
 //   what is past it, and the item fails. Outside text is content: a
 //   captured source is never an instruction file.
 // - Capturing never holds up or fails the call: it runs once the agent
@@ -71,19 +75,34 @@ const audited = async (
   });
 };
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+/** What an item-reading tool answers: its content, or a file's. */
+const itemReadSchema = z.enum(["item", "file"]);
 
-/** Whether `output` is a file's bytes as base64 (`contentAs`'s answer). */
-const isFileAnswer = (output: string): boolean => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output);
-  } catch {
-    return false;
-  }
-  return isObject(parsed) && parsed.encoding === "base64";
+/**
+ * Whether the native tool `action` of `provider` answers one item's
+ * content (`answersItem` in its manifest), and whether that is a file's
+ * (`answersFile`), by the release's generated table, checked. Undefined
+ * for every other tool: a list or a search, and every Composio or MCP
+ * tool, which nothing marks today (GRA-1845).
+ */
+const itemReadOf = (
+  provider: string,
+  action: string
+): z.infer<typeof itemReadSchema> | undefined => {
+  const tools = nativeItemReads[provider];
+  const value =
+    tools !== undefined && Object.hasOwn(tools, action)
+      ? tools[action]
+      : undefined;
+  return value === undefined ? undefined : itemReadSchema.parse(value);
 };
+
+/** Whether a call's input asks for a file as text (`contentAs`'s `as`). */
+const asksText = (input: unknown): boolean =>
+  typeof input === "object" &&
+  input !== null &&
+  "as" in input &&
+  input.as === "text";
 
 /** What a call's capture ended in: its event and the event's detail. */
 type Ended = [CaptureEvent, Record<string, string | number>];
@@ -110,6 +129,7 @@ const captured = async (
   scope: AgentScope,
   connectionId: string,
   action: string,
+  input: unknown,
   result: ConnectResult
 ): Promise<Ended> => {
   const named = new Set(result.provenance).size;
@@ -120,11 +140,14 @@ const captured = async (
   if (classOf(owner, action) !== "read-own") {
     return skippedAll("reach", named);
   }
+  const itemRead =
+    owner.source === "native" ? itemReadOf(owner.provider, action) : undefined;
   const [itemId] = result.provenance;
-  if (named !== 1 || itemId === undefined) {
+  if (itemRead === undefined || named !== 1 || itemId === undefined) {
     return skippedAll("list", named);
   }
-  if (isFileAnswer(result.output)) {
+  // A file read as base64 (the default): bytes are no text to find.
+  if (itemRead === "file" && !asksText(input)) {
     return skippedAll("file", 1);
   }
   const id = await captureIdOf(connectionId, scope.personId, action, itemId);
@@ -154,7 +177,8 @@ const captured = async (
  * Keeps the item the chat's agent read with the tool `action` through
  * `connectionId` (`result`) as a source its person alone may read, if
  * connect said it may be kept, the connection is that person's own, the
- * tool reaches their own things, and the read names one item, not a file. For `waitUntil`: never
+ * tool reaches their own things and answers one item's content (not a
+ * file's bytes). For `waitUntil`: never
  * throws.
  */
 export const captureRead = async (
@@ -162,6 +186,7 @@ export const captureRead = async (
   scope: AgentScope,
   connectionId: string,
   action: string,
+  input: unknown,
   result: ConnectResult
 ): Promise<void> => {
   if (result.keep !== true) {
@@ -169,7 +194,7 @@ export const captureRead = async (
   }
   let ended: Ended;
   try {
-    ended = await captured(env, scope, connectionId, action, result);
+    ended = await captured(env, scope, connectionId, action, input, result);
   } catch (error) {
     // Connect unreachable, or the Brain refused the item (a text past its
     // limit) or couldn't be reached: each item failed.
