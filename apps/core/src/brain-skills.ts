@@ -1,5 +1,6 @@
 import { selectSkills } from "@grasp-os/brain-next/skills";
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   authoritySchema,
@@ -11,7 +12,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { addSkill, listSkillsAs, readSkillAs } from "./brain-next.ts";
+import { addShippedSkill, listSkillsAs, readSkillAs } from "./brain-next.ts";
 import type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import type { ShippedSkill } from "./shipped-skills.ts";
@@ -41,17 +42,36 @@ export type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 //   come in through an approved publish (GRA-1754), which doesn't exist
 //   yet; until then the Brain holds Grasp's alone.
 
+/** The names of Grasp's skills this release ships. */
+const shippedNames: ReadonlySet<string> = new Set(
+  shippedSkills.map(({ name }) => name)
+);
+
 /**
  * Puts each of `skills` (this release's, unless a test passes others) into
  * the Brain as Grasp's own: only those whose current text differs from
  * the release's are written, as their next version, all with one change
- * key minted for this install. A skill that fails is logged, by its place
- * in the list alone, and the others are still written; the next install
- * compares it again (builtins.ts stores the release's fingerprint only
- * once every one is in). Audited once, as the system: which release
- * (its version, when the Worker knows it), how many it wrote and how many
- * failed, never a name or text. Resolves whether every one is in. The
- * release's install on the first request runs it (builtins.ts).
+ * key minted for this install. The others are still written whatever one
+ * does:
+ *
+ * - one the Brain refuses as no skill of this release (`skills.invalid`:
+ *   a name it doesn't ship, a frontmatter naming another skill, a text
+ *   too long) fails alike every time until another release, so it isn't
+ *   tried again: it is logged and audited by name (Grasp's own names
+ *   aren't secret; a name the release doesn't ship, by its place alone)
+ *   and doesn't hold the install back. The test that every shipped
+ *   skill's frontmatter names it (brain-skills.test.ts) keeps it out of a
+ *   release;
+ * - one that fails otherwise (the Brain out of reach) is logged by its
+ *   place, and the install answers incomplete, so the next one compares
+ *   it again (builtins.ts stores the release's fingerprint only once the
+ *   install is complete).
+ *
+ * Audited once, as the system: which release (its version, when the
+ * Worker knows it), how many it shipped, wrote, found invalid and failed
+ * to write, and the invalid ones' names; never a text. Resolves whether
+ * nothing failed but what can't succeed in this release. The release's
+ * install on the first request runs it (builtins.ts).
  */
 export const installShippedSkills = async (
   env: Env,
@@ -60,18 +80,27 @@ export const installShippedSkills = async (
   const change = crypto.randomUUID();
   let changed = 0;
   let failed = 0;
+  const invalid: string[] = [];
   for (const [position, { name, text }] of skills.entries()) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few skills, one at a time
-      const added = await addSkill(env, {
-        skill: { scope: "grasp", name },
-        change,
-        text,
-      });
+      const added = await addShippedSkill(env, { name, change, text });
       changed += added.changed ? 1 : 0;
     } catch (error) {
-      failed += 1;
-      log.error("skills.install_failed", { position, ...errorFields(error) });
+      if (skillErrors.codeOf(error) === "skills.invalid") {
+        const shippedName = shippedNames.has(name) ? name : null;
+        invalid.push(shippedName ?? `#${position}`);
+        log.error("skills.install_invalid", {
+          position,
+          ...(shippedName === null ? {} : { name: shippedName }),
+        });
+      } else {
+        failed += 1;
+        log.error("skills.install_failed", {
+          position,
+          ...errorFields(error),
+        });
+      }
     }
   }
   // A shared skill steers every agent: what the release changed is
@@ -84,6 +113,11 @@ export const installShippedSkills = async (
       release: env.CF_VERSION_METADATA?.id ?? null,
       shipped: skills.length,
       changed,
+      invalid: invalid.length,
+      invalidNames:
+        invalid.length === 0
+          ? null
+          : invalid.join(",").slice(0, identifierMaxLength),
       failed,
     },
   });
@@ -94,11 +128,6 @@ export const installShippedSkills = async (
 const personOf = (by: Authority): string =>
   permissionErrors.parse("permission.context_invalid", authoritySchema, by)
     .onBehalfOf;
-
-/** The names of Grasp's skills this release ships. */
-const shippedNames: ReadonlySet<string> = new Set(
-  shippedSkills.map(({ name }) => name)
-);
 
 /**
  * The skills the code `by` acts with may use, by name: Grasp's this
@@ -137,12 +166,15 @@ export const selectSkillsFor = async (
 
 const skillAtSchema = z.strictObject({
   // As a listing or a selection gives it: what else it carries (its
-  // description) is left out.
-  skill: z.object({
-    scope: z.enum(["grasp", "company"]),
-    name: z.string(),
-    version: z.int().positive(),
-  }),
+  // description) is accepted and dropped here, by name, whatever zod's
+  // default for unknown keys.
+  skill: z
+    .looseObject({
+      scope: z.enum(["grasp", "company"]),
+      name: z.string(),
+      version: z.int().positive(),
+    })
+    .transform(({ scope, name, version }) => ({ scope, name, version })),
 });
 
 /**
