@@ -2,6 +2,7 @@ import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
 import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
+import type { ChatFileType } from "@grasp-os/shared/chat";
 import type { DependencyFinding } from "@grasp-os/shared/dependencies";
 import { modelRoles } from "@grasp-os/shared/deployment-config";
 import type { Json } from "@grasp-os/shared/json";
@@ -3143,6 +3144,32 @@ export const agentPlaces = sqliteTable(
     changedAt: timestamp("changed_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.agentId, table.place] })]
+);
+
+/**
+ * The documents an admin gave an agent to answer from
+ * (agent-documents.ts): the text core read from each file, never the file
+ * itself, which nothing keeps. The agent reads the text in any chat it
+ * answers (`env.chat.readDocument`). Gone with the agent.
+ */
+export const agentDocuments = sqliteTable(
+  "agent_documents",
+  {
+    id: text().primaryKey(),
+    agentId: text("agent_id").notNull(),
+    name: text().notNull(),
+    type: text().$type<ChatFileType>().notNull(),
+    /** The file's size, in bytes. */
+    bytes: integer().notNull(),
+    text: text().notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    // No two of an agent's documents share a name: the agent is told
+    // them by name.
+    uniqueIndex("agent_documents_name_idx").on(table.agentId, table.name),
+  ]
 );
 
 /**

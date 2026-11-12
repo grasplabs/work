@@ -20,6 +20,12 @@ export const agentErrors = defineErrorFamily({
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":
     "That isn't a model your organization has chosen. Pick one in Settings › Models.",
+  // An agent's documents (core's agent-documents.ts).
+  "agent.too_many_documents":
+    "An agent keeps at most 10 documents. Remove one to add another.",
+  "agent.document_unknown": "The agent has no such document.",
+  "agent.document_named":
+    "The agent already has a document with that name. Remove it first, or rename the file.",
   // An agent's wake-ups (core's agent-wakes.ts).
   "agent.wake_invalid":
     "That isn't a wake-up: it needs a schedule that names a time to come, a person of the company, and what to ask.",

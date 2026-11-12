@@ -16,6 +16,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { agentOfRow, firstAgentId, readAgent } from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
+  agentDocuments,
   agentPlaces,
   agentReach,
   agents,
@@ -385,7 +386,7 @@ export const setAgentPaused = async (
  * Deletes the agent `agentId`, for good. Its row stays, marked deleted,
  * so a chat that still names it is refused its turn (agents.ts); its
  * name is free again; it reaches nobody and has every class for nobody,
- * whatever else reads its rows; its places and wake-ups are gone. The
+ * whatever else reads its rows; its places, wake-ups and documents are gone. The
  * chats people had with it, its audit events and its memory file stay.
  * Throws `agent.first_stays` for the company's first agent, which every
  * chat falls back to, and `agent.unknown`.
@@ -414,6 +415,7 @@ export const deleteAgent = async (
       .where(eq(agentToolClasses.agentId, agent.id)),
     db.delete(agentPlaces).where(eq(agentPlaces.agentId, agent.id)),
     db.delete(agentWakes).where(eq(agentWakes.agentId, agent.id)),
+    db.delete(agentDocuments).where(eq(agentDocuments.agentId, agent.id)),
     // Last before the event, which is recorded only if this changed a
     // row: an agent deleted twice at once is recorded once.
     db

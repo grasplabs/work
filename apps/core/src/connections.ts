@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentDocument,
   AgentSettings,
   AgentUsage,
   AgentWake,
@@ -59,6 +60,11 @@ import {
   setAgentReach,
   setAgentToolClass,
 } from "./agent-builder.ts";
+import {
+  addAgentDocument,
+  listAgentDocuments,
+  removeAgentDocument,
+} from "./agent-documents.ts";
 import { agentsUsage } from "./agent-usage.ts";
 import {
   deleteAgentWake,
@@ -779,6 +785,33 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async deleteAgent(agentId: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await deleteAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async agentDocuments(agentId: unknown): Promise<AgentDocument[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentDocuments(this.#env, identity, agentId)
+    );
+  }
+
+  async addAgentDocument(
+    agentId: unknown,
+    file: unknown
+  ): Promise<AgentDocument> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await addAgentDocument(this.#env, identity, agentId, file)
+    );
+  }
+
+  async removeAgentDocument(
+    agentId: unknown,
+    documentId: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await removeAgentDocument(this.#env, identity, agentId, documentId);
     });
   }
 

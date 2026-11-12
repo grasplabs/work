@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import type {
   Agent,
+  AgentDocument,
   AgentInput,
   AgentSettings,
   AgentWake,
@@ -91,6 +92,7 @@ const fakeConnections = () => {
   const asked: unknown[][] = [];
   let agents: Agent[] = [stephen];
   let wakes: AgentWake[] = [];
+  let documents: (AgentDocument & { agentId: string })[] = [];
   const settings = new Map<string, AgentSettings>();
   const changed = (id: string, change: Partial<Agent>): void => {
     agents = agents.map((agent) =>
@@ -192,6 +194,41 @@ const fakeConnections = () => {
       asked.push(["wake deleted", wakeId]);
       wakes = wakes.filter((wake) => wake.id !== wakeId);
     },
+    agentDocuments: async (agentId: string): Promise<AgentDocument[]> => {
+      await Promise.resolve();
+      return documents.filter((each) => each.agentId === agentId);
+    },
+    addAgentDocument: async (
+      agentId: string,
+      file: { name: string; bytes: Uint8Array }
+    ): Promise<AgentDocument> => {
+      await Promise.resolve();
+      asked.push([
+        "document",
+        agentId,
+        file.name,
+        new TextDecoder().decode(file.bytes),
+      ]);
+      // As core refuses a file that isn't what its name says.
+      if (file.name.endsWith(".pdf")) {
+        throw new Error("Only PDF, Word and text files can be attached.");
+      }
+      const made = {
+        id: `document-${documents.length + 1}`,
+        agentId,
+        name: file.name,
+        type: "md" as const,
+        bytes: file.bytes.byteLength,
+        addedAt: "2026-11-12T09:00:00.000Z",
+      };
+      documents = [...documents, made];
+      return made;
+    },
+    removeAgentDocument: async (agentId: string, documentId: string) => {
+      await Promise.resolve();
+      asked.push(["document removed", agentId, documentId]);
+      documents = documents.filter((each) => each.id !== documentId);
+    },
     setAgentReach: async (
       id: string,
       on: boolean,
@@ -234,6 +271,7 @@ interface Shown {
   agents: Agent[];
   settings: Record<string, AgentSettings>;
   wakes: Record<string, AgentWake[]>;
+  documents: Record<string, AgentDocument[]>;
 }
 
 /** What is shown: one agent's page, by its name, or the new agent's. */
@@ -262,6 +300,7 @@ const Page = ({
   return (
     <AgentPage
       agent={agent}
+      documents={data.documents[agent.id]}
       editable={editable}
       first={agent.id === data.agents.at(0)?.id}
       firstAccess={agent.id === data.agents.at(0)?.id ? firstAccess : undefined}
@@ -301,10 +340,17 @@ const shown = async (connections: Connections, open: Open, editable = true) => {
         await connections.agentWakes(id),
       ])
     );
+    const kept = await Promise.all(
+      agents.map(async ({ id }): Promise<[string, AgentDocument[]]> => [
+        id,
+        await connections.agentDocuments(id),
+      ])
+    );
     return {
       agents,
       settings: Object.fromEntries(read),
       wakes: Object.fromEntries(woken),
+      documents: Object.fromEntries(kept),
     };
   };
   const rootRoute = createRootRoute({
@@ -436,6 +482,20 @@ const onSwitch = (): HTMLElement => {
     throw new TypeError("No on switch");
   }
   return found;
+};
+
+/** Picks `files` in the documents' file picker, as a person does. */
+const pick = async (...files: File[]) => {
+  const input = document.querySelector("[data-testid='agent-document-input']");
+  if (!(input instanceof HTMLInputElement)) {
+    throw new TypeError("No file picker");
+  }
+  await act(async () => {
+    Object.defineProperty(input, "files", { value: files, configurable: true });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
 };
 
 const claire = {
@@ -678,5 +738,91 @@ describe("an agent's page", () => {
         },
       ],
     ]);
+  });
+
+  it("gives an agent the files an admin picks, each with its name and content, lists them, and removes one", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire", tab: "instructions" });
+    await pick(
+      new File(["# Close\n\nTwo signatures."], "Close checklist.md"),
+      new File(["Net 30."], "Terms.txt")
+    );
+    const listed = document.body.textContent;
+    await press(button("Remove Close checklist.md"));
+    expect({
+      asked,
+      listed: [
+        listed.includes("Close checklist.md"),
+        listed.includes("Terms.txt"),
+      ],
+      after: [
+        document.body.textContent.includes("Close checklist.md"),
+        document.body.textContent.includes("Terms.txt"),
+      ],
+      // Who may learn what a document says, said where one is added.
+      warned: listed.includes(
+        "Anyone who may ask Claire can learn what these say."
+      ),
+    }).toStrictEqual({
+      asked: [
+        [
+          "document",
+          "agent-1",
+          "Close checklist.md",
+          "# Close\n\nTwo signatures.",
+        ],
+        ["document", "agent-1", "Terms.txt", "Net 30."],
+        ["document removed", "agent-1", "document-1"],
+      ],
+      listed: [true, true],
+      after: [false, true],
+      warned: true,
+    });
+  });
+
+  it("says why a file wasn't taken, keeps those taken before it, and stops there", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire", tab: "instructions" });
+    await pick(
+      new File(["a"], "a.md"),
+      new File(["not a PDF"], "policy.pdf"),
+      new File(["c"], "c.md")
+    );
+    expect({
+      asked: asked.map((each) => each[2]),
+      said: document.body.textContent.includes(
+        "Only PDF, Word and text files can be attached."
+      ),
+      kept: document.body.textContent.includes("a.md"),
+    }).toStrictEqual({
+      asked: ["a.md", "policy.pdf"],
+      said: true,
+      kept: true,
+    });
+  });
+
+  it("shows someone who isn't the company's admin an agent's documents, with no way to add or remove one", async () => {
+    const { connections, asked } = await withClaire();
+    await connections.addAgentDocument("agent-1", {
+      name: "Terms.txt",
+      bytes: new TextEncoder().encode("Net 30."),
+    });
+    asked.length = 0;
+    await shown(connections, { agent: "Claire", tab: "instructions" }, false);
+    expect({
+      listed: document.body.textContent.includes("Terms.txt"),
+      add: document.body.textContent.includes("Add document"),
+      picker: document.querySelector("[data-testid='agent-document-input']"),
+      remove: [...document.querySelectorAll("button")].some(
+        (each) => each.getAttribute("aria-label") === "Remove Terms.txt"
+      ),
+      asked,
+    }).toStrictEqual({
+      listed: true,
+      add: false,
+      picker: null,
+      remove: false,
+      asked: [],
+    });
   });
 });

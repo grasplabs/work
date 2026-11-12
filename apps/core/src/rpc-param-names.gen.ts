@@ -156,6 +156,8 @@ export const rpcParamNames: ParamNames = {
     "watch": ["chatId","after","onUpdate"],
   },
   "ConnectionsRpc": {
+    "addAgentDocument": ["agentId","file"],
+    "agentDocuments": ["agentId"],
     "agentSettings": ["agentId"],
     "agentWakes": ["agentId"],
     "agents": [],
@@ -176,6 +178,7 @@ export const rpcParamNames: ParamNames = {
     "makeAgentWake": ["agentId","input"],
     "pointApp": ["request"],
     "pointSharedMailbox": ["mailbox","audience"],
+    "removeAgentDocument": ["agentId","documentId"],
     "requestApp": ["request"],
     "revocationsByHand": [],
     "setAgentPaused": ["agentId","paused"],

@@ -91,6 +91,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
+import { documentsOf } from "./agent-documents.ts";
 import { isMessage } from "./agent-messages.ts";
 import { requireAgentReaches } from "./agent-reach.ts";
 import {
@@ -2090,15 +2091,27 @@ export class Workspace extends DurableObject<Env> {
     // included, needs a role that builds (app-access.ts).
     const role = await memberRole(this.env.DB, scope.personId);
     const builds = !shared && role !== undefined && canBuild(role);
+    // The documents an admin gave the chat's agent, by name.
+    const kept =
+      agent === undefined ? [] : await documentsOf(this.env, agent.id);
+    const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
     return {
       memory,
       skills,
       channel,
       builds,
-      // The first agent as Grasp ships it is told nothing more.
-      ...(agent === undefined || agent.changedAt === null
+      // The first agent as Grasp ships it, with no document, is told
+      // nothing more.
+      ...(agent === undefined ||
+      (agent.changedAt === null && documents.length === 0)
         ? {}
-        : { agent: { name: agent.name, instructions: agent.instructions } }),
+        : {
+            agent: {
+              name: agent.name,
+              instructions: agent.instructions,
+              ...(documents.length === 0 ? {} : { documents }),
+            },
+          }),
       // The model an admin gave the agent, for its turns.
       ...(agent?.model === null || agent?.model === undefined
         ? {}

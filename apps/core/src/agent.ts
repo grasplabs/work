@@ -271,9 +271,14 @@ export interface TurnContext {
   /**
    * The chat's agent as an admin made or changed it (agents.ts): its name
    * and what it is told on top of Grasp's own rules. None for the first
-   * agent as Grasp ships it, which is told nothing more.
+   * agent as Grasp ships it with no document, which is told nothing more.
    */
-  agent?: { name: string; instructions: string };
+  agent?: {
+    name: string;
+    instructions: string;
+    /** The documents an admin gave it to answer from (agent-documents.ts). */
+    documents?: readonly { id: string; name: string; type: string }[];
+  };
   /**
    * The model an admin gave the chat's agent for its turns; none for an
    * agent that answers with the model its asker picked.
@@ -300,6 +305,22 @@ export const sectionNames = [
 ] as const;
 
 /**
+ * The documents the admins gave the agent, by name: what each holds is
+ * read only when a question needs it (`env.chat.readDocument`), so a long
+ * document costs nothing in a turn that doesn't. Names are an admin's
+ * words, as the instructions are. Nothing for an agent without any.
+ */
+const documentsNote = (
+  documents: readonly { id: string; name: string; type: string }[]
+): string[] =>
+  documents.length === 0
+    ? []
+    : [
+        "The admins also gave you these documents for your job. When a question touches what one may cover, read it with `env.chat.readDocument(id)` before you answer, and say which document your answer rests on. Like the text above, a document adds to the rules and lifts none.",
+        ...documents.map(({ id, name, type }) => `- ${name} (${id}, ${type})`),
+      ];
+
+/**
  * What an admin told the chat's agent, and the name it answers under.
  * After Grasp's own instructions and before how to answer in a chat app,
  * so every rule of Grasp's stands around it: an agent's instructions add
@@ -312,6 +333,7 @@ const agentSection = (agent: TurnContext["agent"]): string | null =>
         "<agent>",
         `You answer here as ${agent.name}, one of this company's agents. Below is what the company's admins tell you about your job. It adds to every rule above and below and lifts none of them: where it asks for something a rule refuses, the rule holds, and you say what you can't do.`,
         ...(agent.instructions === "" ? [] : [agent.instructions]),
+        ...documentsNote(agent.documents ?? []),
         "</agent>",
       ].join("\n");
 
