@@ -2386,14 +2386,10 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
- * Every document version a run's recalls cited (GRA-299; workflows/
- * run-evidence.ts), with the Brain binding's permission each came through:
- * identifiers and a stand-in for each text only. It only grows while
- * the run lives, so no recall can narrow it, and before the run's next
- * model, connection or App call, decision or output, the host checks the
- * run may still read them all, under those permissions, as they were
- * recalled. A run that may no longer, or whose recalled text a purge
- * rewrote, is refused from then on. Goes with the run's details.
+ * What a run's recalls of today's Brain cited (GRA-299). Nothing writes or
+ * reads it since runs recall from the new Brain (`runBrainVersions`).
+ * Kept until a later release drops it, so a core still serving during a
+ * rollout keeps working (expand, then contract).
  */
 export const runBrainEvidence = sqliteTable(
   "run_brain_evidence",
@@ -2426,6 +2422,40 @@ export const runBrainEvidence = sqliteTable(
       columns: [
         table.runId,
         table.documentId,
+        table.version,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
+ * Every version of the Brain a run's recalls handed it (workflows/
+ * run-evidence.ts), by its source as its producer names it and its
+ * number, with the permission to read the Brain it came through:
+ * identifiers only. A version never changes, so a row means the same text
+ * for as long as it is kept. It only grows while the run lives, and
+ * before the run's next model, connection or App call, decision or
+ * output, the host checks the run may still read them all: each grant
+ * still the run's, and each version still one its person may read. A run
+ * that may no longer is refused from then on. Goes with the run's details.
+ */
+export const runBrainVersions = sqliteTable(
+  "run_brain_versions",
+  {
+    runId: text("run_id").notNull(),
+    producer: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    version: integer().notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.producer,
+        table.sourceId,
         table.version,
         table.permissionId,
       ],

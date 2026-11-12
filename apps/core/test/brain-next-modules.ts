@@ -38,4 +38,10 @@ export const brainModules = {
   "apps/core/src/person-erasure.ts": "core",
   // Code's recall: an App's action, a workflow's step and a chat's code.
   "apps/core/src/brain-recall.ts": "recall",
+  // Checks with core's readableVersionsAs which versions a chat read are
+  // still readable, and hands on only which of its own sources are.
+  "apps/core/src/history-access.ts": "core",
+  // Checks with core's readableVersionsAs that a run may still read what
+  // it recalled, and hands on only a refusal.
+  "apps/core/src/workflows/resource-reads.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;

@@ -1,61 +1,31 @@
 import { brainErrors } from "@grasp-os/brain/contract";
-import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   chatIdSchema,
-  collectionIdSchema,
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { permissions, runChatSources } from "../db/core/schema.ts";
+import { readableVersionsAs } from "../brain-next.ts";
+import type { SourceVersionRef } from "../brain-next.ts";
+import { runChatSources } from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
-import { readAsDelegate } from "../knowledge/binding.ts";
-import { brainOf } from "../knowledge/ports.ts";
+import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import { evidenceOf, isAccessRefusal } from "./run-evidence.ts";
 
-// What a run read from today's Brain, checked before anything of the run
-// leaves it: the evidence a run pinned (run-evidence.ts) and what the chat
-// that started it had read (GRA-1093). A run's steps recall from the new
-// Brain (brain-calls.ts), which pins nothing here; this stays for what
-// today's Brain recorded until the cutover (GRA-1735) removes it.
+// What a run read, checked before anything of the run leaves it: the
+// Brain's versions its recalls pinned (run-evidence.ts) and what the chat
+// that started it had read (GRA-1093).
 
-/**
- * The collection a knowledge binding reads through its permission, read
- * now: the workflow's own, active, allowing `read`, or the call is denied.
- */
-const boundCollection = async (
-  env: Env,
-  run: CallingRun,
-  permissionId: string
-): Promise<{ permissionId: PermissionId; collectionId: CollectionId }> => {
-  const row = await drizzle(env.DB)
-    .select({ collectionId: permissions.objectId })
-    .from(permissions)
-    .where(
-      and(
-        eq(permissions.id, permissionId),
-        eq(permissions.subjectType, "workflow"),
-        eq(permissions.subjectId, run.workflowId),
-        eq(permissions.objectType, "collection"),
-        eq(permissions.status, "active")
-      )
-    )
-    .get();
-  if (row === undefined) {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  return {
-    permissionId: permissionIdSchema.parse(permissionId),
-    collectionId: collectionIdSchema.parse(row.collectionId),
-  };
-};
+/** `brain.revoked` for a refusal of access, or `error` as it is. */
+const revokedOr = (error: unknown): unknown =>
+  isAccessRefusal(error) || isExpectedError(error)
+    ? brainErrors.create("brain.revoked")
+    : error;
 
 /**
  * Refuses, as `brain.revoked`, run `runId` once the chat whose agent had
@@ -86,10 +56,7 @@ const requireChatPinsReadable = async (
     },
     rows.map(({ sourceId }) => sourceId)
   ).catch((error: unknown) => {
-    if (isAccessRefusal(error) || isExpectedError(error)) {
-      throw brainErrors.create("brain.revoked");
-    }
-    throw error;
+    throw revokedOr(error);
   });
   if (rows.some(({ sourceId }) => !readable.has(sourceId))) {
     throw brainErrors.create("brain.revoked");
@@ -106,47 +73,52 @@ const requireOwnEvidenceReadable = async (
   if (rows.length === 0) {
     return;
   }
-  const store = d1BrainStore(brainOf(env));
+  // SAFETY: core wrote each row from a pack's own item; checked again,
+  // strictly, by `readableVersionsAs`, which refuses a producer it
+  // doesn't know, and the run with it.
+  const versions = rows.map(
+    ({ producer, sourceId, version }) =>
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      ({ source: { producer, id: sourceId }, version }) as SourceVersionRef
+  );
   try {
     for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
-      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
-      const bound = await boundCollection(env, run, permissionId);
-      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
-      await readAsDelegate(
+      // oxlint-disable-next-line no-await-in-loop -- one per grant, few
+      await authorize(
         env,
         runAuthority(run),
-        runContext(run),
-        bound.permissionId,
-        async (reader) => {
-          const pinned = rows.filter(
-            (row) => row.permissionId === permissionId
-          );
-          // A recall's evidence needs the Brain too; a search's or a
-          // read's only the collection.
-          if (pinned.some((row) => row.recalled)) {
-            await store.requireBrainGrant(reader);
-          }
-          await store.requireDocumentsReadable(reader, pinned);
-        }
+        { type: "platform" },
+        "brain",
+        permissionIdSchema.parse(permissionId),
+        runContext(run)
       );
     }
-  } catch (error) {
-    if (isAccessRefusal(error)) {
+    const readable = await readableVersionsAs(env, run.principal, versions);
+    const kept = new Set(
+      readable.map(({ source, version }) =>
+        JSON.stringify([source.producer, source.id, version])
+      )
+    );
+    if (
+      versions.some(
+        ({ source, version }) =>
+          !kept.has(JSON.stringify([source.producer, source.id, version]))
+      )
+    ) {
       throw brainErrors.create("brain.revoked");
     }
-    throw error;
+  } catch (error) {
+    throw revokedOr(error);
   }
 };
 
 /**
  * Refuses anything leaving a run of a JSON workflow (GRA-299) that recalled
- * what it may no longer read, as `brain.revoked`: its
- * recalls are each through a knowledge binding, one collection under one
- * permission of the workflow's, so each binding's documents are checked
- * under that permission, as the run reads now: the permission still the
- * workflow's and active (`boundCollection`), the Brain still admitting
- * the run, each document still in its collection, readable there and
- * unpurged. A test run recalls nothing, so has nothing to check.
+ * what it may no longer read, as `brain.revoked`: each permission its
+ * recalls came through still the run's, active, now (`authorize`), and
+ * each version they handed it still one its person may read
+ * (`readableVersionsAs`): not erased, nor its readers narrowed away from
+ * them. A test run recalls nothing, so has nothing to check.
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,

@@ -15,7 +15,6 @@ import { relationsExplainRead, relationsRead } from "@grasp-os/brain/relations";
 import type { BrainPack } from "@grasp-os/runtime/app";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
-import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
@@ -32,7 +31,11 @@ import {
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { recallFor } from "./brain-recall.ts";
 import { brainGaps } from "./brain-rpc.ts";
-import { brainDocumentRead, brainGrantRead } from "./history-access.ts";
+import {
+  brainDocumentRead,
+  brainGrantRead,
+  brainVersionRead,
+} from "./history-access.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -228,7 +231,11 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * The recall, under the agent's permission to read the Brain: that grant
    * is recorded with the run before anything is read (`brainGrantRead`),
-   * so what the run holds is withheld once the grant is revoked.
+   * and each version the pack hands over after (`brainVersionRead`)
+   * before the code gets it, so what the run holds is withheld once the
+   * grant is revoked or the person may no longer read one of them
+   * (history-access.ts). Without the grant `recallFor` refuses it, and
+   * audits that.
    */
   async #recalled(scope: AgentScope, input: unknown): Promise<BrainPack> {
     const authority = chatAuthority(scope);
@@ -238,21 +245,29 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
       ({ object, actions }) =>
         object.type === "platform" && actions.includes("brain")
     );
-    if (grant === undefined) {
-      throw permissionErrors.create("permission.denied", { action: "brain" });
+    if (grant !== undefined) {
+      await recordRunReads(this.env, scope, [brainGrantRead]);
     }
-    await recordRunReads(this.env, scope, [brainGrantRead]);
-    return await recallFor(
+    const pack = await recallFor(
       this.env,
       {
         authority,
         context,
-        permissionId: permissionIdSchema.parse(grant.id),
+        permissionId:
+          grant === undefined ? null : permissionIdSchema.parse(grant.id),
         actor: delegateActorOf(authority, scope.via),
         target: { type: "chat", id: scope.chatId },
       },
       input
     );
+    await recordRunReads(
+      this.env,
+      scope,
+      pack.items.map(({ source, version }) =>
+        brainVersionRead({ source, version })
+      )
+    );
+    return pack;
   }
 
   /**

@@ -30,7 +30,7 @@ export type BrainFound = "exact" | "words" | "stop words" | "meaning";
 
 /**
  * A passage of a pack, cited by its source (as Grasp named it when it was
- * added: an upload, a chat or a run, and that one's ID), the source's
+ * added: an upload or a run, and that one's ID), the source's
  * version and the passage's place in it, from 0: the part that best
  * answers the question, or the whole passage (`whole`).
  */

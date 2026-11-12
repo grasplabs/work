@@ -11,6 +11,7 @@ import {
   isOverInstructionsLimit,
   principalMaxLength,
   questionMaxLength,
+  readableCheckMax,
   recallRequestSchema,
   sourceIdMaxLength,
   wellFormedString,
@@ -253,6 +254,14 @@ export interface Recall {
    * never by meaning: vectors are kept for current versions only.
    */
   asOf?: Date;
+  /**
+   * Whether it reads what only the person may read (`owner` sources):
+   * `false` reads as their teams alone. Code's recall (brain-recall.ts:
+   * Apps, workflows, chats' code) passes `false`, so it never reads a
+   * person's private content (GRA-1762). Left out, as the person: GRA-1762
+   * makes it required, and routes `true` to the person's own store.
+   */
+  personal?: boolean;
 }
 
 /**
@@ -267,7 +276,9 @@ const codeRecallSchema = recallRequestSchema
   .extend({ asOf: z.iso.datetime({ offset: true }).optional() });
 
 /** `input` as a recall code asks for (`codeRecallSchema`), or undefined. */
-export const recallOf = (input: unknown): Recall | undefined => {
+export const recallOf = (
+  input: unknown
+): Omit<Recall, "personal"> | undefined => {
   const parsed = codeRecallSchema.safeParse(input);
   if (!parsed.success) {
     return undefined;
@@ -329,18 +340,20 @@ const accessOf = (readers: SourceReaders): Access => {
 
 /**
  * `personId` as the Brain's reader: the person, and the teams core counts
- * them in now. Refused once they have no current membership.
+ * them in now; the teams alone when not `personal`. Refused once they
+ * have no current membership.
  */
 const readerOf = async (
   env: Pick<Env, "DB">,
-  personId: string
+  personId: string,
+  { personal = true }: { personal?: boolean } = {}
 ): Promise<Reader> => {
   const member = await memberOf(env.DB, checked(idSchema, personId));
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
-    person: member.userId,
+    person: personal ? member.userId : null,
     groups: member.teams.map(({ id }) => teamGroup(id)),
   };
 };
@@ -438,18 +451,18 @@ const meaningOf = async (
  * meaning: the question is embedded while its reader is read. Every item
  * cites its source, version and place; the pack says what was not found
  * and whether the budget cut it short, all from what they may read alone.
- * Refused once they are no longer a member, or when `personId` isn't an
- * ID.
+ * Not `personal`: of what their teams may read alone. Refused once they
+ * are no longer a member, or when `personId` isn't an ID.
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf }: Recall
+  { question: asked, budget, asOf, personal }: Recall
 ): Promise<RecalledPack> => {
   // As the Brain checks it, before the embedder sees any of it.
   const question = checked(questionSchema, asked);
   const [reader, meaning] = await Promise.all([
-    readerOf(env, personId),
+    readerOf(env, personId, { personal }),
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
@@ -619,6 +632,53 @@ export const listVersionsAs = async (
     versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
     before: more && last !== undefined ? last.version : null,
   };
+const versionRefsSchema = z.array(versionRefSchema);
+
+/**
+ * Of `versions`, those the member `personId` may read now, as
+ * `readSourceVersionAs` decides it, in the order given and each once,
+ * without reading their text: for core to check what a chat once read
+ * before it sends it again (history-access.ts). Refused once they are no
+ * longer a member. For the server only, as `addSource`.
+ */
+export const readableVersionsAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  versions: readonly SourceVersionRef[]
+): Promise<SourceVersionRef[]> => {
+  const asked = checked(versionRefsSchema, versions);
+  if (asked.length === 0) {
+    return [];
+  }
+  const reader = await readerOf(env, personId);
+  const parts = Array.from(
+    { length: Math.ceil(asked.length / readableCheckMax) },
+    (_, at) => asked.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
+  );
+  const readable = await Promise.all(
+    parts.map(
+      async (part) =>
+        await brain(env).readableVersions({
+          versions: part.map(({ source, version }) => ({
+            source: sourceKeyOf(source),
+            version,
+          })),
+          reader,
+        })
+    )
+  );
+  const kept = new Set(
+    readable.flat().map(({ source, version }) => `${version}:${source}`)
+  );
+  const seen = new Set<string>();
+  return asked.filter(({ source, version }) => {
+    const key = `${version}:${sourceKeyOf(source)}`;
+    if (!kept.has(key) || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 };
 
 // Erasure: for good, apart from ordinary removal, where a new version

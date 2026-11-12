@@ -76,6 +76,9 @@ export const instructionsMaxLength = 8000;
 /** Most sources one read of current versions names. */
 export const currentReadMax = 10;
 
+/** Most versions one check of which a reader may still read names. */
+export const readableCheckMax = 500;
+
 /**
  * A string as the Brain takes it: well-formed, no half of a surrogate pair
  * on its own. Every string the Brain hashes, compares or keeps as bytes is
@@ -189,10 +192,12 @@ export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
 /**
  * Who reads, as the host resolves them now: the person, and each group the
- * host counts them in.
+ * host counts them in. No person (`null`) reads as the groups alone, so
+ * no `owner` source matches: what the host's code recalls for someone
+ * never holds what only they may read.
  */
 export const readerSchema = z.strictObject({
-  person: principalSchema,
+  person: principalSchema.nullable(),
   groups: z.array(principalSchema).max(readerGroupsMax),
 });
 export type Reader = z.infer<typeof readerSchema>;
@@ -567,6 +572,15 @@ export interface VersionList {
   versions: ListedVersion[];
   more: boolean;
 }
+
+/** Versions to check a reader may still read, and who reads them. */
+export const readableRequestSchema = z.strictObject({
+  versions: z
+    .array(z.strictObject({ source: sourceIdSchema, version: versionSchema }))
+    .max(readableCheckMax),
+  reader: readerSchema,
+});
+export type ReadableRequest = z.infer<typeof readableRequestSchema>;
 
 /** A version of a source, whole: its original text, and when it was added. */
 export interface SourceVersion extends SourceVersionRef {
@@ -1188,6 +1202,13 @@ export interface Brain {
    * exist and one they may not read.
    */
   listVersions: (request: VersionListRequest) => Promise<VersionList>;
+   * Of the versions asked for, those the reader may read now, as
+   * `readVersion` decides it, in the order asked and each once, without
+   * reading their text: what a host checks before it sends again what it
+   * once read (a chat's earlier recall). Each left out alike, whether it
+   * doesn't exist, was erased, or the reader may not read it.
+   */
+  readableVersions: (request: ReadableRequest) => Promise<SourceVersionRef[]>;
   /**
    * One tick of the host's clock, at `at`, the host's time now. First it
    * deletes one batch of what erasures hid and haven't deleted yet. Then

@@ -3,10 +3,10 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { PermissionId } from "@grasp-os/shared/ids";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
-import { drizzle } from "drizzle-orm/d1";
 
-import { keepAuditEvent } from "./audit-outbox.ts";
+import { appendAuditEvent } from "./audit-outbox.ts";
 import { recallAs, recallOf } from "./brain-next.ts";
 import { authorize } from "./permissions.ts";
 
@@ -28,19 +28,27 @@ import { authorize } from "./permissions.ts";
 //   `notFound` and `truncated` untrue, so nothing is.
 // - The person: the recall reads as the person the call acts for
 //   (`onBehalfOf`, which core set from the session or the run, never the
-//   code), through `recallAs`, so the Brain filters by them inside its own
-//   search and a pack never holds more than they may read.
+//   code), through `recallAs`, as their teams alone (`personal: false`):
+//   the Brain filters by those inside its own search, so a pack never
+//   holds more than they may read, and never what only they may read
+//   (GRA-1762), whoever the code hands it to.
 // - Nothing of the question or the pack is in a refusal, a log line or
 //   the audit event, which is kept, answered or refused, before the call
-//   returns.
+//   returns. What is refused before a call gets here (an App's operation
+//   it didn't declare, a declaration or a workflow's alias with no
+//   binding an admin approved) is the function host's and the run's own
+//   refusal, recorded as theirs, not as a recall.
 
 /** Who recalls, as core resolved them, never as the code says. */
 export interface RecallCaller {
   readonly authority: Authority;
   /** Where it works: a chat's own permission holds only in that chat. */
   readonly context: WorkContext;
-  /** Its permission to read the Brain (`{ type: "platform" }`, `brain`). */
-  readonly permissionId: PermissionId;
+  /**
+   * Its permission to read the Brain (`{ type: "platform" }`, `brain`):
+   * null when it holds none, and the recall is refused (and audited).
+   */
+  readonly permissionId: PermissionId | null;
   /** How the audit log names it. */
   readonly actor: AuditActor;
   /** What the audit event is about: the App, the run or the chat. */
@@ -73,7 +81,9 @@ export const recallFor = async (
   input: unknown
 ): Promise<BrainPack> => {
   const audit = async (detail: Record<string, string | number | boolean>) => {
-    await keepAuditEvent(env, drizzle(env.DB), {
+    // Straight to the log, as a read is (`appendAuditEvent`): a recall
+    // the log can't take is answered nothing.
+    await appendAuditEvent(env, {
       actor: caller.actor,
       action: "brain.recall",
       ...(caller.target === undefined ? {} : { target: caller.target }),
@@ -85,6 +95,9 @@ export const recallFor = async (
     if (recall === undefined) {
       throw functionErrors.create("permission.invalid_args");
     }
+    if (caller.permissionId === null) {
+      throw permissionErrors.create("permission.denied", { action: "brain" });
+    }
     await authorize(
       env,
       caller.authority,
@@ -93,15 +106,12 @@ export const recallFor = async (
       caller.permissionId,
       caller.context
     );
-    // From the organization's shared content only, never a person's
-    // private chats or files: once `recallAs` takes `personal`
-    // (GRA-1762), this passes `personal: false`, and nothing code sends
-    // can change it.
-    const pack: BrainPack = await recallAs(
-      env,
-      caller.authority.onBehalfOf,
-      recall
-    );
+    // From what the person's teams may read alone, never what only they
+    // may: nothing code sends can change it.
+    const pack: BrainPack = await recallAs(env, caller.authority.onBehalfOf, {
+      ...recall,
+      personal: false,
+    });
     await audit({ items: pack.items.length, truncated: pack.truncated });
     return pack;
   } catch (error) {

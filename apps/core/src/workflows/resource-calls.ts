@@ -32,7 +32,11 @@ import { permissions } from "../db/core/schema.ts";
 import { models } from "../models.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { writeJson } from "./bounded-json.ts";
-import { callBrain, requireBrainRequest } from "./brain-calls.ts";
+import {
+  callBrain,
+  requireBrainAnswer,
+  requireBrainRequest,
+} from "./brain-calls.ts";
 import type { BrainCall } from "./brain-calls.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
 import { runFileTypeShown } from "./office-files.ts";
@@ -916,6 +920,7 @@ const candidateAnswer = async (
     }
     case "grasp.brain": {
       requireBrainRequest(call);
+      requireBrainAnswer(answer);
       return boundedAnswer(answer, "output");
     }
     // A test run keeps no file: its files calls answer what its start

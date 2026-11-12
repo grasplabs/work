@@ -8,7 +8,7 @@ import { eraseSources, runSource } from "../brain-next-origins.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
-  runBrainEvidence,
+  runBrainVersions,
   runChatSources,
   resourceRunMailCalls,
   runMailStampClaims,
@@ -267,7 +267,7 @@ const startDetailsRemoved = async (
     // chunks deleted by `sweepRunFiles`.
     runFilesRemoved(db, due),
     // What its recalls cited (resource-reads.ts): no new call of its to gate.
-    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
+    db.delete(runBrainVersions).where(inArray(runBrainVersions.runId, due)),
     // And what the chat that had it started had read (workflow-starts.ts).
     db.delete(runChatSources).where(inArray(runChatSources.runId, due)),
     // And its inboxes (run-inboxes.ts): a reply from now on is to an

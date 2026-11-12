@@ -37,6 +37,7 @@ import {
   listPrefixesMax,
   modelNameMaxLength,
   questionMaxLength,
+  readableCheckMax,
   readerGroupsMax,
   recallBudgetMax,
   sourceTextMaxBytes,
@@ -100,7 +101,7 @@ export interface Probing {
    * their teams as core names its groups (`team:<id>`, core's
    * brain-next.ts).
    */
-  reader: Reader;
+  reader: Reader & { person: string };
   /** A word in the reader's own source and in every marked one. */
   sharedWord: string;
   /**
@@ -1100,6 +1101,50 @@ export const coreProbes = {
       )
     );
     return asked;
+  },
+  readableVersionsAs: async ({ personId, hiddenVersions, markers }) => {
+    const check = async (
+      name: string,
+      versions: readonly { source: SourceRef; version: number }[],
+      as = personId,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.readableVersionsAs(env, as, versions),
+        about
+      );
+    const hidden = hiddenVersions[0]?.source ?? missingSource();
+    return [
+      await check(
+        "sources no one added",
+        hiddenVersions.map(({ version }) => ({
+          source: missingSource(),
+          version,
+        })),
+        personId,
+        "nothing"
+      ),
+      await check("the hidden versions", hiddenVersions, personId, "hidden"),
+      await check(
+        "as someone who isn't a member",
+        [{ source: hidden, version: 1 }],
+        stranger()
+      ),
+      await check("version 0", [{ source: hidden, version: 0 }]),
+      await check("an unknown producer named by the markers", [
+        unchecked({
+          source: { producer: markers.join(""), id: hidden.id },
+          version: 1,
+        }),
+      ]),
+      await check("an id of the markers and control characters", [
+        {
+          source: { producer: "upload", id: `${markers.join("\n")}\u0000` },
+          version: 1,
+        },
+      ]),
+    ];
   },
   recallAs: async (probing) => {
     const recall = async (asking: PackAsk) =>
@@ -2271,7 +2316,7 @@ const firstChunksOf = (versions: Probing["hiddenVersions"]): ChunkRef[] =>
  * place or moved a score would show), and a model holding those alone,
  * whose answer is what the reader gets when nothing hidden is stored.
  */
-const vectorScene = async (reader: Reader) => {
+const vectorScene = async (reader: Reader & { person: string }) => {
   const question = randomVector();
   const own = await chunkedSource(
     { kind: "owner", person: reader.person },
@@ -2702,6 +2747,62 @@ export const storeProbes = {
       await answer(
         "nothing",
         async () => await find({ question: "", budget: whole })
+      ),
+    ];
+  },
+  readableVersions: async ({ reader, hiddenVersions, markers }) => {
+    const check = async (
+      name: string,
+      versions: readonly { source: string; version: number }[],
+      as: Reader = reader,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().readableVersions({
+            versions: [...versions],
+            reader: as,
+          }),
+        about
+      );
+    const hidden = keyOf(hiddenVersions[0]?.source ?? missingSource());
+    return [
+      await check(
+        "sources no one added",
+        hiddenVersions.map(({ version }) => ({
+          source: keyOf(missingSource()),
+          version,
+        })),
+        reader,
+        "nothing"
+      ),
+      await check(
+        "the hidden versions",
+        hiddenVersions.map(({ source, version }) => ({
+          source: keyOf(source),
+          version,
+        })),
+        reader,
+        "hidden"
+      ),
+      await check("version 0", [{ source: hidden, version: 0 }]),
+      await check(
+        "too many versions",
+        Array.from({ length: readableCheckMax + 1 }, () => ({
+          source: hidden,
+          version: 1,
+        }))
+      ),
+      await check("a source named by the markers, too long", [
+        { source: hidden.repeat(300), version: 1 },
+      ]),
+      await answer(
+        "a request with an unknown field",
+        async () =>
+          await store().readableVersions(
+            unchecked({ versions: [], reader, extra: markers.join(" ") })
+          )
       ),
     ];
   },

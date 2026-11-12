@@ -55,7 +55,8 @@ export const readerSetKeyOf = (access: Access): string =>
  * statement whose `?2` is the reader's person and `?3` their groups
  * (JSON). Principals are matched with their kind, so a person never
  * matches a group of the same name, and a set with no principals matches
- * no one. Each set once.
+ * no one. No person (`?2` null) matches no person's set: SQL's `=` is
+ * never true of null. Each set once.
  *
  * One lookup of the members' index per principal, whatever SQLite's
  * statistics say: the groups come first (`CROSS JOIN` keeps SQLite to

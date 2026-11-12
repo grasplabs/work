@@ -155,7 +155,11 @@ const findingsIn = (
 };
 
 /** The surfaces that recall, where no instruction file may ever show. */
-const recallSurfaces = new Set(["core recallAs", "store recall"]);
+const recallSurfaces = new Set([
+  "core recallAs",
+  "store recall",
+  "recall recallFor",
+]);
 
 /**
  * Calls every surface (or those `among`) as `probing`'s reader; what they
@@ -588,6 +592,31 @@ describe(
         },
         { inRecall }
       );
+      // Code's recall (an App's, a workflow's, a chat's code) never reads
+      // what only its person may read (GRA-1762): the holder's own
+      // sources are as hidden from it as anyone else's.
+      const holderThroughCode = await findingsOf(
+        "the holder, through code's recall",
+        {
+          personId: holder,
+          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          sharedWord,
+          markers: [ownerMarker, noneMarker, narrowedMarker],
+          hiddenVersions: everyVersionOf(...ownerIds, noneId),
+          hiddenInstructionFiles: [agentFile, appFile],
+          instructionGroups,
+          moments: [whileDraft],
+        },
+        {
+          "the holder's own source": ownerMarker,
+          "a source nobody is known to read": noneMarker,
+          "a source narrowed away from the outsider": narrowedMarker,
+        },
+        {
+          among: surfaces.filter(([name]) => name.startsWith("recall ")),
+          inRecall,
+        }
+      );
       // The holder builds the App, so its file is theirs to get.
       const holderAppFiles = await instructionFilesFor(
         env,
@@ -628,6 +657,7 @@ describe(
           ...inTheTeam,
           ...outAgain,
           ...asHolder,
+          ...holderThroughCode,
           ...prompted,
         ],
         outsiderFinds,
