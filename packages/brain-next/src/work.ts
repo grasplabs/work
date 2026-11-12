@@ -248,10 +248,10 @@ export interface WorkContext {
    */
   contextTokens: number | null;
   /**
-   * The moment a write of the item is stamped at: the store's own, past
-   * every moment it gave a read to page from (store.ts `#writeMoment`).
+   * Whether the store is the shared one, which keeps nothing only one
+   * person may read; else a person's own.
    */
-  learnedAt: () => number;
+  shared: boolean;
   /**
    * The host's side of hand-overs (contract.ts `HandOvers`): the shared
    * store's tick only, as hand-overs are queued there alone.
@@ -285,8 +285,8 @@ export interface WorkHost {
   embedders: Embedders;
   bucket: BrainBucket;
   contextTokens: number | null;
-  /** The store's moment for a write (`WorkContext.learnedAt`). */
-  learnedAt: () => number;
+  /** Whether the store is the shared one (`WorkContext.shared`). */
+  shared: boolean;
   /** The shared store's tick only (`WorkContext.handOvers`). */
   handOvers?: HandOvers;
 }
@@ -1189,7 +1189,7 @@ const runItem = async (
         signal,
         bucket: host.bucket,
         contextTokens: host.contextTokens,
-        learnedAt: host.learnedAt,
+        shared: host.shared,
         handOvers: host.handOvers,
         again: (progress) => {
           again = { progress };

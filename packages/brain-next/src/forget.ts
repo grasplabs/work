@@ -131,40 +131,6 @@ export const eraseMemoriesOn = (
 };
 
 /**
- * Deletes the memories only the person the ledger names `subject` may
- * read, learned up to `at`, the erasure's time, and the extraction marks
- * of adds only they read: what is learned for them afterwards is new, and
- * kept. Answers the sets of readers they named.
- */
-export const eraseMemoriesOf = (
-  sql: SqlStorage,
-  subject: string,
-  at: number
-): number[] => {
-  const marks = sql
-    .exec<{ readers: string }>(
-      `DELETE FROM memory_extractions WHERE only_for = ? AND at <= ?
-      RETURNING readers`,
-      subject,
-      at
-    )
-    .toArray()
-    .map(({ readers }) => readers);
-  return [
-    ...setsOf(sql, marks),
-    ...deleteMemories(
-      sql,
-      rowsOf(
-        sql,
-        "SELECT row FROM memories WHERE only_for = ? AND learned_at <= ?",
-        subject,
-        at
-      )
-    ),
-  ];
-};
-
-/**
  * Deletes the memories and extraction marks of the source the ledger
  * names `subject`, every version: what a source's erasure covered. Answers
  * the sets of readers they named.

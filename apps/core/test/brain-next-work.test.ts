@@ -37,6 +37,7 @@ import { inJurisdiction } from "../src/durable-objects.ts";
 import { spendMonth } from "../src/model-spend.ts";
 import { aiProvidersControlUrl } from "./ai-providers-fake.ts";
 import type { PlannedReply } from "./ai-providers-fake.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { platformAnthropicKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -522,13 +523,25 @@ const holdingDeletes = async (never: readonly string[] = []) => {
   return { held, restore };
 };
 
-/** Adds `text` as a new upload `userId` may read: its source and version. */
+/**
+ * Adds `text` as a new upload the member `userId` alone may read, in the
+ * shared store, whose work this file is about: its source and version.
+ */
 const addOf = async (text: string, userId: string) =>
   await addSource(env, {
     source: { producer: "upload", id: crypto.randomUUID() },
     change: crypto.randomUUID(),
     text,
-    readers: { kind: "owner", personId: userId },
+    readers: await soleReadersOf(userId),
+  });
+
+/** Adds `text` as a new upload no one is known to read. */
+const addNobodysOf = async (text: string) =>
+  await addSource(env, {
+    source: { producer: "upload", id: crypto.randomUUID() },
+    change: crypto.randomUUID(),
+    text,
+    readers: { kind: "none" },
   });
 
 /** What `promise` was refused with, or "" when it wasn't. */
@@ -2350,7 +2363,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       const textC = `File C an add is writing, ${crypto.randomUUID()}`;
       swept.hashC = await fileHashOf(textC);
       const writesBefore = held.writes;
-      const cAdd = refusalOf(addOf(textC, `person-${crypto.randomUUID()}`));
+      const cAdd = refusalOf(addNobodysOf(textC));
       await until(() => held.writes > writesBefore);
       const askedBefore = held.asked;
       await enqueue({ key: swept.queued, priority: "archive" });
@@ -2373,9 +2386,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       swept.deletesAfter = held.asked - askedBefore;
       // During the doubt, an add of file A's bytes is refused, writing nothing.
       const writesBeforeA = held.writes;
-      swept.refusalInDoubt = await refusalOf(
-        addOf(swept.textA, `person-${crypto.randomUUID()}`)
-      );
+      swept.refusalInDoubt = await refusalOf(addNobodysOf(swept.textA));
       swept.writesInDoubt = held.writes - writesBeforeA;
       // File A's delete lands late; file B's never does.
       held.released = true;

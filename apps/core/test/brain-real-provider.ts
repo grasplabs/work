@@ -13,36 +13,16 @@
  * Chat completions (Mistral's, OpenRouter's) and Anthropic's Messages API;
  * not OpenAI's Responses API, whose items the bridge streams back under
  * ids of its own that OpenAI wouldn't take in the next request
- * (`realProviderTakes`). The request goes without a stream and the answer
+ * (real-providers.ts `realProviderTakes`). The request goes without a stream and the answer
  * comes back whole: the bridge streams it on. Anthropic's thinking goes
  * back with its real signature, which the next request of a tool loop
  * must return unchanged.
  */
-import { aiProviderIdSchema } from "@grasp-os/shared/ai-providers";
 import { z } from "zod";
 
 import type { BrainProvider } from "./brain-harness.ts";
 import type { StubTurn } from "./brain-stub-model.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
-
-/** The providers whose API this sends on to. */
-const takenProviders: ReadonlySet<string> = new Set([
-  "anthropic",
-  "mistral",
-  "openrouter",
-]);
-
-/**
- * Whether a real run can reach `model` (`<provider>/<model>`): one of a
- * provider whose API this speaks, which a run checks before it sends
- * anything.
- */
-export const realProviderTakes = (model: string): boolean => {
-  const provider = aiProviderIdSchema.safeParse(
-    model.slice(0, model.indexOf("/"))
-  );
-  return provider.success && takenProviders.has(provider.data);
-};
 
 /** What the model said to one request, for the run's log. */
 export interface ModelExchange {

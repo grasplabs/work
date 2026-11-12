@@ -762,17 +762,16 @@ const addsOf = (entities: NewEntity[], memories: NewMemory[]): Candidates[] => {
 };
 
 /**
- * Adds `adding`, checked whole by the store's own schema and stamped at
- * the store's moment for a write, as an add through the store is.
+ * Adds `adding`, checked whole by the store's own schema, as an add
+ * through the store is; the store stamps it.
  */
 const add = async (
-  { storage, learnedAt }: WorkContext,
+  { storage, shared }: WorkContext,
   adding: z.input<typeof newMemoriesSchema>
 ): Promise<void> => {
   await addMemories(
-    { storage, db: drizzle(storage) },
-    newMemoriesSchema.parse(adding),
-    learnedAt
+    { storage, db: drizzle(storage), shared },
+    newMemoriesSchema.parse(adding)
   );
 };
 
@@ -860,8 +859,10 @@ const extractWork: WorkDefinition<Payload> = defineWork({
       return;
     }
     const access = accessOfKey(found.readers);
-    // Nobody may read it, nor anything drawn from it: no call.
-    if (access.kind === "none") {
+    // Nobody may read it, nor anything drawn from it: no call. Nor for
+    // what one person alone may read in the shared store, which keeps no
+    // memory of theirs: that person's own store draws from what it holds.
+    if (access.kind === "none" || (access.kind === "owner" && context.shared)) {
       return;
     }
     const whole = await textOf(context, found.file);
