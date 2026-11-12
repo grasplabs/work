@@ -14,6 +14,8 @@ import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -22,6 +24,7 @@ import {
   erasePerson,
   workBrain,
 } from "../src/brain-next.ts";
+import { personErasureAreas } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import {
@@ -471,6 +474,72 @@ describe("whether something was erased, while its versions wait to be deleted", 
     expect({ waiting, deleted: deleted?.state }).toStrictEqual({
       waiting: { state: "erasing" },
       deleted: "erased",
+    });
+  });
+});
+
+/**
+ * The Brain's store binding, every call of its objects failing, as a store
+ * reset in the middle of one would.
+ */
+const throwingStore = (): Env["BRAIN_STORE"] =>
+  new Proxy(env.BRAIN_STORE, {
+    get: (namespace, name): unknown => {
+      if (name === "jurisdiction") {
+        return () => throwingStore();
+      }
+      if (name !== "getByName" && name !== "get") {
+        return Reflect.get(namespace, name, namespace);
+      }
+      return () =>
+        new Proxy(
+          {},
+          {
+            get: () => async () =>
+              await Promise.reject(new Error("The store was reset")),
+          }
+        );
+    },
+  });
+
+describe("whether something was erased, when a read fails", () => {
+  it("answers the error and records the lookup as failed, when the store throws or core's record can't be read as done or under way", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const erased = await signedInApi(idp, "builder");
+    await admin.api.members.remove(erased.userId);
+    await admin.api.members.erase(erased.userId, String(erased.person.name));
+    // An area no step skips, skipped: neither done nor under way.
+    await drizzle(env.DB)
+      .update(personErasureAreas)
+      .set({ state: "skipped" })
+      .where(
+        and(
+          eq(personErasureAreas.userId, erased.userId),
+          eq(personErasureAreas.area, "brain_sources")
+        )
+      );
+    // The failed requests are logged as errors: that's what they are.
+    const logged = vi.spyOn(console, "error").mockReturnValue();
+    const statuses: number[] = [];
+    const events = await auditedDuring(async () => {
+      const ofStore = await lookUp(
+        { kind: "source", key: `upload:${crypto.randomUUID()}` },
+        { ...env, BRAIN_STORE: throwingStore() }
+      );
+      const ofRecord = await lookUp({ kind: "person", id: erased.userId });
+      statuses.push(ofStore.status, ofRecord.status);
+    });
+    logged.mockRestore();
+
+    expect({
+      statuses,
+      events: lookups(events).map(({ detail }) => detail),
+    }).toStrictEqual({
+      statuses: [500, 500],
+      events: [
+        { kind: "source", outcome: "failed" },
+        { kind: "person", outcome: "failed" },
+      ],
     });
   });
 });

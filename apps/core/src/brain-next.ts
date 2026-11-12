@@ -1419,8 +1419,10 @@ export const actOnBrainForStaff = async (
  * as its ledger names it. The answer is the store's alone, field by field:
  * a state, and for `erased` when. Never a person's own store: a staff path
  * addresses no personal object (GRA-1762), so a person's erasure is read
- * with core's own record of it (brain-report.ts), and a source kept in a
- * person's own store is not looked up.
+ * with core's own record of it (brain-report.ts). A source's answer is the
+ * shared ledger's alone: that its key was closed there. That a copy kept
+ * in a person's own store is gone too rests on the erasure's order, their
+ * own store first and the shared key closed only after (#2196).
  */
 export const brainErasureForStaff = async (
   env: BrainEnv,

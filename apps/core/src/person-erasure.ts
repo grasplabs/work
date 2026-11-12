@@ -650,7 +650,7 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
 export const brainErasureStateOf = async (
   env: Env,
   userId: string
-): Promise<"pending" | "complete" | "skipped" | null> => {
+): Promise<"pending" | "complete" | null> => {
   const [area] = await drizzle(env.DB)
     .select({ state: personErasureAreas.state })
     .from(personErasureAreas)
@@ -660,6 +660,14 @@ export const brainErasureStateOf = async (
         eq(personErasureAreas.area, brainSources.area)
       )
     );
+  // Nothing skips this area (`brainSources` only completes it). Were one
+  // skipped, it would be neither done nor under way: thrown, so the lookup
+  // records `failed` and answers an error, never "not finished" for ever.
+  if (area?.state === "skipped") {
+    throw new Error(
+      "The erasure from the Brain was skipped, which no step does"
+    );
+  }
   return area?.state ?? null;
 };
 
