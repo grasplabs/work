@@ -2387,7 +2387,8 @@ export const brainCaptureIntents = sqliteTable(
 
 /**
  * What a run's recalls of today's Brain cited (GRA-299). Nothing writes or
- * reads it since runs recall from the new Brain (`runBrainVersions`).
+ * reads it since runs recall from the new Brain (`runBrainVersions`);
+ * retention still removes its rows with the run (workflows/retention.ts).
  * Kept until a later release drops it, so a core still serving during a
  * rollout keeps working (expand, then contract).
  */
