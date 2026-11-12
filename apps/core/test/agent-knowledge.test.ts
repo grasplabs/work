@@ -1205,10 +1205,11 @@ describe("a chat's Knowledge", setUpTime, () => {
     // A team's, holding the word, and the person isn't in it.
     const team = await newTeam(admin, [admin]);
     await inBrain(`The plan: ${word}.`, { kind: "team", teamId: team });
-    // The person's own, holding it too.
-    await inBrain(`My own plan: ${word}.`, {
-      kind: "owner",
-      personId: person.userId,
+    // One of a team of the person's, holding it too: the agent's code
+    // reads as their teams, never what only they may read (GRA-1762).
+    await inBrain(`Our plan: ${word}.`, {
+      kind: "team",
+      teamId: await newTeam(admin, [person]),
     });
     const recallStep = codeStep(
       `export default async (self, env) => { try { const pack = await env.brain.recall(${JSON.stringify({ question: word, budget: { tokens: 800 } })}); return pack.items.map(({ text }) => text); } catch (error) { return error.code ?? String(error); } };`
@@ -1235,7 +1236,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       // Once granted, the turn recalls for the question first, then the
       // code's own: their own plan, never the team's.
       expect.not.stringContaining("The plan:"),
-      `Returned:\n["My own plan: ${word}."]`,
+      `Returned:\n["Our plan: ${word}."]`,
       expect.stringContaining("This chat has no API named env.brain"),
     ]);
   });
@@ -1285,8 +1286,8 @@ describe("a chat's recall before a question", setUpTime, () => {
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
     const fact = "The depot opens at seven";
     const source = await inBrain(`Depot ${word}: ${fact}.`, {
-      kind: "owner",
-      personId: person.userId,
+      kind: "team",
+      teamId: await newTeam(admin, [person]),
     });
     const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
@@ -1451,8 +1452,8 @@ describe("a chat's recall before a question", setUpTime, () => {
       const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
       const fact = `The depot code is depot${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
       await inBrain(`Depot ${word}: ${fact}.`, {
-        kind: "owner",
-        personId: person.userId,
+        kind: "team",
+        teamId: await newTeam(admin, [person]),
       });
       const chat = await chatOf(
         person.userId,
