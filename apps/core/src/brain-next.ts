@@ -3,6 +3,7 @@ import {
   brainOf,
   currentReadMax,
   fitsSourceText,
+  isSourceText,
   erasedSource,
   listPageMax,
   erasureReasons,
@@ -458,8 +459,10 @@ const readerOf = async (
  * the server, never from a person's input. An id is not a secret within
  * its kind (an upload's id is seen by those who can see the upload), so
  * a producer checks that whoever asks for the change may change that
- * source before it calls this; the Brain can't tell. An add an erasure
- * closed is refused with `brain.source_erased`: final, never retried.
+ * source before it calls this; the Brain can't tell. Refused, final and
+ * never to be retried: with `brain.source_erased` when an erasure closed
+ * what it adds, `brain.source_no_text` for a text of whitespace alone,
+ * `brain.source_too_large` past a source's bound (`fitsSourceText`).
  */
 export const addSource = async (
   env: BrainEnv,
@@ -471,6 +474,14 @@ export const addSource = async (
   }
 ): Promise<SourceVersionRef> => {
   const { source, change, text, readers } = checked(newSourceSchema, added);
+  // The store's own rules for a text, here, so a producer is told what is
+  // wrong with it by a code, not by trying.
+  if (!isSourceText(text)) {
+    throw brainSourceErrors.create("brain.source_no_text");
+  }
+  if (!fitsSourceText(text)) {
+    throw brainSourceErrors.create("brain.source_too_large");
+  }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
   let version: number;
@@ -1632,8 +1643,11 @@ const handOver = async (
     return await refused("erased", handed.readers);
   }
   const readers = sourceReadersSchema.safeParse(handed.readers);
-  const texts = [handed.text, handed.whenTooLarge].filter(
-    (text) => wellFormedString().safeParse(text).success
+  // The store's own rule for a text (`isSourceText`): a text of
+  // whitespace alone, which an empty or image-only file gives, is refused
+  // as `invalid` here, never tried until it is parked.
+  const texts = [handed.text, handed.whenTooLarge].filter((text) =>
+    isSourceText(text)
   );
   if (!readers.success || texts.length < 2) {
     return await refused("invalid");

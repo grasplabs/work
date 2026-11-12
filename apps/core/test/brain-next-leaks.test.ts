@@ -745,13 +745,16 @@ describe(
           },
           personal: false,
           sharedWord,
-          markers: [ownerMarker],
+          markers: [ownerMarker, ownUploadMarker],
           hiddenVersions: [],
           hiddenInstructionFiles: [],
           instructionGroups,
           moments: [whileDraft],
         },
-        { "the holder's own source": ownerMarker },
+        {
+          "the holder's own source": ownerMarker,
+          "the holder's upload for only them": ownUploadMarker,
+        },
         { among: surfaces.filter(([name]) => name === "core recallAs") }
       );
 
@@ -763,8 +766,11 @@ describe(
       ]);
       await join(secretTeam, teamMate);
       const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
-      const { "a team's source the outsider isn't in": _team, ...notTeams } =
-        markers;
+      const {
+        "a team's source the outsider isn't in": _team,
+        "an upload for a team the outsider isn't in": _teamUpload,
+        ...notTeams
+      } = markers;
       const asTeamMate = await watched(
         "a team-mate of the holder's",
         {
@@ -778,8 +784,15 @@ describe(
             narrowedMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
           ],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            noneId,
+            narrowedId,
+            ownUpload
+          ),
+          hiddenUploads: [ownUpload.id],
           hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
           instructionGroups,
           moments: [whileDraft],
@@ -801,13 +814,18 @@ describe(
             narrowedMarker,
             toHolderMarker,
             ...instructionMarkers,
+            ownUploadMarker,
+            teamUploadMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...ownerIds,
             teamId,
             noneId,
-            narrowedId
+            narrowedId,
+            ownUpload,
+            teamUpload
           ),
+          hiddenUploads: [ownUpload.id, teamUpload.id],
           hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
           instructionGroups,
           moments: [whileDraft],

@@ -1,5 +1,4 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
   brainSourceErrors,
   brainUploadErrors,
@@ -79,9 +78,6 @@ const readersSchema = z.discriminatedUnion("kind", [
 
 /** An upload's id, as core mints them. */
 const uploadIdSchema = z.uuid();
-
-/** Most bytes of an upload's text, its name included: the extractor's limit. */
-const textMaxBytes = 1024 * 1024;
 
 /** The member `person` is now: refused once they are none. */
 const memberNow = async (env: Env, person: Identity): Promise<Member> => {
@@ -241,15 +237,9 @@ const textOf = async (
     throw uploadErrors.create("upload.no_text");
   }
   // A file's text may hold half a surrogate pair, which the Brain refuses:
-  // each becomes U+FFFD, as a decoder would make it.
-  const text = `${file.name}\n\n${markdown}`.toWellFormed();
-  if (new TextEncoder().encode(text).byteLength > textMaxBytes) {
-    throw uploadErrors.create("upload.too_large", {
-      bytes: file.bytes.byteLength,
-      maxBytes: uploadMaxBytes,
-    });
-  }
-  return text;
+  // each becomes U+FFFD, as a decoder would make it. Its size is the
+  // Brain's rule to check (`addSource`), as given and as indexed.
+  return `${file.name}\n\n${markdown}`.toWellFormed();
 };
 
 /** What an upload's audit events say of it: IDs, its readers' kind and the file's type and size. */
@@ -263,36 +253,73 @@ const detailOf = (
   bytes: file.bytes.byteLength,
 });
 
+/** A hand-over's reason for a refusal, as the contract names it. */
+type RefusalReason = "erased" | "invalid" | "too_large";
+
 /**
- * Adds `text` to the Brain as the next version of `row`'s upload, with
- * an event of the outcome. Its row and `brain.upload.received` were
- * written before.
+ * Each of the Brain's refusals of an add, which certainly didn't land:
+ * why, as a hand-over is refused, and what the person is told.
+ */
+const refusals: Readonly<
+  Record<
+    NonNullable<ReturnType<typeof brainSourceErrors.codeOf>>,
+    { reason: RefusalReason; error: () => Error }
+  >
+> = {
+  "brain.source_erased": {
+    reason: "erased",
+    error: () => brainUploadErrors.create("brain.upload_deleted"),
+  },
+  "brain.source_no_text": {
+    reason: "invalid",
+    error: () => uploadErrors.create("upload.no_text"),
+  },
+  "brain.source_too_large": {
+    reason: "too_large",
+    error: () =>
+      uploadErrors.create("upload.too_large", { maxBytes: uploadMaxBytes }),
+  },
+};
+
+/** How the Brain refused `error`'s add, or undefined when it isn't sure. */
+const refusalOf = (error: unknown) => {
+  const code = brainSourceErrors.codeOf(error);
+  return code === undefined ? undefined : refusals[code];
+};
+
+/**
+ * Adds `text` to the Brain as the next version of `row`'s upload, `first`
+ * when it is the upload's first, with the one event the upload is audited
+ * by, its counts with it, written before the person is answered:
  *
  * - `brain.upload.added`, with its version.
- * - `brain.upload.refused` when the Brain refused it because its key was
- *   erased (a delete ran while the file was read): it certainly didn't
- *   land, and the row, which names nothing the Brain holds any more, goes
- *   with the event; answered as `brain.upload_deleted`.
+ * - `brain.upload.refused`, with why, as a hand-over is refused
+ *   (`erased`, `invalid`, `too_large`), when the Brain refused it: it
+ *   certainly didn't land. The row goes with the event when it names
+ *   nothing the Brain holds: always for `erased` (the key is closed), and
+ *   for a first upload. The person is told why, in their words.
  * - `brain.upload.failed` for any other failure: a call that threw or
  *   whose answer was lost may still have added it, so the row stays,
  *   naming the key for its deletion. A first upload that failed so may
- *   then hold no version at all: the person can't see it on the page,
- *   and it holds nothing anyone reads; its row names only IDs. Everything
- *   the Brain itself would refuse is ruled out before the call (the
- *   readers are core's, the text well-formed and within its size).
+ *   then hold no version: the person can't see it on the page, and it
+ *   holds nothing anyone reads; its row names only IDs.
  */
 const addVersion = async (
   env: Env,
   person: Identity,
   row: UploadRow,
-  text: string
+  file: BrainUploadFile & { type: keyof typeof uploadTypes },
+  text: string,
+  first: boolean
 ): Promise<SourceVersionRef> => {
   const db = drizzle(env.DB);
-  const actor = actorOf(person);
-  const target = { type: "brain_upload", id: row.id };
-  const outcome = async (entry: Pick<AuditEntry, "action" | "detail">) => {
-    await auditedBatch(env, db, [outboxed(db, { actor, target, ...entry })]);
-  };
+  const event = (action: string, detail: Record<string, unknown>) =>
+    outboxed(db, {
+      actor: actorOf(person),
+      target: { type: "brain_upload", id: row.id },
+      action,
+      detail: { ...detailOf(row, file), ...detail },
+    });
   let added: SourceVersionRef;
   try {
     added = await addSource(env, {
@@ -303,25 +330,23 @@ const addVersion = async (
       readers: sourceReadersOf(row),
     });
   } catch (error) {
-    if (brainSourceErrors.codeOf(error) === "brain.source_erased") {
-      await auditedBatch(env, db, [
-        db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
-        outboxed(db, {
-          actor,
-          target,
-          action: "brain.upload.refused",
-          detail: {},
-        }),
-      ]);
-      throw brainUploadErrors.create("brain.upload_deleted");
+    const refusal = refusalOf(error);
+    if (refusal === undefined) {
+      await auditedBatch(env, db, [event("brain.upload.failed", {})]);
+      throw error;
     }
-    await outcome({ action: "brain.upload.failed", detail: {} });
-    throw error;
+    const refused = event("brain.upload.refused", { reason: refusal.reason });
+    await (first || refusal.reason === "erased"
+      ? auditedBatch(env, db, [
+          db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
+          refused,
+        ])
+      : auditedBatch(env, db, [refused]));
+    throw refusal.error();
   }
-  await outcome({
-    action: "brain.upload.added",
-    detail: { version: added.version },
-  });
+  await auditedBatch(env, db, [
+    event("brain.upload.added", { version: added.version }),
+  ]);
   return added;
 };
 
@@ -361,17 +386,10 @@ export const uploadToBrain = async (
     createdAt: now,
     updatedAt: now,
   };
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db.insert(brainUploads).values(row),
-    outboxed(db, {
-      actor: actorOf(person),
-      action: "brain.upload.received",
-      target: { type: "brain_upload", id: row.id },
-      detail: detailOf(row, file),
-    }),
-  ]);
-  return await addVersion(env, person, row, text);
+  // Before the Brain is given anything under its key, so every key it
+  // holds is named here for its deletion.
+  await drizzle(env.DB).insert(brainUploads).values(row);
+  return await addVersion(env, person, row, file, text, true);
 };
 
 /**
@@ -399,20 +417,11 @@ export const uploadVersionToBrain = async (
   if (!mayGrant(member, readersOf(row))) {
     throw brainUploadErrors.create("brain.upload_readers");
   }
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db
-      .update(brainUploads)
-      .set({ updatedAt: new Date() })
-      .where(eq(brainUploads.id, row.id)),
-    outboxed(db, {
-      actor: actorOf(person),
-      action: "brain.upload.received",
-      target: { type: "brain_upload", id: row.id },
-      detail: detailOf(row, file),
-    }),
-  ]);
-  return await addVersion(env, person, row, text);
+  await drizzle(env.DB)
+    .update(brainUploads)
+    .set({ updatedAt: new Date() })
+    .where(eq(brainUploads.id, row.id));
+  return await addVersion(env, person, row, file, text, false);
 };
 
 /** The upload `uploadId`, as `person` may act on it: null when there is none or they may not read it, alike. */
@@ -440,11 +449,11 @@ export const brainUploadOf = async (
 };
 
 /**
- * Deletes the upload `uploadId` for good, as `person`: recorded
- * (`brain.upload.deleting`), its key erased in the Brain, every version,
- * then its row forgotten, with `brain.upload.deleted`. An erasure that
- * failed is recorded (`brain.upload.delete_failed`) and leaves the upload
- * as it was, to delete again: the erasure is safe to repeat.
+ * Deletes the upload `uploadId` for good, as `person`: its key erased in
+ * the Brain, every version, then its row forgotten, with
+ * `brain.upload.deleted`. An erasure that failed is recorded
+ * (`brain.upload.delete_failed`) and leaves the upload as it was, to
+ * delete again: the erasure is safe to repeat.
  */
 export const deleteBrainUpload = async (
   env: Env,
@@ -459,15 +468,7 @@ export const deleteBrainUpload = async (
   const db = drizzle(env.DB);
   const actor = actorOf(person);
   const target = { type: "brain_upload", id: row.id };
-  // Recorded before the erasure, and its outcome after, whichever it is.
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor,
-      target,
-      action: "brain.upload.deleting",
-      detail: {},
-    }),
-  ]);
+  // One event, of how it ended, written before the person is answered.
   try {
     await eraseSource(env, {
       source: uploadSource(row.id),
@@ -480,7 +481,7 @@ export const deleteBrainUpload = async (
         actor,
         target,
         action: "brain.upload.delete_failed",
-        detail: {},
+        detail: { readers: row.readers },
       }),
     ]);
     throw error;

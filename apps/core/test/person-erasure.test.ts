@@ -1134,6 +1134,8 @@ describe("erasing a person", () => {
     await admin.api.members.remove(person.userId);
 
     await admin.api.members.erase(person.userId, String(person.person.name));
+    // Their own store is deleted whole, which takes the clock's next pass.
+    await finishedByTheClock(person.userId);
     const { items } = await mate.api.brainSources.search(word);
 
     expect({

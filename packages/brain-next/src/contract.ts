@@ -149,6 +149,19 @@ export const fitsSourceText = (text: string): boolean =>
   byteLengthOf(text) <= sourceTextMaxBytes &&
   byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes;
 
+/** Something other than whitespace. */
+const notBlank = /\S/u;
+
+/**
+ * Whether `text` is one a source can be: well-formed, and something other
+ * than whitespace, which has no passage to keep or find. With
+ * `fitsSourceText`, the store's whole rule for a source's text, which an
+ * add checks and a host checks before it adds, so what fails it is
+ * refused as what it is, never tried again.
+ */
+export const isSourceText = (text: unknown): text is string =>
+  wellFormedString().safeParse(text).success && notBlank.test(String(text));
+
 /**
  * A version of a source to add: which source, the change it is, its text,
  * and who may read this version.
@@ -157,8 +170,10 @@ export const newSourceSchema = z.strictObject({
   source: sourceIdSchema,
   change: changeKeySchema,
   text: wellFormedString()
-    // A text of whitespace alone has no passage to keep or find.
-    .regex(/\S/u, { message: "Holds no text" })
+    .refine((text) => isSourceText(text), {
+      message: "Holds no text",
+      abort: true,
+    })
     .refine((text) => byteLengthOf(text) <= sourceTextMaxBytes, {
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,

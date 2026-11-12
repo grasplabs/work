@@ -1,3 +1,4 @@
+import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type {
   BrainSourceRef,
   BrainUploadReaders,
@@ -12,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { organizationId } from "../src/auth/auth.ts";
 import { eraseSource } from "../src/brain-next.ts";
 import { brainUploads, teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { allEvents } from "./audit-events.ts";
 import { textOf } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
@@ -228,6 +230,80 @@ describe("uploading a file straight into the Brain", () => {
           read: null,
           asked: await askedOf(admin, missing),
         },
+      });
+    }
+  );
+
+  it(
+    "keeps an upload for only me in its uploader's own store, lists it among their sources, and deletes it from there",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const { source } = await uploader.api.brainSources.upload(
+        fileOf("A note to myself"),
+        me
+      );
+      const key = `upload:${source.id}`;
+      const namespace = inJurisdiction(env, env.BRAIN_STORE);
+      const kept = {
+        shared: await brainOf(namespace).keyState(key),
+        own: await personalBrainOf(namespace, uploader.userId).keyState(key),
+      };
+      const listedIds = async (): Promise<string[]> => {
+        const { sources } = await uploader.api.brainSources.list();
+        return sources.flatMap((each) =>
+          each.source.id === source.id
+            ? [`${each.source.id} ${each.personal}`]
+            : []
+        );
+      };
+      const listed = await listedIds();
+      // From the list, as the page deletes it: by the source it lists.
+      const { sources } = await uploader.api.brainSources.list();
+      const fromList = sources.find((each) => each.source.id === source.id);
+      await uploader.api.brainSources.deleteUpload(fromList?.source.id ?? "");
+
+      expect({
+        kept,
+        listed,
+        afterDelete: await listedIds(),
+        ownAfter: await personalBrainOf(namespace, uploader.userId).keyState(
+          key
+        ),
+      }).toStrictEqual({
+        kept: { shared: "free", own: "held" },
+        listed: [`${source.id} true`],
+        afterDelete: [],
+        ownAfter: "erased",
+      });
+    }
+  );
+
+  it(
+    "refuses a file with no text, such as a scan without a text layer, and keeps nothing of it",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const response = await env.ASSETS.fetch(
+        "https://assets/uploads/scan.pdf"
+      );
+      const scan = new Uint8Array(await response.arrayBuffer());
+
+      expect({
+        refused: await outcome(
+          async () =>
+            await uploader.api.brainSources.upload(
+              { name: "Scan.pdf", bytes: scan },
+              me
+            )
+        ),
+        kept: await drizzle(env.DB)
+          .select()
+          .from(brainUploads)
+          .where(eq(brainUploads.uploadedBy, uploader.userId)),
+      }).toStrictEqual({
+        refused: { refused: "upload.no_text" },
+        kept: [],
       });
     }
   );
@@ -486,11 +562,8 @@ describe("uploading a file straight into the Brain", () => {
         afterFailure: source,
         afterRetry: { info: null, found: [] },
         actions: [
-          "brain.upload.received",
           "brain.upload.added",
-          "brain.upload.deleting",
           "brain.upload.delete_failed",
-          "brain.upload.deleting",
           "brain.upload.deleted",
         ],
       });
@@ -538,12 +611,7 @@ describe("uploading a file straight into the Brain", () => {
         foundLate: [],
         info: null,
         deletedAgain: { refused: "brain.upload_not_found" },
-        actions: [
-          "brain.upload.received",
-          "brain.upload.added",
-          "brain.upload.received",
-          "brain.upload.refused",
-        ],
+        actions: ["brain.upload.added", "brain.upload.refused"],
       });
     }
   );
@@ -564,25 +632,21 @@ describe("uploading a file straight into the Brain", () => {
 
       expect({
         actions: events.map(({ action }) => action),
-        received: events[0]?.detail,
-        added: events[1]?.detail,
+        added: events[0]?.detail,
+        deleted: events[1]?.detail,
         leaked: [inName, inText].filter((each) =>
           textOf(events).includes(each)
         ),
       }).toStrictEqual({
-        actions: [
-          "brain.upload.received",
-          "brain.upload.added",
-          "brain.upload.deleting",
-          "brain.upload.deleted",
-        ],
-        received: {
+        actions: ["brain.upload.added", "brain.upload.deleted"],
+        added: {
           readers: "team",
           teamId,
           mediaType: "text/vtt",
           bytes: captions(`Merger plan ${inText}`).byteLength,
+          version: 1,
         },
-        added: { version: 1 },
+        deleted: { readers: "team" },
         leaked: [],
       });
     }

@@ -3578,16 +3578,25 @@ const askedOfUploads = async (
     // oxlint-disable-next-line no-await-in-loop -- one upload at a time
     asked.push(await askOf(`hidden upload ${index}`, uploadId, "hidden"));
   }
-  const { source: own } = await sourcesAs(personId).upload(plainFile(), {
-    kind: "me",
+  // One of their own to act on, as an answer too, for everyone: it holds
+  // nothing of anyone else's, and lands in the shared store, which a
+  // reader whose own store was erased still adds to.
+  let own: string = crypto.randomUUID();
+  const made = await answer("a file of their own, to act on", async () => {
+    const uploaded = await sourcesAs(personId).upload(plainFile(), {
+      kind: "everyone",
+    });
+    own = uploaded.source.id;
+    return uploaded;
   });
   asked.push(
+    made,
     await askOf("an upload named by the markers", markers.join("")),
     // Their own, with nothing of anyone else's in what it adds.
-    await askOf("their own upload", own.id, undefined, personId, plainFile()),
+    await askOf("their own upload", own, undefined, personId, plainFile()),
     await askOf(
       "as someone who isn't a member",
-      hiddenUploads[0] ?? own.id,
+      hiddenUploads[0] ?? own,
       undefined,
       stranger()
     )
@@ -3765,7 +3774,12 @@ export const sourcesProbes = {
     }),
   upload: async ({ personId, markers }) => [
     await answer(
-      "a file of their own",
+      "a file of their own, for everyone",
+      async () =>
+        await sourcesAs(personId).upload(plainFile(), { kind: "everyone" })
+    ),
+    await answer(
+      "a file of their own, for only them",
       async () => await sourcesAs(personId).upload(plainFile(), { kind: "me" })
     ),
     await answer(

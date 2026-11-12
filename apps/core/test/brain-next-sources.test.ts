@@ -271,7 +271,9 @@ const later = (ms: number): void => {
 const crashed = /Crashed by the test/u;
 
 /** What the Brain or core says when it refuses an input. */
-const refused = /^(?:The Brain refused it|Refused)/u;
+/** How core refuses: its own check, the Brain's, or a text the Brain can't keep. */
+const refused =
+  /^(?:The Brain refused it|Refused|There's no text in this to keep|This text is too large for the Brain to keep)/u;
 
 describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
   afterEach(() => {
@@ -712,7 +714,9 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       });
 
     await expect(add(most)).resolves.toMatchObject({ version: 1 });
-    await expect(add(most + 1)).rejects.toThrow(/as indexed/u);
+    await expect(add(most + 1)).rejects.toThrow(
+      /too large for the Brain to keep/u
+    );
   });
 
   it("refuses half a surrogate pair anywhere, so two strings never become one, and gives back astral text as given", async () => {

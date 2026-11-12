@@ -32,7 +32,9 @@ const idp = mockIdp();
 const word = () => `w${unique()}`;
 
 /** What core or the store says when it refuses an input. */
-const refused = /^(?:The Brain refused it|Refused)/u;
+/** How core refuses: its own check, the Brain's, or a text the Brain can't keep. */
+const refused =
+  /^(?:The Brain refused it|Refused|There's no text in this to keep|This text is too large for the Brain to keep)/u;
 
 /** A member of the organization, signed in. */
 const person = async (): Promise<string> => {
@@ -361,7 +363,7 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     const secret = word();
     for (const readers of [
       {},
-      { kind: "everyone" },
+      { kind: "anyone" },
       { kind: "audience", group: "everyone" },
       { kind: "owner", personId: "" },
       { kind: "owner" },
@@ -408,8 +410,9 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
 
   it("holds to its bounds: as many teams as a reader may have, and no more", async () => {
     const [atMost, overMost] = await Promise.all([person(), person()]);
-    await inTeams(atMost, readerGroupsMax);
-    await inTeams(overMost, readerGroupsMax + 1);
+    // Every member is in the company's group too, which counts.
+    await inTeams(atMost, readerGroupsMax - 1);
+    await inTeams(overMost, readerGroupsMax);
     const secret = word();
     const id = await add(secret, { kind: "owner", personId: atMost });
 

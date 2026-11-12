@@ -174,10 +174,12 @@ export interface BrainSourcesApi {
   deleteUpload: (uploadId: string) => Promise<void>;
 }
 
-/** What core's Brain answers a producer whose add an erasure closed: final, never retried. */
+/** What core's Brain answers a producer whose add it refuses: final, never retried. */
 export const brainSourceErrors = defineErrorFamily({
   "brain.source_erased":
     "What this adds was erased: it stays erased, and isn't added.",
+  "brain.source_no_text": "There's no text in this to keep.",
+  "brain.source_too_large": "This text is too large for the Brain to keep.",
 });
 
 export const brainUploadErrors = defineErrorFamily({
