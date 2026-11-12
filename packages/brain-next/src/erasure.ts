@@ -116,8 +116,8 @@ export const ledgerPartVersions = 1000;
 /**
  * Most objects of the ledger one step of a replay reads (`replayStep`): a
  * person's entry and each of its parts; a source's entry is read from its
- * key alone, no read. A first guess, at six reads at once well inside the
- * step's time.
+ * key alone, no read. Entries are read one at a time, an entry's parts six
+ * at a time. A first guess, well inside the step's time.
  */
 export const replayReadsPerStep = 200;
 
@@ -125,11 +125,14 @@ export const replayReadsPerStep = 200;
 const ledgerPageSize = 1000;
 
 /**
- * How long one step of a replay starts new reads for: well under the 30 s
- * a step may hold the store. A read started just before it may take its
- * own 10 s, so a step ends within 25 s.
+ * How long one step of a replay starts new reads, listings and entries
+ * for: a read or listing started just before it may take its own 10 s
+ * (`ledgerWaitMs`), and applying an entry is checked against it too, so a
+ * step's I/O ends within 20 s, leaving 10 s of the 30 s the store may be
+ * held for the rest of a start (`migrate`, and `keepMissingSubjects` once
+ * after migration 0006).
  */
-const replayStepMs = 15_000;
+const replayStepMs = 10_000;
 
 /** Most reads of the ledger in flight at once, in all of a step. */
 const readsAtOnce = 6;
@@ -164,6 +167,17 @@ const entryOf = (key: string): LedgerEntry | undefined => {
     return undefined;
   }
   return { at: Number(at), kind, reason, subject };
+};
+
+/**
+ * Whether `key` is a part of an entry: the entry's key, "/" and digits.
+ */
+const isPartKey = (key: string): boolean => {
+  const slash = key.lastIndexOf("/");
+  return (
+    /^\d+$/u.test(key.slice(slash + 1)) &&
+    entryOf(key.slice(0, slash)) !== undefined
+  );
 };
 
 const subjectPattern = /^[0-9a-f]{64}$/u;
@@ -824,8 +838,11 @@ const textOf = async (bucket: R2Bucket, key: string): Promise<string> =>
  * computed keys (so where a page of the listing ends among them doesn't
  * matter), a few at a time, none started once `stopAt` is past. An entry
  * is read whole, however many parts it has, past the step's read budget:
- * it is as big as the erasure's own transaction was. Answers it with the
- * reads it took.
+ * it is as big as the erasure's own transaction was. A known limit: at
+ * about 1 s a read, an entry of more than roughly 90 parts can't be read
+ * within one step, and the store stays `replaying` until the bucket is
+ * faster; the overview shows it, and it is never unsafe. Answers it with
+ * the reads it took.
  */
 const readPerson = async (
   bucket: R2Bucket,
@@ -867,48 +884,65 @@ export const replayStep = async ({
 }: ErasureStore): Promise<Replayed> => {
   const { sql } = storage;
   const stopAt = Date.now() + replayStepMs;
-  const page = await inTime(
-    bucket.list({
-      prefix: ledgerPrefix,
-      startAfter: replayStart(sql),
-      limit: ledgerPageSize,
-    })
-  );
   const stopped: string[] = [];
   let reads = 0;
-  for (const { key } of page.objects) {
-    const entry = entryOf(key);
-    const applied =
-      entry === undefined ||
-      sql.exec("SELECT 1 FROM erasures WHERE key = ?", key).toArray().length >
-        0;
-    if (!applied) {
-      if (
-        entry.kind === "person" &&
-        (reads >= replayReadsPerStep || Date.now() >= stopAt)
-      ) {
-        return { stopped, more: true };
+  // Where the listing goes on, in memory only: past a page that held no
+  // entry to apply (orphan parts of an entry never written), never past
+  // an entry not applied, so the store's mark moves with what it applied.
+  let startAfter = replayStart(sql);
+  for (;;) {
+    if (Date.now() >= stopAt) {
+      return { stopped, more: true };
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a page after a page with nothing to apply
+    const page = await inTime(
+      bucket.list({ prefix: ledgerPrefix, startAfter, limit: ledgerPageSize })
+    );
+    let applied = 0;
+    for (const { key } of page.objects) {
+      const entry = entryOf(key);
+      if (entry === undefined && !isPartKey(key)) {
+        // A key this release can't read (a later release's, kept through a
+        // rollback): never passed, so nothing after it is skipped.
+        throw new Error("A key of the erasure ledger can't be read");
       }
-      let hidden: Hidden | null = null;
-      if (entry.kind === "person") {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
-          const read = await readPerson(bucket, key, stopAt);
-          ({ hidden } = read);
-          reads += read.reads;
-        } catch (error) {
-          if (error instanceof OutOfTimeError) {
-            return { stopped, more: true };
-          }
-          throw error;
+      const isNew =
+        entry !== undefined &&
+        sql.exec("SELECT 1 FROM erasures WHERE key = ?", key).toArray()
+          .length === 0;
+      if (isNew) {
+        if (
+          Date.now() >= stopAt ||
+          (entry.kind === "person" && reads >= replayReadsPerStep)
+        ) {
+          return { stopped, more: true };
         }
-      }
-      for (const source of storage.transactionSync(() =>
-        apply(sql, key, entry, hidden, true)
-      )) {
-        stopped.push(source);
+        let hidden: Hidden | null = null;
+        if (entry.kind === "person") {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
+            const read = await readPerson(bucket, key, stopAt);
+            ({ hidden } = read);
+            reads += read.reads;
+          } catch (error) {
+            if (error instanceof OutOfTimeError) {
+              return { stopped, more: true };
+            }
+            throw error;
+          }
+        }
+        for (const source of storage.transactionSync(() =>
+          apply(sql, key, entry, hidden, true)
+        )) {
+          stopped.push(source);
+        }
+        applied += 1;
       }
     }
+    const last = page.objects.at(-1)?.key;
+    if (applied > 0 || !page.truncated || last === undefined) {
+      return { stopped, more: page.truncated };
+    }
+    startAfter = last;
   }
-  return { stopped, more: page.truncated };
 };

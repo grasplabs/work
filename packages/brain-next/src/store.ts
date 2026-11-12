@@ -195,13 +195,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Every call but the overview waits for it.
    */
   async #ready(): Promise<void> {
-    if (this.#ledger === "through") {
-      return;
-    }
     // After a failed read, read again at most every `ledgerRetryMs`: calls
     // between are refused at once, so an outage of R2 holds no caller
     // waiting for it.
-    if (Date.now() >= this.#ledgerRetryAfter) {
+    if (this.#ledger !== "through" && Date.now() >= this.#ledgerRetryAfter) {
       await this.ctx.blockConcurrencyWhile(async () => {
         if (this.#ledger === "through") {
           return;
@@ -212,18 +209,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         }
       });
     }
-    // Read anew: the step above changed it.
-    const now = this.#ledgerNow();
+    // Read after the step above, which may have changed it.
+    const now = this.#ledger;
     if (now !== "through") {
       throw new Error(
         now === "replaying" ? ledgerCatchingUp : ledgerUnreadable
       );
     }
-  }
-
-  /** Where this instance is with its ledger now. */
-  #ledgerNow(): WorkOverview["ledgerReplay"] {
-    return this.#ledger;
   }
 
   /** The parts erasure.ts works with, the bucket as the env has it now. */

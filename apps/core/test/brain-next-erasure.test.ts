@@ -222,10 +222,18 @@ const fileOf = async (text: string): Promise<string | null> => {
 /** The ledger's entries naming `id` (a source's key or a person's id). */
 const ledgerOf = async (id: string): Promise<string[]> => {
   const subject = await hashOf(id);
-  const listed = await env.BRAIN_OBJECTS.list({ prefix: "erasures/" });
-  return listed.objects
-    .map(({ key }) => key)
-    .filter((key) => key.endsWith(`-${subject}`));
+  const keys: string[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const listed: R2Objects = await env.BRAIN_OBJECTS.list({
+      prefix: "erasures/",
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    keys.push(...listed.objects.map(({ key }) => key));
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor !== undefined);
+  return keys.filter((key) => key.endsWith(`-${subject}`));
 };
 
 /** How many entries of the ledger name `source`. */
@@ -1784,11 +1792,11 @@ describe(
       }
 
       await restoreStore(backup);
-      // Each read takes 6 s, as the clock sees it: a step (15 s) starts
+      // Each read takes 4 s, as the clock sees it: a step (10 s) starts
       // three.
       vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
       const counted = countLedgerCalls(() => {
-        vi.setSystemTime(Date.now() + 6000);
+        vi.setSystemTime(Date.now() + 4000);
       });
       try {
         const first = await settled(historyAs(reader, source, 1));
@@ -1815,6 +1823,83 @@ describe(
         });
       } finally {
         await counted.restore();
+      }
+    });
+
+    it("stays unreadable on a ledger key it can't read, answering nothing but its overview and applying nothing after it", async () => {
+      const reader = await person();
+      const mark = newMark();
+      const source = newSource();
+      await add(source, `Behind an unknown key ${wordOf(mark)}`, owner(reader));
+      const backup = await copyOfStore();
+      await eraseSource(env, { source, reason: "deleted" });
+      const [erasure] = await ledgerOf(keyOf(source));
+      // As a later release's reason, kept through a rollback, would be:
+      // the same time, sorting before the erasure after it.
+      const unknown = `${erasure?.slice(0, "erasures/".length + 15) ?? ""}-source-archived-${await hashOf(crypto.randomUUID())}`;
+      await env.BRAIN_OBJECTS.put(unknown, "");
+      try {
+        await restoreStore(backup);
+        const answered = await settled(historyAs(reader, source, 1));
+        const { ledgerReplay } = await brainWorkOverview(env);
+        const applied = await runInDurableObject(
+          store(),
+          (_instance, state) =>
+            state.storage.sql
+              .exec<{ count: number }>(
+                "SELECT count(*) AS count FROM erasures WHERE key = ?",
+                erasure ?? ""
+              )
+              .one().count
+        );
+
+        expect({ answered, ledgerReplay, applied }).toStrictEqual({
+          answered: {
+            error:
+              "Error: The Brain can't read its erasure ledger yet, so it answers nothing: try again shortly",
+          },
+          ledgerReplay: "unreadable",
+          applied: 0,
+        });
+      } finally {
+        await env.BRAIN_OBJECTS.delete(unknown);
+        await killStore();
+      }
+    });
+
+    it("lists on past a page of orphan parts, whose entry was never written, to the entry after them", async () => {
+      const reader = await person();
+      const mark = newMark();
+      const source = newSource();
+      await add(source, `Behind orphan parts ${wordOf(mark)}`, owner(reader));
+      const backup = await copyOfStore();
+      await eraseSource(env, { source, reason: "deleted" });
+      const [erasure] = await ledgerOf(keyOf(source));
+      // More parts than a page of the listing, of a person's entry that
+      // crashed before its entry: at the same time, sorting before the
+      // erasure after them.
+      const orphan = `${erasure?.slice(0, "erasures/".length + 15) ?? ""}-person-person_erased-${await hashOf(crypto.randomUUID())}`;
+      const parts = Array.from(
+        { length: 1001 },
+        (_, index) => `${orphan}/${String(index).padStart(4, "0")}`
+      );
+      await Promise.all(
+        parts.map(async (part) => await env.BRAIN_OBJECTS.put(part, "[]"))
+      );
+      try {
+        await restoreStore(backup);
+        const answered = await settled(historyAs(reader, source, 1));
+
+        expect({
+          answered,
+          recalled: await recalledAs(reader, wordOf(mark)),
+        }).toStrictEqual({
+          answered: { value: null },
+          recalled: [],
+        });
+      } finally {
+        await env.BRAIN_OBJECTS.delete(parts);
+        await killStore();
       }
     });
   }
