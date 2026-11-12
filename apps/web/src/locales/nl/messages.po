@@ -1776,6 +1776,14 @@ msgctxt "who reaches a table's records"
 msgid "Access"
 msgstr "Toegang"
 
+#: src/agents/agent-page.tsx
+msgid "Access isn't shown"
+msgstr "Toegang wordt niet getoond"
+
+#: src/agents/agents-overview.tsx
+msgid "Access not shown"
+msgstr "Toegang niet getoond"
+
 #: src/apps/access-view.tsx
 msgid "Access to {name}"
 msgstr "Toegang tot {name}"
@@ -2728,10 +2736,6 @@ msgstr "Zoals de code van de App het instelt"
 #: src/agents/agent-page.tsx
 msgid "As the company has it"
 msgstr "Zoals het bedrijf het heeft"
-
-#: src/agents/agent-page.tsx
-msgid "As the company's first agent"
-msgstr "Als eerste agent van het bedrijf"
 
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
@@ -5348,6 +5352,11 @@ msgstr "iedereen die de App gebruikt"
 msgid "Everyone who uses the App"
 msgstr "Iedereen die de App gebruikt"
 
+#: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
+msgid "Everyone with Grasp"
+msgstr "Iedereen met Grasp"
+
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Iedereen met de rol {name}"
@@ -5777,6 +5786,10 @@ msgstr "Voor een adres dat uw bedrijf aan iemand anders heeft gegeven. Wie zich 
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Voor een beheerder"
+
+#: src/agents/agent-page.tsx
+msgid "For each app, under Access"
+msgstr "Per app, onder Toegang"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "For each item"
@@ -6651,6 +6664,10 @@ msgstr "Importeren of exporteren"
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "Maak in {name} een service user aan die de basis- en werkgegevens van mensen mag lezen, en plak hier de ID en het token."
+
+#: src/agents/agent-page.tsx
+msgid "In Grasp's chat. Chat apps are under Access."
+msgstr "In de chat van Grasp. Chat-apps staan onder Toegang."
 
 #: src/dashboard/pile-cards.tsx
 msgid "In one chat only, for {requester}"
@@ -8965,6 +8982,10 @@ msgstr "Niet bediend"
 msgid "Not shared with the project"
 msgstr "Niet met het project gedeeld"
 
+#: src/agents/agent-page.tsx
+msgid "Not shown"
+msgstr "Niet getoond"
+
 #: src/workflows/requests/request-parts.tsx
 msgid "Not sorted yet"
 msgstr "Nog niet ingedeeld"
@@ -9426,6 +9447,10 @@ msgstr "Alleen wie in de workspace is ingelogd, opent hem."
 msgid "Only the App's builders"
 msgstr "Alleen de bouwers van de App"
 
+#: src/agents/agent-page.tsx
+msgid "Only the company's own admins see it"
+msgstr "Alleen de eigen beheerders van het bedrijf zien dit"
+
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Alleen de eerste manier"
@@ -9595,10 +9620,6 @@ msgstr "Open vraag"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Open vragen"
-
-#: src/agents/agent-page.tsx
-msgid "Open Settings › Stephen"
-msgstr "Instellingen › Stephen openen"
 
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
@@ -11977,14 +11998,13 @@ msgctxt "a kind of field"
 msgid "Set in code"
 msgstr "Vastgelegd in code"
 
-#: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
-msgid "Set in Settings › Stephen"
-msgstr "Ingesteld in Instellingen › Stephen"
-
 #: src/routes/_shell.settings.profile.tsx
 msgid "Set in your organization’s directory."
 msgstr "Ingesteld in de directory van je organisatie."
+
+#: src/agents/agent-page.tsx
+msgid "Set per app"
+msgstr "Per app ingesteld"
 
 #: src/apps/app-settings.tsx
 msgid "Set the link"
@@ -15796,12 +15816,12 @@ msgid "Who may use {name}"
 msgstr "Wie {name} mag gebruiken"
 
 #: src/agents/agent-page.tsx
-msgid "Who may use it"
-msgstr "Wie hem mag gebruiken"
+msgid "Who may use {name} and what it may do couldn't be read. Only the company's own admins see it. If that is you, load the page again."
+msgstr "Wie {name} mag gebruiken en wat hij mag doen, kon niet worden gelezen. Alleen de eigen beheerders van het bedrijf zien dit. Bent u dat, laad de pagina dan opnieuw."
 
 #: src/agents/agent-page.tsx
-msgid "Who may use it, and what it may do"
-msgstr "Wie hem mag gebruiken en wat hij mag doen"
+msgid "Who may use it"
+msgstr "Wie hem mag gebruiken"
 
 #: src/apps/app-settings.tsx
 msgid "Who opens the App besides you, and as what."
@@ -15834,10 +15854,6 @@ msgstr "Wie is wie in je bedrijf?"
 #: src/chat/builds.tsx
 msgid "whoever added the row"
 msgstr "wie de rij heeft toegevoegd"
-
-#: src/agents/agent-page.tsx
-msgid "Whom the company's first agent reaches, where, and what it may do in each app is set in one place."
-msgstr "Wie de eerste agent van het bedrijf bereikt, waar, en wat hij in elke app mag doen, wordt op één plek ingesteld."
 
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx

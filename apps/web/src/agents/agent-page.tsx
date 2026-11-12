@@ -4,8 +4,10 @@ import type {
   AgentUsage,
   AgentWake,
 } from "@grasp-os/shared/agents";
+import type { ToolClassSetting } from "@grasp-os/shared/connect";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,7 +47,12 @@ import {
   audienceOf,
   chosenOf,
 } from "../settings/stephen-audience.tsx";
-import { classNames, Row } from "../settings/stephen-settings.tsx";
+import {
+  classNames,
+  Row,
+  StephenSettings,
+} from "../settings/stephen-settings.tsx";
+import type { AskableWorkflow } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentAvatar } from "./agent-avatar.tsx";
 import {
@@ -115,6 +122,51 @@ const useMoment = () => {
     }).format(new Date(iso));
 };
 
+/** What a glance says: what holds, and a line under it. */
+interface Said {
+  value: string;
+  line?: string;
+}
+
+/**
+ * Whom an agent answers and how much it may do, at a glance. The first
+ * agent's is the company's own, set under Access. Another agent's that
+ * core didn't say (as it won't for Grasp's staff) is said to be not
+ * shown, never passed off as anyone's.
+ */
+const useAccessGlances = (
+  first: boolean,
+  settings: AgentSettings | undefined,
+  teams: StephenReach["teams"]
+): { who: Said; may: Said } => {
+  const { t } = useLingui();
+  const audienceLine = useAudienceLine(teams);
+  if (first) {
+    return {
+      who: {
+        value: t`Everyone with Grasp`,
+        line: t`In Grasp's chat. Chat apps are under Access.`,
+      },
+      may: { value: t`Set per app`, line: t`For each app, under Access` },
+    };
+  }
+  if (settings === undefined) {
+    const unread = {
+      value: t`Not shown`,
+      line: t`Only the company's own admins see it`,
+    };
+    return { who: unread, may: unread };
+  }
+  const classes = classesOn(settings);
+  return {
+    who: { value: audienceLine(settings.audience) },
+    may: {
+      value: t`${classes.on} of ${classes.of}`,
+      line: t`Kinds of work the company has turned on`,
+    },
+  };
+};
+
 /** The agent at a glance: whether it answers, whom, how much it may do, and when it works on its own. */
 const Glances = ({
   agent,
@@ -130,9 +182,8 @@ const Glances = ({
   wakes: readonly AgentWake[];
 }) => {
   const { t } = useLingui();
-  const audienceLine = useAudienceLine(teams);
   const moment = useMoment();
-  const classes = settings === undefined ? undefined : classesOn(settings);
+  const { who, may } = useAccessGlances(first, settings, teams);
   const scheduled = wakesOn(wakes).length;
   const next = nextWakeAt(wakes);
   return (
@@ -146,32 +197,8 @@ const Glances = ({
         }
         value={agent.state === "on" ? t`On` : t`Paused`}
       />
-      <Glance
-        label={t`Who may use it`}
-        line={
-          first || settings === undefined
-            ? t`As the company's first agent`
-            : undefined
-        }
-        value={
-          first || settings === undefined
-            ? t`Set in Settings › Stephen`
-            : audienceLine(settings.audience)
-        }
-      />
-      <Glance
-        label={t`What it may do`}
-        line={
-          classes === undefined
-            ? t`As the company's first agent`
-            : t`Kinds of work the company has turned on`
-        }
-        value={
-          classes === undefined
-            ? t`Set in Settings › Stephen`
-            : t`${classes.on} of ${classes.of}`
-        }
-      />
+      <Glance label={t`Who may use it`} line={who.line} value={who.value} />
+      <Glance label={t`What it may do`} line={may.line} value={may.value} />
       <Glance
         label={t`Works on its own`}
         line={next === undefined ? undefined : t`Next: ${moment(next)}`}
@@ -235,7 +262,15 @@ const Usage = ({ usage }: { usage: AgentUsage }) => {
   );
 };
 
-/** Whom an agent answers and what it may do, or where that is set for the first agent. */
+/** What the first agent's access is read from, as Settings › Stephen read it. */
+export interface FirstAgentAccess {
+  reach: StephenReach;
+  classes: ToolClassSetting[];
+  week: StephenWeek | null;
+  workflows: AskableWorkflow[] | null;
+}
+
+/** Whom an agent answers and what it may do; the first agent's is `StephenSettings`. */
 const Access = ({
   agent,
   first,
@@ -253,22 +288,17 @@ const Access = ({
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
-  if (first || settings === undefined) {
+  if (first) {
+    // The first agent's is its own, larger set (`StephenSettings`).
+    return null;
+  }
+  if (settings === undefined) {
+    // Core didn't say, as it won't for Grasp's staff: said, never left
+    // blank or shown as anyone's.
     return (
       <SettingsSection
-        action={
-          <Button
-            // A link, drawn as a button.
-            nativeButton={false}
-            render={<Link to="/settings/stephen" />}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Open Settings › Stephen</Trans>
-          </Button>
-        }
-        description={t`Whom the company's first agent reaches, where, and what it may do in each app is set in one place.`}
-        title={t`Who may use it, and what it may do`}
+        description={t`Who may use ${name} and what it may do couldn't be read. Only the company's own admins see it. If that is you, load the page again.`}
+        title={t`Access isn't shown`}
       />
     );
   }
@@ -354,6 +384,7 @@ export const AgentPage = ({
   editable,
   usable,
   usage,
+  firstAccess,
   models,
   tab,
   onTab,
@@ -372,6 +403,12 @@ export const AgentPage = ({
   usable: boolean;
   /** What it used of the models this month; none where core didn't say. */
   usage: AgentUsage | undefined;
+  /**
+   * The first agent's access: who reaches it in each chat app, what it
+   * may do in each app, and the workflows people start by asking it. None
+   * for any other agent.
+   */
+  firstAccess?: FirstAgentAccess | undefined;
   /** The models the organization chose, which an agent can be given. */
   models: readonly string[];
   tab: AgentTab;
@@ -613,14 +650,27 @@ export const AgentPage = ({
         </TabsContent>
         <TabsContent keepMounted value="access">
           <div className="flex flex-col gap-6">
-            <Access
-              agent={agent}
-              can={can}
-              change={change}
-              first={first}
-              settings={settings}
-              teams={teams}
-            />
+            {firstAccess === undefined ? (
+              <Access
+                agent={agent}
+                can={can}
+                change={change}
+                first={first}
+                settings={settings}
+                teams={teams}
+              />
+            ) : (
+              // The first agent's reach is the company's own, with a place
+              // for each chat app and a row for each app: its settings
+              // whole, as Settings › Stephen had them.
+              <StephenSettings
+                classes={firstAccess.classes}
+                editable={editable}
+                reach={firstAccess.reach}
+                week={firstAccess.week}
+                workflows={firstAccess.workflows}
+              />
+            )}
           </div>
         </TabsContent>
         <TabsContent keepMounted value="schedule">

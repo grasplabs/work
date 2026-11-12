@@ -27,7 +27,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AgentPage } from "./agent-page.tsx";
-import type { AgentTab } from "./agent-page.tsx";
+import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { NewAgent } from "./new-agent.tsx";
 
 // One agent's page and the new agent's page against core's connections
@@ -66,6 +66,22 @@ const anna: Member = {
   joinedAt: "2026-01-05T09:00:00.000Z",
 };
 const people = [anna];
+
+/** The first agent's access, as core keeps it for a company that changed nothing. */
+const firstAccess: FirstAgentAccess = {
+  reach: {
+    on: true,
+    audience: { who: "everyone" },
+    changedBy: null,
+    changedAt: null,
+    places: [],
+    apps: [],
+    teams,
+  },
+  classes: [],
+  week: null,
+  workflows: null,
+};
 
 /** The models the organization chose. */
 const models = ["anthropic/claude-sonnet-4-5"];
@@ -248,6 +264,7 @@ const Page = ({
       agent={agent}
       editable={editable}
       first={agent.id === data.agents.at(0)?.id}
+      firstAccess={agent.id === data.agents.at(0)?.id ? firstAccess : undefined}
       models={models}
       onTab={setTab}
       people={people}
@@ -447,13 +464,12 @@ describe("an agent's page", () => {
     document.body.replaceChildren();
   });
 
-  it("leads to Settings › Stephen for the first agent's reach, with nothing to choose here", async () => {
+  it("has the first agent's reach on its own page, and no choice of the kind another agent has", async () => {
     const { connections } = fakeConnections();
     await shown(connections, { agent: "Stephen", tab: "access" });
     expect(choice("Who may use Stephen")).toBeNull();
-    expect(
-      document.querySelector("a[href='/settings/stephen']")?.textContent
-    ).toBe("Open Settings › Stephen");
+    expect(document.body.textContent).toContain("Where people reach him");
+    expect(document.querySelector("a[href='/settings/stephen']")).toBeNull();
   });
 
   it("makes an agent from what an admin types, and leads to its access", async () => {
