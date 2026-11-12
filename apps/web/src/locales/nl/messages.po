@@ -15724,6 +15724,10 @@ msgstr "Wat de app ermee mag doen"
 msgid "What the board wants from the sprint: its goals and the rules of the road."
 msgstr "Wat de directie van de sprint wil: de doelen en de spelregels."
 
+#: src/settings/erasures.tsx
+msgid "What the Brain keeps that only they may read"
+msgstr "Wat het Brain bewaart en alleen zij mogen lezen"
+
 #: src/brain/sources-page.tsx
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
 msgstr "Wat het brein bewaart en jij mag lezen, en zoeken daarin zoals je agents het terughalen."
@@ -15731,10 +15735,6 @@ msgstr "Wat het brein bewaart en jij mag lezen, en zoeken daarin zoals je agents
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Wat het brein ervan bewaarde"
-
-#: src/settings/erasures.tsx
-msgid "What the Brain took in of their uploads and runs"
-msgstr "Wat het Brain heeft opgenomen uit hun uploads en runs"
 
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."

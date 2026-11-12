@@ -574,8 +574,8 @@ const apps: ErasureStep = {
 
 /**
  * What the Brain keeps that only they may read (brain-next.ts
- * `erasePerson`): their uploads and their runs as the Brain took them in,
- * every version. Its place among the areas doesn't matter, and nothing
+ * `erasePerson`): whatever was added for them alone, their own
+ * instruction file included, every version. Its place among the areas doesn't matter, and nothing
  * orders a retry's pending areas: nothing of theirs lands after it,
  * whichever areas are still pending, as they were removed before they
  * could be erased, producers hand over nothing for someone no longer a

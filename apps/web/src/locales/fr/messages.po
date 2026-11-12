@@ -15724,6 +15724,10 @@ msgstr "Ce que l’application peut en faire"
 msgid "What the board wants from the sprint: its goals and the rules of the road."
 msgstr "Ce que la direction attend du sprint : ses objectifs et les règles du jeu."
 
+#: src/settings/erasures.tsx
+msgid "What the Brain keeps that only they may read"
+msgstr "Ce que le Brain conserve et que seule cette personne peut lire"
+
 #: src/brain/sources-page.tsx
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
 msgstr "Ce que le cerveau conserve et que vous pouvez lire, et la recherche dedans telle que vos agents s'en souviennent."
@@ -15731,10 +15735,6 @@ msgstr "Ce que le cerveau conserve et que vous pouvez lire, et la recherche deda
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Ce que le cerveau en a gardé"
-
-#: src/settings/erasures.tsx
-msgid "What the Brain took in of their uploads and runs"
-msgstr "Ce que le Brain a repris de ses fichiers importés et exécutions"
 
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."
