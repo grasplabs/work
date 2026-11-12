@@ -3161,6 +3161,11 @@ export const agentDocuments = sqliteTable(
     type: text().$type<ChatFileType>().notNull(),
     /** The file's size, in bytes. */
     bytes: integer().notNull(),
+    /**
+     * How long `text` is, as JavaScript counts it (`text.length`): the
+     * units the agent's code slices it by, which SQLite's `length` isn't.
+     */
+    chars: integer().notNull(),
     text: text().notNull(),
     addedBy: text("added_by").notNull(),
     addedAt: timestamp("added_at").notNull(),

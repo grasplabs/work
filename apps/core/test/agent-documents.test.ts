@@ -66,7 +66,9 @@ const keptFor = async (agentId: string): Promise<number> => {
   return row?.documents ?? 0;
 };
 
-const secret = "Invoices over 5,000 euros need two signatures.";
+// With a character outside Unicode's basic range: two units to the
+// agent's code, one to SQLite.
+const secret = "Invoices over 5,000 euros need two signatures. ✍🏽";
 const fileName = "Close checklist - confidential.md";
 
 describe("an agent's documents", slow, () => {

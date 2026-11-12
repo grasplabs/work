@@ -52,8 +52,8 @@ const card = {
   addedAt: agentDocuments.addedAt,
 };
 
-/** A document's card with how long its text is, in characters. */
-const sized = { ...card, chars: sql<number>`length(${agentDocuments.text})` };
+/** A document's card with how long its text is, as its code slices it. */
+const sized = { ...card, chars: agentDocuments.chars };
 
 const documentOf = (row: {
   id: string;
@@ -176,7 +176,9 @@ const sameOrNamed = async (
   if (kept?.text !== text) {
     throw agentErrors.create("agent.document_named");
   }
-  return named;
+  // Its card alone, as an add answers.
+  const { id, name, type, bytes, addedAt } = named;
+  return { id, name, type, bytes, addedAt };
 };
 
 /**
@@ -222,7 +224,7 @@ export const addAgentDocument = async (
     await auditedBatch(env, db, [
       db.insert(agentDocuments).select(
         sql`SELECT ${document.id}, ${id}, ${document.name}, ${document.type},
-            ${document.bytes}, ${read.text}, ${identity.userId},
+            ${document.bytes}, ${read.text.length}, ${read.text}, ${identity.userId},
             ${document.addedAt.getTime()} WHERE ${holds}`
       ),
       outboxedIfChanged(db, {
@@ -252,6 +254,13 @@ export const addAgentDocument = async (
   if (kept === undefined) {
     // The insert's condition failed: deleted, or full, since the checks.
     await requireAgentId(env, id);
+    // Full with this very file, added at once by another call: the same
+    // answer as that call got.
+    const after = await documentsOf(env, id);
+    const now = after.find(({ name }) => name === read.name);
+    if (now !== undefined) {
+      return await sameOrNamed(env, id, now, read.text);
+    }
     throw agentErrors.create("agent.too_many_documents");
   }
   return documentOf({ ...document });

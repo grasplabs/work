@@ -4,6 +4,7 @@ CREATE TABLE `agent_documents` (
 	`name` text NOT NULL,
 	`type` text NOT NULL,
 	`bytes` integer NOT NULL,
+	`chars` integer NOT NULL,
 	`text` text NOT NULL,
 	`added_by` text NOT NULL,
 	`added_at` integer NOT NULL

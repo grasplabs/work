@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4e7ccee0-77f7-4b08-95dd-5d09e2a8a23e",
+  "id": "2f72e6a5-8860-429f-b7c5-828a0e989136",
   "prevId": "c10644dd-28c7-443f-88f5-91334dca70f5",
   "tables": {
     "access_revocations": {
@@ -348,6 +348,13 @@
         },
         "bytes": {
           "name": "bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chars": {
+          "name": "chars",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
