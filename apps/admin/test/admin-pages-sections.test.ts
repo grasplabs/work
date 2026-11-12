@@ -170,11 +170,10 @@ describe("the admin's frame", () => {
       `/organizations/${acme.clientId}/integrations`
     );
     const workflows = await page(`/organizations/${acme.clientId}/workflows`);
-    const overview = await page(`/organizations/${acme.clientId}`);
 
     const { html } = integrations;
     expect({
-      status: [integrations.status, workflows.status, overview.status],
+      status: [integrations.status, workflows.status],
       drive: html.includes(
         `Connected by Anna de Vries on ${formatDate(daysAgo(3))}.`
       ),
@@ -188,13 +187,11 @@ describe("the admin's frame", () => {
         `Asked for in 2 chats since ${formatDate(daysAgo(1))}, waiting on the person in the chat`
       ),
       notReported: html.includes("doesn’t report"),
-      source: html.includes("From the company’s own Grasp and Composio."),
       waiting: workflows.html.includes("Waiting on a connection</h2>"),
       crm: workflows.html.includes("crm: Hubspot, not connected"),
       mail: workflows.html.includes("mail: No connection approved yet"),
-      health: overview.html.includes("1 stopped: someone must sign in again"),
     }).toStrictEqual({
-      status: [200, 200, 200],
+      status: [200, 200],
       drive: true,
       microsoft: true,
       again: true,
@@ -203,11 +200,9 @@ describe("the admin's frame", () => {
       notConnected: true,
       asked: true,
       notReported: false,
-      source: true,
       waiting: true,
       crm: true,
       mail: true,
-      health: true,
     });
   });
 
@@ -240,9 +235,15 @@ describe("the admin's frame", () => {
     const nobody = await liveClient();
     nobody.core.admin = empty;
 
-    const closedPage = await page(`/organizations/${closed.clientId}/members`);
-    const openPage = await page(`/organizations/${open.clientId}/members`);
-    const nobodyPage = await page(`/organizations/${nobody.clientId}/members`);
+    const closedPage = await page(
+      `/organizations/${closed.clientId}/details?tab=members`
+    );
+    const openPage = await page(
+      `/organizations/${open.clientId}/details?tab=members`
+    );
+    const nobodyPage = await page(
+      `/organizations/${nobody.clientId}/details?tab=members`
+    );
     /** The text of the list item naming `name`. */
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- the test's own, kept beside it; it reads the shared harness
     const rowOfMember = (html: string, name: string): string => {
@@ -262,31 +263,26 @@ describe("the admin's frame", () => {
       closed: {
         anna: rowOfMember(closedPage.html, "Anna de Vries"),
         ben: rowOfMember(closedPage.html, "Ben Okafor").includes("Builder"),
-        ready: closedPage.html.includes("are ready for when Grasp opens"),
-        seats: closedPage.html.includes(
-          "seats taken; the contract that gives them isn’t read yet"
-        ),
+        // No contract is known, so only the seats taken are counted.
+        seats: closedPage.html.includes("2 seats taken"),
         toCome: closedPage.html.includes(
           "This section isn’t in the admin yet."
         ),
       },
       open: {
         anna: rowOfMember(openPage.html, "Anna de Vries"),
-        in: openPage.html.includes("are in"),
       },
       nobody: nobodyPage.html.includes("Nobody has made an account yet."),
     }).toStrictEqual({
       statuses: [200, 200, 200],
       closed: {
-        anna: `AV Anna de Vries anna@acme.test Ready Made an account on ${joined}. Comes in when Grasp opens. Role: Admin`,
+        anna: `AV Anna de Vries anna@acme.test Ready since ${joined} Role: Admin`,
         ben: true,
-        ready: true,
         seats: true,
         toCome: false,
       },
       open: {
-        anna: `AV Anna de Vries anna@acme.test In In since ${joined}. Role: Admin`,
-        in: true,
+        anna: `AV Anna de Vries anna@acme.test In since ${joined} Role: Admin`,
       },
       nobody: true,
     });
@@ -311,7 +307,7 @@ describe("the admin's frame", () => {
             `${section === "overview" ? client.name : sectionWords[section].title}</h1>`
           ),
           column:
-            columnOf(html, client.name).includes("Members") &&
+            columnOf(html, client.name).includes("Details") &&
             columnOf(html, client.name).includes("Not read now"),
           failed: html.includes("This couldn’t be shown"),
           fromCore: ["Needs Grasp", "% known", "From the company"].some(
@@ -333,7 +329,9 @@ describe("the admin's frame", () => {
     const downSections = await sectionsOf(down);
     const waitingSections = await sectionsOf(waiting);
     const downPage = await page(`/organizations/${down.clientId}`);
-    const downMembers = await page(`/organizations/${down.clientId}/members`);
+    const downMembers = await page(
+      `/organizations/${down.clientId}/details?tab=members`
+    );
     const downSetup = await page(`/organizations/${down.clientId}/setup`);
     const waitingPage = await page(`/organizations/${waiting.clientId}`);
 
@@ -361,7 +359,7 @@ describe("the admin's frame", () => {
     const gone = await recordClient("offboarded");
 
     const shown = [];
-    for (const section of ["overview", "members", "setup"] as const) {
+    for (const section of ["overview", "details", "setup"] as const) {
       const path = sectionTo[section].replace("$clientId", gone.clientId);
       // oxlint-disable-next-line no-await-in-loop -- pages render one at a time
       const { status, html } = await page(path);
@@ -388,7 +386,7 @@ describe("the admin's frame", () => {
     acme.core.admin = emptyAdminSnapshot("Acme");
 
     const missing = await page(`/organizations/${acme.clientId}/nothing`);
-    const unknown = await page("/organizations/client-unknown/members");
+    const unknown = await page("/organizations/client-unknown/details");
 
     expect([missing.status, unknown.status]).toStrictEqual([404, 404]);
   });

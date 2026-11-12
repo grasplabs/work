@@ -95,9 +95,6 @@ describe("an organization's details", () => {
       status,
       title: main.includes("Details</h1>"),
       toCome: main.includes("This section isn’t in the admin yet."),
-      name: main.includes(">Noordkade</h2>"),
-      about: main.includes("What it does is not known yet"),
-      people: main.includes("3 people in 2 teams"),
       // Core holds no website, so there is nothing to open.
       website: main.includes("in a new tab"),
       // Nobody is known for any part, so each says what it is for.
@@ -124,9 +121,6 @@ describe("an organization's details", () => {
       status: 200,
       title: true,
       toCome: false,
-      name: true,
-      about: true,
-      people: true,
       website: false,
       contacts: [true, true, true, true],
       writes: false,
@@ -141,17 +135,5 @@ describe("an organization's details", () => {
       ],
       named: false,
     });
-  });
-
-  it("says a company's people aren't known before its list is in", async () => {
-    const acme = await liveClient();
-    acme.core.admin = emptyAdminSnapshot("Noordkade");
-
-    const { html } = await page(`/organizations/${acme.clientId}/details`);
-
-    expect([
-      html.includes("Its people are not known until its own list is in"),
-      html.includes("people in"),
-    ]).toStrictEqual([true, false]);
   });
 });

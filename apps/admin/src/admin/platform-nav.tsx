@@ -1,7 +1,8 @@
 /**
  * Platform's own places, as its pages link them: its overview (the
- * channels, every company and what Grasp's own AI costs), every release
- * the admin imported, and the offboarded clients.
+ * channels, the companies that need a look and what Grasp's own AI costs),
+ * every release the admin imported, the offboarded clients, and its
+ * maintenance (shared secrets, and what staff did).
  */
 import {
   NavigationMenu,
@@ -30,6 +31,7 @@ const platformPlaces = [
   { to: "/platform", label: "Overview" },
   { to: "/platform/releases", label: "Releases" },
   { to: "/platform/offboarded", label: "Offboarded" },
+  { to: "/platform/maintenance", label: "Maintenance" },
 ] as const;
 
 /**

@@ -464,6 +464,42 @@ describe("a person's own store", () => {
   });
 
   // Threat 1: every other read, and an erasure, for someone else.
+  // Threat 1: the listings are reads like the others.
+  it("lists nothing for anyone else, and nothing while it holds nothing, before its first write or once erased whole", async () => {
+    const other = readerOf(`other-${crypto.randomUUID()}`);
+    const refused = /answers only the person whose it is/u;
+    const listed = async () => ({
+      sources: await own().listSources({ reader: me(), prefixes: ["test:"] }),
+      versions: await own().listVersions({
+        source: "test:listed",
+        reader: me(),
+      }),
+    });
+    const empty = {
+      sources: { sources: [], more: false },
+      versions: { versions: [], more: false },
+    };
+    const before = await listed();
+    const kept = await add(own(), "Listed for its person", theirs());
+
+    await expect(
+      called(own().listSources({ reader: other, prefixes: ["test:"] }))
+    ).rejects.toThrow(refused);
+    await expect(
+      called(own().listVersions({ source: kept.source, reader: other }))
+    ).rejects.toThrow(refused);
+    const theirsListed = await own().listSources({
+      reader: me(),
+      prefixes: ["test:"],
+    });
+    await eraseWhole();
+    expect({
+      before,
+      listed: theirsListed.sources.map(({ source }) => source),
+      after: await listed(),
+    }).toStrictEqual({ before: empty, listed: [kept.source], after: empty });
+  });
+
   it("refuses to read a version, current versions or vectors for anyone else, or to erase anyone else", async () => {
     const kept = await add(own(), "Marker of their own", theirs());
     const other = readerOf(`other-${crypto.randomUUID()}`);
@@ -1253,6 +1289,8 @@ const leavingNone = [
   "find",
   "findEntities",
   "listContested",
+  "listSources",
+  "listVersions",
   "readCurrent",
   "readEntity",
   "readMemories",

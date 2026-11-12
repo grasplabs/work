@@ -1,14 +1,11 @@
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
-  listenDays,
   mayInvite,
   RESEARCH_SOURCES,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   OrgView,
-  PersonView,
   ResearchSource,
   Stage,
   StageStatus,
@@ -24,10 +21,12 @@ import { Progress } from "@grasp-os/ui/components/progress";
  * opened underneath. It opens on the step the organization is at.
  *
  * Staff steer the onboarding from here, each change a command to the
- * company's Grasp (commands.tsx): keeping what was agreed (agreements.tsx),
- * marking the one reminder, pausing the interviews, the share at which it
- * opens, and giving Grasp's go or taking it back; the first conversation
- * is brought in from its own step (kickoff.tsx). What the admin can't do
+ * company's Grasp (commands.tsx): pausing the interviews, the share at
+ * which it opens, and giving Grasp's go or taking it back; the first
+ * conversation is brought in from its own step (kickoff.tsx). Three steps
+ * open nothing here, for their own section shows them, with what staff do
+ * there: what was agreed is the Contract's, the team leads and the
+ * interviews are the Interviews'; each goes there. What the admin can't do
  * yet (starting the research) says so where its buttons were. Nor is the
  * company's own link here, as the prototype had it under the steps: a
  * link is a credential, and core never sends one. And nothing anyone
@@ -54,21 +53,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { AgreementsAction } from "./agreements.tsx";
-import { CommandButton, GateControls } from "./commands.tsx";
+import { GateControls } from "./commands.tsx";
 import type { GateState } from "./commands.tsx";
-import { stageShown, stagesIn } from "./flow-stages.ts";
+import { opensElsewhere, stageShown, stagesIn } from "./flow-stages.ts";
 import { Kickoff, visionWords } from "./kickoff.tsx";
-import { Done, KnowledgeDots, Tile } from "./parts.tsx";
+import { Done, KnowledgeDots } from "./parts.tsx";
 import { Section, SectionRow } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
-import {
-  formatDate,
-  linkWords,
-  stageLines,
-  stageWords,
-  workflowWords,
-} from "./words.ts";
+import { formatDate, stageWords } from "./words.ts";
 
 /** `count` and the thing it counts: one for one, many for the rest. */
 const counted = (count: number, one: string, other: string): string =>
@@ -119,7 +111,6 @@ const NotHere = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-/** The steps, each a link that opens it underneath, with the open one marked as a chosen tab is. */
 /** How many columns the steps take when wide, by how many the flow has: a class each, as a class is never built from a number. */
 const stageColumns: Record<number, string> = {
   1: "lg:grid-cols-1",
@@ -131,6 +122,59 @@ const stageColumns: Record<number, string> = {
   7: "lg:grid-cols-7",
 };
 
+const stageLinkClass =
+  "hover:bg-muted/50 focus-visible:ring-ring/50 relative flex h-full w-full items-center gap-3 px-5 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset lg:flex-col lg:items-start lg:gap-2 lg:px-4 lg:py-4";
+
+/** A step's mark and name, with where it stands said to a screen reader. */
+const StageName = ({
+  stage,
+  status,
+  leaves = false,
+}: {
+  stage: Stage;
+  status: StageStatus;
+  /** The step is shown in another section, which its link goes to. */
+  leaves?: boolean;
+}) => (
+  <>
+    <StageMark status={status} />
+    <span className="flex min-w-0 items-center gap-1.5 font-medium">
+      {stageWords[stage]}
+      <span className="sr-only">: {statusWords[status]}</span>
+      {leaves ? (
+        <ArrowRightIcon
+          aria-hidden
+          className="text-muted-foreground size-3.5 flex-none"
+        />
+      ) : null}
+    </span>
+  </>
+);
+
+/** A step another section shows: a link there. */
+const StageElsewhere = ({
+  stage,
+  status,
+  clientId,
+}: {
+  stage: keyof typeof opensElsewhere;
+  status: StageStatus;
+  clientId: string;
+}) => {
+  const { section, search } = opensElsewhere[stage];
+  return (
+    <Link
+      className={stageLinkClass}
+      params={{ clientId }}
+      search={search}
+      to={sectionTo[section]}
+    >
+      <StageName leaves stage={stage} status={status} />
+    </Link>
+  );
+};
+
+/** The steps: each a link that opens it underneath, the open one marked as a chosen tab is, or a link to the section that shows it. */
 const StageList = ({
   view,
   stage,
@@ -142,54 +186,51 @@ const StageList = ({
   /** The steps this company's flow has. */
   shown: readonly Stage[];
   clientId: string;
-}) => {
-  const lines = stageLines(view);
-  return (
-    <nav
-      aria-label="The steps of this onboarding"
-      className="bg-card overflow-hidden rounded-xl border"
-    >
-      <ol className={cn("grid", stageColumns[shown.length])}>
-        {shown.map((each) => {
-          const open = each === stage;
-          const status = view.stages[each];
-          return (
-            <li
-              className="border-b last:border-b-0 lg:border-r lg:border-b-0 lg:last:border-r-0"
-              key={each}
-            >
+}) => (
+  <nav
+    aria-label="The steps of this onboarding"
+    className="bg-card overflow-hidden rounded-xl border"
+  >
+    <ol className={cn("grid", stageColumns[shown.length])}>
+      {shown.map((each) => {
+        const open = each === stage;
+        const status = view.stages[each];
+        return (
+          <li
+            className="border-b last:border-b-0 lg:border-r lg:border-b-0 lg:last:border-r-0"
+            key={each}
+          >
+            {each in opensElsewhere ? (
+              <StageElsewhere
+                clientId={clientId}
+                // SAFETY: just checked to be one of its keys.
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+                stage={each as keyof typeof opensElsewhere}
+                status={status}
+              />
+            ) : (
               <Link
                 // The router marks the link the page is on itself, as the page.
                 activeOptions={{ exact: true }}
                 aria-current={open ? "page" : undefined}
                 className={cn(
-                  "hover:bg-muted/50 focus-visible:ring-ring/50 relative flex h-full w-full items-start gap-3 px-5 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset lg:flex-col lg:gap-2 lg:px-4 lg:py-4",
+                  stageLinkClass,
                   open &&
                     "bg-muted/50 after:bg-foreground after:absolute after:inset-y-0 after:left-0 after:w-0.5 lg:after:inset-x-0 lg:after:top-auto lg:after:bottom-0 lg:after:h-0.5 lg:after:w-auto"
                 )}
                 params={{ clientId }}
-                // The step the organization is at is where the steps open by themselves.
-                search={each === view.stage ? {} : { stage: each }}
+                search={{ stage: each }}
                 to={sectionTo.steps}
               >
-                <StageMark status={status} />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span className="font-medium">
-                    {stageWords[each]}
-                    <span className="sr-only">: {statusWords[status]}</span>
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    {lines[each]}
-                  </span>
-                </span>
+                <StageName stage={each} status={status} />
               </Link>
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
-  );
-};
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  </nav>
+);
 
 /**
  * What the first conversation brought, as the model counts it: which of
@@ -253,10 +294,7 @@ const Conversation = ({
 }) => {
   const { conversation } = view.state;
   return (
-    <Section
-      description="Grasp’s first talk with the sponsor. Bring the transcript in here: Stephen reads it, and says what is still missing."
-      title="The first conversation"
-    >
+    <Section title="The first conversation">
       <div className="flex flex-col items-start gap-3 border-t px-5 py-4">
         <span className="font-medium">What it brought</span>
         {conversation === "read" ? (
@@ -265,20 +303,10 @@ const Conversation = ({
           <p className="text-muted-foreground">
             {conversation === "in"
               ? "Stephen has not read this transcript yet."
-              : "Nothing yet. Once the transcript is in, Stephen reads it for the ten things he needs before his first interview."}
+              : "Once the transcript is in, Stephen reads it for the ten things he needs before his first interview."}
           </p>
         )}
       </div>
-      <SectionRow
-        description="What was said stays in the company’s own Grasp: the admin never shows it."
-        label="The transcript"
-      >
-        {conversation === "none" ? (
-          <span className="text-muted-foreground">Not brought in yet</span>
-        ) : (
-          <Done>Brought in</Done>
-        )}
-      </SectionRow>
       {/* Keyed by the company: another's drafts and answers never carry over. */}
       <Kickoff clientId={clientId} key={clientId} />
     </Section>
@@ -337,10 +365,7 @@ const Research = ({ view }: { view: OrgView }) => {
     <span className="text-muted-foreground">Not looked up yet</span>
   );
   return (
-    <Section
-      description="Stephen looks up the company, never its people. Every fact keeps its source and its date."
-      title="The research"
-    >
+    <Section title="The research">
       {state.conversation === "read" || done ? null : (
         <p className="text-muted-foreground border-t px-5 py-3">
           It starts once Stephen has read the first conversation: that tells him
@@ -399,116 +424,9 @@ const Research = ({ view }: { view: OrgView }) => {
   );
 };
 
-/** One thing to agree on: where it stands on top, then what it is. */
-const AgreedTile = ({
-  label,
-  description,
-  done,
-  status,
-}: {
-  label: string;
-  description: string;
-  done: boolean;
-  status: string;
-}) => (
-  <div className="bg-card flex flex-col gap-3 p-5">
-    {done ? (
-      <Done>{status}</Done>
-    ) : (
-      <span className="text-status-attention">{status}</span>
-    )}
-    <div className="flex flex-1 flex-col gap-0.5">
-      <span className="font-medium">{label}</span>
-      <p className="text-muted-foreground">{description}</p>
-    </div>
-  </div>
-);
-
 /** While the company has paused its interviews: core lets nobody open or save one. */
 const pausedLine =
   "The company has paused its interviews: nobody can open or go on with one until it resumes them.";
-
-/** Under a panel's title, while the interviews are paused. */
-const Paused = () => (
-  <p className="text-status-attention border-t px-5 py-3">{pausedLine}</p>
-);
-
-const councilWords = {
-  yes: "Said yes",
-  none: "No works council",
-  waiting: "Still deciding",
-} as const;
-
-/**
- * What has to be in place before anyone is invited: the agreement on
- * handling data, the company's own look at the risks to its people, and
- * the works council's yes where there is one.
- */
-const Agreed = ({
-  view,
-  paused,
-  clientId,
-  agreements,
-}: {
-  view: OrgView;
-  paused: boolean;
-  clientId: string;
-  agreements: AdminSnapshot["agreements"];
-}) => {
-  const { agreed } = view.state;
-  return (
-    <Section
-      action={
-        <AgreementsAction
-          agreements={agreements}
-          clientId={clientId}
-          told={view.told}
-        />
-      }
-      description="Without all three, nobody is invited."
-      title="Agreed before the first interview"
-    >
-      <div className="bg-border grid gap-px border-t lg:grid-cols-3">
-        <AgreedTile
-          description="The data processing agreement between the company and Grasp, signed in the first talk."
-          done={agreed.processing}
-          label="Agreement on handling data"
-          status={agreed.processing ? "Signed" : "Not signed yet"}
-        />
-        <AgreedTile
-          description="The data protection impact assessment. Grasp brings it filled in, and the company signs it off."
-          done={agreed.assessment}
-          label="The company’s look at the risks to its people"
-          status={agreed.assessment ? "Signed off" : "Not signed off yet"}
-        />
-        <AgreedTile
-          description="Only the works council can agree to this, not the sponsor. It often takes several weeks."
-          done={agreed.council !== "waiting"}
-          label="Works council"
-          status={councilWords[agreed.council]}
-        />
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t px-5 py-3">
-        {paused ? (
-          <span className="text-status-attention">{pausedLine}</span>
-        ) : null}
-        {!paused && mayInvite(agreed) ? (
-          <Done>Interviews can start.</Done>
-        ) : null}
-        {mayInvite(agreed) ? null : (
-          <span className="text-status-attention">
-            Interviews wait until all of this is in place.
-          </span>
-        )}
-        {view.told ? (
-          <span className="text-muted-foreground">
-            The team is told, so this stays as it was agreed.
-          </span>
-        ) : null}
-      </div>
-    </Section>
-  );
-};
 
 /** Each screen of the company's own onboarding, as staff read where its admin is. */
 const adminStepWords: Readonly<Record<string, string>> = {
@@ -550,14 +468,8 @@ const Company = ({ view }: { view: OrgView }) => {
     );
   }
   return (
-    <Section
-      description="In its own onboarding. Grasp waits on each of these, and sees it here the moment it is done."
-      title="What the company does itself"
-    >
-      <SectionRow
-        description="The screen its admin is on in its own onboarding, as its Grasp last heard."
-        label="Where its admin is"
-      >
+    <Section title="What the company does itself">
+      <SectionRow label="Where its admin is">
         {view.org.adminStep === undefined ? (
           <span className="text-muted-foreground">Not started</span>
         ) : (
@@ -566,10 +478,7 @@ const Company = ({ view }: { view: OrgView }) => {
           </span>
         )}
       </SectionRow>
-      <SectionRow
-        description="It tells Grasp who works where: the teams, and everyone in them."
-        label="The sign-in is connected"
-      >
+      <SectionRow label="The sign-in is connected">
         {connected ? (
           <Done>
             {people} people in {counted(teams, "team", "teams")}
@@ -578,268 +487,14 @@ const Company = ({ view }: { view: OrgView }) => {
           waits
         )}
       </SectionRow>
-      <SectionRow
-        description="From the company’s HR platform, or typed in by its admin."
-        label="The team leads are named"
-      >
+      <SectionRow label="The team leads are named">
         {named ? (
           <Done>{counted(teams, "team lead", "team leads")}</Done>
         ) : (
           waits
         )}
       </SectionRow>
-      <SectionRow
-        description="The company’s own message goes first. The same day every team lead gets a link."
-        label="The team is told"
-      >
-        {told}
-      </SectionRow>
-    </Section>
-  );
-};
-
-/**
- * Who can still have the one reminder, and noting that they had it once
- * someone reminded them: then nobody is chased again.
- */
-const Reminders = ({
-  clientId,
-  people,
-  who: [one, other],
-}: {
-  clientId: string;
-  people: string[];
-  who: [string, string];
-}) => (
-  <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
-    <p className="text-muted-foreground">
-      {counted(people.length, `${one} can`, `${other} can`)} still be reminded,
-      once each.
-    </p>
-    <CommandButton
-      clientId={clientId}
-      command={{ type: "onboarding.remind", payload: { people } }}
-      variant="ghost"
-    >
-      Mark {counted(people.length, one, other)} reminded
-    </CommandButton>
-  </div>
-);
-
-/** Where one lead stands, in a line. */
-const leadLine = (view: OrgView, lead: PersonView, size: number): ReactNode => {
-  if (!view.told) {
-    return (
-      <span className="text-muted-foreground">
-        Gets a link the day the team is told.
-      </span>
-    );
-  }
-  if (lead.completed !== null) {
-    return (
-      <Done>
-        Talked on {dayDate(view, lead.completed)}.{" "}
-        {size === 0
-          ? "None of their colleagues has a link yet."
-          : counted(size, "colleague got a link.", "colleagues got a link.")}
-      </Done>
-    );
-  }
-  if (lead.reminded !== null) {
-    return (
-      <span className="text-status-attention">
-        Reminded on {dayDate(view, lead.reminded)}, and has not talked yet. A
-        word from the sponsor helps.
-      </span>
-    );
-  }
-  return (
-    <span className="text-muted-foreground">
-      {linkWords[lead.state]}. The team waits for this interview.
-    </span>
-  );
-};
-
-/**
- * The team leads: they go first, because a lead's interview brings the
- * team's work and who knows each piece best, and only then does the team
- * get its links. A lead who is late holds up a whole team.
- */
-const Leads = ({ view, clientId }: { view: OrgView; clientId: string }) => {
-  const leads = view.teams.flatMap((team) =>
-    team.lead !== null && !team.off ? [{ team, lead: team.lead }] : []
-  );
-  const waiting = leads
-    .filter(({ lead }) => lead.mayRemind)
-    .map(({ lead }) => lead.person.id);
-  return (
-    <Section
-      description="A lead’s interview takes 30 minutes: the team’s work, how much of it there is, and who knows each piece best. The same day their team gets its links."
-      title="Team leads"
-    >
-      {leads.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Not known yet. The company names its team leads in its own onboarding.
-        </p>
-      ) : (
-        <ul className="flex flex-col">
-          {leads.map(({ team, lead }) => (
-            <li
-              className="grid items-center gap-x-6 gap-y-1 border-t px-5 py-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]"
-              key={team.team.id}
-            >
-              <span className="flex min-w-0 flex-col">
-                {lead.person.name}
-                <span className="text-muted-foreground text-xs">
-                  {team.team.name}
-                </span>
-              </span>
-              <span className="min-w-0">
-                {leadLine(
-                  view,
-                  lead,
-                  // The colleagues whose links really went out: who is away
-                  // gets none, and the rest can wait for the team's work.
-                  team.people.filter(
-                    (each) => each !== lead && each.sent !== null
-                  ).length
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {waiting.length > 0 ? (
-        <Reminders
-          clientId={clientId}
-          people={waiting}
-          who={["lead", "leads"]}
-        />
-      ) : null}
-    </Section>
-  );
-};
-
-/** How one team's links stand, beside its progress. */
-const teamLine = (view: OrgView, team: OrgView["teams"][number]): string => {
-  const lead = team.lead?.person.first ?? "";
-  if (team.sent === null) {
-    return lead === ""
-      ? "Waits for the lead’s list"
-      : `Waits for ${lead}’s list`;
-  }
-  const waiting = team.people.filter((each) => each.mayRemind).length;
-  if (waiting > 0) {
-    return `${waiting} not reminded yet`;
-  }
-  return team.counts.completed < team.asked && !view.closed
-    ? "All reminded"
-    : "";
-};
-
-/**
- * The interviews themselves: how many talked, per team, and how many
- * can still be sent the one reminder. One reminder a person, then nobody
- * is chased, so not taking part stays safe.
- */
-const Interviews = ({
-  view,
-  clientId,
-  paused,
-}: {
-  view: OrgView;
-  clientId: string;
-  paused: boolean;
-}) => {
-  const { counts } = view;
-  const days = listenDays(view.org);
-  const closes = dayDate(view, days);
-  let description =
-    "Two weeks, from the day the company tells its team. Everyone gets one link, and one reminder.";
-  if (view.closed) {
-    description = `The link closed on ${closes}. What was said stays; a link that was not used has expired.`;
-  } else if (view.told) {
-    description = `Day ${view.day} of ${days}. The link closes on ${closes}. One reminder a person, then nobody is chased: not taking part stays safe.`;
-  }
-  if (!view.told) {
-    return (
-      <Section description={description} title="Interviews">
-        {paused ? <Paused /> : null}
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Nobody has a link yet. They go out once everything is agreed and the
-          company has told its team.
-        </p>
-      </Section>
-    );
-  }
-  const reminders = view.people
-    .filter((each) => each.mayRemind)
-    .map((each) => each.person.id);
-  return (
-    <Section description={description} title="Interviews">
-      {paused ? <Paused /> : null}
-      <div className="bg-border grid gap-px border-t sm:grid-cols-2 lg:grid-cols-4">
-        <Tile
-          label="have talked"
-          value={`${counts.completed} of ${view.asked}`}
-        />
-        <Tile label="are talking right now" value={counts.progress} />
-        <Tile label="stopped halfway" value={counts.incomplete} />
-        {view.closed ? (
-          <Tile label="never used their link" value={counts.expired} />
-        ) : (
-          <Tile
-            label="have not started"
-            value={counts.invited + counts.opened + counts.waiting}
-          />
-        )}
-      </div>
-      <ul className="flex flex-col">
-        {view.teams
-          .filter((team) => !team.off)
-          .map((team) => {
-            const done = team.counts.completed;
-            return (
-              <li
-                className="grid items-center gap-x-6 gap-y-2 border-t px-5 py-3 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,11rem)]"
-                key={team.team.id}
-              >
-                <span className="min-w-0 truncate">{team.team.name}</span>
-                <span className="flex min-w-0 items-center gap-3">
-                  <Progress
-                    aria-label={team.team.name}
-                    className="flex-1"
-                    value={(done / Math.max(team.asked, 1)) * 100}
-                  />
-                  <span className="text-muted-foreground w-16 flex-none text-right tabular-nums">
-                    {done} of {team.asked}
-                  </span>
-                </span>
-                <span className="text-muted-foreground sm:text-right">
-                  {teamLine(view, team)}
-                </span>
-              </li>
-            );
-          })}
-      </ul>
-      <div className="flex justify-end border-t px-5 py-3">
-        <Button
-          nativeButton={false}
-          render={<Link params={{ clientId }} to={sectionTo.interviews} />}
-          size="sm"
-          variant="ghost"
-        >
-          Everyone by name
-          <ArrowRightIcon data-icon="inline-end" />
-        </Button>
-      </div>
-      {view.closed || reminders.length === 0 ? null : (
-        <Reminders
-          clientId={clientId}
-          people={reminders}
-          who={["person", "people"]}
-        />
-      )}
+      <SectionRow label="The team is told">{told}</SectionRow>
     </Section>
   );
 };
@@ -915,14 +570,15 @@ const Opens = ({
 }) => {
   const { knowledge } = view;
   const known = `${knowledge.percent}% of what Grasp needs is known.`;
-  const blocked = view.works.filter((work) => work.state === "blocked");
-  const open = view.works.filter(
-    (work) => work.state === "mapping" || work.state === "saturating"
-  );
-  const notKnown = [...blocked, ...open];
+  const notKnown = view.works.filter(
+    (work) =>
+      work.state === "blocked" ||
+      work.state === "mapping" ||
+      work.state === "saturating"
+  ).length;
   return (
     <Section
-      description="The company’s platform stays closed until Grasp gives its go. What is not known by then shows to the company as still open, so it keeps nobody out."
+      description="What is not known by then shows to the company as still open."
       title="Grasp opens"
     >
       <div className="flex flex-col gap-5 border-t px-5 py-5">
@@ -939,16 +595,8 @@ const Opens = ({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-0.5 border-t px-5 py-4">
-        <span className="font-medium">How the brain fills</span>
-        <p className="text-muted-foreground">
-          {knowledge.sources.length > 0
-            ? "Every source adds its own share, and only once it is in. The brain never guesses."
-            : "The company’s own Grasp counts what is known and sends the whole, not each source’s share."}
-        </p>
-      </div>
       {knowledge.sources.length > 0 ? (
-        <ul className="flex flex-col">
+        <ul aria-label="How the brain fills" className="flex flex-col">
           {knowledge.sources.map((each) => (
             <li
               className="grid items-center gap-x-6 gap-y-1.5 border-t px-5 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,14rem)_4.5rem]"
@@ -967,55 +615,21 @@ const Opens = ({
         </ul>
       ) : null}
 
-      {view.told && notKnown.length > 0 ? (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4">
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="font-medium">Not known yet</span>
-              <p className="text-muted-foreground">
-                The work that is still being heard, or waits on an answer.
-              </p>
-            </div>
-            <Button
-              nativeButton={false}
-              render={<Link params={{ clientId }} to={sectionTo.workflows} />}
-              size="sm"
-              variant="ghost"
-            >
-              All workflows
-              <ArrowRightIcon data-icon="inline-end" />
-            </Button>
-          </div>
-          <ul className="flex flex-col">
-            {notKnown.map((work) => (
-              <li
-                className="grid items-center gap-x-6 gap-y-0.5 border-t px-5 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,14rem)]"
-                key={work.id}
-              >
-                <span className="flex min-w-0 flex-col">
-                  {work.work.name}
-                  <span className="text-muted-foreground text-xs">
-                    {view.teams.find((each) => each.team.id === work.team)?.team
-                      .name ?? ""}
-                  </span>
-                </span>
-                <span className="text-muted-foreground tabular-nums">
-                  {work.approved} of {work.doers} talked
-                </span>
-                <span
-                  className={cn(
-                    "sm:text-right",
-                    work.state === "blocked"
-                      ? "text-status-attention"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  {workflowWords[work.state]}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
+      {view.told && notKnown > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+          <span className="text-muted-foreground">
+            {counted(notKnown, "workflow is", "workflows are")} not known yet.
+          </span>
+          <Button
+            nativeButton={false}
+            render={<Link params={{ clientId }} to={sectionTo.workflows} />}
+            size="sm"
+            variant="ghost"
+          >
+            All workflows
+            <ArrowRightIcon data-icon="inline-end" />
+          </Button>
+        </div>
       ) : null}
     </Section>
   );
@@ -1028,15 +642,12 @@ export const OrgSteps = ({
   clientId,
   paused,
   gate,
-  agreements,
   flow,
 }: {
   view: OrgView;
-  /** The step asked for: it opens while the flow has it. */
+  /** The step asked for: it opens while the flow has it and it opens here. */
   stage: Stage;
   clientId: string;
-  /** What was agreed, as core keeps it, to change it from. */
-  agreements: AdminSnapshot["agreements"];
   /** The company has paused its interviews, which the model doesn't carry. */
   paused: boolean;
   /** The gate as core keeps it: open now or not, and Grasp's go. */
@@ -1053,19 +664,7 @@ export const OrgSteps = ({
         <Conversation clientId={clientId} view={view} />
       ) : null}
       {stage === "research" ? <Research view={view} /> : null}
-      {stage === "agreed" ? (
-        <Agreed
-          agreements={agreements}
-          clientId={clientId}
-          paused={paused}
-          view={view}
-        />
-      ) : null}
       {stage === "connected" ? <Company view={view} /> : null}
-      {stage === "leads" ? <Leads clientId={clientId} view={view} /> : null}
-      {stage === "interviews" ? (
-        <Interviews clientId={clientId} paused={paused} view={view} />
-      ) : null}
       {stage === "open" ? (
         <Opens clientId={clientId} gate={gate} paused={paused} view={view} />
       ) : null}

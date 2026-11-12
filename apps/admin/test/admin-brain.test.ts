@@ -121,60 +121,20 @@ const heardSnapshot = (name: string): AdminSnapshot => {
   };
 };
 
-/** The cells of the row of the team named `team`, as text. */
-const teamRowOf = (html: string, team: string): string[] => {
-  const at = html.indexOf(`>${team}`, html.indexOf("Team by team"));
-  if (at === -1) {
-    return [];
-  }
-  const row = html.slice(
-    html.lastIndexOf("<tr", at),
-    html.indexOf("</tr>", at)
-  );
-  return [...row.matchAll(/<td[^>]*>(?<cell>[\s\S]*?)<\/td>/gu)].map(
-    ({ groups }) =>
-      (groups?.cell ?? "")
-        .replaceAll(/<[^>]+>/gu, " ")
-        .replaceAll(/\s+/gu, " ")
-        .trim()
-  );
-};
-
 describe("an organization's brain", () => {
   useStoreSecrets({ deployer: token });
 
-  it("counts what the brain stands on, team by team, and says the brain itself isn't shared", async () => {
+  it("says the brain itself isn't shared, and makes up no source's share", async () => {
     const acme = await liveClient();
     acme.core.admin = heardSnapshot("Acme");
 
     const { status, html } = await page(
       `/organizations/${acme.clientId}/brain`
     );
-    const numbers = html.slice(
-      html.indexOf('aria-label="The brain in numbers"'),
-      html.indexOf("</section>", html.indexOf("The brain in numbers"))
-    );
-    // The figure after its label: the kit's key figure (`Stat`).
-    const figureOf = (label: string): string => {
-      const at = numbers.indexOf(`>${label}</span>`);
-      return at === -1
-        ? ""
-        : (/<span data-slot="stat"[^>]*>(?<value>[^<]*)</u.exec(
-            numbers.slice(at)
-          )?.groups?.value ?? "");
-    };
 
     expect({
       status,
       toCome: html.includes("This section isn’t in the admin yet."),
-      figures: [
-        "Known",
-        "Teams heard",
-        "Agreed interviews",
-        "Facts agreed to",
-        "Still open",
-      ].map(figureOf),
-      opensAt: numbers.includes("Opens at 80%"),
       notShared: html.includes(
         `${acme.name} doesn’t share its brain with Grasp’s staff, so only its counts show here.`
       ),
@@ -183,65 +143,12 @@ describe("an organization's brain", () => {
       sourcesWhy: html.includes(
         "The company’s own Grasp counts what is known as one number"
       ),
-      teams: {
-        sales: teamRowOf(html, "Sales"),
-        operations: teamRowOf(html, "Operations"),
-        legal: teamRowOf(html, "Legal"),
-      },
     }).toStrictEqual({
       status: 200,
       toCome: false,
-      figures: ["42%", "1 of 2", "2", "10", "0"],
-      opensAt: true,
       notShared: true,
       sources: false,
       sourcesWhy: true,
-      teams: {
-        sales: ["Sales", "2 of 2", "10", "–", "0"],
-        operations: ["Operations", "0 of 1", "0", "–", "0"],
-        legal: ["Legal Does not take part", "–", "0", "–", "0"],
-      },
-    });
-  });
-
-  it("warns of the teams not heard once the interviews have closed", async () => {
-    const acme = await liveClient();
-    const heard = heardSnapshot("Acme");
-    // Two weeks from January: long closed, before anyone talked.
-    acme.core.admin = {
-      ...heard,
-      plan: { start: "2026-01-05", days: 14, at: "2026-01-05T07:00:00.000Z" },
-    };
-
-    const { html } = await page(`/organizations/${acme.clientId}/brain`);
-    const numbers = html.slice(
-      html.indexOf('aria-label="The brain in numbers"'),
-      html.indexOf("</section>", html.indexOf("The brain in numbers"))
-    );
-
-    expect(
-      numbers.includes("2 teams not heard before the interviews closed")
-    ).toBeTruthy();
-  });
-
-  it("says a company without teams yet has none, with nothing counted", async () => {
-    const acme = await liveClient();
-    acme.core.admin = emptyAdminSnapshot("Acme");
-
-    const { status, html } = await page(
-      `/organizations/${acme.clientId}/brain`
-    );
-
-    expect({
-      status,
-      noTeams: html.includes("No teams yet: they come with who works where."),
-      table: html.includes("<table"),
-      teamsHeard: html.includes(">0 of 0<"),
-    }).toStrictEqual({
-      status: 200,
-      noTeams: true,
-      table: false,
-      teamsHeard: true,
     });
   });
 });
@@ -341,14 +248,16 @@ describe("how an organization's Brain is doing", () => {
 
     expect({
       status,
-      waiting: text.includes("Waiting 12 Oldest added 1 hour ago, 2 running"),
+      waiting: text.includes(
+        "Waiting 12 brain.embed: oldest added 1 hour ago, 2 running"
+      ),
       parked: text.includes("What it works on can't be read. unreadable"),
       requeue: html.includes(">Requeue</button>"),
       store: text.includes("1.2 GB 12% of 10.0 GB"),
       near: text.includes("Near its limit"),
       ledger: text.includes("Read through"),
       embedding: [
-        text.includes("Model test-model@0a1b"),
+        text.includes("Embedding model test-model@0a1b"),
         text.includes("Embedded 38 of 40 passages"),
         html.includes(">Re-embed</button>"),
       ],
@@ -521,7 +430,7 @@ describe("how an organization's Brain is doing", () => {
       html += chunk.value;
     }
     const beforeAnswer = {
-      counts: html.includes('aria-label="The brain in numbers"'),
+      counts: html.includes(">What it stands on</h2>"),
       reading: html.includes(reading),
       report: html.includes("The Brain at work"),
     };

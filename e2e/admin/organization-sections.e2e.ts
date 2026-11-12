@@ -6,11 +6,7 @@ import { z } from "zod";
 const sections = [
   ["", "Overview"],
   ["details", "Details"],
-  ["contract", "Contract"],
-  ["members", "Members"],
-  ["flow", "Flow"],
   ["steps", "Steps"],
-  ["organization", "Organization"],
   ["interviews", "Interviews"],
   ["workflows", "Workflows"],
   ["setup", "Setup"],
@@ -18,7 +14,6 @@ const sections = [
   ["ai-use", "AI use"],
   ["hours", "Hours"],
   ["brain", "Brain"],
-  ["data", "Data"],
   ["log", "Log"],
 ] as const;
 
@@ -183,7 +178,7 @@ test("a section whose read fails says so in its place, the column and sidebar st
   request,
 }) => {
   const { answered } = await seed(request);
-  await page.goto(sectionPath(answered, "members"), {
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
     waitUntil: "networkidle",
   });
   await fault(request, "fetchOrganizationTrail");
@@ -192,8 +187,10 @@ test("a section whose read fails says so in its place, the column and sidebar st
   await openSection(page, "Answering Acme", answered, "log");
   await expect(main.getByText("This couldn’t be shown")).toBeVisible();
   // The organization's column still moves between its sections.
-  await openSection(page, "Answering Acme", answered, "members");
-  await expect(main.getByText("Nobody has made an account yet.")).toBeVisible();
+  await openSection(page, "Answering Acme", answered, "details");
+  await expect(
+    main.getByRole("heading", { level: 1, name: "Details" })
+  ).toBeVisible();
   // And the admin's sidebar still goes elsewhere.
   await page
     .getByRole("navigation", { name: "Organizations" })
@@ -212,7 +209,7 @@ test("a section that can't render what it read says so in its place, and Try aga
   request,
 }) => {
   const { answered } = await seed(request);
-  await page.goto(sectionPath(answered, "members"), {
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
     waitUntil: "networkidle",
   });
   // A trail that isn't one: the Log throws rendering it.
@@ -226,7 +223,7 @@ test("a frame that can't be read says so with Try again, which brings the admin 
   request,
 }) => {
   const { answered } = await seed(request);
-  await page.goto(sectionPath(answered, "members"), {
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
     waitUntil: "networkidle",
   });
   await fault(request, "fetchPlatformSidebar");
@@ -309,7 +306,7 @@ test("a core that doesn't answer in time leaves its last answer on the page, mar
   request,
 }) => {
   const { answered } = await seed(request);
-  await page.goto(sectionPath(answered, "members"), {
+  await page.goto(`${sectionPath(answered, "details")}?tab=members`, {
     waitUntil: "networkidle",
   });
   await expect(page.getByText("Nobody has made an account yet.")).toBeVisible();

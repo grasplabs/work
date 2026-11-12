@@ -5,9 +5,12 @@ import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { followPaceOf } from "../src/admin/setup.tsx";
+import { getClientSetup } from "../src/clients/setup.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { clientDeploys, clients } from "../src/db/schema.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
+import { getClientHosting } from "../src/hosting/placement.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { setClientChannel } from "../src/rollout/channels.ts";
 import { mockAccess } from "./access.ts";
@@ -74,15 +77,13 @@ describe("an organization's Setup", () => {
 
     const status = await page(base);
     const history = await page(`${base}?tab=history`);
-    const resources = await page(`${base}?tab=resources`);
     const releases = await page(`${base}?tab=releases`);
     const settings = await page(`${base}?tab=settings`);
     const header = textOf(sectionOf(status.html, "How it stands"));
-    const checklist = textOf(sectionOf(status.html, "From contract to go"));
-    const howItRuns = textOf(sectionOf(status.html, "How it runs"));
+    const workers = textOf(sectionOf(status.html, "Its Workers"));
 
     expect({
-      statuses: [status, history, resources, releases, settings].map(
+      statuses: [status, history, releases, settings].map(
         (each) => each.status
       ),
       header: [
@@ -99,43 +100,24 @@ describe("an organization's Setup", () => {
       toOldPages: status.html.includes('href="/clients/'),
       // Nothing needs a look on a company that runs the newest release.
       needs: status.html.includes("What needs a look"),
-      // Its numbers aren't kept day by day: said, not made up, and its
-      // account's now read once the page shows.
-      numbers: [
-        "The admin doesn’t keep these day by day yet.",
-        "Reading its account…",
-      ].map((text) =>
-        sectionOf(status.html, "Its platform in numbers").includes(text)
-      ),
-      howItRuns: [
-        "Router",
-        "Core",
-        "Connect",
+      // Its account's numbers are said only once read, and only when
+      // something is off: nothing of them before.
+      numbers: status.html.includes("Its platform in numbers"),
+      // What runs in its account, and under it what its deploys keep there.
+      workers: [
         "grasp-os-core",
+        "grasp-os-connect",
+        "grasp-os-knowledge",
         "grasp-os-files",
-      ].map((text) => howItRuns.includes(text)),
+        "grasp-os-audit-archive",
+        "Read what runs",
+      ].map((text) => workers.includes(text)),
       // No AI Gateway runs for it any more: its AI is its own provider's.
-      gateway: howItRuns.includes("AI Gateway"),
-      // Deployed by the admin, and the contract not held by core yet.
-      checklist: [
-        "Its own platform is deployed",
-        "Not known here yet.",
-        "1 of 6 in place.",
-      ].map((text) => checklist.includes(text)),
-      deployed: checklist.includes(
-        "Its own platform is deployed, in the EU: done"
-      ),
+      gateway: workers.includes("AI Gateway"),
       history: {
         kept: history.html.includes('aria-label="Its history"'),
         settingUp: history.html.includes("Setting it up"),
       },
-      resources: [
-        "grasp-os-core",
-        "grasp-os-connect",
-        "grasp-os-knowledge",
-        "grasp-os-audit-archive",
-        "Read what runs",
-      ].map((text) => resources.html.includes(text)),
       releases: {
         follows: releases.html.includes("Follows its channel"),
         runs: textOf(sectionOf(releases.html, "Recent releases")).includes(
@@ -153,18 +135,15 @@ describe("an organization's Setup", () => {
         "Generation1Last rotatedNeverLiveYes"
       ),
     }).toStrictEqual({
-      statuses: [200, 200, 200, 200, 200],
+      statuses: [200, 200, 200, 200],
       header: [true, true, true, true, true, true],
       activity: true,
       toOldPages: false,
       needs: false,
-      numbers: [true, true],
-      howItRuns: [true, true, true, true, true],
+      numbers: false,
+      workers: [true, true, true, true, true, true],
       gateway: false,
-      checklist: [true, true, true],
-      deployed: true,
       history: { kept: true, settingUp: false },
-      resources: [true, true, true, true, true],
       releases: {
         follows: true,
         runs: true,
@@ -208,7 +187,7 @@ describe("an organization's Setup", () => {
       `Its deploy of ${beta.id} failed`,
       "New secrets wait to reach it",
     ];
-    const done = textOf(sectionOf(history.html, "Done here"));
+    const done = textOf(sectionOf(history.html, "Its history"));
 
     expect({
       standing: textOf(sectionOf(status.html, "How it stands")).includes(
@@ -222,7 +201,7 @@ describe("an organization's Setup", () => {
       done: ["Moved it to Beta.", "Rotated its secrets.", staff.email].map(
         (text) => done.includes(text)
       ),
-      // What the system did itself isn't by hand.
+      // Said in words, never as the log names it.
       created: done.includes("client.create"),
       secretsLive: textOf(sectionOf(settings.html, "Its secrets")).includes(
         "Generation2"
@@ -239,6 +218,56 @@ describe("an organization's Setup", () => {
       created: false,
       secretsLive: true,
       waiting: true,
+    });
+  });
+
+  it("reads itself again every few seconds while a deploy is due or out, and only now and then once it runs what it should or its deploy failed", async () => {
+    const acme = await liveClient(emptyAdminSnapshot("Acme"));
+    const paceOf = async (): Promise<number | null> => {
+      const setup = await getClientSetup(env, acme.clientId);
+      if (setup === null) {
+        throw new Error("The client has no Setup");
+      }
+      return followPaceOf(setup, await getClientHosting(env, acme.clientId));
+    };
+
+    const settled = await paceOf();
+    // A newer release reaches its channel: the reconciler deploys it at
+    // its next tick, with nobody on this page doing anything.
+    const beta = await publishRelease({ notes: "fix(core): rolled out" });
+    await importReleases(env.RELEASES, db);
+    await onChannel(beta.id, "beta");
+    await setClientChannel(env, staff, {
+      clientId: acme.clientId,
+      channel: "beta",
+    });
+    const due = await paceOf();
+    const now = new Date();
+    await db.insert(clientDeploys).values({
+      clientId: acme.clientId,
+      releaseId: beta.id,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "deploying",
+      startedAt: now,
+    });
+    const out = await paceOf();
+    // Failed on the release it should run: it waits for staff to retry.
+    await db
+      .update(clientDeploys)
+      .set({ status: "failed", error: "cloudflare_400_10000", endedAt: now })
+      .where(eq(clientDeploys.clientId, acme.clientId));
+    const failed = await paceOf();
+
+    expect({
+      watched: settled !== null,
+      closerWhileDue: due !== null && settled !== null && due < settled,
+      asCloseWhileOut: out === due,
+      failedAsSettled: failed === settled,
+    }).toStrictEqual({
+      watched: true,
+      closerWhileDue: true,
+      asCloseWhileOut: true,
+      failedAsSettled: true,
     });
   });
 
@@ -377,7 +406,7 @@ describe("an organization's Setup", () => {
 
     expect({
       status: odd.status,
-      onStatus: odd.html.includes("From contract to go"),
+      onStatus: odd.html.includes('aria-label="Its Workers"'),
       channel: textOf(sectionOf(odd.html, "How it stands")).includes("Edge"),
       unknown: unknown.status,
     }).toStrictEqual({

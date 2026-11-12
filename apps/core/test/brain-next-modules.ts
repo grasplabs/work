@@ -21,4 +21,13 @@ export const brainModules = {
   // Answers the staff with core's brainStaffReport and actOnBrainForStaff,
   // through their schemas.
   "apps/core/src/brain-report.ts": "core",
+  // The Brain's Sources page, for people: its own surface, each method
+  // probed as the signed-in person.
+  "apps/core/src/brain-sources-rpc.ts": "sources",
+  // Erases the sources of runs past their retention with core's
+  // eraseSource, and answers nothing of it.
+  "apps/core/src/brain-next-origins.ts": "core",
+  // Erases what an erased person alone may read with core's erasePerson,
+  // and answers nothing of it.
+  "apps/core/src/person-erasure.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;

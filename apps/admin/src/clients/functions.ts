@@ -80,7 +80,14 @@ export const fetchGridLive = createServerFn({ method: "GET" }).handler(
 export const fetchClientLive = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }): Promise<LiveStatus | null> => {
-    const live = await gridLive(env, defaultLiveOptions, data.clientId);
+    // Read anew each time, never from the grid's minute-old answer: its
+    // Setup asks again right after a deploy, when that answer is the one
+    // from before it.
+    const live = await gridLive(
+      env,
+      { ...defaultLiveOptions, cache: false },
+      data.clientId
+    );
     return live[data.clientId] ?? null;
   });
 

@@ -86,7 +86,6 @@ const CheckRow = ({ check }: { check: ReadinessCheck }) => (
       <p
         className={cn(
           "min-w-0 flex-1",
-          check.status === "ready" && "text-muted-foreground",
           check.required &&
             check.status === "blocked" &&
             "text-status-attention"
@@ -94,18 +93,18 @@ const CheckRow = ({ check }: { check: ReadinessCheck }) => (
       >
         {check.words}
       </p>
-      {check.link === undefined || check.status === "ready" ? null : (
-        <CheckLinkTo link={check.link} />
-      )}
+      {check.link === undefined ? null : <CheckLinkTo link={check.link} />}
     </div>
   </li>
 );
 
-/** Platform's checklist: required lines first, then optional ones. */
+/** Platform's checklist of what isn't ready: required lines first, then optional ones. */
 export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
+  // Only what isn't ready: a line that is has nothing to do next.
+  const open = readiness.checks.filter(({ status }) => status !== "ready");
   const ordered = [
-    ...readiness.checks.filter(({ required }) => required),
-    ...readiness.checks.filter(({ required }) => !required),
+    ...open.filter(({ required }) => required),
+    ...open.filter(({ required }) => !required),
   ];
   return (
     <div id={readinessId}>
@@ -117,11 +116,13 @@ export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
         }
         title="Readiness"
       >
-        <ul className="flex flex-col">
-          {ordered.map((check) => (
-            <CheckRow check={check} key={check.id} />
-          ))}
-        </ul>
+        {ordered.length === 0 ? null : (
+          <ul className="flex flex-col">
+            {ordered.map((check) => (
+              <CheckRow check={check} key={check.id} />
+            ))}
+          </ul>
+        )}
       </Section>
     </div>
   );
