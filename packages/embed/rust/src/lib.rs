@@ -51,17 +51,17 @@ pub unsafe extern "C" fn model_init(base: *const u8, len: usize) -> i32 {
     }
 }
 
-/// Reads the tokenizer file the host copied to `base` (it stays there). 0, or -1 when it isn't a consistent
-/// tokenizer file of this version.
+/// Reads the tokenizer file the host copied to `base` (it stays there). 0, or a negative error: -1 not a consistent
+/// tokenizer file of a version this runtime reads, -2 a map from pieces to rows that can't be applied.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tok_init(base: *const u8, len: usize) -> i32 {
     let blob: &'static [u8] = unsafe { core::slice::from_raw_parts(base, len) };
     match Tok::parse(blob) {
-        Some(t) => {
+        Ok(t) => {
             unsafe { TOK = Some(t) };
             0
         }
-        None => -1,
+        Err(e) => e as i32,
     }
 }
 
@@ -80,10 +80,10 @@ pub extern "C" fn max_tokens() -> usize {
 pub extern "C" fn longest_token() -> usize {
     unsafe { TOK.as_ref().map_or(0, |t| t.longest_token()) }
 }
-/// The tokenizer's vocabulary size: the token table has as many rows.
+/// How many rows the token table has: one per tokenizer piece, or as many as a trimmed table's map names.
 #[unsafe(no_mangle)]
-pub extern "C" fn vocab_size() -> usize {
-    unsafe { TOK.as_ref().map_or(0, |t| t.vocab_size()) }
+pub extern "C" fn table_rows() -> usize {
+    unsafe { TOK.as_ref().map_or(0, |t| t.table_rows()) }
 }
 
 /// Which integer kernels run: 0 as this CPU runs fastest (the i16-pair kernels on x86 without VNNI, the i32 dot
@@ -131,8 +131,8 @@ pub extern "C" fn text_cap() -> usize {
     TEXT_CAP
 }
 
-/// Tokenizes the UTF-8 text in text_buf[0..len] into `ids_buf`, `<bos>` and `<eos>` included and truncated to the
-/// model's max tokens. Returns the count.
+/// Tokenizes the UTF-8 text in text_buf[0..len] into `ids_buf` as the token table's rows (a trimmed table's map
+/// applied), `<bos>` and `<eos>` included and truncated to the model's max tokens. Returns the count.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tokenize(len: usize) -> usize {
     unsafe {

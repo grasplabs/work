@@ -5,7 +5,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { addSource, brainStaffReport, erasePerson } from "../src/brain-next.ts";
+import {
+  addSource,
+  brainStaffReport,
+  eraseSource,
+  erasePerson,
+} from "../src/brain-next.ts";
 import { keepOwnStoreHealth } from "../src/brain-own-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
@@ -39,16 +44,34 @@ const ownWork = defineWork({
 const ownStore = (person: string) =>
   inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`);
 
-/** A person of their own, whose store holds one source of theirs. */
-const personWithSource = async (): Promise<string> => {
+/** A person of their own, whose store holds one source of theirs: its ref. */
+const personWithSourceRef = async () => {
   const person = `person-${crypto.randomUUID()}`;
+  const source = { producer: "upload", id: crypto.randomUUID() } as const;
   await addSource(env, {
-    source: { producer: "upload", id: crypto.randomUUID() },
+    source,
     change: "1",
     text: `Their own note ${crypto.randomUUID()}`,
     readers: { kind: "owner", personId: person },
   });
+  return { person, source };
+};
+
+/** A person of their own, whose store holds one source of theirs. */
+const personWithSource = async (): Promise<string> => {
+  const { person } = await personWithSourceRef();
   return person;
+};
+
+/** Runs `person`'s own store's alarm while it is set, at most `most` times. */
+const workedOut = async (person: string, most = 10): Promise<void> => {
+  for (let run = 0; run < most; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one tick after the other
+    if (!(await runDurableObjectAlarm(ownStore(person)))) {
+      return;
+    }
+  }
+  throw new Error("The store kept waking");
 };
 
 /**
@@ -214,6 +237,101 @@ describe("a person's own store at work on its own alarm", () => {
       alarm: null,
       woken: false,
     });
+  });
+
+  it("keeps an erased person's row gone when their erasure lands while a tick of their store is under way", async () => {
+    const person = await personWithSource();
+    // A tick first, so the store has its row.
+    await enqueueOwn(person, `first-${crypto.randomUUID()}`);
+    await runDurableObjectAlarm(ownStore(person));
+    const key = `held-open-${crypto.randomUUID()}`;
+    const gate = { open: false };
+    behaviours.set(key, async () => {
+      while (!gate.open) {
+        // oxlint-disable-next-line no-await-in-loop -- until the test opens it
+        await scheduler.wait(5);
+      }
+    });
+    await enqueueOwn(person, key);
+    const withRow = await totals();
+
+    // Settled as it is made: the erasure may end it.
+    const tick = Promise.allSettled([runDurableObjectAlarm(ownStore(person))]);
+    await until(() => started.includes(key));
+    const erasing = { personId: person, reason: "person_erased" } as const;
+    const first = await erasePerson(env, erasing);
+    // Past the time an add has to write its file: only the tick under way
+    // keeps the erasure from finishing.
+    await ageOwnErasure(person);
+    const whileTicking = await erasePerson(env, erasing);
+    gate.open = true;
+    await tick;
+    const done = await erasePerson(env, erasing);
+    const after = await totals();
+
+    expect({
+      first,
+      whileTicking,
+      done,
+      removed: withRow.stores - after.stores,
+    }).toStrictEqual({
+      first: "still_deleting",
+      whileTicking: "still_deleting",
+      done: "erased",
+      removed: 1,
+    });
+  });
+
+  it("removes a store's row once erasures took all it held, so staff count only stores that hold anything", async () => {
+    const before = await totals();
+    const { person, source } = await personWithSourceRef();
+    await enqueueOwn(person, `kept-${crypto.randomUUID()}`);
+    await workedOut(person);
+    const holding = await totals();
+
+    await eraseSource(env, {
+      source,
+      readers: { kind: "owner", personId: person },
+      reason: "deleted",
+    });
+    // One tick deletes what the erasure hid; its files wait out their
+    // grace for a later sweep, which holds nothing of the store's.
+    await runDurableObjectAlarm(ownStore(person));
+    const emptied = await totals();
+
+    expect({
+      holding: holding.stores - before.stores,
+      emptied: emptied.stores - before.stores,
+    }).toStrictEqual({ holding: 1, emptied: 0 });
+  });
+
+  it("ticks and reports a person's own store that holds memories alone", async () => {
+    const before = await totals();
+    const person = `person-${crypto.randomUUID()}`;
+    await ownStore(person).addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "owner", person },
+      entities: [{ key: "c", kind: "customer", names: ["Acme"] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: "Acme renews on 1 March",
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer: person },
+        },
+      ],
+    });
+    const key = `with-memories-${crypto.randomUUID()}`;
+    await enqueueOwn(person, key);
+    await workedOut(person);
+    const after = await totals();
+
+    expect({
+      ran: finished.includes(key),
+      waiting: await waitingIn(person),
+      stores: after.stores - before.stores,
+    }).toStrictEqual({ ran: true, waiting: 0, stores: 1 });
   });
 
   it("keeps a store's newest report: a late write of an older one never replaces it", async () => {

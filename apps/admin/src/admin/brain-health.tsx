@@ -708,7 +708,7 @@ const OwnStores = ({ report }: { report: BrainReport }) => {
       title="People's own stores"
     >
       <SectionRow
-        description="Stores holding anything that have run their own upkeep."
+        description="Stores holding anything, as their own upkeep last found them."
         label="Stores"
       >
         <span className="tabular-nums">{people}</span>

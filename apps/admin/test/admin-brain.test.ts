@@ -678,7 +678,7 @@ describe("how an organization's Brain is doing", () => {
 
     expect({
       stores: text.includes(
-        "Stores Stores holding anything that have run their own upkeep. 12 people"
+        "Stores Stores holding anything, as their own upkeep last found them. 12 people"
       ),
       waiting: text.includes("Oldest added 1 hour ago. 30"),
       parked: text.includes("Parked"),

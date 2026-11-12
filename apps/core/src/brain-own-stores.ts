@@ -1,4 +1,4 @@
-import { eq, lte, sql } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { brainOwnStores } from "./db/core/schema.ts";
@@ -11,7 +11,8 @@ import { brainOwnStores } from "./db/core/schema.ts";
 // wakes no one's store. A row holds numbers and flags alone, keyed by the
 // SHA-256 of the person's id: nothing of what the store holds, no id, no
 // size (only whether it is near its limit). Erasing the person removes it
-// (brain-next.ts `erasePerson`).
+// (brain-next.ts `erasePerson`), and so does a tick that finds the store
+// holding nothing any more, so the count is of stores that hold anything.
 
 /** What one person's own store last told core of itself: numbers and flags. */
 export interface OwnStoreHealth {
@@ -28,7 +29,7 @@ export interface OwnStoreHealth {
 
 /** The sums staff read: never a row, never a person. */
 export interface OwnStoresTotals {
-  /** People's own stores that reported since they last held nothing. */
+  /** People's own stores that hold anything, as their last tick found them. */
   stores: number;
   waiting: number;
   /** When the item waiting longest across them was added; null while none waits. */
@@ -83,14 +84,24 @@ export const keepOwnStoreHealth = async (
     });
 };
 
-/** Removes `person`'s row, once their own store was erased. */
+/**
+ * Removes `person`'s row: once their own store was erased, or, as of a
+ * tick that ended at `reportedAt`, once it holds nothing (a row a later
+ * tick wrote stays).
+ */
 export const forgetOwnStoreHealth = async (
   env: Pick<Env, "DB">,
-  person: string
+  person: string,
+  reportedAt?: Date
 ): Promise<void> => {
+  const store = eq(brainOwnStores.store, await keyOf(person));
   await drizzle(env.DB)
     .delete(brainOwnStores)
-    .where(eq(brainOwnStores.store, await keyOf(person)));
+    .where(
+      reportedAt === undefined
+        ? store
+        : and(store, lte(brainOwnStores.reportedAt, reportedAt))
+    );
 };
 
 /** The sums of every row, in one query. */

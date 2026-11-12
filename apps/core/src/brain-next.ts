@@ -1787,12 +1787,15 @@ export const alarmHostOf = async (
     ask: askModel(env),
     embedders: await embeddersOf(env),
     report: async (overview) => {
+      const at = new Date();
       try {
-        await keepOwnStoreHealth(
-          env,
-          kind.person,
-          healthOf(overview, new Date())
-        );
+        // A store that holds nothing any more (erasures took it all) has
+        // no row: staff's count is of stores that hold anything. One
+        // whose ledger isn't read through shows nothing of what it holds,
+        // so it keeps its row, as failing.
+        await (overview.ledgerReplay === "through" && !overview.holding
+          ? forgetOwnStoreHealth(env, kind.person, at)
+          : keepOwnStoreHealth(env, kind.person, healthOf(overview, at)));
       } catch {
         // Stale until the next tick: logged by a fixed name alone.
         log.warn("brain.own_store_health_unkept", {});

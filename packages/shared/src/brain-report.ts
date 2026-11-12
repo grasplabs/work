@@ -242,7 +242,7 @@ export const brainReportSchema = z.object({
    * the shared store's, which every recall searches.
    */
   ownStores: z.object({
-    /** Stores that hold anything and have run their own work. */
+    /** Stores that hold anything, as their own work last found them. */
     stores: count,
     /** Items waiting in their queues. */
     waiting: count,
