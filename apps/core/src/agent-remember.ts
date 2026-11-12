@@ -61,6 +61,8 @@ const parameters = Type.Object(
             name: Type.String({
               minLength: 1,
               maxLength: memoryChoices.valueMaxLength,
+              description:
+                'Its name. For the person you are talking with, use "me" as `about` instead, never an entity named "me".',
             }),
             id: Type.Optional(
               Type.String({
@@ -150,7 +152,13 @@ const checkSchema = z.object({ theirs: z.boolean() });
  */
 export type Subject =
   | { readonly self: true }
-  | { readonly kind: string; readonly names: readonly string[] };
+  | {
+      readonly kind: string;
+      /** The name the notice shows: the earliest the store holds. */
+      readonly name: string;
+      /** Every name, as the check is given them. */
+      readonly names: readonly string[];
+    };
 
 /**
  * Whether the person states `proposed` themselves in `said`, the message
@@ -222,7 +230,7 @@ const subjectOf = async (
   }
   if (about.id === undefined) {
     return {
-      subject: { kind: about.kind, names: [about.name] },
+      subject: { kind: about.kind, name: about.name, names: [about.name] },
       entity: { kind: about.kind, names: [about.name] },
     };
   }
@@ -238,10 +246,23 @@ const subjectOf = async (
   ) {
     return { subject: { self: true }, entity };
   }
-  return held.names.length === 0
+  return held.name === null
     ? null
-    : { subject: { kind: held.kind, names: held.names }, entity };
+    : {
+        subject: { kind: held.kind, name: held.name, names: held.names },
+        entity,
+      };
 };
+
+/** What the model is told of a new entity named "me". */
+const namedMe =
+  'Not saved: "me" is the person you are talking with. Use "me" as `about` for them, never an entity named "me".';
+
+/** Whether `about` is a new entity whose only name is "me", in any case. */
+const isNamedMe = (about: Proposed["about"]): boolean =>
+  about !== "me" &&
+  about.id === undefined &&
+  about.name.trim().toLocaleLowerCase() === "me";
 
 /** What the model is told of a memory that isn't the person's word. */
 const notTheirWords =
@@ -265,6 +286,9 @@ export const rememberTool = (
   parameters,
   executionMode: "sequential",
   execute: async (toolCallId, input, signal) => {
+    if (isNamedMe(input.about)) {
+      throw new Error(namedMe);
+    }
     if (!isTheirWords(said, input.quote)) {
       throw new Error(notTheirWords);
     }
@@ -306,9 +330,7 @@ export const rememberTool = (
         memory: saved.memory,
         statement: input.statement,
         // Who or what it is about, when it isn't the person themselves.
-        ...("self" in about.subject
-          ? {}
-          : { about: about.subject.names[0] ?? "" }),
+        ...("self" in about.subject ? {} : { about: about.subject.name }),
       },
     };
   },

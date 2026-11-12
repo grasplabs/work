@@ -369,6 +369,38 @@ describe("the agent remembering in a person's own chat", () => {
     }
   );
 
+  it("never makes the person into an entity named me", slow, async () => {
+    const member = await signedInApi(idp, "user");
+    const chats = await personalChatsOf(
+      member.userId,
+      toolStep("remember", {
+        about: { kind: "person", name: " Me " },
+        attribute: "preference",
+        value: "Dutch",
+        type: "preference",
+        statement: "Wants answers in Dutch",
+        quote: "always want answers in Dutch",
+      }),
+      says("Noted.")
+    );
+    const { chat, ask } = await chats.newChat();
+    await ask("I always want answers in Dutch.");
+    const results = await toolResults(chats.stub, chat.id);
+
+    expect({
+      refused: results.map(({ isError, text }) => ({
+        isError,
+        told: text.includes('Use "me" as `about`'),
+      })),
+      kept: await keptFor(member.userId, "me"),
+      checks: checksSent(chats.provider).length,
+    }).toStrictEqual({
+      refused: [{ isError: true, told: true }],
+      kept: [],
+      checks: 0,
+    });
+  });
+
   it("keeps nothing in a chat others share in Grasp's app", slow, async () => {
     const [member, colleague] = await Promise.all([
       signedInApi(idp, "user"),

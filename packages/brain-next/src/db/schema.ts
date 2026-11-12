@@ -766,3 +766,19 @@ export const memoryChanges = sqliteTable("memory_changes", {
   hash: text().notNull(),
   answer: text().notNull(),
 });
+
+/**
+ * How far the start-up replay of erasures on memories has come (erasure.ts
+ * `replayMemoryErasures`): the highest `erasures` rowid it applied. One
+ * row. A table older releases do not know, so an erasure one records
+ * after a rollback is above it, and replayed after the roll forward; a
+ * restore brings the mark back with its copy.
+ */
+export const memoryErasureReplay = sqliteTable(
+  "memory_erasure_replay",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+  },
+  () => [check("memory_erasure_replay_one", sql.raw("id = 1"))]
+);

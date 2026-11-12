@@ -18,6 +18,15 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/**
+ * What an add says that an erasure closed: to an erased source, whose key
+ * is closed for good, or for a person alone that began before that
+ * person's erasure (erasure.ts). Said only to the producer that adds it,
+ * which never retries it: the message alone, so a producer tells it from
+ * any other failure by comparing it whole.
+ */
+export const erasedSource = "The Brain refused it: what this adds was erased";
+
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
 
@@ -120,6 +129,17 @@ export const accessSchema = z.discriminatedUnion("kind", [
 export type Access = z.infer<typeof accessSchema>;
 
 /**
+ * Whether `text` is within a source's bound (`sourceTextMaxBytes`), as
+ * given and as the word index takes it: folding can grow a text many
+ * times (a compatibility form such as "ﷺ" is 3 bytes, and 33 folded), so
+ * the bound holds for both. The one rule of it, which an add checks and a
+ * host fits a text to before it adds.
+ */
+export const fitsSourceText = (text: string): boolean =>
+  byteLengthOf(text) <= sourceTextMaxBytes &&
+  byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes;
+
+/**
  * A version of a source to add: which source, the change it is, its text,
  * and who may read this version.
  */
@@ -133,10 +153,7 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,
     })
-    // Folding can grow a text many times (a compatibility form such as
-    // "ﷺ" is 3 bytes, and 33 folded), so the bound holds for what the
-    // word index takes too.
-    .refine((text) => byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes, {
+    .refine((text) => fitsSourceText(text), {
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
@@ -890,6 +907,85 @@ export interface Embedders {
   embed: (request: EmbedRequest) => Promise<EmbedReply>;
 }
 
+// Hand-overs: what the host produces (a workflow run, say) reaches the
+// Brain through its work queue, never in a call that adds it at once. The
+// host puts a source's key on the queue (`handOver`); the item, as it
+// runs, asks the host to hand that source over (`HandOvers.handOver`): the
+// host reads it from its records then and adds it, through its own way
+// of adding, which picks the store its readers belong in. A hand-over
+// that fails is retried and, after too many failures, parked where staff
+// see it.
+
+/** The classes of work a hand-over may take (work.ts `workPriorities`). */
+export const handOverPriorities = ["conversation"] as const;
+export type HandOverPriority = (typeof handOverPriorities)[number];
+
+/** Most sources one `handOver` puts on the queue. */
+export const handOversMax = 100;
+
+/** Sources to put on the queue, each with its class of work. */
+export const handOverRequestSchema = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        source: sourceIdSchema,
+        priority: z.enum(handOverPriorities),
+      })
+    )
+    .min(1)
+    .max(handOversMax),
+});
+export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
+
+/**
+ * Why a hand-over was refused for good: what it adds was erased (its key
+ * is closed, or its one reader's erasure began), the host's answer can't
+ * be added (no readers, a text that isn't one), or its text is past a
+ * source's bound with nothing smaller to keep.
+ */
+export const handOverRefusals = ["erased", "invalid", "too_large"] as const;
+export type HandOverRefusal = (typeof handOverRefusals)[number];
+
+/**
+ * How a hand-over ended, as the host says it: added as `version`, nothing
+ * to add (the source is gone), or refused for good. Each settles the item
+ * as done; only a throw tries it again.
+ */
+export const handOverResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("added"), version: z.int().positive() }),
+  z.strictObject({ kind: z.literal("nothing") }),
+  z.strictObject({
+    kind: z.literal("refused"),
+    reason: z.enum(handOverRefusals),
+  }),
+]);
+export type HandOverResult = z.infer<typeof handOverResultSchema>;
+
+/** The host's side of hand-overs, as the shared store's work uses it. */
+export interface HandOvers {
+  /**
+   * Hands `source` over as the host's records hold it now, and says how
+   * it ended (`HandOverResult`). Throws only for a failure worth trying
+   * again (a store out of reach, an audit write that failed). Safe to
+   * repeat.
+   */
+  handOver: (source: SourceId) => Promise<HandOverResult>;
+}
+
+/**
+ * One tick of a store (`Brain.work`): its time, the host's model calls and
+ * embedders, and the host's side of hand-overs. Hand-overs are the shared
+ * store's alone: the shared store's tick hands them over with these, and
+ * a person's own store, which never queues one (`handOver` refuses), has
+ * none to hand over whatever it is given.
+ */
+export interface WorkRequest {
+  ask: AskModel;
+  at: Date;
+  embedders: Embedders;
+  handOvers: HandOvers;
+}
+
 /**
  * A step of the tick that didn't finish: when, and why, as a code of the
  * store's own (R2 didn't answer in time, or the step failed), never an
@@ -1568,19 +1664,29 @@ export type ContestedRequest = z.input<typeof contestedRequestSchema>;
  */
 export interface ContestedPage {
   facts: ContestedFact[];
+  /** The moment the page was read at: what a fact's sides are read as of. */
+  at: Date;
   more: boolean;
   next?: ContestedCursor;
 }
 
+/** Most sides of a contested fact a listing gives with it. */
+export const factSidesShown = 10;
+
 /**
  * A contested fact: an entity's one-value attribute for which the reader
  * may read current memories of more than one lineage saying different
- * things; each with its source, confirmed first, then the newest.
+ * things; its first `factSidesShown`, each with its source, in
+ * `readMemories`' order (confirmed first, then the newest), and whether
+ * more follow. All of them are `readMemories({ entity: about, attribute,
+ * reader, asOf: page.at })`, paged as it pages, from the first again: for
+ * a one-value attribute its current memories are exactly the sides.
  */
 export interface ContestedFact {
   about: EntityId;
   attribute: string;
   memories: Memory[];
+  more: boolean;
 }
 
 /**
@@ -1653,15 +1759,61 @@ export const entityRequestSchema = z.strictObject({
 export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
 /**
- * An entity as a reader sees it: its kind, and the names and identifiers
- * given by memories the reader may read, each once, the earliest first:
- * every one of them.
+ * An entity as a reader sees it: its kind, and its earliest name a memory
+ * the reader may read gave (by when that memory was learned, then its
+ * id), or null. Every name and identifier they may see is read a page at
+ * a time (`readEntityNames`).
  */
 export interface Entity {
   id: EntityId;
   kind: EntityKind;
-  names: string[];
-  identifiers: Identifier[];
+  name: string | null;
+}
+
+/** A name or an exact identifier of an entity, as a memory gave it. */
+export interface EntityName {
+  type: "name" | "email" | "ref";
+  value: string;
+}
+
+/**
+ * Where a page of `readEntityNames` ended: the moment the first page was
+ * read (`at`), at which every later page is read too; and its last name's
+ * place (when the first memory the reader may read that gave it was
+ * learned, that memory's id, its type and its folded form).
+ */
+export const entityNamesCursorSchema = z.strictObject({
+  at: z.date(),
+  learnedAt: z.date(),
+  memory: memoryIdSchema,
+  type: z.enum(["name", "email", "ref"]),
+  folded: wellFormedString().max(1000),
+});
+export type EntityNamesCursor = z.infer<typeof entityNamesCursorSchema>;
+
+/**
+ * The names and identifiers of an entity to read, for a reader: a page of
+ * at most `limit`, after `after`.
+ */
+export const entityNamesRequestSchema = z.strictObject({
+  entity: entityIdSchema,
+  reader: readerSchema,
+  after: entityNamesCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type EntityNamesRequest = z.input<typeof entityNamesRequestSchema>;
+
+/**
+ * A page of every name and identifier of an entity a memory the reader
+ * may read gave, each once, in the order of that first memory (learned,
+ * then id), then type, then folded form; whether more follow, and where to
+ * go on from. None for an entity the reader may not see, as for one no
+ * one added.
+ */
+export interface EntityNamesPage {
+  names: EntityName[];
+  more: boolean;
+  next?: EntityNamesCursor;
 }
 
 /**
@@ -1766,11 +1918,20 @@ export interface Brain {
    * removed. Then it works the queue: runs what is due, a few at a time,
    * asking `ask` for the model calls it makes and `embedders` for vectors,
    * and returns once what it started has ended and nothing more is due,
-   * or its time to start more is up. `ask` and `embedders` are used only
-   * while this call is open. A second tick at the same time shares the same
-   * limits and claims nothing the first has under way.
+   * or its time to start more is up. `ask`, `embedders` and `handOvers`
+   * (the host's side of hand-overs) are used only while this call is open.
+   * A second tick at the same time shares the same limits and claims
+   * nothing the first has under way.
    */
-  work: (ask: AskModel, at: Date, embedders: Embedders) => Promise<void>;
+  work: (request: WorkRequest) => Promise<void>;
+  /**
+   * Puts each source on the work queue to be handed over (above), in
+   * place of one of its hand-overs still waiting or parked. What the item
+   * adds is whatever the host's `HandOvers.handOver` adds when it runs:
+   * so putting a source on twice, or late, adds nothing twice and nothing
+   * stale. The shared store's alone: a person's own store refuses it.
+   */
+  handOver: (request: HandOverRequest) => Promise<void>;
   /**
    * Starts the rebuild for the host's model again: every current version
    * with chunks it hasn't embedded goes on the queue again, those parked
@@ -1895,6 +2056,11 @@ export interface Brain {
    * memory they may read that mentions each.
    */
   findEntities: (request: EntitiesRequest) => Promise<EntityPage>;
+  /**
+   * A page of the names and identifiers of an entity the reader may see
+   * (`EntityNamesPage`).
+   */
+  readEntityNames: (request: EntityNamesRequest) => Promise<EntityNamesPage>;
   /** An entity, if the reader may see it; null alike when there is none. */
   readEntity: (request: EntityRequest) => Promise<Entity | null>;
 }

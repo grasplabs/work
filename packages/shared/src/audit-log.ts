@@ -145,6 +145,9 @@ const typeRules: readonly {
   // for a person, or retired by them, its attempt and then its outcome.
   // Ids and codes only, never what a memory says.
   { action: "brain.memory", type: "action" },
+  // Core handing a source over to the new Brain (GRA-1727): started, handed
+  // over or refused, by ids alone.
+  { action: "brain.source", type: "action" },
   { action: "knowledge.search", type: "read" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },

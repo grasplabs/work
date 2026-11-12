@@ -234,6 +234,18 @@ const valueKeyOf = (
   return plan.object === undefined ? null : (ids[plan.object] ?? null);
 };
 
+/** The SHA-256 of `source`, which the add hashed before its transaction. */
+const subjectOfSource = (
+  subjects: ReadonlyMap<string, string>,
+  source: string
+): string => {
+  const subject = subjects.get(source);
+  if (subject === undefined) {
+    throw new Error("The Brain did not hash a source it adds");
+  }
+  return subject;
+};
+
 /** Where a memory's basis puts it: its version, writer, lineage and place in that lineage. */
 const basisOf = (
   { sql, subjects }: Into,
@@ -266,7 +278,7 @@ const basisOf = (
   return {
     source: basis.source,
     version: basis.version,
-    subject: subjects.get(basis.source) ?? null,
+    subject: subjectOfSource(subjects, basis.source),
     writer: null,
     lineage: lineageOfSource(basis.source),
     order: basis.version,
@@ -364,7 +376,7 @@ const markExtracted = (
     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     source,
     version,
-    subjects.get(source) ?? "",
+    subjectOfSource(subjects, source),
     lineageOfSource(source),
     learnedAt,
     readers,
@@ -374,12 +386,15 @@ const markExtracted = (
 
 /**
  * Adds `adding` (above), or answers what its change added before. Its
+ * memories are learned at `learnedAt()`, asked inside the transaction
+ * (store.ts: past every moment a read was issued). Its
  * memories are readable by its `access` (and, resting on a version, by
  * that version's readers too: memories.ts).
  */
 export const addMemories = async (
   { storage, db }: RememberStore,
-  adding: Adding
+  adding: Adding,
+  learnedAt: () => number
 ): Promise<AddedMemories> => {
   const planned = planOf(adding);
   const { sql } = storage;
@@ -448,7 +463,7 @@ export const addMemories = async (
       ids,
       readers,
       subjects,
-      learnedAt: Date.now(),
+      learnedAt: learnedAt(),
       onlyFor,
       memo: new Map(),
     };

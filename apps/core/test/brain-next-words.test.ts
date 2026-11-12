@@ -15,6 +15,7 @@ import {
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
 
 // Recall finds words in their other forms (GRA-1725): every word is
@@ -412,7 +413,7 @@ const clock = { at: Date.now() };
 /** One tick of core's clock, a minute after the last. */
 const tick = async (): Promise<void> => {
   clock.at = Math.max(clock.at, Date.now()) + 60_000;
-  await workBrain(env, new Date(clock.at));
+  await workBrain(env, new Date(clock.at), noProducers);
 };
 
 /** Ticks until the store's word indexes are current: how many it took. */

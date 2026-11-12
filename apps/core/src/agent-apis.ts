@@ -13,6 +13,7 @@ import { knowledgeApi } from "./agent-knowledge.ts";
 import { memoryApi } from "./agent-memory.ts";
 import { auditRefusal, auditToolCall, requireOpenRun } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { skillsApi } from "./agent-skills.ts";
 import { workflowBuildApi } from "./agent-workflow-build.ts";
 import { workflowsApi } from "./agent-workflows.ts";
 import { workspace } from "./durable-objects.ts";
@@ -287,6 +288,7 @@ export const agentApis: readonly AgentApi[] = [
   workflowsApi,
   workflowBuildApi,
   memoryApi,
+  skillsApi,
   brainAgentApi,
   dashboardApi,
 ].map((api) => ({
@@ -295,13 +297,17 @@ export const agentApis: readonly AgentApi[] = [
 }));
 
 /**
- * What a chat others share gets of the agent's APIs: its chat, and
- * Knowledge, read for everyone in it. No connections, so nothing is read
+ * What a chat others share gets of the agent's APIs: its chat, Knowledge,
+ * read for everyone in it, and the skills, which every member may read. No connections, so nothing is read
  * from or written to anyone's own accounts, and nothing is held for a
  * person to confirm; no Apps, builds, workflows or memory saves, which act
  * as the one person who asked; no brain, which reads as that person.
  */
-const sharedApiNames: ReadonlySet<string> = new Set(["chat", "knowledge"]);
+const sharedApiNames: ReadonlySet<string> = new Set([
+  "chat",
+  "knowledge",
+  "skills",
+]);
 const sharedApis = agentApis.filter(({ name }) => sharedApiNames.has(name));
 
 /** A person's own chat's APIs, its agent without the brain permission. */
