@@ -1,5 +1,7 @@
 import { packItemTokens } from "./contract.ts";
 import type { Pack, PackItem } from "./contract.ts";
+import { datesIn, sameDay } from "./dates.ts";
+import type { Day } from "./dates.ts";
 import { foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { holdsTerm, placedOf, sequenceOf, wordsOf } from "./words.ts";
@@ -94,11 +96,28 @@ const piecesOf = (text: string): string[] => {
   return pieces.filter((piece) => piece.length > 0);
 };
 
-/** What a quote is chosen for: the question's telling words and exact parts. */
+/**
+ * What a quote is chosen for: the question's telling words, its exact
+ * parts, and its dates, each as the days it may be.
+ */
 export interface Asked {
   terms: readonly Word[];
   exacts: readonly Exact[];
+  dates?: readonly (readonly Day[])[];
 }
+
+/** Where `text` writes any of `dates`, each `[start, end)`, in order. */
+const placesOfDates = (
+  text: string,
+  dates: readonly (readonly Day[])[]
+): [number, number][] =>
+  datesIn(text)
+    .filter(({ days }) =>
+      dates.some((asked) =>
+        asked.some((day) => days.some((written) => sameDay(written, day)))
+      )
+    )
+    .map(({ start, end }) => [start, end]);
 
 /**
  * Where in `text` the first of `exacts` it holds is written, `[start,
@@ -161,7 +180,7 @@ const windowOf = (text: string, start: number, end: number): string => {
  */
 export const quoteOf = (
   text: string,
-  { terms, exacts }: Asked,
+  { terms, exacts, dates = [] }: Asked,
   memo: WordMemo = new Map()
 ): string => {
   const parts = [...sentences.segment(text)].flatMap(({ segment }) =>
@@ -173,7 +192,9 @@ export const quoteOf = (
   let bestExact = 0;
   for (const part of parts) {
     const words = wordsOf(part, memo);
-    const exact = foundIn(sequenceOf(part), exacts, every).length;
+    const exact =
+      foundIn(sequenceOf(part), exacts, every).length +
+      placesOfDates(part, dates).length;
     const score =
       exact * (terms.length + 1) +
       terms.filter((term) => holdsTerm(words, term)).length;
@@ -186,7 +207,7 @@ export const quoteOf = (
   if (bestExact > 0) {
     return best;
   }
-  const place = placeOfExact(text, exacts);
+  const place = placeOfExact(text, exacts) ?? placesOfDates(text, dates)[0];
   return place === undefined ? best : windowOf(text, place[0], place[1]);
 };
 

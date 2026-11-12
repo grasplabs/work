@@ -1,7 +1,8 @@
 import { exactCandidatesMax, recallLimit } from "./contract.ts";
 import type { FoundBy, Pack, Reader, RecallRequest } from "./contract.ts";
-import { exactsOf, foundIn } from "./exact.ts";
-import type { Exact } from "./exact.ts";
+import { monthDayOf } from "./dates.ts";
+import { askedOf, foundIn } from "./exact.ts";
+import type { AskedDate, Exact } from "./exact.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Found } from "./pack.ts";
 import { readableSql } from "./reader-sets.ts";
@@ -243,6 +244,54 @@ GROUP BY chunks.row
 ORDER BY length(chunks.text), source_versions.added_at DESC,
   source_versions.source, chunks.position`;
 
+/**
+ * `?1` the question's dates (JSON: each a list of the days it may be, as
+ * `[year, monthday]`, year 0 for none), `?2` the reader's person, `?3`
+ * their groups (JSON), `?4` the most to check of each date: the chunks the
+ * reader may read that write one of its days (`chunk_days`, the same year
+ * or either naming none), each with the dates (by index) within whose
+ * most it is (`parts`), shortest first, then newer, and those whose most
+ * it is the first past (`past`), which are capped. As the exact way's
+ * statement, the cap counts only what the reader may read.
+ */
+const dateSql = (asOf: number | undefined): string => `
+WITH ${readableSql},
+asked AS (
+  SELECT asked.key AS part, day.value ->> '$[0]' AS year,
+    day.value ->> '$[1]' AS monthday
+  FROM json_each(?1) AS asked
+  CROSS JOIN json_each(asked.value) AS day
+),
+found AS (
+  SELECT DISTINCT chunks.row AS row, asked.part AS part
+  FROM asked
+  CROSS JOIN chunk_days
+  JOIN chunks ON chunks.row = chunk_days.chunk${searched(asOf)}
+    AND chunk_days.monthday = asked.monthday
+    AND (asked.year = 0 OR chunk_days.year IN (asked.year, 0))
+),
+ranked AS (
+  SELECT found.row AS row, found.part AS part,
+    row_number() OVER (
+      PARTITION BY found.part
+      ORDER BY length(chunks.text), source_versions.added_at DESC,
+        source_versions.source, chunks.position
+    ) AS rank
+  FROM found
+  JOIN chunks ON chunks.row = found.row
+  JOIN source_versions ON source_versions.row = chunks.version_row
+)
+SELECT ${chunkColumns},
+  json_group_array(ranked.part) FILTER (WHERE ranked.rank <= ?4) AS parts,
+  json_group_array(ranked.part) FILTER (WHERE ranked.rank > ?4) AS past
+FROM ranked
+JOIN chunks ON chunks.row = ranked.row
+JOIN source_versions ON source_versions.row = chunks.version_row
+WHERE ranked.rank <= ?4 + 1
+GROUP BY chunks.row
+ORDER BY length(chunks.text), source_versions.added_at DESC,
+  source_versions.source, chunks.position`;
+
 /** A chunk a statement found. */
 interface Row extends Record<string, SqlStorageValue> {
   row: number;
@@ -387,36 +436,111 @@ const byExact = (
 };
 
 /**
+ * The date way: for each date the question asks for, the chunks the
+ * reader may read writing one of its days (`dateSql`), the dates it
+ * found, and those it capped. Asked before the words way, which leaves out
+ * the words of each date found here (`recall`).
+ */
+const byDates = (
+  sql: SqlStorage,
+  dates: readonly AskedDate[],
+  reader: Reader,
+  asOf: AsOf
+): {
+  rows: (Row & { parts: string })[];
+  parts: Set<number>;
+  capped: Set<number>;
+} => {
+  if (dates.length === 0) {
+    return { rows: [], parts: new Set(), capped: new Set() };
+  }
+  const rows = sql
+    .exec<Row & { parts: string; past: string }>(
+      dateSql(asOf.length > 0 ? 5 : undefined),
+      JSON.stringify(
+        dates.map(({ days }) => days.map((day) => [day.year, monthDayOf(day)]))
+      ),
+      reader.person,
+      JSON.stringify(reader.groups),
+      exactCandidatesMax,
+      ...asOf
+    )
+    .toArray();
+  return {
+    rows,
+    parts: new Set(rows.flatMap(({ parts }) => indexesOf(parts))),
+    capped: new Set(rows.flatMap(({ past }) => indexesOf(past))),
+  };
+};
+
+/**
+ * Each date's list for the fusion: the chunks writing one of its days, in
+ * the words way's order (`byWordsRank`), then as the statement orders
+ * them, as an exact part's list is ordered (`byExact`).
+ */
+const dateLists = (
+  dates: readonly AskedDate[],
+  rows: readonly (Row & { parts: string })[],
+  byWordsRank: ReadonlyMap<number, number>
+): Found[][] => {
+  const rankOf = ({ row }: Row): number => byWordsRank.get(row) ?? recallLimit;
+  return dates.map((_, part) =>
+    foundAs(
+      rows
+        .filter(({ parts }) => indexesOf(parts).includes(part))
+        .toSorted((a, b) => rankOf(a) - rankOf(b))
+        .slice(0, recallLimit),
+      "exact"
+    )
+  );
+};
+
+/**
  * What the reader may read for the question, as a pack within its budget
- * (contract.ts `Brain.recall`): the exact way's lists, one per part, and
- * the words way's, fused by rank (the exact parts' first on a tie, in the
- * question's order), and the parts of the
- * question neither found: its exact parts, but those capped, then its
- * telling words, but those of its IDs.
+ * (contract.ts `Brain.recall`): the exact way's lists, one per part, the
+ * date way's, one per date, and the words way's, fused by rank (in that
+ * order on a tie, each in the question's order), and the parts of the
+ * question none found: its exact parts and its dates, but those capped,
+ * then its telling words, but those of its IDs and dates.
  */
 export const recall = (
   sql: SqlStorage,
   { question, reader, budget, asOf }: RecallRequest
 ): Pack => {
-  const exacts = exactsOf(question);
-  const terms = termsOf(question);
-  // An ID stands for its words: none is said not found apart.
-  const standing = new Set(
-    exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words)
-  );
+  const { exacts, dates } = askedOf(question);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  const words = byWords(sql, terms, reader, at);
-  const exact = byExact(
-    sql,
-    exacts,
-    reader,
-    at,
-    new Map(words.found.map(({ row }, rank) => [row, rank]))
+  const dated = byDates(sql, dates, reader, at);
+  // A date the date way found stands for its words: the words way leaves
+  // them out, so the passages writing that day aren't counted for it
+  // twice, once by the day and again by "2026" and "14", and a common day
+  // never outranks the ID or phrase beside it. A date it didn't find keeps
+  // its words in the words way, which may find a form the table doesn't
+  // read ("14-3-26").
+  const datesFound = new Set(
+    dates
+      .filter((_, index) => dated.parts.has(index))
+      .flatMap(({ asked }) => sequenceOf(asked))
   );
+  const asked = termsOf(question);
+  const terms: Terms = {
+    telling: asked.telling.filter(({ word }) => !datesFound.has(word)),
+    stops: asked.stops,
+  };
+  // An ID or a date stands for its words: none is said not found apart.
+  const standing = new Set([
+    ...exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words),
+    ...dates.flatMap(({ asked: date }) => sequenceOf(date)),
+  ]);
+  const words = byWords(sql, terms, reader, at);
+  const byWordsRank = new Map(words.found.map(({ row }, rank) => [row, rank]));
+  const exact = byExact(sql, exacts, reader, at, byWordsRank);
   const notFound = [
     ...exacts
       .filter((_, index) => !exact.parts.has(index) && !exact.capped.has(index))
       .map(({ asked: part }) => part),
+    ...dates
+      .filter((_, index) => !dated.parts.has(index) && !dated.capped.has(index))
+      .map(({ asked: date }) => date),
     ...terms.telling
       .filter(
         ({ word }, index) => !words.terms.has(index) && !standing.has(word)
@@ -424,8 +548,12 @@ export const recall = (
       .map(({ word }) => word),
   ];
   return packOf(
-    fuse([...exact.lists, words.found]),
-    { terms: terms.telling, exacts },
+    fuse([
+      ...exact.lists,
+      ...dateLists(dates, dated.rows, byWordsRank),
+      words.found,
+    ]),
+    { terms: terms.telling, exacts, dates: dates.map(({ days }) => days) },
     budget.tokens,
     notFound
   );

@@ -46,12 +46,12 @@ describe("the exact parts of a question", () => {
       ['"PO-17', ["PO-17"]],
       ["PO-17:", ["PO-17"]],
       ["PO-17?", ["PO-17"]],
-      // Known and accepted: names of a kind, a timestamp (its colons end
-      // an ID), a compact date, an amount with five digits in a row.
+      // Known and accepted: names of a kind, a compact date, an amount
+      // with five digits in a row. A timestamp is a date (dates.ts).
       ["v2.1", ["v2.1"]],
       ["4x4", ["4x4"]],
       ["COVID-19", ["COVID-19"]],
-      ["2026-03-14T09:00:00Z", ["2026-03-14T09", "00Z"]],
+      ["2026-03-14T09:00:00Z", []],
       ["20260314", ["20260314"]],
       ["€1250000", ["1250000"]],
       // Words.

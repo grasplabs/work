@@ -2504,6 +2504,39 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
     });
   });
 
+  it("takes the days an erased source's passages write with them, and no pack finds it by its day", async () => {
+    const reader = await person();
+    const source = newSource();
+    await add(source, `Due ${wordOf(newMark())} on 21 mei 2037`, owner(reader));
+    const rows = await chunkRowsOf(source);
+    const daysOf = async (): Promise<number> =>
+      await runInDurableObject(
+        store(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM chunk_days WHERE chunk IN (SELECT value FROM json_each(?))",
+              JSON.stringify(rows)
+            )
+            .one().count
+      );
+    const before = await daysOf();
+
+    await eraseSource(env, { source, reason: "deleted" });
+    await tickUntilErased();
+    const { items, notFound } = await recallAs(env, reader, {
+      question: "2037-05-21",
+      budget: { tokens: recallBudgetMax },
+    });
+
+    expect({ before, after: await daysOf(), items, notFound }).toStrictEqual({
+      before: 1,
+      after: 0,
+      items: [],
+      notFound: ["2037-05-21"],
+    });
+  });
+
   it("cites a source added again for a person after their erasure at its new version", async () => {
     const reader = await person();
     const mark = newMark();

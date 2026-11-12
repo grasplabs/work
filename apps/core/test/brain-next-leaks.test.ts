@@ -441,14 +441,19 @@ describe(
       // an ID the outsider's own longer chunk holds too: ranked past the
       // hidden ones, it would be missed if the cap counted them.
       const capId = `CAP-${unique()}`;
+      // And two days: one the outsider's own chunk writes too, one only
+      // these copies write.
       for (let index = 0; index <= exactCandidatesMax; index += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one source at a time
-        await add(`Copy ${index} ${ownerMarker} ${capId}`, {
-          kind: "owner",
-          personId: holder,
-        });
+        await add(
+          `Copy ${index} ${ownerMarker} ${capId} 17 juni 2031 4 mei 2032`,
+          {
+            kind: "owner",
+            personId: holder,
+          }
+        );
       }
-      const capped = `The outsider's own, much longer than any copy: ${capId}.`;
+      const capped = `The outsider's own, much longer than any copy: ${capId}, due on 17 June 2031.`;
       await add(capped, { kind: "owner", personId: outsider });
       // The outsider's own source, with more earlier versions than a
       // recall returns, each holding the shared word and shorter than the
@@ -515,6 +520,20 @@ describe(
         text,
         found,
       }));
+      // By the day both write, their own chunk as exact; by the day only
+      // the hidden copies write, the pack of a day nothing writes.
+      const recalled = async (question: string) =>
+        await recallAs(env, outsider, {
+          question,
+          budget: { tokens: recallBudgetMax },
+        });
+      const { items: datedItems } = await recalled("2031-06-17");
+      const datedFinds = datedItems.map(({ text, found }) => ({ text, found }));
+      const hiddenDay = JSON.stringify(await recalled("2032-05-04")).replaceAll(
+        "2032-05-04",
+        "2032-05-05"
+      );
+      const noDay = JSON.stringify(await recalled("2032-05-05"));
 
       const asOutsider = (groups: string[]): Probing => ({
         personId: outsider,
@@ -644,6 +663,8 @@ describe(
         ],
         outsiderFinds,
         cappedFinds,
+        datedFinds,
+        hiddenDay,
         joinedFinds,
         leftFinds,
         holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
@@ -652,6 +673,8 @@ describe(
         findings: [],
         outsiderFinds: [handbook],
         cappedFinds: [{ text: capped, found: "exact" }],
+        datedFinds: [{ text: capped, found: "exact" }],
+        hiddenDay: noDay,
         joinedFinds: [teamSource],
         leftFinds: [],
         holderAppFile: true,

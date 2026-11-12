@@ -1,3 +1,5 @@
+import { datesIn } from "./dates.ts";
+import type { Day } from "./dates.ts";
 import { allOf, sequenceOf } from "./words.ts";
 
 // The exact way of recall: the parts of a question that must be found as
@@ -20,8 +22,9 @@ import { allOf, sequenceOf } from "./words.ts";
 //    IDs, each would get a list of its own and crowd out the passage that
 //    writes it otherwise ("14 maart 2026", "tweede kwartaal"). Known and
 //    accepted, the rule unchanged: v2.1, 4x4 and COVID-19 are IDs (names
-//    of a kind), and so are the parts of a timestamp its colons part
-//    (2026-03-14T09 and 00Z of 2026-03-14T09:00:00Z: T and Z are letters), a compact date (20260314) and an amount with five
+//    of a kind), and so are a compact date (20260314, not one of the
+//    date forms of dates.ts; a timestamp such as 2026-03-14T09:00:00Z is
+//    one, so it is a date and no ID) and an amount with five
 //    digits in a row (€1250000). Such a token is found only as written,
 //    and is reported in `notFound` when no passage the reader may read
 //    writes it that way. #4521 is not an ID (four digits: found as a
@@ -33,7 +36,9 @@ import { allOf, sequenceOf } from "./words.ts";
 // indexing (GRA-1798); names are left to the words way, since no rule
 // tells a name from a sentence's first word or a run of German nouns.
 //
-// A phrase is read first and is then no longer there for the IDs.
+// A phrase is read first and is then no longer there for the IDs; nor is a
+// date (dates.ts), which recall matches by the days passages write, so a
+// timestamp is a date and not two IDs.
 //
 // What the word index holds of a chunk is its distinct words, so it finds
 // the chunks holding every word of a part (`query`), and the order is
@@ -115,11 +120,20 @@ const idsOf = (text: string): Exact[] =>
     return exact === undefined ? [] : [exact];
   });
 
+/** A date a question asks for: as it wrote it, and the days it may be. */
+export interface AskedDate {
+  asked: string;
+  days: Day[];
+}
+
 /**
  * The parts of `question` to find as written (above), in the order the
- * rules take them, each once, at most `maxExacts`.
+ * rules take them, each once, at most `maxExacts`; and the dates it asks
+ * for (dates.ts), each once, at most `maxExacts`.
  */
-export const exactsOf = (question: string): Exact[] => {
+export const askedOf = (
+  question: string
+): { exacts: Exact[]; dates: AskedDate[] } => {
   const phrases: Exact[] = [];
   const rest = question.replaceAll(quoted, (whole, inner: string) => {
     const exact = exactOf(inner.trim(), sequenceOf(inner), "phrase");
@@ -129,8 +143,25 @@ export const exactsOf = (question: string): Exact[] => {
     phrases.push(exact);
     return " ";
   });
+  const written = datesIn(rest);
+  const seenDays = new Set<string>();
+  const dates = written
+    .map(({ start, end, days }) => ({ asked: rest.slice(start, end), days }))
+    .filter(({ days }) => {
+      const key = JSON.stringify(days);
+      if (seenDays.has(key)) {
+        return false;
+      }
+      seenDays.add(key);
+      return true;
+    })
+    .slice(0, maxExacts);
+  let undated = rest;
+  for (const { start, end } of written.toReversed()) {
+    undated = `${undated.slice(0, start)} ${undated.slice(end)}`;
+  }
   const seen = new Set<string>();
-  return [...phrases, ...idsOf(rest)]
+  const exacts = [...phrases, ...idsOf(undated)]
     .filter(({ words }) => {
       const key = words.join(" ");
       if (seen.has(key)) {
@@ -140,7 +171,11 @@ export const exactsOf = (question: string): Exact[] => {
       return true;
     })
     .slice(0, maxExacts);
+  return { exacts, dates };
 };
+
+/** The exact parts of `question` (`askedOf`). */
+export const exactsOf = (question: string): Exact[] => askedOf(question).exacts;
 
 /** Whether `words` hold `part`'s words in a row, in its order. */
 const holdsInARow = (

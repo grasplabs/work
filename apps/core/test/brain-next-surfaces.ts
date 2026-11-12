@@ -338,6 +338,10 @@ const askedOf = (
       name: "the markers and a date",
       text: (words) => `${words.join(" ")} 14 maart 2026`,
     },
+    {
+      name: "the markers and a day the marked copies write",
+      text: (words) => `${words.join(" ")} on 2032-05-04`,
+    },
     { name: "the shared word and the markers", text: withShared },
     ...[1, 40].map((tokens) => ({
       name: `the shared word and the markers in ${tokens} tokens`,

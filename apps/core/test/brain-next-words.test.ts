@@ -406,6 +406,12 @@ const wordIndexState = async () =>
       .one()
   );
 
+/**
+ * The rules the word index is built by now (words.ts `wordsVersion`): 3
+ * since the days each chunk writes are indexed with its words (GRA-1798).
+ */
+const wordRules = 3;
+
 /** The queue's clock across the file: only forward, as core's clock goes. */
 const clock = { at: Date.now() };
 
@@ -420,7 +426,7 @@ const ticksUntilRebuilt = async (most = 100): Promise<number> => {
   for (let ticks = 0; ticks < most; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time
     const { version } = await wordIndexState();
-    if (version === 2) {
+    if (version === wordRules) {
       return ticks;
     }
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time
@@ -554,7 +560,9 @@ describe(
 
       expect({
         midway:
-          midway.version === 1 && midway.target === 2 && midway.cursor > 0,
+          midway.version === 1 &&
+          midway.target === wordRules &&
+          midway.cursor > 0,
         rebuilt: Number.isFinite(ticks),
         indexed,
         found: chunks.length,
@@ -580,7 +588,7 @@ describe(
             )
             .one()
         )
-      ).resolves.toStrictEqual({ version: 2, cursor: 0 });
+      ).resolves.toStrictEqual({ version: wordRules, cursor: 0 });
     });
   }
 );

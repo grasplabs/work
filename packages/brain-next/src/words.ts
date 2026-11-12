@@ -1,3 +1,4 @@
+import { datesIn, monthDayOf } from "./dates.ts";
 import DutchStemmer from "./snowball/dutch-stemmer.js";
 import EnglishStemmer from "./snowball/english-stemmer.js";
 import FrenchStemmer from "./snowball/french-stemmer.js";
@@ -399,6 +400,17 @@ export const indexWords = (
   const { words, stems } = indexedOf(text, memo);
   sql.exec("INSERT INTO chunk_words (rowid, text) VALUES (?, ?)", row, words);
   sql.exec("INSERT INTO chunk_stems (rowid, stems) VALUES (?, ?)", row, stems);
+  // And the calendar days it writes, each once (dates.ts).
+  for (const date of datesIn(text)) {
+    for (const day of date.days) {
+      sql.exec(
+        "INSERT OR IGNORE INTO chunk_days (chunk, year, monthday) VALUES (?, ?, ?)",
+        row,
+        day.year,
+        monthDayOf(day)
+      );
+    }
+  }
 };
 
 /**
@@ -407,7 +419,9 @@ export const indexWords = (
  * indexes hold of a chunk change, and every store rebuilds its word
  * indexes from its chunks' text (`reindexWords`). The stop words are read
  * from the question alone, so changing them needs no bump. 1: words folded
- * without the primary letters, no stems; 2: stems (GRA-1725). A store's
+ * without the primary letters, no stems; 2: stems (GRA-1725); 3: the
+ * calendar days each chunk writes (`chunk_days`, GRA-1798), so changing
+ * the date forms (dates.ts) needs a bump too. A store's
  * number is 0 when its indexes were made anew and empty (migration 0006,
  * GRA-1729), so it rebuilds them whatever the rules. A store marked
  * current stays so: rolled back to a release with older rules, it indexes
@@ -415,7 +429,7 @@ export const indexWords = (
  * the store reads current; they are recalled by the older rules until the
  * number is bumped again (nothing leaks).
  */
-export const wordsVersion = 2;
+export const wordsVersion = 3;
 
 /**
  * Most chunks a tick re-indexes while a store's word indexes are behind
@@ -485,6 +499,7 @@ export const reindexWords = (
   for (const { row, text } of batch) {
     sql.exec("DELETE FROM chunk_words WHERE rowid = ?", row);
     sql.exec("DELETE FROM chunk_stems WHERE rowid = ?", row);
+    sql.exec("DELETE FROM chunk_days WHERE chunk = ?", row);
     indexWords(sql, row, text, memo);
   }
   const last = batch.at(-1);

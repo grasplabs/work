@@ -197,9 +197,50 @@ const isStop = (token: Token): boolean => token.startsWith(stopPrefix);
 const isId = (token: Token): boolean =>
   !isStop(token) && (token.startsWith("a") || token.startsWith("b"));
 
-/** A token's root: its letter, or the stop word itself. */
+/**
+ * Two days a paragraph may write, each in three forms (dates.ts reads all
+ * of them), with the words search reads of each form: digits, which no
+ * stemmer rewrites, and month names and ordinals no question writes. A
+ * date token is `@<day><form>`; a question writes the ISO form (1).
+ */
+const dateForms = [
+  [
+    ["17 juni 2031", ["17", "juni", "2031"]],
+    ["2031-06-17", ["2031", "06", "17"]],
+    ["June 17th, 2031", ["june", "17th", "2031"]],
+  ],
+  [
+    ["3 maart 2032", ["3", "maart", "2032"]],
+    ["2032-03-03", ["2032", "03"]],
+    ["March 3rd, 2032", ["march", "3rd", "2032"]],
+  ],
+] as const;
+
+const datePrefix = "@";
+
+const isDate = (token: Token): boolean => token.startsWith(datePrefix);
+
+/** A date token's day and form. */
+const dateOf = (token: Token) =>
+  dateForms[Number(token.charAt(1))]?.[Number(token.charAt(2))];
+
+/** A date token's day: the same for each of its forms. */
+const dayOf = (token: Token): string => token.slice(0, 2);
+
+/** A word of a date's form, as the words way sees it: `#<word>`. */
+const dateWordPrefix = "#";
+
+/** `tokens` as the words way reads them: each date as its form's words. */
+const expanded = (tokens: readonly Token[]): Token[] =>
+  tokens.flatMap((token) =>
+    isDate(token)
+      ? (dateOf(token)?.[1] ?? []).map((word) => `${dateWordPrefix}${word}`)
+      : [token]
+  );
+
+/** A token's root: its letter, or the stop word or date word itself. */
 const rootOf = (token: Token): string =>
-  isStop(token) ? token : token.slice(0, 1);
+  isStop(token) || token.startsWith(dateWordPrefix) ? token : token.slice(0, 1);
 
 /** The draws a scenario is made of, from its seed. */
 const drawsOf = (seed: number) => {
@@ -273,17 +314,28 @@ const vocabulary = (seed: number) => {
   // c and d of letters alone, each digit a consonant, so they are words.
   const idPrefix = `r11${hex.slice(2)}`;
   const wordPrefix = `r${hex.replaceAll(/\d/gu, (digit) => "ghjklmnpst".charAt(Number(digit)))}`;
-  return (token: Token): string =>
-    isStop(token)
-      ? token.slice(stopPrefix.length)
-      : `${isId(token) ? idPrefix : wordPrefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
+  return (token: Token): string => {
+    if (isStop(token)) {
+      return token.slice(stopPrefix.length);
+    }
+    if (isDate(token)) {
+      return dateOf(token)?.[0] ?? "";
+    }
+    if (token.startsWith(dateWordPrefix)) {
+      return token.slice(dateWordPrefix.length);
+    }
+    return `${isId(token) ? idPrefix : wordPrefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
+  };
 };
 
 /** Characters of the longest word: "r", eight hex digits, its letter and ending. */
 const wordLength = 10 + Math.max(...formEndings.map(({ length }) => length));
 
-/** Characters the longest list of words takes, with a space after it. */
-const mostWords = mostWordsPerParagraph * (wordLength + 1);
+/**
+ * Characters the longest list of words takes, with a space after it: and
+ * a day after them, whose longest form is shorter than a word.
+ */
+const mostWords = (mostWordsPerParagraph + 1) * (wordLength + 1);
 
 /**
  * Characters the place of a paragraph takes in its text, with spaces: so
@@ -414,16 +466,19 @@ const expectedOf = (
     if (!isAmong(version.readers, person, membership)) {
       return [];
     }
-    return version.paragraphs.map((words, position) => ({
-      name: `s${source.index} v${version.version} c${position}`,
-      planned: source,
-      version,
-      position,
-      length: version.lengths[position] ?? 0,
-      telling: telling.filter((token) => holds(words, [token])).length,
-      stops: stops.filter((token) => words.includes(token)).length,
-      exact: telling.filter((token) => words.includes(token)).length,
-    }));
+    return version.paragraphs.map((tokens, position) => {
+      const words = expanded(tokens);
+      return {
+        name: `s${source.index} v${version.version} c${position}`,
+        planned: source,
+        version,
+        position,
+        length: version.lengths[position] ?? 0,
+        telling: telling.filter((token) => holds(words, [token])).length,
+        stops: stops.filter((token) => words.includes(token)).length,
+        exact: telling.filter((token) => words.includes(token)).length,
+      };
+    });
   });
   const first = readable
     .filter((chunk) => chunk.telling > 0)
@@ -567,10 +622,67 @@ const packOf = (
   // The IDs, each once, in the question's order: the words of roots a and
   // b.
   const ids = [...new Set(asked.filter(isId))];
-  const byWords = expectedOf(planned, person, membership, asked);
+  const readable = planned.flatMap((source) => {
+    const version = currentOf(source);
+    return isAmong(version.readers, person, membership)
+      ? version.paragraphs.map((words, position) => ({
+          source,
+          version,
+          position,
+          words,
+        }))
+      : [];
+  });
+  // The days, each once: found when a readable paragraph writes the day
+  // in any form. A found day's words are the date way's alone.
+  const days = [...new Set(asked.filter(isDate).map(dayOf))];
+  const daysFound = new Set(
+    days.filter((day) =>
+      readable.some(({ words }) => words.some((word) => dayOf(word) === day))
+    )
+  );
+  const askedWords = expanded(asked);
+  const ofFoundDays = new Set(
+    expanded(
+      asked.filter((token) => isDate(token) && daysFound.has(dayOf(token)))
+    )
+  );
+  const ofDays = new Set(expanded(asked.filter(isDate)));
+  const wordsAsked = askedWords.filter((token) => !ofFoundDays.has(token));
+  // With every telling word a found day's, the words way asks nothing.
+  const byWords =
+    askedWords.some((token) => !isStop(token)) &&
+    wordsAsked.every((token) => isStop(token))
+      ? []
+      : expectedOf(planned, person, membership, wordsAsked);
   const exact = exactOf(planned, person, membership, ids, byWords);
+  const rankOf = (name: string): number => {
+    const rank = byWords.findIndex((chunk) => chunk.name === name);
+    return rank === -1 ? recallLimit : rank;
+  };
+  const dateLists = days.map((day) =>
+    readable
+      .filter(({ words }) => words.some((word) => dayOf(word) === day))
+      .map(({ source, version, position }) => ({
+        name: `s${source.index} v${version.version} c${position}`,
+        planned: source,
+        version,
+        position,
+        length: version.lengths[position] ?? 0,
+        telling: 0,
+        stops: 0,
+        exact: 0,
+      }))
+      .toSorted(
+        (a, b) => rankOf(a.name) - rankOf(b.name) || a.length - b.length
+      )
+      .slice(0, recallLimit)
+  );
   const chunks = fused([
     ...exact.lists.map((list) =>
+      list.map((chunk) => ({ chunk, found: "exact" as const }))
+    ),
+    ...dateLists.map((list) =>
       list.map((chunk) => ({ chunk, found: "exact" as const }))
     ),
     byWords.map((chunk) => ({
@@ -580,23 +692,29 @@ const packOf = (
   ]);
   const missing = ids.filter((id) => !exact.held.has(id));
   // The telling words, each once, in the question's order; a question of
-  // stop words alone is all telling.
-  const distinct = [...new Set(asked)];
+  // stop words alone is all telling. An ID's or a date's words are never
+  // said not found apart.
+  const distinct = [...new Set(askedWords)];
   const telling = distinct.some((token) => !isStop(token))
-    ? distinct.filter((token) => !isStop(token) && !isId(token))
+    ? distinct.filter(
+        (token) => !isStop(token) && !isId(token) && !ofDays.has(token)
+      )
     : distinct;
-  const readable = planned.flatMap((source) => {
-    const version = currentOf(source);
-    return isAmong(version.readers, person, membership)
-      ? version.paragraphs
-      : [];
-  });
   return {
     chunks,
     notFound: [
       ...missing.map(written),
+      ...days
+        .filter((day) => !daysFound.has(day))
+        .map((day) => {
+          const token = asked.find((one) => isDate(one) && dayOf(one) === day);
+          return token === undefined ? "" : written(token);
+        }),
       ...telling
-        .filter((token) => !readable.some((words) => holds(words, [token])))
+        .filter(
+          (token) =>
+            !readable.some(({ words }) => holds(expanded(words), [token]))
+        )
         .map(wordOf),
     ],
   };
@@ -742,7 +860,13 @@ const scenario = (people: readonly string[], seed: number) => {
     const pool = long ? longLengths : shortLengths;
     const paragraphs = Array.from(
       { length: long ? 2 + draws.below(mostParagraphs - 1) : 1 },
-      () => draws.tokens(mostWordsPerParagraph, 0.3)
+      () => {
+        const words = draws.tokens(mostWordsPerParagraph, 0.3);
+        // Now and then a day, in one of its forms.
+        return draws.chance(0.25)
+          ? [...words, `${datePrefix}${draws.below(2)}${draws.below(3)}`]
+          : words;
+      }
     );
     const lengths = paragraphs.map(
       () => pool.splice(draws.below(pool.length), 1)[0] ?? 0
@@ -881,9 +1005,13 @@ const scenario = (people: readonly string[], seed: number) => {
   const ask = async (moment: string, person: number): Promise<string[]> => {
     // Mostly forms with a stop word now and then; sometimes stop words
     // alone.
-    const asked = draws.chance(0.15)
+    const plain = draws.chance(0.15)
       ? draws.tokens(3, 1)
       : draws.tokens(4, 0.35);
+    // Now and then a day, as ISO.
+    const asked = draws.chance(0.25)
+      ? [...plain, `${datePrefix}${draws.below(2)}1`]
+      : plain;
     // Sometimes in capitals: search reads a word whatever its case.
     const writtenAs = asked.map((token) =>
       draws.chance(0.2) ? wordOf(token).toUpperCase() : wordOf(token)

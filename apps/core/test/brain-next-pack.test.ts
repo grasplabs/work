@@ -231,7 +231,7 @@ describe("the cited pack", () => {
     );
   });
 
-  it("reads a date, a time and a word with one digit as words: the passage writing them otherwise comes first, and none is said not found", async () => {
+  it("finds a date, a time and a word with one digit however a passage writes them, the passage answering first, and names only a day no passage writes", async () => {
     const reader = await person();
     const [topic, other] = [word(), word()];
     const signed = await add(
@@ -243,7 +243,8 @@ describe("the cited pack", () => {
       owner(reader)
     );
     // A dozen log lines holding the date, the time and "2e" as written:
-    // as IDs, each would have a list of its own, first in the fusion.
+    // as IDs, each would have a list of its own, first in the fusion; the
+    // date's list holds them and the signing alike, the signing first.
     for (let index = 0; index < 12; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
       await add(
@@ -271,10 +272,10 @@ describe("the cited pack", () => {
     expect(
       [bySigning, byQuarter, missed].flatMap(({ notFound }) =>
         notFound.filter((part) =>
-          ["2026-03-14", "2026-03-15", "09:30", "2e"].includes(part)
+          ["2026-03-14 09:30", "2026-03-15", "09:30", "2e"].includes(part)
         )
       )
-    ).toStrictEqual([]);
+    ).toStrictEqual(["2026-03-15"]);
   });
 
   it("reads IDs a question lists with commas, semicolons or sentence punctuation one by one", async () => {
@@ -530,16 +531,9 @@ describe("the cited pack", () => {
           found: "words",
         },
       ],
-      // A date is words: found apart, or not, as any word.
-      notFound: [
-        `${hidden} plan`,
-        hiddenId,
-        hidden,
-        "plan",
-        "14",
-        "maart",
-        "2026",
-      ],
+      // A date no readable passage writes is named as asked, its words
+      // not apart.
+      notFound: [`${hidden} plan`, hiddenId, "14 maart 2026", hidden, "plan"],
       truncated: false,
     });
   });

@@ -32,7 +32,7 @@
  */
 
 /** Bumped with any change to the company, its sources or its questions. */
-export const brainEvalSetVersion = "2026-11-11.3";
+export const brainEvalSetVersion = "2026-11-12.1";
 
 export const brainEvalLanguages = ["en", "nl", "de", "fr", "es"] as const;
 export type BrainEvalLanguage = (typeof brainEvalLanguages)[number];
@@ -93,10 +93,17 @@ export interface BrainEvalSource {
  * How a question finds its source, so each way recall gains can be
  * measured as it lands: with the source's own words (`words`), with other
  * forms of them, inflected or compounded (`forms`: stemming), by an ID,
- * code or name (`exact`), or with other words altogether (`paraphrase`:
- * vectors).
+ * code or name (`exact`), by a day written another way (`date`: the
+ * days a passage writes, GRA-1798), or with other words altogether
+ * (`paraphrase`: vectors).
  */
-export const brainEvalWays = ["words", "forms", "exact", "paraphrase"] as const;
+export const brainEvalWays = [
+  "words",
+  "forms",
+  "exact",
+  "date",
+  "paraphrase",
+] as const;
 export type BrainEvalWay = (typeof brainEvalWays)[number];
 
 /**

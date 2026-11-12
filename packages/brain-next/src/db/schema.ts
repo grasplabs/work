@@ -569,3 +569,28 @@ export const unembeddable = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.model, table.hash] })]
 );
+
+/**
+ * The calendar days each chunk writes (dates.ts), written with the chunk's
+ * words (words.ts `indexWords`): a day as its year (0 when the chunk
+ * names none) and its month and day as one number (`monthday`, 314 for 14
+ * March), so a day asked for is one lookup however it was written. A day
+ * by itself is not personal: it is kept plain, and only ever read joined
+ * to a chunk the reader may read (recall.ts). Deleted with its chunk by a
+ * trigger (migration 0008), as the word indexes are.
+ */
+export const chunkDays = sqliteTable(
+  "chunk_days",
+  {
+    chunk: integer()
+      .notNull()
+      .references(() => chunks.row),
+    year: integer().notNull(),
+    monthday: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chunk, table.year, table.monthday] }),
+    // Recall finds the chunks writing a day by it.
+    index("chunk_days_day_idx").on(table.monthday, table.year, table.chunk),
+  ]
+);
