@@ -693,6 +693,23 @@ describe("embedder", () => {
     }
   });
 
+  it("refuses a tokenizer file whose added-token count the file can't hold, at load", async () => {
+    // Header word 6: the added tokens. 2^28 of them would need 4 GiB.
+    const counted = Uint8Array.from(new Uint8Array(tokenizer));
+    new DataView(counted.buffer).setUint32(6 * 4, 2 ** 28, true);
+    const embedder = await customEmbedder("added-count", {
+      tokenizer: counted,
+      encoder: new Uint8Array(encoderInt8),
+      tokens: new Uint8Array(tokensInt8),
+    });
+    const refused =
+      "The tokenizer file isn't a consistent tokenizer file of this version.";
+    await expect(twoEmbeds(embedder)).resolves.toStrictEqual([
+      refused,
+      refused,
+    ]);
+  });
+
   it("fails closed while a model file is missing, and loads once it is there", async () => {
     await upload(int8Model, int8Files);
     await env.MODEL_FILES.delete(modelFileKey(int8Model.tokens));

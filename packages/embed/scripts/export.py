@@ -137,15 +137,14 @@ def load_model(src: Path) -> ModernBertModel:
 def read_idmap(src: Path) -> dict[int, list[int]] | None:
     """A trimmed token table's map, from the checkpoint's idmap.json: each removed piece and the kept pieces it is
     written as, all as tokenizer IDs. None for a model with a row per piece. Refuses a map the embedder can't run
-    exactly as the model was trained: one with merged pieces (new rows for runs of pieces), or for another vocabulary,
-    or a removed piece written as nothing or as another removed piece, or <bos> or <eos> removed."""
+    exactly as the model was trained: one with merged pieces (new rows for runs of pieces), a removed piece past the
+    vocabulary, or a removed piece written as nothing or as another removed piece, or <bos> or <eos> removed."""
     path = src / IDMAP
     if not path.exists():
         return None
     raw = json.loads(path.read_text())
     n = vocab_size(src)
     assert not raw.get("merges"), "merged pieces: the embedder has no rows for runs of pieces"
-    assert raw.get("base", n) == n, f"a map for {raw['base']} pieces, the tokenizer has {n}"
     decomp = {int(k): [int(t) for t in v] for k, v in raw["decomp"].items()}
     assert all(0 <= k < n for k in decomp), "a removed piece past the vocabulary"
     assert all(seq for seq in decomp.values()), "a removed piece written as nothing"

@@ -17,6 +17,8 @@ const MAGIC_TOK: [u8; 4] = *b"GTOK";
 const VERSION: u32 = 1;
 const VERSION_MAPPED: u32 = 2;
 const META: [u8; 3] = [0xE2, 0x96, 0x81];
+/// The fewest bytes an added token takes in the file: three words and a byte of text, padded to 4.
+const ADDED_MIN_BYTES: usize = 16;
 
 /// Why a tokenizer file is refused (`crate::tok_init`).
 pub enum TokError {
@@ -131,6 +133,11 @@ impl Tok {
         let map = if mapped { Some(RowMap { offs: arr(n.checked_add(1)?)?, rows: arr(map_rows)? }) } else { None };
         let mlen = blob.get(o..o.checked_add(m)?)?;
         o = (o + m + 3) & !3;
+        // Each added token takes at least 16 bytes (id, lstrip, length and one byte, padded to 4): a count the rest of
+        // the file can't hold is refused here, before the map is sized by it.
+        if nadd > blob.len().saturating_sub(o) / ADDED_MIN_BYTES {
+            return None;
+        }
         let mut added = HashMap::with_capacity(nadd);
         let mut starts = vec![0u64; 1024];
         let mut single = [false; 256];
