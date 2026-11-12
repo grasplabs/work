@@ -271,6 +271,61 @@ export interface Pack {
   truncated: boolean;
 }
 
+/**
+ * A passage one store found for a recall: its chunk's row in that store,
+ * its citation and its text.
+ */
+export interface FoundPassage extends SourceVersionRef {
+  row: number;
+  position: number;
+  text: string;
+}
+
+/**
+ * A passage with what the words and exact ways order by after their
+ * counts: its length in characters (as the store's SQL counts them) and
+ * when its version was added, in milliseconds.
+ */
+export interface OrderedPassage extends FoundPassage {
+  length: number;
+  addedAt: number;
+}
+
+/**
+ * What one store found for a recall, before any pack is made of it
+ * (`Brain.find`): each way's passages with what they are ordered by, so
+ * the lists of several stores merge into the lists one store holding all
+ * of them would have found (across.ts `packAcross`). Only what the reader
+ * may read, as for `recall`.
+ */
+export interface Finding {
+  /**
+   * The passages holding the question's telling words, best first, at
+   * most `recallLimit`, with how many of its telling words each holds in
+   * any form, how many of its stop words, and how many telling words as
+   * written.
+   */
+  words: (OrderedPassage & { words: number; stops: number; exact: number })[];
+  /**
+   * When the telling words found fewer than `recallLimit`: the passages
+   * only its stop words find, best first, as many as were missing, with
+   * how many of them each holds.
+   */
+  stopWords: (OrderedPassage & { stops: number })[];
+  /** The telling terms, by index, that any passage the reader may read holds. */
+  terms: number[];
+  /**
+   * The candidates for the question's exact parts: each passage among the
+   * first `exactCandidatesMax` of a part (`parts`, by index), and those of
+   * them whose word index holds it as a phrase (`nearParts`).
+   */
+  exact: (OrderedPassage & { parts: number[]; nearParts: number[] })[];
+  /** The exact parts, by index, more than `exactCandidatesMax` passages may hold. */
+  capped: number[];
+  /** The passages nearest the question's vector, nearest first, with their cosine. */
+  meaning: (FoundPassage & { score: number })[];
+}
+
 /** An ASCII letter or the space: a third of a token each (`tokensOf`). */
 const thirdOfAToken = /[A-Za-z ]/u;
 
@@ -854,6 +909,13 @@ export interface Brain {
    */
   recall: (request: RecallRequest) => Promise<Pack>;
   /**
+   * What `recall` finds, before it is packed: each way's passages with
+   * what they are ordered by (`Finding`). A host recalling from several
+   * stores asks each, with the same request, and packs them together
+   * (across.ts `packAcross`): `recall` is that, over this store alone.
+   */
+  find: (request: RecallRequest) => Promise<Finding>;
+  /**
    * A version of a source, current or history, whole as it was added, for
    * a reader among that version's readers and the source's current
    * version's, with the groups the host counts them in now: `null` when
@@ -958,12 +1020,54 @@ export interface Brain {
   erasePerson: (request: PersonErasure) => Promise<void>;
 }
 
-/** The one store's name: the Brain holds everything in one store for now. */
+/** The shared store's name: everything readable by more than one person. */
 const storeName = "brain";
 
+/** What a person's own store's name starts with; the rest is their id. */
+const personalPrefix = "person:";
+
+/** Whose a store is, by its name: shared, one person's own, or unknown. */
+export type StoreKind =
+  | { kind: "shared" }
+  | { kind: "person"; person: string }
+  | { kind: "unknown" };
+
 /**
- * The Brain, in `store`, the host's namespace of `BrainStore`, in the
- * jurisdiction the host keeps its objects in.
+ * Whose the store named `name` is. A name is all a store knows of itself
+ * (store.ts), so this is the one rule of which store is whose: a name
+ * starting `person:` is that person's own store, or, when what follows
+ * isn't an id, no one's; no name at all (an id not made from a name) is
+ * no one's; any other name is a shared store.
+ */
+export const storeKindOf = (name: string | undefined): StoreKind => {
+  if (name === undefined) {
+    return { kind: "unknown" };
+  }
+  if (!name.startsWith(personalPrefix)) {
+    return { kind: "shared" };
+  }
+  const person = principalSchema.safeParse(name.slice(personalPrefix.length));
+  return person.success
+    ? { kind: "person", person: person.data }
+    : { kind: "unknown" };
+};
+
+/**
+ * The Brain's shared store, in `store`, the host's namespace of
+ * `BrainStore`, in the jurisdiction the host keeps its objects in: what
+ * more than one person may read.
  */
 export const brainOf = (store: DurableObjectNamespace<BrainStore>): Brain =>
   store.getByName(storeName);
+
+/**
+ * `person`'s own store, in `store` as `brainOf`'s: what only they may
+ * read. It answers them alone and keeps nothing anyone else may read
+ * (store.ts). For the host only, with the person it has just verified:
+ * whoever names it reaches that person's own content.
+ */
+export const personalBrainOf = (
+  store: DurableObjectNamespace<BrainStore>,
+  person: string
+): Brain =>
+  store.getByName(`${personalPrefix}${principalSchema.parse(person)}`);

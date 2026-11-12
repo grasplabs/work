@@ -2,6 +2,7 @@ import { log } from "@grasp-os/shared/log";
 import { and, eq, max } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
+import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
 import type {
   CurrentRequest,
@@ -65,7 +66,7 @@ import type { WordMemo } from "./words.ts";
 export interface SourcesStore {
   readonly storage: DurableObjectStorage;
   readonly db: DrizzleSqliteDODatabase;
-  readonly bucket: R2Bucket;
+  readonly bucket: BrainBucket;
 }
 
 const encoder = new TextEncoder();
@@ -349,7 +350,7 @@ export const addVersion = async (
  * missing, never failing a read of others.
  */
 const textOf = async (
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   file: string
 ): Promise<string | null> => {
   const object = await bucket.get(fileKeyOf(file));

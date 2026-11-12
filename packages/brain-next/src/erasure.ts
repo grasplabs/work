@@ -1,3 +1,4 @@
+import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
@@ -81,7 +82,7 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 /** The parts of the store an erasure works with. */
 export interface ErasureStore {
   readonly storage: DurableObjectStorage;
-  readonly bucket: R2Bucket;
+  readonly bucket: BrainBucket;
 }
 
 /** What is erased: a source, or what a person alone may read. */
@@ -944,7 +945,7 @@ export interface Replayed {
  * ledger, so it is a fault to fix, and the store serves nothing it may
  * have erased meanwhile.
  */
-const textOf = async (bucket: R2Bucket, key: string): Promise<string> =>
+const textOf = async (bucket: BrainBucket, key: string): Promise<string> =>
   await inTime(
     (async () => {
       const object = await bucket.get(key);
@@ -967,7 +968,7 @@ const textOf = async (bucket: R2Bucket, key: string): Promise<string> =>
  * the reads it took.
  */
 const readPerson = async (
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   key: string,
   stopAt: number
 ): Promise<{ hidden: Hidden; reads: number }> => {
@@ -1067,4 +1068,69 @@ export const replayStep = async ({
     }
     startAfter = last;
   }
+};
+
+// A person's own store, erased whole (store.ts): when the person is
+// erased, their store is deleted, not searched for what is theirs, since
+// all of it is. The record of it is one object in the store's own part of
+// the bucket, `erased`, outside the ledger's listing and never deleted:
+// written before anything is deleted, so a store that comes back (a
+// restore of its storage, or a late add waking it afresh) finds it before
+// it answers anything, deletes all it holds again and refuses every call.
+// Its files and vectors are then deleted under their prefixes, a bounded
+// batch a call, until none is left.
+
+/** The key of the record that a person's store was erased whole. */
+const storeErasedKey = "erased";
+
+/** Most objects one call lists and deletes, per prefix: one page of R2's listing. */
+const storeDeletePage = 1000;
+
+/** How long one call starts new listings and deletes for. */
+const storeDeleteMs = 10_000;
+
+/** Whether the store whose part of the bucket is `bucket` was erased whole. */
+export const isStoreErased = async (bucket: BrainBucket): Promise<boolean> =>
+  (await inTime(bucket.head(storeErasedKey))) !== null;
+
+/**
+ * Records that the store whose part of the bucket is `bucket` is erased
+ * whole, and why: throws when R2 fails or doesn't answer in time, and
+ * then nothing is deleted. Written again, it says the same.
+ */
+export const recordStoreErased = async (
+  bucket: BrainBucket,
+  reason: ErasureReason,
+  at: number
+): Promise<void> => {
+  await inTime(bucket.put(storeErasedKey, JSON.stringify({ reason, at })));
+};
+
+/**
+ * Deletes a page of the files and vectors under `prefixes` in `bucket`,
+ * for at most `storeDeleteMs`: true once none is left. Throws when R2
+ * fails or doesn't answer in time; what it deleted stays deleted.
+ */
+export const deleteStoreObjects = async (
+  bucket: BrainBucket,
+  prefixes: readonly string[]
+): Promise<boolean> => {
+  const stopAt = Date.now() + storeDeleteMs;
+  for (const prefix of prefixes) {
+    for (;;) {
+      if (Date.now() >= stopAt) {
+        return false;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a page after a page
+      const page = await inTime(
+        bucket.list({ prefix, limit: storeDeletePage })
+      );
+      if (page.objects.length === 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a page after a page
+      await inTime(bucket.delete(page.objects.map(({ key }) => key)));
+    }
+  }
+  return true;
 };

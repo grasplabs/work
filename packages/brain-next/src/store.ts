@@ -3,12 +3,16 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { z } from "zod";
 
+import { packAcross } from "./across.ts";
+import { bucketUnder } from "./bucket.ts";
+import type { BrainBucket } from "./bucket.ts";
 import {
   currentRequestSchema,
   embedModelSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
+  storeKindOf,
   recallRequestSchema,
   sourceErasureSchema,
   vectorSearchSchema,
@@ -19,7 +23,12 @@ import type {
   AskModel,
   CurrentRequest,
   Embedders,
+  ErasureReason,
+  Finding,
   NewInstructions,
+  Reader,
+  Access,
+  StoreKind,
   NewSource,
   PersonErasure,
   RecallRequest,
@@ -38,17 +47,20 @@ import migrations from "./db/migrations/migrations.js";
 import { embeddingOverview, embeddingStep, reembed } from "./embedding.ts";
 import {
   confirmPending,
+  deleteStoreObjects,
   erase,
   eraseBatch,
   erasuresOverview,
   erasuresUnfinished,
+  isStoreErased,
   keepMissingSubjects,
+  recordStoreErased,
   replayStep,
   sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
-import { sweepFiles } from "./files.ts";
-import { recall } from "./recall.ts";
+import { filesPrefix, hashOf, sweepFiles, vectorsPrefix } from "./files.ts";
+import { find, recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
@@ -113,6 +125,59 @@ const tickAtSchema = z.date();
 /** An item of the queue, by its id. */
 const workIdSchema = z.int().positive();
 
+/** What a person's own store answers a reader who is not that person. */
+const notTheirs =
+  "The Brain refused it: this store answers only the person whose it is";
+
+/** What a person's own store answers an add anyone else may read. */
+const notTheirsAlone =
+  "The Brain refused it: this store keeps only what its person alone may read";
+
+/** What a store whose name says no one's answers every call. */
+const noOnes =
+  "The Brain refused it: this store's name doesn't say whose it is";
+
+/** What a person's own store answers once it was erased whole. */
+const erasedWhole = "The Brain refused it: this store was erased";
+
+/** What erasing a person's own store answers while files are left to delete. */
+const stillDeleting =
+  "The Brain erased this store and is still deleting its files: erase it again";
+
+/** What erasing a person's own store answers when its record couldn't be written. */
+const erasureUnrecorded =
+  "The Brain could not record the erasure: erase it again";
+
+/** What a store that holds nothing finds: nothing, by every way. */
+const nothingFound: Finding = {
+  words: [],
+  stopWords: [],
+  terms: [],
+  exact: [],
+  capped: [],
+  meaning: [],
+};
+
+const encoder = new TextEncoder();
+
+/**
+ * Where in the host's bucket the store of `kind` keeps its objects
+ * (bucket.ts): a shared store at the root, a person's own under the
+ * SHA-256 of their id.
+ */
+const prefixOf = async (kind: StoreKind): Promise<string> =>
+  kind.kind === "person"
+    ? `people/${await hashOf(encoder.encode(kind.person))}/`
+    : "";
+
+/** Whether the store's schema was ever made: a person's own store makes it at its first write. */
+const hasSchema = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'source_versions'"
+    )
+    .toArray().length > 0;
+
 /**
  * The Brain's store: its sources and their versions, who may read them
  * and their words, in the object's own SQLite, with each version's
@@ -120,9 +185,50 @@ const workIdSchema = z.int().positive();
  * contract (contract.ts `Brain`), and they are all there is: nothing else
  * can read its storage. Each checks what it is given, so nothing
  * malformed is stored or asked; who the reader is, is the host's to say.
+ *
+ * One class, two kinds of store, told apart by the object's name alone
+ * (contract.ts `storeKindOf`):
+ *
+ * - The shared store (`brainOf`): what more than one person may read.
+ * - A person's own store (`personalBrainOf`, named by their id): what
+ *   only they may read. It keeps nothing anyone else may read, answers no
+ *   other reader, keeps its files under a prefix of its own (bucket.ts),
+ *   makes its schema only at its first write, and is erased whole: then
+ *   it deletes itself and refuses every call, also after a restore of
+ *   its storage (erasure.ts `isStoreErased`). Which person's store a
+ *   call reaches is the host's to say, from the person it verified: the
+ *   store checks every call against its own name, so a reader, an owner
+ *   or an erasure of anyone else is refused, never answered.
+ *
+ * A store whose id has no name refuses every call: it can't say whose it
+ * is.
  */
 export class BrainStore extends DurableObject<BrainStoreEnv> {
   readonly #db = drizzle(this.ctx.storage);
+
+  /**
+   * Whose the store is, by its name (contract.ts `storeKindOf`): shared,
+   * or one person's own, which keeps only what they alone may read,
+   * answers only them, and is erased whole; or no one's, refusing every
+   * call.
+   */
+  readonly #kind = storeKindOf(this.ctx.id.name);
+
+  /** Where the store's part of the host's bucket is (bucket.ts), once known. */
+  #prefix: string | undefined;
+
+  /**
+   * Whether the store's schema is made. A person's own store makes it at
+   * its first write, so a person who never had anything kept costs no
+   * storage: until then every read answers that nothing is there.
+   */
+  #schema = true;
+
+  /** Whether this person's own store was erased whole: then it refuses every call. */
+  #erased = false;
+
+  /** Whether this instance made its schema current (`#start`). */
+  #opened = false;
 
   /**
    * The tick's steps' last failures, cleared by a later success, and the
@@ -176,12 +282,99 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // but its overview, each call refused with why, until a later call
     // reads it (`#ready`).
     void ctx.blockConcurrencyWhile(async () => {
-      await migrate(this.#db, migrations);
-      releaseInterrupted(ctx.storage);
-      markWordsCurrentIfEmpty(ctx.storage.sql);
-      await keepMissingSubjects(ctx.storage);
-      await this.#readLedger();
+      if (this.#kind.kind === "unknown") {
+        return;
+      }
+      this.#prefix = await prefixOf(this.#kind);
+      await this.#start(false);
     });
+  }
+
+  /**
+   * The store started, while it takes nothing else, and again by each call
+   * until it is (`#ledgerStep`): a person's own store first reads whether
+   * it was erased whole, and if so deletes whatever came back (a restore
+   * of its storage) before anything else, and answers nothing from then
+   * on. Then the schema made current, what an earlier instance had under
+   * way put back in the queue, and the ledger read (`#readLedger`). A
+   * person's own store whose schema was never made makes none unless
+   * `create` (its first write, `#readyToWrite`): until then it holds
+   * nothing and writes nothing. A failure to read whether it was erased
+   * is kept as the ledger's, never thrown.
+   */
+  async #start(create: boolean): Promise<void> {
+    if (this.#kind.kind === "person") {
+      try {
+        if (await isStoreErased(this.#bucket)) {
+          if (!this.#erased) {
+            await this.#forget();
+          }
+          this.#ledger = "through";
+          return;
+        }
+      } catch {
+        // Nothing of the error is kept.
+        this.#ledger = "unreadable";
+        return;
+      }
+    }
+    if (!this.#opened) {
+      if (
+        this.#kind.kind === "person" &&
+        !create &&
+        !hasSchema(this.ctx.storage.sql)
+      ) {
+        this.#schema = false;
+        this.#ledger = "through";
+        return;
+      }
+      await migrate(this.#db, migrations);
+      releaseInterrupted(this.ctx.storage);
+      markWordsCurrentIfEmpty(this.ctx.storage.sql);
+      await keepMissingSubjects(this.ctx.storage);
+      this.#opened = true;
+      this.#schema = true;
+    }
+    await this.#readLedger();
+  }
+
+  /**
+   * The store's part of the host's bucket, as the env has it now: known
+   * before any call is taken.
+   */
+  get #bucket(): BrainBucket {
+    if (this.#prefix === undefined) {
+      throw new Error(noOnes);
+    }
+    return bucketUnder(this.env.BRAIN_OBJECTS, this.#prefix);
+  }
+
+  /**
+   * Everything the store holds deleted, as a person's store erased whole:
+   * it refuses every call from then on. Run while the store takes nothing
+   * else.
+   */
+  async #forget(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    this.#erased = true;
+    this.#schema = false;
+  }
+
+  /** Refuses `reader` on a person's own store unless they are that person. */
+  #mayRead(reader: Reader): void {
+    if (this.#kind.kind === "person" && reader.person !== this.#kind.person) {
+      throw new Error(notTheirs);
+    }
+  }
+
+  /** Refuses `access` on a person's own store unless it is that person's alone. */
+  #mayKeep(access: Access): void {
+    if (
+      this.#kind.kind === "person" &&
+      (access.kind !== "owner" || access.person !== this.#kind.person)
+    ) {
+      throw new Error(notTheirsAlone);
+    }
   }
 
   /**
@@ -210,8 +403,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Every call but the overview waits for it.
    */
   async #ready(): Promise<void> {
+    if (this.#kind.kind === "unknown") {
+      throw new Error(noOnes);
+    }
     // Read after the step, which may have changed it.
     const now = await this.#ledgerStep();
+    if (this.#erased) {
+      throw new Error(erasedWhole);
+    }
     if (now !== "through") {
       throw new Error(
         now === "replaying" ? ledgerCatchingUp : ledgerUnreadable
@@ -232,7 +431,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         if (this.#ledger === "through") {
           return;
         }
-        await this.#readLedger();
+        await this.#start(false);
         if (this.#ledger === "unreadable") {
           this.#ledgerRetryAfter = Date.now() + ledgerRetryMs;
         }
@@ -241,17 +440,34 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return this.#ledger;
   }
 
-  /** The parts erasure.ts works with, the bucket as the env has it now. */
-  get #erasures(): ErasureStore {
-    return { storage: this.ctx.storage, bucket: this.env.BRAIN_OBJECTS };
+  /**
+   * As `#ready`, for a call that writes: a person's own store whose schema
+   * was never made makes it first, while it takes nothing else.
+   */
+  async #readyToWrite(): Promise<void> {
+    await this.#ready();
+    if (this.#schema) {
+      return;
+    }
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (!this.#schema && !this.#erased) {
+        await this.#start(true);
+      }
+    });
+    await this.#ready();
   }
 
-  /** The parts sources.ts works with, the bucket as the env has it now. */
+  /** The parts erasure.ts works with: the store's part of the bucket. */
+  get #erasures(): ErasureStore {
+    return { storage: this.ctx.storage, bucket: this.#bucket };
+  }
+
+  /** The parts sources.ts works with: the store's part of the bucket. */
   get #sources(): SourcesStore {
     return {
       storage: this.ctx.storage,
       db: this.#db,
-      bucket: this.env.BRAIN_OBJECTS,
+      bucket: this.#bucket,
     };
   }
 
@@ -261,10 +477,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * same text and readers as the current version answer with it.
    */
   async addSource(source: NewSource): Promise<SourceVersionRef> {
-    await this.#ready();
-    return await addVersion(this.#sources, checked(newSourceSchema, source), {
-      indexed: true,
-    });
+    const adding = checked(newSourceSchema, source);
+    this.#mayKeep(adding.access);
+    await this.#readyToWrite();
+    return await addVersion(this.#sources, adding, { indexed: true });
   }
 
   /**
@@ -272,36 +488,44 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * whole: no chunks, no words, so recall never finds it.
    */
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
-    await this.#ready();
-    return await addVersion(
-      this.#sources,
-      checked(newInstructionsSchema, source),
-      { indexed: false }
-    );
+    const adding = checked(newInstructionsSchema, source);
+    this.#mayKeep(adding.access);
+    await this.#readyToWrite();
+    return await addVersion(this.#sources, adding, { indexed: false });
   }
 
   /** A pack of what the reader may read for the question, within its budget. */
   async recall(request: RecallRequest): Promise<Pack> {
+    const asked = checked(recallRequestSchema, request);
+    this.#mayRead(asked.reader);
     await this.#ready();
-    return recall(this.ctx.storage.sql, checked(recallRequestSchema, request));
+    return this.#schema
+      ? recall(this.ctx.storage.sql, asked)
+      : packAcross(asked.question, asked.budget.tokens, [nothingFound]);
+  }
+
+  /** What `recall` finds, before it is packed (across.ts `packAcross`). */
+  async find(request: RecallRequest): Promise<Finding> {
+    const asked = checked(recallRequestSchema, request);
+    this.#mayRead(asked.reader);
+    await this.#ready();
+    return this.#schema ? find(this.ctx.storage.sql, asked) : nothingFound;
   }
 
   /** A version, current or history, whole: if the reader may read it. */
   async readVersion(request: VersionRequest): Promise<SourceVersion | null> {
+    const asked = checked(versionRequestSchema, request);
+    this.#mayRead(asked.reader);
     await this.#ready();
-    return await readVersion(
-      this.#sources,
-      checked(versionRequestSchema, request)
-    );
+    return this.#schema ? await readVersion(this.#sources, asked) : null;
   }
 
   /** The current versions of sources, whole: those the reader may read. */
   async readCurrent(request: CurrentRequest): Promise<SourceVersion[]> {
+    const asked = checked(currentRequestSchema, request);
+    this.#mayRead(asked.reader);
     await this.#ready();
-    return await readCurrent(
-      this.#sources,
-      checked(currentRequestSchema, request)
-    );
+    return this.#schema ? await readCurrent(this.#sources, asked) : [];
   }
 
   /**
@@ -310,8 +534,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * under way on it is stopped (work.ts `stopWorkOn`).
    */
   async eraseSource(request: SourceErasure): Promise<void> {
-    await this.#ready();
     const { source, reason } = checked(sourceErasureSchema, request);
+    await this.#readyToWrite();
     await erase(this.#erasures, "source", source, reason, (sources) => {
       stopWorkOn(this.#work, sources);
     });
@@ -319,14 +543,58 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * Erases what only one person may read (erasure.ts), as `eraseSource`
-   * erases a source.
+   * erases a source. A person's own store erases itself whole, and only
+   * for that person (`#eraseWhole`).
    */
   async erasePerson(request: PersonErasure): Promise<void> {
-    await this.#ready();
     const { person, reason } = checked(personErasureSchema, request);
+    if (this.#kind.kind === "person") {
+      if (person !== this.#kind.person) {
+        throw new Error(notTheirs);
+      }
+      await this.#eraseWhole(reason);
+      return;
+    }
+    await this.#ready();
     await erase(this.#erasures, "person", person, reason, (sources) => {
       stopWorkOn(this.#work, sources);
     });
+  }
+
+  /**
+   * This person's own store erased whole (erasure.ts): the record of it
+   * written first, then all the store holds deleted, while it takes
+   * nothing else, so from then on it refuses every call, also after a
+   * restore of its storage or when a late add wakes it. Then its files
+   * and vectors, a bounded batch a call: until none is left it throws
+   * `stillDeleting`, so the caller keeps its erasure pending and calls
+   * again. Safe to repeat. Throws, deleting nothing, when the record
+   * couldn't be written.
+   */
+  async #eraseWhole(reason: ErasureReason): Promise<void> {
+    if (!this.#erased) {
+      const recorded = await this.ctx.blockConcurrencyWhile(async () => {
+        if (this.#erased) {
+          return true;
+        }
+        try {
+          await recordStoreErased(this.#bucket, reason, Date.now());
+        } catch {
+          // Nothing of the error is kept: nothing is deleted.
+          return false;
+        }
+        await this.#forget();
+        return true;
+      });
+      if (!recorded) {
+        throw new Error(erasureUnrecorded);
+      }
+    }
+    if (
+      !(await deleteStoreObjects(this.#bucket, [filesPrefix, vectorsPrefix]))
+    ) {
+      throw new Error(stillDeleting);
+    }
   }
 
   /**
@@ -344,6 +612,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
+    if (!this.#schema) {
+      // Nothing was ever kept: nothing to do.
+      return;
+    }
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
       return;
@@ -363,7 +635,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           model,
           embed: async (request) => await embedders.embed(request),
         },
-        bucket: this.env.BRAIN_OBJECTS,
+        bucket: this.#bucket,
       },
       tickAt
     );
@@ -393,10 +665,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * through.
    */
   async reembed(): Promise<StaffActionOutcome> {
-    if ((await this.#ledgerStep()) !== "through") {
+    if (!(await this.#actionable())) {
       return "unavailable";
     }
-    return reembed(this.ctx.storage) ? "done" : "nothing";
+    return this.#schema && reembed(this.ctx.storage) ? "done" : "nothing";
   }
 
   /**
@@ -496,12 +768,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     const outcome = await this.ctx.blockConcurrencyWhile(async () => {
       try {
-        return await sweepFiles(
-          this.ctx.storage,
-          this.#db,
-          this.env.BRAIN_OBJECTS,
-          at
-        );
+        return await sweepFiles(this.ctx.storage, this.#db, this.#bucket, at);
       } catch {
         return "failed" as const;
       }
@@ -519,8 +786,25 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#sweepAfter = at.getTime() + sweepWaitMs;
   }
 
-  /** The queue, as staff see it. */
+  /**
+   * Whether a staff action may apply: the store is someone's, its ledger
+   * read through, and it wasn't erased whole.
+   */
+  async #actionable(): Promise<boolean> {
+    if (this.#kind.kind === "unknown") {
+      return false;
+    }
+    return (await this.#ledgerStep()) === "through" && !this.#erased;
+  }
+
+  /** The queue, as staff see it: empty while nothing was ever kept. */
   workOverview(): WorkOverview {
+    if (this.#kind.kind === "unknown") {
+      throw new Error(noOnes);
+    }
+    if (!this.#schema) {
+      return this.#emptyOverview();
+    }
     return {
       ...workOverview(this.ctx.storage, this.#work),
       erasing: erasuresUnfinished(this.ctx.storage.sql),
@@ -541,10 +825,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async requeueWork(id: number): Promise<StaffActionOutcome> {
     const item = checked(workIdSchema, id);
-    if ((await this.#ledgerStep()) !== "through") {
+    if (!(await this.#actionable())) {
       return "unavailable";
     }
-    return requeueWork(this.ctx.storage, item) ? "done" : "nothing";
+    return this.#schema && requeueWork(this.ctx.storage, item)
+      ? "done"
+      : "nothing";
   }
 
   /**
@@ -552,16 +838,55 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * `unavailable`, changing nothing, until the ledger is read through.
    */
   async rebuildWords(): Promise<StaffActionOutcome> {
-    if ((await this.#ledgerStep()) !== "through") {
+    if (!(await this.#actionable())) {
       return "unavailable";
     }
-    return startWordsRebuild(this.ctx.storage.sql) ? "done" : "nothing";
+    return this.#schema && startWordsRebuild(this.ctx.storage.sql)
+      ? "done"
+      : "nothing";
   }
 
-  /** Keeps vectors of current chunks as their codes, in one transaction. */
+  /** The overview of a store that never kept anything. */
+  #emptyOverview(): WorkOverview {
+    return {
+      waiting: [],
+      running: 0,
+      parked: [],
+      parkedCount: 0,
+      paused: null,
+      overdue: [],
+      erasing: 0,
+      sourcesWithoutCurrent: 0,
+      ledgerReplay: this.#ledger,
+      stepsFailed: { ...this.#stepsFailed },
+      embedding: {
+        model: null,
+        chunks: 0,
+        embedded: 0,
+        unembeddable: 0,
+        parked: 0,
+        rebuilt: true,
+      },
+      storeBytes: 0,
+      words: "current",
+      erasures: {
+        source: { written: 0, unwritten: 0 },
+        person: { written: 0, unwritten: 0 },
+        byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
+      },
+    };
+  }
+
+  /**
+   * Keeps vectors of current chunks as their codes, in one transaction;
+   * none in a store that never kept anything, which has no chunks.
+   */
   async putVectors(request: VectorsToPut): Promise<void> {
-    await this.#ready();
     const vectors = checked(vectorsToPutSchema, request);
+    await this.#ready();
+    if (!this.#schema) {
+      return;
+    }
     this.ctx.storage.transactionSync(() => {
       putVectors(this.ctx.storage.sql, vectors);
     });
@@ -569,17 +894,18 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** What the reader may read of current chunks, nearest the vector first. */
   async searchVectors(request: VectorSearch): Promise<VectorsFound> {
+    const asked = checked(vectorSearchSchema, request);
+    this.#mayRead(asked.reader);
     await this.#ready();
-    return searchVectors(
-      this.ctx.storage.sql,
-      checked(vectorSearchSchema, request)
-    );
+    return this.#schema
+      ? searchVectors(this.ctx.storage.sql, asked)
+      : { chunks: [] };
   }
 
   /** Repacks one block holding removed codes: true when more are left. */
   async repackVectors(): Promise<boolean> {
     await this.#ready();
-    return this.#repackOne();
+    return this.#schema && this.#repackOne();
   }
 
   /** One block repacked, in its own transaction: true when more are left. */

@@ -1,16 +1,21 @@
+import { packAcross } from "./across.ts";
 import {
   exactCandidatesMax,
   recallLimit,
   vectorModelNameOf,
 } from "./contract.ts";
-import type { FoundBy, Pack, Reader, RecallRequest } from "./contract.ts";
-import { exactsOf, foundIn } from "./exact.ts";
+import type {
+  Finding,
+  OrderedPassage,
+  Pack,
+  Reader,
+  RecallRequest,
+} from "./contract.ts";
+import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
-import { fuse, packOf } from "./pack.ts";
-import type { Found } from "./pack.ts";
 import { readableSql } from "./reader-sets.ts";
 import { nearChunks } from "./vectors.ts";
-import { sequenceOf, termsOf } from "./words.ts";
+import { termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
 
 // Recall: two ways at once, fused by rank into a pack (pack.ts). Words,
@@ -20,7 +25,9 @@ import type { Terms } from "./words.ts";
 // is then checked in code (exact.ts). And a third when the host gives the
 // question's vector: meaning, the vector way's scan (vectors.ts), with
 // the access check inside it. The host embeds the question before it
-// calls, so recall stays one synchronous read of one snapshot.
+// calls, so what a store finds is one synchronous read of one snapshot
+// (`find`). Each way's lists are then merged, checked and fused across
+// every store recalled from, one or several (across.ts `packAcross`).
 //
 // It searches the chunks of each source's current version (a version is
 // current once `current_versions` points at it, set in the transaction
@@ -124,7 +131,8 @@ const foundBy = (
 /** What a statement returns of a chunk it found. */
 const chunkColumns = `chunks.row AS row, source_versions.source AS source,
   source_versions.version AS version, chunks.position AS position,
-  chunks.text AS text`;
+  chunks.text AS text, length(chunks.text) AS length,
+  source_versions.added_at AS added_at`;
 
 /**
  * `?1` the question's telling terms (JSON, words.ts `Term`), `?2` the
@@ -160,7 +168,8 @@ scored AS (
   FROM matched
   LEFT JOIN stopped ON stopped.row = matched.row
 )
-SELECT ${chunkColumns},
+SELECT ${chunkColumns}, scored.words AS words, scored.stops AS stops,
+  scored.exact AS exact,
   (SELECT json_group_array(DISTINCT term) FROM found) AS terms
 FROM scored
 JOIN chunks ON chunks.row = scored.row
@@ -190,7 +199,7 @@ found AS (
 matched AS (
   SELECT row, count(DISTINCT term) AS stops FROM found GROUP BY row
 )
-SELECT ${chunkColumns}
+SELECT ${chunkColumns}, matched.stops AS stops
 FROM matched
 JOIN chunks ON chunks.row = matched.row
 JOIN source_versions ON source_versions.row = chunks.version_row
@@ -230,6 +239,7 @@ near AS (
 ),
 ranked AS (
   SELECT found.row AS row, found.part AS part,
+    near.row IS NOT NULL AS near,
     row_number() OVER (
       PARTITION BY found.part
       ORDER BY near.row IS NOT NULL DESC, length(chunks.text),
@@ -242,6 +252,8 @@ ranked AS (
 )
 SELECT ${chunkColumns},
   json_group_array(ranked.part) FILTER (WHERE ranked.rank <= ?4) AS parts,
+  json_group_array(ranked.part) FILTER (WHERE ranked.rank <= ?4 AND ranked.near)
+    AS near_parts,
   json_group_array(ranked.part) FILTER (WHERE ranked.rank > ?4) AS past
 FROM ranked
 JOIN chunks ON chunks.row = ranked.row
@@ -251,13 +263,15 @@ GROUP BY chunks.row
 ORDER BY length(chunks.text), source_versions.added_at DESC,
   source_versions.source, chunks.position`;
 
-/** A chunk a statement found. */
+/** A chunk a statement found, with what the ways order it by. */
 interface Row extends Record<string, SqlStorageValue> {
   row: number;
   source: string;
   version: number;
   position: number;
   text: string;
+  length: number;
+  added_at: number;
 }
 
 /** The indexes in a statement's JSON array. */
@@ -271,31 +285,43 @@ const indexesOf = (json: SqlStorageValue | undefined): number[] => {
     : [];
 };
 
-/** `rows` as found by `how`. */
-const foundAs = (rows: readonly Row[], how: FoundBy): Found[] =>
-  rows.map(({ row, source, version, position, text }) => ({
-    row,
-    source,
-    version,
-    position,
-    text,
-    found: how,
-  }));
+/** `row` as a passage of a finding. */
+const passageOf = ({
+  row,
+  source,
+  version,
+  position,
+  text,
+  length,
+  added_at: addedAt,
+}: Row): OrderedPassage => ({
+  row,
+  source,
+  version,
+  position,
+  text,
+  length,
+  addedAt,
+});
 
-/** The words way: its list, best first, and the telling terms it found. */
+/**
+ * The words way: the passages its telling words find, best first, those
+ * only its stop words find when those are fewer than the limit, and the
+ * telling terms it found.
+ */
 const byWords = (
   sql: SqlStorage,
   { telling, stops }: Terms,
   reader: Reader,
   asOf: AsOf
-): { found: Found[]; terms: Set<number> } => {
+): Pick<Finding, "words" | "stopWords" | "terms"> => {
   if (telling.length === 0) {
-    return { found: [], terms: new Set() };
+    return { words: [], stopWords: [], terms: [] };
   }
   // The moment, if any, follows the five bindings of each statement.
   const as = asOf.length > 0 ? 6 : undefined;
   const rows = sql
-    .exec<Row & { terms: string }>(
+    .exec<Row & { words: number; stops: number; exact: number; terms: string }>(
       recallSql(as),
       JSON.stringify(telling.map(({ exact, forms }) => ({ exact, forms }))),
       reader.person,
@@ -305,13 +331,12 @@ const byWords = (
       ...asOf
     )
     .toArray();
-  const terms = new Set(indexesOf(rows[0]?.terms));
   // A question whose telling words find little is asked again by its
   // stop words alone: what they find comes after.
   const more =
     rows.length < recallLimit && stops.length > 0
       ? sql
-          .exec<Row>(
+          .exec<Row & { stops: number }>(
             stopsOnlySql(as),
             JSON.stringify(stops),
             reader.person,
@@ -323,74 +348,59 @@ const byWords = (
           .toArray()
       : [];
   return {
-    found: [...foundAs(rows, "words"), ...foundAs(more, "stop words")],
-    terms,
+    words: rows.map((row) => ({
+      ...passageOf(row),
+      words: row.words,
+      stops: row.stops,
+      exact: row.exact,
+    })),
+    stopWords: more.map((row) => ({ ...passageOf(row), stops: row.stops })),
+    terms: indexesOf(rows[0]?.terms),
   };
 };
 
 /**
- * The exact way: a list per exact part, best first, the parts it found,
- * and those it capped (`exactCandidatesMax`). A part's list holds the
- * chunks that hold it as written, in the words way's order (`byWords`), so
- * among the chunks an ID every one of them holds, the one that holds the
- * question's words comes first; then those the words way didn't list, as
- * the statement orders them. A list per part, fused with the others, so
- * chunks holding one part never crowd out those holding another.
+ * The exact way's candidates: the chunks the reader may read that may
+ * hold one of the question's exact parts, each with the parts within whose
+ * first `exactCandidatesMax` it is, and those it is near for; and the
+ * parts capped. Which candidates hold a part as written, and each part's
+ * list, are across.ts's (`packAcross`), over every store's candidates.
  */
 const byExact = (
   sql: SqlStorage,
   exacts: readonly Exact[],
   reader: Reader,
-  asOf: AsOf,
-  byWordsRank: ReadonlyMap<number, number>
-): { lists: Found[][]; parts: Set<number>; capped: Set<number> } => {
-  const rows =
-    exacts.length === 0
-      ? []
-      : sql
-          .exec<Row & { parts: string; past: string }>(
-            exactSql(asOf.length > 0 ? 5 : undefined),
-            JSON.stringify(
-              exacts.map(({ query, near }, part) => ({ part, query, near }))
-            ),
-            reader.person,
-            JSON.stringify(reader.groups),
-            exactCandidatesMax,
-            ...asOf
-          )
-          .toArray();
-  const capped = new Set(rows.flatMap(({ past }) => indexesOf(past)));
-  // Each chunk's words are cut once, however many parts it may hold.
-  const sequences = new Map<number, string[]>();
-  const holds = (row: Row, among: readonly number[]): Set<number> => {
-    let words = sequences.get(row.row);
-    if (words === undefined) {
-      words = sequenceOf(row.text);
-      sequences.set(row.row, words);
-    }
-    return new Set(foundIn(words, exacts, among));
-  };
-  const held = rows.map((row) => ({
-    row,
-    parts: holds(row, indexesOf(row.parts)),
-  }));
-  const rankOf = ({ row }: Row): number => byWordsRank.get(row) ?? recallLimit;
-  const lists = exacts.map((_, part) =>
-    foundAs(
-      held
-        .filter(({ parts }) => parts.has(part))
-        .map(({ row }) => row)
-        .toSorted((a, b) => rankOf(a) - rankOf(b))
-        .slice(0, recallLimit),
-      "exact"
+  asOf: AsOf
+): Pick<Finding, "exact" | "capped"> => {
+  if (exacts.length === 0) {
+    return { exact: [], capped: [] };
+  }
+  const rows = sql
+    .exec<Row & { parts: string; near_parts: string; past: string }>(
+      exactSql(asOf.length > 0 ? 5 : undefined),
+      JSON.stringify(
+        exacts.map(({ query, near }, part) => ({ part, query, near }))
+      ),
+      reader.person,
+      JSON.stringify(reader.groups),
+      exactCandidatesMax,
+      ...asOf
     )
-  );
+    .toArray();
   return {
-    lists,
-    parts: new Set(
-      lists.flatMap((list, part) => (list.length > 0 ? [part] : []))
-    ),
-    capped,
+    exact: rows.flatMap((row) => {
+      const parts = indexesOf(row.parts);
+      return parts.length === 0
+        ? []
+        : [
+            {
+              ...passageOf(row),
+              parts,
+              nearParts: indexesOf(row.near_parts),
+            },
+          ];
+    }),
+    capped: [...new Set(rows.flatMap(({ past }) => indexesOf(past)))],
   };
 };
 
@@ -409,7 +419,7 @@ const byMeaning = (
   hasWords: boolean,
   reader: Reader,
   asOf: AsOf
-): Found[] =>
+): Finding["meaning"] =>
   meaning === undefined || !hasWords || asOf.length > 0
     ? []
     : nearChunks(
@@ -418,57 +428,38 @@ const byMeaning = (
         meaning.vector,
         reader,
         recallLimit
-      ).map((chunk) => ({ ...chunk, found: "meaning" }));
+      );
+
+/**
+ * What the reader may read for the question, found by each way, before it
+ * is packed (contract.ts `Brain.find`): one synchronous read of one
+ * snapshot.
+ */
+export const find = (
+  sql: SqlStorage,
+  { question, reader, asOf, meaning }: RecallRequest
+): Finding => {
+  const exacts = exactsOf(question);
+  const terms = termsOf(question);
+  const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
+  return {
+    ...byWords(sql, terms, reader, at),
+    ...byExact(sql, exacts, reader, at),
+    meaning: byMeaning(
+      sql,
+      meaning,
+      terms.telling.length + exacts.length > 0,
+      reader,
+      at
+    ),
+  };
+};
 
 /**
  * What the reader may read for the question, as a pack within its budget
- * (contract.ts `Brain.recall`): the exact way's lists, one per part, the
- * words way's and the meaning way's, fused by rank (the exact parts'
- * first on a tie, in the question's order, then words, then meaning), and
- * the parts of the question neither words nor exact found: its exact
- * parts, but those capped, then its telling words, but those of its IDs.
- * Meaning finds no word, so it never takes one off that list.
+ * (contract.ts `Brain.recall`): what this store finds (`find`), packed as
+ * across.ts packs what several stores find, so one store's pack and the
+ * pack of stores holding the same passages between them are the same.
  */
-export const recall = (
-  sql: SqlStorage,
-  { question, reader, budget, asOf, meaning }: RecallRequest
-): Pack => {
-  const exacts = exactsOf(question);
-  const terms = termsOf(question);
-  // An ID stands for its words: none is said not found apart.
-  const standing = new Set(
-    exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words)
-  );
-  const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  const words = byWords(sql, terms, reader, at);
-  const exact = byExact(
-    sql,
-    exacts,
-    reader,
-    at,
-    new Map(words.found.map(({ row }, rank) => [row, rank]))
-  );
-  const notFound = [
-    ...exacts
-      .filter((_, index) => !exact.parts.has(index) && !exact.capped.has(index))
-      .map(({ asked: part }) => part),
-    ...terms.telling
-      .filter(
-        ({ word }, index) => !words.terms.has(index) && !standing.has(word)
-      )
-      .map(({ word }) => word),
-  ];
-  const meant = byMeaning(
-    sql,
-    meaning,
-    terms.telling.length + exacts.length > 0,
-    reader,
-    at
-  );
-  return packOf(
-    fuse([...exact.lists, words.found, meant]),
-    { terms: terms.telling, exacts },
-    budget.tokens,
-    notFound
-  );
-};
+export const recall = (sql: SqlStorage, request: RecallRequest): Pack =>
+  packAcross(request.question, request.budget.tokens, [find(sql, request)]);

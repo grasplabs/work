@@ -2062,6 +2062,24 @@ export const storeProbes = {
     );
     return asked;
   },
+  // What recall finds before it is packed: the same questions, answered
+  // as lists with their order keys, must hold no marker either.
+  find: async (probing) => {
+    const find = async (asking: PackAsk) =>
+      await store().find({ ...asking, reader: probing.reader });
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), find)),
+      await answer(
+        "the shared word",
+        async () => await find({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "nothing",
+        async () => await find({ question: "", budget: whole })
+      ),
+    ];
+  },
   recall: async (probing) => {
     const { reader, markers } = probing;
     const recall = async (asking: PackAsk, as: Reader = reader) =>

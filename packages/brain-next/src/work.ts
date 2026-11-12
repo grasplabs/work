@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import type { z } from "zod";
 
+import type { BrainBucket } from "./bucket.ts";
 import {
   modelReplySchema,
   modelTimeoutMaxMs,
@@ -230,7 +231,7 @@ export interface WorkContext {
     embed: (texts: string[]) => Promise<EmbedReply>;
   };
   /** The host's Brain bucket, where the store keeps what it keeps in R2. */
-  bucket: R2Bucket;
+  bucket: BrainBucket;
   /**
    * Says more is left once this run returns (rule 7), having written
    * `progress` pieces of the work (more than 0, or the attempt fails): the
@@ -247,7 +248,7 @@ export interface WorkContext {
 export interface WorkHost {
   ask: AskModel;
   embedders: Embedders;
-  bucket: R2Bucket;
+  bucket: BrainBucket;
 }
 
 /** A kind of work, and how one item of it is done. */

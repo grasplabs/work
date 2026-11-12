@@ -808,10 +808,15 @@ export const searchVectors = (
   };
 };
 
-/** A chunk recall's vector way found, with its row and text. */
+/**
+ * A chunk recall's vector way found, with its row, its text and its
+ * cosine to the question's vector (by its 8-bit code), which recall
+ * across stores orders by.
+ */
 export interface NearChunk extends ChunkRef {
   row: number;
   text: string;
+  score: number;
 }
 
 /**
@@ -844,10 +849,12 @@ export const nearChunks = (
       .toArray()
       .map(({ row, text }) => [row, text])
   );
-  return closest.flatMap(({ chunk, found: { source, version, position } }) => {
-    const text = texts.get(chunk);
-    return text === undefined
-      ? []
-      : [{ row: chunk, source, version, position, text }];
-  });
+  return closest.flatMap(
+    ({ chunk, found: { source, version, position, score } }) => {
+      const text = texts.get(chunk);
+      return text === undefined
+        ? []
+        : [{ row: chunk, source, version, position, text, score }];
+    }
+  );
 };

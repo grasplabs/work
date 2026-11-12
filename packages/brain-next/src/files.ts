@@ -1,6 +1,7 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
+import type { BrainBucket } from "./bucket.ts";
 import { files, vectorFiles } from "./db/schema.ts";
 
 // The original files of source versions, in the host's Brain bucket (R2,
@@ -61,12 +62,18 @@ export const sweepDeleteMs = 10_000;
 /** Vector objects swept at once: with a batch of files, one R2 call. */
 const vectorSweepBatch = 400;
 
+/** Where versions' files are kept in the store's part of the bucket. */
+export const filesPrefix = "sources/";
+
+/** Where vectors are kept in the store's part of the bucket. */
+export const vectorsPrefix = "vectors/";
+
 /** The file of `hash`'s key in the bucket. */
-export const fileKeyOf = (hash: string): string => `sources/${hash}`;
+export const fileKeyOf = (hash: string): string => `${filesPrefix}${hash}`;
 
 /** Where `model`'s vectors are kept in the bucket. */
 export const vectorPrefixOf = (model: string): string =>
-  `vectors/${encodeURIComponent(model)}/`;
+  `${vectorsPrefix}${encodeURIComponent(model)}/`;
 
 /** The key of the vector of a passage of `hash` by `model`. */
 export const vectorKeyOf = (model: string, hash: string): string =>
@@ -325,7 +332,7 @@ export const holdFile = (db: DrizzleSqliteDODatabase, hash: string): boolean =>
  * never holds back the others.
  */
 const deleteObjects = async (
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   keys: readonly string[]
 ): Promise<string[]> => {
   try {
@@ -404,7 +411,7 @@ const settleVectorSweep = (
 export const sweepFiles = async (
   storage: DurableObjectStorage,
   db: DrizzleSqliteDODatabase,
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   at: Date
 ): Promise<"swept" | "idle" | "timed_out"> => {
   const asOf = Math.min(at.getTime(), Date.now());
