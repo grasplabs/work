@@ -33,6 +33,7 @@ import {
   rememberAs,
   saveOver,
   setUpTime,
+  erasing,
 } from "./knowledge-purge.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import {
@@ -599,6 +600,7 @@ describe("a purge's record", setUpTime, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     const failing = await rebuildFailingOnce(admin);
     const { token } = await admin.api.knowledge.preparePurge(input);
     await outcome(failing.knowledge.purge(input, token));

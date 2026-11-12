@@ -12,6 +12,7 @@ import {
   rememberAs,
   saveOver,
   setUpTime,
+  erasing,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import {
@@ -700,14 +701,12 @@ describe(
         .bind(owner.userId)
         .first<{ id: string }>();
       const purgeId = open?.id ?? "";
-      // They leave: their Personal collection goes, and they are an admin
-      // no more.
+      // They leave: removed, and erased, their own collections go.
       await purged(other, {
         type: "personal",
         userId: owner.userId,
         reason: "offboarding",
       });
-      await other.api.members.setRole(owner.userId, "user");
       const stuck = {
         prepare: await outcome(other.api.knowledge.preparePurge(input)),
         exportOpen: await outcome(
@@ -886,6 +885,7 @@ describe(
         userId: leaver.userId,
         reason: "offboarding",
       };
+      await erasing(admin, leaver.userId);
       const failing = await rebuildFailingOnce(admin);
       const first = await admin.api.knowledge.preparePurge(input);
       await refusal(failing.knowledge.purge(input, first.token));

@@ -6,6 +6,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { erasing } from "./knowledge-purge.ts";
 import { ownCollectionOf } from "./knowledge.ts";
 import {
   auditedDuring,
@@ -813,6 +814,7 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     const personalPlan = await admin.api.knowledge.preparePurge(personal);
     await admin.api.knowledge.purge(personal, personalPlan.token);
     const readAfterPersonal = await admin.api.brain.read();

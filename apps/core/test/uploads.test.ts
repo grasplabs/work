@@ -25,6 +25,7 @@ import {
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { erasing } from "./knowledge-purge.ts";
 import { newTeam, ownCollectionOf, storedVersionTexts } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { connectWithoutGraspKeys } from "./platform-providers.ts";
@@ -1415,6 +1416,7 @@ export default class extends WorkerEntrypoint {
       userId: person.userId,
       reason: "offboarding",
     };
+    await erasing(admin, person.userId);
     const plan = await admin.api.knowledge.preparePurge(input);
     await admin.api.knowledge.purge(input, plan.token);
 
@@ -1442,6 +1444,7 @@ export default class extends WorkerEntrypoint {
       userId: person.userId,
       reason: "offboarding",
     };
+    await erasing(admin, person.userId);
     const { token } = await admin.api.knowledge.preparePurge(input);
     // Knowledge refusing the batch that deletes the collection, once the
     // originals are gone.

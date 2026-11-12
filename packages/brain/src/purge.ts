@@ -94,10 +94,14 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // asks (GDPR erasure): an admin prepares a purge, which says how much it
 // removes and returns a token, and confirms it with that token. Two kinds:
 //
-// - `personal`: the person's Personal collection (their USER.md and
-//   whatever else is in it) is deleted with every version, section, link,
-//   transcript and search row, and so are their Brain memories and command receipts
+// - `personal`: every collection only the person reads (`access` "me",
+//   theirs: whatever made it, a Personal collection they once had among
+//   them) is deleted with every version, section, link, transcript and
+//   search row, and so are their Brain memories and command receipts
 //   (memories.ts). One batch, with its audit event, which counts them.
+//   Collections they own that others read too are the company's, and
+//   stay. Core runs one only for a person being erased (core's rpc.ts
+//   `requireErasing`, person-erasure.ts).
 // - `content`: every occurrence of some terms (a name, an email address, a
 //   passage), in any case and as a whole word as the search index's
 //   tokenizer draws words (never inside a longer word, except in scripts

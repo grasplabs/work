@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { erasing } from "./knowledge-purge.ts";
 import { newTeam, ownCollectionOf } from "./knowledge.ts";
 import {
   callAuth,
@@ -475,6 +476,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     const plan = await admin.api.knowledge.preparePurge(input);
     await admin.api.knowledge.purge(input, plan.token);
 

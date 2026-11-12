@@ -107,7 +107,34 @@ export const holding = async (term: string): Promise<string[]> => {
 };
 
 /** Prepares `input` as `admin` and confirms it with the token. */
+/**
+ * `userId` removed by `admin`, and their erasure begun and not yet run, as
+ * `erasePerson` (person-erasure.ts) leaves it until its steps finish: what
+ * lets a personal purge of them run (rpc.ts `requireErasing`).
+ */
+export const erasing = async (admin: Person, userId: string): Promise<void> => {
+  const removed = await env.DB.prepare(
+    "SELECT 1 AS removed FROM person_erasures WHERE user_id = ?"
+  )
+    .bind(userId)
+    .first();
+  if (removed !== null) {
+    return;
+  }
+  await admin.api.members.remove(userId).catch(() => {
+    // Removed before: what is asked is that they are.
+  });
+  await env.DB.prepare(
+    "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at, completed_at) VALUES (?, 'Leaver', NULL, 1, ?, ?, NULL)"
+  )
+    .bind(userId, admin.userId, Date.now())
+    .run();
+};
+
 export const purged = async (admin: Person, input: PurgeInput) => {
+  if (input.type === "personal") {
+    await erasing(admin, input.userId);
+  }
   const plan = await admin.api.knowledge.preparePurge(input);
   const result = await admin.api.knowledge.purge(input, plan.token);
   return { plan, result };

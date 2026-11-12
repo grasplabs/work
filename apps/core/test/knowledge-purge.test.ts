@@ -18,6 +18,7 @@ import {
   rememberAs,
   saveOver,
   setUpTime,
+  erasing,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import {
@@ -94,6 +95,7 @@ describe("a personal purge", setUpTime, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     const events = await auditedDuring(async () => {
       outcomeOf = await purged(admin, input);
     });
@@ -131,9 +133,10 @@ describe("a personal purge", setUpTime, () => {
     });
   });
 
-  it("leaves another person's collection only they read, and a team's collection the person wrote in, as they were", async () => {
+  it("leaves another person's collection only they read, and the team's and everyone's collections the person made or wrote in, as they were", async () => {
     const admin = await personOf("admin");
-    const leaver = await personOf("user");
+    // An admin, who may make collections for a team or for everyone.
+    const leaver = await personOf("admin");
     const stays = await personOf("user");
     const team = await newTeam(admin, [leaver, stays]);
     const secret = `brandsma${unique()}`;
@@ -155,6 +158,35 @@ describe("a personal purge", setUpTime, () => {
       "plan.md",
       `# Plan\n${secret} leads it.`
     );
+    // Collections the person made and owns, for others to read too: the
+    // company's, not theirs alone.
+    const { id: theirTeams } = await leaver.api.knowledge.createCollection({
+      name: `Handover ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    const forTeam = await saveOver(
+      leaver,
+      theirTeams,
+      "handover.md",
+      `# Handover\n${secret} hands over.`
+    );
+    await saveOver(
+      leaver,
+      theirTeams,
+      "handover.md",
+      `# Handover\n${secret} hands over, done.`
+    );
+    const { id: theirEveryone } = await leaver.api.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const forEveryone = await saveOver(
+      leaver,
+      theirEveryone,
+      "rules.md",
+      `# Rules\nAsk ${secret}.`
+    );
     await saveOver(
       leaver,
       await ownCollectionOf(leaver),
@@ -172,10 +204,17 @@ describe("a personal purge", setUpTime, () => {
       documents: result.documents,
       theirs: await versionTexts(kept.id),
       team: await versionTexts(shared.id),
+      theirTeams: await versionTexts(forTeam.id),
+      theirEveryone: await versionTexts(forEveryone.id),
     }).toStrictEqual({
       documents: 1,
       theirs: [`# Notes\nWorking with ${secret}.`],
       team: [`# Plan\n${secret} leads it.`],
+      theirTeams: [
+        `# Handover\n${secret} hands over.`,
+        `# Handover\n${secret} hands over, done.`,
+      ],
+      theirEveryone: [`# Rules\nAsk ${secret}.`],
     });
   });
 
@@ -194,6 +233,7 @@ describe("a personal purge", setUpTime, () => {
       userId: leaver.userId,
       reason: "erasure_request",
     };
+    await erasing(admin, leaver.userId);
     const first = await purged(admin, input);
     const again = await purged(admin, input);
     expect({
@@ -208,6 +248,44 @@ describe("a personal purge", setUpTime, () => {
         versions: 0,
       },
       held: [],
+    });
+  });
+});
+
+describe("a personal purge outside an erasure", setUpTime, () => {
+  it("is refused for a person nobody is erasing, before anything is counted or changed", async () => {
+    const admin = await personOf("admin");
+    const colleague = await personOf("user");
+    const notes = await ownCollectionOf(colleague);
+    const note = await saveOver(
+      colleague,
+      notes,
+      "private.md",
+      "# Private\nOnly mine."
+    );
+    const input: PurgeInput = {
+      type: "personal",
+      userId: colleague.userId,
+      reason: "erasure_request",
+    };
+
+    let prepared: unknown;
+    let ran: unknown;
+    const events = await auditedDuring(async () => {
+      prepared = await outcome(admin.api.knowledge.preparePurge(input));
+      ran = await outcome(admin.api.knowledge.purge(input, "1.token"));
+    });
+
+    expect({
+      prepared,
+      ran,
+      events: events.map(({ action }) => action),
+      note: await versionTexts(note.id),
+    }).toStrictEqual({
+      prepared: "knowledge.purge_not_erasing",
+      ran: "knowledge.purge_not_erasing",
+      events: [],
+      note: ["# Private\nOnly mine."],
     });
   });
 });
@@ -727,6 +805,7 @@ describe("a purge whose index cleanup fails", setUpTime, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
+    await erasing(admin, leaver.userId);
     const failing = await rebuildFailingOnce(admin);
     const { token } = await admin.api.knowledge.preparePurge(input);
     const first = await outcome(failing.knowledge.purge(input, token));
@@ -783,13 +862,14 @@ describe("purging", setUpTime, () => {
       userId: user.userId,
       reason: "offboarding",
     };
+    await erasing(admin, user.userId);
     const { token } = await admin.api.knowledge.preparePurge(input);
     const otherInput: PurgeInput = { ...input, reason: "other" };
     const dot = token.indexOf(".");
     const tampered = `${Number(token.slice(0, dot)) + 1}${token.slice(dot)}`;
     const refusals = await Promise.all([
       outcome(builder.api.knowledge.preparePurge(input)),
-      outcome(user.api.knowledge.purge(input, token)),
+      outcome(builder.api.knowledge.purge(input, token)),
       outcome(staff.knowledge.preparePurge(input)),
       outcome(staff.knowledge.purge(input, token)),
       outcome(otherAdmin.api.knowledge.purge(input, token)),
