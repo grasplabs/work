@@ -30,6 +30,7 @@ import type {
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { ageOwnErasure, breakOwnStore } from "./brain-next-own-store.ts";
+import { holdNextBucketPut } from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -435,7 +436,7 @@ describe("a source whose readers would change kind", () => {
     });
 
     expect({
-      narrowing: narrowing.includes("keeps the kind of readers"),
+      narrowing: narrowing.includes("keeps the readers it was first added for"),
       namesTheKey: narrowing.includes(source.id),
       colleague: await textsFor(colleague, word, true),
       person: await textsFor(person, word, true),
@@ -446,6 +447,48 @@ describe("a source whose readers would change kind", () => {
       colleague: [`The team's draft ${word}`],
       person: [`The team's draft ${word}`],
       theirsAlone: [],
+    });
+  });
+
+  it("is refused, and kept nowhere of theirs, when a team's add of the same new key lands while it is being added", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    // Theirs past the shared store's first answer and writing its file in
+    // their own store, as the team's lands in the shared one.
+    const gate = await holdNextBucketPut(`person:${person}`);
+    const adding = outcomeOf(
+      add(source, `Theirs alone ${word}`, { kind: "owner", personId: person })
+    );
+    await vi.waitFor(
+      () => {
+        expect(gate.reached).toBeTruthy();
+      },
+      { timeout: 10_000 }
+    );
+    const teamAdd = await outcomeOf(
+      add(source, `The team's ${word}`, { kind: "team", teamId: team })
+    );
+    gate.released = true;
+    const theirs = await adding;
+    const theirsKept = await own(person).readCurrent({
+      sources: [keyOf(source)],
+      reader: { person, groups: [] },
+    });
+
+    expect({
+      teamAdd,
+      theirs: theirs.includes("keeps the readers it was first added for"),
+      theirsKept,
+      found: await textsFor(person, word, true),
+      colleague: await textsFor(colleague, word, true),
+    }).toStrictEqual({
+      teamAdd: "answered",
+      theirs: true,
+      theirsKept: [],
+      found: [`The team's ${word}`],
+      colleague: [`The team's ${word}`],
     });
   });
 
@@ -527,7 +570,7 @@ describe("a source whose readers would change kind", () => {
 });
 
 describe("a person's own store failing", () => {
-  it("leaves shared history readable to them and others' recall whole, and fails only their own recall that reads it", async () => {
+  it("leaves what is shared readable, listed and loaded for them and others' recall whole, and fails only their own recall that reads it", async () => {
     const [person, colleague] = await Promise.all([member(), member()]);
     const team = await teamOf(person, colleague);
     const word = markerWord();
@@ -540,15 +583,40 @@ describe("a person's own store failing", () => {
       kind: "owner",
       personId: person,
     });
+    const company: InstructionFile = { scope: "company", name: "facts" };
+    const theirFile: InstructionFile = { scope: "person", personId: person };
+    await addInstructionFile(env, {
+      file: company,
+      change: crypto.randomUUID(),
+      text: "We sell bicycles",
+    });
+    await addInstructionFile(env, {
+      file: theirFile,
+      change: crypto.randomUUID(),
+      text: "Call me by my first name",
+    });
     const broken = await breakOwnStore(person);
     try {
+      const listed = await listSourcesAs(env, person, {});
+      const versions = await listVersionsAs(env, person, { source: teamNote });
+      const files = await readInstructionFilesAs(env, { userId: person }, [
+        company,
+        theirFile,
+      ]);
       expect({
         history: await historyAs(person, { source: teamNote, version: 1 }),
+        listed: listed.sources.map(({ source }) => source.id),
+        versions: versions.versions.map(({ version }) => version),
+        files: files.map(({ text }) => text),
         asApp: await textsFor(person, word, false),
         colleague: await textsFor(colleague, word, true),
         own: await outcomeOf(textsFor(person, word, true)),
       }).toStrictEqual({
         history: `The team's note ${word}`,
+        // Their own part goes missing, never the shared part.
+        listed: [teamNote.id],
+        versions: [1],
+        files: ["We sell bicycles"],
         asApp: [`The team's note ${word}`],
         colleague: [`The team's note ${word}`],
         own: "Error: The Brain can't read its erasure ledger yet, so it answers nothing: try again shortly",
@@ -598,20 +666,17 @@ describe("erasing a person", () => {
 
     // Recorded, but its files can't be deleted yet: still pending.
     const undeletable = await breakBucketOf(person, ["delete"]);
-    await expect(erasePerson(env, erasing)).rejects.toThrow(
-      /still deleting its files/u
-    );
+    const whileUndeletable = await erasePerson(env, erasing);
     const whileDeleting = await textsFor(person, word, true);
     await undeletable.heal();
     // Its files deleted, it is still deleting until an add under way
     // could have written its file: as if that time had passed.
-    await expect(erasePerson(env, erasing)).rejects.toThrow(
-      /still deleting its files/u
-    );
+    const withinGrace = await erasePerson(env, erasing);
     await ageOwnErasure(person);
-    await erasePerson(env, erasing);
+    const done = await erasePerson(env, erasing);
 
     expect({
+      answers: [whileUndeletable, withinGrace, done],
       beforeErasure,
       whileDeleting,
       afterwards: await textsFor(person, word, true),
@@ -627,6 +692,7 @@ describe("erasing a person", () => {
         () => true
       ),
     }).toStrictEqual({
+      answers: ["still_deleting", "still_deleting", "erased"],
       beforeErasure: [`Their own ${word}`, `The team's ${word} and more`],
       whileDeleting: [`The team's ${word} and more`],
       afterwards: [`The team's ${word} and more`],

@@ -16,6 +16,7 @@ import {
   recallRequestSchema,
   sourceErasureSchema,
   sourceIdSchema,
+  stillDeleting,
   sourceListRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
@@ -197,10 +198,6 @@ const erasedWhole = "The Brain refused it: this store was erased";
  */
 const alarmUnset =
   "The Brain did it but couldn't schedule what it left to finish: try again";
-
-/** What erasing a person's own store answers while files are left to delete. */
-const stillDeleting =
-  "The Brain erased this store and is still deleting its files: erase it again";
 
 /** What erasing a person's own store answers when its record couldn't be written. */
 const erasureUnrecorded =

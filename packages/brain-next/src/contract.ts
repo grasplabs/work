@@ -1203,6 +1203,20 @@ export type StoreKind =
   | { kind: "unknown" };
 
 /**
+ * What erasing a person's own store whole answers while it is still
+ * deleting: its record written and its storage gone, its files waiting
+ * out the time an add under way has to write one. The expected answer
+ * for a while after every such erasure, not a failure: the host keeps the
+ * erasure pending and calls again (`isStillDeleting`).
+ */
+export const stillDeleting =
+  "The Brain erased this store and is still deleting its files: erase it again";
+
+/** Whether `error` is the answer `stillDeleting`, as it crosses RPC. */
+export const isStillDeleting = (error: unknown): boolean =>
+  error instanceof Error && error.message === stillDeleting;
+
+/**
  * Whose the store named `name` is. A name is all a store knows of itself
  * (store.ts), so this is the one rule of which store is whose, and it
  * fails closed: exactly `brain` is the shared store; `person:` followed

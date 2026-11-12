@@ -1,8 +1,4 @@
-import {
-  packAcross,
-  sourcesAcross,
-  versionsAcross,
-} from "@grasp-os/brain-next/across";
+import { packAcross, sourcesAcross } from "@grasp-os/brain-next/across";
 import {
   brainOf,
   currentReadMax,
@@ -10,6 +6,7 @@ import {
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
+  isStillDeleting,
   principalMaxLength,
   questionMaxLength,
   sourceIdMaxLength,
@@ -272,10 +269,10 @@ type BrainEnv = Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">;
 // Two kinds of store (@grasp-os/brain-next `BrainStore`), both in core's
 // jurisdiction: the shared one, holding what more than one person may
 // read, and each person's own, holding what only they may read (`owner`).
-// A source's store follows from its readers (`storeOf`), so a source
+// A source's store follows from its readers (`keptIn`), so a source
 // keeps its kind of readers, and its person, for its whole life: who may
 // read it changes only by a person's act that makes a new source (a new
-// key). Narrowing a shared source to one person is refused (`storeFor`).
+// key). Narrowing a shared source to one person is refused (`keptIn`).
 // Widening one person's own to a group can't be told apart from a new
 // shared source without knowing whose it was, so producers never do it:
 // were one to, the private versions would stay readable to their person
@@ -295,29 +292,55 @@ const brain = (env: BrainEnv): Brain =>
 const ownBrain = (env: BrainEnv, person: string): Brain =>
   personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), person);
 
-/** The store what `access` lets read is kept in: its owner's own, or the shared one. */
-const storeOf = (env: BrainEnv, access: Access): Brain =>
-  access.kind === "owner" ? ownBrain(env, access.person) : brain(env);
+/**
+ * What the reader's own store answers to `read`, or `missing` when it
+ * fails, logged by a fixed name alone: where a read joins what is shared
+ * with what is theirs, their own part may go missing, never the shared
+ * part. (A recall that reads their own store fails instead: it would
+ * answer as if they held nothing.)
+ */
+const ownOr = async <T>(read: () => Promise<T>, missing: T): Promise<T> => {
+  try {
+    return await read();
+  } catch {
+    log.warn("brain.own_store_unavailable", {});
+    return missing;
+  }
+};
 
 /** What an add that would narrow a shared source to one person answers. */
 const narrowed =
-  "Refused: a source keeps the kind of readers it was first added with; one more than one person could read can't become one person's own: add it as a new source";
+  "Refused: a source keeps the readers it was first added for, so one added for more than one person, or one an erasure closed, can't become one person's own: add it as a new source";
 
 /**
- * The store to add `source` to for `access` (`storeOf`), once the shared
- * store says it was never given that key when it is one person's own:
- * a shared source is never narrowed into a person's own store, where
- * its shared versions would stay readable to those taken off.
+ * `add` run on the store `source` is kept in for `access` (`keptIn`).
+ * One person's own only while the shared store was never given its key,
+ * asked before and again after: a shared source is never narrowed into a
+ * person's own store, where its shared versions would stay readable to
+ * those taken off. A shared add of the key that landed in between (two
+ * producers at once) has the person's copy erased and this add refused;
+ * one after the second ask is a widening, which producers never do.
  */
-const storeFor = async (
+const keptIn = async <T>(
   env: BrainEnv,
   source: SourceId,
-  access: Access
-): Promise<Brain> => {
-  if (access.kind === "owner" && (await brain(env).holdsSource(source))) {
+  access: Access,
+  add: (store: Brain) => Promise<T>
+): Promise<T> => {
+  if (access.kind !== "owner") {
+    return await add(brain(env));
+  }
+  const shared = brain(env);
+  if (await shared.holdsSource(source)) {
     throw new Error(narrowed);
   }
-  return storeOf(env, access);
+  const own = ownBrain(env, access.person);
+  const added = await add(own);
+  if (await shared.holdsSource(source)) {
+    await own.eraseSource({ source, reason: "deleted" });
+    throw new Error(narrowed);
+  }
+  return added;
 };
 
 /**
@@ -368,7 +391,7 @@ const readerOf = async (
  * read; it replaces the version before in recall, which stays as history.
  * What only one person may read (`owner`) is kept in their own store,
  * anything else in the shared one; a source keeps its kind of readers,
- * and its person, for its whole life (`storeOf`): `owner` readers for a
+ * and its person, for its whole life (`keptIn`): `owner` readers for a
  * source the shared store holds are refused.
  *
  * `change` names this one change, unique per source: an upstream
@@ -398,13 +421,13 @@ export const addSource = async (
   const { source, change, text, readers } = checked(newSourceSchema, added);
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
-  const store = await storeFor(env, key, access);
-  const { version } = await store.addSource({
-    source: key,
-    change,
-    text,
+  const { version } = await keptIn(
+    env,
+    key,
     access,
-  });
+    async (store) =>
+      await store.addSource({ source: key, change, text, access })
+  );
   return { source, version };
 };
 
@@ -511,7 +534,7 @@ export const recallAs = async (
  * could read from before they joined. `null` when there is none or they
  * may not, alike. Asked of the shared store first, and of their own only
  * when the shared one has no version they may read: a source is in one of
- * them (`storeOf`), and a shared one stays readable whatever their own
+ * them (`keptIn`), and a shared one stays readable whatever their own
  * store does. Refused once they are no longer a member. For the server
  * only, as `addSource`.
  */
@@ -569,8 +592,9 @@ export interface SourcePage {
  * producer's kind (never an instruction file), newest first by when their
  * current version was added, after `after` when given: what they may not
  * read takes no place in it. Of the shared store and their own, merged as
- * one store holding both would list them (`sourcesAcross`). Refused once
- * they are no longer a member.
+ * one store holding both would list them (`sourcesAcross`); the shared
+ * one's alone while their own store fails (`ownOr`). Refused once they
+ * are no longer a member.
  */
 export const listSourcesAs = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -590,7 +614,13 @@ export const listSourcesAs = async (
   const { sources, more } = sourcesAcross(
     await Promise.all([
       brain(env).listSources(request),
-      ownBrain(env, reader.person).listSources(request),
+      ownOr(
+        async () => await ownBrain(env, reader.person).listSources(request),
+        {
+          sources: [],
+          more: false,
+        }
+      ),
     ])
   );
   const listed = sources.map(
@@ -641,8 +671,10 @@ const versionsWantedSchema = z.strictObject({
  * A page of the versions of `source` the member `personId` may read,
  * newest first, below `before` when given: only while they may read its
  * current version, as `readSourceVersionAs` reads them; none, alike, for
- * a source there isn't. Of the shared store and their own, merged
- * (`versionsAcross`). Refused once they are no longer a member.
+ * a source there isn't. Of the shared store, and of their own only when
+ * the shared one lists none of it: a source is in one of them, and a
+ * shared one's history stays listed whatever their own store does.
+ * Refused once they are no longer a member.
  */
 export const listVersionsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -656,12 +688,11 @@ export const listVersionsAs = async (
     reader,
     ...(before === undefined ? {} : { before }),
   };
-  const { versions, more } = versionsAcross(
-    await Promise.all([
-      brain(env).listVersions(request),
-      ownBrain(env, reader.person).listVersions(request),
-    ])
-  );
+  const shared = await brain(env).listVersions(request);
+  const { versions, more } =
+    shared.versions.length > 0
+      ? shared
+      : await ownBrain(env, reader.person).listVersions(request);
   const last = versions.at(-1);
   return {
     versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
@@ -694,7 +725,7 @@ const personErasureSchema = z.strictObject({
  * retry never brings it back. Safe to repeat. For a producer's deletion
  * for good, or the end of its retention. `readers` are the source's, as
  * its producer adds it: its key is closed in the shared store, and in
- * the person's own store too when they name one (`storeOf`).
+ * the person's own store too when they name one (`keptIn`).
  *
  * Only a call that returned is in the Brain's ledger. A call that fails
  * or throws must be retried until it succeeds: until then, a restore of
@@ -727,25 +758,37 @@ export const eraseSource = async (
  *
  * In the shared store, and, for `person_erased` alone, then their own
  * store, whole: deleted for good, it holds nothing and takes nothing from
- * then on. While its files are being deleted, or when the record of its
- * erasure couldn't be written, this throws: the caller keeps the erasure
- * pending and calls again. A withdrawal never touches their own store:
- * they stay a member, and what they withdraw (an interview) is erased as
- * its source (`eraseSource`).
+ * then on. A withdrawal never touches their own store: they stay a
+ * member, and what they withdraw (an interview) is erased as its source
+ * (`eraseSource`).
  *
- * Only a call that returned is in the Brain's ledger. A call that fails
- * or throws must be retried until it succeeds: until then, a restore of
+ * Answers `erased` once it is all done, or `still_deleting` while their
+ * own store waits out the time an add under way has to write a file
+ * (about 15 minutes after the first call): no failure, so the caller
+ * keeps the erasure pending, quietly, and calls again. Throws when it
+ * failed (the record of an erasure couldn't be written, say).
+ *
+ * Only a call that answered `erased` is done. Until then, a restore of
  * the Brain's store can bring what it covers back.
  */
 export const erasePerson = async (
   env: BrainEnv,
   erased: { personId: string; reason: ErasureReason }
-): Promise<void> => {
+): Promise<"erased" | "still_deleting"> => {
   const { personId, reason } = checked(personErasureSchema, erased);
   await brain(env).erasePerson({ person: personId, reason });
-  if (reason === "person_erased") {
-    await ownBrain(env, personId).erasePerson({ person: personId, reason });
+  if (reason !== "person_erased") {
+    return "erased";
   }
+  try {
+    await ownBrain(env, personId).erasePerson({ person: personId, reason });
+  } catch (error) {
+    if (isStillDeleting(error)) {
+      return "still_deleting";
+    }
+    throw error;
+  }
+  return "erased";
 };
 
 // Instruction files: what people write for every chat to start with (the
@@ -880,13 +923,18 @@ export const addInstructionFile = async (
   const { file, change } = checked(newInstructionsSchema, added);
   const access = instructionAccessOf(file);
   const key = instructionKeyOf(file);
-  const store = await storeFor(env, key, access);
-  const { version } = await store.addInstructions({
-    source: key,
-    change,
-    text: added.text,
+  const { version } = await keptIn(
+    env,
+    key,
     access,
-  });
+    async (store) =>
+      await store.addInstructions({
+        source: key,
+        change,
+        text: added.text,
+        access,
+      })
+  );
   return { file, version };
 };
 
@@ -920,7 +968,7 @@ export const readInstructionFilesAs = async (
       ? [companyGroup]
       : [companyGroup, appGroup(checked(instructionIdSchema, builtApp))];
   const reader = { person: checked(idSchema, member.userId), groups };
-  // A person's file is in their own store (`storeOf`): only the reader's
+  // A person's file is in their own store (`keptIn`): only the reader's
   // own is asked of, there, and their store only when it is wanted.
   // Another person's is left out as a file never written is, and their
   // store is never addressed.
@@ -933,12 +981,17 @@ export const readInstructionFilesAs = async (
       sources: sharedFiles.map((file) => instructionKeyOf(file)),
       reader,
     }),
+    // Their own file is left out while their store fails, never the rest.
     ownFile.length === 0
       ? []
-      : ownBrain(env, reader.person).readCurrent({
-          sources: ownFile.map((file) => instructionKeyOf(file)),
-          reader,
-        }),
+      : ownOr(
+          async () =>
+            await ownBrain(env, reader.person).readCurrent({
+              sources: ownFile.map((file) => instructionKeyOf(file)),
+              reader,
+            }),
+          []
+        ),
   ]);
   const read = new Map(
     [...fromShared, ...fromOwn].map((current) => [current.source, current])

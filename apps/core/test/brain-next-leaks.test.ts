@@ -534,8 +534,8 @@ describe(
         narrowedId
       );
       // First for the outsider's own team, then narrowed to the holder
-      // alone: refused, as a source keeps the kind of readers it was first
-      // added with, so the version for the holder alone is kept nowhere.
+      // alone: refused, as a source keeps the readers it was first added
+      // for, so the version for the holder alone is kept nowhere.
       const toHolder = await add("Shared plan for the quarter", {
         kind: "team",
         teamId: ownTeam,
