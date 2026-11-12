@@ -68,6 +68,12 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
+import {
+  countingInto,
+  countWithoutMeaning,
+  newRecallCounts,
+  recallOverviewOf,
+} from "./recall-counts.ts";
 import { find, recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
@@ -305,6 +311,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     embedding: null,
   };
   #sweepAfter = 0;
+
+  /**
+   * Recall by each way and without meaning, since this instance started:
+   * in memory, gone with it, as `#stepsFailed` (recall-counts.ts).
+   */
+  readonly #recallCounts = newRecallCounts();
 
   /**
    * Where this instance is with its erasure ledger: read through, a replay
@@ -610,17 +622,31 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const asked = checked(recallRequestSchema, request);
     this.#mayRead(asked.reader);
     await this.#ready();
+    this.#countWithoutMeaning(asked);
     return this.#schema
-      ? recall(this.ctx.storage.sql, asked)
+      ? recall(this.ctx.storage.sql, asked, countingInto(this.#recallCounts))
       : packAcross(asked.question, asked.budget.tokens, [nothingFound]);
   }
 
-  /** What `recall` finds, before it is packed (across.ts `packAcross`). */
+  /**
+   * What `recall` finds, before it is packed (across.ts `packAcross`),
+   * each way counted as `recall` counts it.
+   */
   async find(request: RecallRequest): Promise<Finding> {
     const asked = checked(recallRequestSchema, request);
     this.#mayRead(asked.reader);
     await this.#ready();
-    return this.#schema ? find(this.ctx.storage.sql, asked) : nothingFound;
+    this.#countWithoutMeaning(asked);
+    return this.#schema
+      ? find(this.ctx.storage.sql, asked, countingInto(this.#recallCounts))
+      : nothingFound;
+  }
+
+  /** A recall the host made without the question's vector, counted by why. */
+  #countWithoutMeaning({ withoutMeaning }: RecallRequest): void {
+    if (withoutMeaning !== undefined) {
+      countWithoutMeaning(this.#recallCounts, withoutMeaning);
+    }
   }
 
   /** A version, current or history, whole: if the reader may read it. */
@@ -1044,6 +1070,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       storeBytes: this.ctx.storage.sql.databaseSize,
       words: wordsRebuilding(this.ctx.storage.sql) ? "rebuilding" : "current",
       erasures: erasuresOverview(this.ctx.storage.sql),
+      recall: recallOverviewOf(this.#recallCounts),
     };
   }
 
@@ -1103,6 +1130,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         person: { written: 0, unwritten: 0 },
         byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
       },
+      recall: recallOverviewOf(this.#recallCounts),
     };
   }
 

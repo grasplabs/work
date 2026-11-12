@@ -14,6 +14,7 @@ import type {
 import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { readableSql } from "./reader-sets.ts";
+import type { WayRunner } from "./recall-counts.ts";
 import { nearChunks } from "./vectors.ts";
 import { termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
@@ -315,9 +316,6 @@ const byWords = (
   reader: Reader,
   asOf: AsOf
 ): Pick<Finding, "words" | "stopWords" | "terms"> => {
-  if (telling.length === 0) {
-    return { words: [], stopWords: [], terms: [] };
-  }
   // The moment, if any, follows the five bindings of each statement.
   const as = asOf.length > 0 ? 6 : undefined;
   const rows = sql
@@ -372,9 +370,6 @@ const byExact = (
   reader: Reader,
   asOf: AsOf
 ): Pick<Finding, "exact" | "capped"> => {
-  if (exacts.length === 0) {
-    return { exact: [], capped: [] };
-  }
   const rows = sql
     .exec<Row & { parts: string; near_parts: string; past: string }>(
       exactSql(asOf.length > 0 ? 5 : undefined),
@@ -407,52 +402,56 @@ const byExact = (
 /**
  * The meaning way: the chunks the reader may read whose vectors of the
  * question's model and build are nearest its vector, best first, at most
- * `recallLimit` (vectors.ts `nearChunks`). None without a vector, for a
- * question of no word (an empty question finds nothing by any way), and
- * as of a moment: vectors are kept for current versions only, so the scan
- * can't tell which were current then, and nearer chunks added since would
- * take every place.
+ * `recallLimit` (vectors.ts `nearChunks`).
  */
 const byMeaning = (
   sql: SqlStorage,
-  meaning: RecallRequest["meaning"],
-  hasWords: boolean,
-  reader: Reader,
-  asOf: AsOf
+  meaning: NonNullable<RecallRequest["meaning"]>,
+  reader: Reader
 ): Finding["meaning"] =>
-  meaning === undefined || !hasWords || asOf.length > 0
-    ? []
-    : nearChunks(
-        sql,
-        vectorModelNameOf(meaning.model),
-        meaning.vector,
-        reader,
-        recallLimit
-      );
+  nearChunks(
+    sql,
+    vectorModelNameOf(meaning.model),
+    meaning.vector,
+    reader,
+    recallLimit
+  );
 
 /**
  * What the reader may read for the question, found by each way, before it
  * is packed (contract.ts `Brain.find`): one synchronous read of one
  * snapshot.
+ *
+ * A way runs, through `way` (which counts it), only when the question has
+ * something for it: telling words, exact parts, or a vector for a
+ * question of some word (an empty question finds nothing by any way), and
+ * by meaning never as of a moment: vectors are kept for current versions
+ * only, so the scan can't tell which were current then, and nearer chunks
+ * added since would take every place. A way that throws fails the recall.
  */
 export const find = (
   sql: SqlStorage,
-  { question, reader, asOf, meaning }: RecallRequest
+  { question, reader, asOf, meaning }: RecallRequest,
+  way: WayRunner
 ): Finding => {
   const exacts = exactsOf(question);
   const terms = termsOf(question);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  return {
-    ...byWords(sql, terms, reader, at),
-    ...byExact(sql, exacts, reader, at),
-    meaning: byMeaning(
-      sql,
-      meaning,
-      terms.telling.length + exacts.length > 0,
-      reader,
-      at
-    ),
-  };
+  const words =
+    terms.telling.length === 0
+      ? { words: [], stopWords: [], terms: [] }
+      : way("words", () => byWords(sql, terms, reader, at));
+  const exact =
+    exacts.length === 0
+      ? { exact: [], capped: [] }
+      : way("exact", () => byExact(sql, exacts, reader, at));
+  const meant =
+    meaning === undefined ||
+    terms.telling.length + exacts.length === 0 ||
+    asOf !== undefined
+      ? []
+      : way("meaning", () => byMeaning(sql, meaning, reader));
+  return { ...words, ...exact, meaning: meant };
 };
 
 /**
@@ -461,5 +460,11 @@ export const find = (
  * across.ts packs what several stores find, so one store's pack and the
  * pack of stores holding the same passages between them are the same.
  */
-export const recall = (sql: SqlStorage, request: RecallRequest): Pack =>
-  packAcross(request.question, request.budget.tokens, [find(sql, request)]);
+export const recall = (
+  sql: SqlStorage,
+  request: RecallRequest,
+  way: WayRunner
+): Pack =>
+  packAcross(request.question, request.budget.tokens, [
+    find(sql, request, way),
+  ]);
