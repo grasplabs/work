@@ -1,8 +1,8 @@
 // What staff see of recall (src/recall-counts.ts, GRA-1800): per way, how
 // many recalls searched by it and how many it failed, and how many
 // recalls the host made without the question's vector, by why; since the
-// store started. Each test in a store of its own, so the counts start
-// from nothing.
+// store started. Each test in the shared store from empty storage
+// (`reset`), a new instance, so the counts start from nothing.
 import type {
   Access,
   EmbedModel,
@@ -10,15 +10,14 @@ import type {
   RecallRequest,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
-import { runInDurableObject } from "cloudflare:test";
+import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { recallBudgetMax, vectorModelNameOf } from "../src/contract.ts";
 
 /** This test's store: one of its own. */
-let storeName = "";
-const store = () => env.BRAIN_STORE.getByName(storeName);
+const store = () => env.BRAIN_STORE.getByName("brain");
 
 /** The host's model, as its embedder names it. */
 const model: EmbedModel = { name: "counts-test", build: "1" };
@@ -76,8 +75,8 @@ const unchecked = (value: unknown): never =>
 const noneWithout = { timed_out: 0, failed: 0, refused: 0, unusable: 0 };
 
 describe("recall's counts, as staff see them", () => {
-  beforeEach(() => {
-    storeName = crypto.randomUUID();
+  beforeEach(async () => {
+    await reset();
   });
 
   it("counts each recall by the ways its question had something for, as of a moment never by meaning", async () => {
