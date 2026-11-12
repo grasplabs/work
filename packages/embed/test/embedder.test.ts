@@ -1,8 +1,8 @@
 // The embedder through its Durable Object, on the tiny models in fixtures/
 // (scripts/make-fixture.py): its vectors and token IDs against Hugging
 // Face's, the same bits from every integer kernel, a model of another depth
-// and shape run from its file alone, its model files checked before use,
-// and a reload after an eviction.
+// and shape run from its file alone, a model with a trimmed token table,
+// its model files checked before use, and a reload after an eviction.
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -25,11 +25,18 @@ import reference from "./fixtures/reference.json";
 import tokenizer from "./fixtures/tokenizer.bin";
 import tokensFloat from "./fixtures/tokens-float.bin";
 import tokensInt8 from "./fixtures/tokens-int8.bin";
+import trimmedEncoderInt8 from "./fixtures/trimmed/encoder-int8.bin";
+import trimmedReference from "./fixtures/trimmed/reference.json";
+import trimmedTokenizer from "./fixtures/trimmed/tokenizer.bin";
+import trimmedTokensFloat from "./fixtures/trimmed/tokens-float.bin";
+import trimmedTokensInt8 from "./fixtures/trimmed/tokens-int8.bin";
 import {
   deepFloatModel,
   deepInt8Model,
   floatModel,
   int8Model,
+  trimmedFloatModel,
+  trimmedInt8Model,
   abortWord,
   trapOnceWord,
   trapWord,
@@ -686,6 +693,23 @@ describe("embedder", () => {
     }
   });
 
+  it("refuses a tokenizer file whose added-token count the file can't hold, at load", async () => {
+    // Header word 6: the added tokens. 2^28 of them would need 4 GiB.
+    const counted = Uint8Array.from(new Uint8Array(tokenizer));
+    new DataView(counted.buffer).setUint32(6 * 4, 2 ** 28, true);
+    const embedder = await customEmbedder("added-count", {
+      tokenizer: counted,
+      encoder: new Uint8Array(encoderInt8),
+      tokens: new Uint8Array(tokensInt8),
+    });
+    const refused =
+      "The tokenizer file isn't a consistent tokenizer file of this version.";
+    await expect(twoEmbeds(embedder)).resolves.toStrictEqual([
+      refused,
+      refused,
+    ]);
+  });
+
   it("fails closed while a model file is missing, and loads once it is there", async () => {
     await upload(int8Model, int8Files);
     await env.MODEL_FILES.delete(modelFileKey(int8Model.tokens));
@@ -1205,5 +1229,194 @@ describe("embedder, waking", () => {
       }
     );
     expect(answer).toStrictEqual(["fixture-int8", int8Bits[0]]);
+  });
+});
+
+/**
+ * A trimmed tokenizer file's map from pieces to rows (rust/src/tokenizer.rs,
+ * version 2): its header words 7 and 8 (the table's rows, the map's
+ * length), then the map's offsets and rows after the byte fallback IDs.
+ */
+const mapOf = (
+  file: ArrayBuffer
+): { rows: number; sequences: number[][]; at: number; end: number } => {
+  const view = new DataView(file);
+  const word = (i: number): number => view.getUint32(i * 4, true);
+  const [pieces, merges, rows, length] = [word(4), word(5), word(7), word(8)];
+  const at = 36 + 4 * (2 * (pieces + 1) + merges + 256);
+  const offsets = Array.from({ length: pieces + 1 }, (_, i) =>
+    view.getUint32(at + 4 * i, true)
+  );
+  const flat = new Uint32Array(file.slice(at + 4 * (pieces + 1)), 0, length);
+  const sequences = offsets
+    .slice(0, -1)
+    .map((start, i) => [...flat.subarray(start, offsets[i + 1])]);
+  return { rows, sequences, at, end: at + 4 * (pieces + 1 + length) };
+};
+
+/**
+ * The trimmed fixture's tokenizer with its map's `sequences` (one per
+ * piece) and `rows`, and the map's length as the header says it, unless
+ * `length` says otherwise.
+ */
+const withMap = (
+  sequences: number[][],
+  rows: number,
+  length = sequences.flat().length
+): Uint8Array => {
+  const { at, end } = mapOf(trimmedTokenizer);
+  const source = new Uint8Array(trimmedTokenizer);
+  const offsets = [0];
+  for (const sequence of sequences) {
+    offsets.push((offsets.at(-1) ?? 0) + sequence.length);
+  }
+  const map = Uint32Array.from([...offsets, ...sequences.flat()]);
+  const out = new Uint8Array(at + map.byteLength + source.byteLength - end);
+  out.set(source.subarray(0, at));
+  out.set(new Uint8Array(map.buffer), at);
+  out.set(source.subarray(end), at + map.byteLength);
+  const view = new DataView(out.buffer);
+  view.setUint32(7 * 4, rows, true);
+  view.setUint32(8 * 4, length, true);
+  return out;
+};
+
+const trimmedFloatFiles: Files = {
+  tokenizer: trimmedTokenizer,
+  encoder: encoderFloat,
+  tokens: trimmedTokensFloat,
+};
+const trimmedInt8Files: Files = {
+  tokenizer: trimmedTokenizer,
+  encoder: trimmedEncoderInt8,
+  tokens: trimmedTokensInt8,
+};
+
+describe("embedder, trimmed token table", () => {
+  it("runs a model whose removed pieces are written as kept ones as its reference does, cutting at the limit after the map", async () => {
+    // fixtures/trimmed: pieces written as two and three kept ones, first
+    // and last in a text, an added token among them, texts with none, and
+    // one of 72 pieces that is 212 rows once mapped, so cut at 128.
+    const runs: [string, EmbedModel, Files][] = [
+      ["trimmed-float", trimmedFloatModel, trimmedFloatFiles],
+      ["trimmed-int8", trimmedInt8Model, trimmedInt8Files],
+    ];
+    const [float, int8] = await Promise.all(
+      runs.map(async ([name, model, files]) => {
+        await upload(model, files);
+        const stub = env.CUSTOM.getByName(name);
+        await stub.use(model);
+        return stub;
+      })
+    );
+    const cases = trimmedReference.embeddings;
+    await expect(
+      Promise.all(cases.map(async ({ text }) => await int8?.tokenize(text)))
+    ).resolves.toStrictEqual(cases.map(({ ids }) => ids));
+    expect(cases.at(-1)?.ids).toHaveLength(128);
+    for (const { text, vector } of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- each object embeds one text at a time
+      const [floatVector, int8Vector] = await Promise.all(
+        [float, int8].map(async (stub) => {
+          const embedding = await stub?.embed(text);
+          return embedding?.vector ?? new Float32Array();
+        })
+      );
+      const furthest = Math.max(
+        ...Array.from(floatVector ?? [], (value, i) =>
+          Math.abs(value - (vector[i] ?? 0))
+        )
+      );
+      expect(furthest).toBeLessThanOrEqual(floatTolerance);
+      expect(dot(int8Vector ?? [], vector)).toBeGreaterThanOrEqual(
+        int8LeastCosine
+      );
+    }
+  });
+
+  it("counts the rows a removed piece is written as toward a call's 8,192 tokens", async () => {
+    // A model reading 1,024 tokens: 500 x "▁Rotterdam" is 502 pieces but
+    // 1,502 rows, cut at 1,024, so 8 such texts use up the call and the
+    // short text after them waits.
+    const stub = await customEmbedder("trimmed-tokens", {
+      tokenizer: new Uint8Array(trimmedTokenizer),
+      encoder: withMaxTokens(trimmedEncoderInt8, 1024, 1),
+      tokens: new Uint8Array(trimmedTokensInt8),
+    });
+    const long = "Rotterdam ".repeat(500);
+    await expect(stub.tokenize(long)).resolves.toHaveLength(1024);
+    const results = outcomes(
+      await stub.embedMany([...Array.from({ length: 8 }, () => long), "Hallo"])
+    );
+    expect(results[0]).toMatch(/^[0-9a-f]+$/u);
+    expect(results.slice(1, 8)).toStrictEqual(
+      Array.from({ length: 7 }, () => results[0])
+    );
+    expect(results.at(-1)).toBe("deferred");
+  });
+
+  it("cuts a text at the most tokens the model reads however many rows a piece is written as", async () => {
+    // The piece written as three rows ("▁Rotterdam") written as 100,000.
+    const { rows, sequences } = mapOf(trimmedTokenizer);
+    const three = sequences.findIndex((sequence) => sequence.length === 3);
+    const stub = await customEmbedder("trimmed-long-sequence", {
+      tokenizer: withMap(
+        sequences.map((sequence, piece) =>
+          piece === three
+            ? Array.from({ length: 100_000 }, () => sequence[0] ?? 0)
+            : sequence
+        ),
+        rows
+      ),
+      encoder: new Uint8Array(trimmedEncoderInt8),
+      tokens: new Uint8Array(trimmedTokensInt8),
+    });
+    const ids = await stub.tokenize("Rotterdam is here.");
+    expect(ids).toHaveLength(128);
+    const { vector } = await stub.embed("Rotterdam is here.");
+    expect(dot(vector, vector)).toBeCloseTo(1, 5);
+  });
+
+  it("refuses a map that can't be applied when the model loads, before any text", async () => {
+    const { rows, sequences } = mapOf(trimmedTokenizer);
+    const files = {
+      encoder: new Uint8Array(trimmedEncoderInt8),
+      tokens: new Uint8Array(trimmedTokensInt8),
+    };
+    const badMap =
+      "The tokenizer file has a map from pieces to rows that names a row past the token table or an empty sequence, or doesn't give <bos> and <eos> a row each.";
+    const changed = (piece: number, sequence: number[]): number[][] =>
+      sequences.map((each, at) => (at === piece ? sequence : each));
+    // <eos> and <bos> are pieces 1 and 2 of the fixture's tokenizer.
+    const cases: [string, Uint8Array, string][] = [
+      ["row-past-table", withMap(changed(100, [rows]), rows), badMap],
+      ["empty-sequence", withMap(changed(100, []), rows), badMap],
+      ["eos-two-rows", withMap(changed(1, [1, 1]), rows), badMap],
+      ["bos-two-rows", withMap(changed(2, [2, 2]), rows), badMap],
+      // A map longer than the file, at a length whose bytes wrap 32 bits.
+      [
+        "length-past-file",
+        withMap(sequences, rows, 2 ** 30),
+        "The tokenizer file isn't a consistent tokenizer file of this version.",
+      ],
+      // A sound map, for a table of more rows than the token table has.
+      [
+        "rows-past-table",
+        withMap(sequences, rows + 1),
+        `trimmed-rows-past-table's token table doesn't fit its tokenizer and encoder: ${String(rows + 1)} rows of 132 bytes wanted.`,
+      ],
+    ];
+    const outcome = await Promise.all(
+      cases.map(async ([name, tokenizerBytes]) => {
+        const embedder = await customEmbedder(`trimmed-${name}`, {
+          ...files,
+          tokenizer: tokenizerBytes,
+        });
+        return [name, await twoEmbeds(embedder)];
+      })
+    );
+    expect(outcome).toStrictEqual(
+      cases.map(([name, , message]) => [name, [message, message]])
+    );
   });
 });

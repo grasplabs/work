@@ -74,7 +74,7 @@ if (
   header === null ||
   header.format !== format ||
   header.dim !== auto.dim ||
-  header.rows !== auto.vocabSize
+  header.rows !== auto.tableRows
 ) {
   throw new Error(
     "The token table doesn't belong to this encoder and tokenizer."
