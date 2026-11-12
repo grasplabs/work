@@ -143,7 +143,10 @@ describe("a memory's lineage", () => {
       ]
     );
     const entity = entities.c ?? "";
-    const before = new Date();
+    // The moment a read is given now: every write so far is at or before it.
+    const { at: before } = await shared().listContested({
+      reader: readerOf(unique("clock"), unique("nobody")),
+    });
     const second = await addSource("Renews 1 April", audience(group), source);
     await remember(
       audience(group),
@@ -1146,7 +1149,10 @@ describe("what hidden memories never decide, and when a fact ends", () => {
       ]
     );
     const entity = made.entities.c ?? "";
-    const before = new Date();
+    // The moment a read is given now: every write so far is at or before it.
+    const { at: before } = await shared().listContested({
+      reader: readerOf(unique("clock"), unique("nobody")),
+    });
     const second = await addSource(
       "Acme is in Rotterdam",
       audience(group),
