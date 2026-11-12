@@ -270,20 +270,17 @@ describe(
       ];
 
       expect({
-        members: Object.fromEntries(
-          brainSurfaces.map(({ name, module }) => [
-            name,
-            membersOf(module).toSorted(),
-          ])
-        ),
+        // Pairs, not an object: two surfaces of one name are both compared.
+        members: brainSurfaces.map(({ name, module }) => [
+          name,
+          membersOf(module).toSorted(),
+        ]),
         unprobed: reaching.filter(([, name]) => !names.has(name)),
       }).toStrictEqual({
-        members: Object.fromEntries(
-          brainSurfaces.map(({ name, probes }) => [
-            name,
-            Object.keys(probes).toSorted(),
-          ])
-        ),
+        members: brainSurfaces.map(({ name, probes }) => [
+          name,
+          Object.keys(probes).toSorted(),
+        ]),
         unprobed: [],
       });
     });
