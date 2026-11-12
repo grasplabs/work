@@ -230,7 +230,8 @@ export type WithoutMeaningReason = (typeof withoutMeaningReasons)[number];
  * the host embeds the question first; without a vector, and always as of
  * a moment, recall is by words and exact parts alone. A host whose model
  * gave no vector it could use says why (`withoutMeaning`), for staff to
- * count (`RecallOverview`); never with a vector.
+ * count (`RecallOverview`); never with a vector, nor as of a moment,
+ * when there was no vector to miss.
  */
 export const recallRequestSchema = z
   .strictObject({
@@ -248,6 +249,14 @@ export const recallRequestSchema = z
       meaning === undefined || withoutMeaning === undefined,
     {
       message: "Gives a vector and why it has none",
+      path: ["withoutMeaning"],
+    }
+  )
+  .refine(
+    ({ asOf, withoutMeaning }) =>
+      asOf === undefined || withoutMeaning === undefined,
+    {
+      message: "Gives why it has no vector for a moment that takes none",
       path: ["withoutMeaning"],
     }
   );
