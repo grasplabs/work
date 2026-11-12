@@ -155,6 +155,11 @@ describe("recall's counts, as staff see them", () => {
       })
     ).rejects.toThrow("Gives a vector and why it has none");
     await expect(
+      recall("pallets", { withoutMeaning: "failed", asOf: new Date() })
+    ).rejects.toThrow(
+      "Gives why it has no vector for a moment that takes none"
+    );
+    await expect(
       recall("pallets", { withoutMeaning: unchecked("slow") })
     ).rejects.toThrow("The Brain refused it");
 
