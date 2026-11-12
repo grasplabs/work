@@ -35,6 +35,9 @@ let root: Root | undefined;
 /** The memories the page undid, by id, in order. */
 const forgotten: string[] = [];
 
+/** What core answers the page's undo of a memory. */
+let forgetAnswer: "done" | "nothing" = "done";
+
 const asked: ChatMessage = {
   id: 1,
   role: "user",
@@ -59,7 +62,9 @@ const thread = async (
     withSession: async <T,>(
       action: (session: {
         brain: { thinking: () => Promise<ThinkingGround> };
-        brainMemories: { forget: (memory: string) => Promise<"done"> };
+        brainMemories: {
+          forget: (memory: string) => Promise<"done" | "nothing">;
+        };
       }) => Promise<T>
     ): Promise<T> =>
       await action({
@@ -67,7 +72,7 @@ const thread = async (
           forget: async (memory) => {
             await Promise.resolve();
             forgotten.push(memory);
-            return "done";
+            return forgetAnswer;
           },
         },
         brain: {
@@ -161,6 +166,7 @@ describe(ChatThread, () => {
     root = undefined;
     document.body.replaceChildren();
     forgotten.length = 0;
+    forgetAnswer = "done";
   });
 
   it("says under a call of remember that it is an instruction, with the value it holds", async () => {
@@ -249,6 +255,61 @@ describe(ChatThread, () => {
     expect(document.body.textContent).toContain(
       "Grasp will remember about Bob: Prefers answers by mail"
     );
+  });
+
+  it("says when an undo found nothing to undo, never that it was forgotten", async () => {
+    forgetAnswer = "nothing";
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Acme renews on 1 March" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "fact",
+          statement: "Acme renews on 1 March",
+        },
+      },
+    ]);
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((button) => button.textContent === "Undo")
+        ?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(forgotten).toHaveLength(1);
+    });
+    const text = document.body.textContent;
+
+    expect({
+      told: text.includes(
+        "There was nothing to undo: Grasp no longer uses this."
+      ),
+      claimedForgotten: text.includes("Grasp no longer remembers this."),
+    }).toStrictEqual({ told: true, claimedForgotten: false });
   });
 
   it("says under a call of remember what Grasp will remember, in the person's words, and undoes it there", async () => {

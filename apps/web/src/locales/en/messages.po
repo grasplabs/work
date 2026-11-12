@@ -14137,6 +14137,10 @@ msgstr "There is a team with this name already."
 msgid "There is nobody in this list."
 msgstr "There is nobody in this list."
 
+#: src/chat/saved-memory.tsx
+msgid "There was nothing to undo: Grasp no longer uses this."
+msgstr "There was nothing to undo: Grasp no longer uses this."
+
 #: src/brain/share-record.tsx
 msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
 msgstr "There's nowhere to share it yet: you're in no team, and in no chat others share."

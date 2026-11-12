@@ -33,6 +33,7 @@ import {
 import type {
   Access,
   AskModel,
+  AttributeRule,
   Brain,
   ErasureReason,
   Embedders,
@@ -1906,11 +1907,22 @@ export const actOnBrainForStaff = async (
 // read only what they may. An instruction is the Brain's to keep its
 // writer's own (`owner` of that writer), which this is.
 
-/** Every attribute any kind of entity has, as the Brain lists them. */
-const attributeNames = [
-  ...new Set(
-    Object.values(entityAttributes).flatMap((rules) => Object.keys(rules))
-  ),
+/**
+ * The attributes a memory a person says can hold, as the Brain lists them:
+ * those whose value is a text, never a relation to another entity (which
+ * a memory names by the related entity, not a value). No attribute is a
+ * relation for one kind and a value for another.
+ */
+const valueRules = Object.values(entityAttributes).flatMap((rules) =>
+  Object.entries(rules).flatMap(([name, rule]: [string, AttributeRule]) =>
+    rule.relation === undefined ? [{ name, many: rule.values === "many" }] : []
+  )
+);
+const attributeNames = [...new Set(valueRules.map(({ name }) => name))];
+
+/** Of those, the ones that hold many values side by side. */
+const manyValueAttributes = [
+  ...new Set(valueRules.flatMap(({ name, many }) => (many ? [name] : []))),
 ];
 
 /**
@@ -1922,6 +1934,7 @@ export const memoryChoices = {
   kinds: entityKinds,
   types: memoryTypes,
   attributes: attributeNames,
+  manyValueAttributes,
   valueMaxLength,
   statementMaxLength,
   quoteMaxLength,

@@ -281,7 +281,8 @@ export const rememberTool = (
   label: "Remember",
   description: [
     "Keeps something the person told you that will still matter in their later chats: a lasting fact about them, their work or the people and things they deal with, a decision, or how they want you to work. It is kept as their own word, for them alone; they see a notice of it and can undo it.",
-    "Memory is for what helps you help them next time. Most messages hold nothing worth keeping, so save rarely, and never what only matters to this chat. Saving something new about the same thing replaces what you saved before.",
+    "Memory is for what helps you help them next time. Most messages hold nothing worth keeping, so save rarely, and never what only matters to this chat.",
+    `A save replaces what you saved before only when it names the same subject (the person as "me", or another by the id an earlier save answered) and an attribute that holds one value. These attributes hold many values side by side, so a save adds beside the earlier ones: ${memoryChoices.manyValueAttributes.join(", ")}. Another person or thing named only by its name is a new one: name one you saved before by its id.`,
   ].join("\n"),
   parameters,
   executionMode: "sequential",
@@ -323,7 +324,7 @@ export const rememberTool = (
       content: [
         {
           type: "text",
-          text: `Saved, about ${saved.entity}. The person sees a notice of it and can undo it.`,
+          text: `Saved. It is about the entity with id ${saved.entity}: give that id to name it again. The person sees a notice of it and can undo it.`,
         },
       ],
       // What the store kept, as the notice shows it: never the call's own

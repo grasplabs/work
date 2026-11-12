@@ -1,4 +1,7 @@
-import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
+import type {
+  BrainMemoryOutcome,
+  ChatSavedMemory,
+} from "@grasp-os/shared/brain-memories";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -67,18 +70,21 @@ const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
  * as the store keeps it (its statement, who or what it is about when it
  * isn't them, its value, and whether it says how Grasp should act for
  * them), and a way to undo it, which retires the memory (core's
- * `session.brainMemories.forget`). One that was undone already, here or
- * elsewhere, is undone as well.
+ * `session.brainMemories.forget`): it never becomes current again, even
+ * once a later save replaced it. Said forgotten only when core answers
+ * `done` (one undone before, here or elsewhere, too); `nothing` means
+ * there was nothing of theirs in use to undo, which pressing again
+ * wouldn't change, so it says that instead.
  */
 export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
   const { busy, failure, run } = useCoreAction();
-  const [undone, setUndone] = useState(false);
+  const [outcome, setOutcome] = useState<BrainMemoryOutcome>();
   const undo = async () => {
-    const outcome = await run(
+    const answered = await run(
       async (session) => await session.brainMemories.forget(saved.memory)
     );
-    if (outcome !== undefined) {
-      setUndone(true);
+    if (answered !== undefined) {
+      setOutcome(answered);
     }
   };
   return (
@@ -87,9 +93,13 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
         <BrainIcon />
       </TraceIcon>
       <TraceTitle>
-        {undone ? (
+        {outcome === "done" ? (
           <Trans>Grasp no longer remembers this.</Trans>
-        ) : (
+        ) : null}
+        {outcome === "nothing" ? (
+          <Trans>There was nothing to undo: Grasp no longer uses this.</Trans>
+        ) : null}
+        {outcome === undefined ? (
           <>
             <SavedKind type={saved.type} /> <SavedText saved={saved} />{" "}
             <Button
@@ -103,7 +113,7 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
               <Trans>Undo</Trans>
             </Button>
           </>
-        )}
+        ) : null}
       </TraceTitle>
       {failure === undefined ? null : (
         <TraceDescription>{failure}</TraceDescription>

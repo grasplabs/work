@@ -1,10 +1,19 @@
-import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
+import {
+  brainOf,
+  entityAttributes,
+  personalBrainOf,
+} from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { forgetFor, rememberFor } from "../src/brain-memories.ts";
 import type { MemoryCaller } from "../src/brain-memories.ts";
-import { erasePerson, forgetAs, rememberAs } from "../src/brain-next.ts";
+import {
+  erasePerson,
+  forgetAs,
+  memoryChoices,
+  rememberAs,
+} from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
@@ -79,6 +88,12 @@ const orderOf = ({
 }): number =>
   (action === "brain.memory.remembered" ? 0 : 2) +
   (detail?.outcome === "attempted" ? 0 : 1);
+
+/** A kind of entity that has `attribute`, as the Brain lists them. */
+const kindOf = (attribute: string) =>
+  Object.entries(entityAttributes).find(([, rules]) =>
+    Object.hasOwn(rules, attribute)
+  )?.[0];
 
 /** The person themselves, as a caller of brain-memories.ts. */
 const themselves = (personId: string): MemoryCaller => ({
@@ -185,6 +200,59 @@ describe("a person's memories", () => {
       undone: "done",
       after: [{ id: earlier.memory, value: "Renewing" }],
     });
+  });
+
+  it("keeps a word the person undid out for good, in either order of undoing", async () => {
+    const anna = await person();
+    /** Saves A, then B over it, and undoes them in `order`: what each undo answered and what is current after. */
+    const undoing = async (order: "earlier first" | "later first") => {
+      const name = `Acme ${unique()}`;
+      const earlier = await rememberAs(env, anna, status(name, "Renewing"));
+      const later = await rememberAs(env, anna, {
+        ...status(name, "Churned"),
+        about: { id: earlier.entity, kind: "customer" },
+      });
+      const first = order === "earlier first" ? earlier : later;
+      const second = order === "earlier first" ? later : earlier;
+      const undone = [
+        await forgetAs(env, anna, first.memory),
+        await forgetAs(env, anna, second.memory),
+      ];
+      return { undone, after: values(await currentOf(anna, earlier.entity)) };
+    };
+
+    expect({
+      earlierFirst: await undoing("earlier first"),
+      laterFirst: await undoing("later first"),
+    }).toStrictEqual({
+      earlierFirst: { undone: ["done", "done"], after: [] },
+      laterFirst: { undone: ["done", "done"], after: [] },
+    });
+  });
+
+  it("saves every attribute the chat's tool offers, each with a value", async () => {
+    const anna = await person();
+    const saved = await Promise.all(
+      memoryChoices.attributes.map(async (attribute) => {
+        try {
+          await rememberAs(env, anna, {
+            change: crypto.randomUUID(),
+            about: { kind: kindOf(attribute), names: [`Named ${unique()}`] },
+            attribute,
+            value: "Some value",
+            type: "fact",
+            statement: "Some value",
+            quote: "Some value",
+          });
+          return [attribute, "saved"];
+        } catch {
+          return [attribute, "refused"];
+        }
+      })
+    );
+    expect(saved.filter(([, outcome]) => outcome !== "saved")).toStrictEqual(
+      []
+    );
   });
 
   it("refuses someone who is no longer a member", async () => {
