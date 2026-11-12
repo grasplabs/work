@@ -5,7 +5,7 @@ import type { Exact } from "./exact.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Found } from "./pack.ts";
 import { readableSql } from "./reader-sets.ts";
-import { termsOf } from "./words.ts";
+import { sequenceOf, termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
 
 // Recall: two ways at once, fused by rank into a pack (pack.ts). Words,
@@ -186,7 +186,8 @@ ORDER BY matched.stops DESC, length(chunks.text),
 LIMIT ?4`;
 
 /**
- * `?1` the exact parts (JSON: each its `query` and `near`, exact.ts), `?2`
+ * `?1` the exact parts (JSON: each its index as `part`, its `query` and
+ * `near`, exact.ts), `?2`
  * the reader's person, `?3` their groups (JSON), `?4` the most to check of
  * each part: the chunks the reader may read that may hold one of them,
  * each with the parts (by index) within whose most it is (`parts`), and
@@ -197,7 +198,8 @@ LIMIT ?4`;
 const exactSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
 asked AS (
-  SELECT key, value ->> '$.query' AS query, value ->> '$.near' AS near
+  SELECT value ->> '$.part' AS key, value ->> '$.query' AS query,
+    value ->> '$.near' AS near
   FROM json_each(?1)
 ),
 found AS (
@@ -329,23 +331,35 @@ const byExact = (
   asOf: AsOf,
   byWordsRank: ReadonlyMap<number, number>
 ): { lists: Found[][]; parts: Set<number>; capped: Set<number> } => {
-  if (exacts.length === 0) {
-    return { lists: [], parts: new Set(), capped: new Set() };
-  }
-  const rows = sql
-    .exec<Row & { parts: string; past: string }>(
-      exactSql(asOf.length > 0 ? 5 : undefined),
-      JSON.stringify(exacts.map(({ query, near }) => ({ query, near }))),
-      reader.person,
-      JSON.stringify(reader.groups),
-      exactCandidatesMax,
-      ...asOf
-    )
-    .toArray();
+  const rows =
+    exacts.length === 0
+      ? []
+      : sql
+          .exec<Row & { parts: string; past: string }>(
+            exactSql(asOf.length > 0 ? 5 : undefined),
+            JSON.stringify(
+              exacts.map(({ query, near }, part) => ({ part, query, near }))
+            ),
+            reader.person,
+            JSON.stringify(reader.groups),
+            exactCandidatesMax,
+            ...asOf
+          )
+          .toArray();
   const capped = new Set(rows.flatMap(({ past }) => indexesOf(past)));
+  // Each chunk's words are cut once, however many parts it may hold.
+  const sequences = new Map<number, string[]>();
+  const holds = (row: Row, among: readonly number[]): Set<number> => {
+    let words = sequences.get(row.row);
+    if (words === undefined) {
+      words = sequenceOf(row.text);
+      sequences.set(row.row, words);
+    }
+    return new Set(foundIn(words, exacts, among));
+  };
   const held = rows.map((row) => ({
     row,
-    parts: new Set(foundIn(row.text, exacts, indexesOf(row.parts))),
+    parts: holds(row, indexesOf(row.parts)),
   }));
   const rankOf = ({ row }: Row): number => byWordsRank.get(row) ?? recallLimit;
   const lists = exacts.map((_, part) =>

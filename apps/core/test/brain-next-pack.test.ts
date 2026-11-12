@@ -227,6 +227,52 @@ describe("the cited pack", () => {
     );
   });
 
+  it("reads a date, a time and a word with one digit as words: the passage writing them otherwise comes first, and none is said not found", async () => {
+    const reader = await person();
+    const [topic, other] = [word(), word()];
+    const signed = await add(
+      `The ${topic} contract was signed on 14 maart 2026 at 9.30.`,
+      owner(reader)
+    );
+    const quarter = await add(
+      `De omzet van ${other} in het tweede kwartaal steeg.`,
+      owner(reader)
+    );
+    // A dozen log lines holding the date, the time and "2e" as written:
+    // as IDs, each would have a list of its own, first in the fusion.
+    for (let index = 0; index < 12; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(
+        `log ${topic} ${other} 2026-03-14 09:30 2e run ${index}`,
+        owner(reader)
+      );
+    }
+
+    const [bySigning, byQuarter, missed] = await Promise.all([
+      packFor(
+        reader,
+        `when was the ${topic} contract signed on 2026-03-14 09:30`
+      ),
+      packFor(reader, `omzet ${other} 2e kwartaal`),
+      packFor(
+        reader,
+        `was the ${topic} contract signed on 2026-03-15 at 09:30`
+      ),
+    ]);
+
+    expect({
+      bySigning: bySigning.items[0]?.source,
+      byQuarter: byQuarter.items[0]?.source,
+    }).toStrictEqual({ bySigning: signed, byQuarter: quarter });
+    expect(
+      [bySigning, byQuarter, missed].flatMap(({ notFound }) =>
+        notFound.filter((part) =>
+          ["2026-03-14", "2026-03-15", "09:30", "2e"].includes(part)
+        )
+      )
+    ).toStrictEqual([]);
+  });
+
   it("finds a phrase held in a row in a longer chunk past more chunks than the cap that hold its words apart", async () => {
     const reader = await person();
     const [first, second] = [word(), word()];

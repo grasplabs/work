@@ -195,7 +195,11 @@ export interface Recall {
    * not its midnight, which leaves out what was added that day. Each
    * source answers with its newest version added by then that still
    * exists, if the reader may read it: once a later version is erased, a
-   * moment when it was current answers with the one before it.
+   * moment when it was current answers with the one before it. For the
+   * moments a version the reader may not read was current, the source
+   * answers nothing, so stepping `asOf` shows when such a version was
+   * added and replaced; its existence shows in the version numbers
+   * already.
    */
   asOf?: Date;
 }

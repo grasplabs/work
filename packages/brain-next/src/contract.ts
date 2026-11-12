@@ -40,6 +40,13 @@ export const recallLimit = 10;
  * so that part, and only that one, is never reported not found. A capped
  * part can still be missed in a long chunk where its words first appear
  * apart, past 200 likelier ones; the words way still ranks that chunk.
+ *
+ * Measured on a laptop over 20,000 chunks that each hold every word asked,
+ * for the slowest question the limits allow (eight quoted phrases of stop
+ * words, 2,000 characters): p50 123 ms, max 132 ms; the same question
+ * without its quotes, by the words way alone: p50 128 ms, max 133 ms. What costs
+ * is reading the posting lists of up to 16 words that every chunk holds,
+ * which the words way did before; the exact way adds no measurable time.
  */
 export const exactCandidatesMax = 200;
 

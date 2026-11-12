@@ -7,11 +7,18 @@ import { allOf, sequenceOf } from "./words.ts";
 //
 // 1. Quoted phrases: text between double quotes of any kind ("…", “…”,
 //    „…“, «…»).
-// 2. IDs: a word holding a digit and a letter (A12, PO12345), or a digit
-//    and a separator inside it (INV-2024-0042, 2024/0042), or a bare
-//    number of five digits or more (40417): a reference. A shorter bare
-//    number (a year, an amount, a day) is a plain word, which the words
-//    way finds: as an ID, a year would list every chunk that names it.
+// 2. IDs: a word, separators inside it allowed, holding a letter and at
+//    least two digits (PO-17, A12, INV-2024-0042, TK-5531, CN-2026-118),
+//    or a run of five digits or more (12345, 06-12345678): a reference.
+//    Everything else is words, which the words way finds: dates and times
+//    in digits (2026-03-14, 09:30, 14:00-15:00), amounts, decimals and
+//    fractions (1.250,00, 12.5, 1/2), numbers under five digits (2026,
+//    4400), and words with one digit (2e, 3rd, 9am, A4, Q3, MP3, v2). As
+//    IDs, each would get a list of its own and crowd out the passage that
+//    writes it otherwise ("14 maart 2026", "tweede kwartaal"). Known and
+//    accepted: v2.1, 4x4 and COVID-19 are IDs (names of a kind, found
+//    however their separators are written), and #4521 is not (four
+//    digits: found as a word).
 //
 // Dates (found however a source writes them) wait for a parser at
 // indexing (GRA-1798); names are left to the words way, since no rule
@@ -50,8 +57,11 @@ export interface Exact {
 /** Most exact parts of a question that count. */
 const maxExacts = 8;
 
-/** Fewest digits of a bare number that is an ID: a reference, not a year. */
+/** Fewest digits in a row that make a word an ID: a reference, not a year. */
 const referenceDigits = 5;
+
+/** Fewest digits that make a word with a letter an ID. */
+const idDigits = 2;
 
 /** A pair of double quotes of any kind, and what they hold. */
 const quoted = /["“”„«»](?<inner>[^"“”„«»]+)["“”„«»]/gu;
@@ -59,10 +69,9 @@ const quoted = /["“”„«»](?<inner>[^"“”„«»]+)["“”„«»]/gu;
 /** What surrounds a word that isn't part of it: punctuation and symbols. */
 const aroundWord = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
 
-const digit = /\p{N}/u;
+const digits = /\p{N}/gu;
 const letter = /\p{L}/u;
-const separator = /[^\p{L}\p{N}]/u;
-const bareReference = new RegExp(`^\\p{N}{${referenceDigits},}$`, "u");
+const reference = new RegExp(`\\p{N}{${referenceDigits}}`, "u");
 
 /** An exact part, or none when it holds no word. */
 const exactOf = (
@@ -82,8 +91,8 @@ const exactOf = (
 
 /** Whether a word, as the question wrote it, is an ID (rule 2). */
 const isId = (word: string): boolean =>
-  (digit.test(word) && (letter.test(word) || separator.test(word))) ||
-  bareReference.test(word);
+  (letter.test(word) && (word.match(digits) ?? []).length >= idDigits) ||
+  reference.test(word);
 
 /** The IDs among `text`'s words, in order (rule 2). */
 const idsOf = (text: string): Exact[] =>
@@ -135,14 +144,10 @@ const holdsInARow = (
   return false;
 };
 
-/** Which of `exacts` (by index) `text` holds as written. */
+/** Which of `exacts` (by index) a text holds as written, given its `words` (`sequenceOf`). */
 export const foundIn = (
-  text: string,
+  words: readonly string[],
   exacts: readonly Exact[],
   among: readonly number[]
-): number[] => {
-  const words = sequenceOf(text);
-  return among.filter((index) =>
-    holdsInARow(words, exacts[index]?.words ?? [""])
-  );
-};
+): number[] =>
+  among.filter((index) => holdsInARow(words, exacts[index]?.words ?? [""]));

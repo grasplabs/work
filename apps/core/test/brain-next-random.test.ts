@@ -458,10 +458,13 @@ interface Packed extends ExpectedChunk {
 }
 
 /**
- * The chunks of current versions `person` may read holding the question's
- * IDs as written: those holding more of them first, then in the order of
- * `byWords` (the words list), then the shorter, at most `recallLimit`; and
- * which IDs any of them holds.
+ * For each of the question's IDs, a list: the chunks of current versions
+ * `person` may read holding it as written, in the order of `byWords` (the
+ * words list), then the shorter, at most `recallLimit`; and which IDs any
+ * of them holds. The store breaks a tie on length by the newer version,
+ * then the source, then the place; no two chunks here share a length, so
+ * those never decide. Every part's candidates here are far fewer than the
+ * store's cap, so the cap never cuts one.
  */
 const exactOf = (
   planned: readonly Planned[],

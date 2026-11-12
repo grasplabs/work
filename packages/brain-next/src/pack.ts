@@ -2,7 +2,7 @@ import { packItemTokens } from "./contract.ts";
 import type { Pack, PackItem } from "./contract.ts";
 import { foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
-import { holdsTerm, wordsOf } from "./words.ts";
+import { holdsTerm, sequenceOf, wordsOf } from "./words.ts";
 import type { Word } from "./words.ts";
 
 // How what recall found becomes a pack: fused by rank, then fitted to the
@@ -116,7 +116,7 @@ export const quoteOf = (text: string, { terms, exacts }: Asked): string => {
   for (const part of parts) {
     const words = wordsOf(part);
     const score =
-      foundIn(part, exacts, every).length * (terms.length + 1) +
+      foundIn(sequenceOf(part), exacts, every).length * (terms.length + 1) +
       terms.filter((term) => holdsTerm(words, term)).length;
     if (score > bestScore) {
       best = part;
