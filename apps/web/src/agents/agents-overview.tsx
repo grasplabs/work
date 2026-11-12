@@ -34,7 +34,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
-import { StephenAvatar } from "../settings/stephen-avatar.tsx";
+import { AgentAvatar } from "./agent-avatar.tsx";
 import {
   AgentStateBadge,
   classesOn,
@@ -102,6 +102,8 @@ interface Shown {
   id: string;
   name: string;
   job: string;
+  /** The figure it is drawn with, by name. */
+  face: string;
   /** Whether the person may talk to it. */
   usable: boolean;
   /** As an admin reads it; undefined for anyone else. */
@@ -177,7 +179,7 @@ const AgentCard = ({
   return (
     <li className="bg-card hover:border-ring/40 relative flex min-w-0 flex-col gap-4 rounded-xl border p-4 transition-colors">
       <div className="flex items-start gap-3">
-        <StephenAvatar />
+        <AgentAvatar face={shown.face} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           {managed === undefined ? (
             <Link className={nameClass} search={{ agent: shown.id }} to="/">
@@ -224,10 +226,11 @@ const shownOf = (
   managed: ManagedAgents | undefined
 ): Shown[] => {
   if (managed === undefined) {
-    return usable.map(({ id, name, job }) => ({
+    return usable.map(({ id, name, job, face }) => ({
       id,
       name,
       job,
+      face,
       usable: true,
       managed: undefined,
     }));
@@ -237,6 +240,7 @@ const shownOf = (
     id: agent.id,
     name: agent.name,
     job: agent.job,
+    face: agent.face,
     usable: usable.some(({ id }) => id === agent.id),
     managed: {
       state: agent.state,

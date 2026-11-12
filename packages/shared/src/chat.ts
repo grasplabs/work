@@ -72,6 +72,12 @@ export interface ChatAgent {
   face: string;
   /** One line on what it is for. */
   job: string;
+  /**
+   * The model its turns use, whichever the question names: one an admin
+   * gave it that the organization still has. Null for an agent that
+   * answers with the model its asker picks.
+   */
+  model: string | null;
 }
 
 /** A chat in the person's list. */

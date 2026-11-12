@@ -52,6 +52,7 @@ const stephen: Agent = {
   job: "Answers from what the company told Grasp.",
   instructions: "",
   modelRole: null,
+  model: null,
   state: "on",
   changedBy: null,
   changedAt: null,
@@ -65,6 +66,9 @@ const anna: Member = {
   joinedAt: "2026-01-05T09:00:00.000Z",
 };
 const people = [anna];
+
+/** The models the organization chose. */
+const models = ["anthropic/claude-sonnet-4-5"];
 
 /** Core's agents, kept as an admin makes and changes them, and each change asked. */
 const fakeConnections = () => {
@@ -102,6 +106,7 @@ const fakeConnections = () => {
       const made: Agent = {
         id: `agent-${agents.length}`,
         ...input,
+        model: input.model ?? null,
         state: "on",
         changedBy: "admin",
         changedAt: "2026-11-12T09:00:00.000Z",
@@ -232,7 +237,7 @@ const Page = ({
     open === "new" ? "overview" : (open.tab ?? "overview")
   );
   if (open === "new") {
-    return <NewAgent />;
+    return <NewAgent models={models} />;
   }
   const agent = data.agents.find(({ name }) => name === open.agent);
   if (agent === undefined) {
@@ -243,6 +248,7 @@ const Page = ({
       agent={agent}
       editable={editable}
       first={agent.id === data.agents.at(0)?.id}
+      models={models}
       onTab={setTab}
       people={people}
       settings={data.settings[agent.id]}
@@ -419,6 +425,7 @@ const claire = {
   job: "Chases unpaid invoices.",
   instructions: "Answer only about invoices.",
   face: "stephen",
+  model: null,
   modelRole: null,
 };
 
@@ -612,5 +619,47 @@ describe("an agent's page", () => {
     expect(document.body.textContent).toContain(
       "Every weekday at 09:00 · Europe/Amsterdam"
     );
+  });
+
+  it("saves each card's own fields over the agent as core has it now, never undoing what another card saved", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire" });
+    const pen = document.querySelector("input[aria-label='Pen']");
+    const model = document.querySelector("select");
+    if (!(pen instanceof HTMLElement) || model === null) {
+      throw new TypeError("Expected the picture and the model to choose");
+    }
+    await press(pen);
+    await press(button("Save"));
+    // The model's card was shown before the picture was saved.
+    await set(model, "anthropic/claude-sonnet-4-5", "change");
+    const [, saveModel] = [...document.querySelectorAll("button")].filter(
+      (each) => each.textContent?.trim() === "Save"
+    );
+    if (saveModel === undefined) {
+      throw new TypeError("Expected the model's Save");
+    }
+    await press(saveModel);
+    // And the name's card before the model was.
+    await set(field("Name"), "Clara", "input");
+    await press(button("Save"));
+    expect(asked).toStrictEqual([
+      ["change", "agent-1", { ...claire, face: "pen" }],
+      [
+        "change",
+        "agent-1",
+        { ...claire, face: "pen", model: "anthropic/claude-sonnet-4-5" },
+      ],
+      [
+        "change",
+        "agent-1",
+        {
+          ...claire,
+          name: "Clara",
+          face: "pen",
+          model: "anthropic/claude-sonnet-4-5",
+        },
+      ],
+    ]);
   });
 });

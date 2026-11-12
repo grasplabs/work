@@ -10,12 +10,13 @@ import { SiteHeader } from "../frame/site-header.tsx";
 
 const NewAgentPage = () => {
   const { t } = useLingui();
+  const models = Route.useLoaderData();
   return (
     <>
       <SiteHeader
         crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`New agent` }]}
       />
-      <NewAgent />
+      <NewAgent models={models} />
     </>
   );
 };
@@ -28,4 +29,14 @@ export const Route = createFileRoute("/_shell/agents/new")({
     }
   },
   component: NewAgentPage,
+  // The models an agent can be given: none when core won't say.
+  loader: async ({ context: { core } }): Promise<string[]> => {
+    try {
+      return await core.withSession(
+        async (session) => await session.chats.models()
+      );
+    } catch {
+      return [];
+    }
+  },
 });

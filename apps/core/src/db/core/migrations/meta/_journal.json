@@ -1660,6 +1660,13 @@
       "when": 1794426437434,
       "tag": "0236_agent_wakes",
       "breakpoints": true
+    },
+    {
+      "idx": 237,
+      "version": "6",
+      "when": 1794476552670,
+      "tag": "0237_agent_model",
+      "breakpoints": true
     }
   ]
 }

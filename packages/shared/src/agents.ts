@@ -25,6 +25,12 @@ export interface Agent {
   instructions: string;
   /** The role it asks the gateway for; null: the model a chat uses anyway. */
   modelRole: ModelRole | null;
+  /**
+   * The model its turns use, `<provider>/<model>`, one the organization
+   * has chosen; null: the model the person asking picked. One the
+   * organization no longer has is passed over the same way.
+   */
+  model: string | null;
   /** Whether it answers. */
   state: "on" | "paused";
   /** Who last changed it, and when; null: as Grasp ships it. */
@@ -37,6 +43,22 @@ export const agentNameMax = 60;
 export const agentJobMax = 200;
 export const agentInstructionsMax = 8000;
 
+/**
+ * The figures an agent can be drawn with, by name: the dotted head every
+ * company's first agent has (`stephen`), and Grasp's other sign figures.
+ * What the pages offer; core keeps any name, and one a page doesn't know
+ * is drawn as the head.
+ */
+export const agentFaces = [
+  "stephen",
+  "brain",
+  "pen",
+  "lines",
+  "flow",
+  "check",
+] as const;
+export type AgentFace = (typeof agentFaces)[number];
+
 /** What an admin says of an agent as they make or change it. */
 export const agentInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(agentNameMax),
@@ -45,8 +67,13 @@ export const agentInputSchema = z.strictObject({
   job: z.string().trim().max(agentJobMax),
   instructions: z.string().max(agentInstructionsMax),
   modelRole: z.enum(modelRoles).nullable(),
+  /** The model its turns use; null, or left out, for the asker's own. */
+  model: z.string().min(1).max(200).nullable().default(null),
 });
-export type AgentInput = z.infer<typeof agentInputSchema>;
+/** As an admin sends it: its model may be left out. */
+export type AgentInput = z.input<typeof agentInputSchema>;
+/** As core reads it: every part said. */
+export type AgentSaid = z.output<typeof agentInputSchema>;
 
 /** Whom an agent reaches and for whom it has each class, as core keeps it. */
 export interface AgentSettings {
@@ -107,6 +134,12 @@ export interface AgentsApi {
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
   setAgentPaused: (agentId: string, paused: boolean) => Promise<void>;
+  /**
+   * Deletes an agent, for good: it answers nobody, its wake-ups are gone
+   * and its name is free again. The chats people had with it stay theirs
+   * to read. Never the company's first agent.
+   */
+  deleteAgent: (agentId: string) => Promise<void>;
   /**
    * Whom an agent reaches and for whom it has each class. Not the first
    * agent's, which Settings › Stephen has.

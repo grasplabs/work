@@ -47,6 +47,7 @@ const agentOf = (id: string, name: string, change: Partial<Agent>): Agent => ({
   job: `${name}'s job.`,
   instructions: `${name}'s instructions.`,
   modelRole: null,
+  model: null,
   state: "on",
   changedBy: null,
   changedAt: null,
@@ -97,6 +98,7 @@ const chatAgent = ({ id, name, face, job }: Agent): ChatAgent => ({
   name,
   face,
   job,
+  model: null,
 });
 
 let root: Root | undefined;
@@ -115,6 +117,10 @@ const mounted = async (shown: ReactNode): Promise<Asked> => {
     setAgentPaused: async (id: string, paused: boolean) => {
       await Promise.resolve();
       asked.push(["paused", id, paused]);
+    },
+    deleteAgent: async (id: string) => {
+      await Promise.resolve();
+      asked.push(["deleted", id]);
     },
   };
   const core = {
@@ -190,6 +196,7 @@ const page = (agent: Agent, tab: AgentTab, usable = true) => (
     agent={agent}
     editable
     first={agent.id === stephen.id}
+    models={["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6"]}
     onTab={() => {}}
     people={[]}
     settings={managed.settings[agent.id]}
@@ -342,10 +349,65 @@ describe("the company's agents, on pages of their own", () => {
             job: "Chases invoices.",
             instructions: "Chase after 30 days.",
             face: "stephen",
+            model: null,
             modelRole: null,
           },
         ],
       ]);
+    });
+
+    it("saves a picked picture and a model of its own, each with the rest as it was", async () => {
+      const asked = await mounted(page(claire, "overview"));
+      await press(document.querySelector("input[aria-label='Pen']"));
+      const [saveProfile, saveModel] = [
+        ...document.querySelectorAll("button"),
+      ].filter((each) => each.textContent?.trim() === "Save");
+      await press(saveProfile);
+      const select = document.querySelector("select");
+      if (select === null) {
+        throw new TypeError("No model select");
+      }
+      await act(async () => {
+        select.value = "anthropic/claude-opus-4-6";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        await Promise.resolve();
+      });
+      await press(saveModel);
+      const whole = {
+        name: "Claire",
+        job: "Chases invoices.",
+        instructions: "Claire's instructions.",
+        modelRole: null,
+      };
+      expect(asked).toStrictEqual([
+        ["change", "agent-claire", { ...whole, face: "pen", model: null }],
+        [
+          "change",
+          "agent-claire",
+          { ...whole, face: "stephen", model: "anthropic/claude-opus-4-6" },
+        ],
+      ]);
+    });
+
+    it("deletes an agent only once the admin says so again, and offers no delete for the first agent", async () => {
+      const asked = await mounted(page(claire, "overview"));
+      await press(buttonNamed("Delete"));
+      const before = [...asked];
+      await press(buttonNamed("Delete for good"));
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await mounted(page(stephen, "overview"));
+      expect({
+        before,
+        asked,
+        firstOffers: buttonNamed("Delete") !== undefined,
+      }).toStrictEqual({
+        before: [],
+        asked: [["deleted", "agent-claire"]],
+        firstOffers: false,
+      });
     });
   });
 });

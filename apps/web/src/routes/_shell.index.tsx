@@ -12,6 +12,7 @@ import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import {
   AgentName,
   AgentPicker,
+  agentModelOf,
   startingAgent,
 } from "../chat/agent-choice.tsx";
 import { AskOrCompose } from "../chat/asked-questions.tsx";
@@ -175,6 +176,7 @@ const NewChat = ({
             )}
           </div>
           <Composer
+            agentModel={agentModelOf(agents, agentId)}
             agent={
               <AgentPicker
                 agentId={agentId}
@@ -306,6 +308,7 @@ const OpenChat = ({
             <ChatSources names={sourceNames} provenance={view.provenance} />
             <AskOrCompose
               agent={<AgentName agentId={chat.agentId} agents={agents} />}
+              agentModel={agentModelOf(agents, chat.agentId)}
               messages={view.messages}
               onAnswer={(answers) => {
                 void ask(answers);

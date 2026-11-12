@@ -3046,7 +3046,14 @@ export const agents = sqliteTable(
     job: text().notNull(),
     instructions: text().notNull(),
     modelRole: text("model_role", { enum: modelRoles }),
-    state: text({ enum: ["on", "paused"] }).notNull(),
+    /** The model its turns use, `<provider>/<model>`; null: the asker's own. */
+    model: text(),
+    /**
+     * `deleted`: an admin deleted it. Its row stays, so a chat that still
+     * names it is refused its turn and never read as an agent nobody
+     * made, which takes one; its name's key is cleared, free for another.
+     */
+    state: text({ enum: ["on", "paused", "deleted"] }).notNull(),
     madeBy: text("made_by").notNull(),
     madeAt: timestamp("made_at").notNull(),
     changedBy: text("changed_by").notNull(),

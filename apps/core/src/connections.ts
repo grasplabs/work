@@ -47,6 +47,7 @@ import { z } from "zod";
 import {
   changeAgent,
   listAgents,
+  deleteAgent,
   makeAgent,
   readAgentSettings,
   setAgentPaused,
@@ -758,6 +759,12 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async setAgentPaused(agentId: unknown, paused: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setAgentPaused(this.#env, identity, agentId, paused);
+    });
+  }
+
+  async deleteAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await deleteAgent(this.#env, identity, agentId);
     });
   }
 
