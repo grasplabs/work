@@ -2,12 +2,37 @@
 //! (leftmost-longest on the raw text, with lstrip), then Replace(' ' -> '▁'), Metaspace (prepend always, a word
 //! starting at each '▁'), then BPE with ranked merges and byte fallback; `<bos>` in front and `<eos>` behind,
 //! truncated as its truncation with the template post-processor truncates.
+//!
+//! A model with a trimmed token table keeps rows for only some pieces. Its file (version 2) maps every piece to a
+//! sequence of rows: a kept piece to its own row, a removed one to the rows of the kept pieces it is written as.
+//! The map is in rows, not pieces, so a sequence can't name a removed piece or another sequence. Each piece is
+//! mapped as it is produced and the length cut counts rows, which gives what the model was trained with: the
+//! reference tokenizer cuts at max tokens, the map is applied, and the result is cut again to its first max - 1
+//! rows and its last (`<eos>`). Both give the same rows, as every piece maps to at least one row.
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
 const MAGIC_TOK: [u8; 4] = *b"GTOK";
+/// Version 1: a row per piece. Version 2: a map from pieces to rows.
 const VERSION: u32 = 1;
+const VERSION_MAPPED: u32 = 2;
 const META: [u8; 3] = [0xE2, 0x96, 0x81];
+
+/// Why a tokenizer file is refused (`crate::tok_init`).
+pub enum TokError {
+    /// Not a consistent tokenizer file of a version this runtime reads.
+    File = -1,
+    /// Its map from pieces to rows names a row past the table or an empty sequence, its offsets don't add up, or it
+    /// maps `<bos>` or `<eos>` to other than one row.
+    Map = -2,
+}
+
+/// A trimmed table's map: piece `i`'s rows are `rows[offs[i]..offs[i + 1]]`, each non-empty and below the table's
+/// row count (`check_map`).
+struct RowMap {
+    offs: &'static [u32],
+    rows: &'static [u32],
+}
 
 pub struct Tok {
     offs: &'static [u32],
@@ -31,6 +56,10 @@ pub struct Tok {
     mask: usize,
     bos: u32,
     eos: u32,
+    /// The map from pieces to rows; none when the table has a row per piece.
+    map: Option<RowMap>,
+    /// How many rows the token table has.
+    table_rows: usize,
 }
 
 fn fnv(b: &[u8]) -> u32 {
@@ -50,16 +79,46 @@ fn words(blob: &'static [u8], o: usize, n: usize) -> Option<&'static [u32]> {
 
 impl Tok {
     /// Reads a tokenizer file (see scripts/export.py), which stays where it is for the life of the tokenizer:
-    /// magic, version, bos, eos | n, m, nadd | offs[n+1] | moffs[n+1] | mrank[m] | byte_id[256] | mlen[m] (pad 4) |
+    /// magic, version, bos, eos | n, m, nadd | (version 2: rows, k) | offs[n+1] | moffs[n+1] | mrank[m] |
+    /// byte_id[256] | (version 2: map offsets[n+1] | map rows[k]) | mlen[m] (pad 4) |
     /// added: (id, lstrip, len, bytes, pad 4)* | piece bytes.
-    pub fn parse(blob: &'static [u8]) -> Option<Tok> {
+    pub fn parse(blob: &'static [u8]) -> Result<Tok, TokError> {
+        let tok = Tok::read(blob).ok_or(TokError::File)?;
+        if tok.map.as_ref().is_some_and(|map| !tok.check_map(map)) {
+            return Err(TokError::Map);
+        }
+        Ok(tok)
+    }
+
+    /// Whether the map is one the tokenizer can apply: offsets from 0 to its last row, each sequence non-empty,
+    /// every row below the table's count (which IDs as i32 can hold), and `<bos>` and `<eos>` a row each, as the
+    /// length cut keeps the last row for `<eos>`. Rows past the table would fail every text that holds them, later;
+    /// an empty sequence would drop a piece without a trace.
+    fn check_map(&self, map: &RowMap) -> bool {
+        let one_row = |id: u32| map.offs[id as usize + 1] - map.offs[id as usize] == 1;
+        self.table_rows <= i32::MAX as usize
+            && map.offs[0] == 0
+            && map.offs.windows(2).all(|p| p[0] < p[1])
+            && map.offs[map.offs.len() - 1] as usize == map.rows.len()
+            && map.rows.iter().all(|&r| (r as usize) < self.table_rows)
+            && one_row(self.bos)
+            && one_row(self.eos)
+    }
+
+    fn read(blob: &'static [u8]) -> Option<Tok> {
         let w = |i: usize| words(blob, i * 4, 1).map(|s| s[0]);
-        if blob.get(0..4)? != MAGIC_TOK || w(1)? != VERSION {
+        if blob.get(0..4)? != MAGIC_TOK {
             return None;
         }
+        let mapped = match w(1)? {
+            VERSION => false,
+            VERSION_MAPPED => true,
+            _ => return None,
+        };
         let (bos, eos) = (w(2)?, w(3)?);
         let (n, m, nadd) = (w(4)? as usize, w(5)? as usize, w(6)? as usize);
-        let mut o = 28;
+        let (table_rows, map_rows) = if mapped { (w(7)? as usize, w(8)? as usize) } else { (n, 0) };
+        let mut o = if mapped { 36 } else { 28 };
         let mut arr = |k: usize| -> Option<&'static [u32]> {
             let s = words(blob, o, k)?;
             o += k * 4;
@@ -69,6 +128,7 @@ impl Tok {
         let moffs = arr(n.checked_add(1)?)?;
         let mrank = arr(m)?;
         let byte_id = arr(256)?;
+        let map = if mapped { Some(RowMap { offs: arr(n.checked_add(1)?)?, rows: arr(map_rows)? }) } else { None };
         let mlen = blob.get(o..o.checked_add(m)?)?;
         o = (o + m + 3) & !3;
         let mut added = HashMap::with_capacity(nadd);
@@ -118,11 +178,34 @@ impl Tok {
             table[h] = id as u32;
         }
         let longest = offs.windows(2).map(|p| (p[1] - p[0]) as usize).max().unwrap_or(1).max(1);
-        Some(Tok { offs, pieces, moffs, mrank, mlen, byte_id, added, added_lens, starts, single, longest, table, mask, bos, eos })
+        Some(Tok {
+            offs, pieces, moffs, mrank, mlen, byte_id, added, added_lens, starts, single, longest, table, mask, bos, eos,
+            map, table_rows,
+        })
     }
 
-    pub fn vocab_size(&self) -> usize {
-        self.offs.len() - 1
+    /// How many rows the token table has: a row per piece, or as many as the map says.
+    pub fn table_rows(&self) -> usize {
+        self.table_rows
+    }
+
+    /// Appends piece `id`'s rows to `ids`, up to `lim` rows in all: its own row, or with a map its sequence of
+    /// rows. Rows past `lim` are never kept, so however long a sequence is, `ids` holds at most `lim`.
+    fn push(&self, id: u32, ids: &mut Vec<u32>, lim: usize) {
+        let room = lim.saturating_sub(ids.len());
+        match &self.map {
+            None if room > 0 => ids.push(id),
+            None => {}
+            Some(map) => {
+                let seq = &map.rows[map.offs[id as usize] as usize..map.offs[id as usize + 1] as usize];
+                ids.extend_from_slice(&seq[..seq.len().min(room)]);
+            }
+        }
+    }
+
+    /// The row of `<bos>` or `<eos>`, which a map gives a row each (`check_map`).
+    fn special_row(&self, id: u32) -> u32 {
+        self.map.as_ref().map_or(id, |map| map.rows[map.offs[id as usize] as usize])
     }
 
     /// The most bytes one token covers: the longest vocabulary piece or added token.
@@ -161,7 +244,7 @@ impl Tok {
         }
         None
     }
-    fn bpe(&self, w: &[u8], ids: &mut Vec<u32>, buf: &mut Vec<u8>) {
+    fn bpe(&self, w: &[u8], ids: &mut Vec<u32>, lim: usize, buf: &mut Vec<u8>) {
         #[derive(Clone, Copy)]
         struct Sym {
             c: u32,
@@ -235,7 +318,7 @@ impl Tok {
         }
         let mut k = 0i32;
         while k >= 0 && (k as usize) < ns {
-            ids.push(syms[k as usize].c);
+            self.push(syms[k as usize].c, ids, lim);
             k = syms[k as usize].next;
         }
     }
@@ -261,7 +344,8 @@ impl Tok {
             if k == m.len() || m[k..].starts_with(&META) {
                 // A token covers at most `longest` bytes, so a word over twice the room left times that fills it: only
                 // its start is encoded (bounded work). Texts within the limit never get here and keep the reference's
-                // tokens; beyond it, merges near the cut may make the kept tokens differ from the reference's.
+                // tokens; beyond it, merges near the cut may make the kept tokens differ from the reference's. A map
+                // only adds rows (each piece is one or more), so the room left in rows bounds the pieces as well.
                 let room = (max - ids.len()).saturating_mul(self.longest).saturating_mul(2);
                 let mut end = k;
                 if end - st > room {
@@ -270,7 +354,7 @@ impl Tok {
                         end -= 1;
                     }
                 }
-                self.bpe(&m[st..end], ids, buf);
+                self.bpe(&m[st..end], ids, max, buf);
                 if ids.len() >= max {
                     return;
                 }
@@ -299,13 +383,13 @@ impl Tok {
             Some((len, id, lstrip))
         })
     }
-    /// `<bos>` + ids + `<eos>`, at most `max` (>= 2) tokens in all. `s` is UTF-8.
+    /// `<bos>` + rows + `<eos>`, at most `max` (>= 2) rows in all. `s` is UTF-8.
     ///
     /// An added token's text in the input (`<eos>`, `<mask>`, `<b>`) becomes that token, deliberately: the reference
     /// tokenizer does the same with raw text.
     pub fn encode(&self, s: &[u8], max: usize) -> Vec<u32> {
         let lim = max - 1;
-        let mut ids = vec![self.bos];
+        let mut ids = vec![self.special_row(self.bos)];
         let mut buf = Vec::with_capacity(256);
         let mut start = 0;
         let mut i = 0;
@@ -324,9 +408,7 @@ impl Tok {
                     if start < st {
                         self.piece_ids(&s[start..st], &mut ids, lim, &mut buf);
                     }
-                    if ids.len() < lim {
-                        ids.push(id);
-                    }
+                    self.push(id, &mut ids, lim);
                     i += len;
                     start = i;
                     continue;
@@ -338,7 +420,7 @@ impl Tok {
             self.piece_ids(&s[start..], &mut ids, lim, &mut buf);
         }
         ids.truncate(lim);
-        ids.push(self.eos);
+        ids.push(self.special_row(self.eos));
         ids
     }
 }

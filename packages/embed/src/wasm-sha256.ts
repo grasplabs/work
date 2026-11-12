@@ -1,4 +1,4 @@
 // Written by build.sh with embed.wasm: the module's SHA-256, part of every
 // vector's build identifier (model-files.ts).
 export const wasmSha256 =
-  "16c56ce0cebd22fb940a425ebd465e637cc95344a5caf762192dce819e9f3832";
+  "2c8bd6492ef14b0dcab6dacd12e41eb914445776209b4e8389dcd72d2cd7c7d5";
