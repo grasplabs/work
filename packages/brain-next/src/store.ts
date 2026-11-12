@@ -738,9 +738,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       : [];
   }
 
-  /** Whether this store was ever given `source`, or closed its key (contract.ts). */
+  /**
+   * Whether this store was ever given `source`, or closed its key
+   * (contract.ts); never, for a person's own store erased whole, which
+   * holds nothing.
+   */
   async holdsSource(source: SourceId): Promise<boolean> {
     const key = checked(sourceIdSchema, source);
+    if (await this.#erasedWhole()) {
+      return false;
+    }
     await this.#ready();
     if (!this.#schema) {
       return false;

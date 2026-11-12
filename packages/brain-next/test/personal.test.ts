@@ -901,6 +901,8 @@ describe("a person's own store", () => {
       current: await called(
         own().readCurrent({ sources: [kept.source], reader })
       ),
+      // It holds nothing, the key it once held included.
+      holds: await called(own().holdsSource(kept.source)),
       // Erasing one of its sources after it: nothing is left to erase.
       sourceErased: await called(
         own().eraseSource({ source: kept.source, reason: "deleted" })
@@ -909,6 +911,7 @@ describe("a person's own store", () => {
       found: nothingFound,
       version: null,
       current: [],
+      holds: false,
       sourceErased: "erased",
     });
     await expect(add(own(), "A late add", theirs())).rejects.toThrow(erased);

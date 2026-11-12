@@ -30,7 +30,7 @@ import type {
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { ageOwnErasure, breakOwnStore } from "./brain-next-own-store.ts";
-import { holdNextBucketPut } from "./brain-next-traces.ts";
+import { holdNextBucketPut, ledgerOf } from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -98,6 +98,78 @@ const add = async (
   readers: SourceReaders
 ): Promise<void> => {
   await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text,
+    readers,
+  });
+};
+
+/** How long a store out of reach takes to fail, in these tests. */
+const outOfReachMs = 200;
+
+/**
+ * Core's env with the store named `name` failing its `method` on the
+ * calls numbered in `failing` (from 1), as a store out of reach would:
+ * every other call reaches the store itself.
+ */
+const envFailing = (
+  name: string,
+  method: string,
+  failing: readonly number[]
+): Env => {
+  let calls = 0;
+  const binding = env.BRAIN_STORE;
+  const getByName = (named: string) => {
+    const stub = binding.getByName(named);
+    if (named !== name) {
+      return stub;
+    }
+    return new Proxy(stub, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        // Called through, never bound: an RPC stub takes `bind` for a
+        // method of the store.
+        if (property !== method) {
+          return async (...args: unknown[]) => {
+            const answered: unknown = await Reflect.apply(value, target, args);
+            return answered;
+          };
+        }
+        return async (...args: unknown[]) => {
+          calls += 1;
+          if (failing.includes(calls)) {
+            // Late, as a store out of reach answers: whatever runs beside
+            // the call has landed by then.
+            await scheduler.wait(outOfReachMs);
+            throw new Error("Out of reach, for the test");
+          }
+          const answered: unknown = await Reflect.apply(value, target, args);
+          return answered;
+        };
+      },
+    });
+  };
+  return {
+    ...env,
+    BRAIN_STORE: new Proxy(binding, {
+      get: (target, property): unknown =>
+        property === "getByName" ? getByName : Reflect.get(target, property),
+    }),
+  };
+};
+
+/** Adds `text` to `source` for `readers` through core with `withEnv`. */
+const addWith = async (
+  withEnv: Env,
+  source: SourceRef,
+  text: string,
+  readers: SourceReaders
+): Promise<void> => {
+  await addSource(withEnv, {
     source,
     change: crypto.randomUUID(),
     text,
@@ -328,6 +400,41 @@ describe("what one person alone may read, in their own store", () => {
     });
   });
 
+  it("is closed in the shared store, which staff read, only once their own store's erasure returned", async () => {
+    const person = await member();
+    const word = markerWord();
+    const source = newSource();
+    const readers: SourceReaders = { kind: "owner", personId: person };
+    await add(source, `Their own ${word}`, readers);
+    const key = keyOf(source);
+    // Their own store's erasure fails once, as a store out of reach.
+    const failing = envFailing(`person:${person}`, "eraseSource", [1]);
+
+    const first = await outcomeOf(
+      eraseSource(failing, { source, readers, reason: "deleted" })
+    );
+    const sharedMeanwhile = await ledgerOf(key);
+    const foundMeanwhile = await textsFor(person, word, true);
+    await eraseSource(failing, { source, readers, reason: "deleted" });
+
+    const sharedAfter = await ledgerOf(key);
+
+    expect({
+      first,
+      sharedMeanwhile,
+      foundMeanwhile,
+      shared: sharedAfter.length,
+      found: await textsFor(person, word, true),
+    }).toStrictEqual({
+      first: "Error: Out of reach, for the test",
+      // Not erased in the shared ledger while their copy is still found.
+      sharedMeanwhile: [],
+      foundMeanwhile: [`Their own ${word}`],
+      shared: 1,
+      found: [],
+    });
+  });
+
   it("is erased in their own store by the readers its producer names, and its key closed", async () => {
     const person = await member();
     const word = markerWord();
@@ -447,6 +554,94 @@ describe("a source whose readers would change kind", () => {
       colleague: [`The team's draft ${word}`],
       person: [`The team's draft ${word}`],
       theirsAlone: [],
+    });
+  });
+
+  it("fails, not refused, when the shared store can't be asked after it landed, and its retry is refused and takes their copy back out", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    const theirs: SourceReaders = { kind: "owner", personId: person };
+    const text = `Theirs alone ${word}`;
+    // The shared store answers the first ask and not the second.
+    const failing = envFailing("brain", "holdsSource", [2]);
+    const gate = await holdNextBucketPut(`person:${person}`);
+    const adding = outcomeOf(addWith(failing, source, text, theirs));
+    await vi.waitFor(
+      () => {
+        expect(gate.reached).toBeTruthy();
+      },
+      { timeout: 10_000 }
+    );
+    await add(source, `The team's ${word}`, { kind: "team", teamId: team });
+    gate.released = true;
+    const first = await adding;
+
+    const retry = await outcomeOf(add(source, text, theirs));
+    const listed = await listSourcesAs(env, person, {});
+    const theirsKept = await own(person).readCurrent({
+      sources: [keyOf(source)],
+      reader: { person, groups: [] },
+    });
+
+    expect({
+      first,
+      retry: retry.includes("keeps the readers it was first added for"),
+      found: await textsFor(person, word, true),
+      listed: listed.sources
+        .filter(({ source: listedSource }) => listedSource.id === source.id)
+        .map(({ personal }) => personal),
+      read: await historyAs(person, { source, version: 1 }),
+      theirsKept,
+    }).toStrictEqual({
+      first: "Error: Out of reach, for the test",
+      retry: true,
+      found: [`The team's ${word}`],
+      listed: [false],
+      read: `The team's ${word}`,
+      theirsKept: [],
+    });
+  });
+
+  it("fails, not refused, when their copy can't be taken back out, and its retry takes it out and is refused", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    const theirs: SourceReaders = { kind: "owner", personId: person };
+    // Theirs, then the team's: a copy of theirs the shared store's key holds.
+    await add(source, `Theirs alone ${word}`, theirs);
+    await add(source, `The team's ${word}`, { kind: "team", teamId: team });
+    const failing = envFailing(`person:${person}`, "eraseSource", [1]);
+
+    const first = await outcomeOf(
+      addWith(failing, source, `Theirs again ${word}`, theirs)
+    );
+    const keptMeanwhile = await own(person).readCurrent({
+      sources: [keyOf(source)],
+      reader: { person, groups: [] },
+    });
+    const retry = await outcomeOf(
+      addWith(failing, source, `Theirs again ${word}`, theirs)
+    );
+    const theirsKept = await own(person).readCurrent({
+      sources: [keyOf(source)],
+      reader: { person, groups: [] },
+    });
+
+    expect({
+      first,
+      keptMeanwhile: keptMeanwhile.length,
+      retry: retry.includes("keeps the readers it was first added for"),
+      found: await textsFor(person, word, true),
+      theirsKept,
+    }).toStrictEqual({
+      first: "Error: Out of reach, for the test",
+      keptMeanwhile: 1,
+      retry: true,
+      found: [`The team's ${word}`],
+      theirsKept: [],
     });
   });
 

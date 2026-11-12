@@ -326,13 +326,33 @@ const narrowed =
   "Refused: a source keeps the readers it was first added for, so one added for more than one person, or one an erasure closed, can't become one person's own: add it as a new source";
 
 /**
+ * Refuses an add of `source` to `own` as a narrowing, once `own`'s copy
+ * of it, if it has one, is erased: one a shared add that landed during
+ * this add left, or during an earlier one whose check or clean-up failed.
+ * A clean-up that fails throws its own error, not the refusal, so the
+ * caller's retry comes back here and does it again. A store never given
+ * the key is only asked, never written to.
+ */
+const refusedAsNarrowed = async (
+  own: Brain,
+  source: SourceId
+): Promise<never> => {
+  if (await own.holdsSource(source)) {
+    await own.eraseSource({ source, reason: "deleted" });
+  }
+  throw new Error(narrowed);
+};
+
+/**
  * `add` run on the store `source` is kept in for `access` (`keptIn`).
  * One person's own only while the shared store was never given its key,
  * asked before and again after: a shared source is never narrowed into a
  * person's own store, where its shared versions would stay readable to
  * those taken off. A shared add of the key that landed in between (two
  * producers at once) has the person's copy erased and this add refused;
- * one after the second ask is a widening, which producers never do.
+ * one after the second ask is a widening, which producers never do. Every
+ * refusal takes the person's copy back out first (`refusedAsNarrowed`),
+ * so a retry finishes what a failed check or clean-up left.
  */
 const keptIn = async <T>(
   env: BrainEnv,
@@ -344,14 +364,13 @@ const keptIn = async <T>(
     return await add(brain(env));
   }
   const shared = brain(env);
-  if (await shared.holdsSource(source)) {
-    throw new Error(narrowed);
-  }
   const own = ownBrain(env, access.person);
+  if (await shared.holdsSource(source)) {
+    return await refusedAsNarrowed(own, source);
+  }
   const added = await add(own);
   if (await shared.holdsSource(source)) {
-    await own.eraseSource({ source, reason: "deleted" });
-    throw new Error(narrowed);
+    return await refusedAsNarrowed(own, source);
   }
   return added;
 };
@@ -737,8 +756,8 @@ const personErasureSchema = z.strictObject({
  * Its key is closed: a later add of it is refused, so a producer's late
  * retry never brings it back. Safe to repeat. For a producer's deletion
  * for good, or the end of its retention. `readers` are the source's, as
- * its producer adds it: its key is closed in the shared store, and in
- * the person's own store too when they name one (`keptIn`).
+ * its producer adds it: its key is closed in the person's own store when
+ * they name one, then in the shared store (`keptIn`).
  *
  * Only a call that returned is in the Brain's ledger. A call that fails
  * or throws must be retried until it succeeds: until then, a restore of
@@ -750,15 +769,15 @@ export const eraseSource = async (
 ): Promise<void> => {
   const { source, readers, reason } = checked(sourceErasureSchema, erased);
   const request = { source: sourceKeyOf(source), reason };
-  // Closed in the shared store whatever its readers, and in its person's
-  // own when it is theirs, so no copy is left where it could be: both
-  // must succeed before this returns.
-  await Promise.all([
-    brain(env).eraseSource(request),
-    ...(readers.kind === "owner"
-      ? [ownBrain(env, readers.personId).eraseSource(request)]
-      : []),
-  ]);
+  // In its person's own store first, when it is theirs, and only once
+  // that returned closed in the shared store, whatever its readers: the
+  // shared ledger, which staff read, never says erased while a copy is
+  // left. A failure of the first leaves the shared store as it was, and
+  // the retry does both, in order.
+  if (readers.kind === "owner") {
+    await ownBrain(env, readers.personId).eraseSource(request);
+  }
+  await brain(env).eraseSource(request);
 };
 
 /**
