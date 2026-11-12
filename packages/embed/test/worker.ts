@@ -7,6 +7,7 @@ import type { Loaded } from "../src/embedder.ts";
 import type { Kernel, RunningKernel } from "../src/engine.ts";
 import type { EmbedModel } from "../src/model-files.ts";
 import deepFiles from "./fixtures/deep/files.json";
+import trimmedFiles from "./fixtures/trimmed/files.json";
 import { BreakableEmbedder, floatModel, int8Model } from "./test-models.ts";
 
 export { floatModel, int8Model } from "./test-models.ts";
@@ -24,6 +25,24 @@ export const deepInt8Model: EmbedModel = {
   tokenizer: deepFiles["tokenizer.bin"],
   encoder: deepFiles["encoder-int8.bin"],
   tokens: deepFiles["tokens-int8.bin"],
+};
+
+/**
+ * The trimmed fixture: the first model with a few pieces' rows removed
+ * from its token table, each written as kept pieces by its tokenizer's map.
+ */
+export const trimmedFloatModel: EmbedModel = {
+  name: "fixture-trimmed-float",
+  tokenizer: trimmedFiles["tokenizer.bin"],
+  encoder: trimmedFiles["encoder-float.bin"],
+  tokens: trimmedFiles["tokens-float.bin"],
+};
+
+export const trimmedInt8Model: EmbedModel = {
+  name: "fixture-trimmed-int8",
+  tokenizer: trimmedFiles["tokenizer.bin"],
+  encoder: trimmedFiles["encoder-int8.bin"],
+  tokens: trimmedFiles["tokens-int8.bin"],
 };
 
 /** The float model, breakable as `BreakableEmbedder` is: another build than the int8 one. */

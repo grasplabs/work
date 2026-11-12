@@ -92,11 +92,12 @@ export type EmbedResult =
 export const maxTextsPerCall = 16;
 
 /**
- * The most tokens one call embeds: once a text would go past it, it and
- * every text after it are `deferred`, so a call ends within about 1.7 s of
- * CPU for the 4-layer model and 5 s for a 10-layer one of width 384 (0.21
- * and 0.61 ms a token on Cloudflare, against the 30 s a Durable Object
- * request may use). It is 16 texts of 512 tokens: with a model that reads
+ * The most tokens one call embeds, counted as the encoder runs them (a
+ * trimmed table's removed piece as the rows it is written as): once a
+ * text would go past it, it and every text after it are `deferred`, so a
+ * call ends within about 1.7 s of CPU for the 4-layer model and 5 s for
+ * a 10-layer one of width 384 (0.21 and 0.61 ms a token on Cloudflare,
+ * against the 30 s a Durable Object request may use). It is 16 texts of 512 tokens: with a model that reads
  * at most 512, a call of 16 always fits; with one that reads 1,024, 8 full
  * texts do. A text whose module trapped counts the tokens it was given,
  * and a text tried again counts twice. A caller that wants shorter calls
@@ -350,9 +351,9 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       this.kernel
     );
     const width = rowBytes(table.format, engine.dim);
-    if (table.rows !== engine.vocabSize || table.rowBytes !== width) {
+    if (table.rows !== engine.tableRows || table.rowBytes !== width) {
       throw new ModelFilesError(
-        `${this.running.name}'s token table doesn't fit its tokenizer and encoder: ${engine.vocabSize} rows of ${width} bytes wanted.`
+        `${this.running.name}'s token table doesn't fit its tokenizer and encoder: ${engine.tableRows} rows of ${width} bytes wanted.`
       );
     }
     const loaded = {
