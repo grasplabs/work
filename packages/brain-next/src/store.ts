@@ -44,13 +44,19 @@ import type {
   WorkOverview,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
-import { embeddingOverview, embeddingStep, reembed } from "./embedding.ts";
+import {
+  embeddingDue,
+  embeddingOverview,
+  embeddingStep,
+  reembed,
+} from "./embedding.ts";
 import {
   confirmPending,
   deleteStoreObjects,
   erase,
   eraseBatch,
   erasuresOverview,
+  erasureDue,
   erasuresUnfinished,
   isStoreErased,
   storeErasedAt,
@@ -66,6 +72,7 @@ import {
   fileGraceMs,
   filesPrefix,
   hashOf,
+  sweepDueAt,
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
@@ -78,7 +85,12 @@ import {
 import { find, recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
-import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
+import {
+  putVectors,
+  repackDue,
+  repackVectors,
+  searchVectors,
+} from "./vectors.ts";
 import {
   markWordsCurrentIfEmpty,
   reindexWords,
@@ -87,13 +99,12 @@ import {
 } from "./words.ts";
 import {
   newWorkState,
+  queueDueAt,
   releaseInterrupted,
   repackPerTick,
   requeueWork,
   stopWorkOn,
   workOverview,
-  workParkedMs,
-  workParksMax,
   workTick,
 } from "./work.ts";
 
@@ -147,39 +158,6 @@ const ledgerRetryMs = 30_000;
  * minute, as the host's clock ticks the shared store.
  */
 const alarmWaitMs = 60_000;
-
-/**
- * When a tick next can do something (`?1` now), or null when nothing is
- * left: an item of the queue not parked, when it is due and the queue's
- * pause (work.ts rule 1) is over; a parked one, when it comes back by
- * itself (rule 5), the pause over too; an erasure's versions to delete,
- * a ledger entry to write or vector codes to repack, now (and word
- * indexes to rebuild, `#armAlarm`); a file or a
- * vector nothing holds, once the sweep may delete it (files.ts: past its
- * grace and any doubt) and the sweep's own wait (`?5`) is over. Never a
- * parked item that comes back no more, so a store whose work is all done,
- * or all failed for good, sleeps.
- */
-const nextWorkSql = `WITH paused AS (
-  SELECT coalesce(max(paused_until), 0) AS until FROM work_model_bucket
-)
-SELECT min(at) AS at FROM (
-  SELECT max(min(not_before), ?1, (SELECT until FROM paused)) AS at
-    FROM work_items WHERE parked_at IS NULL AND running = 0
-    HAVING count(*) > 0
-  UNION ALL SELECT max(min(parked_at) + ?2, (SELECT until FROM paused))
-    FROM work_items WHERE parked_at IS NOT NULL AND parks < ?3
-    HAVING count(*) > 0
-  UNION ALL SELECT CASE WHEN EXISTS (SELECT 1 FROM erasing_versions)
-    OR EXISTS (SELECT 1 FROM erasures WHERE confirmed = 0)
-    OR EXISTS (SELECT 1 FROM vector_removed) THEN ?1 END
-  UNION ALL SELECT max(min(max(written_at + ?4, coalesce(in_doubt_until, 0))),
-      ?1, ?5)
-    FROM files WHERE refs = 0 HAVING count(*) > 0
-  UNION ALL SELECT max(min(max(written_at + ?4, coalesce(in_doubt_until, 0))),
-      ?1, ?5)
-    FROM vector_files WHERE unheld = 1 HAVING count(*) > 0
-)`;
 
 /** A tick's time: a valid date. */
 const tickAtSchema = z.date();
@@ -291,7 +269,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * The calls under way that may write to the store's part of the bucket:
-   * adds and ticks (`#writing`).
+   * every call that can change it (`#changing`).
    */
   readonly #writes = new Set<Promise<unknown>>();
 
@@ -601,11 +579,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addSource(source: NewSource): Promise<SourceVersionRef> {
     const adding = checked(newSourceSchema, source);
     this.#mayKeep(adding.access);
-    return await this.#writing(async () => {
+    return await this.#changing(async () => {
       await this.#readyToWrite();
-      const added = await addVersion(this.#sources, adding, { indexed: true });
-      await this.#armAlarm();
-      return added;
+      return await addVersion(this.#sources, adding, { indexed: true });
     });
   }
 
@@ -616,27 +592,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
     const adding = checked(newInstructionsSchema, source);
     this.#mayKeep(adding.access);
-    return await this.#writing(async () => {
+    return await this.#changing(async () => {
       await this.#readyToWrite();
-      const added = await addVersion(this.#sources, adding, {
-        indexed: false,
-      });
-      await this.#armAlarm();
-      return added;
+      return await addVersion(this.#sources, adding, { indexed: false });
     });
   }
 
   /**
-   * `write` run as one of the calls under way that may write to the
-   * store's part of the bucket (`#eraseWhole` waits for them).
+   * `change` run as a call that may change the store: counted among the
+   * calls under way, which may write to its part of the bucket
+   * (`#eraseWhole` waits for them), and, once it ends, done or failed, a
+   * person's own store's alarm set from what it then has to do
+   * (`#armAlarm`). Every method that can leave work for a tick runs
+   * through here, so none can leave it without the store waking for it:
+   * a person's store has no clock but its own alarm.
    */
-  async #writing<T>(write: () => Promise<T>): Promise<T> {
-    const running = write();
+  async #changing<T>(change: () => Promise<T>): Promise<T> {
+    const running = change();
     this.#writes.add(running);
     try {
       return await running;
     } finally {
       this.#writes.delete(running);
+      await this.#armAlarm();
     }
   }
 
@@ -702,12 +680,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (await this.#erasedWhole()) {
       return;
     }
-    await this.#writing(async () => {
+    await this.#changing(async () => {
       await this.#readyToWrite();
       await erase(this.#erasures, "source", source, reason, (sources) => {
         stopWorkOn(this.#work, sources);
       });
-      await this.#armAlarm();
     });
   }
 
@@ -800,7 +777,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * none starves the next, and the queue runs whatever the others did.
    */
   async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
-    await this.#writing(async () => {
+    await this.#changing(async () => {
       await this.#workNow(ask, at, embedders);
     });
   }
@@ -814,14 +791,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // Nothing was ever kept: nothing to do.
       return;
     }
-    try {
-      await this.#tick(ask, tickAt, {
-        model,
-        embed: async (request) => await embedders.embed(request),
-      });
-    } finally {
-      await this.#armAlarm();
-    }
+    await this.#tick(ask, tickAt, {
+      model,
+      embed: async (request) => await embedders.embed(request),
+    });
   }
 
   /** The tick of `work` at `tickAt`, with the host's checked `embedders`. */
@@ -908,27 +881,56 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
+   * When a tick next has something to do, in milliseconds, or null when
+   * nothing is left: the one rule of whether this store has work, made of
+   * each step's own rule, beside the code that decides that step (`#tick`,
+   * in its order):
+   *
+   * - erasure.ts `erasureDue`: a ledger entry to write, hidden versions to
+   *   delete;
+   * - files.ts `sweepDueAt`: a file or a vector nothing holds, once its
+   *   grace is over, and the sweep's own wait after a failure;
+   * - vectors.ts `repackDue`: removed codes to repack;
+   * - words.ts `wordsRebuilding`: word indexes behind their rules;
+   * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
+   *   still to remove;
+   * - work.ts `queueDueAt`: an item of the queue, due or coming back from
+   *   parked, once the queue's pause is over.
+   *
+   * A step that keeps failing stays due, so the store keeps waking for it
+   * while staff see the failure in the overview.
+   */
+  #nextWorkAt(now: number): number | null {
+    const { storage } = this.ctx;
+    const { sql } = storage;
+    if (
+      erasureDue(sql) ||
+      repackDue(sql) ||
+      wordsRebuilding(sql) ||
+      embeddingDue(storage)
+    ) {
+      return now;
+    }
+    const sweep = sweepDueAt(sql);
+    const due = [
+      sweep === null ? null : Math.max(sweep, this.#sweepAfter),
+      queueDueAt(storage),
+    ].filter((at) => at !== null);
+    return due.length === 0 ? null : Math.min(...due);
+  }
+
+  /**
    * A person's own store's alarm set for when a tick next has something
-   * to do (`nextWorkSql`), a minute on at the soonest, unless one is set
-   * sooner; none when nothing is left, or the store holds nothing.
+   * to do (`#nextWorkAt`), a minute on at the soonest, unless one is set
+   * sooner; none when nothing is left, or the store holds nothing. Run
+   * after every call that can change the store (`#changing`).
    */
   async #armAlarm(): Promise<void> {
     if (this.#kind.kind !== "person" || !this.#schema || this.#erased) {
       return;
     }
     const now = Date.now();
-    const { sql } = this.ctx.storage;
-    const [next] = sql
-      .exec<{ at: number | null }>(
-        nextWorkSql,
-        now,
-        workParkedMs,
-        workParksMax,
-        fileGraceMs,
-        this.#sweepAfter
-      )
-      .toArray();
-    const due = wordsRebuilding(sql) ? now : (next?.at ?? null);
+    const due = this.#nextWorkAt(now);
     if (due === null) {
       return;
     }
@@ -963,10 +965,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * through.
    */
   async reembed(): Promise<StaffActionOutcome> {
-    if (!(await this.#actionable())) {
-      return "unavailable";
-    }
-    return this.#schema && reembed(this.ctx.storage) ? "done" : "nothing";
+    return await this.#changing(async () => {
+      if (!(await this.#actionable())) {
+        return "unavailable";
+      }
+      return this.#schema && reembed(this.ctx.storage) ? "done" : "nothing";
+    });
   }
 
   /**
@@ -1130,12 +1134,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async requeueWork(id: number): Promise<StaffActionOutcome> {
     const item = checked(workIdSchema, id);
-    if (!(await this.#actionable())) {
-      return "unavailable";
-    }
-    return this.#schema && requeueWork(this.ctx.storage, item)
-      ? "done"
-      : "nothing";
+    return await this.#changing(async () => {
+      if (!(await this.#actionable())) {
+        return "unavailable";
+      }
+      return this.#schema && requeueWork(this.ctx.storage, item)
+        ? "done"
+        : "nothing";
+    });
   }
 
   /**
@@ -1143,12 +1149,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * `unavailable`, changing nothing, until the ledger is read through.
    */
   async rebuildWords(): Promise<StaffActionOutcome> {
-    if (!(await this.#actionable())) {
-      return "unavailable";
-    }
-    return this.#schema && startWordsRebuild(this.ctx.storage.sql)
-      ? "done"
-      : "nothing";
+    return await this.#changing(async () => {
+      if (!(await this.#actionable())) {
+        return "unavailable";
+      }
+      return this.#schema && startWordsRebuild(this.ctx.storage.sql)
+        ? "done"
+        : "nothing";
+    });
   }
 
   /** The overview of a store that never kept anything. */
@@ -1189,12 +1197,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async putVectors(request: VectorsToPut): Promise<void> {
     const vectors = checked(vectorsToPutSchema, request);
-    await this.#ready();
-    if (!this.#schema) {
-      return;
-    }
-    this.ctx.storage.transactionSync(() => {
-      putVectors(this.ctx.storage.sql, vectors);
+    await this.#changing(async () => {
+      await this.#ready();
+      if (!this.#schema) {
+        return;
+      }
+      this.ctx.storage.transactionSync(() => {
+        putVectors(this.ctx.storage.sql, vectors);
+      });
     });
   }
 
@@ -1209,8 +1219,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** Repacks one block holding removed codes: true when more are left. */
   async repackVectors(): Promise<boolean> {
-    await this.#ready();
-    return this.#schema && this.#repackOne();
+    return await this.#changing(async () => {
+      await this.#ready();
+      return this.#schema && this.#repackOne();
+    });
   }
 
   /** One block repacked, in its own transaction: true when more are left. */

@@ -204,6 +204,24 @@ export const releaseVectors = (store: SqlStorage, hashes: string): void => {
 };
 
 /**
+ * `?1` the grace (`fileGraceMs`): when the sweep (`sweepFiles`) next has a
+ * file or a vector to look at, by the same conditions it takes them by: a
+ * file no version points at, or a vector row marked unheld, once its
+ * grace is over. Null when there is none.
+ */
+const sweepDueSql = `
+SELECT min(at) AS at FROM (
+  SELECT min(written_at) + ?1 AS at FROM files WHERE refs = 0
+  UNION ALL SELECT min(written_at) + ?1 FROM vector_files WHERE unheld = 1
+)
+HAVING min(at) IS NOT NULL`;
+
+/** When the sweep next has something to look at (above), or null. */
+export const sweepDueAt = (store: SqlStorage): number | null =>
+  store.exec<{ at: number }>(sweepDueSql, fileGraceMs).toArray().at(0)?.at ??
+  null;
+
+/**
  * `?1` the cut-off: rows noted before it, `?2` how many. The oldest
  * unheld vector rows past the grace and not in doubt.
  */

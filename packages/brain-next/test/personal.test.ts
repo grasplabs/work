@@ -6,9 +6,14 @@
 // tests (`reset`) crashed workerd here, beside the tests that swap a
 // store's bucket. The threat model is on GRA-1762; each test names the
 // threat it holds.
-import type { Access, Reader } from "@grasp-os/brain-next/contract";
+import type {
+  Access,
+  AskModel,
+  Embedders,
+  Reader,
+} from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
+import { DurableObject, env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -20,7 +25,7 @@ import {
   vectorModelNameOf,
 } from "../src/contract.ts";
 import { fileGraceMs } from "../src/files.ts";
-import type { BrainStore } from "../src/store.ts";
+import { BrainStore } from "../src/store.ts";
 
 /** A store, as its namespace gives it. */
 type Store = DurableObjectStub<BrainStore>;
@@ -1083,5 +1088,220 @@ describe("a person's own store", () => {
     await expect(
       own().readVersion({ ...kept, reader: me() })
     ).resolves.toMatchObject({ text: "Theirs, by name" });
+  });
+});
+
+/** A model that answers nothing: no work here asks one. */
+const quietAsk: AskModel = async () => {
+  await Promise.resolve();
+  return { kind: "answer", text: "" };
+};
+
+/** The host's embedders while no model ships. */
+const noModel: Embedders = {
+  model: null,
+  embed: async () => {
+    await Promise.resolve();
+    return { kind: "unavailable" };
+  },
+};
+
+/** A tick of this test's person's store, as its alarm runs one with no model. */
+const tick = async (): Promise<void> => {
+  await own().work(quietAsk, new Date(), noModel);
+};
+
+/** Runs `change` in this test's person's store, in its own storage. */
+const inStore = async (change: (sql: SqlStorage) => void): Promise<void> => {
+  await runInDurableObject(own(), (_instance, state) => {
+    change(state.storage.sql);
+  });
+};
+
+/** The store's alarm taken away, as once it has fired. */
+const noAlarm = async (): Promise<void> => {
+  await runInDurableObject(own(), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
+};
+
+/**
+ * A person's store with a source kept and all its work done, as a host
+ * with no model leaves it, and no alarm: the source's ref.
+ */
+const settled = async (): Promise<{ source: string; version: number }> => {
+  const kept = await add(own(), "Settled and done", theirs());
+  await tick();
+  await noAlarm();
+  return kept;
+};
+
+/** The model the store last saw is `name`, its walk over, as a tick with it leaves it. */
+const sawModel = async (name: string): Promise<void> => {
+  await inStore((sql) => {
+    sql.exec(
+      `INSERT INTO embedding_state (id, model, walked_to, walked, rebuilt)
+      VALUES (1, ?1, 0, 1, 1)
+      ON CONFLICT (id) DO UPDATE SET model = ?1, walked = 1, rebuilt = 1`,
+      name
+    );
+  });
+};
+
+/** Each public method of the store, its own and any it inherits, but the runtime's handlers. */
+const storeMethods = (): string[] => {
+  const names = new Set<string>();
+  for (
+    let prototype: unknown = BrainStore.prototype;
+    prototype !== DurableObject.prototype &&
+    typeof prototype === "object" &&
+    prototype !== null;
+    prototype = Object.getPrototypeOf(prototype)
+  ) {
+    for (const name of Object.getOwnPropertyNames(prototype)) {
+      names.add(name);
+    }
+  }
+  names.delete("constructor");
+  names.delete("alarm");
+  return [...names].toSorted();
+};
+
+/**
+ * For each method that can leave a person's store work for a tick: a
+ * settled store with no alarm made to have work by it.
+ */
+const leavingWork: Record<string, () => Promise<void>> = {
+  addSource: async () => {
+    await add(own(), "A source to embed", theirs());
+  },
+  // Failed: its file is noted before it is written, and nothing holds it.
+  addInstructions: async () => {
+    const { heal } = await breakBucket(own(), ["put"]);
+    await Promise.allSettled([
+      called(
+        own().addInstructions({
+          source: "instructions:failed",
+          change: "1",
+          text: "Never written",
+          access: theirs(),
+        })
+      ),
+    ]);
+    await heal();
+  },
+  eraseSource: async () => {
+    const kept = await add(own(), "To erase", theirs());
+    await tick();
+    await noAlarm();
+    await own().eraseSource({ source: kept.source, reason: "deleted" });
+  },
+  // A tick that deletes an erased version lets its file go to the sweep.
+  work: async () => {
+    const kept = await add(own(), "Erased, then swept", theirs());
+    await own().eraseSource({ source: kept.source, reason: "deleted" });
+    await noAlarm();
+    await tick();
+  },
+  reembed: async () => {
+    await sawModel("m@1");
+    await own().reembed();
+  },
+  requeueWork: async () => {
+    await add(own(), "Parked for good", theirs());
+    let parked = 0;
+    await inStore((sql) => {
+      parked = sql
+        .exec<{ id: number }>(
+          `UPDATE work_items SET parked_at = ?1, parks = 3
+          RETURNING id`,
+          Date.now()
+        )
+        .one().id;
+    });
+    await noAlarm();
+    await own().requeueWork(parked);
+  },
+  rebuildWords: async () => {
+    await own().rebuildWords();
+  },
+  // Vectors of a build other than the one the store saw: to remove.
+  putVectors: async () => {
+    const kept = await add(own(), "With a vector", theirs());
+    await tick();
+    await sawModel("m@1");
+    await noAlarm();
+    await own().putVectors({
+      model: { name: "other@1", centre: [0, 0] },
+      vectors: [{ chunk: { ...kept, position: 0 }, vector: [1, 0] }],
+    });
+  },
+};
+
+/** The methods that only read, or take work away (`erasePerson` erases it all). */
+const leavingNone = [
+  "erasePerson",
+  "find",
+  "readCurrent",
+  "readVersion",
+  "recall",
+  "repackVectors",
+  "searchVectors",
+  "workOverview",
+];
+
+describe("a person's own store's alarm", () => {
+  beforeEach(() => {
+    person = `person-${crypto.randomUUID()}`;
+  });
+
+  it("knows of every public method whether it can leave work", () => {
+    expect(storeMethods()).toStrictEqual(
+      [...Object.keys(leavingWork), ...leavingNone].toSorted()
+    );
+  });
+
+  it("is armed after every method that leaves work, though the store had none", async () => {
+    const armed: Record<string, boolean> = {};
+    for (const [method, leave] of Object.entries(leavingWork)) {
+      person = `person-${crypto.randomUUID()}`;
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await settled();
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await leave();
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      armed[method] = (await alarmOf(own())) !== null;
+    }
+    expect(armed).toStrictEqual(
+      Object.fromEntries(Object.keys(leavingWork).map((name) => [name, true]))
+    );
+  });
+
+  it("is not armed while the store has nothing to do: no model shipped, a model seen and done, or a paused queue with nothing in it", async () => {
+    const asleep: Record<string, number | null> = {};
+    await settled();
+    await own().repackVectors();
+    asleep.noModel = await alarmOf(own());
+
+    await sawModel("m@1");
+    await own().repackVectors();
+    asleep.modelDone = await alarmOf(own());
+
+    await inStore((sql) => {
+      sql.exec(
+        `INSERT INTO work_model_bucket (id, tokens, at, paused_until)
+        VALUES (1, 0, ?1, ?2)
+        ON CONFLICT (id) DO UPDATE SET paused_until = ?2`,
+        Date.now(),
+        Date.now() + 20 * 60_000
+      );
+    });
+    await tick();
+    asleep.paused = await alarmOf(own());
+    expect(asleep).toStrictEqual({
+      noModel: null,
+      modelDone: null,
+      paused: null,
+    });
   });
 });
