@@ -1034,17 +1034,21 @@ export type StoreKind =
 
 /**
  * Whose the store named `name` is. A name is all a store knows of itself
- * (store.ts), so this is the one rule of which store is whose: a name
- * starting `person:` is that person's own store, or, when what follows
- * isn't an id, no one's; no name at all (an id not made from a name) is
- * no one's; any other name is a shared store.
+ * (store.ts), so this is the one rule of which store is whose, and it
+ * fails closed: exactly `brain` is the shared store; `person:` followed
+ * by a well-formed id is that person's own store; any other name (a
+ * different case, a space, another separator, an id that isn't one), or
+ * no name at all (an id not made from a name), is no one's, and refuses
+ * every call. So a mistyped name never makes a second shared store,
+ * sharing the shared store's part of the bucket, nor keeps private
+ * content where it isn't guarded.
  */
 export const storeKindOf = (name: string | undefined): StoreKind => {
-  if (name === undefined) {
-    return { kind: "unknown" };
-  }
-  if (!name.startsWith(personalPrefix)) {
+  if (name === storeName) {
     return { kind: "shared" };
+  }
+  if (name === undefined || !name.startsWith(personalPrefix)) {
+    return { kind: "unknown" };
   }
   const person = principalSchema.safeParse(name.slice(personalPrefix.length));
   return person.success

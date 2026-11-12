@@ -54,6 +54,8 @@ import {
   erasuresUnfinished,
   isStoreErased,
   keepMissingSubjects,
+  ledgerPrefix,
+  readLedgerStart,
   recordStoreErased,
   replayStep,
   sourcesWithoutCurrent,
@@ -140,25 +142,36 @@ const ledgerRetryMs = 30_000;
 const alarmWaitMs = 60_000;
 
 /**
- * When a tick next has something to do (`?1` now), or null when nothing
- * is left: an item of the queue not parked, when it is due; a parked one,
- * when it comes back by itself (work.ts rule 5); an erasure's versions to
- * delete, a ledger entry to write, vector codes to repack or word indexes
- * to rebuild, now; a file or a vector nothing holds, once the sweep may
- * delete it (files.ts). Never a parked item that comes back no more, so
- * a store whose work is all done, or all failed for good, sleeps.
+ * When a tick next can do something (`?1` now), or null when nothing is
+ * left: an item of the queue not parked, when it is due and the queue's
+ * pause (work.ts rule 1) is over; a parked one, when it comes back by
+ * itself (rule 5), the pause over too; an erasure's versions to delete,
+ * a ledger entry to write or vector codes to repack, now (and word
+ * indexes to rebuild, `#armAlarm`); a file or a
+ * vector nothing holds, once the sweep may delete it (files.ts: past its
+ * grace and any doubt) and the sweep's own wait (`?5`) is over. Never a
+ * parked item that comes back no more, so a store whose work is all done,
+ * or all failed for good, sleeps.
  */
-const nextWorkSql = `SELECT min(at) AS at FROM (
-  SELECT max(min(not_before), ?1) AS at FROM work_items
-    WHERE parked_at IS NULL AND running = 0
-  UNION ALL SELECT min(parked_at) + ?2 FROM work_items
-    WHERE parked_at IS NOT NULL AND parks < ?3
+const nextWorkSql = `WITH paused AS (
+  SELECT coalesce(max(paused_until), 0) AS until FROM work_model_bucket
+)
+SELECT min(at) AS at FROM (
+  SELECT max(min(not_before), ?1, (SELECT until FROM paused)) AS at
+    FROM work_items WHERE parked_at IS NULL AND running = 0
+    HAVING count(*) > 0
+  UNION ALL SELECT max(min(parked_at) + ?2, (SELECT until FROM paused))
+    FROM work_items WHERE parked_at IS NOT NULL AND parks < ?3
+    HAVING count(*) > 0
   UNION ALL SELECT CASE WHEN EXISTS (SELECT 1 FROM erasing_versions)
     OR EXISTS (SELECT 1 FROM erasures WHERE confirmed = 0)
     OR EXISTS (SELECT 1 FROM vector_removed) THEN ?1 END
-  UNION ALL SELECT max(min(written_at) + ?4, ?1) FROM files WHERE refs = 0
-  UNION ALL SELECT max(min(written_at) + ?4, ?1) FROM vector_files
-    WHERE unheld = 1
+  UNION ALL SELECT max(min(max(written_at + ?4, coalesce(in_doubt_until, 0))),
+      ?1, ?5)
+    FROM files WHERE refs = 0 HAVING count(*) > 0
+  UNION ALL SELECT max(min(max(written_at + ?4, coalesce(in_doubt_until, 0))),
+      ?1, ?5)
+    FROM vector_files WHERE unheld = 1 HAVING count(*) > 0
 )`;
 
 /** A tick's time: a valid date. */
@@ -367,14 +380,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
     }
     if (!this.#opened) {
-      if (
-        this.#kind.kind === "person" &&
-        !create &&
-        !hasSchema(this.ctx.storage.sql)
-      ) {
-        this.#schema = false;
-        this.#ledger = "through";
-        return;
+      if (this.#kind.kind === "person" && !hasSchema(this.ctx.storage.sql)) {
+        if (!create) {
+          this.#schema = false;
+          this.#ledger = "through";
+          return;
+        }
+        // Its ledger read before any table is made: a store that can't
+        // read it makes nothing.
+        try {
+          await readLedgerStart(this.#bucket);
+        } catch {
+          // Nothing of the error is kept.
+          this.#ledger = "unreadable";
+          return;
+        }
       }
       await migrate(this.#db, migrations);
       releaseInterrupted(this.ctx.storage);
@@ -407,6 +427,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.ctx.storage.deleteAll();
     this.#erased = true;
     this.#schema = false;
+  }
+
+  /**
+   * Refuses a call to a store whose name says no one's, and ends this
+   * instance: an id reached once without its name (`idFromString`) makes
+   * an instance that can't know whose it is, and the next call, by name,
+   * gets an instance of its own that can.
+   */
+  #refuseNoOnes(): never {
+    // Once this call is answered: aborting within it would end the call
+    // with the instance.
+    this.ctx.abort(noOnes);
+    throw new Error(noOnes);
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */
@@ -453,7 +486,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async #ready(): Promise<void> {
     if (this.#kind.kind === "unknown") {
-      throw new Error(noOnes);
+      this.#refuseNoOnes();
     }
     // Read after the step, which may have changed it.
     const now = await this.#ledgerStep();
@@ -527,6 +560,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
     });
     await this.#ready();
+    // Made only once its ledger was read (`#start`): until then, a store
+    // that holds nothing answers reads as such, and refuses a write.
+    if (!this.#schema) {
+      throw new Error(ledgerUnreadable);
+    }
   }
 
   /** The parts erasure.ts works with: the store's part of the bucket. */
@@ -638,11 +676,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (await this.#erasedWhole()) {
       return;
     }
-    await this.#readyToWrite();
-    await erase(this.#erasures, "source", source, reason, (sources) => {
-      stopWorkOn(this.#work, sources);
+    await this.#writing(async () => {
+      await this.#readyToWrite();
+      await erase(this.#erasures, "source", source, reason, (sources) => {
+        stopWorkOn(this.#work, sources);
+      });
+      await this.#armAlarm();
     });
-    await this.#armAlarm();
   }
 
   /**
@@ -694,16 +734,18 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         throw new Error(erasureUnrecorded);
       }
     }
-    // An add or a tick that started before the erasure may still write
-    // a file or a vector under the store's prefix after this deletes what
-    // it lists: while one is under way, the erasure isn't finished, and
-    // the caller's next call deletes what it wrote.
+    // An add, a source's erasure or a tick that started before this may
+    // still write a file, a vector or a ledger entry under the store's
+    // prefix after this deletes what it lists: while one is under way, the
+    // erasure isn't finished, and the caller's next call deletes what it
+    // wrote.
     const quiet = this.#writes.size === 0;
     let done = false;
     try {
       done = await deleteStoreObjects(this.#bucket, [
         filesPrefix,
         vectorsPrefix,
+        ledgerPrefix,
       ]);
     } catch {
       // Nothing of the error is kept: it may name a key.
@@ -792,14 +834,37 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (this.#kind.kind !== "person") {
       return;
     }
-    // An erased store wakes to nothing (`#ready` would refuse the tick).
-    await this.#ledgerStep();
+    try {
+      // An erased store wakes to nothing (`#ready` would refuse the tick).
+      await this.#ledgerStep();
+      if (this.#erased) {
+        return;
+      }
+      if (this.alarmHost !== null) {
+        const host = await this.alarmHost();
+        await this.work(host.ask, new Date(), host.embedders);
+      }
+    } catch {
+      // Nothing of the error is kept. A tick that couldn't run (its ledger
+      // unreadable or still replaying, the host's model unreachable) wakes
+      // the store again in a minute, until it can: never only after the
+      // runtime's own retries, which give up.
+      await this.#armAgain();
+    }
+  }
+
+  /**
+   * A person's own store's alarm set a minute on, unless one is set
+   * sooner, whatever work it holds: after a tick that couldn't run.
+   */
+  async #armAgain(): Promise<void> {
     if (this.#erased) {
       return;
     }
-    if (this.alarmHost !== null) {
-      const host = await this.alarmHost();
-      await this.work(host.ask, new Date(), host.embedders);
+    const at = Date.now() + alarmWaitMs;
+    const set = await this.ctx.storage.getAlarm();
+    if (set === null || set > at) {
+      await this.ctx.storage.setAlarm(at);
     }
   }
 
@@ -820,7 +885,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         now,
         workParkedMs,
         workParksMax,
-        fileGraceMs
+        fileGraceMs,
+        this.#sweepAfter
       )
       .toArray();
     const due = wordsRebuilding(sql) ? now : (next?.at ?? null);
@@ -985,7 +1051,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async #actionable(): Promise<boolean> {
     if (this.#kind.kind === "unknown") {
-      return false;
+      this.#refuseNoOnes();
     }
     return (await this.#ledgerStep()) === "through" && !this.#erased;
   }
@@ -993,7 +1059,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /** The queue, as staff see it: empty while nothing was ever kept. */
   workOverview(): WorkOverview {
     if (this.#kind.kind === "unknown") {
-      throw new Error(noOnes);
+      this.#refuseNoOnes();
     }
     if (!this.#schema) {
       return this.#emptyOverview();

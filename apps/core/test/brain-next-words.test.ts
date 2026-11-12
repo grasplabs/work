@@ -577,7 +577,16 @@ describe(
     });
 
     it("marks a store with no passages current as it starts, with nothing to rebuild", async () => {
-      const empty = env.BRAIN_STORE.getByName(`empty-${crypto.randomUUID()}`);
+      // A person's own store makes its schema at its first write: here an
+      // instruction file, which has no passages.
+      const owner = `person-${crypto.randomUUID()}`;
+      const empty = env.BRAIN_STORE.getByName(`person:${owner}`);
+      await empty.addInstructions({
+        source: "instructions:words-test",
+        change: "1",
+        text: "Answer in English.",
+        access: { kind: "owner", person: owner },
+      });
 
       await expect(
         runInDurableObject(empty, (_instance, state) =>

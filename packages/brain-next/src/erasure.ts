@@ -102,7 +102,7 @@ interface LedgerEntry {
 }
 
 /** Where the ledger's entries are in the bucket. */
-const ledgerPrefix = "erasures/";
+export const ledgerPrefix = "erasures/";
 
 /** Digits of an entry's time in its key: so keys sort by time. */
 const timeDigits = 15;
@@ -1077,8 +1077,10 @@ export const replayStep = async ({
 // written before anything is deleted, so a store that comes back (a
 // restore of its storage, or a late add waking it afresh) finds it before
 // it answers anything, deletes all it holds again and refuses every call.
-// Its files and vectors are then deleted under their prefixes, a bounded
-// batch a call, until none is left.
+// Its files, its vectors and its own ledger's entries (when each of its
+// sources was erased, by a hash of its key) are then deleted under their
+// prefixes, a bounded batch a call, until none is left: the record is all
+// that stays of it.
 
 /** The key of the record that a person's store was erased whole. */
 const storeErasedKey = "erased";
@@ -1094,6 +1096,16 @@ export const isStoreErased = async (bucket: BrainBucket): Promise<boolean> =>
   (await inTime(bucket.head(storeErasedKey))) !== null;
 
 /**
+ * Reads the first page of the ledger of the store whose part of the bucket
+ * is `bucket`, before a person's own store makes its schema, so a store
+ * whose ledger can't be read makes nothing: throws when R2 fails or
+ * doesn't answer in time.
+ */
+export const readLedgerStart = async (bucket: BrainBucket): Promise<void> => {
+  await inTime(bucket.list({ prefix: ledgerPrefix, limit: 1 }));
+};
+
+/**
  * Records that the store whose part of the bucket is `bucket` is erased
  * whole, and why: throws when R2 fails or doesn't answer in time, and
  * then nothing is deleted. Written again, it says the same.
@@ -1107,7 +1119,7 @@ export const recordStoreErased = async (
 };
 
 /**
- * Deletes a page of the files and vectors under `prefixes` in `bucket`,
+ * Deletes a page of the objects under `prefixes` in `bucket`,
  * for at most `storeDeleteMs`: true once none is left. Throws when R2
  * fails or doesn't answer in time; what it deleted stays deleted.
  */

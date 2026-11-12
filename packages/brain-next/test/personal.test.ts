@@ -1,7 +1,11 @@
 // A person's own store (store.ts, GRA-1762): what only one person may
-// read, kept apart from everything else. Each test in stores of its own
-// names. The threat model is on GRA-1762; each test names the threat it
-// holds.
+// read, kept apart from everything else. Under the names the host uses:
+// `brain` for the shared store, `person:<id>` for a person's own. Each
+// test has a person, readers and texts of its own, so what earlier tests
+// left in the shared store is hidden from it: emptying storage between
+// tests (`reset`) crashed workerd here, beside the tests that swap a
+// store's bucket. The threat model is on GRA-1762; each test names the
+// threat it holds.
 import type { Access, Reader } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -9,6 +13,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { packAcross } from "../src/across.ts";
 import {
+  brainOf,
   personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
@@ -22,9 +27,8 @@ type Store = DurableObjectStub<BrainStore>;
 let person = "";
 const own = (): Store => env.BRAIN_STORE.getByName(`person:${person}`);
 
-/** A store shared by this test alone. */
-let sharedName = "";
-const shared = () => env.BRAIN_STORE.getByName(sharedName);
+/** The shared store, as the host names it. */
+const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 
 const whole = { tokens: recallBudgetMax };
 const readerOf = (who: string): Reader => ({ person: who, groups: [] });
@@ -277,6 +281,90 @@ const alarmOf = async (store: Store): Promise<number | null> =>
     async (_instance, state) => await state.storage.getAlarm()
   );
 
+/** How many sources the split-pack test's corpus holds. */
+const splitSources = 28;
+
+/** The split-pack test's model, and its vectors' dimensions and centre. */
+const splitModel = { name: "split-test", build: "1" };
+const splitModelName = vectorModelNameOf(splitModel);
+const splitDimensions = 8;
+const splitCentre = Array.from({ length: splitDimensions }, () => 0);
+
+/**
+ * Words in more than one form, and stop words, so passages tie on what
+ * they hold and part on how they hold it.
+ */
+const splitWords = [
+  "invoice",
+  "invoices",
+  "budget",
+  "budgets",
+  "travel",
+  "travelling",
+  "contract",
+  "contracts",
+  "meeting",
+  "salary",
+  "laptop",
+  "office",
+  "the",
+  "and",
+];
+
+/**
+ * The split-pack test's questions: words in their forms, IDs found and
+ * not, an ID only many passages hold in other forms, and a rare word with
+ * stop words, which the stop words fill out.
+ */
+const splitQuestions = [
+  "invoice budget",
+  "the invoices and budgets",
+  "travel salary PO-10000",
+  "PO-10007 and PO-99999",
+  "laptop office meeting contract",
+  "Where is PO-55555?",
+  "the zebra and the",
+];
+
+/**
+ * Source `index`'s text: its words, an ID now and then, a rare word in
+ * two, padded to a length of its own (spaced so a second version, longer
+ * by 8, never takes another's), so passages never tie on what follows.
+ */
+const splitTextOf = (index: number, random: (n: number) => number): string => {
+  const words = [
+    ...Array.from(
+      { length: 3 + (index % 7) },
+      () => splitWords[random(splitWords.length)] ?? ""
+    ),
+    index % 7 === 0 ? `PO-${10_000 + index}` : "",
+    index === 4 || index === 19 ? "zebra" : "",
+  ]
+    .filter((word) => word !== "")
+    .join(" ");
+  return `${words} ${"x".repeat(200 + 10 * index - words.length - 1)}`;
+};
+
+/**
+ * A text of 105 passages, each holding the words of PO-55555 but not in a
+ * row, so none holds it as written: candidates of the exact way, which
+ * only its cap keeps from saying it isn't found. Each of a length of its
+ * own: `side` 0 and 1 never share one.
+ */
+const longTextOf = (side: number): string =>
+  Array.from({ length: 105 }, (_, index) => {
+    const opening = `55555 ${side === 0 ? "quartz" : "lattice"} PO`;
+    return `${opening} ${"q".repeat(700 + 2 * index + side - opening.length - 1)}`;
+  }).join("\n\n");
+
+/** A moment passed: the store's next time is later than its last. */
+const moment = async (): Promise<void> => {
+  await scheduler.wait(5);
+};
+
+/** The sources the split-pack test adds a second version of. */
+const revised = (index: number): boolean => index % 7 === 3;
+
 /** Numbers below `n` from `seed`, the same each run (a linear congruential generator). */
 const seeded = (seed: number): ((n: number) => number) => {
   let state = seed;
@@ -289,7 +377,6 @@ const seeded = (seed: number): ((n: number) => number) => {
 describe("a person's own store", () => {
   beforeEach(() => {
     person = `person-${crypto.randomUUID()}`;
-    sharedName = `shared-${crypto.randomUUID()}`;
   });
 
   // Threat 1: a caller asks someone's store as someone else.
@@ -392,12 +479,68 @@ describe("a person's own store", () => {
     await expect(called(unnamed.workOverview())).rejects.toThrow(refused);
   });
 
+  // Threat 1: a name that is neither the shared store's nor a person's is
+  // no one's, never a second shared store at the bucket's root.
+  it("refuses every call to a store whose name is neither `brain` nor `person:` and an id", async () => {
+    const privately = `Kept where no one guards it ${person}`;
+    const forEveryone = `Kept for everyone ${person}`;
+    const names = [
+      `Person:${person}`,
+      `person-${person}`,
+      ` person:${person}`,
+      "person:",
+      "Brain",
+      "brain ",
+      `shared-${person}`,
+    ];
+    const outcomes = await Promise.allSettled(
+      names.map(async (name) => {
+        const store = env.BRAIN_STORE.getByName(name);
+        await add(store, privately, theirs());
+        await add(store, forEveryone, {
+          kind: "audience",
+          group: "company",
+        });
+      })
+    );
+    expect(
+      outcomes.map(
+        (outcome) =>
+          outcome.status === "rejected" &&
+          String(outcome.reason).includes("name doesn't say whose it is")
+      )
+    ).toStrictEqual(names.map(() => true));
+    // Nothing reached the bucket, the shared store's part included.
+    const hashes = await Promise.all([sha256(privately), sha256(forEveryone)]);
+    const keys = await keysUnder("");
+    expect(
+      keys.filter((key) => hashes.some((hash) => key.endsWith(hash)))
+    ).toStrictEqual([]);
+  });
+
+  it("answers by its name once a call without it was refused", async () => {
+    const named = env.BRAIN_STORE.idFromName(`person:${person}`);
+    const unnamed = env.BRAIN_STORE.get(
+      env.BRAIN_STORE.idFromString(named.toString())
+    );
+    await expect(
+      called(unnamed.recall({ question: "x", reader: me(), budget: whole }))
+    ).rejects.toThrow(/name doesn't say whose it is/u);
+
+    const kept = await add(own(), "Theirs, by name", theirs());
+    await expect(
+      own().readVersion({ ...kept, reader: me() })
+    ).resolves.toMatchObject({ text: "Theirs, by name" });
+  });
+
   it("answers its person, before its first write, as a store holding nothing does", async () => {
     const reader = me();
     const asked = { question: "Where is the invoice PO-12345?", budget: whole };
-    const expected = await env.BRAIN_STORE.getByName(
-      `empty-${crypto.randomUUID()}`
-    ).recall({ ...asked, reader });
+    // The shared store, holding nothing this reader may read.
+    const expected = await brainOf(env.BRAIN_STORE).recall({
+      ...asked,
+      reader,
+    });
 
     await expect(own().recall({ ...asked, reader })).resolves.toStrictEqual(
       expected
@@ -426,77 +569,161 @@ describe("a person's own store", () => {
   });
 
   // Threat 8: recall across two stores leaks nothing and loses nothing.
-  it("packs what it and a shared store find as one store holding both would", async () => {
+  // The same content twice in the shared store: once for one reader, all
+  // of it there (one store); once for another, split between the shared
+  // store and that reader's own (two stores). Each reader's half of the
+  // shared store is hidden from the other, with more no one reads. Their
+  // packs must be the same, source names aside.
+  it("packs what it and the shared store find as one store holding both would", async () => {
     const random = seeded(1762);
-    // Each word in more than one form, and stop words, so passages tie on
-    // what they hold and part on how they hold it.
-    const words = [
-      "invoice",
-      "invoices",
-      "budget",
-      "budgets",
-      "travel",
-      "travelling",
-      "contract",
-      "contracts",
-      "meeting",
-      "salary",
-      "laptop",
-      "office",
-      "the",
-      "and",
-    ];
-    const single = env.BRAIN_STORE.getByName(`single-${crypto.randomUUID()}`);
-    const reader = { person, groups: ["company"] };
-    for (let index = 0; index < 40; index += 1) {
-      // A length of its own, so passages never tie on what follows it.
-      const text = [
-        ...Array.from({ length: 3 + index }, () => words[random(words.length)]),
-        index % 5 === 0 ? `PO-${10_000 + index}` : "",
-      ]
-        .join(" ")
-        .trim();
-      const source = `test:${index}`;
-      const access: Access =
-        random(2) === 0 ? theirs() : { kind: "audience", group: "company" };
-      // oxlint-disable-next-line no-await-in-loop -- in order, as one store would take them
-      await single.addSource({ source, change: "1", text, access });
-      // oxlint-disable-next-line no-await-in-loop -- in order, as one store would take them
-      await (access.kind === "owner" ? own() : shared()).addSource({
-        source,
+    const one = {
+      reader: { person: `one-${person}`, groups: [`one-${person}`] },
+      prefix: "a",
+    };
+    const two = { reader: { person, groups: [`two-${person}`] }, prefix: "b" };
+    const nobody: Access = { kind: "audience", group: `nobody-${person}` };
+    const vectors = new Map<string, number[]>();
+    const vectorOf = (key: string): number[] => {
+      const kept = vectors.get(key);
+      if (kept !== undefined) {
+        return kept;
+      }
+      const made = Array.from(
+        { length: splitDimensions },
+        () => random(2001) / 1000 - 1
+      );
+      vectors.set(key, made);
+      return made;
+    };
+    const texts = Array.from({ length: splitSources }, (_, index) =>
+      splitTextOf(index, random)
+    );
+    /** Adds the corpus for `setup`, its private half to `privately`. */
+    const addAll = async (
+      setup: typeof one,
+      privately: Store,
+      change: string,
+      only: (index: number) => boolean
+    ) => {
+      for (const [index, text] of texts.entries()) {
+        if (only(index)) {
+          const ownedHere = index % 2 === 0;
+          const access: Access = ownedHere
+            ? { kind: "owner", person: setup.reader.person }
+            : { kind: "audience", group: setup.reader.groups[0] ?? "" };
+          const store = ownedHere ? privately : shared();
+          const source = `${setup.prefix}:${String(index).padStart(2, "0")}`;
+          const body = change === "1" ? text : `${text} revised`;
+          // oxlint-disable-next-line no-await-in-loop -- in order, as one store would take them
+          const { version } = await store.addSource({
+            source,
+            change,
+            text: body,
+            access,
+          });
+          // oxlint-disable-next-line no-await-in-loop -- its vector as the queue would put it
+          await store.putVectors({
+            model: { name: splitModelName, centre: splitCentre },
+            vectors: [
+              {
+                chunk: { source, version, position: 0 },
+                vector: vectorOf(`${index}:${change}`),
+              },
+            ],
+          });
+        }
+      }
+      // An ID many passages hold, but not as written: more than
+      // `exactCandidatesMax` of them only once both halves are counted.
+      await Promise.all(
+        [true, false].map(async (ownedHere) => {
+          const store = ownedHere ? privately : shared();
+          await store.addSource({
+            source: `${setup.prefix}:long-${ownedHere ? "own" : "all"}`,
+            change,
+            text: longTextOf(ownedHere ? 0 : 1),
+            access: ownedHere
+              ? { kind: "owner", person: setup.reader.person }
+              : { kind: "audience", group: setup.reader.groups[0] ?? "" },
+          });
+        })
+      );
+    };
+    // What no reader here may read: the same words, IDs and nearness.
+    for (const [index, text] of texts.slice(0, 6).entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await shared().addSource({
+        source: `hidden:${index}`,
         change: "1",
         text,
-        access,
+        access: nobody,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await shared().putVectors({
+        model: { name: splitModelName, centre: splitCentre },
+        vectors: [
+          {
+            chunk: { source: `hidden:${index}`, version: 1, position: 0 },
+            vector: vectorOf(`hidden:${index}`),
+          },
+        ],
       });
     }
-    const questions = [
-      "invoice budget",
-      "the invoices and budgets",
-      "travel salary PO-10000",
-      "PO-10005 and PO-99999",
-      "laptop office meeting contract",
-      "nothing here",
-    ];
+    // One store; then two; then, past a moment, second versions of some.
+    await addAll(one, shared(), "1", () => true);
+    await addAll(two, own(), "1", () => true);
+    await moment();
+    const between = new Date();
+    await moment();
+    await addAll(one, shared(), "2", revised);
+    await addAll(two, own(), "2", revised);
+
+    const requests = splitQuestions.flatMap((question) =>
+      [whole, { tokens: 150 }].flatMap((budget) => [
+        {
+          question,
+          budget,
+          meaning: { model: splitModel, vector: vectorOf(question) },
+        },
+        { question, budget, asOf: between },
+      ])
+    );
     const packs = await Promise.all(
-      questions.flatMap((question) =>
-        [whole, { tokens: 120 }].map(async (budget) => {
-          const request = { question, reader, budget };
-          const [one, mine, everyone] = await Promise.all([
-            single.recall(request),
-            own().find(request),
-            shared().find(request),
-          ]);
-          return {
-            one,
-            split: packAcross(question, budget.tokens, [everyone, mine]),
-          };
-        })
-      )
+      requests.map(async (asking) => {
+        const [single, mine, everyone] = await Promise.all([
+          called(shared().recall({ ...asking, reader: one.reader })),
+          called(own().find({ ...asking, reader: two.reader })),
+          called(shared().find({ ...asking, reader: two.reader })),
+        ]);
+        const split = packAcross(asking.question, asking.budget.tokens, [
+          everyone,
+          mine,
+        ]);
+        return {
+          single,
+          split: {
+            ...split,
+            items: split.items.map((item) => ({
+              ...item,
+              source: item.source.replace(/^b:/u, "a:"),
+            })),
+          },
+        };
+      })
     );
     expect(packs.map(({ split }) => split)).toStrictEqual(
-      packs.map(({ one }) => one)
+      packs.map(({ single }) => single)
     );
-    expect(packs.some(({ one }) => one.items.length > 3)).toBeTruthy();
+    // What each way had to merge was there to merge.
+    const found = new Set(
+      packs.flatMap(({ single }) => single.items.map((item) => item.found))
+    );
+    expect([...found].toSorted()).toStrictEqual([
+      "exact",
+      "meaning",
+      "stop words",
+      "words",
+    ]);
   });
 
   // Threat 7: no file, count or sweep shared between a person's store and another.
@@ -673,5 +900,70 @@ describe("a person's own store", () => {
     await own().erasePerson({ person, reason: "person_erased" });
 
     await expect(alarmOf(own())).resolves.toBeNull();
+  });
+
+  // Partial failure: a tick that can't run still wakes the store again.
+  it("wakes itself again when its alarm's tick couldn't read its ledger", async () => {
+    await add(own(), "Work for its queue", theirs());
+    // An entry of the ledger this release can't read: the store refuses
+    // every call until it can (erasure.ts `replayStep`).
+    await env.BRAIN_OBJECTS.put(`${await ownPrefix()}erasures/unreadable`, "");
+    await kill(own());
+
+    await expect(runDurableObjectAlarm(own())).resolves.toBeTruthy();
+    await expect(alarmOf(own())).resolves.not.toBeNull();
+    await expect(
+      called(own().recall({ question: "Work", reader: me(), budget: whole }))
+    ).rejects.toThrow(/can't read its erasure ledger/u);
+  });
+
+  it("wakes itself for its queue once the queue's pause is over, not before", async () => {
+    await add(own(), "Before the pause", theirs());
+    const until = Date.now() + 20 * 60_000;
+    // The queue's model said to wait (work.ts rule 1), as its bucket keeps it.
+    await runInDurableObject(own(), async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO work_model_bucket (id, tokens, at, paused_until)
+        VALUES (1, 0, ?1, ?2)
+        ON CONFLICT (id) DO UPDATE SET paused_until = ?2`,
+        Date.now(),
+        until
+      );
+      const removed = state.storage.deleteAlarm();
+      await removed;
+    });
+
+    await add(own(), "During the pause", theirs());
+    await expect(alarmOf(own())).resolves.toBeGreaterThanOrEqual(until);
+  });
+
+  // The ledger of what it erased goes with it: only the record stays.
+  it("erased whole after one of its sources was, keeps nothing but the record of it", async () => {
+    const kept = await add(own(), "Erased first", theirs());
+    await add(own(), "Erased with the store", theirs());
+    await own().eraseSource({ source: kept.source, reason: "deleted" });
+    await expect(
+      keysUnder(`${await ownPrefix()}erasures/`)
+    ).resolves.not.toStrictEqual([]);
+
+    await own().erasePerson({ person, reason: "person_erased" });
+
+    await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
+      `${await ownPrefix()}erased`,
+    ]);
+    await expect(
+      called(own().recall({ question: "Erased", reader: me(), budget: whole }))
+    ).rejects.toThrow(/this store was erased/u);
+  });
+
+  // Threat 6: a first add reads the ledger before anything is made.
+  it("makes nothing at its first add while it can't read its ledger", async () => {
+    const { heal } = await breakBucket(own(), ["list"]);
+
+    await expect(add(own(), "Their first", theirs())).rejects.toThrow(
+      /can't read its erasure ledger/u
+    );
+    await expect(tablesOf(own())).resolves.toStrictEqual([]);
+    await heal();
   });
 });
