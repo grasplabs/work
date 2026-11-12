@@ -1063,7 +1063,7 @@ export const workOverview = (
   state: WorkState
 ): Omit<
   WorkOverview,
-  "stepsFailed" | "erasing" | "sourcesWithoutCurrent" | "ledgerLeft"
+  "stepsFailed" | "erasing" | "sourcesWithoutCurrent" | "ledgerReplay"
 > => {
   const db = drizzle(storage);
   const waiting = db

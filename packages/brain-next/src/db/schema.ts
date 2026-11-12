@@ -459,7 +459,9 @@ export const sourceSubjects = sqliteTable(
  * SHA-256 of its source's key, as its ledger entry holds it (erasure.ts),
  * kept after the version is deleted, so the entry can be written again
  * whole, part by part, however many versions it names. A source's erasure
- * has none: it hides every version of its source.
+ * has none: it hides every version of its source. Kept for good, as the
+ * erasure's own record, costing storage only: they hold nothing but
+ * hashes and version numbers.
  */
 export const erasedVersions = sqliteTable(
   "erased_versions",

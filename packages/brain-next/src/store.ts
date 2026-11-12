@@ -124,11 +124,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   };
   #sweepAfter = 0;
 
-  /** Whether this instance read the erasure ledger whole as it started. */
-  #ledgerRead = false;
-
-  /** Entries of the ledger the last step of a replay left to apply. */
-  #ledgerLeft = 0;
+  /**
+   * Where this instance is with its erasure ledger: read through, a replay
+   * under way, or the last read failed. What the gate (`#ready`) and the
+   * overview both read.
+   */
+  #ledger: WorkOverview["ledgerReplay"] = "replaying";
 
   /** When a call may read the ledger again, after a read that failed. */
   #ledgerRetryAfter = 0;
@@ -170,24 +171,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * One step of reading the erasure ledger and applying what the store
-   * lacks (erasure.ts `replayStep`), each read of it waited for at most
-   * 10 s; read through once nothing is left. A failure is kept in the
-   * overview, never thrown, as a throw here would reset the store; what a
-   * step applied stays applied. Run while the store takes nothing else.
-   * Answers whether it failed.
+   * lacks (erasure.ts `replayStep`: one page, done well inside the 30 s the
+   * store may be held); read through once nothing is left. A failure is
+   * kept, never thrown, as a throw here would reset the store; what a step
+   * applied stays applied. Run while the store takes nothing else.
    */
-  async #readLedger(): Promise<boolean> {
+  async #readLedger(): Promise<void> {
     try {
-      const { stopped, left } = await replayStep(this.#erasures);
+      const { stopped, more } = await replayStep(this.#erasures);
       stopWorkOn(this.#work, stopped);
-      this.#ledgerLeft = left;
-      this.#ledgerRead = left === 0;
-      this.#stepsFailed.ledger = null;
-      return false;
+      this.#ledger = more ? "replaying" : "through";
     } catch {
       // Nothing of the error is kept: it may name a key.
-      this.#stepsFailed.ledger = { at: new Date(), reason: "failed" };
-      return true;
+      this.#ledger = "unreadable";
     }
   }
 
@@ -195,11 +191,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Resolves once this instance has read its erasure ledger through. Until
    * then each call (a tick's among them) reads one more step while the
    * store takes nothing else, and is refused with why: the ledger can't
-   * be read, or a long replay is under way (the overview says how many
-   * entries are left). Every call but the overview waits for it.
+   * be read, or a long replay is under way (the overview says which).
+   * Every call but the overview waits for it.
    */
   async #ready(): Promise<void> {
-    if (this.#ledgerRead) {
+    if (this.#ledger === "through") {
       return;
     }
     // After a failed read, read again at most every `ledgerRetryMs`: calls
@@ -207,16 +203,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // waiting for it.
     if (Date.now() >= this.#ledgerRetryAfter) {
       await this.ctx.blockConcurrencyWhile(async () => {
-        if (!this.#ledgerRead && (await this.#readLedger())) {
+        if (this.#ledger === "through") {
+          return;
+        }
+        await this.#readLedger();
+        if (this.#ledger === "unreadable") {
           this.#ledgerRetryAfter = Date.now() + ledgerRetryMs;
         }
       });
     }
-    if (!this.#ledgerRead) {
+    // Read anew: the step above changed it.
+    const now = this.#ledgerNow();
+    if (now !== "through") {
       throw new Error(
-        this.#stepsFailed.ledger === null ? ledgerCatchingUp : ledgerUnreadable
+        now === "replaying" ? ledgerCatchingUp : ledgerUnreadable
       );
     }
+  }
+
+  /** Where this instance is with its ledger now. */
+  #ledgerNow(): WorkOverview["ledgerReplay"] {
+    return this.#ledger;
   }
 
   /** The parts erasure.ts works with, the bucket as the env has it now. */
@@ -455,7 +462,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return {
       ...workOverview(this.ctx.storage, this.#work),
       erasing: erasuresUnfinished(this.ctx.storage.sql),
-      ledgerLeft: this.#ledgerLeft,
+      ledgerReplay: this.#ledger,
       sourcesWithoutCurrent: sourcesWithoutCurrent(this.ctx.storage.sql),
       stepsFailed: { ...this.#stepsFailed },
     };

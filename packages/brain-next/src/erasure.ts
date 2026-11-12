@@ -114,13 +114,24 @@ const confirmPerTick = 100;
 export const ledgerPartVersions = 1000;
 
 /**
- * Most objects of the ledger one step of a replay reads (`replayStep`):
- * an entry and each of its parts. A first guess, well inside the 30 s a
- * step may hold the store at a few R2 reads at once.
+ * Most objects of the ledger one step of a replay reads (`replayStep`): a
+ * person's entry and each of its parts; a source's entry is read from its
+ * key alone, no read. A first guess, at six reads at once well inside the
+ * step's time.
  */
 export const replayReadsPerStep = 200;
 
-/** How many reads of the ledger run at once. */
+/** Most keys one step of a replay lists: one page of R2's listing. */
+const ledgerPageSize = 1000;
+
+/**
+ * How long one step of a replay starts new reads for: well under the 30 s
+ * a step may hold the store. A read started just before it may take its
+ * own 10 s, so a step ends within 25 s.
+ */
+const replayStepMs = 15_000;
+
+/** Most reads of the ledger in flight at once, in all of a step. */
 const readsAtOnce = 6;
 
 const timeOf = (at: number): string => String(at).padStart(timeDigits, "0");
@@ -200,15 +211,32 @@ const slicesOf = <T>(items: readonly T[], size: number): T[][] =>
     items.slice(index * size, (index + 1) * size)
   );
 
-/** `run` over `items`, `readsAtOnce` at a time, in order. */
+/** Thrown when a step of a replay is out of time: no new read starts. */
+class OutOfTimeError extends Error {
+  constructor() {
+    super("A step of the replay is out of time");
+    this.name = "OutOfTimeError";
+  }
+}
+
+/**
+ * `run` over `items`, `readsAtOnce` at a time, in order, starting none
+ * once `stopAt` is past (throws `OutOfTimeError`).
+ */
 const fewAtATime = async <T, R>(
   items: readonly T[],
+  stopAt: number,
   run: (item: T) => Promise<R>
 ): Promise<R[]> => {
   const done: R[] = [];
   for (const slice of slicesOf(items, readsAtOnce)) {
+    if (Date.now() >= stopAt) {
+      throw new OutOfTimeError();
+    }
     // oxlint-disable-next-line no-await-in-loop -- a few at a time
-    done.push(...(await Promise.all(slice.map(run))));
+    for (const result of await Promise.all(slice.map(run))) {
+      done.push(result);
+    }
   }
   return done;
 };
@@ -451,7 +479,12 @@ const apply = (
     bySubject.set(entry.subject, undefined);
   } else {
     for (const [subject, version] of hidden) {
-      bySubject.set(subject, [...(bySubject.get(subject) ?? []), version]);
+      const versions = bySubject.get(subject);
+      if (versions === undefined) {
+        bySubject.set(subject, [version]);
+      } else {
+        versions.push(version);
+      }
     }
   }
   const stopped: string[] = [];
@@ -746,133 +779,136 @@ export const erase = async (
 };
 
 /**
- * Lists the ledger after `startAfter`, a page at a time, each page within
- * `ledgerWaitMs`.
+ * Where a replay reads the ledger from: after the last entry this copy of
+ * the store holds, and after that entry's parts. That is part of the
+ * store, so it is exactly what this copy has applied: on an ordinary start
+ * the listing finds nothing new; after a restore the copy's mark is as old
+ * as the copy, and the listing finds everything erased since. Keys only
+ * grow (`nextAt`), so every entry a copy lacks sorts after all of its own.
  */
-const ledgerKeysAfter = async (
-  bucket: R2Bucket,
-  startAfter: string | undefined
-): Promise<string[]> => {
-  const keys: string[] = [];
-  let cursor: string | undefined = undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const listed: R2Objects = await inTime(
-      bucket.list({
-        prefix: ledgerPrefix,
-        ...(cursor === undefined ? { startAfter } : { cursor }),
-      })
-    );
-    keys.push(...listed.objects.map(({ key }) => key));
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor !== undefined);
-  return keys;
+const replayStart = (sql: SqlStorage): string | undefined => {
+  const last = sql
+    .exec<{ key: string | null }>("SELECT max(key) AS key FROM erasures")
+    .one().key;
+  // A part's key is the entry's, "/" and digits: "~" sorts after them all.
+  return last === null ? undefined : `${last}/~`;
 };
 
-/**
- * Where a replay reads the ledger from: after the last entry this copy of
- * the store holds. That is part of the store, so it is exactly what this
- * copy has applied: on an ordinary start the listing finds nothing new;
- * after a restore the copy's mark is as old as the copy, and the listing
- * finds everything erased since. Keys only grow (`nextAt`), so every
- * entry a copy lacks sorts after all of its own.
- */
-const replayMark = (sql: SqlStorage): string | null =>
-  sql.exec<{ key: string | null }>("SELECT max(key) AS key FROM erasures").one()
-    .key;
-
-/** What one step of a replay did, and how many entries are left. */
+/** What one step of a replay did, and whether the ledger holds more. */
 export interface Replayed {
   /** The sources whose current version it hid. */
   stopped: string[];
-  /** Entries of the ledger still to apply after it. */
-  left: number;
-}
-
-/** A missing entry, read whole: what it hid, and how many objects that took. */
-interface Read {
-  key: string;
-  entry: LedgerEntry;
-  hidden: Hidden | null;
-  reads: number;
+  /** Whether entries may be left to apply: the next step reads on. */
+  more: boolean;
 }
 
 /**
- * Reads the entry `key` whole: a person's body, then its parts, a few at
- * a time, each read within `ledgerWaitMs`. An entry or a part that can't
- * be read throws: only the store writes the ledger, so it is a fault to
- * fix, and the store serves nothing it may have erased meanwhile.
+ * The text of the ledger's object `key`, its read and its body within
+ * `ledgerWaitMs`. One that is gone throws: only the store writes the
+ * ledger, so it is a fault to fix, and the store serves nothing it may
+ * have erased meanwhile.
  */
-const readEntry = async (
+const textOf = async (bucket: R2Bucket, key: string): Promise<string> =>
+  await inTime(
+    (async () => {
+      const object = await bucket.get(key);
+      if (object === null) {
+        throw new Error("An entry of the erasure ledger can't be read");
+      }
+      return await object.text();
+    })()
+  );
+
+/**
+ * What a person's entry `key` hid: its body, then its parts by their
+ * computed keys (so where a page of the listing ends among them doesn't
+ * matter), a few at a time, none started once `stopAt` is past. An entry
+ * is read whole, however many parts it has, past the step's read budget:
+ * it is as big as the erasure's own transaction was. Answers it with the
+ * reads it took.
+ */
+const readPerson = async (
   bucket: R2Bucket,
   key: string,
-  entry: LedgerEntry
-): Promise<Read> => {
-  if (entry.kind === "source") {
-    return { key, entry, hidden: null, reads: 1 };
+  stopAt: number
+): Promise<{ hidden: Hidden; reads: number }> => {
+  if (Date.now() >= stopAt) {
+    throw new OutOfTimeError();
   }
-  const textOf = async (objectKey: string): Promise<string> => {
-    const object = await inTime(bucket.get(objectKey));
-    if (object === null) {
-      throw new Error("An entry of the erasure ledger can't be read");
-    }
-    return await object.text();
-  };
-  const parts = partsOf(await textOf(key));
+  const parts = partsOf(await textOf(bucket, key));
   const read = await fewAtATime(
     Array.from({ length: parts }, (_, index) => partKeyOf(key, index)),
-    async (partKey) => partOf(await textOf(partKey))
+    stopAt,
+    async (partKey) => partOf(await textOf(bucket, partKey))
   );
-  return { key, entry, hidden: read.flat(), reads: 1 + parts };
+  return { hidden: read.flat(), reads: 1 + parts };
 };
 
 /**
- * One step of a replay: applies, in order, the entries of the ledger the
- * store lacks, literally (above), each in its own transaction and recorded
- * as confirmed, until it has read `replayReadsPerStep` objects. The next
- * step goes on after the last entry it applied. Run it while the store
+ * One step of a replay: lists one page of the ledger after the store's
+ * mark and applies, in order, the entries in it the store lacks,
+ * literally (above), each in its own transaction and recorded as
+ * confirmed. A source's entry takes no read; a person's is read with its
+ * parts, at most `readsAtOnce` reads in flight. It stops after
+ * `replayReadsPerStep` reads, or once `replayStepMs` is past, starting no
+ * new read; an entry it didn't finish reading is read again by the next
+ * step, which goes on after the last entry applied. Run it while the store
  * takes nothing else. Throws when R2 fails or doesn't answer in time,
  * keeping what it applied.
  *
- * Measured in local workerd on a laptop, with 100,000 entries of erased
- * sources in the ledger, each start timed with the first tick it served:
- * an ordinary start, nothing new past its mark, 9 ms; a store with none
- * of them applied, listing and applying all 100,000 at once, 1.7 s (before
- * steps were bounded: a step now applies at most 200). Not measured on
- * Cloudflare.
+ * Measured in local workerd on a laptop, a backlog of 3,000 erased
+ * sources' entries after a restore: three steps of one list call each
+ * (as the store started, then a step each for two ticks), 78 ms in all.
+ * Not measured on Cloudflare.
  */
 export const replayStep = async ({
   storage,
   bucket,
 }: ErasureStore): Promise<Replayed> => {
   const { sql } = storage;
-  const mark = replayMark(sql);
-  const listed = await ledgerKeysAfter(bucket, mark ?? undefined);
-  const missing = listed.flatMap((key) => {
-    const entry = entryOf(key);
-    const applied =
-      sql.exec("SELECT 1 FROM erasures WHERE key = ?", key).toArray().length >
-      0;
-    return entry === undefined || applied ? [] : [{ key, entry }];
-  });
+  const stopAt = Date.now() + replayStepMs;
+  const page = await inTime(
+    bucket.list({
+      prefix: ledgerPrefix,
+      startAfter: replayStart(sql),
+      limit: ledgerPageSize,
+    })
+  );
   const stopped: string[] = [];
   let reads = 0;
-  let applied = 0;
-  for (const slice of slicesOf(missing, readsAtOnce)) {
-    if (reads >= replayReadsPerStep) {
-      break;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- a few at a time, in order
-    const read = await Promise.all(
-      slice.map(async ({ key, entry }) => await readEntry(bucket, key, entry))
-    );
-    for (const { key, entry, hidden, reads: took } of read) {
-      stopped.push(
-        ...storage.transactionSync(() => apply(sql, key, entry, hidden, true))
-      );
-      reads += took;
-      applied += 1;
+  for (const { key } of page.objects) {
+    const entry = entryOf(key);
+    const applied =
+      entry === undefined ||
+      sql.exec("SELECT 1 FROM erasures WHERE key = ?", key).toArray().length >
+        0;
+    if (!applied) {
+      if (
+        entry.kind === "person" &&
+        (reads >= replayReadsPerStep || Date.now() >= stopAt)
+      ) {
+        return { stopped, more: true };
+      }
+      let hidden: Hidden | null = null;
+      if (entry.kind === "person") {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
+          const read = await readPerson(bucket, key, stopAt);
+          ({ hidden } = read);
+          reads += read.reads;
+        } catch (error) {
+          if (error instanceof OutOfTimeError) {
+            return { stopped, more: true };
+          }
+          throw error;
+        }
+      }
+      for (const source of storage.transactionSync(() =>
+        apply(sql, key, entry, hidden, true)
+      )) {
+        stopped.push(source);
+      }
     }
   }
-  return { stopped, left: missing.length - applied };
+  return { stopped, more: page.truncated };
 };

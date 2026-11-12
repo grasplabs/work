@@ -1535,15 +1535,14 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
 
       expect({
         refused,
-        ledger:
-          "value" in overview ? overview.value.stepsFailed.ledger?.reason : "",
+        ledger: "value" in overview ? overview.value.ledgerReplay : "",
         read,
       }).toStrictEqual({
         refused: {
           error:
             "Error: The Brain can't read its erasure ledger yet, so it answers nothing: try again shortly",
         },
-        ledger: "failed",
+        ledger: "unreadable",
         read: "Readable",
       });
     } finally {
@@ -1596,6 +1595,43 @@ const crashAtBucketPut = async (crashAt: number): Promise<void> => {
       },
     });
   });
+};
+
+/**
+ * Counts the store's listings and reads of its bucket from its next
+ * start, calling `onGet` before each read. As in the outage test, only a
+ * bucket on the shared env reaches a store as it starts; `restore` puts
+ * the bucket back and kills the store, so no later test meets it.
+ */
+const countLedgerCalls = (onGet: () => void = () => {}) => {
+  const bucket = env.BRAIN_OBJECTS;
+  const calls = { lists: 0, gets: 0 };
+  Reflect.set(env, "BRAIN_OBJECTS", {
+    list: async (options: R2ListOptions) => {
+      calls.lists += 1;
+      return await bucket.list(options);
+    },
+    get: async (key: string) => {
+      // The ledger's reads only, not a version's file.
+      if (key.startsWith("erasures/")) {
+        calls.gets += 1;
+        onGet();
+      }
+      return await bucket.get(key);
+    },
+    put: async (key: string, value: string) => await bucket.put(key, value),
+    delete: async (keys: string | string[]) => {
+      await bucket.delete(keys);
+    },
+    head: async (key: string) => await bucket.head(key),
+  });
+  return {
+    calls,
+    restore: async () => {
+      Reflect.set(env, "BRAIN_OBJECTS", bucket);
+      await killStore();
+    },
+  };
 };
 
 describe(
@@ -1665,48 +1701,121 @@ describe(
       });
     });
 
-    it("applies a replay too long for one step a step a call, answering nothing but its overview until it is through", async () => {
+    it("goes through a backlog longer than one page a page a step, each step one listing, an erased source's entry taking no read", async () => {
       const reader = await person();
       const mark = newMark();
       const source = newSource();
       await add(source, `Restored late ${wordOf(mark)}`, owner(reader));
       const backup = await copyOfStore();
-      // More entries than two steps apply (200 reads a step): one as the
-      // store starts, one by the first call.
-      for (let start = 0; start < 420; start += 20) {
-        // oxlint-disable-next-line no-await-in-loop -- a few at a time
-        await Promise.all(
-          Array.from({ length: 20 }, async () => {
-            await eraseSource(env, { source: newSource(), reason: "deleted" });
-          })
-        );
-      }
       await eraseSource(env, { source, reason: "deleted" });
+      // More entries than two pages of the listing (1,000 keys a page):
+      // erased sources no one added, as the ledger names them.
+      const after = await runInDurableObject(
+        store(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ at: number }>("SELECT max(erased_at) AS at FROM erasures")
+            .one().at
+      );
+      await Promise.all(
+        Array.from({ length: 2100 }, async (_, index) => {
+          const subject = await hashOf(crypto.randomUUID());
+          await env.BRAIN_OBJECTS.put(
+            `erasures/${String(after + 1 + index).padStart(15, "0")}-source-deleted-${subject}`,
+            ""
+          );
+        })
+      );
 
       await restoreStore(backup);
-      const first = await settled(historyAs(reader, source, 1));
-      const overview = await brainWorkOverview(env);
-      const second = await settled(historyAs(reader, source, 1));
-      const through = await brainWorkOverview(env);
+      const counted = countLedgerCalls();
+      try {
+        const calls: { lists: number; gets: number; answer: string }[] = [];
+        for (let call = 0; call < 5; call += 1) {
+          const before = { ...counted.calls };
+          // oxlint-disable-next-line no-await-in-loop -- one call at a time
+          const answered = await settled(historyAs(reader, source, 1));
+          calls.push({
+            lists: counted.calls.lists - before.lists,
+            gets: counted.calls.gets - before.gets,
+            answer: "value" in answered ? "answered" : answered.error,
+          });
+          if ("value" in answered) {
+            break;
+          }
+        }
+        const { ledgerReplay } = await brainWorkOverview(env);
 
-      expect({
-        first,
-        left: overview.ledgerLeft > 0,
-        ledgerFailed: overview.stepsFailed.ledger,
-        second,
-        leftAfter: through.ledgerLeft,
-        recalled: await recalledAs(reader, wordOf(mark)),
-      }).toStrictEqual({
-        first: {
-          error:
-            "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
-        },
-        left: true,
-        ledgerFailed: null,
-        second: { value: null },
-        leftAfter: 0,
-        recalled: [],
+        expect({
+          calls,
+          ledgerReplay,
+          recalled: await recalledAs(reader, wordOf(mark)),
+        }).toStrictEqual({
+          // As it starts, a step; then a step a call until it is through.
+          calls: [
+            {
+              lists: 2,
+              gets: 0,
+              answer:
+                "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
+            },
+            { lists: 1, gets: 0, answer: "answered" },
+          ],
+          ledgerReplay: "through",
+          recalled: [],
+        });
+      } finally {
+        await counted.restore();
+      }
+    });
+
+    it("stops a step whose reads are slow once its time is up, keeping what it applied, and the next step goes on", async () => {
+      const reader = await person();
+      const source = newSource();
+      await add(source, "Answered once through", owner(reader));
+      const backup = await copyOfStore();
+      // Nine people's erasures, each an entry of the ledger to read.
+      for (let erased = 0; erased < 9; erased += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await erasePerson(env, {
+          personId: `nobody-${crypto.randomUUID()}`,
+          reason: "withdrawn",
+        });
+      }
+
+      await restoreStore(backup);
+      // Each read takes 6 s, as the clock sees it: a step (15 s) starts
+      // three.
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+      const counted = countLedgerCalls(() => {
+        vi.setSystemTime(Date.now() + 6000);
       });
+      try {
+        const first = await settled(historyAs(reader, source, 1));
+        const afterFirst = counted.calls.gets;
+        const { ledgerReplay } = await brainWorkOverview(env);
+        const second = await settled(historyAs(reader, source, 1));
+
+        expect({
+          first,
+          afterFirst,
+          ledgerReplay,
+          second,
+          afterSecond: counted.calls.gets - afterFirst,
+        }).toStrictEqual({
+          first: {
+            error:
+              "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
+          },
+          // Three as it starts, three by the first call.
+          afterFirst: 6,
+          ledgerReplay: "replaying",
+          second: { value: "Answered once through" },
+          afterSecond: 3,
+        });
+      } finally {
+        await counted.restore();
+      }
     });
   }
 );

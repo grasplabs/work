@@ -353,18 +353,18 @@ export interface WorkOverview {
    */
   sourcesWithoutCurrent: number;
   /**
-   * How many entries of the erasure ledger this instance still has to
-   * apply, as its last step of a replay counted them: 0 once it is through.
-   * Above 0 after a restore, while the store answers nothing but this
-   * overview and each call applies one more step.
+   * Whether the store answers: `through` once it has read its erasure
+   * ledger through; otherwise it answers nothing but this overview, each
+   * call refused with why, while a replay after a restore is under way
+   * (`replaying`: each call applies one more step) or while the ledger
+   * can't be read (`unreadable`: read again at most every 30 s).
    */
-  ledgerLeft: number;
+  ledgerReplay: "through" | "replaying" | "unreadable";
   /**
    * The tick's own steps before its queue, each with its last failure
-   * since the store started: the erasure ledger, read as the store starts
-   * and written for each erasure, cleared once it was read whole and every
-   * entry written (until it is read, the store answers nothing but this
-   * overview, each call refused with why); the erasure of what erasures
+   * since the store started: the writing of erasures' ledger entries,
+   * cleared once a tick wrote every one (reading the ledger is
+   * `ledgerReplay`'s); the erasure of what erasures
    * still hold, set when a version failed to delete, which goes behind the
    * others and is tried again, cleared once a batch deletes all it takes;
    * the sweep
