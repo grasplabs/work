@@ -87,7 +87,9 @@ const lineOf = (html: string, label: string): string => {
 };
 
 const contractOf = async (clientId: string): Promise<string> => {
-  const { html } = await page(`/organizations/${clientId}/contract`);
+  const { html } = await page(
+    `/organizations/${clientId}/details?tab=contract`
+  );
   return mainOf(html);
 };
 
@@ -356,7 +358,7 @@ describe("an organization's billing, with Stripe's key", () => {
 
     // The whole page, scripts and the data they hydrate with included.
     const response = await exports.default.fetch(
-      `https://ops.grasp.test/organizations/${clientId}/contract`,
+      `https://ops.grasp.test/organizations/${clientId}/details?tab=contract`,
       { headers: { "cf-access-jwt-assertion": await accessJwt(staff.email) } }
     );
     const html = await response.text();
