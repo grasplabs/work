@@ -453,7 +453,7 @@ describe(
           }
         );
       }
-      const capped = `The outsider's own, much longer than any copy: ${capId}, due on 17 June 2031.`;
+      const capped = `The outsider's own, much longer than any copy: ${capId}, due on June 17th.`;
       await add(capped, { kind: "owner", personId: outsider });
       // The outsider's own source, with more earlier versions than a
       // recall returns, each holding the shared word and shorter than the
@@ -520,8 +520,9 @@ describe(
         text,
         found,
       }));
-      // By the day both write, their own chunk as exact; by the day only
-      // the hidden copies write, the pack of a day nothing writes.
+      // By the day both write, their own chunk as exact (it writes the day
+      // with no word of the question, so the day alone finds it); by the
+      // day only the hidden copies write, the pack of a day nothing writes.
       const recalled = async (question: string) =>
         await recallAs(env, outsider, {
           question,

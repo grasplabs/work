@@ -36,13 +36,28 @@ describe("the dates a text writes", () => {
       ["le 1er mars 2026", [["2026-3-1"]]],
       ["el 14 de marzo de 2026", [["2026-3-14"]]],
       ["op 14 maart", [["0-3-14"]]],
-      ["op 3 okt.", [["0-10-3"]]],
+      // A short name only with a year.
+      ["op 3 okt. 2026", [["2026-10-3"]]],
+      ["el 12 ago 2026", [["2026-8-12"]]],
       ["le 14 févr. 2026", [["2026-2-14"]]],
       ["op 29 februari", [["0-2-29"]]],
       // A month's name, a day, a year or none.
       ["on March 14th, 2026", [["2026-3-14"]]],
       ["on Mar 14 2026", [["2026-3-14"]]],
       ["el marzo 14", [["0-3-14"]]],
+      // A numbered line: its number is never the day.
+      ["1. March 14, 2026: kickoff", [["2026-3-14"]]],
+      ["- 3 March 14, 2026", [["2026-3-14"]]],
+      ["Agenda item 4 May 12th 2026", [["2026-5-12"]]],
+      ["Version 2 April 3, 2026", [["2026-4-3"]]],
+      // And a real day with a year, a number after it.
+      ["Kickoff 1 March 2026, 14 people came", [["2026-3-1"]]],
+      ["on 3 March 2026 14 orders shipped", [["2026-3-3"]]],
+      ["4 May 2026 12th floor", [["2026-5-4"]]],
+      // Accepted: a long name beside a number is a date.
+      ["3 mars bars", [["0-3-3"]]],
+      ["Mars 3", [["0-3-3"]]],
+      ["on 1.2.2026", [["2026-2-1", "2026-1-2"]]],
     ];
     expect(table.map(([text]) => [text, daysOf(text)])).toStrictEqual(table);
   });
@@ -60,6 +75,12 @@ describe("the dates a text writes", () => {
         "next Tuesday",
         "from 1 to 14 March",
         "20260314",
+        // A short name with no year beside it.
+        "ago 12",
+        "a week ago 3 orders",
+        "op 3 okt.",
+        "Mar 14",
+        "dec 5",
       ].flatMap(daysOf)
     ).toStrictEqual([["0-3-14"]]);
   });

@@ -78,14 +78,28 @@ const packFor = async (
 ): Promise<RecalledPack> =>
   await recallAs(env, personId, { question, budget: { tokens } });
 
-/** The sources a pack cites as found by their date or exact part. */
+/** The Brain's one store. */
+const store = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** The sources a pack cites, by words or by their day. */
+const citedIn = (pack: RecalledPack): string[] =>
+  pack.items.map(({ source }) => source.id);
+
+/** The sources a pack cites as found by their day or an exact part alone. */
 const exactIn = (pack: RecalledPack): string[] =>
   pack.items
     .filter(({ found }) => found === "exact")
     .map(({ source }) => source.id);
 
-/** The Brain's one store. */
-const store = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+/** The word index's rules number, as the store keeps it. */
+const wordIndexVersion = async (): Promise<number> =>
+  await runInDurableObject(
+    store(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ version: number }>("SELECT version FROM word_index")
+        .one().version
+  );
 
 describe("dates, however a source writes them", { timeout: 120_000 }, () => {
   it("finds a passage writing the day as an ordinal, with a month name in any of the five languages, as ISO with a time, without a year, or the other way round", async () => {
@@ -116,16 +130,16 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
 
     const ids = sources.map((source) => source.id).toSorted();
     expect({
-      asIso: exactIn(asIso).toSorted(),
-      asWords: exactIn(asWords).toSorted(),
-      april: exactIn(april),
-      march: exactIn(march),
+      asIso: ids.filter((one) => citedIn(asIso).includes(one)),
+      asWords: ids.filter((one) => citedIn(asWords).includes(one)),
+      april: citedIn(april).includes(bothWays.id),
+      march: citedIn(march).includes(bothWays.id),
       notFound: [asIso, asWords, april, march].map(({ notFound }) => notFound),
     }).toStrictEqual({
       asIso: ids,
       asWords: ids,
-      april: [bothWays.id],
-      march: [bothWays.id],
+      april: true,
+      march: true,
       // The question's other words, never its date.
       notFound: [["happened"], ["gebeurde"], ["came"], ["kam"]],
     });
@@ -207,7 +221,6 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
       holds: item?.text.includes("14 maart 2026"),
       within: text.includes(item?.text ?? "-"),
       whole: item?.whole,
-      found: item?.found,
       spent:
         pack.items.reduce(
           (sum, one) =>
@@ -218,14 +231,89 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
       holds: true,
       within: true,
       whole: false,
-      found: "exact",
       spent: true,
     });
   });
 
-  it("gives the passages of an older store their days once the word index's rebuild reaches them", async () => {
+  it("keeps a date's words in the word search, so a passage writing the day another way still answers first", async () => {
     const reader = await person();
-    const source = await add("Due on 9 septembre 2033.", owner(reader));
+    const subject = word();
+    await add(
+      `Standup notes on 14 March 2026: nothing on the ${word()}.`,
+      owner(reader)
+    );
+    const answer = await add(
+      `The ${subject} launch slipped to mid-March 2026 after the long review by the board.`,
+      owner(reader)
+    );
+    const twoDigits = await add(
+      `The ${subject} audit slipped to 14/3/26 after the long review by the board.`,
+      owner(reader)
+    );
+    for (let index = 0; index < 12; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`The ${subject} launch slipped ${index}.`, owner(reader));
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`The ${subject} audit slipped ${index}.`, owner(reader));
+    }
+
+    const [launch, audit, people] = await Promise.all([
+      packFor(reader, `Did the ${subject} launch slip on 14 March 2026?`),
+      packFor(reader, `Did the ${subject} audit slip on 14/3/26?`),
+      packFor(
+        reader,
+        `Were 14 people at the ${subject} launch on 14 March 2026?`
+      ),
+    ]);
+
+    expect({
+      launch: launch.items[0]?.source,
+      audit: audit.items[0]?.source,
+      // "14 people" keeps its "14".
+      people: citedIn(people).includes(answer.id),
+    }).toStrictEqual({ launch: answer, audit: twoDigits, people: true });
+  });
+
+  it("reads a numbered timeline's days, never its numbers", async () => {
+    const reader = await person();
+    const timeline = await add(
+      [
+        "Project timeline:",
+        "1. March 14, 2026: kickoff",
+        "2. April 3, 2026: design review",
+        "3. May 12th 2026: go-live",
+      ].join("\n"),
+      owner(reader)
+    );
+
+    const [kickoff, review, first] = await Promise.all([
+      packFor(reader, "What happened on 2026-03-14?"),
+      packFor(reader, "What is on 3 April 2026?"),
+      packFor(reader, "What happened on 1 March 2019?"),
+    ]);
+
+    expect({
+      kickoff: citedIn(kickoff),
+      review: citedIn(review),
+      first: exactIn(first),
+      firstNotFound: first.notFound.includes("1 March 2019"),
+    }).toStrictEqual({
+      kickoff: [timeline.id],
+      review: [timeline.id],
+      first: [],
+      firstNotFound: true,
+    });
+  });
+
+  it("names no date not found while the word index is rebuilt, finds by words meanwhile, and by the day once the rebuild reaches it", async () => {
+    const reader = await person();
+    // Only its day says when: no word of "2033-09-09" is in it.
+    const byDay = await add("Payable le 9 septembre.", owner(reader));
+    // Shares "2033" with the question: found by words meanwhile.
+    const byWords = await add(
+      "Delivered in 2033 on 9 September 2033.",
+      owner(reader)
+    );
     // As a store from before days were indexed: none, and its word index
     // at the rules before them.
     await runInDurableObject(store(), (_instance, state) => {
@@ -234,28 +322,30 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
         "UPDATE word_index SET version = 2, target = 2, cursor = 0"
       );
     });
-    const before = exactIn(await packFor(reader, "2033-09-09"));
+    const during = await packFor(reader, "What is due on 2033-09-09?");
     let at = Date.now();
     for (let tick = 0; tick < 100; tick += 1) {
       at += 60_000;
       // oxlint-disable-next-line no-await-in-loop -- one tick at a time
       await workBrain(env, new Date(at));
       // oxlint-disable-next-line no-await-in-loop -- one tick at a time
-      const version = await runInDurableObject(
-        store(),
-        (_instance, state) =>
-          state.storage.sql
-            .exec<{ version: number }>("SELECT version FROM word_index")
-            .one().version
-      );
-      if (version === 3) {
+      if ((await wordIndexVersion()) === 3) {
         break;
       }
     }
+    const after = await packFor(reader, "What is due on 2033-09-09?");
 
     expect({
-      before,
-      after: exactIn(await packFor(reader, "2033-09-09")),
-    }).toStrictEqual({ before: [], after: [source.id] });
+      during: citedIn(during),
+      duringNotFound: during.notFound,
+      after: citedIn(after).toSorted(),
+      afterNotFound: after.notFound,
+    }).toStrictEqual({
+      during: [byWords.id],
+      // Its other word, never its date.
+      duringNotFound: ["due"],
+      after: [byDay.id, byWords.id].toSorted(),
+      afterNotFound: ["due"],
+    });
   });
 });

@@ -68,7 +68,7 @@ export interface Exact {
   kind: "phrase" | "id";
 }
 
-/** Most exact parts of a question that count. */
+/** Most exact parts and dates of a question that count, together. */
 const maxExacts = 8;
 
 /** Fewest digits in a row that make a word an ID: a reference, not a year. */
@@ -112,58 +112,56 @@ const isId = (word: string): boolean =>
   reference.test(word);
 
 /** The IDs among `text`'s words, in order (rule 2). */
-const idsOf = (text: string): Exact[] =>
-  (text.match(idWord) ?? []).flatMap((word) => {
+const idsOf = (text: string): { at: number; exact: Exact }[] =>
+  [...text.matchAll(idWord)].flatMap(({ 0: word, index }) => {
     const exact = isId(word)
       ? exactOf(word, sequenceOf(word), "id")
       : undefined;
-    return exact === undefined ? [] : [exact];
+    return exact === undefined ? [] : [{ at: index, exact }];
   });
-
 /** A date a question asks for: as it wrote it, and the days it may be. */
 export interface AskedDate {
   asked: string;
   days: Day[];
 }
 
+/** `text` with `[start, end)` written over with spaces: places kept. */
+const blanked = (text: string, start: number, end: number): string =>
+  `${text.slice(0, start)}${" ".repeat(end - start)}${text.slice(end)}`;
+
 /**
- * The parts of `question` to find as written (above), in the order the
- * rules take them, each once, at most `maxExacts`; and the dates it asks
- * for (dates.ts), each once, at most `maxExacts`.
+ * The parts of `question` to find as written (above) and the dates it
+ * asks for (dates.ts), each once, at most `maxExacts` of them all in the
+ * order the question writes them: past those, a part is ordinary words,
+ * as any words are.
  */
 export const askedOf = (
   question: string
 ): { exacts: Exact[]; dates: AskedDate[] } => {
-  const phrases: Exact[] = [];
-  const rest = question.replaceAll(quoted, (whole, inner: string) => {
+  type Part = { at: number; exact: Exact } | { at: number; date: AskedDate };
+  const parts: Part[] = [];
+  let rest = question;
+  for (const match of question.matchAll(quoted)) {
+    const inner = match.groups?.inner ?? "";
     const exact = exactOf(inner.trim(), sequenceOf(inner), "phrase");
-    if (exact === undefined) {
-      return whole;
+    if (exact !== undefined) {
+      parts.push({ at: match.index, exact });
+      rest = blanked(rest, match.index, match.index + match[0].length);
     }
-    phrases.push(exact);
-    return " ";
-  });
-  const written = datesIn(rest);
-  const seenDays = new Set<string>();
-  const dates = written
-    .map(({ start, end, days }) => ({ asked: rest.slice(start, end), days }))
-    .filter(({ days }) => {
-      const key = JSON.stringify(days);
-      if (seenDays.has(key)) {
-        return false;
-      }
-      seenDays.add(key);
-      return true;
-    })
-    .slice(0, maxExacts);
-  let undated = rest;
-  for (const { start, end } of written.toReversed()) {
-    undated = `${undated.slice(0, start)} ${undated.slice(end)}`;
   }
+  for (const { start, end, days } of datesIn(rest)) {
+    parts.push({ at: start, date: { asked: rest.slice(start, end), days } });
+    rest = blanked(rest, start, end);
+  }
+  parts.push(...idsOf(rest));
   const seen = new Set<string>();
-  const exacts = [...phrases, ...idsOf(undated)]
-    .filter(({ words }) => {
-      const key = words.join(" ");
+  const kept = parts
+    .toSorted((a, b) => a.at - b.at)
+    .filter((part) => {
+      const key =
+        "exact" in part
+          ? `exact ${part.exact.words.join(" ")}`
+          : `date ${JSON.stringify(part.date.days)}`;
       if (seen.has(key)) {
         return false;
       }
@@ -171,7 +169,10 @@ export const askedOf = (
       return true;
     })
     .slice(0, maxExacts);
-  return { exacts, dates };
+  return {
+    exacts: kept.flatMap((part) => ("exact" in part ? [part.exact] : [])),
+    dates: kept.flatMap((part) => ("date" in part ? [part.date] : [])),
+  };
 };
 
 /** The exact parts of `question` (`askedOf`). */

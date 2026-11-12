@@ -53,13 +53,20 @@ import { testBinding } from "./test-env.ts";
 //   may read that hold it as written, in the words list's order, then the
 //   shorter; at most `recallLimit`.
 //   No question here has a quoted phrase.
-// - The pack (GRA-1728): the ID lists and the words list fused by
-//   reciprocal rank (1 / (60 + rank), summed; ties to the better rank,
-//   then to the list given first), each chunk whole at the largest budget,
-//   found "exact" when an ID list holds it, else by its words or its
-//   stop words alone. Not found: the IDs no readable current chunk holds,
-//   as written, then the telling words none holds in any form, folded,
-//   but the IDs' own. Never cut short.
+// - Dates (GRA-1798): a paragraph now and then writes one of two days in
+//   one of three forms (`dateForms`); a question now and then asks one as
+//   ISO. A day's words are words like any. For each day asked, a list: the
+//   chunks of current versions the reader may read writing that day in
+//   any form that the words list doesn't hold, the shorter first; at most
+//   `recallLimit`.
+// - The pack (GRA-1728): the ID lists, the words list and the day lists
+//   fused by reciprocal rank (1 / (60 + rank), summed; ties to the better
+//   rank, then to the list given first), each chunk whole at the largest
+//   budget, found "exact" when an ID or day list holds it, else by its
+//   words or its stop words alone. Not found: the IDs no readable current
+//   chunk holds, as written, then the days none writes, as written, then
+//   the telling words none holds in any form, folded, but the IDs' and the
+//   days' own. Never cut short.
 // - History: a version, whole, to a person among its readers and among
 //   the current version's readers, with the teams they are in now; to
 //   anyone else exactly what a source no one added answers (null).
@@ -634,7 +641,7 @@ const packOf = (
       : [];
   });
   // The days, each once: found when a readable paragraph writes the day
-  // in any form. A found day's words are the date way's alone.
+  // in any form. A day's words stay in the words way.
   const days = [...new Set(asked.filter(isDate).map(dayOf))];
   const daysFound = new Set(
     days.filter((day) =>
@@ -642,24 +649,12 @@ const packOf = (
     )
   );
   const askedWords = expanded(asked);
-  const ofFoundDays = new Set(
-    expanded(
-      asked.filter((token) => isDate(token) && daysFound.has(dayOf(token)))
-    )
-  );
   const ofDays = new Set(expanded(asked.filter(isDate)));
-  const wordsAsked = askedWords.filter((token) => !ofFoundDays.has(token));
-  // With every telling word a found day's, the words way asks nothing.
-  const byWords =
-    askedWords.some((token) => !isStop(token)) &&
-    wordsAsked.every((token) => isStop(token))
-      ? []
-      : expectedOf(planned, person, membership, wordsAsked);
+  const byWords = expectedOf(planned, person, membership, askedWords);
   const exact = exactOf(planned, person, membership, ids, byWords);
-  const rankOf = (name: string): number => {
-    const rank = byWords.findIndex((chunk) => chunk.name === name);
-    return rank === -1 ? recallLimit : rank;
-  };
+  const inWords = new Set(byWords.map(({ name }) => name));
+  // A day's list: the readable paragraphs writing it that the words list
+  // doesn't hold, shortest first.
   const dateLists = days.map((day) =>
     readable
       .filter(({ words }) => words.some((word) => dayOf(word) === day))
@@ -673,22 +668,21 @@ const packOf = (
         stops: 0,
         exact: 0,
       }))
-      .toSorted(
-        (a, b) => rankOf(a.name) - rankOf(b.name) || a.length - b.length
-      )
+      .filter(({ name }) => !inWords.has(name))
+      .toSorted((a, b) => a.length - b.length)
       .slice(0, recallLimit)
   );
   const chunks = fused([
     ...exact.lists.map((list) =>
       list.map((chunk) => ({ chunk, found: "exact" as const }))
     ),
-    ...dateLists.map((list) =>
-      list.map((chunk) => ({ chunk, found: "exact" as const }))
-    ),
     byWords.map((chunk) => ({
       chunk,
       found: chunk.telling > 0 ? ("words" as const) : ("stop words" as const),
     })),
+    ...dateLists.map((list) =>
+      list.map((chunk) => ({ chunk, found: "exact" as const }))
+    ),
   ]);
   const missing = ids.filter((id) => !exact.held.has(id));
   // The telling words, each once, in the question's order; a question of

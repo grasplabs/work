@@ -17,10 +17,20 @@
 //
 // Month names are each month's long and short names in English, Dutch,
 // German, French and Spanish, from `Intl`, folded; a name two months share
-// is left out. Two-digit years are out (they read like versions, amounts
-// and pages), and so are ranges and relative days ("next Tuesday"). A form
-// that isn't here is not a date, and its words are found by the words way
-// as any words are: a miss costs nothing.
+// is left out. A short name that is only short ("mar", "ago", "dec") is a
+// month only with a four-digit year beside it ("12 ago 2026" is a date,
+// "a week ago 3 orders" is not); a long name is one with or without
+// ("3 mars bars" and "Mars 3" are dates: accepted, a miss costs a stray
+// row). Numbers with dots are read as a date both ways too ("1.2.2026").
+// Two-digit years are out (they read like versions, amounts and pages),
+// and so are ranges and relative days ("next Tuesday"). A form that isn't
+// here is not a date, and its words are found by the words way as any
+// words are: a miss costs nothing.
+//
+// Where two forms read overlapping text ("1. March 14, 2026"), every
+// form's reading is collected and the best that don't overlap are kept: a
+// reading with a year before one without, then the longer, then the
+// earlier. So a numbered line's number is never taken for the day.
 
 /** A calendar day: `year` 0 when the text names none. */
 export interface Day {
@@ -52,11 +62,15 @@ const foldName = (name: string): string =>
 const monthLocales = ["en", "nl", "de", "fr", "es"] as const;
 
 /**
- * Each month's names in the five languages, long and short, folded, as
- * one word: month 1 to 12. A name two months share is left out.
+ * Each month's names in the five languages, folded, as one word, with
+ * whether each is only ever a short name: month 1 to 12. A name two
+ * months share is left out.
  */
-const namesOfMonths = (): ReadonlyMap<string, number> => {
-  const names = new Map<string, number>();
+const namesOfMonths = (): ReadonlyMap<
+  string,
+  { month: number; short: boolean }
+> => {
+  const names = new Map<string, { month: number; short: boolean }>();
   const shared = new Set<string>();
   for (const locale of monthLocales) {
     for (const style of ["long", "short"] as const) {
@@ -68,10 +82,13 @@ const namesOfMonths = (): ReadonlyMap<string, number> => {
         const name = foldName(format.format(Date.UTC(2026, month - 1, 1)));
         if (name !== "") {
           const known = names.get(name);
-          if (known !== undefined && known !== month) {
+          if (known !== undefined && known.month !== month) {
             shared.add(name);
           }
-          names.set(name, month);
+          names.set(name, {
+            month,
+            short: style === "short" && (known?.short ?? true),
+          });
         }
       }
     }
@@ -84,9 +101,16 @@ const namesOfMonths = (): ReadonlyMap<string, number> => {
 
 const monthNames = namesOfMonths();
 
-/** The month `name` names, or 0. */
-const monthOf = (name: string | undefined): number =>
-  monthNames.get(foldName(name ?? "")) ?? 0;
+/** The month `name` names, or 0: a short name only beside a year. */
+const monthOf = (
+  name: string | undefined,
+  year: string | undefined
+): number => {
+  const known = monthNames.get(foldName(name ?? ""));
+  return known === undefined || (known.short && year === undefined)
+    ? 0
+    : known.month;
+};
 
 /** `year`, `month` and `day` as a day, if there is one; any year when 0. */
 const dayOf = (year: number, month: number, day: number): Day | undefined => {
@@ -145,7 +169,7 @@ const forms: readonly [RegExp, (groups: Groups) => (Day | undefined)[]][] = [
       "giu"
     ),
     ({ day, name, year: written }) => [
-      dayOf(Number(written ?? 0), monthOf(name), Number(day)),
+      dayOf(Number(written ?? 0), monthOf(name, written), Number(day)),
     ],
   ],
   [
@@ -154,7 +178,7 @@ const forms: readonly [RegExp, (groups: Groups) => (Day | undefined)[]][] = [
       "giu"
     ),
     ({ day, name, year: written }) => [
-      dayOf(Number(written ?? 0), monthOf(name), Number(day)),
+      dayOf(Number(written ?? 0), monthOf(name, written), Number(day)),
     ],
   ],
 ];
@@ -162,30 +186,49 @@ const forms: readonly [RegExp, (groups: Groups) => (Day | undefined)[]][] = [
 /** The same day, once. */
 const keyOf = ({ year: y, month, day }: Day): string => `${y}-${month}-${day}`;
 
+/** 1 when a reading names a year, else 0: one with a year comes first. */
+const hasYear = ({ days }: DateWritten): number =>
+  days.some(({ year: written }) => written !== 0) ? 1 : 0;
+
 /**
  * The dates `text` writes, in the order they start, each once: where, and
- * the days it may be (two for a numeric date valid both ways). A part of
- * the text read by one form is not read by another.
+ * the days it may be (two for a numeric date valid both ways). Every
+ * form's readings are collected, and the best that don't overlap kept:
+ * one with a year first, then the longer, then the earlier.
  */
 export const datesIn = (text: string): DateWritten[] => {
-  const found: DateWritten[] = [];
+  const readings: DateWritten[] = [];
   for (const [pattern, read] of forms) {
     for (const match of text.matchAll(pattern)) {
-      const start = match.index;
-      const end = start + match[0].length;
-      const taken = found.some((date) => start < date.end && date.start < end);
       const days = read(match.groups ?? {}).filter(
         (day): day is Day => day !== undefined
       );
       const unique = [
         ...new Map(days.map((day) => [keyOf(day), day])).values(),
       ];
-      if (!taken && unique.length > 0) {
-        found.push({ start, end, days: unique });
+      if (unique.length > 0) {
+        readings.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          days: unique,
+        });
       }
     }
   }
-  return found.toSorted((a, b) => a.start - b.start);
+  const kept: DateWritten[] = [];
+  for (const reading of readings.toSorted(
+    (a, b) =>
+      hasYear(b) - hasYear(a) ||
+      b.end - b.start - (a.end - a.start) ||
+      a.start - b.start
+  )) {
+    if (
+      !kept.some((date) => reading.start < date.end && date.start < reading.end)
+    ) {
+      kept.push(reading);
+    }
+  }
+  return kept.toSorted((a, b) => a.start - b.start);
 };
 
 /**

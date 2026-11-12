@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { exactsOf, foundIn } from "../src/exact.ts";
+import { askedOf, exactsOf, foundIn } from "../src/exact.ts";
 import { sequenceOf } from "../src/words.ts";
 
 // What a question asks for as written: its quoted phrases and IDs, read by
@@ -103,5 +103,18 @@ describe("the exact parts of a question", () => {
         Array.from({ length: 12 }, (_, index) => `ID-${index + 100}`).join(" ")
       )
     ).toHaveLength(8);
+  });
+
+  it("counts dates and exact parts together, eight in the order written, the rest words", () => {
+    const { exacts, dates } = askedOf(
+      "ID-101 2026-01-01 ID-102 2026-01-02 ID-103 2026-01-03 ID-104 2026-01-04 ID-105 2026-01-05"
+    );
+    expect({
+      exacts: exacts.map(({ asked }) => asked),
+      dates: dates.map(({ asked }) => asked),
+    }).toStrictEqual({
+      exacts: ["ID-101", "ID-102", "ID-103", "ID-104"],
+      dates: ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+    });
   });
 });

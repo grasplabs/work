@@ -6,7 +6,7 @@ import type { AskedDate, Exact } from "./exact.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Found } from "./pack.ts";
 import { readableSql } from "./reader-sets.ts";
-import { sequenceOf, termsOf } from "./words.ts";
+import { sequenceOf, termsOf, wordsVersion } from "./words.ts";
 import type { Terms } from "./words.ts";
 
 // Recall: two ways at once, fused by rank into a pack (pack.ts). Words,
@@ -438,8 +438,7 @@ const byExact = (
 /**
  * The date way: for each date the question asks for, the chunks the
  * reader may read writing one of its days (`dateSql`), the dates it
- * found, and those it capped. Asked before the words way, which leaves out
- * the words of each date found here (`recall`).
+ * found, and those it capped.
  */
 const byDates = (
   sql: SqlStorage,
@@ -474,31 +473,39 @@ const byDates = (
 };
 
 /**
- * Each date's list for the fusion: the chunks writing one of its days, in
- * the words way's order (`byWordsRank`), then as the statement orders
- * them, as an exact part's list is ordered (`byExact`).
+ * Each date's list for the fusion: the chunks writing one of its days that
+ * the words way didn't list (`byWordsRank`), as the statement orders them
+ * (shortest, then newer). A chunk the words way lists counts once, by its
+ * words; the date way adds what they missed, so a common day never counts
+ * a passage twice and outranks the ID or phrase beside it.
  */
 const dateLists = (
   dates: readonly AskedDate[],
   rows: readonly (Row & { parts: string })[],
   byWordsRank: ReadonlyMap<number, number>
-): Found[][] => {
-  const rankOf = ({ row }: Row): number => byWordsRank.get(row) ?? recallLimit;
-  return dates.map((_, part) =>
+): Found[][] =>
+  dates.map((_, part) =>
     foundAs(
       rows
-        .filter(({ parts }) => indexesOf(parts).includes(part))
-        .toSorted((a, b) => rankOf(a) - rankOf(b))
+        .filter(
+          ({ row, parts }) =>
+            !byWordsRank.has(row) && indexesOf(parts).includes(part)
+        )
         .slice(0, recallLimit),
       "exact"
     )
   );
-};
+
+/** Whether the word index, and the days with it, is built by the current rules. */
+const wordIndexCurrent = (sql: SqlStorage): boolean =>
+  sql
+    .exec<{ version: number }>("SELECT version FROM word_index WHERE id = 1")
+    .one().version === wordsVersion;
 
 /**
  * What the reader may read for the question, as a pack within its budget
  * (contract.ts `Brain.recall`): the exact way's lists, one per part, the
- * date way's, one per date, and the words way's, fused by rank (in that
+ * words way's, and the date way's, one per date, fused by rank (in that
  * order on a tie, each in the question's order), and the parts of the
  * question none found: its exact parts and its dates, but those capped,
  * then its telling words, but those of its IDs and dates.
@@ -508,39 +515,31 @@ export const recall = (
   { question, reader, budget, asOf }: RecallRequest
 ): Pack => {
   const { exacts, dates } = askedOf(question);
-  const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  const dated = byDates(sql, dates, reader, at);
-  // A date the date way found stands for its words: the words way leaves
-  // them out, so the passages writing that day aren't counted for it
-  // twice, once by the day and again by "2026" and "14", and a common day
-  // never outranks the ID or phrase beside it. A date it didn't find keeps
-  // its words in the words way, which may find a form the table doesn't
-  // read ("14-3-26").
-  const datesFound = new Set(
-    dates
-      .filter((_, index) => dated.parts.has(index))
-      .flatMap(({ asked }) => sequenceOf(asked))
-  );
-  const asked = termsOf(question);
-  const terms: Terms = {
-    telling: asked.telling.filter(({ word }) => !datesFound.has(word)),
-    stops: asked.stops,
-  };
+  const terms = termsOf(question);
   // An ID or a date stands for its words: none is said not found apart.
+  // A date's words stay in the words way, as any words are.
   const standing = new Set([
     ...exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words),
-    ...dates.flatMap(({ asked: date }) => sequenceOf(date)),
+    ...dates.flatMap(({ asked }) => sequenceOf(asked)),
   ]);
+  const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
   const words = byWords(sql, terms, reader, at);
   const byWordsRank = new Map(words.found.map(({ row }, rank) => [row, rank]));
   const exact = byExact(sql, exacts, reader, at, byWordsRank);
+  const dated = byDates(sql, dates, reader, at);
+  // While the word index is rebuilt to the current rules, a chunk not yet
+  // reached has no days: a date is never said not found meanwhile.
+  const daysWhole = wordIndexCurrent(sql);
   const notFound = [
     ...exacts
       .filter((_, index) => !exact.parts.has(index) && !exact.capped.has(index))
       .map(({ asked: part }) => part),
-    ...dates
-      .filter((_, index) => !dated.parts.has(index) && !dated.capped.has(index))
-      .map(({ asked: date }) => date),
+    ...(daysWhole
+      ? dates.filter(
+          (_, index) => !dated.parts.has(index) && !dated.capped.has(index)
+        )
+      : []
+    ).map(({ asked: date }) => date),
     ...terms.telling
       .filter(
         ({ word }, index) => !words.terms.has(index) && !standing.has(word)
@@ -548,10 +547,12 @@ export const recall = (
       .map(({ word }) => word),
   ];
   return packOf(
+    // The date lists after the words list: they add what it missed, so on
+    // a tie the words way's own first comes first.
     fuse([
       ...exact.lists,
-      ...dateLists(dates, dated.rows, byWordsRank),
       words.found,
+      ...dateLists(dates, dated.rows, byWordsRank),
     ]),
     { terms: terms.telling, exacts, dates: dates.map(({ days }) => days) },
     budget.tokens,

@@ -225,9 +225,11 @@ export interface PackItem extends SourceVersionRef {
  * What a recall found the reader may read, best first, within its budget
  * as `tokensOf` counts it;
  * the parts of the question no passage the reader may read holds
- * (`notFound`: its words, folded, and its IDs and quoted phrases as
- * written), and whether the budget left out or shortened any passage
- * found (`truncated`).
+ * (`notFound`: its words, folded, and its IDs, quoted phrases and dates
+ * as written; a date only when no such passage writes its day, and never
+ * while the store's word index is being rebuilt to its current rules,
+ * when some passages' days are not yet read), and whether the budget left
+ * out or shortened any passage found (`truncated`).
  */
 export interface Pack {
   items: PackItem[];
