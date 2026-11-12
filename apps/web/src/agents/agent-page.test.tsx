@@ -808,12 +808,16 @@ describe("an agent's page", () => {
     const large = new File(["a"], "large.md");
     Object.defineProperty(large, "size", { value: chatFileMaxBytes + 1 });
     await pick(large);
-    const tooLarge = document.body.textContent.includes("at most 10 MB");
+    const tooLarge = document.body.textContent.includes(
+      "A document is at most 10 MB"
+    );
     await pick(new File(["MZ"], "tool.exe"));
     expect({
       asked,
       tooLarge,
-      unsupported: document.body.textContent.includes("Only PDF, Word (.docx)"),
+      unsupported: document.body.textContent.includes(
+        "A document is a PDF, Word (.docx)"
+      ),
     }).toStrictEqual({ asked: [], tooLarge: true, unsupported: true });
   });
 

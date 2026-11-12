@@ -68,10 +68,10 @@ export const AgentDocuments = ({
         // past what one message to core holds would drop the connection,
         // and every call waiting on it, before core could say why.
         if (chatFileTypeOf(file.name) === undefined) {
-          throw agentErrors.create("agent.file_unsupported");
+          throw agentErrors.create("agent.document_unsupported");
         }
         if (file.size > chatFileMaxBytes) {
-          throw agentErrors.create("agent.file_too_large");
+          throw agentErrors.create("agent.document_too_large");
         }
         // oxlint-disable-next-line no-await-in-loop -- in order, stopping at the first refused
         const bytes = new Uint8Array(await file.arrayBuffer());

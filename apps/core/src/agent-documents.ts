@@ -52,6 +52,9 @@ const card = {
   addedAt: agentDocuments.addedAt,
 };
 
+/** A document's card with how long its text is, in characters. */
+const sized = { ...card, chars: sql<number>`length(${agentDocuments.text})` };
+
 const documentOf = (row: {
   id: string;
   name: string;
@@ -78,18 +81,19 @@ const requireAgentId = async (env: Env, agentId: unknown): Promise<string> => {
 
 /**
  * The documents core keeps for the agent with this ID, the oldest first,
- * without their text: what a turn tells the agent it has.
+ * without their text but with its length in characters: what a turn
+ * tells the agent it has.
  */
 export const documentsOf = async (
   env: Pick<Env, "DB">,
   agentId: string
-): Promise<AgentDocument[]> => {
+): Promise<(AgentDocument & { chars: number })[]> => {
   const rows = await drizzle(env.DB)
-    .select(card)
+    .select(sized)
     .from(agentDocuments)
     .where(eq(agentDocuments.agentId, agentId))
     .orderBy(asc(agentDocuments.addedAt), asc(agentDocuments.id));
-  return rows.map(documentOf);
+  return rows.map((row) => ({ ...documentOf(row), chars: row.chars }));
 };
 
 /**
@@ -104,7 +108,8 @@ export const listAgentDocuments = async (
 ): Promise<AgentDocument[]> => {
   requireAdmin(identity);
   const id = await requireAgentId(env, agentId);
-  return await documentsOf(env, id);
+  const documents = await documentsOf(env, id);
+  return documents.map(({ chars: _chars, ...document }) => document);
 };
 
 /**
@@ -131,11 +136,56 @@ export const readAgentDocument = async (
   return row === undefined ? undefined : { ...documentOf(row), text: row.text };
 };
 
+/** A chat file's refusals, as they are said of a document. */
+const asDocument = {
+  "agent.file_unsupported": "agent.document_unsupported",
+  "agent.file_too_large": "agent.document_too_large",
+  "agent.file_busy": "agent.document_busy",
+} as const;
+
+/** `file` read as a chat's file is, refused in a document's words. */
+const readAsDocument = async (env: LocalExtractorEnv, file: unknown) => {
+  try {
+    return await readChatFile(env, file);
+  } catch (error) {
+    const code = agentErrors.codeOf(error);
+    if (
+      code === "agent.file_unsupported" ||
+      code === "agent.file_too_large" ||
+      code === "agent.file_busy"
+    ) {
+      throw agentErrors.create(asDocument[code]);
+    }
+    throw error;
+  }
+};
+
+/**
+ * The document `named`, which the agent has under the name of a file
+ * being added, when its text is the file's: the same file added again,
+ * such as by a caller whose first answer was lost, which is told what it
+ * was told then. Throws `agent.document_named` for any other file.
+ */
+const sameOrNamed = async (
+  env: Pick<Env, "DB">,
+  agentId: string,
+  named: AgentDocument,
+  text: string
+): Promise<AgentDocument> => {
+  const kept = await readAgentDocument(env, agentId, named.id);
+  if (kept?.text !== text) {
+    throw agentErrors.create("agent.document_named");
+  }
+  return named;
+};
+
 /**
  * Gives the agent `agentId` the file `file` as a document, read as a
- * chat's file is. Throws `agent.unknown`, the errors of a chat's file
- * that can't be read, `agent.document_named` when the agent has one by
- * that name, and `agent.too_many_documents` past {@link agentDocumentsMax}.
+ * chat's file is. Throws `agent.unknown`, why a file can't be read in a
+ * document's words (`agent.document_unsupported`, `_too_large`, `_busy`),
+ * `agent.document_named` when the agent has another file by that name,
+ * and `agent.too_many_documents` past {@link agentDocumentsMax}. The same
+ * file added again is answered with the document it already is.
  *
  * The insert itself holds what was checked before the file was read: the
  * agent wasn't deleted and has room. Reading a file takes a while, and
@@ -149,10 +199,11 @@ export const addAgentDocument = async (
 ): Promise<AgentDocument> => {
   requireCompanyAdmin(identity);
   const id = await requireAgentId(env, agentId);
-  const read = await readChatFile(env, file);
+  const read = await readAsDocument(env, file);
   const before = await documentsOf(env, id);
-  if (before.some(({ name }) => name === read.name)) {
-    throw agentErrors.create("agent.document_named");
+  const named = before.find(({ name }) => name === read.name);
+  if (named !== undefined) {
+    return await sameOrNamed(env, id, named, read.text);
   }
   if (before.length >= agentDocumentsMax) {
     throw agentErrors.create("agent.too_many_documents");
@@ -186,11 +237,16 @@ export const addAgentDocument = async (
       }),
     ]);
   } catch (error) {
-    // Two admins adding one name at once: the index refuses the second.
-    if (String(error).includes("UNIQUE constraint failed")) {
+    // One name added twice at once: the index refuses the second.
+    if (!String(error).includes("UNIQUE constraint failed")) {
+      throw error;
+    }
+    const after = await documentsOf(env, id);
+    const now = after.find(({ name }) => name === read.name);
+    if (now === undefined) {
       throw agentErrors.create("agent.document_named");
     }
-    throw error;
+    return await sameOrNamed(env, id, now, read.text);
   }
   const kept = await readAgentDocument(env, id, document.id);
   if (kept === undefined) {

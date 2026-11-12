@@ -160,6 +160,8 @@ describe("an agent's documents", slow, () => {
         })
       ),
       first: await add("a.md", utf8("a")),
+      // The same file again, as a caller whose answer was lost sends it.
+      again: await add("a.md", utf8("a")),
       sameName: await add("a.md", utf8("another")),
     };
     // All at once: the insert itself holds the most an agent keeps.
@@ -178,11 +180,12 @@ describe("an agent's documents", slow, () => {
       kept: await keptFor(claire.id),
     }).toStrictEqual({
       outcomes: {
-        notPdf: "agent.file_unsupported",
-        noType: "agent.file_unsupported",
+        notPdf: "agent.document_unsupported",
+        noType: "agent.document_unsupported",
         empty: "upload.no_text",
         unknownAgent: "agent.unknown",
         first: "ok",
+        again: "ok",
         sameName: "agent.document_named",
       },
       filled: true,
@@ -224,6 +227,8 @@ describe("an agent's documents", slow, () => {
       toldWords: asked[0]?.includes("two signatures"),
       // …and her code lists it and reads its text.
       listed: read?.text.includes(`"name":"${fileName}"`),
+      // With how long its text is, so it knows what a read hands over.
+      sized: read?.text.includes(`"chars":${`# Close\n\n${secret}`.length}`),
       text: read?.text.includes("two signatures"),
       readFailed: read?.isError,
       // The other agent is told nothing of it and can't read it.
@@ -236,6 +241,7 @@ describe("an agent's documents", slow, () => {
       told: [true, true],
       toldWords: false,
       listed: true,
+      sized: true,
       text: true,
       readFailed: false,
       toldOther: false,

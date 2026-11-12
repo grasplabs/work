@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -137,7 +138,7 @@ export class ChatApi extends WorkerEntrypoint<Env, AgentScope> {
    * text.
    */
   async documents(): Promise<
-    { id: string; name: string; type: string; bytes: number }[]
+    { id: string; name: string; type: string; bytes: number; chars: number }[]
   > {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, "chat.documents");
@@ -146,11 +147,12 @@ export class ChatApi extends WorkerEntrypoint<Env, AgentScope> {
       method: "chat.documents",
       detail: { documents: documents.length },
     });
-    return documents.map(({ id, name, type, bytes }) => ({
+    return documents.map(({ id, name, type, bytes, chars }) => ({
       id,
       name,
       type,
       bytes,
+      chars,
     }));
   }
 
@@ -159,9 +161,13 @@ export class ChatApi extends WorkerEntrypoint<Env, AgentScope> {
    * from it. Only the agent the chat's turns run as: an ID another agent
    * keeps a document by is refused as one nobody has.
    */
-  async readDocument(
-    documentId: unknown
-  ): Promise<{ note: string; name: string; type: string; text: string }> {
+  async readDocument(documentId: unknown): Promise<{
+    note: string;
+    name: string;
+    type: string;
+    text: string;
+    chars: number;
+  }> {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, "chat.readDocument");
     const document = await readAgentDocument(
@@ -187,6 +193,7 @@ export class ChatApi extends WorkerEntrypoint<Env, AgentScope> {
       name: document.name,
       type: document.type,
       text: document.text,
+      chars: document.text.length,
     };
   }
 }
@@ -237,17 +244,24 @@ chat: {
     type: "pdf" | "docx" | "xlsx" | "md" | "txt" | "csv" | "json";
     /** The file's size, in bytes. */
     bytes: number;
+    /** How long its text is, in characters. */
+    chars: number;
   }[]>;
   /**
-   * One of your documents, with the text read from it (as Markdown for a
-   * PDF, Word or Excel file), up to 1 MB. Return only the parts of it you
-   * need.
+   * One of your documents, with the whole text read from it (as Markdown
+   * for a PDF, Word or Excel file), up to 1 MB, and its length in
+   * characters. A code step's result holds far less than that
+   * (${platformLimits.codeModeOutputBytes} bytes, logs included), so never return a
+   * long text whole: search it here and return the parts you need, or
+   * read it a slice at a time over several code steps
+   * (text.slice(from, to)), and say so when you answered from part of it.
    */
   readDocument(id: string): Promise<{
     note: string;
     name: string;
     type: "pdf" | "docx" | "xlsx" | "md" | "txt" | "csv" | "json";
     text: string;
+    chars: number;
   }>;
 };`,
   stub: (scope) => exports.ChatApi({ props: scope }),
