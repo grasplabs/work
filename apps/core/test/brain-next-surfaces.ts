@@ -1706,12 +1706,14 @@ export const coreProbes = {
     const name = `probe-${crypto.randomUUID()}`;
     return [
       await answer(
-        "a marked skill",
+        "a marked skill of another name",
         async () =>
           await coreBrain.addCompanySkill(env, personId, {
             name,
             change: crypto.randomUUID(),
-            text: `---\nname: ${name}\ndescription: ${text}\n---\n${text}`,
+            // A card of another name: refused, for an admin too, so the
+            // markers are never written where anyone reads them.
+            text: `---\nname: ${name}-other\ndescription: ${text}\n---\n${text}`,
           })
       ),
       await answer(
@@ -1754,7 +1756,7 @@ export const coreProbes = {
       await add("text with no card", text),
       await add(
         "a name of the markers",
-        `---\nname: ${markers.join(" ")}\ndescription: ${text}\n---\n${text}`
+        `---\nname: Marked ${markers.join(" ")}\ndescription: ${text}\n---\n${text}`
       ),
       await add(
         "too much text",

@@ -607,8 +607,9 @@ describe("writing and sharing skills", setUpTime, () => {
       theirs: await usable(author.userId, true, [shared, kept]),
       members: await usable(member.userId, true, [shared, kept]),
     }).toStrictEqual({
+      // Their own of a name takes the company's place, for them alone.
       before: [
-        ["company", shared],
+        ["person", shared],
         ["person", kept],
       ],
       theirs: [["company", shared]],
