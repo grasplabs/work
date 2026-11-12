@@ -155,6 +155,8 @@ interface DueStart {
   createdAt: number;
   /** Whether it admitted a run: its run has its ID (resource-runs.ts). */
   ran: boolean;
+  /** The person it runs for: a run's sources are theirs alone. */
+  principalId: string;
 }
 
 /**
@@ -180,6 +182,7 @@ const dueStarts = async (
       id: receipts.id,
       workflowId: receipts.workflowResourceId,
       createdAt: sql<number>`${receipts.createdAt}`,
+      principalId: receipts.principalId,
       run: runs.id,
     })
     .from(receipts)
@@ -195,11 +198,12 @@ const dueStarts = async (
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(limit);
-  return rows.map(({ id, workflowId, createdAt, run }) => ({
+  return rows.map(({ id, workflowId, createdAt, principalId, run }) => ({
     id,
     workflowId,
     createdAt,
     ran: run !== null,
+    principalId,
   }));
 };
 
@@ -238,9 +242,20 @@ const startDetailsRemoved = async (
   // erased before they are marked, so a sweep it fails for marks nothing
   // and the next erases them again. A hand-over still on its way for one
   // of them is refused from now on.
+  // A run's sources are the person it ran for alone (`owner`), so they
+  // are erased in that person's own store and the shared one.
   await eraseSources(
     env,
-    heldOf.map(({ runId }) => runSource(runId)),
+    dueRows.flatMap(({ id, ran, principalId }) =>
+      ran
+        ? [
+            {
+              source: runSource(id),
+              readers: { kind: "owner" as const, personId: principalId },
+            },
+          ]
+        : []
+    ),
     "retention"
   );
   await auditedBatch(env, db, [

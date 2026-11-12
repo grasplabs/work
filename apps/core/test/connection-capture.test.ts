@@ -3,9 +3,8 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { eraseSource, recallAs } from "../src/brain-next.ts";
+import { erasePerson, eraseSource, recallAs } from "../src/brain-next.ts";
 import { captureIdOf } from "../src/connection-capture-key.ts";
-import { captureBytesMax } from "../src/connection-capture.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -131,9 +130,18 @@ const messageRead = (id: string, subject: string) => ({
   _meta: { [provenanceMetaKey]: [id] },
 });
 
-/** What `personId` recalls for `question`: each item's text and version. */
-const recalled = async (personId: string, question: string) => {
+/**
+ * What `personId` recalls for `question`, each item's text and version:
+ * with their own store, as their own web chat does, unless `personal` is
+ * false, as an App, a workflow or the SDK asks.
+ */
+const recalled = async (
+  personId: string,
+  question: string,
+  personal = true
+) => {
   const { items, elsewhere } = await recallAs(env, personId, {
+    personal,
     question,
     budget,
   });
@@ -218,7 +226,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         {
           action: "brain.capture.kept",
           onBehalfOf: person.userId,
-          detail: { items: 2, kept: 2, tooLarge: 0 },
+          detail: { items: 2, kept: 2, failed: 0 },
         },
       ],
       items: [
@@ -300,7 +308,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         {
           action: "brain.capture.kept",
           onBehalfOf: person.userId,
-          detail: { items: 1, kept: 1, tooLarge: 0 },
+          detail: { items: 1, kept: 1, failed: 0 },
         },
       ],
       named: [JSON.stringify({ id: `message-${named}`, subject: named })],
@@ -393,61 +401,48 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("redacts a credential before it is kept, and skips an item too large to keep whole", async () => {
+  it("keeps an item in the person's own store, credentials redacted: found by their own recall, never by an App's as them, and gone once they are erased", async () => {
     const person = await signedInApi(idp, "user");
-    const [marker, large] = [markerOf(), markerOf()];
+    const marker = markerOf();
     const secret = `hunter2-${crypto.randomUUID()}`;
     const mail = await mailConnection([], mailWithSearch, {
-      owner: person.userId,
-    });
-    const bigMail = await mailConnection([], mailWithSearch, {
       owner: person.userId,
     });
     await mail.answer(
       "mail.search",
       messageRead(`message-${marker}`, `Login ${marker} password: ${secret}`)
     );
-    await bigMail.answer(
-      "mail.search",
-      messageRead(`message-${large}`, `${large} ${"x".repeat(captureBytesMax)}`)
-    );
     const chat = await chatOf(
       person.userId,
-      step(
-        calling("MAIL", "mail.search", { query: marker }),
-        calling("BIG", "mail.search", { query: large })
-      ),
-      says("Found them.")
+      step(calling("MAIL", "mail.search", { query: marker })),
+      says("Found it.")
     );
     await grant(chat, mail.id, "MAIL", ["mail.search"]);
-    await grant(chat, bigMail.id, "BIG", ["mail.search"]);
 
-    await chat.ask("Find them.");
-    const [, bigEvents] = await Promise.all([
-      captures(mail.id),
-      captures(bigMail.id),
-    ]);
+    await chat.ask("Find it.");
+    await captures(mail.id);
+    const own = await recalled(person.userId, `login ${marker}`);
+    // As an App, a workflow or the SDK asks: the shared store alone.
+    const asApp = await recalled(person.userId, `login ${marker}`, false);
+    await erasePerson(env, {
+      personId: person.userId,
+      reason: "person_erased",
+    });
+    const erased = await recalled(person.userId, `login ${marker}`);
 
-    const { texts } = await recalled(person.userId, `login ${marker}`);
     expect({
-      kept: texts.map(({ text }) => text),
-      big: bigEvents.map(shown),
-      large: await recalled(person.userId, large),
+      own: own.texts.map(({ text }) => text),
+      asApp,
+      erased,
     }).toStrictEqual({
-      kept: [
+      own: [
         JSON.stringify({
           id: `message-${marker}`,
           subject: `Login ${marker} password: [redacted]`,
         }),
       ],
-      big: [
-        {
-          action: "brain.capture.skipped",
-          onBehalfOf: person.userId,
-          detail: { reason: "too_large", items: 1 },
-        },
-      ],
-      large: { texts: [], elsewhere: [] },
+      asApp: { texts: [], elsewhere: [] },
+      erased: { texts: [], elsewhere: [] },
     });
   });
 
@@ -465,6 +460,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         producer: "capture",
         id: await captureIdOf(mail.id, person.userId, itemId),
       },
+      readers: { kind: "owner", personId: person.userId },
       reason: "deleted",
     });
     const chat = await chatOf(
@@ -488,7 +484,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         {
           action: "brain.capture.failed",
           onBehalfOf: person.userId,
-          detail: { items: 1 },
+          detail: { items: 1, kept: 0, failed: 1 },
         },
       ],
       answered: true,

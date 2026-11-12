@@ -321,6 +321,12 @@ export const InterviewPeople = ({
   const interviewOf = new Map(
     view.interviews.map((interview) => [interview.id, interview])
   );
+  // Everyone who can still have the one reminder, whatever the search shows.
+  const reminders = view.closed
+    ? []
+    : view.people
+        .filter((each) => each.mayRemind)
+        .map((each) => each.person.id);
   const wanted = query.trim().toLowerCase();
   const shown = view.people.filter(
     (each) => wanted === "" || each.person.name.toLowerCase().includes(wanted)
@@ -353,6 +359,24 @@ export const InterviewPeople = ({
       description="By name, for Grasp only: the company sees numbers per team. What anyone said stays in the company’s own Grasp."
       title="People"
     >
+      {/* More than one: all at once, as each row does for its own. */}
+      {reminders.length > 1 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+          <p className="text-muted-foreground">
+            {`${reminders.length} people can still be reminded, once each.`}
+          </p>
+          <CommandButton
+            clientId={clientId}
+            command={{
+              type: "onboarding.remind",
+              payload: { people: reminders },
+            }}
+            variant="outline"
+          >
+            {`Mark ${reminders.length} people reminded`}
+          </CommandButton>
+        </div>
+      ) : null}
       <div className="border-t">
         <Table>
           <TableHeader>

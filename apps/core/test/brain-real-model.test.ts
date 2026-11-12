@@ -15,12 +15,13 @@ import type {
   BrainProvider,
   BrainReport,
 } from "./brain-harness.ts";
-import { realProvider, realProviderTakes } from "./brain-real-provider.ts";
+import { realProvider } from "./brain-real-provider.ts";
 import type { ModelExchange } from "./brain-real-provider.ts";
 import { summarizeArm } from "./brain-scoring.ts";
 import { stubReader } from "./brain-stub-model.ts";
 import { brainFamilies, brainTasks } from "./fixtures/brain-tasks.ts";
 import { mockIdp } from "./idp.ts";
+import { realProviderTakes } from "./real-providers.ts";
 import { testBinding } from "./test-env.ts";
 
 // The Brain baseline against a real model (GRA-676), on request only:

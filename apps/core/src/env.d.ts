@@ -77,7 +77,7 @@ interface __BaseEnv_Env {
   /**
    * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
    * and for an extraction, a page build and a package build on the
-   * sandbox host (src/knowledge/extract.ts, src/platform-sandbox.ts).
+   * sandbox host (src/files/extract.ts, src/platform-sandbox.ts).
    */
   SANDBOX_DEADLINE_MS?: string;
   /**

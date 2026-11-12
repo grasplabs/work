@@ -503,6 +503,7 @@ describe("instruction files", setUpTime, () => {
 
     await expect(
       recallAs(env, admin.userId, {
+        personal: true,
         question: word,
         budget: { tokens: recallBudgetMax },
       })

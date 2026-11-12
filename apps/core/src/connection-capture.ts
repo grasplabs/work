@@ -28,23 +28,17 @@ import { connectionOwnersOf } from "./connections.ts";
 //   brought it in". A shared connection's reads are kept by nothing yet:
 //   a capture readable by its person alone would outlive their access to
 //   the connection.
-// - One source per item: the item's part of the output (the one object
-//   that names it, or the whole output when the read named one item),
-//   credentials redacted (`redact`); never the call's input. When the
-//   output can't be split by item, nothing of the call is kept. Outside
+// - One source per item, in the person's own store (owner content): the
+//   item's part of the output (the one object that names it, or the whole
+//   output when the read named one item), credentials redacted
+//   (`redact`); never the call's input. When the output can't be split by
+//   item, nothing of the call is kept. No cap of its own: the Brain's
+//   own limit on a source refuses what is past it, and that item fails. Outside
 //   text is content: a captured source is never an instruction file.
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every capture ends in one audit event,
 //   of IDs and counts alone: kept, skipped (why), or failed, which is
 //   also what one reads whose adds may have landed after all.
-
-/**
- * The most of one item kept, in bytes of UTF-8: a larger one is skipped,
- * never cut, so a source never holds part of an item as if whole.
- */
-export const captureBytesMax = 256 * 1024;
-
-const encoder = new TextEncoder();
 
 type CaptureEvent =
   | "brain.capture.kept"
@@ -134,30 +128,39 @@ const captured = async (
     return ["brain.capture.skipped", { reason: "unsplittable" }];
   }
   let kept = 0;
-  let tooLarge = 0;
+  let failed = 0;
   for (const [itemId, part] of items) {
-    const text = redact(part);
-    if (encoder.encode(text).length > captureBytesMax) {
-      tooLarge += 1;
-      continue;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one item at a time
+      const id = await captureIdOf(connectionId, scope.personId, itemId);
+      // Owner content: core's Brain module keeps it in the person's own
+      // store, never the shared one.
+      // oxlint-disable-next-line no-await-in-loop -- one item at a time
+      await addSource(env, {
+        source: { producer: "capture", id },
+        // A change of its own each time: the same text again is the
+        // current version (the Brain's rule), so reading an unchanged item
+        // adds nothing, and an item that changed back is a version again.
+        change: crypto.randomUUID(),
+        text: redact(part),
+        readers: { kind: "owner", personId: scope.personId },
+      });
+      kept += 1;
+    } catch (error) {
+      // Refused by the Brain (an erased key, a text past its limit) or
+      // unreachable: this item is not kept, the others go on.
+      log.warn("brain.capture.item_failed", {
+        connectionId,
+        chatId: scope.chatId,
+        ...errorFields(error),
+      });
+      failed += 1;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one item at a time
-    const id = await captureIdOf(connectionId, scope.personId, itemId);
-    // oxlint-disable-next-line no-await-in-loop -- one item at a time
-    await addSource(env, {
-      source: { producer: "capture", id },
-      // A change of its own each time: the same text again is the current
-      // version (the Brain's rule), so reading an unchanged item adds
-      // nothing, and an item that changed back is a version again.
-      change: crypto.randomUUID(),
-      text,
-      readers: { kind: "owner", personId: scope.personId },
-    });
-    kept += 1;
   }
-  return kept === 0
-    ? ["brain.capture.skipped", { reason: "too_large", items: items.size }]
-    : ["brain.capture.kept", { items: items.size, kept, tooLarge }];
+  return [
+    kept === 0 ? "brain.capture.failed" : "brain.capture.kept",
+    { items: items.size, kept, failed },
+  ];
 };
 
 /**
@@ -184,7 +187,10 @@ export const captureRead = async (
       chatId: scope.chatId,
       ...errorFields(error),
     });
-    ended = ["brain.capture.failed", { items: result.provenance.length }];
+    ended = [
+      "brain.capture.failed",
+      { items: result.provenance.length, kept: 0, failed: 0 },
+    ];
   }
   try {
     await audited(env, scope, connectionId, ...ended);

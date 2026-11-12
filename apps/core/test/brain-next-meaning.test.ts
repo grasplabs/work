@@ -28,9 +28,15 @@ import {
   recallAs,
   workBrain,
 } from "../src/brain-next.ts";
-import type { RecalledPack, SourceRef } from "../src/brain-next.ts";
+import type {
+  RecalledPack,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // Recall by meaning through core (GRA-1769), with the embed package's
@@ -77,7 +83,7 @@ const embedEverything = async (): Promise<void> => {
   for (let tick = 0; tick < 50; tick += 1) {
     at += 60 * 60 * 1000;
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
-    await workBrain(env, new Date(at));
+    await workBrain(env, new Date(at), noProducers);
     // oxlint-disable-next-line no-await-in-loop -- read after each tick
     const { embedding } = await brainWorkOverview(env);
     if (
@@ -124,6 +130,8 @@ const warnedOf = async <T>(
 
 describe("recall by meaning, through core", () => {
   let personId = "";
+  /** The team of the person alone their sources are for. */
+  let readers: SourceReaders = { kind: "none" };
   /** The person's sources, by the Brain's key for each (core's brain-next.ts). */
   const sources = new Map<string, SourceRef>();
 
@@ -134,7 +142,10 @@ describe("recall by meaning, through core", () => {
   const withoutMeaning = async (asked: string): Promise<RecalledPack> => {
     const pack: Pack = await store().recall({
       question: asked,
-      reader: { person: personId, groups: [] },
+      reader: {
+        person: personId,
+        groups: readers.kind === "team" ? [`team:${readers.teamId}`] : [],
+      },
       budget: { tokens: recallBudgetMax },
     });
     return {
@@ -153,6 +164,7 @@ describe("recall by meaning, through core", () => {
     await warnedOf(
       async () =>
         await recallAs(env, personId, {
+          personal: true,
           question: asked,
           budget: { tokens: recallBudgetMax },
         })
@@ -171,6 +183,9 @@ describe("recall by meaning, through core", () => {
       return;
     }
     ({ userId: personId } = await signedInWithRole(idp, "user"));
+    // In the shared store, which core's clock embeds: a person's own store
+    // does its own work (its alarm).
+    readers = await soleReadersOf(personId);
     for (const text of [english, dutch]) {
       const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
       sources.set(`${source.producer}:${source.id}`, source);
@@ -179,7 +194,7 @@ describe("recall by meaning, through core", () => {
         source,
         change: crypto.randomUUID(),
         text,
-        readers: { kind: "owner", personId },
+        readers,
       });
     }
     await embedEverything();
@@ -278,6 +293,7 @@ describe("recall by meaning, through core", () => {
     const { value, warned } = await warnedOf(
       async () =>
         await recallAs(env, personId, {
+          personal: true,
           question: withWords,
           budget: { tokens: recallBudgetMax },
           asOf: new Date(),

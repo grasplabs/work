@@ -9,6 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
+import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import {
@@ -24,18 +25,28 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { captureIdOf } from "../src/connection-capture-key.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { published } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import {
+  builder,
+  definitionOf,
+  ended,
+  published as publishedWorkflow,
+  start,
+} from "./workflow-resource-runs-harness.ts";
 
 // The marker test (GRA-1722): the gate every later Brain issue keeps
 // green. Unique marker words are planted in sources a reader may not
@@ -145,6 +156,30 @@ const findingsIn = (
   return [...markersIn(answers, forbidden), ...unlike, ...thin];
 };
 
+/**
+ * The surfaces that read what the Brain holds, as a member: those probed
+ * as a team-mate and an admin besides the full passes.
+ */
+const readingSurfaces = new Set([
+  "core recallAs",
+  "core readSourceVersionAs",
+  "core readInstructionFilesAs",
+  "core brainStaffReport",
+  "core listSourcesAs",
+  "core listVersionsAs",
+  "sources list",
+  "sources versions",
+  "sources read",
+  "sources search",
+  "store listSources",
+  "store listVersions",
+  "store recall",
+  "store find",
+  "store readVersion",
+  "store readCurrent",
+  "store searchVectors",
+]);
+
 /** The surfaces that recall, where no instruction file may ever show. */
 const recallSurfaces = new Set(["core recallAs", "store recall"]);
 
@@ -187,6 +222,36 @@ const findingsOf = async (
       found,
     })),
   ];
+};
+
+/**
+ * The names of the Brain's stores core addressed while `run` ran (the
+ * shared one, `brain`, and a person's own, `person:<id>`), and what it
+ * returned: through the binding itself, so no way core names a store
+ * goes unseen.
+ */
+const addressedBy = async <T>(
+  run: () => Promise<T>
+): Promise<{ value: T; names: string[] }> => {
+  const binding = env.BRAIN_STORE;
+  const byName = vi.spyOn(binding, "getByName");
+  const idsByName = vi.spyOn(binding, "idFromName");
+  const byId = vi.spyOn(binding, "get");
+  try {
+    const value = await run();
+    return {
+      value,
+      names: [
+        ...byName.mock.calls.map(([name]) => name),
+        ...idsByName.mock.calls.map(([name]) => name),
+        ...byId.mock.calls.map(([id]) => id.name ?? `id:${String(id)}`),
+      ],
+    };
+  } finally {
+    byName.mockRestore();
+    idsByName.mockRestore();
+    byId.mockRestore();
+  }
 };
 
 const join = async (teamId: string, userId: string): Promise<void> => {
@@ -250,6 +315,7 @@ const textsFor = async (
   question: string
 ): Promise<string[]> => {
   const { items } = await recallAs(env, personId, {
+    personal: true,
     question,
     budget: { tokens: recallBudgetMax },
   });
@@ -305,6 +371,7 @@ describe(
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
+        "a source narrowed to the holder alone": markerWord(),
         "the holder's instruction file": markerWord(),
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
@@ -316,6 +383,7 @@ describe(
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
         "a source narrowed away from the outsider": narrowedMarker,
+        "a source narrowed to the holder alone": toHolderMarker,
         "the holder's instruction file": holderFileMarker,
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
@@ -465,9 +533,10 @@ describe(
       const handbook = `The handbook for everyone who joins the team, ${sharedWord}`;
       await add(handbook, { kind: "team", teamId: ownTeam }, handbookId);
       // First for the outsider's own team, the marker in that version only;
-      // then narrowed to the holder. Its first version is neither the
-      // outsider's now (taken off) nor ever the holder's (not among its
-      // readers), though the holder reads the current one.
+      // then narrowed to a team of the holder alone. Its first version is neither
+      // the outsider's now (taken off) nor ever the holder's (not among its
+      // readers), though the holder reads the current one. A source keeps
+      // its kind of readers, so both versions are in the shared store.
       // Added two hours ago, by a clock faked in this isolate, which the
       // store shares: the final version, added now, comes an hour after
       // `whileDraft` whatever the machine's speed. As of then, the
@@ -487,10 +556,26 @@ describe(
         vi.useRealTimers();
       }
       const whileDraft = new Date(draftAt + hourMs);
+      const holdersTeam = await newTeam(holder);
       await add(
         `Final plan ${sharedWord}`,
-        { kind: "owner", personId: holder },
+        { kind: "team", teamId: holdersTeam },
         narrowedId
+      );
+      // First for the outsider's own team, then narrowed to the holder
+      // alone: refused, as a source keeps the readers it was first added
+      // for, so the version for the holder alone is kept nowhere.
+      const toHolder = await add("Shared plan for the quarter", {
+        kind: "team",
+        teamId: ownTeam,
+      });
+      const narrowedToHolder = await add(
+        `Plan for the holder ${sharedWord} ${toHolderMarker}`,
+        { kind: "owner", personId: holder },
+        toHolder
+      ).then(
+        () => "added",
+        () => "refused"
       );
 
       // The markers are there to find for those who may read them.
@@ -505,11 +590,13 @@ describe(
       const outsiderFinds = await textsFor(outsider, sharedWord);
       // The holder's own recall of it names its connection.
       const { elsewhere: holderElsewhere } = await recallAs(env, holder, {
+        personal: true,
         question: `supplier ${captureMarker}`,
         budget: { tokens: recallBudgetMax },
       });
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
+        personal: true,
         question: capId,
         budget: { tokens: recallBudgetMax },
       });
@@ -518,9 +605,23 @@ describe(
         found,
       }));
 
+      // Every store core addresses while anyone but the holder reads, or
+      // while the holder recalls as an App does: never the holder's own.
+      const addressed: string[] = [];
+      const watched = async (
+        ...args: Parameters<typeof findingsOf>
+      ): Promise<Finding[]> => {
+        const { value, names } = await addressedBy(
+          async () => await findingsOf(...args)
+        );
+        addressed.push(...names);
+        return value;
+      };
+
       const asOutsider = (groups: string[]): Probing => ({
         personId: outsider,
         reader: { person: outsider, groups: groups.map((id) => `team:${id}`) },
+        personal: true,
         sharedWord,
         markers: [
           ownerMarker,
@@ -528,6 +629,7 @@ describe(
           noneMarker,
           narrowedMarker,
           captureMarker,
+          toHolderMarker,
           ...instructionMarkers,
         ],
         hiddenVersions: everyVersionOf(
@@ -542,7 +644,7 @@ describe(
         instructionGroups,
         moments: [whileDraft],
       });
-      const first = await findingsOf(
+      const first = await watched(
         "the outsider",
         asOutsider([ownTeam]),
         markers,
@@ -555,7 +657,7 @@ describe(
       const joinedFinds = await textsFor(outsider, teamMarker);
       const { "a team's source the outsider isn't in": _joined, ...notJoined } =
         markers;
-      const inTheTeam = await findingsOf(
+      const inTheTeam = await watched(
         "the outsider, in the team",
         {
           ...asOutsider([ownTeam, secretTeam]),
@@ -564,6 +666,7 @@ describe(
             noneMarker,
             narrowedMarker,
             captureMarker,
+            toHolderMarker,
             ...instructionMarkers,
           ],
           hiddenVersions: everyVersionOf(
@@ -580,7 +683,7 @@ describe(
       // Leaving counts from the very next recall too.
       await leave(secretTeam, outsider);
       const leftFinds = await textsFor(outsider, teamMarker);
-      const outAgain = await findingsOf(
+      const outAgain = await watched(
         "the outsider, out of the team again",
         asOutsider([ownTeam]),
         markers,
@@ -594,7 +697,11 @@ describe(
         "the holder",
         {
           personId: holder,
-          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          reader: {
+            person: holder,
+            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
+          },
+          personal: true,
           sharedWord,
           markers: [noneMarker, narrowedMarker, agentFileMarker, appFileMarker],
           hiddenVersions: [
@@ -615,6 +722,90 @@ describe(
         },
         { inRecall }
       );
+      // Recalling as an App does (`personal: false`), the holder finds
+      // nothing of what is theirs alone: it is in their own store, which
+      // that recall never addresses.
+      const asApp = await watched(
+        "the holder, recalling as an App does",
+        {
+          personId: holder,
+          reader: {
+            person: holder,
+            groups: [`team:${secretTeam}`, `team:${holdersTeam}`],
+          },
+          personal: false,
+          sharedWord,
+          markers: [ownerMarker],
+          hiddenVersions: [],
+          hiddenInstructionFiles: [],
+          instructionGroups,
+          moments: [whileDraft],
+        },
+        { "the holder's own source": ownerMarker },
+        { among: surfaces.filter(([name]) => name === "core recallAs") }
+      );
+
+      // A team-mate of the holder's, and an admin, through every surface
+      // that reads: nothing of the holder's own reaches them.
+      const [{ userId: teamMate }, { userId: admin }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "admin"),
+      ]);
+      await join(secretTeam, teamMate);
+      const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
+      const { "a team's source the outsider isn't in": _team, ...notTeams } =
+        markers;
+      const asTeamMate = await watched(
+        "a team-mate of the holder's",
+        {
+          personId: teamMate,
+          reader: { person: teamMate, groups: [`team:${secretTeam}`] },
+          personal: true,
+          sharedWord,
+          markers: [
+            ownerMarker,
+            noneMarker,
+            narrowedMarker,
+            toHolderMarker,
+            ...instructionMarkers,
+          ],
+          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
+          instructionGroups,
+          moments: [whileDraft],
+        },
+        notTeams,
+        { among: reading, inRecall }
+      );
+      const asAdmin = await watched(
+        "an admin",
+        {
+          personId: admin,
+          reader: { person: admin, groups: [] },
+          personal: true,
+          sharedWord,
+          markers: [
+            ownerMarker,
+            teamMarker,
+            noneMarker,
+            narrowedMarker,
+            toHolderMarker,
+            ...instructionMarkers,
+          ],
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            teamId,
+            noneId,
+            narrowedId
+          ),
+          hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
+          instructionGroups,
+          moments: [whileDraft],
+        },
+        markers,
+        { among: reading, inRecall }
+      );
+
       // The holder builds the App, so its file is theirs to get.
       const holderAppFiles = await instructionFilesFor(
         env,
@@ -655,7 +846,18 @@ describe(
           ...inTheTeam,
           ...outAgain,
           ...asHolder,
+          ...asApp,
+          ...asTeamMate,
+          ...asAdmin,
           ...prompted,
+        ],
+        narrowedToHolder,
+        holdersStoreAddressed: addressed.includes(`person:${holder}`),
+        // The binding was watched: the shared store and the outsider's own
+        // were addressed through it.
+        othersAddressed: [
+          addressed.includes("brain"),
+          addressed.includes(`person:${outsider}`),
         ],
         outsiderFinds,
         holderElsewhere,
@@ -666,6 +868,9 @@ describe(
         outsiderOpens,
       }).toStrictEqual({
         findings: [],
+        narrowedToHolder: "refused",
+        holdersStoreAddressed: false,
+        othersAddressed: [true, true],
         outsiderFinds: [handbook],
         holderElsewhere: [captureConnection],
         cappedFinds: [{ text: capped, found: "exact" }],
@@ -712,6 +917,7 @@ describe(
             {
               personId,
               reader: { person: personId, groups: [] },
+              personal: true,
               sharedWord: `s${unique()}`,
               markers: [marker],
               hiddenVersions: [],
@@ -793,12 +999,35 @@ describe(
 
       // A chat and an upload deleted for good, a run past its retention,
       // the team's source deleted, and then the holder erased.
-      await eraseSource(env, { source: chat, reason: "deleted" });
-      await eraseSource(env, { source: upload, reason: "deleted" });
-      await eraseSource(env, { source: run, reason: "retention" });
-      await eraseSource(env, { source: teamSource, reason: "deleted" });
+      const teamReaders: SourceReaders = { kind: "team", teamId: team };
+      await eraseSource(env, {
+        source: chat,
+        readers: holders,
+        reason: "deleted",
+      });
+      await eraseSource(env, {
+        source: upload,
+        readers: holders,
+        reason: "deleted",
+      });
+      await eraseSource(env, {
+        source: run,
+        readers: holders,
+        reason: "retention",
+      });
+      await eraseSource(env, {
+        source: teamSource,
+        readers: teamReaders,
+        reason: "deleted",
+      });
+      // Their own store answers that it is still deleting until an add
+      // under way could have written its file: as if that time had passed.
+      await Promise.allSettled([
+        erasePerson(env, { personId: holder, reason: "person_erased" }),
+      ]);
+      await ageOwnErasure(holder);
       await erasePerson(env, { personId: holder, reason: "person_erased" });
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       await restoreStore(backup);
 
       const erased = [own, teamSource, upload, chat, run].flatMap((source) =>
@@ -810,6 +1039,7 @@ describe(
       ): Probing => ({
         personId,
         reader: { person: personId, groups: [`team:${team}`] },
+        personal: true,
         sharedWord,
         markers: Object.values(markers),
         hiddenVersions: erased,
@@ -844,6 +1074,60 @@ describe(
         findings: [],
         prompted: [],
       });
+    });
+
+    it("gives away nothing core's producers handed over to whoever the producer would not let read it", async () => {
+      await answeringProvider(() => {});
+      // Planted through each producer, as core hands them over: a run that
+      // ended for the person it acted for. Then core's surfaces are probed
+      // as the outsider and as an admin, neither of whom reads it.
+      const [otherAdmin, { userId: outsider }, runner] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInWithRole(idp, "user"),
+        builder(),
+      ]);
+      const sharedWord = `s${unique()}`;
+      const markers = { "a run of someone else": markerWord() };
+      const { "a run of someone else": runMarker } = markers;
+      const workflow = await publishedWorkflow(
+        runner,
+        definitionOf([], { value: { status: `${sharedWord} ${runMarker}` } })
+      );
+      const { runId } = await start(runner, workflow.id);
+      await ended(runner, workflow.id, runId);
+      await drainAuditOutboxes(env);
+      await relayHandOvers(env);
+      await workBrain(env, new Date(), producersOf(env));
+
+      const probing = (personId: string): Probing => ({
+        personId,
+        reader: { person: personId, groups: [] },
+        personal: true,
+        sharedWord,
+        markers: Object.values(markers),
+        hiddenVersions: everyVersionOf({ producer: "run", id: runId ?? "" }),
+        hiddenInstructionFiles: [],
+        instructionGroups: [],
+      });
+      const among = surfaces.filter(([name]) => name.startsWith("core "));
+      const findings = [
+        ...(await findingsOf("the outsider", probing(outsider), markers, {
+          among,
+        })),
+        ...(await findingsOf(
+          "an admin who doesn't read it",
+          probing(otherAdmin.userId),
+          markers,
+          { among }
+        )),
+      ];
+      const runnerFinds = await textsFor(runner.userId, runMarker);
+
+      expect({
+        findings,
+        // The runner does find theirs.
+        runner: runnerFinds.length,
+      }).toStrictEqual({ findings: [], runner: 1 });
     });
   }
 );
