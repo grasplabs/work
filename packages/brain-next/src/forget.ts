@@ -38,24 +38,33 @@ const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
     "DELETE FROM memories WHERE row IN (SELECT value FROM json_each(?))",
     listed
   );
-  sql.exec(
-    `DELETE FROM entities WHERE row IN (SELECT value FROM json_each(?))
-    AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = entities.row)
-    AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = entities.row)`,
-    JSON.stringify(touched.flatMap(({ entity }) => entity ?? []))
+  // An entity others were merged into stays while it stands for them;
+  // one merged into another leaves its merge with it.
+  const orphans = `SELECT touched.value FROM json_each(?1) AS touched
+    WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
+      AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
+      AND NOT EXISTS (
+        SELECT 1 FROM entity_merges WHERE entity_merges.into_entity = touched.value
+      )`;
+  const affected = JSON.stringify(
+    touched.flatMap(({ entity }) => entity ?? [])
   );
+  sql.exec(`DELETE FROM entity_merges WHERE merged IN (${orphans})`, affected);
+  sql.exec(`DELETE FROM entities WHERE row IN (${orphans})`, affected);
   return [...new Set(touched.map(({ reader_set: readerSet }) => readerSet))];
 };
 
 /**
- * Deletes the memories resting on the version at `versionRow`, as the
- * version is deleted: answers their sets of readers.
+ * Deletes the memories resting on the version at `versionRow`, and its
+ * mark of being fully extracted, as the version is deleted: answers the
+ * memories' sets of readers.
  */
 export const eraseMemoriesOn = (
   sql: SqlStorage,
   versionRow: number
-): number[] =>
-  deleteMemories(
+): number[] => {
+  sql.exec("DELETE FROM memory_extractions WHERE version_row = ?", versionRow);
+  return deleteMemories(
     sql,
     sql
       .exec<{ row: number }>(
@@ -65,6 +74,7 @@ export const eraseMemoriesOn = (
       .toArray()
       .map(({ row }) => row)
   );
+};
 
 /**
  * Deletes the memories only the person the ledger names `subject` may

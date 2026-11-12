@@ -394,6 +394,11 @@ export const wordIndex = sqliteTable(
     target: integer().notNull(),
     /** The last chunk (`chunks.row`) the rebuild rewrote: 0 before the first. */
     cursor: integer().notNull(),
+    /**
+     * The last memory (`memories.row`) the rebuild rewrote, once past the
+     * last chunk: 0 before the first. Added by migration 0008.
+     */
+    memoryCursor: integer("memory_cursor").notNull().default(0),
   },
   () => [check("word_index_one", sql.raw("id = 1"))]
 );
@@ -591,6 +596,24 @@ export const entities = sqliteTable(
 );
 
 /**
+ * An entity merged into another (`into`, never itself merged): every
+ * statement reads the two as one, under `into`, so no memory is ever
+ * re-pointed. Written by the linker (GRA-1740); none yet.
+ */
+export const entityMerges = sqliteTable(
+  "entity_merges",
+  {
+    merged: integer()
+      .primaryKey()
+      .references(() => entities.row),
+    into: integer("into_entity")
+      .notNull()
+      .references(() => entities.row),
+  },
+  (table) => [index("entity_merges_into_idx").on(table.into)]
+);
+
+/**
  * A memory (contract.ts `Memory`). Its lineage is the source it rests on
  * (`source:` and the source's key) or its writer (`writer:` and their
  * id); `lineage_order` orders a lineage's memories, the version number
@@ -616,7 +639,12 @@ export const memories = sqliteTable(
     type: text().notNull(),
     statement: text().notNull(),
     quote: text(),
-    versionRow: integer("version_row").references(() => sourceVersions.row),
+    // No foreign key to the version, nor below to the set of readers: a
+    // release before memories deletes both without knowing of them (an
+    // admin's rollback), and must never abort on it. The store's own code
+    // deletes a memory with its version and keeps a set while one points
+    // at it (erasure.ts).
+    versionRow: integer("version_row"),
     writer: text(),
     lineage: text().notNull(),
     lineageOrder: integer("lineage_order").notNull(),
@@ -626,9 +654,7 @@ export const memories = sqliteTable(
     validUntil: integer("valid_until"),
     learnedAt: integer("learned_at").notNull(),
     retiredAt: integer("retired_at"),
-    readerSet: integer("reader_set")
-      .notNull()
-      .references(() => readerSets.id),
+    readerSet: integer("reader_set").notNull(),
     onlyFor: text("only_for"),
   },
   (table) => [
@@ -704,6 +730,24 @@ export const memoryConfirmedOver = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.confirmation, table.memory] }),
     index("memory_confirmed_over_memory_idx").on(table.memory),
+  ]
+);
+
+/**
+ * A version of a source fully extracted (contract.ts `extracted`): every
+ * memory of its source's lineage from an earlier version ends at `at`,
+ * for readers who may read this version. Deleted with the version.
+ */
+export const memoryExtractions = sqliteTable(
+  "memory_extractions",
+  {
+    versionRow: integer("version_row").primaryKey(),
+    lineage: text().notNull(),
+    version: integer().notNull(),
+    at: integer().notNull(),
+  },
+  (table) => [
+    index("memory_extractions_lineage_idx").on(table.lineage, table.version),
   ]
 );
 

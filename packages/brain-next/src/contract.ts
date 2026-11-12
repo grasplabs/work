@@ -1426,13 +1426,32 @@ export type NewMemory = z.infer<typeof newMemorySchema>;
  * model that drew them saw), under a change key: the same key again
  * answers what it added, whatever was added since, and is refused with
  * other memories. Every entity is mentioned by at least one memory.
+ *
+ * `extracted` says a version of a source is fully extracted: every memory
+ * drawn from an earlier version of that source ends then, as a newer
+ * memory of its lineage ends it, for readers who may read that version
+ * (it must be one this store holds). With it, `memories` may be empty.
+ *
+ * `reader` is who the add is made for, as the host resolved them: given,
+ * an entity's `id` is taken only if they may see it; without it, only if
+ * a memory with exactly `access`'s readers mentions it. Either way an id
+ * that fails is refused in the words of an unknown one.
  */
-export const newMemoriesSchema = z.strictObject({
-  change: changeKeySchema,
-  access: accessSchema,
-  entities: z.array(newEntitySchema).min(1).max(memoriesPerAddMax),
-  memories: z.array(newMemorySchema).min(1).max(memoriesPerAddMax),
-});
+export const newMemoriesSchema = z
+  .strictObject({
+    change: changeKeySchema,
+    access: accessSchema,
+    entities: z.array(newEntitySchema).max(memoriesPerAddMax),
+    memories: z.array(newMemorySchema).max(memoriesPerAddMax),
+    extracted: z
+      .strictObject({ source: sourceIdSchema, version: versionSchema })
+      .optional(),
+    reader: readerSchema.optional(),
+  })
+  .refine(
+    ({ memories, extracted }) => memories.length > 0 || extracted !== undefined,
+    { message: "Adds no memory and marks no extraction", path: ["memories"] }
+  );
 export type NewMemories = z.input<typeof newMemoriesSchema>;
 
 /** What an add made: each memory's id in the order given, and each entity's id by its key. */
@@ -1514,10 +1533,11 @@ export interface ContestedFact {
   memories: Memory[];
 }
 
-/** One of a writer's own memories to retire. */
+/** One of a writer's own memories to retire, for a reader who may read it. */
 export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
   writer: principalSchema,
+  reader: readerSchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
 
@@ -1750,8 +1770,9 @@ export interface Brain {
   erasePerson: (request: PersonErasure) => Promise<void>;
   /**
    * Adds memories and the entities they name, in one transaction, all
-   * readable by `access` (above). Each entity is the known `id`, else the
-   * first of its kind holding one of its identifiers, else new. Each
+   * readable by `access` (above). Each entity is the known `id` (as
+   * `reader` may see it), else the first of its kind holding one of its
+   * identifiers by a memory with exactly `access`'s readers, else new. Each
    * memory of a one-value attribute ends the current one of its lineage
    * about the same entity and attribute (a source's: one from an earlier
    * version, or the same; a writer's: one added before); one from an
@@ -1774,16 +1795,18 @@ export interface Brain {
   listContested: (request: ContestedRequest) => Promise<ContestedFact[]>;
   /**
    * Retires one of the writer's own memories (its lineage is that
-   * writer): it stops being current from now on, and stays as history.
-   * Nothing else changes: a memory it had ended stays ended.
+   * writer) that the reader may read: it stops being current from now on,
+   * and stays as history. Nothing else changes: a memory it had ended
+   * stays ended.
    */
   retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
   /**
    * The reader confirms a current memory they may read, over the current
    * memories of other lineages they may read that say something else of
    * the same entity and attribute: recorded as the reader's own word,
-   * read first among them from then on, and seen only by readers who can
-   * read the memory and each one it was confirmed over.
+   * and read first among them by a reader who may read the memory and
+   * each one it was confirmed over, and no current rival besides. A
+   * repeat by the same person over the same rivals records nothing new.
    */
   confirmMemory: (request: ConfirmRequest) => Promise<MemoryChangeOutcome>;
   /**

@@ -2173,6 +2173,8 @@ const memoryFixture = async ({
   const ended = await store().addMemories({
     change: crypto.randomUUID(),
     access: { kind: "audience", group },
+    // Made for someone who sees the reader's entity and is in the group.
+    reader: { person: reader.person, groups: [group] },
     entities: [{ key: "c", id: seenId, kind: "customer", names: [text] }],
     memories: [
       memory(
@@ -2344,7 +2346,12 @@ const memoryProbes = {
     ) =>
       await answer(
         name,
-        async () => await store().retireMemory({ memory, writer }),
+        async () =>
+          await store().retireMemory({
+            memory,
+            writer,
+            reader: probing.reader,
+          }),
         about
       );
     return [
