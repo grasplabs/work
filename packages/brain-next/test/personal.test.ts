@@ -496,6 +496,24 @@ describe("a person's own store", () => {
   });
 
   // Threat 1: content anyone else may read never goes in.
+  // A key lives in one store: the host asks the shared one before it
+  // keeps a source in a person's own.
+  it("says, for the host, whether it was given a key, an erased one included, and nothing more", async () => {
+    const group: Access = {
+      kind: "audience",
+      group: `team:${crypto.randomUUID()}`,
+    };
+    const kept = await add(shared(), "Kept for a team", group);
+    const erased = await add(shared(), "Erased for a team", group);
+    await shared().eraseSource({ source: erased.source, reason: "deleted" });
+
+    expect({
+      kept: await called(shared().holdsSource(kept.source)),
+      erased: await called(shared().holdsSource(erased.source)),
+      never: await called(shared().holdsSource(`test:${crypto.randomUUID()}`)),
+    }).toStrictEqual({ kept: true, erased: true, never: false });
+  });
+
   it("keeps nothing anyone but its person may read", async () => {
     const refused = /keeps only what its person alone may read/u;
     const others: Access[] = [
