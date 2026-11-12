@@ -18,13 +18,15 @@ import { loadFromCore } from "../load-from-core.tsx";
 
 /** What an admin reads of every agent: its reach, its classes and its wake-ups. */
 export const readManaged = async (session: Session): Promise<ManagedAgents> => {
-  const [agents, reach] = await Promise.all([
-    session.connections.agents(),
-    session.connections.stephenReach(),
-  ]);
   // What each used this month: none when core won't say, and the pages
-  // then show the agents without it.
-  const [used] = await Promise.allSettled([session.connections.agentsUsage()]);
+  // then show the agents without it. Read beside the agents, not after.
+  const [[agents, reach], [used]] = await Promise.all([
+    Promise.all([
+      session.connections.agents(),
+      session.connections.stephenReach(),
+    ]),
+    Promise.allSettled([session.connections.agentsUsage()]),
+  ]);
   // Each other agent's reach and classes: none for one core won't say
   // them of, as it won't for Grasp's staff.
   const read = await Promise.allSettled(
