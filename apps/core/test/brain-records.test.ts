@@ -586,7 +586,6 @@ describe(
       const read = await member.api.brain.read();
 
       expect({
-        planned: plan.hostCopies,
         stillFound,
         again,
         source: read.sources.find(({ id }) => id === ids.source)?.title,
@@ -599,7 +598,6 @@ describe(
           .toSorted((a, b) => a.localeCompare(b)),
         inAudit: JSON.stringify(events).includes(name),
       }).toStrictEqual({
-        planned: 3,
         stillFound: 0,
         again: { added: 0, unchanged: 3 },
         source: `Interview with ${purgedMarker}`,
@@ -629,7 +627,7 @@ describe(
       });
     });
 
-    it("report a record added after the purge read them, which a run again rewrites", async () => {
+    it("leave a record added after the purge read them to a run again, which rewrites it", async () => {
       const admin = await signedInApi(idp, "admin");
       const tag = unique();
       const name = `Visser${tag}`;
@@ -670,28 +668,22 @@ describe(
       const racing = await core.authenticate();
 
       const first = await purgeOf(admin, [name]);
-      const raced = await racing.knowledge.purge(first.input, first.plan.token);
+      await racing.knowledge.purge(first.input, first.plan.token);
+      const raced = await admin.api.brain.read();
       const second = await purgeOf(admin, [name]);
-      const again = await admin.api.knowledge.purge(
-        second.input,
-        second.plan.token
-      );
+      await admin.api.knowledge.purge(second.input, second.plan.token);
       const read = await admin.api.brain.read();
 
       expect({
-        raced: raced.stillFound,
-        planned: second.plan.hostCopies,
-        again: again.stillFound,
+        raced: raced.statements.find(({ id }) => id === late.id)?.text,
         late: read.statements.find(({ id }) => id === late.id)?.text,
       }).toStrictEqual({
-        raced: 1,
-        planned: 1,
-        again: 0,
+        raced: `${name} wants the numbers sooner.`,
         late: `${purgedMarker} wants the numbers sooner.`,
       });
     });
 
-    it("count a form the purge leaves on purpose, as the index would find it, in its plan and its check", async () => {
+    it("keep a form the purge leaves on purpose, and its check counts only the documents named", async () => {
       const admin = await signedInApi(idp, "admin");
       const tag = unique();
       const { ids, records } = naming(tag, `Rene${tag}`);
@@ -702,12 +694,10 @@ describe(
       const read = await admin.api.brain.read();
 
       expect({
-        planned: plan.hostCopies,
         stillFound: result.stillFound,
         statement: read.statements.find(({ id }) => id === ids.statement)?.text,
       }).toStrictEqual({
-        planned: 3,
-        stillFound: 3,
+        stillFound: 0,
         statement: `Rene${tag} types invoices over by hand.`,
       });
     });

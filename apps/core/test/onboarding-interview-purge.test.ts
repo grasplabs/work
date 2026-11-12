@@ -15,7 +15,6 @@ import {
   drawingErasure,
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
-import { staffTextErasure } from "../src/onboarding/staff-text-erasure.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
@@ -570,7 +569,7 @@ describe("a purge of terms in staff's own text", () => {
     });
   });
 
-  it("counts in Stephen's setup only the lines a purge rewrites, never his language codes", async () => {
+  it("rewrites in Stephen's setup only the lines a purge reaches, never his language codes", async () => {
     const store = onboardingStore(env);
     await store.saveStephen(
       {
@@ -580,14 +579,18 @@ describe("a purge of terms in staff's own text", () => {
       },
       { type: "system" }
     );
-    const erasure = staffTextErasure(env);
 
-    expect({
-      // A term spelled as a language code: the setup holds it nowhere a
-      // purge rewrites, so nothing is left of it there.
-      code: await erasure.count((text) => text === "nl"),
-      line: await erasure.count((text) => text === "Salesforce"),
-    }).toStrictEqual({ code: 0, line: 1 });
+    // A term spelled as a language code: the setup holds it nowhere a
+    // purge rewrites, so the code stays.
+    await purgeTerm("nl");
+    await purgeTerm("Salesforce");
+    const kept = await store.stephen();
+
+    expect(kept.setup).toStrictEqual({
+      languages: ["nl"],
+      limits: ["De plannen van de directie"],
+      terms: [purgedMarker],
+    });
   });
 
   it("leaves Stephen's setup alone when none of a purge's terms are in it", async () => {

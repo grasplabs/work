@@ -82,13 +82,9 @@ const textsOf = (said: { setup: string | null }): string[] =>
 /** Stephen's setup, as a purge of terms reaches it. */
 export const staffTextErasure = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
-): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => {
+): Pick<OnErase, "rewrite" | "forgetActor"> => {
   const store = onboardingStore(env);
   return {
-    count: async (holds) => {
-      const said = await store.staffTextsSaid();
-      return said.setup !== null && setupTexts(said.setup).some(holds) ? 1 : 0;
-    },
     rewrite: async (by, rewrite) => {
       const actor = auditActorSchema.parse(by.actor);
       for (let attempt = 0; attempt < rewriteAttempts; attempt += 1) {

@@ -175,8 +175,6 @@ describe("a purge of content", setUpTime, () => {
             versions: 4,
             occurrences: 8,
             inLongerWords: 0,
-            memories: 0,
-            hostCopies: 0,
           },
         },
         {

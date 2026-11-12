@@ -84,9 +84,14 @@ type Stage =
   | { at: "plan"; input: PurgeInput; plan: PurgePlan }
   | { at: "done"; result: PurgeResult };
 
-/** What the plan says the purge would remove, as counts. */
+/**
+ * What the plan says the purge would remove, as counts: of the documents
+ * named, and a person's own memory records for a personal purge. A
+ * content purge also cleans everyone's memory records and Grasp's copies
+ * of people's words, but counts none of them.
+ */
 const PlanCounts = ({
-  plan: { documents, versions, occurrences, memories, hostCopies, originals },
+  plan: { documents, versions, occurrences, memories, originals },
 }: {
   plan: PurgePlan;
 }) => (
@@ -112,20 +117,15 @@ const PlanCounts = ({
         value={occurrences}
       />
     </li>
-    <li>
-      <Plural
-        one="# memory record redacted or deleted"
-        other="# memory records redacted or deleted"
-        value={memories}
-      />
-    </li>
-    <li>
-      <Plural
-        one="# copy outside Knowledge cleaned"
-        other="# copies outside Knowledge cleaned"
-        value={hostCopies}
-      />
-    </li>
+    {memories === undefined ? null : (
+      <li>
+        <Plural
+          one="# memory record redacted or deleted"
+          other="# memory records redacted or deleted"
+          value={memories}
+        />
+      </li>
+    )}
     <li>
       <Plural
         one="# uploaded original deleted"
@@ -224,7 +224,13 @@ const PurgeForm = ({
 };
 
 /** The plan, to confirm before it expires. */
-const PlanView = ({ plan }: { plan: PurgePlan }) => {
+const PlanView = ({
+  plan,
+  kind,
+}: {
+  plan: PurgePlan;
+  kind: PurgeInput["type"];
+}) => {
   const until = formatDateTime(plan.expiresAt);
   const longer = plan.inLongerWords;
   return (
@@ -247,6 +253,18 @@ const PlanView = ({ plan }: { plan: PurgePlan }) => {
             </Trans>
           </AlertDescription>
         </Alert>
+      ) : null}
+      {kind === "content" ? (
+        // A content purge's widest effect, said without a number: how many
+        // of those hold a term is never counted (it would say what
+        // someone's private records hold).
+        <p className="text-sm">
+          <Trans>
+            The terms also go from everyone&apos;s memory records, interviews
+            and answers. How many of those hold them isn&apos;t counted or
+            shown.
+          </Trans>
+        </p>
       ) : null}
       <p className="text-muted-foreground text-sm">
         <Trans>
@@ -375,7 +393,9 @@ const PurgeFlow = ({
           terms={terms}
         />
       ) : null}
-      {stage.at === "plan" ? <PlanView plan={stage.plan} /> : null}
+      {stage.at === "plan" ? (
+        <PlanView plan={stage.plan} kind={stage.input.type} />
+      ) : null}
       {stage.at === "done" ? <ResultView result={stage.result} /> : null}
       <ErrorText>{failure}</ErrorText>
       <DialogFooter>

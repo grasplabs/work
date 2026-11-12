@@ -577,10 +577,6 @@ msgstr "{hidden, plural, one {Nog # tonen} other {Nog # tonen}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} op {resource}"
 
-#: src/knowledge/purge.tsx
-msgid "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
-msgstr "{hostCopies, plural, one {# kopie buiten Kennis opgeschoond} other {# kopieën buiten Kennis opgeschoond}}"
-
 #: src/brain/thinking/use-thinking.ts
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
 msgstr "{hours, plural, one {# uur per week in alles wat Grasp kan tellen} other {# uur per week in alles wat Grasp kan tellen}}"
@@ -13508,6 +13504,10 @@ msgstr "het team in {field}"
 #: src/apps/access-view.tsx
 msgid "The team in {field}"
 msgstr "Het team in {field}"
+
+#: src/knowledge/purge.tsx
+msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
+msgstr "De termen verdwijnen ook uit ieders herinneringen, interviews en antwoorden. Hoeveel daarvan ze bevatten, wordt niet geteld of getoond."
 
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"

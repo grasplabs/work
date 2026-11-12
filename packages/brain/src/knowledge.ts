@@ -589,19 +589,13 @@ export interface PurgePlan {
    */
   inLongerWords: number;
   /**
-   * The Brain's memory records it reaches: the person's own, deleted
-   * (`personal`), or everyone's whose statement holds a term, whatever
-   * documents are named (`content`), each redacted, or deleted when no
-   * word of it is left but the markers.
+   * The person's own memory records it deletes (`personal` only). A
+   * content purge redacts everyone's records holding a term, and the
+   * host's copies of people's words, whatever documents are named, but
+   * counts none of them: how many hold a term would say what someone's
+   * private records or interviews hold.
    */
-  memories: number;
-  /**
-   * Copies the host keeps outside Knowledge a term is removed from
-   * (`content`; core's: the brain's gap answers), every one holding a
-   * term, whatever documents are named. Always 0 for `personal`, which
-   * forgets the person as their author instead.
-   */
-  hostCopies: number;
+  memories?: number;
   /**
    * Originals of uploaded files it deletes (and the uploads it forgets):
    * those of the collection (`personal`), or every one uploaded as a
@@ -627,10 +621,9 @@ export interface PurgeResult {
    * index matches by the same tokens, an address or a domain inside a
    * longer one (which the plan counted, `inLongerWords`), a form spelled
    * otherwise that folds to the same ("Rene" for "René"), or a term of
-   * several words joined otherwise ("tom-visser" for "tom visser").
-   * Memory records and gap answers still holding a term count too: one
-   * remembered or given after the purge read them, left to a purge
-   * again. Absent for `personal`.
+   * several words joined otherwise ("tom-visser" for "tom visser"), and
+   * their transcripts still holding one. Only the documents named: never
+   * memory records or the host's copies. Absent for `personal`.
    */
   stillFound?: number;
 }

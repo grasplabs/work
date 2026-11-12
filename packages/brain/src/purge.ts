@@ -41,12 +41,7 @@ import {
 } from "./knowledge.ts";
 import type { PurgePlan, PurgeResult, PurgeStatus } from "./knowledge.ts";
 import { log } from "./log.ts";
-import {
-  countStatements,
-  eraseStatements,
-  forgetPerson,
-  personCounts,
-} from "./memories.ts";
+import { eraseStatements, forgetPerson, personCounts } from "./memories.ts";
 import {
   collectPayloads,
   commitPayload,
@@ -127,23 +122,23 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // whatever documents it names (memories.ts, `eraseStatements`): each
 // statement holding a term is redacted as text is, and deleted when no
 // word is left of it but the markers (`erasedStatement`), matched
-// decomposed (NFD) as text is. Its plan counts them (`memories`), each change is
-// audited, and its check counts one still holding a term with the
-// documents a term still finds (`stillFound`): remembered after the purge
-// read it, or a form it leaves on purpose, as the index would find it
-// (`foldedHolds`: "Rene" for "René", "tom-visser" for "tom visser").
+// decomposed (NFD) as text is. Each change is audited. Neither its plan,
+// its check (`stillFound`), its step's record nor its audit event counts
+// them: a count of the records holding a term, a term (a name with a fact)
+// at a time, would say what someone's private records hold. One
+// remembered after the purge read it, or holding a form it leaves on
+// purpose (`foldedHolds`: "Rene" for "René"), is left, as it would be
+// after any purge.
 //
 // Both reach the copies of people's words the host keeps outside
 // Knowledge too, through its `OnErase` hook (core's: the brain's gap
-// answers and records, and the onboarding's readings of the documents
-// shared in it), so Knowledge names none of them: a personal purge forgets
-// the person as the author of any, a content purge rewrites every one
-// holding a term, whatever documents it names, and forgets every copy made
-// of a document it names, whatever it holds, before its documents. Its plan
-// counts the copies holding a term (`hostCopies`), and its check counts one
-// still holding one (written after the rewrite read it, or a form it leaves
-// on purpose, as a memory statement's) with the documents a term still
-// finds (`stillFound`).
+// answers and records, the interviews and what was drawn from them, and
+// the onboarding's readings of the documents shared in it), so Knowledge
+// names none of them: a personal purge forgets the person as the author of
+// any, a content purge rewrites every one holding a term, whatever
+// documents it names, and forgets every copy made of a document it names,
+// whatever it holds, before its documents. Nothing counts those either, for
+// the same reason: interviews are the company's to see only in groups.
 //
 // Both have the host forget the files it keeps as the documents they
 // purge (`OnErase` `forgetFiles`; core's: the originals of uploaded files,
@@ -258,8 +253,6 @@ export type ErasedFiles =
  * it (onboarding/documents.ts).
  */
 export interface OnErase {
-  /** How many copies `holds` is true of: those holding a purged term. */
-  count: (holds: (text: string) => boolean) => Promise<number>;
   /**
    * Rewrites every copy with `rewrite` (a content purge's: its terms
    * replaced), as `person`; a copy it leaves as it is isn't written.
@@ -444,7 +437,18 @@ const personalSteps = [
 const documentStep = (documentId: string): string =>
   `${documentStepPrefix}${documentId}`;
 
-/** The steps of a content purge of `documentIds`, in the order it runs them. */
+/**
+ * The steps of a content purge of `documentIds`, in the order it runs them:
+ * people's memory records and the host's copies first, so a document whose
+ * purge then fails doesn't leave them holding a term. What is written to
+ * them after their step ran (a record remembered, an answer given, an
+ * interview said while the purge runs) isn't covered, as nothing written
+ * to a document after a purge completed is: the purge's check counts only
+ * the documents named (`stillFound`), never those, and running the purge
+ * again erases it. Their steps stay first: run last, they would narrow
+ * that window, but leave everyone's records holding a term whenever a
+ * document's purge fails, which is the more likely of the two.
+ */
 const contentSteps = (documentIds: readonly string[]): string[] => [
   "statements",
   "host_copies",
@@ -2032,20 +2036,17 @@ const purgeContent = async <C>(
     // The Brain's records hold people's words too, everyone's, whatever
     // documents the purge names: before its documents, so one whose purge
     // fails doesn't leave them holding a term.
-    await runStep(
-      brain,
-      held,
-      "statements",
-      async (save) =>
-        await eraseStatements(
-          brain,
-          by.actor,
-          purgeId,
-          (statement) => erasedStatement(statement, matcher),
-          () => heldNow(brain, held),
-          (soFar) => [save(soFar)]
-        )
-    );
+    // The step keeps no count of them: how many records a term was in
+    // says what people's private records held (`purgeStatus`).
+    await runStep(brain, held, "statements", async () => {
+      await eraseStatements(
+        brain,
+        by.actor,
+        purgeId,
+        (statement) => erasedStatement(statement, matcher),
+        () => heldNow(brain, held)
+      );
+    });
     // The host's copies hold people's words too: every one is rewritten,
     // whatever documents the purge names. First, so a document whose
     // purge fails doesn't leave them holding a term.
@@ -2167,27 +2168,21 @@ const purgeContent = async <C>(
     input.terms,
     named.map(({ document }) => document.id)
   );
-  // A record or copy written after the purge read it is left to a purge
-  // again.
-  const memories = await countStatements(
-    brain,
-    statementHolds(input.terms, matcher)
-  );
-  const hostCopies = await onErase.count(statementHolds(input.terms, matcher));
   // A transcript saved after the purge read it, or a form it leaves on
-  // purpose, as a memory statement's.
+  // purpose, as the index would find it (`statementHolds`).
   const inTranscripts = await transcriptsHolding(
     db,
     named.map(({ document }) => document.id),
     statementHolds(input.terms, matcher)
   );
-  const stillFound = inDocuments + memories + hostCopies + inTranscripts;
+  // Only of the documents named, which the admin may name: never of
+  // people's memory records or the host's copies of their words, whose
+  // count, a term at a time, would say what someone's private records hold.
+  const stillFound = inDocuments + inTranscripts;
   if (stillFound > 0) {
     log.warn("knowledge.purge_still_found", {
       purgeId,
       documents: inDocuments,
-      memories,
-      hostCopies,
       transcripts: inTranscripts,
     });
   }
@@ -2222,8 +2217,9 @@ export const preparePurge = async <C>(
   // A personal purge deletes whole documents: nothing is left in a word.
   let removed = 0;
   let left = 0;
-  let hostCopies = 0;
-  let records: { memories: number; receipts?: number };
+  // The named person's own records, a personal purge's evidence; a
+  // content purge counts none (see below).
+  let records: { memories?: number; receipts?: number } = {};
   if (parsed.type === "personal") {
     ({ counts, ...scope } = await personalScope(db, parsed, onErase));
     records = await personCounts(db, parsed.userId);
@@ -2243,6 +2239,11 @@ export const preparePurge = async <C>(
     );
     scope = { documentIds: named.map(({ document }) => document.id) };
     const matcher = matcherOf(parsed.terms, { countLeft: true });
+    // Only what the documents named hold: never everyone's memory records
+    // or the host's copies, which the purge erases too. Counting those, a
+    // term (a passage, a name with a fact) at a time, would say what is in
+    // someone's private records and interviews; nor are they read here at
+    // all, so how long this takes doesn't say it either.
     ({ counts, removed, left } = await contentCounts(
       brain,
       db,
@@ -2250,13 +2251,6 @@ export const preparePurge = async <C>(
       matcher,
       onErase
     ));
-    records = {
-      memories: await countStatements(
-        brain,
-        statementHolds(parsed.terms, matcher)
-      ),
-    };
-    hostCopies = await onErase.count(statementHolds(parsed.terms, matcher));
   }
   await auditedBatch(brain.ports, db, [
     outboxed(
@@ -2264,7 +2258,7 @@ export const preparePurge = async <C>(
       purgeEntry(by, "knowledge.purge.prepared", parsed, scope, {
         ...counts,
         ...(parsed.type === "content"
-          ? { occurrences: removed, inLongerWords: left, hostCopies }
+          ? { occurrences: removed, inLongerWords: left }
           : {}),
         ...records,
       })
@@ -2274,8 +2268,7 @@ export const preparePurge = async <C>(
     ...counts,
     occurrences: removed,
     inLongerWords: left,
-    memories: records.memories,
-    hostCopies,
+    ...(records.memories === undefined ? {} : { memories: records.memories }),
     originals,
     ...(await tokenFor(brain, by, parsed)),
   };

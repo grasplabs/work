@@ -126,18 +126,10 @@ import { brainOf } from "./ports.ts";
 import { uploadErasure } from "./uploads.ts";
 
 /** The copies of people's words in core's own tables, as `OnErase` reaches them. */
-type Copies = Pick<OnErase, "count" | "rewrite" | "forgetActor">;
+type Copies = Pick<OnErase, "rewrite" | "forgetActor">;
 
-/** `copies` as one: each counted, rewritten and forgotten in turn. */
+/** `copies` as one: each rewritten and forgotten in turn. */
 const allOf = (copies: readonly Copies[]): Copies => ({
-  count: async (holds) => {
-    let total = 0;
-    for (const each of copies) {
-      // oxlint-disable-next-line no-await-in-loop -- one table after another
-      total += await each.count(holds);
-    }
-    return total;
-  },
   rewrite: async (by, rewrite, between) => {
     for (const [index, each] of copies.entries()) {
       if (index > 0) {

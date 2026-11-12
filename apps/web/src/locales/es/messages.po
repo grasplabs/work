@@ -577,10 +577,6 @@ msgstr "{hidden, plural, one {Mostrar # más} other {Mostrar # más}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} sobre {resource}"
 
-#: src/knowledge/purge.tsx
-msgid "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
-msgstr "{hostCopies, plural, one {# copia fuera de Conocimiento limpiada} other {# copias fuera de Conocimiento limpiadas}}"
-
 #: src/brain/thinking/use-thinking.ts
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
 msgstr "{hours, plural, one {# hora a la semana en todo lo que Grasp puede contar} other {# horas a la semana en todo lo que Grasp puede contar}}"
@@ -13508,6 +13504,10 @@ msgstr "el equipo en {field}"
 #: src/apps/access-view.tsx
 msgid "The team in {field}"
 msgstr "El equipo en {field}"
+
+#: src/knowledge/purge.tsx
+msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
+msgstr "Los términos también desaparecen de los recuerdos, entrevistas y respuestas de todos. Cuántos de ellos los contienen no se cuenta ni se muestra."
 
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"

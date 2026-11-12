@@ -572,7 +572,7 @@ describe("a purge's record", setUpTime, () => {
     });
   });
 
-  it("counts what each step changed, and a person's documents across runs", async () => {
+  it("counts what each document step changed, and a person's documents across runs", async () => {
     const admin = await personOf("admin");
     const secret = `jansen${unique()}`;
     const handbook = await admin.api.knowledge.createCollection({
@@ -618,8 +618,12 @@ describe("a purge's record", setUpTime, () => {
     const personStatus = await admin.api.knowledge.purgeStatus(
       person.result.purgeId
     );
+    // The record holding the term went, though no step counts records.
+    const { records: remembered } = await admin.api.knowledge.memoriesList();
     expect({
-      statements: stepCounts(contentStatus, "statements"),
+      remembered: remembered.some(({ statement }) =>
+        statement.toLowerCase().includes(secret)
+      ),
       document: stepCounts(contentStatus, `document:${document.id}`),
       records: stepCounts(personStatus, "records"),
       result: {
@@ -627,7 +631,7 @@ describe("a purge's record", setUpTime, () => {
         versions: person.result.versions,
       },
     }).toStrictEqual({
-      statements: { redacted: 0, deleted: 1 },
+      remembered: false,
       document: { documents: 1, versions: 1 },
       records: { documents: 2, versions: 2 },
       result: { documents: 2, versions: 2 },
