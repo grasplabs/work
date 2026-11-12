@@ -26,6 +26,12 @@ export const brainModules = {
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.
   "apps/core/src/brain-sources-rpc.ts": "sources",
+  // Erases the sources of runs past their retention with core's
+  // eraseSource, and answers nothing of it.
+  "apps/core/src/brain-next-origins.ts": "core",
+  // Erases what an erased person alone may read with core's erasePerson,
+  // and answers nothing of it.
+  "apps/core/src/person-erasure.ts": "core",
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",

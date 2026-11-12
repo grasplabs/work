@@ -1526,17 +1526,30 @@ export const coreProbes = {
   listSkillsAs: async ({ personId, personal }) => [
     await answer(
       "the reader's skills",
-      async () => await coreBrain.listSkillsAs(env, personId, { personal })
+      async () =>
+        await coreBrain.listSkillsAs(
+          env,
+          personId,
+          new Set(["draw-a-workflow"]),
+          { personal }
+        )
     ),
     await answer(
       "the reader's skills, without their own",
       async () =>
-        await coreBrain.listSkillsAs(env, personId, { personal: false })
+        await coreBrain.listSkillsAs(
+          env,
+          personId,
+          new Set(["draw-a-workflow"]),
+          { personal: false }
+        )
     ),
     await answer(
       "as someone who isn't a member",
       async () =>
-        await coreBrain.listSkillsAs(env, stranger(), { personal: true })
+        await coreBrain.listSkillsAs(env, stranger(), new Set<string>(), {
+          personal: true,
+        })
     ),
   ],
   // A skill is read by its own key alone: no producer's source is under
@@ -1621,6 +1634,40 @@ export const coreProbes = {
         })
     )),
   ],
+  // Writes a company skill only for one of the organization's admins:
+  // the readers here aren't, so each is refused, a marked one included,
+  // and nothing of it is listed after.
+  addCompanySkill: async ({ personId, markers }) => {
+    const text = markedText(markers);
+    const name = `probe-${crypto.randomUUID()}`;
+    return [
+      await answer(
+        "a marked skill",
+        async () =>
+          await coreBrain.addCompanySkill(env, personId, {
+            name,
+            change: crypto.randomUUID(),
+            text: `---\nname: ${name}\ndescription: ${text}\n---\n${text}`,
+          })
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await coreBrain.addCompanySkill(env, stranger(), {
+            name,
+            change: crypto.randomUUID(),
+            text,
+          })
+      ),
+      await answer(
+        "the reader's skills after",
+        async () =>
+          await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
+            personal: true,
+          })
+      ),
+    ];
+  },
   // Writes the reader's own store only: refusals holding the markers, and
   // one skill of the reader's that holds none.
   addOwnSkill: async ({ personId, markers }) => {
@@ -1676,12 +1723,22 @@ export const coreProbes = {
     }),
     ...(await pairedOverSkills(hiddenSkills, async (name) => {
       await coreBrain.eraseOwnSkill(env, personId, name);
-      return await coreBrain.listSkillsAs(env, personId, { personal: true });
+      return await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
+        personal: true,
+      });
     })),
   ],
-  // Retires only a company skill the reader may read: a name of the
-  // markers, or someone's own skill's name, is none.
+  // Retires only as an admin, and only a company skill: a name of the
+  // markers, or someone's own skill's name, is none. The readers here
+  // aren't admins: they are refused, and their skills are as they were.
   retireCompanySkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "the reader's skills",
+      async () =>
+        await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
+          personal: true,
+        })
+    ),
     await answer(
       "a skill never written",
       async () =>
@@ -3737,6 +3794,10 @@ export const shareProbes = {
   // no marker is approved.
   approveShare: async ({ personId, markers }) => [
     await answer(
+      "the reader's page after",
+      async () => await skillShares.skillsOverview(env, sessionOf(personId))
+    ),
+    await answer(
       "the reader's share",
       async () =>
         await skillShares.approveShare(
@@ -3785,6 +3846,10 @@ export const shareProbes = {
     ),
   ],
   retireSkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "the reader's page after",
+      async () => await skillShares.skillsOverview(env, sessionOf(personId))
+    ),
     await answer("a company skill holding no marker, as an admin", async () => {
       const approved = await skillShares.approveShare(
         env,

@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { erasurePageSize } from "../src/person-erasure.ts";
+import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -39,6 +40,9 @@ const removedTwo = async () => {
   await admin.api.members.remove(kept.userId);
   await admin.api.members.remove(erased.userId);
   await admin.api.members.erase(erased.userId, String(erased.person.name));
+  // Their own Brain store still deleting as the request ends: the clock
+  // finishes it once an add under way could have ended.
+  await finishedByTheClock(erased.userId);
   return { admin, kept, erased, member };
 };
 
@@ -103,6 +107,7 @@ const allComplete = [
   "interview",
   "runs",
   "brain",
+  "brain_sources",
 ].map((area) => ({ area, state: "complete" }));
 
 describe("what admins see of erasures", () => {

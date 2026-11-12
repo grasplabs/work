@@ -22,8 +22,8 @@ import {
   outboxedIfChanged,
 } from "./audit-outbox.ts";
 import {
+  addCompanySkill,
   addOwnSkill,
-  addSkill,
   eraseOwnSkill,
   listSkillsAs,
   readCurrentSkillAs,
@@ -65,6 +65,9 @@ import { skillShares, users } from "./db/core/schema.ts";
 //   their own instruction file isn't.
 
 const nameSchema = z.string().min(1).max(64);
+
+/** Grasp's skills aren't the page's: none of their names is asked for. */
+const noShipped: ReadonlySet<string> = new Set();
 const versionSchema = z.int().positive();
 
 /** `by`, refused unless one of the organization's own admins. */
@@ -163,7 +166,7 @@ export const skillsOverview = async (
 ): Promise<SkillsOverview> => {
   const db = drizzle(env.DB);
   const [listed, shares] = await Promise.all([
-    listSkillsAs(env, by.userId, { personal: true }),
+    listSkillsAs(env, by.userId, noShipped, { personal: true }),
     db
       .select(shareColumns)
       .from(skillShares)
@@ -362,8 +365,8 @@ export const approveShare = async (
     }
     throw skillErrors.create("skills.not_found");
   }
-  const { version } = await addSkill(env, {
-    skill: { scope: "company", name: decided.name },
+  const { version } = await addCompanySkill(env, by.userId, {
+    name: decided.name,
     change: `share:${decided.id}`,
     text: decided.text,
   });

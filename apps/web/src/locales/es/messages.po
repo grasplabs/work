@@ -15817,6 +15817,10 @@ msgstr "Qué puede hacer la aplicación con ella"
 msgid "What the board wants from the sprint: its goals and the rules of the road."
 msgstr "Lo que la dirección quiere del sprint: sus objetivos y las reglas del juego."
 
+#: src/settings/erasures.tsx
+msgid "What the Brain keeps that only they may read"
+msgstr "Lo que el Brain guarda y solo esa persona puede leer"
+
 #: src/brain/sources-page.tsx
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
 msgstr "Lo que el cerebro guarda y puedes leer, y la búsqueda en ello tal como lo recuerdan tus agentes."

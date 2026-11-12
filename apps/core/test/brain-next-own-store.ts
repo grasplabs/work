@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 
 /** How long the store gives an add to write its file, as its files.ts does. */
 const fileGraceMs = 15 * 60 * 1000;
@@ -75,4 +76,15 @@ export const breakOwnStore = async (
       await killOwnStore(personId);
     },
   };
+};
+
+/**
+ * Lets the clock's retries finish `personId`'s erasure: their own store
+ * answers that it is still deleting until an add under way could have
+ * written its file, so that time is let pass (`ageOwnErasure`) and the
+ * clock runs once more.
+ */
+export const finishedByTheClock = async (personId: string): Promise<void> => {
+  await ageOwnErasure(personId);
+  await runMinuteTasks();
 };

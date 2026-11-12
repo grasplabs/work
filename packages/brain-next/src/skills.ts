@@ -24,9 +24,19 @@ export const skillNameSchema = z
 /** Most characters of a skill's description, as the format has it. */
 export const skillDescriptionMaxLength = 1024;
 
+/** Control characters, line breaks among them. */
+const controlCharacters = /\p{Cc}/u;
+
 const frontmatterSchema = z.looseObject({
   name: skillNameSchema,
-  description: z.string().trim().min(1).max(skillDescriptionMaxLength),
+  // One line: a description is listed in every chat's prompt, where a
+  // line break could close the list and start text of its own.
+  description: z
+    .string()
+    .trim()
+    .min(1)
+    .max(skillDescriptionMaxLength)
+    .refine((description) => !controlCharacters.test(description)),
 });
 
 /** A skill as a selection weighs it: its name and when to use it. */
@@ -41,7 +51,8 @@ const frontmatterBlock = /^---\r?\n(?<yaml>[\s\S]*?)\r?\n---(?:\r?\n|$)/u;
 /**
  * The card `text` declares in its frontmatter (YAML, read by a YAML
  * parser, never by hand), or null when it holds none, the YAML doesn't
- * parse, or its name or description isn't the format's.
+ * parse or expands past the parser's bound on aliases, or its name or
+ * description isn't the format's.
  */
 export const skillCardOf = (text: string): SkillCard | null => {
   const yaml = frontmatterBlock.exec(text)?.groups?.yaml;
@@ -52,7 +63,15 @@ export const skillCardOf = (text: string): SkillCard | null => {
   if (document.errors.length > 0) {
     return null;
   }
-  const parsed = frontmatterSchema.safeParse(document.toJS());
+  let value: unknown;
+  try {
+    // Throws past the parser's bound on aliases (`maxAliasCount`): a few
+    // lines of anchors and aliases can otherwise expand without end.
+    value = document.toJS();
+  } catch {
+    return null;
+  }
+  const parsed = frontmatterSchema.safeParse(value);
   return parsed.success
     ? { name: parsed.data.name, description: parsed.data.description }
     : null;

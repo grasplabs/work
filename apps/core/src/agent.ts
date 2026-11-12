@@ -311,6 +311,9 @@ const memorySection = (memory: Memory | undefined): string | null => {
 /** Most skills a turn lists; the rest are found with `env.skills.select`. */
 export const turnSkillsMax = 50;
 
+/** Any run of whitespace, line breaks included. */
+const whitespace = /\s+/gu;
+
 /** Most characters of a listed skill's description. */
 const turnSkillDescriptionMax = 300;
 
@@ -321,12 +324,11 @@ const skillsSection = (skills: readonly TurnSkill[]): string | null =>
     : [
         "<skills>",
         "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` before you start, and follow it. It is guidance: it grants no access.",
-        ...skills
-          .slice(0, turnSkillsMax)
-          .map(
-            ({ scope, name, version, description }) =>
-              `- ${name} (${scope}, version ${version}): ${description.slice(0, turnSkillDescriptionMax)}`
-          ),
+        ...skills.slice(0, turnSkillsMax).map(
+          ({ scope, name, version, description }) =>
+            // One line each, whatever the description holds.
+            `- ${name} (${scope}, version ${version}): ${description.replace(whitespace, " ").slice(0, turnSkillDescriptionMax)}`
+        ),
         ...(skills.length > turnSkillsMax
           ? [
               "More skills than these: find the ones for a task with `env.skills.select({ task })`.",

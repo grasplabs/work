@@ -32,6 +32,22 @@ import {
   killStore,
   restoreStore,
 } from "./brain-next-store-copy.ts";
+import {
+  fileGraceMs,
+  hashOf,
+  holdNextBucketPut,
+  later,
+  ledgerOf,
+  newMark,
+  nextBucketPut,
+  objectsHolding,
+  settled,
+  tablesHolding,
+  tailOf,
+  tickPastGrace,
+  tickUntilErased,
+  wordOf,
+} from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -54,29 +70,11 @@ import { signedInWithRole } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** How long the store gives an add before it sweeps a file nothing holds. */
-const fileGraceMs = 15 * 60 * 1000;
-
 /** The Brain's shared store, as core reaches it. */
 const store = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
 
 /** The Brain's contract on the store, for what core has no way to (vectors). */
 const brain = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
-
-/** A mark of 24 digits: found by its last 12 in every table and file. */
-const newMark = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(24)), (byte) =>
-    String(byte % 10)
-  ).join("");
-
-/** What is looked for of `mark`: its tail, whole in any index page. */
-const tailOf = (mark: string): string => mark.slice(-12);
-
-/**
- * A word holding `mark`, as a source writes it: with an ending the
- * stemmers take off, so the mark is in the stems index too.
- */
-const wordOf = (mark: string): string => `zq${mark}ingen`;
 
 /** A member of the organization, signed in. */
 const person = async (): Promise<string> => {
@@ -193,196 +191,16 @@ const historyAs = async (
   return read?.text ?? null;
 };
 
-/** Bytes as text, one character a byte: digits show as they are. */
-const bytesAsText = (bytes: ArrayBuffer): string =>
-  Array.from(new Uint8Array(bytes), (byte) => String.fromCodePoint(byte)).join(
-    ""
-  );
-
-/** A stored value as text, whatever its kind. */
-const valueAsText = (value: SqlStorageValue): string =>
-  value instanceof ArrayBuffer ? bytesAsText(value) : String(value);
-
-/**
- * The tables of the store, every one, the word indexes' own pages and
- * copies among them, that hold any of `marks` anywhere in a row.
- */
-const tablesHolding = async (marks: readonly string[]): Promise<string[]> =>
-  await runInDurableObject(store(), (_instance, state) => {
-    const { sql } = state.storage;
-    const names = sql
-      .exec<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'"
-      )
-      .toArray()
-      .map(({ name }) => name);
-    const holding = new Set<string>();
-    for (const name of names) {
-      for (const row of sql.exec(`SELECT * FROM "${name}"`)) {
-        const text = Object.values(row).map(valueAsText).join(" ");
-        if (marks.some((mark) => text.includes(tailOf(mark)))) {
-          holding.add(name);
-        }
-      }
-    }
-    return [...holding].toSorted();
-  });
-
-/** The keys of the bucket whose key or bytes hold any of `marks`. */
-const objectsHolding = async (marks: readonly string[]): Promise<string[]> => {
-  const holding: string[] = [];
-  let cursor: string | undefined = undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const listed: R2Objects = await env.BRAIN_OBJECTS.list(
-      cursor === undefined ? {} : { cursor }
-    );
-    for (const { key } of listed.objects) {
-      // oxlint-disable-next-line no-await-in-loop -- one object at a time
-      const object = await env.BRAIN_OBJECTS.get(key);
-      // oxlint-disable-next-line no-await-in-loop -- one object at a time
-      const body = object === null ? null : await object.arrayBuffer();
-      const bytes = body === null ? "" : bytesAsText(body);
-      if (marks.some((mark) => `${key} ${bytes}`.includes(tailOf(mark)))) {
-        holding.push(key);
-      }
-    }
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor !== undefined);
-  return holding;
-};
-
-/** The SHA-256 of `text`'s UTF-8 bytes, in hex. */
-const hashOf = async (text: string): Promise<string> =>
-  Array.from(
-    new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
-    ),
-    (byte) => byte.toString(16).padStart(2, "0")
-  ).join("");
-
 /** The bucket's file holding `text`: null when there is none. */
 const fileOf = async (text: string): Promise<string | null> => {
   const file = await env.BRAIN_OBJECTS.get(`sources/${await hashOf(text)}`);
   return file === null ? null : await file.text();
 };
 
-/** The ledger's entries naming `id` (a source's key or a person's id). */
-const ledgerOf = async (id: string): Promise<string[]> => {
-  const subject = await hashOf(id);
-  const keys: string[] = [];
-  let cursor: string | undefined = undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const listed: R2Objects = await env.BRAIN_OBJECTS.list({
-      prefix: "erasures/",
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    keys.push(...listed.objects.map(({ key }) => key));
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor !== undefined);
-  return keys.filter((key) => key.endsWith(`-${subject}`));
-};
-
 /** How many entries of the ledger name `source`. */
 const ledgerCount = async (source: SourceRef): Promise<number> => {
   const entries = await ledgerOf(keyOf(source));
   return entries.length;
-};
-
-/** Moves the clock, for `Date` alone, to `ms` from now. */
-const later = (ms: number): void => {
-  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + ms });
-};
-
-/** Ticks core's clock past a file's grace, so the sweep takes what is due. */
-const tickPastGrace = async (): Promise<void> => {
-  later(fileGraceMs + 1);
-  await workBrain(env, new Date());
-};
-
-/** Ticks until no erasure is left unfinished, at most `most` ticks. */
-const tickUntilErased = async (most = 10): Promise<number> => {
-  for (let tick = 1; tick <= most; tick += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
-    await workBrain(env, new Date());
-    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
-    const { erasing } = await brainWorkOverview(env);
-    if (erasing === 0) {
-      return tick;
-    }
-  }
-  return Number.POSITIVE_INFINITY;
-};
-
-/**
- * `promise`'s outcome, value or error, observed from now on: a promise
- * awaited later in a test never rejects with nothing watching it.
- */
-const settled = async <T>(
-  promise: Promise<T>
-): Promise<{ value: T } | { error: string }> => {
-  try {
-    return { value: await promise };
-  } catch (error) {
-    return { error: String(error) };
-  }
-};
-
-/**
- * Has the store's next write to its bucket go through `put`, given the
- * store's state and the write itself; its own bucket is back after it.
- */
-const nextBucketPut = async (
-  put: (
-    state: DurableObjectState,
-    write: () => Promise<unknown>
-  ) => Promise<unknown>
-): Promise<void> => {
-  await runInDurableObject(store(), (instance, state) => {
-    const objectEnv: unknown = Reflect.get(instance, "env");
-    if (typeof objectEnv !== "object" || objectEnv === null) {
-      throw new TypeError("The store has no env");
-    }
-    const bucket = env.BRAIN_OBJECTS;
-    const once = {
-      get: async (key: string) => await bucket.get(key),
-      list: async (options: R2ListOptions) => await bucket.list(options),
-      delete: async (keys: string | string[]) => {
-        await bucket.delete(keys);
-      },
-      put: async (
-        key: string,
-        value: ArrayBufferView,
-        options?: R2PutOptions
-      ) => {
-        Reflect.set(instance, "env", objectEnv);
-        return await put(
-          state,
-          async () => await bucket.put(key, value, options)
-        );
-      },
-    };
-    Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: once });
-  });
-};
-
-/**
- * Holds the store's next bucket write before it reaches the bucket, until
- * the test releases it: `reached` once it is there. Flags, not a promise,
- * since workerd won't let one request wait on another's.
- */
-const holdNextBucketPut = async () => {
-  const gate = { reached: false, released: false };
-  await nextBucketPut(async (_state, write) => {
-    gate.reached = true;
-    while (!gate.released) {
-      // oxlint-disable-next-line no-await-in-loop -- until the test says
-      await scheduler.wait(10);
-    }
-    return await write();
-  });
-  return gate;
 };
 
 /** Work the tests queue about a source: its payload holds a mark. */
@@ -2418,6 +2236,14 @@ const citedBy = async (
 // before the tick deletes it or after; a source added again for a person
 // after their erasure is cited at its new version; and while the store
 // replays its ledger, recall is refused as every call is.
+
+/** What finds `mark`: its word, its ID and its phrase. */
+const questions = (mark: string): string[] => [
+  wordOf(mark),
+  `INV-${mark}`,
+  `"night rota ${mark}"`,
+];
+
 describe("a pack after an erasure", { timeout: 120_000 }, () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -2472,11 +2298,6 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
         teamId: team,
       }
     );
-    const questions = (mark: string): string[] => [
-      wordOf(mark),
-      `INV-${mark}`,
-      `"night rota ${mark}"`,
-    ];
     const moments = [
       undefined,
       new Date(start + hour),
