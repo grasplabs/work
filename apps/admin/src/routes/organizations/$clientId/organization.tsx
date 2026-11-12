@@ -24,6 +24,8 @@ export const Route = createFileRoute("/organizations/$clientId/organization")({
       to: "/organizations/$clientId/interviews",
       params,
       search,
+      // Back goes past the old address, not into it again.
+      replace: true,
     });
   },
 });

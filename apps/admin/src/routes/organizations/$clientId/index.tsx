@@ -5,12 +5,7 @@ import { ArrowRightIcon } from "lucide-react";
 import { OrgBrief } from "../../../admin/org-brief.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { Section } from "../../../admin/section.tsx";
-import {
-  needSearch,
-  needSection,
-  sectionTo,
-  sectionWords,
-} from "../../../admin/sections.ts";
+import { needWhere, sectionTo, sectionWords } from "../../../admin/sections.ts";
 import { needLine } from "../../../admin/words.ts";
 
 /**
@@ -34,7 +29,7 @@ const NeedsHere = () => {
       <ul className="flex flex-col">
         {view.needs.map((need, index) => {
           const text = needLine(need, view);
-          const section = needSection(need);
+          const { section, search } = needWhere(need);
           return (
             <li
               className="flex items-center justify-between gap-4 border-t px-5 py-3"
@@ -54,7 +49,7 @@ const NeedsHere = () => {
                 render={
                   <Link
                     params={{ clientId: admin.client.id }}
-                    search={needSearch(need)}
+                    search={search}
                     to={sectionTo[section]}
                   />
                 }

@@ -8,6 +8,8 @@ export const Route = createFileRoute("/organizations/$clientId/flow")({
       to: "/organizations/$clientId/steps",
       params,
       search: { tab: "flow" },
+      // Back goes past the old address, not into it again.
+      replace: true,
     });
   },
 });

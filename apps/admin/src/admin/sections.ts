@@ -177,11 +177,21 @@ const needSections: Record<Need["kind"], OrgSection> = {
 
 export const needSection = (need: Need): OrgSection => needSections[need.kind];
 
-/** The tab of its section a need is settled on, where that isn't the section's first: the contract's are on Details' Contract. */
-export const needSearch = (need: Need): { tab: "contract" } | undefined =>
-  need.kind === "contract" || need.kind === "ending" || need.kind === "overdue"
-    ? { tab: "contract" }
-    : undefined;
+/**
+ * Where a need is settled: its section, and the tab of it where that isn't
+ * the section's first. The contract's are on Details' Contract.
+ */
+export const needWhere = (
+  need: Need
+): { section: OrgSection; search: { tab: "contract" } | undefined } => ({
+  section: needSection(need),
+  search:
+    need.kind === "contract" ||
+    need.kind === "ending" ||
+    need.kind === "overdue"
+      ? { tab: "contract" }
+      : undefined,
+});
 
 /** A system a section's figures come from. */
 export type OrgSource = "core" | "admin" | "attio" | "stripe" | "composio";

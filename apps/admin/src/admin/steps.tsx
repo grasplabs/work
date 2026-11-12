@@ -161,27 +161,15 @@ const StageElsewhere = ({
   status: StageStatus;
   clientId: string;
 }) => {
-  const name = <StageName leaves stage={stage} status={status} />;
-  if (stage === "agreed") {
-    return (
-      <Link
-        className={stageLinkClass}
-        params={{ clientId }}
-        search={{ tab: "contract" }}
-        to={sectionTo.details}
-      >
-        {name}
-      </Link>
-    );
-  }
+  const { section, search } = opensElsewhere[stage];
   return (
     <Link
       className={stageLinkClass}
       params={{ clientId }}
-      search={stage === "leads" ? { tab: "people" } : {}}
-      to={sectionTo.interviews}
+      search={search}
+      to={sectionTo[section]}
     >
-      {name}
+      <StageName leaves stage={stage} status={status} />
     </Link>
   );
 };

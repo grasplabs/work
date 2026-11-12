@@ -9,6 +9,8 @@ import type {
   OnboardingFlow,
 } from "@grasp-os/shared/onboarding-flow";
 
+import type { OrgSection } from "./sections.ts";
+
 // Which of an onboarding's steps, as Grasp's staff follow them (Steps),
 // a company's flow has: a step whose part of the flow is off isn't shown,
 // since nothing will ever happen on it.
@@ -41,13 +43,16 @@ export const stagesIn = (flow?: OnboardingFlow): Stage[] => {
 /**
  * The steps Steps opens nothing for, each shown in a section of its own
  * with what staff do there: what was agreed in the Contract, the team
- * leads and the interviews in Interviews. Their step goes there.
+ * leads and the interviews in Interviews. Their step goes there: the
+ * section, and its tab where that isn't its first.
  */
 export const opensElsewhere = {
-  agreed: "contract",
-  leads: "interviews",
-  interviews: "interviews",
-} as const satisfies Partial<Record<Stage, string>>;
+  agreed: { section: "details", search: { tab: "contract" } },
+  leads: { section: "interviews", search: { tab: "people" } },
+  interviews: { section: "interviews", search: {} },
+} as const satisfies Partial<
+  Record<Stage, { section: OrgSection; search: { tab?: string } }>
+>;
 
 /**
  * The step that is open, of those that open here: the one `asked` for
