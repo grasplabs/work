@@ -1,4 +1,8 @@
-import { recallLimit, sourceTextMaxBytes } from "@grasp-os/brain-next/contract";
+import {
+  recallBudgetMax,
+  recallLimit,
+  sourceTextMaxBytes,
+} from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -53,7 +57,10 @@ const recalledAs = async (
   personId: string,
   question: string
 ): Promise<SourceRef[]> => {
-  const { chunks } = await recallAs(env, personId, question);
+  const { items: chunks } = await recallAs(env, personId, {
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
   return chunks.map(({ source }) => source);
 };
 
@@ -127,7 +134,10 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
     ];
     const source = await add(passages.join("\n\n"), ownedBy(reader));
 
-    const { chunks } = await recallAs(env, reader, `factuur ${tag}`);
+    const { items: chunks } = await recallAs(env, reader, {
+      question: `factuur ${tag}`,
+      budget: { tokens: recallBudgetMax },
+    });
 
     expect(chunks[0]).toMatchObject({ source, text: passages[2] });
     expect(chunks).toHaveLength(passages.length);
@@ -537,7 +547,10 @@ describe(
         });
       });
 
-      const { chunks } = await recallAs(env, reader, `${mark}x7ing`);
+      const { items: chunks } = await recallAs(env, reader, {
+        question: `${mark}x7ing`,
+        budget: { tokens: recallBudgetMax },
+      });
 
       expect({
         midway:

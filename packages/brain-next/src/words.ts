@@ -185,11 +185,23 @@ export interface Word {
   readonly stems: readonly string[];
 }
 
+/** The words a word as written folds into, without their stems. */
+const foldedOf = (written: string): string[] =>
+  (foldForSearch(written).match(wordPattern) ?? []).filter((word) =>
+    letterOrDigit.test(word)
+  );
+
+/** `text`'s words as written, as both `wordsOf` and `sequenceOf` cut it. */
+const writtenOf = (text: string): string[] =>
+  // Cut after compatibility folding (NFKC), so a symbol that folds into
+  // letters is words too ("㍿" is "株式会社", "℡" is "tel", "Ⓐ" is "a"),
+  // as `foldForSearch` reads it; NFKC keeps accents, which the stemmers
+  // need, composed.
+  text.normalize("NFKC").toLowerCase().match(wordPattern) ?? [];
+
 /** The words a word as written folds into, with their stems. */
 const wordsOfWritten = (written: string): Word[] => {
-  const folded = (foldForSearch(written).match(wordPattern) ?? []).filter(
-    (word) => letterOrDigit.test(word)
-  );
+  const folded = foldedOf(written);
   // As written too, when it is written otherwise (accented) and folds
   // into one word alone.
   const asWritten =
@@ -229,13 +241,7 @@ export type WordMemo = Map<string, Word[]>;
  */
 export const wordsOf = (text: string, memo: WordMemo = new Map()): Word[] => {
   const words = new Map<string, Set<string>>();
-  // Cut after compatibility folding (NFKC), so a symbol that folds into
-  // letters is words too ("㍿" is "株式会社", "℡" is "tel", "Ⓐ" is "a"),
-  // as `foldForSearch` reads it; NFKC keeps accents, which the stemmers
-  // need, composed.
-  for (const written of new Set(
-    text.normalize("NFKC").toLowerCase().match(wordPattern)
-  )) {
+  for (const written of new Set(writtenOf(text))) {
     let found = memo.get(written);
     if (found === undefined) {
       found = wordsOfWritten(written);
@@ -290,10 +296,11 @@ const anyOf = (words: readonly string[]): string =>
  * written; `forms` finds it or any of its stems, asked of `chunk_words`
  * (a chunk's word is one of them) and of `chunk_stems` (one of them is
  * among a chunk's word's stems). So a chunk's word matches when the two
- * share a stem, or one is the other's stem. Built here from quoted words
- * alone, so nothing of FTS5's query syntax comes from the question.
+ * share a stem, or one is the other's stem (`holdsTerm`). Built here from
+ * quoted words alone, so nothing of FTS5's query syntax comes from the
+ * question. `word` and `stems` are the word itself, folded, and its stems.
  */
-export interface Term {
+export interface Term extends Word {
   exact: string;
   forms: string;
 }
@@ -316,6 +323,8 @@ export const termsOf = (question: string): Terms => {
   const asked = telling.length > 0 ? telling : words;
   return {
     telling: asked.slice(0, maxTerms).map(({ word, stems }) => ({
+      word,
+      stems,
       exact: anyOf([word]),
       forms: anyOf([word, ...stems]),
     })),
@@ -328,6 +337,54 @@ export const termsOf = (question: string): Terms => {
         : [],
   };
 };
+
+/**
+ * Whether `words` (a text's, `wordsOf`) hold `term` in one of its forms,
+ * as the word indexes match it: the same word, a word among its stems, a
+ * word whose stems hold it, or a shared stem.
+ */
+export const holdsTerm = (words: readonly Word[], term: Word): boolean => {
+  const forms = new Set([term.word, ...term.stems]);
+  return words.some(
+    ({ word, stems }) =>
+      forms.has(word) || stems.some((stem) => forms.has(stem))
+  );
+};
+
+/**
+ * `text`'s words in order, folded, repeats kept: the words `wordsOf` holds,
+ * cut the same way, without their stems. What an exact match compares, a
+ * question's phrase against a chunk's text (exact.ts).
+ */
+export const sequenceOf = (text: string): string[] =>
+  writtenOf(text).flatMap(foldedOf);
+
+/** A word of a text, folded, and where it is written: `[start, end)`. */
+export interface PlacedWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * `text`'s words in order, folded, each with where it is written in
+ * `text` itself, so a part of the text can be cut around them. Cut word
+ * by word as written (without `sequenceOf`'s compatibility folding of the
+ * whole text first), so for the rare text whose compatibility forms join
+ * or part words, it may differ from `sequenceOf`; a caller falls back then.
+ */
+export const placedOf = (text: string): PlacedWord[] =>
+  [...text.matchAll(wordPattern)].flatMap((match) =>
+    foldedOf(match[0].normalize("NFKC").toLowerCase()).map((word) => ({
+      word,
+      start: match.index,
+      end: match.index + match[0].length,
+    }))
+  );
+
+/** `words` as one FTS5 query: all of them, each a quoted word. */
+export const allOf = (words: readonly string[]): string =>
+  [...new Set(words)].map((word) => `"${word}"`).join(" AND ");
 
 /**
  * Indexes the words of the chunk at `row`, in the caller's transaction.

@@ -16,6 +16,8 @@ import type {
   Brain,
   ErasureReason,
   ModelReply,
+  Pack,
+  PackItem,
   Reader,
   SourceId,
   WorkOverview,
@@ -181,9 +183,35 @@ export interface SourceVersionRef {
   version: number;
 }
 
-/** A passage of a source's current version, as recall finds it. */
-export interface RecalledChunk extends SourceVersionRef {
-  text: string;
+/** What to recall: the question, the pack's budget, and the moment as of. */
+export interface Recall {
+  question: string;
+  budget: { tokens: number };
+  /**
+   * Read each source as it was at this moment, to the millisecond and
+   * including it: a version added at it counts. A caller who means "on
+   * that day" passes the day's last millisecond in the time zone they
+   * mean (for 14 March 2026 in Amsterdam, 2026-03-14T23:59:59.999+01:00),
+   * not its midnight, which leaves out what was added that day. Each
+   * source answers with its newest version added by then that still
+   * exists, if the reader may read it: once a later version is erased, a
+   * moment when it was current answers with the one before it. For the
+   * moments a version the reader may not read was current, the source
+   * answers nothing, so stepping `asOf` shows when such a version was
+   * added and replaced; its existence shows in the version numbers
+   * already.
+   */
+  asOf?: Date;
+}
+
+/** An item of a pack, citing its source as its producer named it. */
+export interface RecalledItem extends Omit<PackItem, "source"> {
+  source: SourceRef;
+}
+
+/** A pack, as recall answers (`recallAs`). */
+export interface RecalledPack extends Omit<Pack, "items"> {
+  items: RecalledItem[];
 }
 
 /** A version of a source, whole. */
@@ -280,26 +308,37 @@ export const addSource = async (
 };
 
 /**
- * What the member `personId` may read of the current versions' passages
- * holding `question`'s words, best first, as core counts them now.
- * Refused once they are no longer a member, or when `personId` isn't an
- * ID.
+ * A pack of what the member `personId` may read for `question`, as core
+ * counts them now, within `budget.tokens` (the Brain's estimate,
+ * `tokensOf`), and, with `asOf`, of each source as it was then: the
+ * Brain's `recall`. Every item cites its source, version and place; the
+ * pack says what was not found and whether the budget cut it short, all
+ * from what they may read alone. Refused once they are no longer a
+ * member, or when `personId` isn't an ID.
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  question: string
-): Promise<{ chunks: RecalledChunk[] }> => {
-  const { chunks } = await brain(env).recall({
+  { question, budget, asOf }: Recall
+): Promise<RecalledPack> => {
+  const reader = await readerOf(env, personId);
+  const { items, notFound, truncated } = await brain(env).recall({
     question,
-    reader: await readerOf(env, personId),
+    reader,
+    budget,
+    ...(asOf === undefined ? {} : { asOf }),
   });
   return {
-    chunks: chunks.map(({ source, version, text }) => ({
+    items: items.map(({ source, version, position, text, whole, found }) => ({
       source: sourceRefOf(source),
       version,
+      position,
       text,
+      whole,
+      found,
     })),
+    notFound,
+    truncated,
   };
 };
 

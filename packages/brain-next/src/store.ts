@@ -21,7 +21,7 @@ import type {
   NewSource,
   PersonErasure,
   RecallRequest,
-  Recalled,
+  Pack,
   SourceErasure,
   SourceVersion,
   SourceVersionRef,
@@ -257,11 +257,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     );
   }
 
-  /** What the reader may read of current versions holding the question's words. */
-  async recall(request: RecallRequest): Promise<Recalled> {
+  /** A pack of what the reader may read for the question, within its budget. */
+  async recall(request: RecallRequest): Promise<Pack> {
     await this.#ready();
-    const { question, reader } = checked(recallRequestSchema, request);
-    return recall(this.ctx.storage.sql, question, reader);
+    return recall(this.ctx.storage.sql, checked(recallRequestSchema, request));
   }
 
   /** A version, current or history, whole: if the reader may read it. */

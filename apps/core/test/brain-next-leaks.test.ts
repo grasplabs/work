@@ -1,3 +1,7 @@
+import {
+  exactCandidatesMax,
+  recallBudgetMax,
+} from "@grasp-os/brain-next/contract";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import { DurableObject, env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -257,8 +261,11 @@ const textsFor = async (
   personId: string,
   question: string
 ): Promise<string[]> => {
-  const { chunks } = await recallAs(env, personId, question);
-  return chunks.map(({ text }) => text);
+  const { items } = await recallAs(env, personId, {
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return items.map(({ text }) => text);
 };
 
 /**
@@ -318,7 +325,6 @@ describe(
       const secretTeam = await newTeam(holder);
       const ownTeam = await newTeam(outsider);
       const sharedWord = `s${unique()}`;
-      const unknownWord = `u${unique()}`;
       const markers = {
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
@@ -429,6 +435,21 @@ describe(
         });
         ownerIds.push(id);
       }
+      // More hidden chunks holding a marker than the exact way checks of
+      // a part: its cap counts only what the reader may read, so a marker
+      // the reader asks for is still not found, as its twin is. They hold
+      // an ID the outsider's own longer chunk holds too: ranked past the
+      // hidden ones, it would be missed if the cap counted them.
+      const capId = `CAP-${unique()}`;
+      for (let index = 0; index <= exactCandidatesMax; index += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one source at a time
+        await add(`Copy ${index} ${ownerMarker} ${capId}`, {
+          kind: "owner",
+          personId: holder,
+        });
+      }
+      const capped = `The outsider's own, much longer than any copy: ${capId}.`;
+      await add(capped, { kind: "owner", personId: outsider });
       // The outsider's own source, with more earlier versions than a
       // recall returns, each holding the shared word and shorter than the
       // current one: superseded, they may neither show nor take its place.
@@ -450,10 +471,25 @@ describe(
       // then narrowed to the holder. Its first version is neither the
       // outsider's now (taken off) nor ever the holder's (not among its
       // readers), though the holder reads the current one.
-      const narrowedId = await add(
-        `Draft plan ${sharedWord} ${narrowedMarker}`,
-        { kind: "team", teamId: ownTeam }
-      );
+      // Added two hours ago, by a clock faked in this isolate, which the
+      // store shares: the final version, added now, comes an hour after
+      // `whileDraft` whatever the machine's speed. As of then, the
+      // outsider was among the draft's readers, and is still, but not
+      // among the current version's.
+      const hourMs = 3_600_000;
+      const draftAt = Date.now() - 2 * hourMs;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(draftAt);
+      let narrowedId: SourceRef;
+      try {
+        narrowedId = await add(`Draft plan ${sharedWord} ${narrowedMarker}`, {
+          kind: "team",
+          teamId: ownTeam,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      const whileDraft = new Date(draftAt + hourMs);
       await add(
         `Final plan ${sharedWord}`,
         { kind: "owner", personId: holder },
@@ -470,12 +506,20 @@ describe(
       // What the outsider finds by the shared word: their own source, past
       // the marked ones.
       const outsiderFinds = await textsFor(outsider, sharedWord);
+      // And by the ID the hidden copies share: their own chunk, as exact.
+      const { items: cappedItems } = await recallAs(env, outsider, {
+        question: capId,
+        budget: { tokens: recallBudgetMax },
+      });
+      const cappedFinds = cappedItems.map(({ text, found }) => ({
+        text,
+        found,
+      }));
 
       const asOutsider = (groups: string[]): Probing => ({
         personId: outsider,
         reader: { person: outsider, groups: groups.map((id) => `team:${id}`) },
         sharedWord,
-        unknownWord,
         markers: [
           ownerMarker,
           teamMarker,
@@ -487,6 +531,7 @@ describe(
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         usedApps,
         instructionGroups,
+        moments: [whileDraft],
       });
       const first = await findingsOf(
         "the outsider",
@@ -536,7 +581,6 @@ describe(
           personId: holder,
           reader: { person: holder, groups: [`team:${secretTeam}`] },
           sharedWord,
-          unknownWord,
           markers: [noneMarker, narrowedMarker, agentFileMarker, appFileMarker],
           hiddenVersions: [
             ...everyVersionOf(noneId),
@@ -546,6 +590,7 @@ describe(
           // they build.
           hiddenInstructionFiles: [agentFile, appFile],
           instructionGroups,
+          moments: [whileDraft],
         },
         {
           "a source nobody is known to read": noneMarker,
@@ -598,6 +643,7 @@ describe(
           ...prompted,
         ],
         outsiderFinds,
+        cappedFinds,
         joinedFinds,
         leftFinds,
         holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
@@ -605,6 +651,7 @@ describe(
       }).toStrictEqual({
         findings: [],
         outsiderFinds: [handbook],
+        cappedFinds: [{ text: capped, found: "exact" }],
         joinedFinds: [teamSource],
         leftFinds: [],
         holderAppFile: true,
@@ -649,7 +696,6 @@ describe(
               personId,
               reader: { person: personId, groups: [] },
               sharedWord: `s${unique()}`,
-              unknownWord: `u${unique()}`,
               markers: [marker],
               hiddenVersions: [],
               hiddenInstructionFiles: companyFiles,
@@ -748,7 +794,6 @@ describe(
         personId,
         reader: { person: personId, groups: [`team:${team}`] },
         sharedWord,
-        unknownWord: `u${unique()}`,
         markers: Object.values(markers),
         hiddenVersions: erased,
         hiddenInstructionFiles,

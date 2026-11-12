@@ -1,4 +1,4 @@
-import { recallLimit } from "@grasp-os/brain-next/contract";
+import { recallBudgetMax, recallLimit } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -185,18 +185,19 @@ describe("the Brain evaluation", () => {
       const asker = askerOf(question);
       const started = performance.now();
       // oxlint-disable-next-line no-await-in-loop -- timed one at a time
-      const recalled = await recallAs(
-        env,
-        idIn(people, asker),
-        question.question
-      );
+      const recalled = await recallAs(env, idIn(people, asker), {
+        question: question.question,
+        // The most a pack may hold, so every item is its whole chunk: the
+        // evaluation scores the order the pack ranks passages in.
+        budget: { tokens: recallBudgetMax },
+      });
       const ms = performance.now() - started;
-      // Recall returns chunks: the question's source is found when a chunk
-      // of it holds the quote (`rankOf`), and the leak check reads every
-      // chunk returned.
+      // Recall returns a pack of chunks: the question's source is found
+      // when a chunk of it holds the quote (`rankOf`), and the leak check
+      // reads every chunk returned.
       const brain: Returned = {
-        keys: recalled.chunks.map(({ source }) => source.id),
-        texts: recalled.chunks.map(({ text }) => text),
+        keys: recalled.items.map(({ source }) => source.id),
+        texts: recalled.items.map(({ text }) => text),
       };
       const grep = grepRecall(passages, asker, question.question, recallLimit);
       const brainLeaks = leaksOf(sources, question, brain);
@@ -207,7 +208,7 @@ describe("the Brain evaluation", () => {
       // passages the same length) and the baseline hold only if the Brain
       // cuts each source as the set did: every chunk it returns of a source
       // of the set must be one of that source's passages.
-      for (const { source, text } of recalled.chunks) {
+      for (const { source, text } of recalled.items) {
         const cut = passageTexts.get(source.id);
         if (cut !== undefined && !cut.has(text)) {
           uncut.push(`${question.id}: ${source.id}`);
