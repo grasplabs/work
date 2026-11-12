@@ -1,3 +1,4 @@
+import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { z } from "zod";
 
 import type { BrainStore } from "./store.ts";
@@ -17,8 +18,8 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
-/** Most characters of a question. */
-export const questionMaxLength = 2000;
+/** Most characters of a question (the host's page holds to it too). */
+export const questionMaxLength = brainQuestionMaxLength;
 
 /** Most groups a reader can be in. */
 export const readerGroupsMax = 1000;

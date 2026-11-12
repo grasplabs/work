@@ -9,7 +9,10 @@ import type {
   BrainSourceText,
   BrainSourceVersionPage,
 } from "@grasp-os/shared/brain-sources";
-import { firstLineOf } from "@grasp-os/shared/brain-sources";
+import {
+  brainQuestionMaxLength,
+  firstLineOf,
+} from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -219,6 +222,7 @@ const Search = ({
           onChange={(event) => {
             setQuestion(event.target.value);
           }}
+          maxLength={brainQuestionMaxLength}
           placeholder={t`Ask what you're looking for`}
           type="search"
           value={question}
@@ -440,9 +444,9 @@ const VersionList = ({
   const { before } = page;
   return (
     <div className="flex flex-col gap-1">
-      <h3 className="text-muted-foreground text-xs font-medium">
+      <h4 className="text-muted-foreground text-xs font-medium">
         <Trans>Versions</Trans>
-      </h3>
+      </h4>
       <ItemGroup render={<ul />} spacing="tight">
         {page.versions.map(({ version, addedAt }) => {
           const added = formatDateTime(addedAt);
@@ -508,9 +512,12 @@ const SourcePanel = ({
     state: "loading",
   });
   const [chosen, setChosen] = useState(asked);
-  const [text, setText] = useState<Read<BrainSourceText | null>>({
-    state: "loading",
-  });
+  // Each read is kept with the version it is of, so a version picked
+  // after it shows as loading, never under the text of the one before.
+  const [readOf, setReadOf] = useState<{
+    version: number;
+    answer: Read<BrainSourceText | null>;
+  }>();
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
@@ -538,7 +545,7 @@ const SourcePanel = ({
         async (sources) => await sources.read(source, version)
       );
       if (!left) {
-        setText(answer);
+        setReadOf({ version, answer });
       }
     };
     if (shown !== undefined) {
@@ -552,6 +559,10 @@ const SourcePanel = ({
   if (versions.state === "refused") {
     return <ErrorText>{versions.message}</ErrorText>;
   }
+  const text: Read<BrainSourceText | null> =
+    readOf !== undefined && readOf.version === shown
+      ? readOf.answer
+      : { state: "loading" };
   const read = text.state === "ready" ? text.data : undefined;
   return (
     <Card render={<section />} size="sm">
@@ -563,7 +574,9 @@ const SourcePanel = ({
         ) : null}
         {read === undefined || read === null ? null : (
           <>
-            <h2 className="text-sm font-medium">{firstLineOf(read.text)}</h2>
+            <h3 className="text-sm font-medium">
+              {firstLineOf(read.text) || <Trans>No first line</Trans>}
+            </h3>
             <p className="text-sm whitespace-pre-wrap">{read.text}</p>
           </>
         )}

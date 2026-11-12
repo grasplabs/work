@@ -94,13 +94,16 @@ export const firstLineOf = (text: string): string =>
     .map((line) => line.trim())
     .find((line) => line !== "") ?? "";
 
+/** Most characters of a question: the Brain's own limit, which the search box holds to too. */
+export const brainQuestionMaxLength = 2000;
+
 /** How many tokens a search's pack may hold (the Brain's own estimate). */
 export const brainSearchBudget = 4000;
 
 /** The Brain's sources, for the person signed in. */
 export interface BrainSourcesApi {
   /** A page of the sources they may read, newest first, after `after`. */
-  list: (after?: BrainSourcesAfter) => Promise<BrainSourcePage>;
+  list: (after?: BrainSourcesAfter | null) => Promise<BrainSourcePage>;
   /** A page of a source's versions they may read, newest first, below `before`. */
   versions: (
     source: BrainSourceRef,

@@ -69,14 +69,15 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
     this.#check = check;
   }
 
-  async list(after?: BrainSourcesAfter): Promise<BrainSourcePage> {
+  async list(after?: BrainSourcesAfter | null): Promise<BrainSourcePage> {
     return await withPerson(this.#check, async (person) => {
       // Where the page starts, as `list` answered it: brain-next.ts checks
       // it strictly (a time that is one, a source as its rules name one).
       const { sources, next } = await listSourcesAs(
         this.#env,
         person.userId,
-        after === undefined
+        // Null, as a client may send for none, is none.
+        after === undefined || after === null
           ? {}
           : {
               after: {

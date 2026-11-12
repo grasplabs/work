@@ -198,6 +198,9 @@ const newSourceSchema = z.strictObject({
   readers: sourceReadersSchema,
 });
 
+/** A question as the Brain takes one (`recallRequestSchema`). */
+const questionSchema = wellFormedString().max(questionMaxLength);
+
 const versionRefSchema = z.strictObject({
   source: sourceRefSchema,
   version: z.int().positive(),
@@ -351,9 +354,6 @@ const isUsableVector = (vector: readonly number[]): boolean =>
  * by words and exact parts. With no model shipped there is no why: going
  * without is no failure then.
  */
-/** A question as the Brain takes one (`recallRequestSchema`). */
-const questionSchema = wellFormedString().max(questionMaxLength);
-
 const meaningOf = async (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
   question: string

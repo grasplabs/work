@@ -283,6 +283,22 @@ describe("the Brain's sources, as a person reads them", () => {
     ).rejects.toThrow(/^Refused: /u);
   });
 
+  it("reads a null page start as none, and refuses one that names no page", async () => {
+    const reader = await signedInApi(idp, "user");
+    await add(newSource(), `${word()} kept`, owner(reader.userId));
+    const first = await reader.api.brainSources.list();
+
+    await expect(reader.api.brainSources.list(null)).resolves.toStrictEqual(
+      first
+    );
+    await expect(
+      reader.api.brainSources.list({
+        addedAt: "not a time",
+        source: { producer: "upload", id: crypto.randomUUID() },
+      })
+    ).rejects.toThrow("Something went wrong.");
+  });
+
   it("refuses a Grasp staff session", async () => {
     const staff = await openRpc(
       await signedIn(idp, "grasp-staff", staffPerson())

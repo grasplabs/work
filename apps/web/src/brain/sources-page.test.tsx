@@ -98,7 +98,9 @@ const settle = async (): Promise<void> => {
 const shown = async (
   connections: Connection[],
   refusal?: string,
-  searched?: Promise<boolean>
+  searched?: Promise<boolean>,
+  /** Holds each read of a source's first version until it settles. */
+  firstRead?: Promise<boolean>
 ) => {
   const calls: string[] = [];
   const brainSources = {
@@ -137,6 +139,9 @@ const shown = async (
     read: async (source: BrainSourceRef, version: number) => {
       await Promise.resolve();
       calls.push(`read ${source.id}@${version}`);
+      if (version === 1) {
+        await (firstRead ?? Promise.resolve(true));
+      }
       const text = texts[`${source.id}@${version}`];
       return text === undefined
         ? null
@@ -301,6 +306,23 @@ describe(SourcesPage, () => {
       opened: true,
       calls: ["list", "search invoices refunds", "versions u-1", "read u-1@1"],
     });
+  });
+
+  it("shows a version picked as loading until its own text arrives, never the text of the one before", async () => {
+    const read = Promise.withResolvers<boolean>();
+    await shown([], undefined, undefined, read.promise);
+    await press("Handbook");
+    const newest = panel();
+    await press("Version 1");
+    const waiting = panel();
+    read.resolve(true);
+    await settle();
+
+    expect({
+      newest: newest.includes("Invoices are paid on Fridays."),
+      waiting: waiting.includes("Invoices are paid on Fridays."),
+      arrived: panel().includes("Invoices are paid monthly."),
+    }).toStrictEqual({ newest: true, waiting: false, arrived: true });
   });
 
   it("asks one search at a time: a question sent while one is searched is not asked", async () => {
