@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
@@ -798,5 +799,128 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       call: ["started", "brain.budget_exceeded"],
       recall: ["brain.budget_exceeded"],
     });
+  });
+});
+
+// What an App recalls, it may keep: its data outlives the call. Sharing
+// holds an App to what it may have read (app-provenance.ts): someone it
+// is shared with must be able to read every source it read.
+
+/** An App whose action keeps what it recalls in notes its members read. */
+const keepApp = () =>
+  testApp(
+    {
+      name: "Keep",
+      tables: {
+        notes: {
+          fields: { text: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
+      },
+      permissions: ['permission.brain({ operations: ["recall"] })'],
+    },
+    {
+      "server/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
+
+export const save = mutation({
+  args: { text: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("notes", args);
+    return null;
+  },
+});
+
+export const keep = action({
+  args: { question: v.string() },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const pack = await ctx.brain.recall({
+      question: args.question,
+      budget: { tokens: 800 },
+    });
+    for (const item of pack.items) {
+      await ctx.runMutation(save, { text: item.text });
+    }
+    return pack.items.length;
+  },
+});
+
+export const list = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map(({ text }) => text),
+});
+`,
+    }
+  );
+
+/** What `name` of `app` answers `by`: its value, or its error's code. */
+const calledOf = async (
+  app: Fixture & { release: Release },
+  by: Member,
+  name: string,
+  args: Record<string, unknown>
+): Promise<unknown> => {
+  const fn = app.release.app.functions[name];
+  if (fn === undefined) {
+    throw new Error(`No ${name}`);
+  }
+  const { result }: { result: FunctionResult } = await callAppFunction(
+    env,
+    by,
+    app.app,
+    JSON.stringify({ reference: { name, kind: fn.kind }, args })
+  );
+  return result.ok ? result.value : { failed: result.error.code };
+};
+
+describe("what an App recalls and keeps", setUpTime, () => {
+  it("never reaches someone it is shared with who can't read where it came from", async () => {
+    const { word, admin, ada, uma } = await company();
+    // Ben is in none of the teams whose notes hold the word.
+    const ben = await person("user");
+    const fixture: Fixture = await appWith(keepApp(), "Keep", ada);
+    const release: Release = await seal(fixture);
+    await publishVersion(env, fixture.owner, fixture.app, 1);
+    const app = { ...fixture, release };
+    const permissionId = await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: app.app }),
+      release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: app.app,
+      alias: "brain",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+    // Shared with Uma and Ben, as the App's owner shares it.
+    const shared = await Promise.all(
+      [uma, ben].map(async (member) => {
+        try {
+          await addMember(env, ada, app.app, {
+            type: "person",
+            id: member.userId,
+            role: "user",
+          });
+          return "shared";
+        } catch (error) {
+          return z.object({ code: z.string() }).parse(error).code;
+        }
+      })
+    );
+    // Uma recalls her team's note, and the App keeps it.
+    const kept = await calledOf(app, uma, "notes.keep", { question: word });
+    const seen = await calledOf(app, ben, "notes.list", {});
+    // However the App is held to it (sharing refused, the call refused,
+    // or the note withheld), Ben never reads her team's note.
+    expect({
+      shared,
+      kept,
+      benReadsUmasTeam: JSON.stringify(seen).includes(`Uma's team: ${word}`),
+    }).toMatchObject({ benReadsUmasTeam: false });
   });
 });
