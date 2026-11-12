@@ -22,6 +22,7 @@ import {
   manifestSchema as storeManifestSchema,
 } from "../src/exports.ts";
 import type { BrainStore } from "../src/store.ts";
+import { workParksMax } from "../src/work.ts";
 
 type Store = DurableObjectStub<BrainStore>;
 
@@ -1601,6 +1602,8 @@ describe("exports and restores", () => {
       await putBack(shared(), emptyShared);
       await shared().startRestore(id, "test");
       await restoreSettled(id);
+      // Every file the manifest names is still there: only those past it went.
+      const adopted = await keysUnder(`exports/${id}/`);
       await shared().eraseSource({ source: unnamed, reason: "deleted" });
       await tick(shared());
       await tick(shared());
@@ -1613,7 +1616,65 @@ describe("exports and restores", () => {
           holding.push(key);
         }
       }
-      expect(holding).toStrictEqual([]);
+      expect({ adopted, holding }).toStrictEqual({
+        adopted: [
+          `exports/${id}/manifest.json`,
+          `exports/${id}/part-0000.holds.json`,
+          `exports/${id}/part-0000.jsonl`,
+        ],
+        holding: [],
+      });
+    });
+
+    it("drops a handed-back export whose holdings an erasure named while its restore was stuck, with no erasure after (threats 6, 9)", async () => {
+      await putBack(shared(), emptyShared);
+      const source = `test:${unique()}`;
+      await add(
+        shared(),
+        source,
+        `erased ${unique()}`,
+        team(`team:${unique()}`)
+      );
+      await add(
+        shared(),
+        `test:${unique()}`,
+        `kept ${unique()}`,
+        team(`team:${unique()}`)
+      );
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const restoreItem = async (set: string): Promise<void> => {
+        await runInDurableObject(shared(), (_instance, state) => {
+          state.storage.sql.exec(
+            `UPDATE work_items SET ${set} WHERE kind = 'brain.restore' AND key = ?`,
+            `restore:${id}`
+          );
+        });
+      };
+      // Parked, not for good: the restore runs no further, and its export,
+      // still adopted, is held.
+      await restoreItem(`parked_at = ${Date.now()}, parks = 1`);
+      // An erasure of what it holds: its sweep pass passes the export by,
+      // as the store has a record of it.
+      await shared().eraseSource({ source, reason: "deleted" });
+      for (let ticks = 0; ticks < 4; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const held = await keysUnder(`exports/${id}/`);
+      // Parked for good: the tick hands the export back, and with no
+      // erasure after, a pass still judges its files.
+      await restoreItem(`parks = ${workParksMax}`);
+      for (let ticks = 0; ticks < 6; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      expect({
+        held: held.length > 0,
+        after: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ held: true, after: [] });
     });
 
     it("goes on with a sweep pass whose item went before it ended, from its saved place (threat 6)", async () => {
