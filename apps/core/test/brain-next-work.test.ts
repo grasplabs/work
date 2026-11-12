@@ -41,6 +41,7 @@ import { platformAnthropicKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 import { streamText } from "./provider-streams.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -57,6 +58,7 @@ import { testBinding } from "./test-env.ts";
 const noHandOvers: HandOvers = {
   handOver: async () => {
     await Promise.resolve();
+    return { kind: "nothing" };
   },
 };
 
@@ -240,7 +242,7 @@ const later = (ms: number): Date => {
 
 /** One tick of core's clock, `ms` after the last. */
 const tick = async (ms = 1000): Promise<void> => {
-  await workBrain(env, later(ms));
+  await workBrain(env, later(ms), noProducers);
 };
 
 /** Whether `promise` failed. */
@@ -699,7 +701,10 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     }
     await enqueueAll(items, { priority: "upload" });
     const at = later(1000);
-    await Promise.all([workBrain(env, at), workBrain(env, at)]);
+    await Promise.all([
+      workBrain(env, at, noProducers),
+      workBrain(env, at, noProducers),
+    ]);
     expect(seen.started.toSorted()).toStrictEqual(items.toSorted());
     expect(seen.mostAtOnce).toBe(workAtOnce);
   });
@@ -716,7 +721,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     });
     await enqueue({ key: killedIn, priority: "asked" });
     await enqueueAll(others, { priority: "recent" });
-    const first = failed(workBrain(env, later(1000)));
+    const first = failed(workBrain(env, later(1000), noProducers));
     await reached.wait();
     await until(() => seen.finished.length >= others.length);
     await killStore();
@@ -1063,12 +1068,12 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     for (let tickNumber = 0; tickNumber <= workAttemptsMax; tickNumber += 1) {
       // Past each wait, which doubles up to 30 minutes.
       // oxlint-disable-next-line no-await-in-loop -- tick after tick
-      await store().work(
-        brokenHost,
-        later(40 * 60_000),
-        noEmbedders,
-        noHandOvers
-      );
+      await store().work({
+        ask: brokenHost,
+        at: later(40 * 60_000),
+        embedders: noEmbedders,
+        handOvers: noHandOvers,
+      });
     }
     const meanwhile = await queue([item]);
     await answeringProvider(() => answer);
@@ -1347,7 +1352,11 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     const item = keyOf("no-connect");
     behaviours.set(item, asksOnce);
     await enqueue({ key: item, priority: "asked" }, quickWork);
-    await workBrain({ ...env, CONNECT: unreachableConnect }, later(1000));
+    await workBrain(
+      { ...env, CONNECT: unreachableConnect },
+      later(1000),
+      noProducers
+    );
     const meanwhile = await queue([item]);
     await tick(3 * 60_000);
     const { parked, paused } = await queue([item]);
@@ -1463,7 +1472,12 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       return { kind: "answer" as const, text: "An answer." };
     };
     const at = later(1000);
-    await store().work(host, at, noEmbedders, noHandOvers);
+    await store().work({
+      ask: host,
+      at,
+      embedders: noEmbedders,
+      handOvers: noHandOvers,
+    });
     const { paused } = await queue();
     expect({
       reason: paused?.reason,
@@ -1561,7 +1575,12 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     const plain = keyOf("plain");
     behaviours.set(asking, asksOnce);
     await enqueue({ key: asking, priority: "asked" });
-    await store().work(brokenHost, later(1000), noEmbedders, noHandOvers);
+    await store().work({
+      ask: brokenHost,
+      at: later(1000),
+      embedders: noEmbedders,
+      handOvers: noHandOvers,
+    });
     await enqueue({ key: plain, priority: "archive" });
     // Within the pause's minute: nothing runs, not even work with no model.
     await tick(10_000);

@@ -1,7 +1,8 @@
 import {
   brainOf,
   currentReadMax,
-  erasedRefusal,
+  fitsSourceText,
+  erasedSource,
   erasureReasons,
   handOversMax,
   instructionsMaxLength,
@@ -10,7 +11,6 @@ import {
   principalMaxLength,
   questionMaxLength,
   sourceIdMaxLength,
-  sourceTextMaxBytes,
   wellFormedString,
   modelWaitMaxSeconds,
   storeBytesMax,
@@ -22,6 +22,7 @@ import type {
   ErasureReason,
   Embedders,
   HandOverPriority,
+  HandOverResult,
   HandOvers,
   ModelReply,
   Pack,
@@ -47,7 +48,7 @@ import type {
   BrainStep,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
-import { firstLineOf } from "@grasp-os/shared/brain-sources";
+import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
@@ -322,7 +323,8 @@ const readerOf = async (
  * the server, never from a person's input. An id is not a secret within
  * its kind (an upload's id is seen by those who can see the upload), so
  * a producer checks that whoever asks for the change may change that
- * source before it calls this; the Brain can't tell.
+ * source before it calls this; the Brain can't tell. An add an erasure
+ * closed is refused with `brain.source_erased`: final, never retried.
  */
 export const addSource = async (
   env: BrainEnv,
@@ -334,12 +336,22 @@ export const addSource = async (
   }
 ): Promise<SourceVersionRef> => {
   const { source, change, text, readers } = checked(newSourceSchema, added);
-  const { version } = await brain(env).addSource({
-    source: sourceKeyOf(source),
-    change,
-    text,
-    access: accessOf(readers),
-  });
+  let version: number;
+  try {
+    ({ version } = await brain(env).addSource({
+      source: sourceKeyOf(source),
+      change,
+      text,
+      access: accessOf(readers),
+    }));
+  } catch (error) {
+    // The Brain's own refusal of what an erasure closed, by its whole
+    // message (@grasp-os/brain-next/contract): a code producers can test.
+    if (error instanceof Error && error.message === erasedSource) {
+      throw brainSourceErrors.create("brain.source_erased");
+    }
+    throw error;
+  }
   return { source, version };
 };
 
@@ -927,61 +939,41 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
 // none is refused, and nothing is added.
 
 /**
- * A source as its producer holds it now: its change, text and readers; or
- * nothing to hand over (`gone`); or nothing, as the erasure of its one
- * reader (`readers`, the store that may hold it) has begun, when the Brain
- * closes its key, as an add of it may have landed after that erasure.
+ * A source as its producer holds it now: its change, text and readers,
+ * and the text to keep instead when `text` is past a source's bound
+ * (`whenTooLarge`: what it is, saying plainly that the rest was too large
+ * to keep, never a cut part of it); or nothing to hand over (`gone`); or
+ * nothing, as the erasure of its one reader (`readers`, the store that
+ * may hold it) has begun, when the Brain closes its key, as an add of it
+ * may have landed after that erasure.
  */
 export type Handed =
   | { kind: "gone" }
   | { kind: "erased"; readers: SourceReaders }
-  | { kind: "source"; change: string; text: string; readers: SourceReaders };
+  | {
+      kind: "source";
+      change: string;
+      text: string;
+      whenTooLarge: string;
+      readers: SourceReaders;
+    };
 
-/** How a hand-over ended, as the Brain tells it. */
-export type HandOverEnd =
-  | { kind: "added"; version: number }
-  | { kind: "refused" };
+/** How a hand-over that did something ended: added, or refused for good. */
+export type HandOverEnd = Exclude<HandOverResult, { kind: "nothing" }>;
 
 /** Core's producers, as the Brain's hand-overs reach them (brain-sources.ts). */
 export interface Producers {
   /** `source` as its producer's records hold it now. */
   read: (source: SourceRef) => Promise<Handed>;
-  /** How the hand-over of `source` ended: once it did, and again on a repeat. */
+  /**
+   * Records how the hand-over of `source` ended: once it did, and again
+   * on a repeat. Throws when it can't, so the item is tried again.
+   */
   settled: (source: SourceRef, outcome: HandOverEnd) => Promise<void>;
 }
 
 /** The class of the Brain's work every hand-over takes. */
 const handOverPriority: HandOverPriority = "conversation";
-
-/**
- * Most UTF-8 bytes of a text handed over: below the Brain's bound
- * (`sourceTextMaxBytes`), with room for the Brain's folding of it for its
- * word index, which can grow it. A longer text is cut (`fitted`), not
- * refused.
- */
-const handedMaxBytes = Math.floor(sourceTextMaxBytes * 0.9);
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-/**
- * `text`'s start that fits `handedMaxBytes`, cut where a character starts,
- * the same each time for the same text: a run's result can be a little
- * over the Brain's bound.
- */
-const fitted = (text: string): string => {
-  const bytes = encoder.encode(text);
-  if (bytes.byteLength <= handedMaxBytes) {
-    return text;
-  }
-  let end = handedMaxBytes;
-  // A byte `10xxxxxx` (0x80 to 0xbf) continues a character: cut before
-  // the one it is in.
-  while (end > 0 && (bytes[end] ?? 0) >= 0x80 && (bytes[end] ?? 0) < 0xc0) {
-    end -= 1;
-  }
-  return decoder.decode(bytes.subarray(0, end));
-};
 
 /**
  * Closes `source`'s key for good, as the erasure of its one reader
@@ -997,68 +989,109 @@ const closeKey = async (
   await eraseSource(env, { source, reason: "person_erased" });
 };
 
+/** Whether `error` is core's refusal of an add an erasure closed (`addSource`). */
+const isErasedRefusal = (error: unknown): boolean =>
+  brainSourceErrors.codeOf(error) === "brain.source_erased";
+
+/**
+ * Refuses the hand-over of `source` for `reason`: recorded first, then,
+ * when its one reader's erasure began (`closing`), its key closed. In
+ * that order, as closing the key takes this item off the queue with every
+ * other of its key: a refusal recorded after could, failing, never be
+ * tried again. A close that fails fails the item, which is tried again,
+ * recording again: each attempt records its own.
+ */
+const refuse = async (
+  env: Env,
+  producers: Producers,
+  source: SourceRef,
+  reason: HandOverEnd & { kind: "refused" },
+  closing?: SourceReaders
+): Promise<HandOverResult> => {
+  await producers.settled(source, reason);
+  if (closing !== undefined) {
+    await closeKey(env, source, closing);
+  }
+  return reason;
+};
+
 /**
  * Hands `source` over as its producer's records hold it now, through
- * `addSource`, which takes it to the store its readers belong in: nothing,
- * when the producer has nothing to hand over. The readers are checked as
- * any add's, so a producer that names none is refused, and the item is
- * tried again, then parked. An add refused because what it adds was erased
- * is final: told to the producer, never tried again.
+ * `addSource`, which takes it to the store its readers belong in, and says
+ * how it ended (`HandOverResult`), which settles the item as done:
+ *
+ * - nothing, when the producer has nothing to hand over;
+ * - refused as `invalid`, when the producer's answer can't be added (no
+ *   readers, a text that isn't one): never tried again;
+ * - its text, or its `whenTooLarge` when the text is past a source's
+ *   bound as given or as indexed (`fitsSourceText`); refused as
+ *   `too_large` when neither fits;
+ * - refused as `erased` when what it adds was erased: final.
  *
  * A source for one person alone whose erasure has begun is erased (its key
  * closed), never left: when the producer says so (`erased`), as an add of
  * it may have landed after the Brain's erasure (began before it, the add's
  * erasure failed or never ran), and when it was added while that erasure
  * began (core's record of it is written before the Brain's erasure, and
- * the producer checked it before the add). An erasure that fails fails the
- * item, which is tried again. Erasing a key twice is harmless.
+ * the producer checked it before the add). Only a throw tries it again: a
+ * store out of reach, an audit write or a close that failed.
  */
 const handOver = async (
   env: Env,
   producers: Producers,
   source: SourceRef
-): Promise<void> => {
+): Promise<HandOverResult> => {
   const handed = await producers.read(source);
   if (handed.kind === "gone") {
-    return;
+    return { kind: "nothing" };
   }
+  const refused = async (
+    reason: (HandOverEnd & { kind: "refused" })["reason"],
+    closing?: SourceReaders
+  ) =>
+    await refuse(env, producers, source, { kind: "refused", reason }, closing);
   if (handed.kind === "erased") {
-    await closeKey(env, source, handed.readers);
-    await producers.settled(source, { kind: "refused" });
-    return;
+    return await refused("erased", handed.readers);
   }
-  const readers = checked(sourceReadersSchema, handed.readers);
-  let outcome: HandOverEnd;
+  const readers = sourceReadersSchema.safeParse(handed.readers);
+  const texts = [handed.text, handed.whenTooLarge].filter(
+    (text) => wellFormedString().safeParse(text).success
+  );
+  if (!readers.success || texts.length < 2) {
+    return await refused("invalid");
+  }
+  const text = texts.find((each) => fitsSourceText(each));
+  if (text === undefined) {
+    return await refused("too_large");
+  }
+  let version: number;
   try {
-    const { version } = await addSource(env, {
+    ({ version } = await addSource(env, {
       source,
       change: handed.change,
-      text: fitted(checked(wellFormedString(), handed.text)),
-      readers,
-    });
-    outcome = { kind: "added", version };
+      text,
+      readers: readers.data,
+    }));
   } catch (error) {
-    if (!(error instanceof Error && error.message === erasedRefusal)) {
+    if (!isErasedRefusal(error)) {
       throw error;
     }
-    outcome = { kind: "refused" };
+    return await refused("erased");
   }
   if (
-    outcome.kind === "added" &&
-    readers.kind === "owner" &&
-    (await erasureBegun(env, readers.personId))
+    readers.data.kind === "owner" &&
+    (await erasureBegun(env, readers.data.personId))
   ) {
-    await closeKey(env, source, readers);
-    outcome = { kind: "refused" };
+    return await refused("erased", readers.data);
   }
-  await producers.settled(source, outcome);
+  const added: HandOverResult = { kind: "added", version };
+  await producers.settled(source, added);
+  return added;
 };
 
 /** Core's producers as the Brain's work reaches them, by its keys. */
 const handOversOf = (env: Env, producers: Producers): HandOvers => ({
-  handOver: async (key) => {
-    await handOver(env, producers, sourceRefOf(key));
-  },
+  handOver: async (key) => await handOver(env, producers, sourceRefOf(key)),
 });
 
 /**
@@ -1097,21 +1130,22 @@ export const queueHandOvers = async (
  * few blocks of vector codes, keeps its vectors to core's embedding model,
  * then runs what is due in its queue, its model calls through core's
  * gateway, its passages through core's bulk embedders and its hand-overs
- * through `producers` (brain-sources.ts `producersOf`, which the clock
- * gives). Without them a hand-over due fails and is tried again later,
- * adding nothing. Harmless late or twice.
+ * through `producers`: core's (brain-sources.ts `producersOf`), which the
+ * clock gives. Required, so no tick of the shared store forgets them; a
+ * tick that hands nothing over says so with producers that read nothing.
+ * Harmless late or twice.
  */
 export const workBrain = async (
   env: Env,
   at: Date,
-  producers?: Producers
+  producers: Producers
 ): Promise<void> => {
-  await brain(env).work(
-    askModel(env),
+  await brain(env).work({
+    ask: askModel(env),
     at,
-    await embeddersOf(env),
-    producers === undefined ? undefined : handOversOf(env, producers)
-  );
+    embedders: await embeddersOf(env),
+    handOvers: handOversOf(env, producers),
+  });
 };
 
 /** The Brain's work queue, store and ledger, as staff see it (brain-report.ts). */

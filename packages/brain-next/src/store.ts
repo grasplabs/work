@@ -10,6 +10,7 @@ import {
   currentRequestSchema,
   embedModelSchema,
   handOverRequestSchema,
+  handOverResultSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -30,6 +31,7 @@ import type {
   Finding,
   HandOverRequest,
   HandOvers,
+  WorkRequest,
   NewInstructions,
   Reader,
   Access,
@@ -856,12 +858,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work(
-    ask: AskModel,
-    at: Date,
-    embedders: Embedders,
-    handOvers?: HandOvers
-  ): Promise<void> {
+  async work({ ask, at, embedders, handOvers }: WorkRequest): Promise<void> {
     await this.#changing(async () => {
       await this.#workNow(ask, at, embedders, handOvers);
     });
@@ -872,7 +869,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     ask: AskModel,
     at: Date,
     embedders: Embedders,
-    handOvers: HandOvers | undefined
+    handOvers?: HandOvers
   ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
@@ -924,9 +921,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           ? {}
           : {
               handOvers: {
-                handOver: async (source) => {
-                  await handOvers.handOver(source);
-                },
+                handOver: async (source) =>
+                  checked(
+                    handOverResultSchema,
+                    await handOvers.handOver(source)
+                  ),
               },
             }),
       },
@@ -967,7 +966,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       if (this.alarmHost !== null) {
         const host = await this.alarmHost();
-        await this.work(host.ask, new Date(), host.embedders);
+        // No side of hand-overs: a person's own store never queues one
+        // (`handOver` refuses), so none is ever due here.
+        await this.#changing(async () => {
+          await this.#workNow(host.ask, new Date(), host.embedders);
+        });
       }
     } catch {
       // Nothing of the error is kept. A tick that couldn't run (its ledger

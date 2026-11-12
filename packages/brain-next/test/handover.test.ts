@@ -5,6 +5,7 @@
 import type {
   AskModel,
   Embedders,
+  HandOverResult,
   HandOvers,
 } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
@@ -30,7 +31,10 @@ const noEmbedders: Embedders = {
   },
 };
 
-/** A host keeping each source it is asked to hand over, failing while `failing`. */
+/**
+ * A host keeping each source it is asked to hand over, failing while
+ * `failing`, and saying it added it once it doesn't.
+ */
 const hostOf = (
   failing = false
 ): HandOvers & { asked: string[]; failing: boolean } => {
@@ -38,12 +42,13 @@ const hostOf = (
   const host = {
     asked,
     failing,
-    handOver: async (source: string) => {
+    handOver: async (source: string): Promise<HandOverResult> => {
       await Promise.resolve();
       host.asked.push(source);
       if (host.failing) {
         throw new Error("The host is out of reach");
       }
+      return { kind: "added", version: 1 };
     },
   };
   return host;
@@ -55,7 +60,12 @@ const clock = { at: Date.now() };
 /** One tick with `host`, `aheadMs` past the last. */
 const tick = async (host: HandOvers, aheadMs = 0): Promise<void> => {
   clock.at = Math.max(clock.at, Date.now()) + aheadMs;
-  await store().work(quietAsk, new Date(clock.at), noEmbedders, host);
+  await store().work({
+    ask: quietAsk,
+    at: new Date(clock.at),
+    embedders: noEmbedders,
+    handOvers: host,
+  });
 };
 
 /** The hand-overs parked before this test: the store is the file's. */
@@ -199,6 +209,45 @@ describe("handing a source over through the queue", () => {
       refused: "The Brain refused it: only the shared store takes this",
       waiting: 0,
       parked: 0,
+    });
+  });
+
+  it("settles a hand-over the host refused as done, never trying it again, and tries one whose answer isn't one again", async () => {
+    const asked: string[] = [];
+    const answering = (answer: unknown): HandOvers => ({
+      handOver: async (source) => {
+        await Promise.resolve();
+        asked.push(source);
+        // SAFETY: the store checks what the host answers; this hands it
+        // what the type rules out, as a host outside TypeScript could.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        return answer as HandOverResult;
+      },
+    });
+    await store().handOver({
+      items: [{ source: "run:refused", priority: "conversation" }],
+    });
+    await tick(answering({ kind: "refused", reason: "too_large" }));
+    await tick(
+      answering({ kind: "refused", reason: "too_large" }),
+      20 * 60_000
+    );
+    const afterRefused = { asked: [...asked], queue: await queued() };
+    asked.length = 0;
+    await store().handOver({
+      items: [{ source: "run:odd", priority: "conversation" }],
+    });
+    await tick(answering({ kind: "maybe" }));
+
+    expect({
+      afterRefused,
+      odd: { asked, queue: await queued() },
+    }).toStrictEqual({
+      afterRefused: {
+        asked: ["run:refused"],
+        queue: { waiting: 0, parked: [] },
+      },
+      odd: { asked: ["run:odd"], queue: { waiting: 1, parked: [] } },
     });
   });
 });

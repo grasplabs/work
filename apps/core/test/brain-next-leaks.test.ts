@@ -35,6 +35,7 @@ import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import {
@@ -768,7 +769,7 @@ describe(
       await eraseSource(env, { source: run, reason: "retention" });
       await eraseSource(env, { source: teamSource, reason: "deleted" });
       await erasePerson(env, { personId: holder, reason: "person_erased" });
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       await restoreStore(backup);
 
       const erased = [own, teamSource, upload, chat, run].flatMap((source) =>

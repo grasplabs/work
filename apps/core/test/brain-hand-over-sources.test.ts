@@ -115,6 +115,37 @@ const outcomesFor = async (id: string): Promise<string[]> => {
     .map(({ action }) => action);
 };
 
+/**
+ * `real`, running `steps` in turn, each just before the next batch after
+ * a statement matching `query` was prepared: one throwing fails that
+ * batch.
+ */
+const inTurn = (
+  real: D1Database,
+  query: RegExp,
+  steps: readonly (() => Promise<void>)[]
+): D1Database => {
+  const left = [...steps];
+  let matched = false;
+  return {
+    prepare: (sql) => {
+      matched ||= query.test(sql);
+      return real.prepare(sql);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      if (matched) {
+        matched = false;
+        await left.shift()?.();
+      }
+      return await real.batch<T>(statements);
+    },
+    exec: async (sql) => await real.exec(sql),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
 /** The Brain's store, as core reaches it. */
 const store = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
 
@@ -464,9 +495,96 @@ describe("how a hand-over fails closed", () => {
       queued: await queuedFor(source),
     }).toStrictEqual({
       landed: true,
+      // The refusal is recorded before the key is closed; the close
+      // failed, so the item was tried again, and recorded again.
+      afterFailure: [
+        "brain.source.handover_started",
+        "brain.source.handover_refused",
+      ],
+      after: [
+        "brain.source.handover_started",
+        "brain.source.handover_refused",
+        "brain.source.handover_refused",
+      ],
+      version: null,
+      queued: { waiting: false, parked: false },
+    });
+  });
+
+  it("records the refusal of an add that landed after its person's erasure, also when that record failed once, and closes the key", async () => {
+    const runner = await builder();
+    const said = word();
+    const id = await endedRun(runner, said);
+    const source: SourceRef = { producer: "run", id };
+    await relayNow();
+    // The person's erasure begins once the hand-over has read their run
+    // (its first audit write), before its add; the add lands after it, and
+    // the next audit write, the refusal's, fails once.
+    await tick(
+      {
+        ...env,
+        DB: inTurn(env.DB, auditWrite, [
+          async () => {
+            await drizzle(env.DB).insert(personErasures).values({
+              userId: runner.userId,
+              name: "Erased",
+              emailHash: null,
+              emailKeyVersion: 1,
+              requestedBy: runner.userId,
+              requestedAt: new Date(),
+            });
+            await erasePerson(env, {
+              personId: runner.userId,
+              reason: "person_erased",
+            });
+          },
+          async () => {
+            await Promise.resolve();
+            throw new Error("D1 is out of reach");
+          },
+        ]),
+      },
+      later()
+    );
+    const afterFailure = await outcomesFor(id);
+    // Past the failed attempt's backoff.
+    await tick(env, later(2 * 60_000));
+
+    expect({
+      afterFailure,
+      after: await outcomesFor(id),
+      version: await readSourceVersionAs(env, runner.userId, {
+        source,
+        version: 1,
+      }),
+      queued: await queuedFor(source),
+    }).toStrictEqual({
       afterFailure: ["brain.source.handover_started"],
       after: ["brain.source.handover_started", "brain.source.handover_refused"],
       version: null,
+      queued: { waiting: false, parked: false },
+    });
+  });
+
+  it("keeps a run whose result is past the Brain's bound as how it ended, saying the result was too large, never a cut part of it", async () => {
+    const runner = await builder();
+    // Small as given, past the bound as the word index folds it: each
+    // character is 3 bytes, and 33 folded.
+    const id = await endedRun(runner, "\uFDFA".repeat(31_000));
+    const source: SourceRef = { producer: "run", id };
+    await handOverNow();
+    const kept = await readSourceVersionAs(env, runner.userId, {
+      source,
+      version: 1,
+    });
+
+    expect({
+      outcomes: await outcomesFor(id),
+      text: kept?.text,
+      queued: await queuedFor(source),
+    }).toStrictEqual({
+      outcomes: ["brain.source.handover_started", "brain.source.handed_over"],
+      text: "Workflow run completed.\n\nIts result was too large to keep.",
       queued: { waiting: false, parked: false },
     });
   });

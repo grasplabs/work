@@ -18,6 +18,15 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/**
+ * What an add says that an erasure closed: to an erased source, whose key
+ * is closed for good, or for a person alone that began before that
+ * person's erasure (erasure.ts). Said only to the producer that adds it,
+ * which never retries it: the message alone, so a producer tells it from
+ * any other failure by comparing it whole.
+ */
+export const erasedSource = "The Brain refused it: what this adds was erased";
+
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
 
@@ -120,6 +129,17 @@ export const accessSchema = z.discriminatedUnion("kind", [
 export type Access = z.infer<typeof accessSchema>;
 
 /**
+ * Whether `text` is within a source's bound (`sourceTextMaxBytes`), as
+ * given and as the word index takes it: folding can grow a text many
+ * times (a compatibility form such as "ﷺ" is 3 bytes, and 33 folded), so
+ * the bound holds for both. The one rule of it, which an add checks and a
+ * host fits a text to before it adds.
+ */
+export const fitsSourceText = (text: string): boolean =>
+  byteLengthOf(text) <= sourceTextMaxBytes &&
+  byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes;
+
+/**
  * A version of a source to add: which source, the change it is, its text,
  * and who may read this version.
  */
@@ -133,10 +153,7 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,
     })
-    // Folding can grow a text many times (a compatibility form such as
-    // "ﷺ" is 3 bytes, and 33 folded), so the bound holds for what the
-    // word index takes too.
-    .refine((text) => byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes, {
+    .refine((text) => fitsSourceText(text), {
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
@@ -920,22 +937,54 @@ export const handOverRequestSchema = z.strictObject({
 });
 export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
 
-/** The host's side of hand-overs, as the Brain's work uses it. */
+/**
+ * Why a hand-over was refused for good: what it adds was erased (its key
+ * is closed, or its one reader's erasure began), the host's answer can't
+ * be added (no readers, a text that isn't one), or its text is past a
+ * source's bound with nothing smaller to keep.
+ */
+export const handOverRefusals = ["erased", "invalid", "too_large"] as const;
+export type HandOverRefusal = (typeof handOverRefusals)[number];
+
+/**
+ * How a hand-over ended, as the host says it: added as `version`, nothing
+ * to add (the source is gone), or refused for good. Each settles the item
+ * as done; only a throw tries it again.
+ */
+export const handOverResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("added"), version: z.int().positive() }),
+  z.strictObject({ kind: z.literal("nothing") }),
+  z.strictObject({
+    kind: z.literal("refused"),
+    reason: z.enum(handOverRefusals),
+  }),
+]);
+export type HandOverResult = z.infer<typeof handOverResultSchema>;
+
+/** The host's side of hand-overs, as the shared store's work uses it. */
 export interface HandOvers {
   /**
-   * Hands `source` over as the host's records hold it now: resolves once
-   * it is added, or there is nothing to add; throws to be tried again.
-   * Safe to repeat.
+   * Hands `source` over as the host's records hold it now, and says how
+   * it ended (`HandOverResult`). Throws only for a failure worth trying
+   * again (a store out of reach, an audit write that failed). Safe to
+   * repeat.
    */
-  handOver: (source: SourceId) => Promise<void>;
+  handOver: (source: SourceId) => Promise<HandOverResult>;
 }
 
 /**
- * What an add answers when what it adds was erased: the source's key is
- * closed, or its one reader was erased since it began. Final: a producer
- * never tries it again.
+ * One tick of a store (`Brain.work`): its time, the host's model calls and
+ * embedders, and the host's side of hand-overs. Hand-overs are the shared
+ * store's alone: the shared store's tick hands them over with these, and
+ * a person's own store, which never queues one (`handOver` refuses), has
+ * none to hand over whatever it is given.
  */
-export const erasedRefusal = "The Brain refused it: what this adds was erased";
+export interface WorkRequest {
+  ask: AskModel;
+  at: Date;
+  embedders: Embedders;
+  handOvers: HandOvers;
+}
 
 /**
  * A step of the tick that didn't finish: when, and why, as a code of the
@@ -1155,12 +1204,7 @@ export interface Brain {
    * A second tick at the same time shares the same limits and claims
    * nothing the first has under way.
    */
-  work: (
-    ask: AskModel,
-    at: Date,
-    embedders: Embedders,
-    handOvers?: HandOvers
-  ) => Promise<void>;
+  work: (request: WorkRequest) => Promise<void>;
   /**
    * Puts each source on the work queue to be handed over (above), in
    * place of one of its hand-overs still waiting or parked. What the item

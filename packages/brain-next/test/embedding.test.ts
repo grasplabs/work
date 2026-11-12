@@ -51,6 +51,7 @@ import { workAttemptsMax } from "../src/work.ts";
 const noHandOvers: HandOvers = {
   handOver: async () => {
     await Promise.resolve();
+    return { kind: "nothing" };
   },
 };
 
@@ -103,7 +104,12 @@ const embeddersOf = (
 const clock = { at: Date.now() };
 const tick = async (embedders: Embedders, aheadMs = 0): Promise<void> => {
   clock.at = Math.max(clock.at, Date.now()) + aheadMs;
-  await store().work(quietAsk, new Date(clock.at), embedders, noHandOvers);
+  await store().work({
+    ask: quietAsk,
+    at: new Date(clock.at),
+    embedders,
+    handOvers: noHandOvers,
+  });
 };
 
 /** A paragraph of its own, about 800 characters: one chunk. */

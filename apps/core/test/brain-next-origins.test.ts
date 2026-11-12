@@ -48,7 +48,7 @@ const day = 24 * 60 * 60 * 1000;
 
 /** What a hand-over to an erased key, or for a person erased since it began, is told. */
 const refusedAsErased =
-  "Error: The Brain refused it: what this adds was erased";
+  "Error: What this adds was erased: it stays erased, and isn't added.";
 
 /** The Brain's contract on its store, for a reader core no longer has. */
 const brain = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));

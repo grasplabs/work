@@ -81,11 +81,10 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
     return gone;
   }
   const { result, error } = await resultOf(env, row);
-  // A failure by its code alone, which the run's row keeps: the same text
-  // whether the engine still answers or not.
-  const parts = [
+  // How it ended, and a failure by its code alone, which the run's row
+  // keeps: the same text whether the engine still answers or not.
+  const ending = [
     `Workflow run ${row.status}.`,
-    ...(result === undefined ? [] : [JSON.stringify(result)]),
     ...(error?.code === undefined || error.code === null
       ? []
       : [`Failed: ${error.code}`]),
@@ -93,7 +92,12 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   return {
     kind: "source",
     change: "end",
-    text: parts.join("\n\n"),
+    text: [
+      ...ending,
+      ...(result === undefined ? [] : [JSON.stringify(result)]),
+    ].join("\n\n"),
+    // Never a cut part of a result, which would read as half a document.
+    whenTooLarge: [...ending, "Its result was too large to keep."].join("\n\n"),
     readers,
   };
 };
@@ -170,7 +174,7 @@ export const producersOf = (env: Env): Producers => ({
             actor: { type: "system" },
             action: "brain.source.handover_refused",
             target: targetOf(source),
-            detail: { producer: source.producer, reason: "erased" },
+            detail: { producer: source.producer, reason: outcome.reason },
           }
     );
   },

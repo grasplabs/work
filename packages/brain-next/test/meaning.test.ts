@@ -33,6 +33,7 @@ const quietAsk: AskModel = async () => {
 const noHandOvers: HandOvers = {
   handOver: async () => {
     await Promise.resolve();
+    return { kind: "nothing" };
   },
 };
 
@@ -364,7 +365,12 @@ describe("recall by meaning", () => {
     switched.failing = false;
     await store().eraseSource({ source: crowd.source, reason: "deleted" });
     const erased = await found();
-    await store().work(quietAsk, new Date(), noEmbedders, noHandOvers);
+    await store().work({
+      ask: quietAsk,
+      at: new Date(),
+      embedders: noEmbedders,
+      handOvers: noHandOvers,
+    });
     const ticked = await found();
 
     expect({ before, failed, hidden, erased, ticked }).toStrictEqual({
