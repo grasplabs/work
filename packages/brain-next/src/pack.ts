@@ -3,7 +3,7 @@ import type { Pack, PackItem } from "./contract.ts";
 import { foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { holdsTerm, sequenceOf, wordsOf } from "./words.ts";
-import type { Word } from "./words.ts";
+import type { Word, WordMemo } from "./words.ts";
 
 // How what recall found becomes a pack: fused by rank, then fitted to the
 // reader's token budget. Everything here works on what the reader may
@@ -106,7 +106,11 @@ export interface Asked {
  * question's exact parts, then the most of its telling words in any form;
  * the first on a tie. The text itself when it is one such part.
  */
-export const quoteOf = (text: string, { terms, exacts }: Asked): string => {
+export const quoteOf = (
+  text: string,
+  { terms, exacts }: Asked,
+  memo: WordMemo = new Map()
+): string => {
   const parts = [...sentences.segment(text)].flatMap(({ segment }) =>
     piecesOf(segment.trim())
   );
@@ -114,7 +118,7 @@ export const quoteOf = (text: string, { terms, exacts }: Asked): string => {
   let best = parts[0] ?? text;
   let bestScore = -1;
   for (const part of parts) {
-    const words = wordsOf(part);
+    const words = wordsOf(part, memo);
     const score =
       foundIn(sequenceOf(part), exacts, every).length * (terms.length + 1) +
       terms.filter((term) => holdsTerm(words, term)).length;
@@ -150,8 +154,17 @@ export const packOf = (
   let left = budget;
   let truncated = false;
   const kept: { found: Found; item: PackItem }[] = [];
+  // Each word is stemmed once for the whole pack, however many quotes
+  // hold it.
+  const memo: WordMemo = new Map();
   for (const found of fused) {
-    const quote = quoteOf(found.text, asked);
+    // A quote is never empty, so an item costs at least its citation and
+    // a token: one that can't fit is left out without choosing its quote.
+    if (packItemTokens(itemOf(found, "", false)) + 1 > left) {
+      truncated = true;
+      continue;
+    }
+    const quote = quoteOf(found.text, asked, memo);
     const item = itemOf(found, quote, quote === found.text);
     const cost = packItemTokens(item);
     if (cost <= left) {

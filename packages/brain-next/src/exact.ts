@@ -16,9 +16,15 @@ import { allOf, sequenceOf } from "./words.ts";
 //    4400), and words with one digit (2e, 3rd, 9am, A4, Q3, MP3, v2). As
 //    IDs, each would get a list of its own and crowd out the passage that
 //    writes it otherwise ("14 maart 2026", "tweede kwartaal"). Known and
-//    accepted: v2.1, 4x4 and COVID-19 are IDs (names of a kind, found
-//    however their separators are written), and #4521 is not (four
-//    digits: found as a word).
+//    accepted, the rule unchanged: v2.1, 4x4 and COVID-19 are IDs (names
+//    of a kind), and so are a timestamp (2026-03-14T09:00:00Z: its T and
+//    Z are letters), a compact date (20260314) and an amount with five
+//    digits in a row (€1250000). Such a token is found only as written,
+//    and is reported in `notFound` when no passage the reader may read
+//    writes it that way. #4521 is not an ID (four digits: found as a
+//    word). An ID's words match in a row whatever separates them (PO-17,
+//    PO 17 and PO/17 match each other), but written as one word it is
+//    another word: PO17 doesn't match PO-17, nor A12 A-12.
 //
 // Dates (found however a source writes them) wait for a parser at
 // indexing (GRA-1798); names are left to the words way, since no rule

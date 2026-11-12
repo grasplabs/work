@@ -36,10 +36,14 @@ describe("the exact parts of a question", () => {
       "CN-2026-118",
       "12345",
       "06-12345678",
-      // Known and accepted: names of a kind.
+      // Known and accepted: names of a kind, a timestamp, a compact date,
+      // an amount with five digits in a row.
       "v2.1",
       "4x4",
       "COVID-19",
+      "2026-03-14T09:00:00Z",
+      "20260314",
+      "€1250000",
     ];
     const words = [
       "2026-03-14",
