@@ -298,11 +298,11 @@ export const brainRestoreResponse = async (
       // An install that didn't write every skill fails the preparation:
       // the restore doesn't start, and the admin is told to try again.
       async () =>
-        await startBrainRestore(env, asked.exportId, async () => {
-          if (!(await installShippedSkills(env))) {
-            throw brainExportErrors.create("brain.restore_unprepared");
-          }
-        })
+        await startBrainRestore(
+          env,
+          asked.exportId,
+          async () => await installShippedSkills(env)
+        )
     );
     return answer(status);
   } catch (error) {

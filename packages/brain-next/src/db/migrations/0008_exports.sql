@@ -40,7 +40,6 @@ CREATE TABLE `exports` (
 CREATE INDEX `exports_state_idx` ON `exports` (`state`,`finished_at`);--> statement-breakpoint
 CREATE TABLE `restores` (
 	`export` text PRIMARY KEY NOT NULL,
-	`manifest` text NOT NULL,
 	`checked` integer NOT NULL,
 	`damaged` integer DEFAULT false NOT NULL,
 	`held_to` integer,

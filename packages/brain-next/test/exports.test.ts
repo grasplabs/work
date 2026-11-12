@@ -1009,7 +1009,7 @@ describe("exports and restores", () => {
       await expect(keysUnder(`exports/${id}/`)).resolves.toStrictEqual([]);
     });
 
-    it("checks every part before it writes any, keeps parts within their byte budget, and starts again once failed", async () => {
+    it("checks every part before it writes any, keeps parts within their byte budget, and gives up a restore whose check found a damaged part", async () => {
       const group = `team:${unique()}`;
       // Five versions of some 0.9 MB of text in three bytes a character:
       // more than a part's budget of encoded bytes.
@@ -1048,30 +1048,19 @@ describe("exports and restores", () => {
         // oxlint-disable-next-line no-await-in-loop -- a tick at a time
         await tick(shared());
       }
-      expect({
-        status: await shared().restoreStatus(id),
-        held: await versionsHeld(),
-      }).toStrictEqual({
-        status: { export: id, state: "failed", restored: 0 },
-        held: 0,
-      });
-
-      // Mended, it starts again and goes through.
-      await env.BRAIN_OBJECTS.put(lastPart, body);
-      await shared().startRestore(id, "test");
-      for (let ticks = 0; ticks < 5; ticks += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
-        await tick(shared());
-      }
-      const current = await shared().readCurrent({
-        sources: large,
-        reader: readerOf(unique(), [group]),
-      });
+      // Damaged before its check ended: the restore is given up, its
+      // export's files go, and it can't be started again.
       const status = await shared().restoreStatus(id);
-      expect({
-        state: status?.state,
-        current: current.map(({ text }) => text.slice(0, 1)),
-      }).toStrictEqual({ state: "done", current: ["0", "1", "2", "3", "4"] });
+      const held = await versionsHeld();
+      const files = await keysUnder(`exports/${id}/`);
+      await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
+        "given up"
+      );
+      expect({ status, held, files }).toStrictEqual({
+        status: { export: id, state: "abandoned", restored: 0 },
+        held: 0,
+        files: [],
+      });
     });
 
     it("settles an export whose item of the queue is gone as failed, and deletes its files", async () => {
@@ -1427,6 +1416,53 @@ describe("exports and restores", () => {
         short: false,
         manifest: true,
         served: null,
+      });
+    });
+
+    it("never serves an adopted export with a damaged part and no holdings beside it, and deletes its files (threats 6, 8)", async () => {
+      await putBack(shared(), emptyShared);
+      const marker = `marker${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, marker, team(`team:${unique()}`));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+      // A part damaged, and its holdings gone: nothing says what it holds.
+      const partKey = `exports/${id}/part-0000.jsonl`;
+      const object = await env.BRAIN_OBJECTS.get(partKey);
+      const body = (await object?.text()) ?? "";
+      await env.BRAIN_OBJECTS.put(partKey, `${body}\n`);
+      await env.BRAIN_OBJECTS.delete(`exports/${id}/part-0000.holds.json`);
+      await shared().startRestore(id, "test");
+      await restoreSettled(id);
+      await shared().eraseSource({ source, reason: "deleted" });
+      await tick(shared());
+      await tick(shared());
+      const served = await shared().exportFile({ id, file: "part-0000.jsonl" });
+      const holding: string[] = [];
+      for (const key of await keysUnder(`exports/${id}/`)) {
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        const file = await env.BRAIN_OBJECTS.get(key);
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        const text = (await file?.text()) ?? "";
+        if (text.includes(marker)) {
+          holding.push(key);
+        }
+      }
+      expect({ served, holding }).toStrictEqual({ served: null, holding: [] });
+    });
+
+    it("makes an adopted export of no parts done once its restore is done", async () => {
+      await putBack(shared(), emptyShared);
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const restore = await restoreSettled(id);
+      const status = await shared().exportStatus({ id });
+      expect({ restore: restore?.state, export: status?.state }).toStrictEqual({
+        restore: "done",
+        export: "done",
       });
     });
 

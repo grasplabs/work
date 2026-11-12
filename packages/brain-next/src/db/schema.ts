@@ -642,13 +642,13 @@ export const exportParts = sqliteTable(
 );
 
 /**
- * A restore of a company export into the shared store: the export's
- * manifest as read when it started, the next part to restore, and how many
- * versions it restored.
+ * A restore of a company export into the shared store: how far it has
+ * checked and written its export's parts (each part's hash, size and count
+ * are rows of `export_parts`, written as it started, so no value grows
+ * with how many parts there are), and how many versions it restored.
  */
 export const restores = sqliteTable("restores", {
   export: text().primaryKey(),
-  manifest: text().notNull(),
   /** Parts checked so far, in a first pass before anything is written. */
   checked: integer().notNull(),
   /** Whether a part checked so far failed: the restore fails once all are checked. */

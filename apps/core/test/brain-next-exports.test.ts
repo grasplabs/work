@@ -31,77 +31,62 @@ const idp = mockIdp();
 const request = async (
   cookie: string,
   path: string,
-  init: { method?: string; body?: unknown; site?: string } = {},
-  coreEnv: Env = env
+  init: { method?: string; body?: unknown; site?: string } = {}
 ): Promise<Response> =>
-  await routed(
-    path,
-    {
-      method: init.method ?? "GET",
-      headers: {
-        cookie,
-        "sec-fetch-site": init.site ?? "same-origin",
-        ...(init.body === undefined
-          ? {}
-          : { "content-type": "application/json" }),
-      },
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  await routed(path, {
+    method: init.method ?? "GET",
+    headers: {
+      cookie,
+      "sec-fetch-site": init.site ?? "same-origin",
+      ...(init.body === undefined
+        ? {}
+        : { "content-type": "application/json" }),
     },
-    coreEnv
-  );
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  });
+
+/** The R2 calls the Brain's store makes, passed through. */
+const r2Calls = ["get", "head", "put", "delete", "list"] as const;
 
 /**
- * Core's env with its Brain's store standing in as one that takes no
- * write of a skill (out of reach for it) and would start a restore: what
- * an incomplete install of Grasp's own skills meets. Every other call goes
- * to the real store. Records whether a restore was started.
+ * The shared Brain store's bucket failing every read and write of a
+ * source's file (`sources/`), as R2 out of reach for them: what a skill's
+ * write meets. Every other call goes through. Answers how to heal it.
  */
-const brainRefusingSkills = (): { env: Env; restoresStarted: string[] } => {
-  const restoresStarted: string[] = [];
-  const wrapStub = (stub: object): object =>
-    new Proxy(stub, {
-      get: (target, name) => {
-        if (name === "readCurrent") {
-          return async () => {
-            await Promise.resolve();
-            return [];
-          };
-        }
-        if (name === "addInstructions") {
-          return async () => {
-            await Promise.resolve();
-            throw new Error("The Brain is out of reach");
-          };
-        }
-        if (name === "checkRestore") {
-          return async () => {
-            await Promise.resolve();
-          };
-        }
-        if (name === "startRestore") {
-          return async (id: string) => {
-            await Promise.resolve();
-            restoresStarted.push(id);
-            return { export: id, state: "running", restored: 0 };
-          };
-        }
-        const value: unknown = Reflect.get(target, name);
-        if (typeof value !== "function") {
-          return value;
-        }
-        return (...args: unknown[]): unknown =>
-          Reflect.apply(value, target, args);
-      },
+const failingSourceFiles = async (): Promise<() => Promise<void>> => {
+  const store = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+  const bucket = env.BRAIN_OBJECTS;
+  const swap = async (to: unknown): Promise<void> => {
+    await runInDurableObject(store, (instance) => {
+      const objectEnv: unknown = Reflect.get(instance, "env");
+      if (typeof objectEnv !== "object" || objectEnv === null) {
+        throw new TypeError("The store has no env");
+      }
+      Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: to });
     });
-  const wrapNamespace = (namespace: DurableObjectNamespace): object => ({
-    jurisdiction: () => wrapNamespace(namespace.jurisdiction("eu")),
-    getByName: (name: string) => wrapStub(namespace.getByName(name)),
-  });
-  return {
-    // SAFETY: the stand-in answers every call the restore route makes.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    env: { ...env, BRAIN_STORE: wrapNamespace(env.BRAIN_STORE) } as Env,
-    restoresStarted,
+  };
+  await swap(
+    Object.fromEntries(
+      r2Calls.map((name) => [
+        name,
+        async (...args: unknown[]): Promise<unknown> => {
+          const [key] = args;
+          if (typeof key === "string" && key.startsWith("sources/")) {
+            await Promise.resolve();
+            throw new Error("R2 out of reach");
+          }
+          const method: unknown = Reflect.get(bucket, name);
+          if (typeof method !== "function") {
+            throw new TypeError(`R2 has no ${name}`);
+          }
+          const result: unknown = await Reflect.apply(method, bucket, args);
+          return result;
+        },
+      ])
+    )
+  );
+  return async () => {
+    await swap(bucket);
   };
 };
 
@@ -188,6 +173,67 @@ describe(
       ]);
     });
 
+    // Run before anything is added to the shared store: a restore goes
+    // only into one that holds nothing but Grasp's own skills.
+    it("starts no restore when Grasp's own skills could not be installed first, on record as failed, and starts it once they can be (threat 9)", async () => {
+      const admin = await signedInWithRole(idp, "admin");
+      const id = await start(admin.session);
+      await writtenFiles(admin.session, id);
+      // The store's bucket fails every source file: no skill can be read
+      // or written.
+      const heal = await failingSourceFiles();
+      let refused: Response | undefined;
+      let events: Awaited<ReturnType<typeof auditedDuring>> = [];
+      try {
+        events = await auditedDuring(async () => {
+          refused = await request(admin.session, brainRestorePath, {
+            method: "POST",
+            body: { exportId: id },
+          });
+        });
+      } finally {
+        await heal();
+      }
+      const { code } = z
+        .object({ code: z.string() })
+        .parse(await refused?.json());
+      const notStarted = await request(
+        admin.session,
+        `${brainRestorePath}?id=${id}`
+      );
+      // Once the skills can be installed, the same restore starts.
+      const again = await request(admin.session, brainRestorePath, {
+        method: "POST",
+        body: { exportId: id },
+      });
+      const { state } = z
+        .object({ state: z.string() })
+        .parse(await again.json());
+      // Done, so the store takes adds and exports again for what follows.
+      await workBrain(env, new Date(), noProducers);
+      await workBrain(env, new Date(), noProducers);
+      expect({
+        status: refused?.status,
+        code,
+        audited: events
+          .filter(({ action }) => action.startsWith("brain.restore."))
+          .map(({ action, detail }) => [action, detail?.outcome ?? null]),
+        notStarted: notStarted.status,
+        again: again.status,
+        state,
+      }).toStrictEqual({
+        status: 503,
+        code: "brain.restore_unprepared",
+        audited: [
+          ["brain.restore.asked", null],
+          ["brain.restore.answered", "failed"],
+        ],
+        notStarted: 404,
+        again: 200,
+        state: "running",
+      });
+    });
+
     it("gives an admin the company's export, without anything one person alone may read, on record without its content (threats 4, 12)", async () => {
       const admin = await signedInWithRole(idp, "admin");
       const member = await signedInWithRole(idp, "user");
@@ -239,29 +285,6 @@ describe(
       });
     });
 
-    it("starts no restore when Grasp's own skills could not be installed first, and answers so to try again (threat 9)", async () => {
-      const admin = await signedInWithRole(idp, "admin");
-      const brain = brainRefusingSkills();
-      const response = await request(
-        admin.session,
-        brainRestorePath,
-        { method: "POST", body: { exportId: crypto.randomUUID() } },
-        brain.env
-      );
-      const { code } = z
-        .object({ code: z.string() })
-        .parse(await response.json());
-      expect({
-        status: response.status,
-        code,
-        started: brain.restoresStarted,
-      }).toStrictEqual({
-        status: 503,
-        code: "brain.restore_unprepared",
-        started: [],
-      });
-    });
-
     it("answers an export started, and an add made, while a restore runs with a code of their own: a conflict, never an error of core's", async () => {
       const admin = await signedInWithRole(idp, "admin");
       const store = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
@@ -269,8 +292,8 @@ describe(
       // A restore under way, as the store records one.
       await runInDurableObject(store, (_instance, state) => {
         state.storage.sql.exec(
-          `INSERT INTO restores (export, manifest, checked, part, restored, state, started_at)
-          VALUES (?, '{}', 0, 0, 0, 'running', ?)`,
+          `INSERT INTO restores (export, checked, part, restored, state, started_at)
+          VALUES (?, 0, 0, 0, 'running', ?)`,
           restoring,
           Date.now()
         );

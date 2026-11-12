@@ -69,9 +69,9 @@ import type { WorkContext } from "./work.ts";
 // the ledger as it is read was the other way: it would leave erased content
 // in the bucket, and filtering a checked part breaks its checksum. A copy
 // someone already downloaded is outside the Brain's reach, and so outside
-// its erasure. An export's versions are kept on record until its files are
-// gone, so an erasure is unfinished while a file holds what it took
-// (`erasureHeldByExportFilesSql`).
+// its erasure. What an export holds stays on record (`export_sources`)
+// until its files are gone; nothing yet reads that record to say whether an
+// erasure is finished (the staff's erasure lookup is to, once it lands).
 //
 // The files outlive the store's record of them when its storage is lost or
 // rolled back and its bucket kept. So each part's holdings are written
@@ -146,23 +146,24 @@ const holdsSchema = z.array(
 );
 
 /**
- * What part `index` of export `id` holds, by its holdings file: none when
- * it can't be read (a restore records what its lines hold too).
+ * What part `index` of export `id` holds, by its holdings file: undefined
+ * when it is missing or can't be read, which a restore counts as a damaged
+ * part (restore.ts `checkPart`).
  */
 export const partHoldingsOf = async (
   bucket: BrainBucket,
   id: string,
   index: number
-): Promise<Held[]> => {
+): Promise<Held[] | undefined> => {
   const object = await bucket.get(exportKeyOf(id, partHoldsFileOf(index)));
   if (object === null) {
-    return [];
+    return undefined;
   }
   try {
     const held = holdsSchema.safeParse(JSON.parse(await object.text()));
-    return held.success ? held.data : [];
+    return held.success ? held.data : undefined;
   } catch {
-    return [];
+    return undefined;
   }
 };
 
@@ -254,22 +255,6 @@ const staleSql = `EXISTS (
 export const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
 WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
 LIMIT 1`;
-
-/**
- * Of a row of `erasures` (named so): whether a version it names is held by
- * an export whose files are not yet deleted. An erasure is unfinished until
- * then: for the store's answer of whether an erasure is done.
- */
-export const erasureHeldByExportFilesSql = `EXISTS (
-  SELECT 1 FROM export_sources AS held
-  WHERE (erasures.kind = 'source' AND held.subject = erasures.subject)
-    OR EXISTS (
-      SELECT 1 FROM erased_versions
-      WHERE erased_versions.erasure = erasures.key
-        AND erased_versions.subject = held.subject
-        AND erased_versions.version = held.version
-    )
-)`;
 
 /** Of a row of `exports`: whether a restore of it runs, or failed and may start again. */
 const heldSql = `exports.id IN (
@@ -741,11 +726,18 @@ const settleStuck = (storage: DurableObjectStorage): void => {
 };
 
 /**
- * Of a row of `restores`: a failed one to give up, as the store took
- * something since it failed (`held_to`, but Grasp's own skills), or the
- * ledger names a version its export holds.
+ * Of a row of `restores`: a failed one to give up, as it failed before its
+ * export was wholly checked (still `restoring`: what its files hold is not
+ * all on record, so they go), the store took something since it failed
+ * (`held_to`, but Grasp's own skills), or the ledger names a version its
+ * export holds.
  */
 const givenUpSql = `restores.state = 'failed' AND (
+  EXISTS (
+    SELECT 1 FROM exports
+    WHERE exports.id = restores.export AND exports.state = 'restoring'
+  )
+  OR
   EXISTS (
     SELECT 1 FROM source_versions
     WHERE source_versions.row > coalesce(restores.held_to, 0)

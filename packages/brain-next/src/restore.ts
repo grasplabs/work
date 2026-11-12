@@ -6,6 +6,7 @@ import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
 import {
   changeKeySchema,
+  exportPartNameOf,
   isWholeKey,
   newSourceSchema,
   shippedSkillsPrefix,
@@ -104,7 +105,6 @@ const refusals = {
 /** A restore's row, as the store keeps it. */
 interface RestoreRow extends Record<string, SqlStorageValue> {
   export: string;
-  manifest: string;
   checked: number;
   damaged: number;
   part: number;
@@ -474,8 +474,7 @@ const checkPart = async (
   bucket: BrainBucket,
   id: string,
   index: number,
-  part: Manifest["parts"][number],
-  parts: number
+  part: Manifest["parts"][number]
 ): Promise<void> => {
   const [lines, holdings] = await Promise.all([
     partLinesOf(bucket, id, part),
@@ -488,27 +487,56 @@ const checkPart = async (
   );
   storage.transactionSync(() => {
     const { sql } = storage;
-    recordExportSources(sql, id, [...holdings, ...fromLines]);
+    recordExportSources(sql, id, [...(holdings ?? []), ...fromLines]);
+    // A part whose lines don't check, or whose holdings are missing or
+    // unreadable (what it holds may not all be on record), is damaged.
     sql.exec(
       `UPDATE restores SET checked = checked + 1,
         damaged = damaged OR ?3
       WHERE export = ?1 AND checked = ?2 AND state = 'running'`,
       id,
       index,
-      lines === undefined ? 1 : 0
+      lines === undefined || holdings === undefined ? 1 : 0
     );
-    // Every part's holdings on record: only now may the export be served
-    // or restored again (exports.ts `recordRestoredExport`).
-    if (index + 1 >= parts) {
-      sql.exec(
-        `UPDATE exports SET state = 'done', finished_at = ?
-        WHERE id = ? AND state = 'restoring'`,
-        Date.now(),
-        id
-      );
-    }
   });
 };
+
+/**
+ * Export `id`, adopted by its restore, made `done` once every part was
+ * checked and none was damaged: then what each holds is on record, and it
+ * may be served and restored again (exports.ts `recordRestoredExport`).
+ * The one place that does it, for any number of parts, none among them.
+ */
+const adoptChecked = (storage: DurableObjectStorage, id: string): void => {
+  storage.transactionSync(() => {
+    storage.sql.exec(
+      `UPDATE exports SET state = 'done', finished_at = ?1
+      WHERE id = ?2 AND state = 'restoring'
+        AND EXISTS (
+          SELECT 1 FROM restores
+          WHERE export = ?2 AND state = 'running' AND damaged = 0
+            AND checked >= (SELECT count(*) FROM export_parts WHERE export = ?2)
+        )`,
+      Date.now(),
+      id
+    );
+  });
+};
+
+/** What a restore needs of each part, from the rows its start wrote (`recordRestoredExport`). */
+const partsOf = (sql: SqlStorage, id: string): Manifest["parts"] =>
+  sql
+    .exec<{ part: number; hash: string; versions: number; bytes: number }>(
+      "SELECT part, hash, versions, bytes FROM export_parts WHERE export = ? ORDER BY part",
+      id
+    )
+    .toArray()
+    .map(({ part, hash, versions, bytes }) => ({
+      file: exportPartNameOf(part, "jsonl"),
+      sha256: hash,
+      versions,
+      bytes,
+    }));
 
 /**
  * One run of a restore: the next part checked, while any is unchecked;
@@ -524,21 +552,26 @@ const restorePart = async (
   if (row?.state !== "running") {
     return;
   }
-  const manifest = manifestSchema.parse(JSON.parse(row.manifest));
-  const checking = row.checked < manifest.parts.length;
+  // What it needs of each part is in rows, never one value that grows
+  // with how many parts there are.
+  const parts = partsOf(sql, id);
+  const checking = row.checked < parts.length;
+  if (!checking) {
+    if (row.damaged === 1) {
+      settleNow(storage, id, "failed");
+      return;
+    }
+    adoptChecked(storage, id);
+  }
   const index = checking ? row.checked : row.part;
-  const part = manifest.parts[index];
+  const part = parts[index];
   if (part === undefined) {
     settleNow(storage, id, "done");
     return;
   }
   if (checking) {
-    await checkPart(storage, bucket, id, index, part, manifest.parts.length);
+    await checkPart(storage, bucket, id, index, part);
     again(1);
-    return;
-  }
-  if (row.damaged === 1) {
-    settleNow(storage, id, "failed");
     return;
   }
   const lines = await partLinesOf(bucket, id, part);
@@ -558,7 +591,7 @@ const restorePart = async (
       restored += 1;
     }
   }
-  const last = index + 1 >= manifest.parts.length;
+  const last = index + 1 >= parts.length;
   storage.transactionSync(() => {
     sql.exec(
       `UPDATE restores SET part = part + 1, restored = restored + ?
@@ -667,14 +700,13 @@ export const startRestore = async (
       throw new Error(refusals.notFound);
     }
     sql.exec(
-      `INSERT INTO restores (export, manifest, checked, part, restored, state, started_at)
-      VALUES (?, ?, 0, 0, 0, 'running', ?)
-      ON CONFLICT (export) DO UPDATE SET manifest = excluded.manifest,
+      `INSERT INTO restores (export, checked, part, restored, state, started_at)
+      VALUES (?, 0, 0, 0, 'running', ?)
+      ON CONFLICT (export) DO UPDATE SET
         checked = 0, damaged = 0, held_to = NULL, part = 0, restored = 0,
         state = 'running',
         started_at = excluded.started_at, finished_at = NULL`,
       id,
-      JSON.stringify(manifest),
       Date.now()
     );
     recordRestoredExport(sql, manifest);
