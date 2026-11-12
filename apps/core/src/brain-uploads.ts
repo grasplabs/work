@@ -471,6 +471,7 @@ export const deleteBrainUpload = async (
   try {
     await eraseSource(env, {
       source: uploadSource(row.id),
+      readers: sourceReadersOf(row),
       reason: "deleted",
     });
   } catch (error) {

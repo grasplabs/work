@@ -510,7 +510,11 @@ describe("uploading a file straight into the Brain", () => {
       // Erased, but core never forgot the upload: as a delete whose
       // erasure returned and whose forgetting failed, or a version whose
       // file was read while the delete ran.
-      await eraseSource(env, { source, reason: "deleted" });
+      await eraseSource(env, {
+        source,
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
 
       const added = await outcome(
         async () =>

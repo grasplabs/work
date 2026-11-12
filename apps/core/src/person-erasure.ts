@@ -582,14 +582,24 @@ const apps: ErasureStep = {
  * whichever areas are still pending, as they were removed before they
  * could be erased, producers hand over nothing for someone no longer a
  * member, and a hand-over that began before is refused by the Brain as it
- * records. Complete only once the Brain's call returned, which puts the
- * erasure in its ledger; one that fails or throws leaves the area pending
+ * records. Complete only once the Brain answered that it is all erased,
+ * which puts the erasure in its ledger; one that fails or throws, or
+ * answers that their own store is still deleting, leaves the area pending
  * for the clock, and asking the Brain again is safe.
  */
 const brainSources: ErasureStep = {
   area: "brain_sources",
   erase: async (env, userId) => {
-    await eraseFromBrain(env, { personId: userId, reason: "person_erased" });
+    const outcome = await eraseFromBrain(env, {
+      personId: userId,
+      reason: "person_erased",
+    });
+    // Their own store still deleting is the expected way for its first
+    // minutes: pending, for the clock, with nothing logged or counted as
+    // failed, so a stuck erasure stands out from a normal one.
+    if (outcome !== "erased") {
+      return;
+    }
     // Only once the Brain erased them: their uploads for themselves alone
     // (brain-uploads.ts) name nothing the Brain still holds, and nobody
     // else may delete them. What they uploaded for a team or everyone is

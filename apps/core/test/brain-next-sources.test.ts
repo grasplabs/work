@@ -16,7 +16,9 @@ import {
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
 
 // Sources kept whole and versioned (GRA-1723), through core's functions
@@ -73,16 +75,15 @@ const teamOf = async (...members: string[]): Promise<string> => {
   return id;
 };
 
-const owner = (personId: string): SourceReaders => ({
-  kind: "owner",
-  personId,
-});
+/** Readers of `personId` alone, in the shared store, which this file is about. */
+const owner = soleReadersOf;
 
 const team = (teamId: string): SourceReaders => ({ kind: "team", teamId });
 
 /** What `personId` recalls for `question`: each chunk's source and version. */
 const recalledAs = async (personId: string, question: string) => {
   const { items: chunks } = await recallAs(env, personId, {
+    personal: true,
     question,
     budget: { tokens: recallBudgetMax },
   });
@@ -284,7 +285,12 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     const secret = word();
     const text = `Offer ${secret}`;
     const add = async () =>
-      await addSource(env, { source, change, text, readers: owner(reader) });
+      await addSource(env, {
+        source,
+        change,
+        text,
+        readers: await owner(reader),
+      });
 
     // Three at once, as retries racing each other, all between the file
     // and the version together; then one after the first reply was lost.
@@ -329,7 +335,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
     // The first add's retry comes late.
     const retried = await addSource(env, {
@@ -360,18 +366,23 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     const change = newChange();
     const secret = word();
     const text = `Notes ${secret}`;
-    await addSource(env, { source, change, text, readers: owner(reader) });
+    await addSource(env, {
+      source,
+      change,
+      text,
+      readers: await owner(reader),
+    });
 
     await expect(
       addSource(env, {
         source,
         change,
         text: `${text} and more`,
-        readers: owner(reader),
+        readers: await owner(reader),
       })
     ).rejects.toThrow(/added before with other text or readers/u);
     await expect(
-      addSource(env, { source, change, text, readers: owner(other) })
+      addSource(env, { source, change, text, readers: await owner(other) })
     ).rejects.toThrow(/added before with other text or readers/u);
     expect({
       reader: await recalledAs(reader, secret),
@@ -394,7 +405,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change,
         text: body,
-        readers: owner(reader),
+        readers: await owner(reader),
       });
 
     const added = await add(first, text);
@@ -424,7 +435,8 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change: newChange(),
         text,
-        readers: owner(reader),
+        // oxlint-disable-next-line no-await-in-loop -- the same team each time
+        readers: await owner(reader),
       });
     }
 
@@ -456,7 +468,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source: upload,
       change: newChange(),
       text: `Upload ${mine}`,
-      readers: owner(reader),
+      readers: await owner(reader),
     });
     // The same id from another producer is another source: it supersedes
     // nothing of the upload's.
@@ -464,7 +476,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source: chat,
       change: newChange(),
       text: `Chat ${theirs}`,
-      readers: owner(reader),
+      readers: await owner(reader),
     });
 
     expect({
@@ -493,7 +505,8 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change: newChange(),
         text,
-        readers: owner(reader),
+        // oxlint-disable-next-line no-await-in-loop -- the same team each time
+        readers: await owner(reader),
       });
     }
 
@@ -525,7 +538,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text: final,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
 
     expect({
@@ -560,7 +573,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text: draft,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
     await addSource(env, {
       source,
@@ -597,14 +610,15 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change: newChange(),
         text,
-        readers: owner(writer),
+        // oxlint-disable-next-line no-await-in-loop -- the same team each time
+        readers: await owner(writer),
       });
     }
     const again = await addSource(env, {
       source,
       change: newChange(),
       text: draft,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
 
     expect({
@@ -630,13 +644,13 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text,
-      readers: owner(first),
+      readers: await owner(first),
     });
     const added = await addSource(env, {
       source,
       change: newChange(),
       text,
-      readers: owner(second),
+      readers: await owner(second),
     });
 
     expect({
@@ -667,10 +681,11 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text,
-      readers: owner(reader),
+      readers: await owner(reader),
     });
 
     const { items: chunks } = await recallAs(env, reader, {
+      personal: true,
       question: secret,
       budget: { tokens: recallBudgetMax },
     });
@@ -693,7 +708,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source: newSource(),
         change: newChange(),
         text: "ﷺ".repeat(count),
-        readers: owner(reader),
+        readers: await owner(reader),
       });
 
     await expect(add(most)).resolves.toMatchObject({ version: 1 });
@@ -717,7 +732,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source: on,
         change: key,
         text,
-        readers: owner(reader),
+        readers: await owner(reader),
       });
 
     // Calls, not promises: each is made only when its refusal is awaited,
@@ -728,6 +743,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       async () => await add("text", newSource(), "change \uD800"),
       async () =>
         await recallAs(env, reader, {
+          personal: true,
           question: "question \uD800",
           budget: { tokens: recallBudgetMax },
         }),
@@ -778,7 +794,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
           source: source as SourceRef,
           change: newChange(),
           text: secret,
-          readers: owner(reader),
+          readers: await owner(reader),
         })
     );
     for (const add of adds) {
@@ -795,7 +811,8 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
           source: newSource(),
           change,
           text,
-          readers: owner(reader),
+          // oxlint-disable-next-line no-await-in-loop -- the same team each time
+          readers: await owner(reader),
         })
       ).rejects.toThrow(refused);
     }
@@ -820,7 +837,12 @@ describe(
       const secret = word();
       const text = `Contract ${secret}`;
       const add = async () =>
-        await addSource(env, { source, change, text, readers: owner(reader) });
+        await addSource(env, {
+          source,
+          change,
+          text,
+          readers: await owner(reader),
+        });
 
       await crashAfterNextFile();
       await expect(add()).rejects.toThrow(crashed);
@@ -856,7 +878,7 @@ describe(
         source: kept,
         change: newChange(),
         text: keptText,
-        readers: owner(reader),
+        readers: await owner(reader),
       });
       await crashAfterNextFile();
       await expect(
@@ -864,19 +886,23 @@ describe(
           source: lost,
           change: newChange(),
           text: lostText,
-          readers: owner(reader),
+          readers: await owner(reader),
         })
       ).rejects.toThrow(crashed);
 
       // Within an add's time, the sweep leaves the file for the add, even
       // when its caller's clock runs ahead.
-      await workBrain(env, new Date());
-      await workBrain(env, new Date(Date.now() + fileGraceMs + 60_000));
+      await workBrain(env, new Date(), noProducers);
+      await workBrain(
+        env,
+        new Date(Date.now() + fileGraceMs + 60_000),
+        noProducers
+      );
       const withinTime = await fileOf(lostText);
       later(fileGraceMs + 1);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       // Late or twice is harmless.
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       const pastTime = {
         file: await fileOf(lostText),
         count: await countOn(lostText),
@@ -901,24 +927,25 @@ describe(
             source: newSource(),
             change: newChange(),
             text,
-            readers: owner(reader),
+            // oxlint-disable-next-line no-await-in-loop -- the same team each time
+            readers: await owner(reader),
           })
         ).rejects.toThrow(crashed);
       }
 
       later(fileGraceMs + 1);
       const restore = await refuseDeleting(stuckText);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       restore();
       const afterRefusal = {
         stuck: await fileOf(stuckText),
         free: await fileOf(freeText),
       };
       // Noted afresh: it waits a grace before it is tried again.
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       const sameTick = await fileOf(stuckText);
       later(fileGraceMs + 1);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
 
       expect({
         afterRefusal,
@@ -937,7 +964,12 @@ describe(
       const change = newChange();
       const text = `Late ${word()}`;
       const add = async () =>
-        await addSource(env, { source, change, text, readers: owner(reader) });
+        await addSource(env, {
+          source,
+          change,
+          text,
+          readers: await owner(reader),
+        });
       await crashAfterNextFile();
       await expect(add()).rejects.toThrow(crashed);
 
@@ -951,7 +983,7 @@ describe(
       await vi.waitFor(() => {
         expect(gate.reached).toBeTruthy();
       });
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       gate.released = true;
 
       expect({
@@ -971,7 +1003,12 @@ describe(
       const change = newChange();
       const text = `Swept ${word()}`;
       const add = async () =>
-        await addSource(env, { source, change, text, readers: owner(reader) });
+        await addSource(env, {
+          source,
+          change,
+          text,
+          readers: await owner(reader),
+        });
       await crashAfterNextFile();
       await expect(add()).rejects.toThrow(crashed);
 
@@ -983,7 +1020,7 @@ describe(
         expect(gate.reached).toBeTruthy();
       });
       later(fileGraceMs + 60_000);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       gate.released = true;
       const outcome = await stalled;
       expect("error" in outcome ? String(outcome.error) : "added").toMatch(

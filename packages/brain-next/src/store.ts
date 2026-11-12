@@ -9,12 +9,17 @@ import type { BrainBucket } from "./bucket.ts";
 import {
   currentRequestSchema,
   embedModelSchema,
+  handOverRequestSchema,
+  handOverResultSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
   storeKindOf,
   recallRequestSchema,
   sourceErasureSchema,
+  sourceIdSchema,
+  stillDeleting,
+  storeErased as erasedWhole,
   sourceListRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
@@ -26,7 +31,11 @@ import type {
   CurrentRequest,
   Embedders,
   ErasureReason,
+  KeyState,
   Finding,
+  HandOverRequest,
+  HandOvers,
+  WorkRequest,
   NewInstructions,
   Reader,
   Access,
@@ -36,6 +45,7 @@ import type {
   RecallRequest,
   Pack,
   SourceErasure,
+  SourceId,
   SourceList,
   SourceListRequest,
   SourceVersion,
@@ -64,8 +74,10 @@ import {
   erasuresOverview,
   erasureDue,
   erasuresUnfinished,
+  isErased,
   isStoreErased,
   storeErasedAt,
+  subjectOf,
   keepMissingSubjects,
   ledgerPrefix,
   readLedgerStart,
@@ -82,6 +94,7 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
+import { enqueueHandOvers } from "./handover.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   countingInto,
@@ -176,6 +189,9 @@ const workIdSchema = z.int().positive();
 const notTheirs =
   "The Brain refused it: this store answers only the person whose it is";
 
+/** What a person's own store answers a call only the shared store takes. */
+const sharedOnly = "The Brain refused it: only the shared store takes this";
+
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
@@ -184,19 +200,12 @@ const notTheirsAlone =
 const noOnes =
   "The Brain refused it: this store's name doesn't say whose it is";
 
-/** What a person's own store answers once it was erased whole. */
-const erasedWhole = "The Brain refused it: this store was erased";
-
 /**
  * What a call that changed a person's own store answers when it could not
  * set when the store wakes for what it left: done, but to repeat.
  */
 const alarmUnset =
   "The Brain did it but couldn't schedule what it left to finish: try again";
-
-/** What erasing a person's own store answers while files are left to delete. */
-const stillDeleting =
-  "The Brain erased this store and is still deleting its files: erase it again";
 
 /** What erasing a person's own store answers when its record couldn't be written. */
 const erasureUnrecorded =
@@ -603,7 +612,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addVersion(this.#sources, adding, { indexed: true });
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: true })
+      );
     });
   }
 
@@ -616,8 +627,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addVersion(this.#sources, adding, { indexed: false });
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: false })
+      );
     });
+  }
+
+  /**
+   * `add` run, refused as an erased store refuses (`erasedWhole`) when
+   * this person's own store was erased whole while it ran: its storage
+   * is gone under it, and what went wrong is never the database's words.
+   */
+  async #unlessErasedMeanwhile<T>(add: () => Promise<T>): Promise<T> {
+    try {
+      return await add();
+    } catch (error) {
+      if (this.#erased) {
+        // Nothing of the error is kept: it is the database's.
+        throw new Error(erasedWhole, { cause: error });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -717,6 +747,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
+   * What this store has of the key `source` (contract.ts): `free` for a
+   * person's own store erased whole, which holds nothing.
+   */
+  async keyState(source: SourceId): Promise<KeyState> {
+    const key = checked(sourceIdSchema, source);
+    if (await this.#erasedWhole()) {
+      return "free";
+    }
+    await this.#ready();
+    if (!this.#schema) {
+      return "free";
+    }
+    if (isErased(this.ctx.storage.sql, await subjectOf(key))) {
+      return "erased";
+    }
+    const held =
+      this.ctx.storage.sql
+        .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
+        .toArray().length > 0;
+    return held ? "held" : "free";
+  }
+
+  /**
    * A page of the sources the reader may read, newest first: none in a
    * store that holds nothing (never written, or erased whole).
    */
@@ -791,11 +844,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * couldn't be written.
    */
   async #eraseWhole(reason: ErasureReason): Promise<void> {
+    // Whether the store was never written when this call erased it: an
+    // add makes the schema before it writes a file, so no add of an
+    // earlier instance can still land under its prefix.
+    let neverWritten = false;
     if (!this.#erased) {
       const recorded = await this.ctx.blockConcurrencyWhile(async () => {
         if (this.#erased) {
           return true;
         }
+        neverWritten = !hasSchema(this.ctx.storage.sql);
         try {
           await recordStoreErased(this.#bucket, reason, Date.now());
         } catch {
@@ -815,9 +873,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // this instance, the erasure isn't finished. Nor is it while one that
     // an earlier instance started (reset meanwhile, so no longer seen
     // here) may still land: until the grace an add has to write its file
-    // (files.ts `fileGraceMs`) has passed since the record. Both are read
-    // before the listing, so what lands after it is deleted by a later
-    // call: the caller calls again until one is done.
+    // (files.ts `fileGraceMs`) has passed since the record, unless the
+    // store was never written. Both are read before the listing, so what
+    // lands after it is deleted by a later call: the caller calls again
+    // until one is done.
     const quiet = this.#writes.size === 0;
     let done = false;
     try {
@@ -828,7 +887,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         vectorsPrefix,
         ledgerPrefix,
       ]);
-      done = quiet && settled && emptied;
+      done = quiet && (settled || neverWritten) && emptied;
     } catch {
       // Nothing of the error is kept: it may name a key.
     }
@@ -844,18 +903,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
    * a step of embedding (embedding.ts), then the queue, asking `ask` for
-   * its model calls and `embedders` for vectors (work.ts). Each step is
+   * its model calls, `embedders` for vectors and `handOvers` for what is
+   * handed over (work.ts, handover.ts). Each step is
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async work({ ask, at, embedders, handOvers }: WorkRequest): Promise<void> {
     await this.#changing(async () => {
-      await this.#workNow(ask, at, embedders);
+      await this.#workNow(ask, at, embedders, handOvers);
     });
   }
 
   /** `work`, as one of the calls that may write to the bucket. */
-  async #workNow(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async #workNow(
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    handOvers?: HandOvers
+  ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
@@ -863,17 +928,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // Nothing was ever kept: nothing to do.
       return;
     }
-    await this.#tick(ask, tickAt, {
-      model,
-      embed: async (request) => await embedders.embed(request),
-    });
+    await this.#tick(
+      ask,
+      tickAt,
+      {
+        model,
+        embed: async (request) => await embedders.embed(request),
+      },
+      handOvers
+    );
   }
 
-  /** The tick of `work` at `tickAt`, with the host's checked `embedders`. */
+  /**
+   * The tick of `work` at `tickAt`, with the host's checked `embedders`,
+   * and its `handOvers` on the shared store only: hand-overs are queued
+   * there alone (`handOver`).
+   */
   async #tick(
     ask: AskModel,
     tickAt: Date,
-    embedders: Embedders
+    embedders: Embedders,
+    handOvers: HandOvers | undefined
   ): Promise<void> {
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
@@ -888,7 +963,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await workTick(
       this.ctx.storage,
       this.#work,
-      { ask, embedders, bucket: this.#bucket },
+      {
+        ask,
+        embedders,
+        bucket: this.#bucket,
+        ...(handOvers === undefined || this.#kind.kind !== "shared"
+          ? {}
+          : {
+              handOvers: {
+                handOver: async (source) =>
+                  checked(
+                    handOverResultSchema,
+                    await handOvers.handOver(source)
+                  ),
+              },
+            }),
+      },
       tickAt
     );
   }
@@ -926,7 +1016,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       if (this.alarmHost !== null) {
         const host = await this.alarmHost();
-        await this.work(host.ask, new Date(), host.embedders);
+        // No side of hand-overs: a person's own store never queues one
+        // (`handOver` refuses), so none is ever due here.
+        await this.#changing(async () => {
+          await this.#workNow(host.ask, new Date(), host.embedders);
+        });
       }
     } catch {
       // Nothing of the error is kept. A tick that couldn't run (its ledger
@@ -1011,6 +1105,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (set === null || set > at) {
       await this.ctx.storage.setAlarm(at);
     }
+  }
+  /**
+   * Puts sources on the queue to be handed over (handover.ts), each in
+   * place of one of its hand-overs still waiting or parked. The shared
+   * store's alone: the host's clock ticks it with its side of hand-overs
+   * (`work`), and a person's own store, which it never ticks, refuses.
+   */
+  async handOver(request: HandOverRequest): Promise<void> {
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    const checkedRequest = checked(handOverRequestSchema, request);
+    await this.#changing(async () => {
+      await this.#ready();
+      enqueueHandOvers(this.ctx.storage, checkedRequest);
+    });
   }
 
   /**

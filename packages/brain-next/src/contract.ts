@@ -18,6 +18,9 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/** What a store has of a key (`Brain.keyState`). */
+export type KeyState = "free" | "held" | "erased";
+
 /**
  * What an add says that an erasure closed: to an erased source, whose key
  * is closed for good, or for a person alone that began before that
@@ -26,6 +29,13 @@ export const sourceTextMaxBytes = 1_000_000;
  * any other failure by comparing it whole.
  */
 export const erasedSource = "The Brain refused it: what this adds was erased";
+
+/**
+ * What a person's own store erased whole answers an add, or any call that
+ * would write: they were erased, for good, so the add is refused as
+ * `erasedSource` is, and never tried again.
+ */
+export const storeErased = "The Brain refused it: this store was erased";
 
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
@@ -129,6 +139,17 @@ export const accessSchema = z.discriminatedUnion("kind", [
 export type Access = z.infer<typeof accessSchema>;
 
 /**
+ * Whether `text` is within a source's bound (`sourceTextMaxBytes`), as
+ * given and as the word index takes it: folding can grow a text many
+ * times (a compatibility form such as "ﷺ" is 3 bytes, and 33 folded), so
+ * the bound holds for both. The one rule of it, which an add checks and a
+ * host fits a text to before it adds.
+ */
+export const fitsSourceText = (text: string): boolean =>
+  byteLengthOf(text) <= sourceTextMaxBytes &&
+  byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes;
+
+/**
  * A version of a source to add: which source, the change it is, its text,
  * and who may read this version.
  */
@@ -142,10 +163,7 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,
     })
-    // Folding can grow a text many times (a compatibility form such as
-    // "ﷺ" is 3 bytes, and 33 folded), so the bound holds for what the
-    // word index takes too.
-    .refine((text) => byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes, {
+    .refine((text) => fitsSourceText(text), {
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
@@ -899,6 +917,85 @@ export interface Embedders {
   embed: (request: EmbedRequest) => Promise<EmbedReply>;
 }
 
+// Hand-overs: what the host produces (a workflow run, say) reaches the
+// Brain through its work queue, never in a call that adds it at once. The
+// host puts a source's key on the queue (`handOver`); the item, as it
+// runs, asks the host to hand that source over (`HandOvers.handOver`): the
+// host reads it from its records then and adds it, through its own way
+// of adding, which picks the store its readers belong in. A hand-over
+// that fails is retried and, after too many failures, parked where staff
+// see it.
+
+/** The classes of work a hand-over may take (work.ts `workPriorities`). */
+export const handOverPriorities = ["conversation"] as const;
+export type HandOverPriority = (typeof handOverPriorities)[number];
+
+/** Most sources one `handOver` puts on the queue. */
+export const handOversMax = 100;
+
+/** Sources to put on the queue, each with its class of work. */
+export const handOverRequestSchema = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        source: sourceIdSchema,
+        priority: z.enum(handOverPriorities),
+      })
+    )
+    .min(1)
+    .max(handOversMax),
+});
+export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
+
+/**
+ * Why a hand-over was refused for good: what it adds was erased (its key
+ * is closed, or its one reader's erasure began), the host's answer can't
+ * be added (no readers, a text that isn't one), or its text is past a
+ * source's bound with nothing smaller to keep.
+ */
+export const handOverRefusals = ["erased", "invalid", "too_large"] as const;
+export type HandOverRefusal = (typeof handOverRefusals)[number];
+
+/**
+ * How a hand-over ended, as the host says it: added as `version`, nothing
+ * to add (the source is gone), or refused for good. Each settles the item
+ * as done; only a throw tries it again.
+ */
+export const handOverResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("added"), version: z.int().positive() }),
+  z.strictObject({ kind: z.literal("nothing") }),
+  z.strictObject({
+    kind: z.literal("refused"),
+    reason: z.enum(handOverRefusals),
+  }),
+]);
+export type HandOverResult = z.infer<typeof handOverResultSchema>;
+
+/** The host's side of hand-overs, as the shared store's work uses it. */
+export interface HandOvers {
+  /**
+   * Hands `source` over as the host's records hold it now, and says how
+   * it ended (`HandOverResult`). Throws only for a failure worth trying
+   * again (a store out of reach, an audit write that failed). Safe to
+   * repeat.
+   */
+  handOver: (source: SourceId) => Promise<HandOverResult>;
+}
+
+/**
+ * One tick of a store (`Brain.work`): its time, the host's model calls and
+ * embedders, and the host's side of hand-overs. Hand-overs are the shared
+ * store's alone: the shared store's tick hands them over with these, and
+ * a person's own store, which never queues one (`handOver` refuses), has
+ * none to hand over whatever it is given.
+ */
+export interface WorkRequest {
+  ask: AskModel;
+  at: Date;
+  embedders: Embedders;
+  handOvers: HandOvers;
+}
+
 /**
  * A step of the tick that didn't finish: when, and why, as a code of the
  * store's own (R2 didn't answer in time, or the step failed), never an
@@ -1086,6 +1183,15 @@ export interface Brain {
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
+   * What this store has of the key `source`, whoever may read it: `erased`
+   * when an erasure closed it, `held` when a version of it is kept
+   * (current or history), `free` when it was never given it. For the host
+   * only, before it keeps a source in another store (one person's own):
+   * a key lives in one store. A person's own store erased whole holds
+   * nothing: `free`.
+   */
+  keyState: (source: SourceId) => Promise<KeyState>;
+  /**
    * The sources whose current version the reader may read, among those
    * whose key starts with one of the prefixes asked: newest first by when
    * their current version was added, then by key, a page at a time. Each
@@ -1112,11 +1218,20 @@ export interface Brain {
    * removed. Then it works the queue: runs what is due, a few at a time,
    * asking `ask` for the model calls it makes and `embedders` for vectors,
    * and returns once what it started has ended and nothing more is due,
-   * or its time to start more is up. `ask` and `embedders` are used only
-   * while this call is open. A second tick at the same time shares the same
-   * limits and claims nothing the first has under way.
+   * or its time to start more is up. `ask`, `embedders` and `handOvers`
+   * (the host's side of hand-overs) are used only while this call is open.
+   * A second tick at the same time shares the same limits and claims
+   * nothing the first has under way.
    */
-  work: (ask: AskModel, at: Date, embedders: Embedders) => Promise<void>;
+  work: (request: WorkRequest) => Promise<void>;
+  /**
+   * Puts each source on the work queue to be handed over (above), in
+   * place of one of its hand-overs still waiting or parked. What the item
+   * adds is whatever the host's `HandOvers.handOver` adds when it runs:
+   * so putting a source on twice, or late, adds nothing twice and nothing
+   * stale. The shared store's alone: a person's own store refuses it.
+   */
+  handOver: (request: HandOverRequest) => Promise<void>;
   /**
    * Starts the rebuild for the host's model again: every current version
    * with chunks it hasn't embedded goes on the queue again, those parked
@@ -1203,6 +1318,20 @@ export type StoreKind =
   | { kind: "shared" }
   | { kind: "person"; person: string }
   | { kind: "unknown" };
+
+/**
+ * What erasing a person's own store whole answers while it is still
+ * deleting: its record written and its storage gone, its files waiting
+ * out the time an add under way has to write one. The expected answer
+ * for a while after every such erasure, not a failure: the host keeps the
+ * erasure pending and calls again (`isStillDeleting`).
+ */
+export const stillDeleting =
+  "The Brain erased this store and is still deleting its files: erase it again";
+
+/** Whether `error` is the answer `stillDeleting`, as it crosses RPC. */
+export const isStillDeleting = (error: unknown): boolean =>
+  error instanceof Error && error.message === stillDeleting;
 
 /**
  * Whose the store named `name` is. A name is all a store knows of itself

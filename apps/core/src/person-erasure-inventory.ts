@@ -249,6 +249,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.audit_outbox": { kept: "audit events on their way to the log (D2)" },
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
   "core.brain_capture_intents": { company: "outcomes of runs (D3), by run" },
+  "core.brain_hand_overs": {
+    none: "a source's kind and ID until the new Brain's queue takes it",
+  },
   "core.brain_records": {
     company: "agreed facts naming roles; a gap's answer names who gave it",
   },

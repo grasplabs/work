@@ -33,11 +33,8 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import drawAWorkflow from "../../skills/draw-a-workflow/SKILL.md";
-import interviewAStakeholder from "../../skills/interview-a-stakeholder/SKILL.md";
-import runABaseline from "../../skills/run-a-baseline/SKILL.md";
-import writeBoardPage from "../../skills/write-board-page/SKILL.md";
 import { outboxed } from "../audit-outbox.ts";
+import { shippedSkills } from "../shipped-skills.ts";
 import { requireWritable } from "./collection-rules.ts";
 import { personWriter } from "./person-writes.ts";
 import { portsOf, brainOf } from "./ports.ts";
@@ -87,17 +84,14 @@ export interface GraspSkill {
 }
 
 /**
- * The Grasp skills this release ships: one `SKILL.md` each, at
- * `<name>/SKILL.md`. Add a skill's folder under apps/core/skills/ here.
- * A skill removed from the release stays in the collection as it was:
- * Knowledge never deletes a document but through a purge.
+ * The Grasp skills this release ships (shipped-skills.ts), each at
+ * `<name>/SKILL.md`. A skill removed from the release stays in the
+ * collection as it was: Knowledge never deletes a document but through a
+ * purge.
  */
-export const graspSkills: readonly GraspSkill[] = [
-  { path: "draw-a-workflow/SKILL.md", text: drawAWorkflow },
-  { path: "interview-a-stakeholder/SKILL.md", text: interviewAStakeholder },
-  { path: "run-a-baseline/SKILL.md", text: runABaseline },
-  { path: "write-board-page/SKILL.md", text: writeBoardPage },
-];
+export const graspSkills: readonly GraspSkill[] = shippedSkills.map(
+  ({ name, text }) => ({ path: `${name}/SKILL.md`, text })
+);
 
 /** Who the sync is: Grasp itself, with no person behind it. */
 const graspActor: AuditActor = { type: "system" };

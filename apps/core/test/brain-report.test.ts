@@ -1,5 +1,5 @@
 import { brainOf, vectorModelNameOf } from "@grasp-os/brain-next/contract";
-import type { Embedders } from "@grasp-os/brain-next/contract";
+import type { Embedders, HandOvers } from "@grasp-os/brain-next/contract";
 import {
   defineWork,
   enqueueWork,
@@ -38,6 +38,7 @@ import {
 } from "./brain-next-store-copy.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { auditedDuring, routed, signedInWithRole } from "./sign-in.ts";
 
 // Grasp's staff's view of this client's Brain (src/brain-report.ts),
@@ -97,7 +98,7 @@ const nextDay = (): Date => {
 const tick = async (times: number): Promise<void> => {
   for (let index = 0; index < times; index += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one tick after another
-    await workBrain(env, nextDay());
+    await workBrain(env, nextDay(), noProducers);
   }
 };
 
@@ -366,10 +367,14 @@ describe("the Brain's report", () => {
         source,
         change: crypto.randomUUID(),
         text: `${marked} is what the board decided about the merger.`,
-        readers: { kind: "owner", personId: person },
+        readers: { kind: "none" },
       });
     }
-    await eraseSource(env, { source: erased, reason: "deleted" });
+    await eraseSource(env, {
+      source: erased,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
     const { key, id } = await parked(marked);
 
     const reads: Awaited<ReturnType<typeof readReport>>[] = [];
@@ -437,7 +442,7 @@ describe("the Brain's report", () => {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: Array.from({ length: 400 }, () => marker()).join(" "),
-      readers: { kind: "owner", personId: "someone" },
+      readers: { kind: "none" },
     });
     const after = await reported(bytesOf);
 
@@ -484,16 +489,24 @@ describe("recall, as staff see it", () => {
     }
 
     const whole = { tokens: 4000 };
+    // Of the shared store alone, which the report shows: a person's own
+    // store counts its own recalls.
     // Words alone (a marker is an ID, so it would be an exact part too).
     await recallAs(env, userId, {
       question: "warehouse invoice",
       budget: whole,
+      personal: false,
     });
     await recallAs(env, userId, {
       question: `INV-2026-17 ${marked}`,
       budget: whole,
+      personal: false,
     });
-    await recallAs(env, userId, { question: "", budget: whole });
+    await recallAs(env, userId, {
+      question: "",
+      budget: whole,
+      personal: false,
+    });
     const { text, report } = await readReport();
     const after = recallCountsOf(report);
 
@@ -518,6 +531,7 @@ describe("recall, as staff see it", () => {
     await recallAs(env, userId, {
       question: "warehouse",
       budget: { tokens: 4000 },
+      personal: false,
     });
     const { report: before } = await readReport();
     await scheduler.wait(5);
@@ -606,18 +620,20 @@ describe("the Brain's actions", () => {
   it("rebuilds the word indexes while recall goes on, once at a time, and records it", async () => {
     const marked = marker();
     const person = `person-${crypto.randomUUID()}`;
+    // A team's, so it is in the shared store, which staff rebuild.
+    const teamId = crypto.randomUUID();
     await addSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: `${marked} sits in the warehouse in Rotterdam.`,
-      readers: { kind: "owner", personId: person },
+      readers: { kind: "team", teamId },
     });
     const recalled = async (): Promise<number> => {
       const { items } = await brainOf(
         inJurisdiction(env, env.BRAIN_STORE)
       ).recall({
         question: marked,
-        reader: { person, groups: [] },
+        reader: { person, groups: [`team:${teamId}`] },
         budget: { tokens: 1000 },
       });
       return items.length;
@@ -676,6 +692,7 @@ describe("the Brain's actions while it reads its erasure ledger", () => {
     const backup = await copyOfStore();
     await eraseSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
+      readers: { kind: "none" },
       reason: "deleted",
     });
     const last = await runInDurableObject(storeObject(), (_store, state) =>
@@ -807,6 +824,14 @@ describe("the Brain's actions when the store throws", () => {
 });
 
 /** The host's model, as the store's own tick asks it: it answers, and holds nothing. */
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 const quietModel = async () => {
   await Promise.resolve();
   return { kind: "answer" as const, text: "" };
@@ -836,7 +861,12 @@ const embedAll = async (embedders: Embedders): Promise<void> => {
   const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
   for (let ticks = 0; ticks < 50; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one tick after another
-    await brain.work(quietModel, nextDay(), embedders);
+    await brain.work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders,
+      handOvers: noHandOvers,
+    });
     // oxlint-disable-next-line no-await-in-loop -- look after each tick
     const { embedding } = await brainWorkOverview(env);
     if (embedding.rebuilt) {
@@ -853,7 +883,7 @@ describe("the Brain's embedding, as staff see it", () => {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: `${marked} is in the contract with the supplier in Utrecht.`,
-      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+      readers: { kind: "none" },
     });
     const embedders = await testModelEmbedders();
     await embedAll(embedders);
@@ -923,7 +953,7 @@ describe("the Brain's embedding, as staff see it", () => {
         2000,
         " filler"
       ),
-      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+      readers: { kind: "none" },
     });
     const working = await testModelEmbedders();
     // The model passes over the marked passage and embeds nothing else this
@@ -942,7 +972,12 @@ describe("the Brain's embedding, as staff see it", () => {
       },
     };
     const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
-    await brain.work(quietModel, nextDay(), choosy);
+    await brain.work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders: choosy,
+      handOvers: noHandOvers,
+    });
     const before = await reported((report) => report?.embedding);
     const answered = await answerTo({ type: "reembed" });
     const after = await reported((report) => report?.embedding);
@@ -963,7 +998,7 @@ describe("the Brain's embedding, as staff see it", () => {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: "The invoice from the supplier in Zwolle, due in thirty days.",
-      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+      readers: { kind: "none" },
     });
     const working = await testModelEmbedders();
     const broken: Embedders = {
@@ -979,12 +1014,22 @@ describe("the Brain's embedding, as staff see it", () => {
     // and fails again: ticked until the overview shows one parked, as how
     // many items a tick runs depends on the machine's load, at most 20
     // ticks.
-    await brain.work(quietModel, nextDay(), broken);
+    await brain.work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders: broken,
+      handOvers: noHandOvers,
+    });
     await brain.reembed();
     let { embedding: whileBroken } = await brainWorkOverview(env);
     for (let round = 0; round < 20 && whileBroken.parked === 0; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one tick after another, past each backoff
-      await brain.work(quietModel, nextDay(), broken);
+      await brain.work({
+        ask: quietModel,
+        at: nextDay(),
+        embedders: broken,
+        handOvers: noHandOvers,
+      });
       // oxlint-disable-next-line no-await-in-loop -- looked at after each tick
       ({ embedding: whileBroken } = await brainWorkOverview(env));
     }
@@ -1075,11 +1120,12 @@ describe("the Brain's upkeep, as staff see it", () => {
     const marked = marker();
     // The store sees the test model first, so core's own tick (no model)
     // changes the model it embeds for, which the step writes.
-    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work(
-      quietModel,
-      nextDay(),
-      await testModelEmbedders()
-    );
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders: await testModelEmbedders(),
+      handOvers: noHandOvers,
+    });
     // The step's own table refuses every write, with the marker in its words.
     await runInDurableObject(storeObject(), (_store, state) => {
       for (const when of ["INSERT", "UPDATE"]) {
@@ -1093,7 +1139,7 @@ describe("the Brain's upkeep, as staff see it", () => {
     try {
       // Core's embedders run no model, which the store last saw running
       // one: the step writes its state, and fails.
-      await workBrain(env, nextDay());
+      await workBrain(env, nextDay(), noProducers);
       const { status, text, report } = await readReport();
 
       expect({

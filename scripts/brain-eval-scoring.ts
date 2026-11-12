@@ -18,6 +18,8 @@
  * - The size of a difference, and MRR, which isn't 0 or 1, get a 95%
  *   interval by a seeded bootstrap over questions, for display.
  */
+import { readdirSync } from "node:fs";
+
 import { z } from "zod";
 
 import {
@@ -32,6 +34,19 @@ import {
  */
 export const evalArgs = (args: readonly string[]): string[] =>
   args[0] === "--" ? args.slice(1) : [...args];
+
+/**
+ * The newest earlier run of the evaluation in `dir`, by name (a run's
+ * name starts with its time): files at its top alone, so a model run's,
+ * kept in a folder of their own (brain-eval-model-scoring.ts
+ * `modelResultsFolder`), is never read as one.
+ */
+export const lastRunIn = (dir: string): string | undefined =>
+  readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map(({ name }) => name)
+    .toSorted()
+    .at(-1);
 
 /** How many results a reader is counted as looking at. */
 export const resultBudget = 5;
@@ -278,10 +293,16 @@ const languageNames = {
   es: "Spanish",
 } as const;
 
-const sameLanguage = (result: QuestionResult): boolean =>
+/** What a question's groups are decided by: any result that says it can be grouped. */
+export type Grouped = Pick<
+  QuestionResult,
+  "language" | "sourceLanguage" | "way" | "long" | "lookalike"
+>;
+
+const sameLanguage = (result: Grouped): boolean =>
   result.language === result.sourceLanguage;
 
-const shortSource = (result: QuestionResult): boolean => !result.long;
+const shortSource = (result: Grouped): boolean => !result.long;
 
 /**
  * The groups a run is reported in, each a filter over answerable
@@ -298,19 +319,18 @@ const shortSource = (result: QuestionResult): boolean => !result.long;
 export const groups: readonly {
   name: string;
   long: boolean;
-  has: (result: QuestionResult) => boolean;
+  has: (result: Grouped) => boolean;
 }[] = [
   { name: "All answerable", long: false, has: shortSource },
   {
     name: "Same language",
     long: false,
-    has: (result: QuestionResult) =>
-      shortSource(result) && sameLanguage(result),
+    has: (result: Grouped) => shortSource(result) && sameLanguage(result),
   },
   ...brainEvalLanguages.map((language) => ({
     name: languageNames[language],
     long: false,
-    has: (result: QuestionResult) =>
+    has: (result: Grouped) =>
       shortSource(result) &&
       sameLanguage(result) &&
       result.language === language,
@@ -318,24 +338,23 @@ export const groups: readonly {
   {
     name: "Across languages",
     long: false,
-    has: (result: QuestionResult) =>
-      shortSource(result) && !sameLanguage(result),
+    has: (result: Grouped) => shortSource(result) && !sameLanguage(result),
   },
   ...brainEvalWays.map((way) => ({
     name: `Way: ${way}`,
     long: false,
-    has: (result: QuestionResult) =>
+    has: (result: Grouped) =>
       shortSource(result) && sameLanguage(result) && result.way === way,
   })),
   {
     name: "Long documents",
     long: true,
-    has: (result: QuestionResult) => result.long,
+    has: (result: Grouped) => result.long,
   },
   {
     name: "Long documents: look-alike",
     long: true,
-    has: (result: QuestionResult) => result.long && result.lookalike,
+    has: (result: Grouped) => result.long && result.lookalike,
   },
 ];
 
@@ -484,15 +503,15 @@ export const withMargin = (value: Estimate | null): string =>
     ? "–"
     : `${fixed(value.mean)} ±${fixed(Math.max(value.mean - value.low, value.high - value.mean))}`;
 
-const signed = (value: Estimate | null): string =>
+export const signed = (value: Estimate | null): string =>
   value === null
     ? "–"
     : `${value.mean >= 0 ? "+" : ""}${fixed(value.mean)} [${fixed(value.low)}, ${fixed(value.high)}]`;
 
-const pOf = ({ gained, lost, p }: SignTest): string =>
+export const pOf = ({ gained, lost, p }: SignTest): string =>
   gained + lost === 0 ? "–" : p.toFixed(3);
 
-const table = (
+export const table = (
   header: readonly string[],
   rows: readonly string[][]
 ): string => {

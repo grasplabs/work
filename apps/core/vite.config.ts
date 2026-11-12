@@ -439,6 +439,9 @@ export default coreProject({
     "test/brain-scale-*-of-*.test.ts",
     // The Brain evaluation, on request only: vite.brain-eval.config.ts.
     "test/brain-eval.test.ts",
+    // The Brain evaluation against a real model, which costs money, on
+    // request only: vite.brain-eval-model.config.ts.
+    "test/brain-eval-model.test.ts",
     // Recall by meaning through core, with a test model as if it shipped:
     // vite.brain-meaning.config.ts.
     "test/brain-next-meaning.test.ts",
