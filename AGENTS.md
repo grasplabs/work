@@ -50,22 +50,22 @@ Vite+ docs: `node_modules/vite-plus/docs`.
 - **Dependencies**: versions live in the `catalog` in `pnpm-workspace.yaml`, pinned exactly; packages reference them as `catalog:`. New versions wait 3 days (pnpm and Renovate). Only packages listed under `allowBuilds` may run install scripts.
 - **No dev docs in the repo**: plans, ADRs, design notes and research live outside it. The Markdown allowed is `README.md`, this file, `.github/` templates, skills, and the SDK docs in `apps/docs/content/`, which ship with each release; CI enforces it. Docs change in the same pull request as the code they describe, and their code examples are type-checked against the SDK in CI. Put the why in code comments where the decision sits, and in PR descriptions.
 - **Secrets**: never commit secrets, client names or client configuration; secretlint checks every commit and CI. Local secrets go in `.dev.vars` (see `.dev.vars.example`). Authenticate Wrangler through the 1Password shell plugin.
-- **No compatibility code**: nothing is released to clients yet, so there are no backfills, legacy fallbacks, tolerant readers for old formats or dead code. Refuse an old stored format clearly instead (bump the format, "publish again").
-- **Schemas** follow expand, then contract: add first, remove in a later release. Code must work against both the old and the new schema. This holds for Durable Object SQLite too, because the admin can roll a client back to an earlier release: add columns as nullable, and drop or rename in a later release.
+- **No compatibility code for the past**: until the first client release, no backfills, legacy fallbacks, readers for formats older than the current release, or dead code. Refuse an old stored format clearly instead (bump the format, "publish again"). The one exception is the release-to-release window below.
+- **Schemas** (the exception) follow expand, then contract: add first, remove in a later release. Code must work against both the old and the new schema. This holds for Durable Object SQLite too, because the admin can roll a client back to an earlier release: add columns as nullable, and drop or rename in a later release.
 - **No feature flags**: a feature works by default once it merges, in development too. Don't add a flag or a kill switch.
 - **No AI attribution**: no co-author trailers or "generated with" lines in commits or pull requests.
-- **Never skip the git hooks** (`--no-verify`), and never loosen a lint rule to make code pass: fix the code.
+- **Never skip the git hooks** (`--no-verify`), and never loosen a lint rule to make code pass, except where this file names the exception: fix the code.
 
 ## How we build
 
-- **Simplest design that is secure.** KISS and DRY. No features, settings, toggles or validation layers nobody asked for; a fixed choice is a constant in code.
+- **Simplest design that is secure.** KISS and DRY. No features, settings or toggles nobody asked for, and no validation beyond checking input at the boundary; a fixed choice is a constant in code.
 - **Only make a change that is clearly better overall** and makes nothing worse. "Industry standard" alone is no reason.
 - **Question existing code.** When reworking something, don't port a piece because it exists. If it has little value or isn't a common pattern, remove it, and say what you dropped and why in the pull request.
 - **Stable IDs.** References use a stable key; a rename changes only a label and never breaks anything.
 - **Use the library's feature**, don't build our own version of it. Change our design so the library works as designed.
 - **Follow standards.** Code that reads a standard format (Markdown, URLs, MIME, email headers) uses a conformant parser, or follows the specification's grammar exactly. When a review finds a second edge case in a hand-written rule, replace the rule.
-- **Allow and audit over blocking.** Sensible defaults; block only where the risk is severe and obvious. Audit records must be correct: one event per action with who, what and counts, not one per affected item. No arbitrary size caps; paging covers size.
-- **Content only one person may read** (their chats, their interview) is stored only where that person alone can reach it, such as their own Durable Object.
+- **Allow and audit over blocking.** Sensible defaults; block only where the risk is severe and obvious. Audit records must be correct: one event per action with who, what and counts, not one per affected item. No arbitrary caps on how much someone may store or list; paging covers size. Limits that protect the platform (request bodies, model tokens, uploads) stay.
+- **Content only one person may read** (their chats, their personal documents) is stored only where that person alone can reach it, such as their own Durable Object.
 
 ## Branches and pull requests
 
@@ -74,10 +74,10 @@ Trunk-based: `main` is the only long-lived branch; every merge deploys core and 
 1. Branch from `main` as `<type>/<kebab-description>`, e.g. `feat/audit-export`, using the commit types. A pre-push hook and CI check the name.
 2. Open a **draft** pull request into `main`. CI runs the fast checks.
 3. Have the diff reviewed by a reviewer that didn't write it (a fresh agent with no context from the author is fine) for correctness, simplicity and security. Fix what it finds and review again, until a round finds nothing of medium severity or worse.
-4. Label it: `Security` when it changes who can see or do what (permissions, audiences, staff access, sign-in, tokens, the sandbox, secrets, the audit log, egress, CI); `Complexity: High` for a schema change with data risk, a cross-app or SDK contract, workflow durability or a risk of data loss. The `Review tier` workflow adds labels from size and paths; never remove one.
-5. `Security` or `Complexity: High` pull requests get one Greptile review, last, on a head that won't change: mark ready and comment `@greptileai review`. Merge at 5/5 with no open notes. Greptile is paid per review: never ask on a draft, and ask again only after fixing a P0 or P1 finding.
-6. Nick or Jakob approves (CODEOWNERS); pushing after an approval needs a new one. Resolve every review thread: an open one keeps the pull request out of the queue.
-7. Add it to the merge queue (`gh pr merge --squash --auto`), which runs the full suite on top of the latest `main` and squash-merges it. No need to keep the branch up to date by hand.
+4. Label it: `Security` when it changes who can see or do what (permissions, audiences, staff access, sign-in, tokens, the sandbox, secrets, the audit log, egress, CI); `Complexity: High` for a schema change with data risk, a cross-app or SDK contract, workflow durability or a risk of data loss. The `Review tier` workflow sets labels from size and paths and never lowers them; don't remove or lower one yourself.
+5. `Security` or `Complexity: High` pull requests get one Greptile review, last, on a head that won't change: mark ready and comment `@greptileai review`. Merge at 5/5 with no open notes; a `Security` pull request also needs a security review that starts from its threat model (and see Working from Linear). Greptile is paid per review: never ask on a draft, and ask again only after fixing a P0 or P1 finding.
+6. Nick and Jakob are requested as reviewers (CODEOWNERS); the ruleset doesn't require an approval. Resolve every review thread: an open one keeps the pull request out of the queue.
+7. Add it to the merge queue (`gh pr merge --squash --auto --match-head-commit <sha>`, so a later push can't merge unreviewed), which runs the full suite on top of the latest `main` and squash-merges it. No need to keep the branch up to date by hand.
 
 Nobody pushes to `main` directly. In an emergency, organisation owners can merge a pull request without a second review or passing checks; GitHub records every bypass. Use it only when waiting would do more harm. The rules live in `.github/rulesets/`; apply changes with `vp run github:setup`.
 
@@ -141,7 +141,7 @@ Test what the code does, at real boundaries, never how it does it.
 - **Concurrency and recovery claims** (conditional writes, retries, resumed runs) need a deterministic race or integration test through the real path.
 - **Bug fixes close a behaviour gap.** Find the behaviour test that should have caught the bug and fix or extend it. Add a new test only for behaviour nothing covers; never a test named after a bug.
 - Keep suites flat, use async/await, and never commit `.only` or `.skip`.
-- Locally, run the test files you touched (`vp test <files> --maxWorkers=2`) and `vp check`; the merge queue runs everything. Playwright only when `apps/web`, `apps/admin` or `e2e/` changed.
+- Locally, run the test files you touched (`vp test <files> --maxWorkers=2`) and `vp check`; the merge queue runs everything. Run Playwright locally (`vp run e2e`, `vp run e2e:admin`) only when `apps/web`, `apps/admin` or `e2e/` changed.
 
 <!-- ultracite:start — generated by `ultracite init --agents universal` (Ultracite 7.12.0); commands adapted to Vite+, testing rules moved to Testing above -->
 
