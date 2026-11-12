@@ -551,9 +551,10 @@ export const confirmMemory = (
 
 /**
  * Retires the memory `id` if its lineage is `writer`'s, the reader may
- * read it, and it is still believed as they see it: not retired, and no
- * newer memory of its lineage that they may read ended it by now, so one
- * hidden from them neither blocks the retire nor shows (contract.ts
+ * read it, and it is current as they see it: not retired, in its world
+ * time now, and no newer memory of its lineage that they may read ended
+ * it by now, so one hidden from them neither blocks the retire nor shows.
+ * One this writer already retired answers `done` again (contract.ts
  * `retireMemory`).
  */
 export const retireMemory = (
@@ -565,20 +566,38 @@ export const retireMemory = (
     at,
   }: { id: string; writer: string; reader: Reader; at: number }
 ): MemoryChangeOutcome => {
-  const retired = sql.exec(
-    `WITH ${readableSql}
-    UPDATE memories AS m SET retired_at = ?5
-    WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
-      AND ${visibleSql("m")}
-      AND NOT EXISTS (${newerSql("m", "?5", true)})`,
+  const asked = [
     id,
     reader.person,
     JSON.stringify(reader.groups),
     lineageOfWriter(writer),
-    at
+    at,
+  ];
+  const retired = sql.exec(
+    `WITH ${readableSql}
+    UPDATE memories AS m SET retired_at = ?5
+    WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
+      AND (m.valid_from IS NULL OR m.valid_from <= ?5)
+      AND (m.valid_until IS NULL OR m.valid_until > ?5)
+      AND ${visibleSql("m")}
+      AND NOT EXISTS (${newerSql("m", "?5", true)})`,
+    ...asked
   );
   retired.toArray();
-  return retired.rowsWritten > 0 ? "done" : "nothing";
+  if (retired.rowsWritten > 0) {
+    return "done";
+  }
+  // Retired already, by this writer, and the reader may read it: a retry.
+  const again = sql
+    .exec(
+      `WITH ${readableSql}
+      SELECT 1 FROM memories AS m
+      WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
+        AND ${visibleSql("m")}`,
+      ...asked
+    )
+    .toArray();
+  return again.length > 0 ? "done" : "nothing";
 };
 
 /**
