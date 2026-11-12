@@ -734,6 +734,52 @@ const leakyEmbedders = (markers: readonly string[]): Embedders => ({
     throw new Error(`Could not embed ${[...texts, ...markers].join(" ")}`);
   },
 });
+/** The ids of the items parked now, as the store's overview lists them. */
+const parkedIds = async (): Promise<number[]> => {
+  const { parked } = await store().workOverview();
+  return parked.map(({ id }) => id);
+};
+
+/**
+ * A marked item worked to parking, then every way to put an item back:
+ * each parked one (the marked among them), one twice, an id nothing has,
+ * and ids that aren't one, the markers among them.
+ */
+const requeueMarked = async (
+  markers: readonly string[],
+  requeue: (id: number) => Promise<unknown>
+): Promise<Answer[]> => {
+  const worked = await workMarked(
+    markers,
+    async (at) => {
+      await store().work(quietModel, at, leakyEmbedders(markers));
+    },
+    "a marked item worked to parking"
+  );
+  const ids = await parkedIds();
+  const asked: Answer[] = [];
+  for (const id of [...ids, ...ids.slice(0, 1)]) {
+    // oxlint-disable-next-line no-await-in-loop -- one at a time
+    const answered = await answer(
+      `a requeue of ${id}`,
+      async () => await requeue(id)
+    );
+    asked.push(answered);
+  }
+  return [
+    ...worked,
+    ...asked,
+    await answer(
+      "a requeue of an id nothing has",
+      async () => await requeue(Number.MAX_SAFE_INTEGER)
+    ),
+    await answer("a requeue of 0", async () => await requeue(0)),
+    await answer(
+      "a requeue named by the markers",
+      async () => await requeue(unchecked(markers.join(" ")))
+    ),
+  ];
+};
 
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
@@ -1108,19 +1154,6 @@ export const coreProbes = {
       ),
     ];
   },
-  reembedBrain: async ({ markers }) => [
-    await answer("a re-embed", async () => {
-      await coreBrain.reembedBrain(env);
-    }),
-    ...(await workMarked(
-      markers,
-      async (at) => {
-        await coreBrain.reembedBrain(env);
-        await coreBrain.workBrain(env, at);
-      },
-      "a marked item worked through core's clock after a re-embed"
-    )),
-  ],
   brainWorkOverview: async ({ markers }) => [
     ...(await workMarked(
       markers,
@@ -1133,6 +1166,56 @@ export const coreProbes = {
       "the overview, the marked item parked",
       async () => await coreBrain.brainWorkOverview(env)
     ),
+  ],
+  brainStaffReport: async ({ markers }) => [
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await store().work(quietModel, at, leakyEmbedders(markers));
+      },
+      "a marked item worked to parking"
+    )),
+    await answer(
+      "the staff's report, the marked item parked",
+      async () => await coreBrain.brainStaffReport(env)
+    ),
+  ],
+  actOnBrainForStaff: async ({ markers }) => [
+    ...(await requeueMarked(
+      markers,
+      async (item) =>
+        await coreBrain.actOnBrainForStaff(env, { type: "requeue", item })
+    )),
+    await answer(
+      "a rebuild of the word indexes",
+      async () =>
+        await coreBrain.actOnBrainForStaff(env, { type: "rebuild_words" })
+    ),
+    await answer(
+      "a rebuild while one is under way",
+      async () =>
+        await coreBrain.actOnBrainForStaff(env, { type: "rebuild_words" })
+    ),
+    await answer(
+      "an action named by the markers",
+      async () =>
+        await coreBrain.actOnBrainForStaff(
+          env,
+          unchecked({ type: markers.join(" ") })
+        )
+    ),
+    await answer(
+      "a re-embed",
+      async () => await coreBrain.actOnBrainForStaff(env, { type: "reembed" })
+    ),
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await coreBrain.actOnBrainForStaff(env, { type: "reembed" });
+        await coreBrain.workBrain(env, at);
+      },
+      "a marked item worked through core's clock after a re-embed"
+    )),
   ],
 } satisfies Record<CoreMember, Probe>;
 
@@ -2411,6 +2494,18 @@ export const storeProbes = {
     await answer(
       "the store's overview, the marked item parked",
       async () => await store().workOverview()
+    ),
+  ],
+  requeueWork: async ({ markers }) =>
+    await requeueMarked(markers, async (id) => await store().requeueWork(id)),
+  rebuildWords: async () => [
+    await answer(
+      "a rebuild of the word indexes",
+      async () => await store().rebuildWords()
+    ),
+    await answer(
+      "a rebuild while one is under way",
+      async () => await store().rebuildWords()
     ),
   ],
 } satisfies Record<StoreMember, Probe>;

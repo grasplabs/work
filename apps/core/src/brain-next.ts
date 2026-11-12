@@ -9,6 +9,7 @@ import {
   sourceIdMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
+  storeBytesMax,
 } from "@grasp-os/brain-next/contract";
 import type {
   Access,
@@ -21,8 +22,14 @@ import type {
   PackItem,
   Reader,
   SourceId,
+  StepFailure,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
+import type {
+  BrainAction,
+  BrainActionOutcome,
+  BrainReport,
+} from "@grasp-os/shared/brain-report";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { modelErrors } from "@grasp-os/shared/models";
@@ -728,16 +735,111 @@ export const workBrain = async (env: Env, at: Date): Promise<void> => {
   await brain(env).work(askModel(env), at, await embeddersOf(env));
 };
 
-/**
- * Has the Brain put every current version whose chunks lack vectors of
- * core's model on its queue again, over the next ticks: for staff, once
- * the embedders work again after long enough broken for items to park
- * for good (GRA-1733 gives it its button).
- */
-export const reembedBrain = async (env: BrainEnv): Promise<void> => {
-  await brain(env).reembed();
-};
-
-/** The Brain's work queue, as staff will see it (GRA-1733). */
+/** The Brain's work queue, store and ledger, as staff see it (brain-report.ts). */
 export const brainWorkOverview = async (env: BrainEnv): Promise<WorkOverview> =>
   await brain(env).workOverview();
+
+/** A step's last failure as the staff report says it. */
+const failureOf = (
+  failure: StepFailure | null
+): BrainReport["stepsFailed"]["ledger"] =>
+  failure === null
+    ? null
+    : { at: failure.at.toISOString(), reason: failure.reason };
+
+/**
+ * The Brain as Grasp's staff see it (brain-report.ts): its overview, field
+ * by field, operational state only. What names anything is left out: a
+ * work item's key and an overdue item's key (a source's key, say).
+ * Erasures are counts alone: never which, when, or by what hash.
+ */
+export const brainStaffReport = async (env: BrainEnv): Promise<BrainReport> => {
+  const overview = await brain(env).workOverview();
+  return {
+    now: new Date().toISOString(),
+    queue: {
+      waiting: overview.waiting.map(({ kind, count, oldestAddedAt }) => ({
+        kind,
+        count,
+        oldestAddedAt: oldestAddedAt.toISOString(),
+      })),
+      running: overview.running,
+      overdue: overview.overdue.length,
+      paused:
+        overview.paused === null
+          ? null
+          : {
+              reason: overview.paused.reason,
+              since: overview.paused.since.toISOString(),
+              until: overview.paused.until.toISOString(),
+            },
+      parked: overview.parked.map((parked) => ({
+        item: parked.id,
+        kind: parked.kind,
+        attempts: parked.attempts,
+        parks: parked.parks,
+        final: parked.final,
+        error: parked.error,
+        message: parked.message,
+        parkedAt: parked.parkedAt.toISOString(),
+      })),
+      parkedCount: overview.parkedCount,
+    },
+    store: { bytes: overview.storeBytes, limitBytes: storeBytesMax },
+    words: overview.words,
+    embedding: {
+      model: overview.embedding.model,
+      chunks: overview.embedding.chunks,
+      embedded: overview.embedding.embedded,
+      passedOver: overview.embedding.unembeddable,
+      rebuilding:
+        overview.embedding.model !== null && !overview.embedding.rebuilt,
+    },
+    ledger: {
+      replay: overview.ledgerReplay,
+      erasing: overview.erasing,
+      sourcesWithoutCurrent: overview.sourcesWithoutCurrent,
+      source: overview.erasures.source,
+      person: overview.erasures.person,
+      byReason: overview.erasures.byReason,
+    },
+    stepsFailed: {
+      ledger: failureOf(overview.stepsFailed.ledger),
+      erase: failureOf(overview.stepsFailed.erase),
+      sweep: failureOf(overview.stepsFailed.sweep),
+      repack: failureOf(overview.stepsFailed.repack),
+      reindex: failureOf(overview.stepsFailed.reindex),
+    },
+  };
+};
+
+/**
+ * What Grasp's staff asked of the Brain (brain-report.ts), done: a parked
+ * item put back in the queue, a rebuild of the word indexes started, or
+ * the embedding's rebuild started again (a re-embed).
+ * `nothing` when no item of that id is parked or a rebuild is under way;
+ * `unavailable` while the store reads its erasure ledger: the store's own
+ * gate refuses it, applying nothing.
+ */
+export const actOnBrainForStaff = async (
+  env: BrainEnv,
+  action: BrainAction
+): Promise<BrainActionOutcome> => {
+  switch (action.type) {
+    case "requeue": {
+      return await brain(env).requeueWork(action.item);
+    }
+    case "rebuild_words": {
+      return await brain(env).rebuildWords();
+    }
+    case "reembed": {
+      return await brain(env).reembed();
+    }
+    default: {
+      // A new kind of action fails to compile until it is handled here;
+      // what came anyway is never echoed.
+      const unhandled: never = action;
+      throw new Error(`No such action (${typeof unhandled})`);
+    }
+  }
+};

@@ -27,6 +27,7 @@ import type {
   SourceErasure,
   SourceVersion,
   SourceVersionRef,
+  StaffActionOutcome,
   VectorSearch,
   VectorsFound,
   VectorsToPut,
@@ -39,6 +40,7 @@ import {
   confirmPending,
   erase,
   eraseBatch,
+  erasuresOverview,
   erasuresUnfinished,
   keepMissingSubjects,
   replayStep,
@@ -50,11 +52,17 @@ import { recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
-import { markWordsCurrentIfEmpty, reindexWords } from "./words.ts";
+import {
+  markWordsCurrentIfEmpty,
+  reindexWords,
+  startWordsRebuild,
+  wordsRebuilding,
+} from "./words.ts";
 import {
   newWorkState,
   releaseInterrupted,
   repackPerTick,
+  requeueWork,
   stopWorkOn,
   workOverview,
   workTick,
@@ -101,6 +109,9 @@ const ledgerRetryMs = 30_000;
 
 /** A tick's time: a valid date. */
 const tickAtSchema = z.date();
+
+/** An item of the queue, by its id. */
+const workIdSchema = z.int().positive();
 
 /**
  * The Brain's store: its sources and their versions, who may read them
@@ -199,6 +210,20 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Every call but the overview waits for it.
    */
   async #ready(): Promise<void> {
+    // Read after the step, which may have changed it.
+    const now = await this.#ledgerStep();
+    if (now !== "through") {
+      throw new Error(
+        now === "replaying" ? ledgerCatchingUp : ledgerUnreadable
+      );
+    }
+  }
+
+  /**
+   * Where the store is with its erasure ledger, once one more step of
+   * reading it was taken while it isn't read through (`#ready`'s step).
+   */
+  async #ledgerStep(): Promise<WorkOverview["ledgerReplay"]> {
     // After a failed read, read again at most every `ledgerRetryMs`: calls
     // between are refused at once, so an outage of R2 holds no caller
     // waiting for it.
@@ -213,13 +238,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         }
       });
     }
-    // Read after the step above, which may have changed it.
-    const now = this.#ledger;
-    if (now !== "through") {
-      throw new Error(
-        now === "replaying" ? ledgerCatchingUp : ledgerUnreadable
-      );
-    }
+    return this.#ledger;
   }
 
   /** The parts erasure.ts works with, the bucket as the env has it now. */
@@ -368,10 +387,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * Puts every current version whose chunks lack vectors of the host's
-   * model on the queue again, over the next ticks (embedding.ts).
+   * model on the queue again, over the next ticks (embedding.ts):
+   * `nothing` while no model was seen or a walk is under way already;
+   * `unavailable`, changing nothing, until the ledger is read through.
    */
-  reembed(): void {
-    reembed(this.ctx.storage);
+  async reembed(): Promise<StaffActionOutcome> {
+    if ((await this.#ledgerStep()) !== "through") {
+      return "unavailable";
+    }
+    return reembed(this.ctx.storage) ? "done" : "nothing";
   }
 
   /**
@@ -503,7 +527,34 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       sourcesWithoutCurrent: sourcesWithoutCurrent(this.ctx.storage.sql),
       stepsFailed: { ...this.#stepsFailed },
       embedding: embeddingOverview(this.ctx.storage),
+      storeBytes: this.ctx.storage.sql.databaseSize,
+      words: wordsRebuilding(this.ctx.storage.sql) ? "rebuilding" : "current",
+      erasures: erasuresOverview(this.ctx.storage.sql),
     };
+  }
+
+  /**
+   * Puts a parked item back in the queue: `nothing` when none is parked by
+   * that id; `unavailable`, changing nothing, until the ledger is read
+   * through (the same gate as `#ready`, answered rather than thrown).
+   */
+  async requeueWork(id: number): Promise<StaffActionOutcome> {
+    const item = checked(workIdSchema, id);
+    if ((await this.#ledgerStep()) !== "through") {
+      return "unavailable";
+    }
+    return requeueWork(this.ctx.storage, item) ? "done" : "nothing";
+  }
+
+  /**
+   * Starts a rebuild of the word indexes: `nothing` when one is under way;
+   * `unavailable`, changing nothing, until the ledger is read through.
+   */
+  async rebuildWords(): Promise<StaffActionOutcome> {
+    if ((await this.#ledgerStep()) !== "through") {
+      return "unavailable";
+    }
+    return startWordsRebuild(this.ctx.storage.sql) ? "done" : "nothing";
   }
 
   /** Keeps vectors of current chunks as their codes, in one transaction. */

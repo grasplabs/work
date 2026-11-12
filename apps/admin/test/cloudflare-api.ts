@@ -25,6 +25,14 @@ import type {
   AiStatusReport,
   PlatformSpendRow,
 } from "@grasp-os/shared/ai-status-report";
+import {
+  brainActionPath,
+  brainActionPurpose,
+  brainActionRequestSchema,
+  brainReportPath,
+  brainReportPurpose,
+  brainReportRequestSchema,
+} from "@grasp-os/shared/brain-report";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -427,6 +435,75 @@ const answerAiStatus = async (
   return Response.json(core.ai ?? aiStatusOf());
 };
 
+/**
+ * `request`'s body as `schema` reads it, when it is signed for the Brain
+ * with the key its live version's auth secret gives; null otherwise.
+ */
+const signedForBrain = async <T>(
+  live: VersionState,
+  request: Request,
+  { purpose, schema }: { purpose: string; schema: z.ZodType<T> }
+): Promise<T | null> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    purpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const asked = schema.safeParse(JSON.parse(body));
+  return request.headers.get(platformUpdateSignatureHeader) === expected &&
+    asked.success
+    ? asked.data
+    : null;
+};
+
+/**
+ * What a client's core answers the admin's Brain report request with, as
+ * core does (core's src/brain-report.ts): its report once signed, 403
+ * otherwise, 404 for a core without one; after `brainHeld`, when set.
+ */
+const answerBrainReport = async (
+  { core }: CoreHost,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const asked = await signedForBrain(live, request, {
+    purpose: brainReportPurpose,
+    schema: brainReportRequestSchema,
+  });
+  if (asked === null) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  core.brainAsks.push(asked);
+  await core.brainHeld?.();
+  if (core.brain === undefined) {
+    return new Response("Not found", { status: 404 });
+  }
+  return Response.json(core.brain);
+};
+
+/** What a client's core answers the admin's Brain action with, as core does. */
+const answerBrainAction = async (
+  { core }: CoreHost,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const asked = await signedForBrain(live, request, {
+    purpose: brainActionPurpose,
+    schema: brainActionRequestSchema,
+  });
+  if (asked === null) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  core.brainAsks.push(asked);
+  return Response.json({ outcome: core.brainOutcome ?? "done" });
+};
+
 /** Two hex characters at a time. */
 const hexPair = /../gu;
 
@@ -633,6 +710,8 @@ const signedPosts: ReadonlyMap<
   [adminKickoffPath, answerKickoff],
   [adminCommandPath, answerCommand],
   [aiStatusReportPath, answerAiStatus],
+  [brainReportPath, answerBrainReport],
+  [brainActionPath, answerBrainAction],
 ]);
 
 /**
@@ -1061,6 +1140,7 @@ export const fakeCloudflareApi = (token: string) => {
       coreAsked: [],
       kickoffAsks: [],
       commands: [],
+      brainAsks: [],
     };
     cores.set(clientId, core);
     return core;

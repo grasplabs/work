@@ -10,10 +10,13 @@ import {
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { BrainHealth } from "../../../admin/brain-health.tsx";
+import { loadBrainRead } from "../../../admin/brain-loads.ts";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { BarList, Figure } from "../../../admin/parts.tsx";
 import { Section } from "../../../admin/section.tsx";
 import { knowledgeSourceWords, plural } from "../../../admin/words.ts";
+import { fetchBrainReport } from "../../../clients/brain-functions.ts";
 
 /**
  * The company's brain, as the prototype shows it
@@ -34,6 +37,7 @@ import { knowledgeSourceWords, plural } from "../../../admin/words.ts";
  */
 const BrainSection = () => {
   const { admin, view } = useOrganization();
+  const { brainRead } = Route.useLoaderData();
   const brain = brainOf(view);
   const taking = brain.teams.filter((team) => !team.off).length;
   const { percent, threshold, covered, differs } = brain;
@@ -189,11 +193,28 @@ const BrainSection = () => {
           </p>
         )}
       </Section>
+
+      <BrainHealth clientId={admin.client.id} read={brainRead} />
     </>
   );
 };
 
-/** An organization's Brain: the counts its brain stands on, team by team. */
+/**
+ * An organization's Brain: the counts its brain stands on, team by team;
+ * then how its Brain is doing, read from its core as the section opens
+ * and again after an action, each read in the company's audit log.
+ */
 export const Route = createFileRoute("/organizations/$clientId/brain")({
+  // Not awaited, and not asked on a preload (src/admin/brain-loads.ts):
+  // each read is in the company's audit log as staff reading its Brain.
+  loader: ({ params, preload }) => ({
+    brainRead: loadBrainRead({
+      clientId: params.clientId,
+      preload,
+      read: async (clientId) => await fetchBrainReport({ data: { clientId } }),
+    }),
+  }),
+  // A preload asks its core nothing: opened, the section loads anew.
+  preloadStaleTime: 0,
   component: BrainSection,
 });

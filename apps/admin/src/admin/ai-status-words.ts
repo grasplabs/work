@@ -12,7 +12,7 @@ const hourMs = 60 * minuteMs;
 const dayMs = 24 * hourMs;
 
 /** How long before `now` `at` was, in a few words: "5 min ago". */
-const agoWords = (at: number, now: number): string => {
+export const agoWords = (at: number, now: number): string => {
   const since = Math.max(0, now - at);
   if (since < minuteMs) {
     return "just now";

@@ -1,10 +1,18 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { BrainReport } from "@grasp-os/shared/brain-report";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { mockAccess } from "./access.ts";
+import { loadBrainRead } from "../src/admin/brain-loads.ts";
+import {
+  brainActionFn,
+  fetchBrainReport,
+} from "../src/clients/brain-functions.ts";
+import { readBrainReport } from "../src/clients/brain.ts";
+import { accessJwt, mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { page } from "./pages.ts";
+import { callServerFn, page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -234,6 +242,358 @@ describe("an organization's brain", () => {
       noTeams: true,
       table: false,
       teamsHeard: true,
+    });
+  });
+});
+
+/** The Brain as a core reports it: a parked item, a store of `bytes`, a ledger through. */
+const brainReport = (bytes: number): BrainReport => ({
+  now: "2026-11-12T10:00:00.000Z",
+  queue: {
+    waiting: [
+      {
+        kind: "brain.embed",
+        count: 12,
+        oldestAddedAt: "2026-11-12T09:00:00.000Z",
+      },
+    ],
+    running: 2,
+    overdue: 0,
+    paused: null,
+    parked: [
+      {
+        item: 41,
+        kind: "brain.extract",
+        attempts: 5,
+        parks: 1,
+        final: false,
+        error: "unreadable",
+        message: "What it works on can't be read.",
+        parkedAt: "2026-11-12T08:00:00.000Z",
+      },
+    ],
+    parkedCount: 1,
+  },
+  store: { bytes, limitBytes: 10_000_000_000 },
+  words: "current",
+  embedding: {
+    model: "test-model@0a1b",
+    chunks: 40,
+    embedded: 38,
+    passedOver: 2,
+    rebuilding: false,
+  },
+  ledger: {
+    replay: "through",
+    erasing: 0,
+    sourcesWithoutCurrent: 0,
+    source: { written: 3, unwritten: 0 },
+    person: { written: 1, unwritten: 0 },
+    byReason: { deleted: 3, retention: 0, person_erased: 0, withdrawn: 1 },
+  },
+  stepsFailed: {
+    ledger: null,
+    erase: null,
+    sweep: null,
+    repack: null,
+    reindex: null,
+  },
+});
+
+/** A read of a client's Brain from its core, as the section's server function makes it. */
+const read = async (clientId: string) =>
+  await readBrainReport(env, { email: "grace@grasp.test" }, clientId);
+
+/** The text of `html`, its tags gone and its spaces one. */
+const textOf = (html: string): string =>
+  html
+    .replaceAll(/<[^>]+>/gu, " ")
+    .replaceAll(/\s+/gu, " ")
+    .replaceAll("&#x27;", "'");
+
+describe("how an organization's Brain is doing", () => {
+  useStoreSecrets({ deployer: token });
+
+  it("shows its queue, parked items with their error, its store and its ledger, asked of its core as the staff member", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    acme.core.brain = brainReport(1_200_000_000);
+
+    const { status, html } = await page(
+      `/organizations/${acme.clientId}/brain`,
+      "grace@grasp.test"
+    );
+    const text = textOf(html);
+
+    expect({
+      status,
+      waiting: text.includes("Waiting 12 Oldest added 1 hour ago, 2 running"),
+      parked: text.includes("What it works on can't be read. unreadable"),
+      requeue: html.includes(">Requeue</button>"),
+      store: text.includes("1.2 GB 12% of 10.0 GB"),
+      near: text.includes("Near its limit"),
+      ledger: text.includes("Read through"),
+      embedding: [
+        text.includes("Model test-model@0a1b"),
+        text.includes("Embedded 38 of 40 passages"),
+        html.includes(">Re-embed</button>"),
+      ],
+      erased: text.includes(
+        "3 deleted for good, 0 past their retention, 0 people erased, and 1 withdrawn"
+      ),
+      askedBy: acme.core.brainAsks.map((asked) => asked.staff.email),
+    }).toStrictEqual({
+      status: 200,
+      waiting: true,
+      parked: true,
+      requeue: true,
+      store: true,
+      near: false,
+      ledger: true,
+      embedding: [true, true, true],
+      erased: true,
+      askedBy: ["grace@grasp.test"],
+    });
+  });
+
+  it("flags a store near its limit before writes fail, and a ledger not read through", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    const report = brainReport(8_000_000_000);
+    acme.core.brain = {
+      ...report,
+      ledger: { ...report.ledger, replay: "replaying" },
+      queue: {
+        ...report.queue,
+        paused: {
+          reason: "rate_limited",
+          since: "2026-11-12T09:50:00.000Z",
+          until: "2026-11-12T10:05:00.000Z",
+        },
+      },
+    };
+
+    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const text = textOf(html);
+
+    expect({
+      near: text.includes(
+        "Near its limit of 10.0 GB: writes fail once it is full"
+      ),
+      ledger: text.includes(
+        "Replaying after a restore The Brain answers nothing until it is read through"
+      ),
+      paused: text.includes(
+        "Since 10 min ago: the model is limiting its calls. It tries again in 5 min."
+      ),
+    }).toStrictEqual({ near: true, ledger: true, paused: true });
+  });
+
+  it("says when its core doesn't answer how its Brain is doing", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+
+    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const text = textOf(html);
+
+    expect(
+      text.includes("The company’s Grasp didn’t answer how its Brain is doing.")
+    ).toBeTruthy();
+  });
+
+  it("requeues a parked item and rebuilds the word indexes as the staff member, and sends nothing for a caller Access doesn't vouch for", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+    const requeue = {
+      clientId: acme.clientId,
+      action: { type: "requeue", item: 41 },
+    } as const;
+
+    const refused = await callServerFn(brainActionFn, requeue, {
+      email: null,
+    }).then(
+      () => "answered",
+      () => "refused"
+    );
+    const asksBefore = acme.core.brainAsks.length;
+    const requeued = await callServerFn(brainActionFn, requeue, {
+      email: "grace@grasp.test",
+    });
+    acme.core.brainOutcome = "nothing";
+    const rebuilt = await callServerFn(
+      brainActionFn,
+      { clientId: acme.clientId, action: { type: "rebuild_words" } },
+      { email: "grace@grasp.test" }
+    );
+
+    expect({
+      refused,
+      asksBefore,
+      requeued,
+      rebuilt,
+      asked: acme.core.brainAsks.map((asked) =>
+        "action" in asked ? [asked.staff.email, asked.action] : null
+      ),
+    }).toStrictEqual({
+      refused: "refused",
+      asksBefore: 0,
+      requeued: { outcome: "done" },
+      rebuilt: { outcome: "nothing" },
+      asked: [
+        ["grace@grasp.test", { type: "requeue", item: 41 }],
+        ["grace@grasp.test", { type: "rebuild_words" }],
+      ],
+    });
+  });
+
+  it("asks its core nothing on a preload, and reads it once the section is opened", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+
+    const preloaded = await loadBrainRead({
+      clientId: acme.clientId,
+      preload: true,
+      read,
+    });
+    const asksAfterPreload = acme.core.brainAsks.length;
+    const opened = await loadBrainRead({
+      clientId: acme.clientId,
+      preload: false,
+      read,
+    });
+
+    expect({
+      preloaded,
+      asksAfterPreload,
+      opened: opened.state,
+      asks: acme.core.brainAsks.length,
+    }).toStrictEqual({
+      preloaded: { state: "not_asked" },
+      asksAfterPreload: 0,
+      opened: "read",
+      asks: 1,
+    });
+  });
+
+  it("shows the rest of the section while its core is slow, and the report once it answers", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    acme.core.brain = brainReport(1_000_000);
+    const held = Promise.withResolvers<boolean>();
+    acme.core.brainHeld = async () => {
+      await held.promise;
+    };
+    const reading = "Reading how its Brain is doing from its core";
+
+    const response = await exports.default.fetch(
+      `https://ops.grasp.test/organizations/${acme.clientId}/brain`,
+      {
+        headers: {
+          "cf-access-jwt-assertion": await accessJwt("staff@grasp.test"),
+        },
+      }
+    );
+    const reader = response.body
+      ?.pipeThrough(new TextDecoderStream())
+      .getReader();
+    let html = "";
+    // The page streams: read until it says it is reading, its core held.
+    while (!html.includes(reading)) {
+      // oxlint-disable-next-line no-await-in-loop -- one chunk after another
+      const chunk = await reader?.read();
+      if (chunk === undefined || chunk.done) {
+        break;
+      }
+      html += chunk.value;
+    }
+    const beforeAnswer = {
+      counts: html.includes('aria-label="The brain in numbers"'),
+      reading: html.includes(reading),
+      report: html.includes("The Brain at work"),
+    };
+    held.resolve(true);
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- one chunk after another
+      const chunk = await reader?.read();
+      if (chunk === undefined || chunk.done) {
+        break;
+      }
+      html += chunk.value;
+    }
+
+    expect({
+      beforeAnswer,
+      report: html.includes('aria-label="The Brain at work"'),
+    }).toStrictEqual({
+      beforeAnswer: { counts: true, reading: true, report: false },
+      report: true,
+    });
+  });
+
+  it("reads nothing of its core for a caller Access doesn't vouch for", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+
+    const outcome = await callServerFn(
+      fetchBrainReport,
+      { clientId: acme.clientId },
+      { email: null }
+    ).then(
+      () => "answered",
+      () => "refused"
+    );
+
+    expect({ outcome, asks: acme.core.brainAsks.length }).toStrictEqual({
+      outcome: "refused",
+      asks: 0,
+    });
+  });
+
+  it("says in one line that no embedding model runs, and offers no re-embed", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    const report = brainReport(1_000_000);
+    acme.core.brain = {
+      ...report,
+      embedding: {
+        model: null,
+        chunks: 40,
+        embedded: 0,
+        passedOver: 0,
+        rebuilding: false,
+      },
+    };
+
+    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const text = textOf(html);
+
+    expect({
+      line: text.includes(
+        "No embedding model runs yet, so the Brain recalls by words alone."
+      ),
+      counts: text.includes("Embedded 0 of 40"),
+      reembed: html.includes(">Re-embed</button>"),
+    }).toStrictEqual({ line: true, counts: false, reembed: false });
+  });
+
+  it("re-embeds as the staff member", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+
+    const answered = await callServerFn(
+      brainActionFn,
+      { clientId: acme.clientId, action: { type: "reembed" } },
+      { email: "grace@grasp.test" }
+    );
+
+    expect({
+      answered,
+      asked: acme.core.brainAsks.map((asked) =>
+        "action" in asked ? [asked.staff.email, asked.action] : null
+      ),
+    }).toStrictEqual({
+      answered: { outcome: "done" },
+      asked: [["grace@grasp.test", { type: "reembed" }]],
     });
   });
 });

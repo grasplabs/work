@@ -61,6 +61,7 @@
     "./brain": "./src/brain.ts",
     "./thinking": "./src/thinking.ts",
     "./brain-records": "./src/brain-records.ts",
+    "./brain-report": "./src/brain-report.ts",
     "./capability": "./src/capability.ts",
     "./channel-accounts": "./src/channel-accounts.ts",
     "./channel-keys": "./src/channel-keys.ts",

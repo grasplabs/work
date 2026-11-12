@@ -1,0 +1,598 @@
+/**
+ * How a client's Brain is doing, for Grasp's staff (GRA-1733): its work
+ * queue, its store's size against its limit, its erasure ledger and the
+ * steps of its tick that failed, as its core reported it as the section
+ * opened (src/clients/brain.ts), with its embedding's progress; and the
+ * three things staff may do: put a parked item back in the queue, rebuild
+ * the word indexes, and re-embed. Every
+ * read and action is in the company's audit log, by the staff member.
+ *
+ * Operational state only: counts, ages, kinds of work, error codes,
+ * sizes, and erasures as counts alone. Amber marks what
+ * needs someone: parked items, a store near its limit, a ledger that
+ * isn't read through, a step that failed.
+ */
+import { storeNearLimit } from "@grasp-os/shared/brain-report";
+import type {
+  BrainAction,
+  BrainActionOutcome,
+  BrainReport,
+} from "@grasp-os/shared/brain-report";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { Await, useRouter } from "@tanstack/react-router";
+
+import { brainActionFn } from "../clients/brain-functions.ts";
+import { thenRefresh, useAction } from "../use-action.ts";
+import { agoWords } from "./ai-status-words.ts";
+import type { BrainRead } from "./brain-loads.ts";
+import { Figure } from "./parts.tsx";
+import { EmptySection, Section, SectionRow } from "./section.tsx";
+import { formatList, formatPercent, plural, whole } from "./words.ts";
+
+/** Why an action changed nothing, as staff read it. */
+const refusals: Readonly<
+  Record<Exclude<BrainActionOutcome, "done"> | "not_answered", string>
+> = {
+  nothing:
+    "Nothing to do: the item isn't parked any more, or a rebuild is under way already.",
+  unavailable:
+    "The Brain is reading its erasure ledger and takes nothing else yet: try again shortly.",
+  not_answered: "The company's Grasp didn't answer: try again.",
+};
+
+const replayWords: Record<BrainReport["ledger"]["replay"], string> = {
+  through: "Read through",
+  replaying: "Replaying after a restore",
+  unreadable: "Can't be read",
+};
+
+const stepWords: Record<keyof BrainReport["stepsFailed"], string> = {
+  ledger: "Writing erasures to the ledger",
+  erase: "Deleting what erasures hid",
+  sweep: "Sweeping files nothing holds",
+  repack: "Repacking vector codes",
+  reindex: "Rebuilding the word indexes",
+};
+
+const stepOrder = ["ledger", "erase", "sweep", "repack", "reindex"] as const;
+
+const reasonOrder = [
+  "deleted",
+  "retention",
+  "person_erased",
+  "withdrawn",
+] as const;
+
+const reasonWords: Record<(typeof reasonOrder)[number], string> = {
+  deleted: "deleted for good",
+  retention: "past their retention",
+  person_erased: "people erased",
+  withdrawn: "withdrawn",
+};
+
+const pauseWords: Record<string, string> = {
+  rate_limited: "the model is limiting its calls",
+  unavailable: "the model doesn't answer",
+  account: "the model's account refuses calls",
+};
+
+const oneDecimal = new Intl.NumberFormat("en", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+/** Bytes in GB or MB, as Cloudflare counts them (10^9, 10^6). */
+const sizeWords = (bytes: number): string =>
+  bytes >= 1e9
+    ? `${oneDecimal.format(bytes / 1e9)} GB`
+    : `${oneDecimal.format(bytes / 1e6)} MB`;
+
+/**
+ * Runs `action` on the Brain, then reads the section again. Held above
+ * the report, so what the action answered stays shown while the report
+ * is read again, and when the part that asked is gone from it (the last
+ * parked item, say).
+ */
+const useBrainAction = (clientId: string) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(refusals);
+  const act = (action: BrainAction) => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () => {
+            const { outcome } = await brainActionFn({
+              data: { clientId, action },
+            });
+            return { refused: outcome === "done" ? null : outcome };
+          },
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
+  return { busy, failure, act };
+};
+
+/** What staff may do to the Brain, as the report's parts are given it. */
+interface Acting {
+  busy: boolean;
+  act: (action: BrainAction) => void;
+}
+
+/** In how long `at` comes after `now`, in a few words: "in 5 min". */
+const inWords = (at: number, now: number): string => {
+  const minutes = Math.max(1, Math.ceil((at - now) / 60_000));
+  if (minutes < 60) {
+    return `in ${whole(minutes)} min`;
+  }
+  const hours = Math.round(minutes / 60);
+  return `in ${whole(hours)} ${plural(hours, "hour", "hours")}`;
+};
+
+/** The figures first: what waits, what is parked, the store and the ledger. */
+const Figures = ({ report }: { report: BrainReport }) => {
+  const now = Date.parse(report.now);
+  const { queue, store, ledger } = report;
+  const waiting = queue.waiting.reduce((sum, { count }) => sum + count, 0);
+  const oldest = Math.min(
+    ...queue.waiting.map(({ oldestAddedAt }) => Date.parse(oldestAddedAt))
+  );
+  const near = storeNearLimit(store);
+  return (
+    <section
+      aria-label="The Brain at work"
+      className="overflow-hidden rounded-xl border"
+    >
+      <div className="bg-border grid grid-cols-2 gap-px lg:grid-cols-4">
+        <Figure
+          label="Waiting"
+          sub={
+            waiting === 0
+              ? `${whole(queue.running)} running`
+              : `Oldest added ${agoWords(oldest, now)}, ${whole(queue.running)} running`
+          }
+          value={whole(waiting)}
+        />
+        <Figure
+          attention={queue.parkedCount > 0}
+          label="Parked"
+          sub={
+            queue.parkedCount > 0
+              ? "Failed too often: requeue below once the cause is fixed"
+              : undefined
+          }
+          value={whole(queue.parkedCount)}
+        />
+        <Figure
+          attention={near}
+          label="Store"
+          ring={{ value: store.bytes, of: store.limitBytes }}
+          sub={
+            near
+              ? `Near its limit of ${sizeWords(store.limitBytes)}: writes fail once it is full`
+              : `${formatPercent(store.bytes / store.limitBytes)} of ${sizeWords(store.limitBytes)}`
+          }
+          value={sizeWords(store.bytes)}
+        />
+        <Figure
+          attention={ledger.replay !== "through"}
+          label="Erasure ledger"
+          sub={
+            ledger.replay === "through"
+              ? undefined
+              : "The Brain answers nothing until it is read through"
+          }
+          value={replayWords[ledger.replay]}
+        />
+      </div>
+    </section>
+  );
+};
+
+/** What waits, kind by kind, and whether the queue waits for its model. */
+const Waiting = ({ report }: { report: BrainReport }) => {
+  const now = Date.parse(report.now);
+  const { queue } = report;
+  const pause = queue.paused;
+  return (
+    <Section
+      description="What the Brain still has to do, by kind of work. Items run in order of priority, a few at a time."
+      title="Queue"
+    >
+      {pause === null ? null : (
+        <SectionRow
+          description={`Since ${agoWords(Date.parse(pause.since), now)}: ${pauseWords[pause.reason] ?? pause.reason}. It tries again ${inWords(Date.parse(pause.until), now)}.`}
+          label="Waiting for the model"
+        >
+          <Badge variant="attention">Paused</Badge>
+        </SectionRow>
+      )}
+      {queue.overdue > 0 ? (
+        <SectionRow
+          description="Their handlers ran past their time and still hold a slot each."
+          label="Running past their time"
+        >
+          <Badge variant="attention">{whole(queue.overdue)}</Badge>
+        </SectionRow>
+      ) : null}
+      {queue.waiting.length === 0 ? (
+        <p className="text-muted-foreground border-t px-5 py-4">
+          Nothing waits.
+        </p>
+      ) : (
+        <div className="border-t">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead variant="card">Kind</TableHead>
+                <TableHead className="text-right" variant="card">
+                  Waiting
+                </TableHead>
+                <TableHead className="text-right" variant="card">
+                  Oldest added
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {queue.waiting.map(({ kind, count, oldestAddedAt }) => (
+                <TableRow key={kind}>
+                  <TableCell variant="card">
+                    <span className="font-mono text-xs">{kind}</span>
+                  </TableCell>
+                  <TableCell className="text-right" variant="card">
+                    <span className="tabular-nums">{whole(count)}</span>
+                  </TableCell>
+                  <TableCell className="text-right" variant="card">
+                    {agoWords(Date.parse(oldestAddedAt), now)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </Section>
+  );
+};
+
+/** The parked items, the latest first, each with its error and a requeue. */
+const Parked = ({
+  acting: { busy, act },
+  report,
+}: {
+  acting: Acting;
+  report: BrainReport;
+}) => {
+  const now = Date.parse(report.now);
+  const { parked, parkedCount } = report.queue;
+  if (parkedCount === 0) {
+    return null;
+  }
+  const shown =
+    parked.length < parkedCount
+      ? ` The latest ${whole(parked.length)} of ${whole(parkedCount)} show.`
+      : "";
+  return (
+    <Section
+      description={`Items that failed too often. Each comes back by itself a day later, up to three times; requeue one to run it now.${shown}`}
+      title="Parked"
+    >
+      <div className="border-t">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead variant="card">Kind</TableHead>
+              <TableHead variant="card">Last error</TableHead>
+              <TableHead className="text-right" variant="card">
+                Attempts
+              </TableHead>
+              <TableHead className="text-right" variant="card">
+                Parked
+              </TableHead>
+              <TableHead className="text-right" variant="card">
+                <span className="sr-only">Requeue</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {parked.map((item) => (
+              <TableRow key={item.item}>
+                <TableCell variant="card">
+                  <span className="font-mono text-xs">{item.kind}</span>
+                </TableCell>
+                <TableCell className="whitespace-normal" variant="card">
+                  <span className="flex flex-col gap-0.5">
+                    <span>{item.message}</span>
+                    <span className="text-muted-foreground font-mono text-xs">
+                      {item.error}
+                    </span>
+                  </span>
+                </TableCell>
+                <TableCell className="text-right" variant="card">
+                  <span className="tabular-nums">{whole(item.attempts)}</span>
+                </TableCell>
+                <TableCell className="text-right" variant="card">
+                  <span className="flex flex-col items-end gap-0.5">
+                    <span>{agoWords(Date.parse(item.parkedAt), now)}</span>
+                    {item.final ? (
+                      <Badge variant="attention">For good</Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">
+                        {`${whole(item.parks)} ${plural(item.parks, "time", "times")}`}
+                      </span>
+                    )}
+                  </span>
+                </TableCell>
+                <TableCell className="text-right" variant="card">
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      act({ type: "requeue", item: item.item });
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Requeue
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Section>
+  );
+};
+
+/** The embedding's progress over the current passages, and the re-embed. */
+const Embedding = ({
+  acting: { busy, act },
+  report,
+}: {
+  acting: Acting;
+  report: BrainReport;
+}) => {
+  const { embedding } = report;
+  if (embedding.model === null) {
+    return (
+      <EmptySection>
+        No embedding model runs yet, so the Brain recalls by words alone.
+      </EmptySection>
+    );
+  }
+  return (
+    <Section
+      action={
+        <Button
+          disabled={busy || embedding.rebuilding}
+          onClick={() => {
+            act({ type: "reembed" });
+          }}
+          size="sm"
+          variant="outline"
+        >
+          Re-embed
+        </Button>
+      }
+      description="How far the embedding model has come over the passages people can read now. A re-embed puts every passage without its vectors back on the queue, those passed over included."
+      title="Embedding"
+    >
+      <SectionRow label="Model">
+        <span className="font-mono text-xs">{embedding.model}</span>
+      </SectionRow>
+      <SectionRow label="Embedded">
+        <span className="tabular-nums">
+          {`${whole(embedding.embedded)} of ${whole(embedding.chunks)} ${plural(embedding.chunks, "passage", "passages")}`}
+        </span>
+      </SectionRow>
+      <SectionRow
+        description="Passages the model can't embed: found by words only, until a re-embed."
+        label="Passed over"
+      >
+        {embedding.passedOver > 0 ? (
+          <Badge variant="attention">{whole(embedding.passedOver)}</Badge>
+        ) : (
+          <span className="tabular-nums">0</span>
+        )}
+      </SectionRow>
+      <SectionRow label="Rebuild">
+        {embedding.rebuilding ? (
+          <Badge>Under way</Badge>
+        ) : (
+          <Badge variant="passed">Done</Badge>
+        )}
+      </SectionRow>
+    </Section>
+  );
+};
+
+/** The word indexes, and their rebuild. */
+const Words = ({
+  acting: { busy, act },
+  report,
+}: {
+  acting: Acting;
+  report: BrainReport;
+}) => {
+  const rebuilding = report.words === "rebuilding";
+  return (
+    <Section
+      action={
+        <Button
+          disabled={busy || rebuilding}
+          onClick={() => {
+            act({ type: "rebuild_words" });
+          }}
+          size="sm"
+          variant="outline"
+        >
+          Rebuild
+        </Button>
+      }
+      description="What recall finds words by. A rebuild rewrites every passage's words from its text, 200 a minute; recall goes on meanwhile."
+      title="Word indexes"
+    >
+      <SectionRow label="Indexed by the current rules">
+        {rebuilding ? (
+          <Badge>Rebuilding</Badge>
+        ) : (
+          <Badge variant="passed">Current</Badge>
+        )}
+      </SectionRow>
+    </Section>
+  );
+};
+
+/** The erasure ledger: its counts, by kind, by reason, and not yet written. */
+const Ledger = ({ report }: { report: BrainReport }) => {
+  const { ledger } = report;
+  const unwritten = ledger.source.unwritten + ledger.person.unwritten;
+  return (
+    <Section
+      description="Every erasure, counted: never which, or when. After a restore the Brain applies the ledger again before it answers."
+      title="Erasures"
+    >
+      <SectionRow
+        description="Erased sources and people, whole, with their ledger entry written."
+        label="In the ledger"
+      >
+        <span className="tabular-nums">
+          {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}, ${whole(ledger.person.written)} ${plural(ledger.person.written, "person", "people")}`}
+        </span>
+      </SectionRow>
+      <SectionRow
+        description="Erased and hidden, their ledger entry still to write: each tick tries again."
+        label="Not yet written"
+      >
+        {unwritten > 0 ? (
+          <Badge variant="attention">{whole(unwritten)}</Badge>
+        ) : (
+          <span className="tabular-nums">0</span>
+        )}
+      </SectionRow>
+      <SectionRow
+        description="Hidden already; the tick deletes what they held a batch at a time."
+        label="Still being deleted"
+      >
+        <span className="tabular-nums">{whole(ledger.erasing)}</span>
+      </SectionRow>
+      <SectionRow
+        description="Sources with versions kept but none current, so nobody can read them: what a replay can leave."
+        label="Sources without a current version"
+      >
+        <span className="tabular-nums">
+          {whole(ledger.sourcesWithoutCurrent)}
+        </span>
+      </SectionRow>
+      <SectionRow
+        description="Every erasure in the ledger, by why it was made."
+        label="By reason"
+      >
+        <span className="tabular-nums">
+          {formatList(
+            reasonOrder.map(
+              (reason) =>
+                `${whole(ledger.byReason[reason])} ${reasonWords[reason]}`
+            )
+          )}
+        </span>
+      </SectionRow>
+    </Section>
+  );
+};
+
+/** The tick's own steps, and when each last failed since the store started. */
+const Steps = ({ report }: { report: BrainReport }) => {
+  const now = Date.parse(report.now);
+  return (
+    <Section
+      description="The Brain's own upkeep before its queue, each tick. A failure shows until a later tick gets through."
+      title="Upkeep"
+    >
+      {stepOrder.map((step) => {
+        const failed = report.stepsFailed[step];
+        return (
+          <SectionRow key={step} label={stepWords[step]}>
+            {failed === null ? (
+              <Badge variant="passed">Fine</Badge>
+            ) : (
+              <Badge variant="attention">
+                {`${failed.reason === "timed_out" ? "Timed out" : "Failed"} ${agoWords(Date.parse(failed.at), now)}`}
+              </Badge>
+            )}
+          </SectionRow>
+        );
+      })}
+    </Section>
+  );
+};
+
+/** While the section waits for its core, or hasn't asked it (a preload). */
+const Reading = () => (
+  <EmptySection>Reading how its Brain is doing from its core…</EmptySection>
+);
+
+/** The Brain at work, or why it isn't shown. */
+const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
+  // A preload asks nothing: that is no answer yet, not a core that didn't.
+  if (read.state === "not_asked") {
+    return <Reading />;
+  }
+  const { report } = read;
+  if (report === null) {
+    return (
+      <EmptySection>
+        The company’s Grasp didn’t answer how its Brain is doing. Open the
+        section again to ask once more.
+      </EmptySection>
+    );
+  }
+  return (
+    <>
+      <Figures report={report} />
+      <Parked acting={acting} report={report} />
+      <Waiting report={report} />
+      <Words acting={acting} report={report} />
+      <Embedding acting={acting} report={report} />
+      <Ledger report={report} />
+      <Steps report={report} />
+    </>
+  );
+};
+
+/**
+ * The Brain at work, once its core answered: the rest of the page shows
+ * meanwhile, never held up by a slow or unreachable core.
+ */
+export const BrainHealth = ({
+  clientId,
+  read,
+}: {
+  clientId: string;
+  read: Promise<BrainRead>;
+}) => {
+  const { busy, failure, act } = useBrainAction(clientId);
+  return (
+    <>
+      {failure === null ? null : (
+        <p className="text-destructive text-sm" role="alert">
+          {failure}
+        </p>
+      )}
+      <Await fallback={<Reading />} promise={read}>
+        {(answered) => <Report acting={{ busy, act }} read={answered} />}
+      </Await>
+    </>
+  );
+};

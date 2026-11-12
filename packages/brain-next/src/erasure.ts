@@ -1,5 +1,5 @@
 import { erasureReasons } from "./contract.ts";
-import type { ErasureReason } from "./contract.ts";
+import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
@@ -693,6 +693,41 @@ export const sourcesWithoutCurrent = (sql: SqlStorage): number =>
         AND row NOT IN (SELECT version_row FROM erasing_versions)`
     )
     .one().count;
+
+/**
+ * The erasures the store applied, as its record of the ledger keeps them:
+ * counts only, by kind, written to the ledger or not yet, and by reason;
+ * never which, when, or the SHA-256 the ledger names one by. One pass
+ * over the record, a row an erasure.
+ */
+export const erasuresOverview = (sql: SqlStorage): ErasuresOverview => {
+  const overview: ErasuresOverview = {
+    source: { written: 0, unwritten: 0 },
+    person: { written: 0, unwritten: 0 },
+    byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
+  };
+  const counts = sql.exec<{
+    kind: string;
+    reason: string;
+    confirmed: number;
+    count: number;
+  }>(
+    `SELECT kind, reason, confirmed, count(*) AS count FROM erasures
+    GROUP BY kind, reason, confirmed`
+  );
+  for (const { kind, reason, confirmed, count } of counts) {
+    const of = kind === "person" ? overview.person : overview.source;
+    if (confirmed === 1) {
+      of.written += count;
+    } else {
+      of.unwritten += count;
+    }
+    if (isReason(reason)) {
+      overview.byReason[reason] += count;
+    }
+  }
+  return overview;
+};
 
 /** What an erasure says when its ledger entry couldn't be written. */
 const notRecorded = "The Brain could not record the erasure: erase it again";
