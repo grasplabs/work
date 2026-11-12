@@ -18,6 +18,7 @@ import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { workBrain } from "./brain-next.ts";
+import { producersOf, relayHandOvers } from "./brain-sources.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
@@ -78,8 +79,18 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: reconcileConsolidation,
   },
   // The new Brain's work queue: what is due, a few at a time
-  // (src/brain-next.ts, @grasp-os/brain-next's work.ts).
-  { name: "brain.work", period: "minute", run: workBrain },
+  // (src/brain-next.ts, @grasp-os/brain-next's work.ts), its hand-overs
+  // read from core's producers (src/brain-sources.ts).
+  {
+    name: "brain.work",
+    period: "minute",
+    run: async (env, at) => {
+      await workBrain(env, at, producersOf(env));
+    },
+  },
+  // What core noted to hand over to the new Brain, put on its work queue
+  // (src/brain-hand-overs.ts, src/brain-sources.ts).
+  { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
   {

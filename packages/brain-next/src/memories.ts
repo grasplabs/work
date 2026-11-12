@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { memoryTypes, recallLimit, speakerSchema } from "./contract.ts";
+import {
+  factSidesShown,
+  memoryTypes,
+  recallLimit,
+  speakerSchema,
+} from "./contract.ts";
 import type {
   ContestedCursor,
   ContestedFact,
@@ -123,7 +128,7 @@ const extractedSql = (alias: string): string => `
  * never before it was learned itself (an older version's memory that came
  * late is history from the start). Null while believed.
  */
-const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
+export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
   SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
   UNION ALL${newerSql("m", "?4", true)}
   UNION ALL${extractedSql("m")}
@@ -411,8 +416,10 @@ export interface MemoriesAsked {
  */
 export const readMemories = (
   sql: SqlStorage,
-  { entity, reader, attribute, at, history, after, limit }: MemoriesAsked
+  { entity, reader, attribute, at: asked, history, after, limit }: MemoriesAsked
 ): MemoriesRead => {
+  // Every page of one read is read at the moment of its first.
+  const at = after?.at.getTime() ?? asked;
   const found = entityRowOf(sql, entity);
   if (found === undefined) {
     return { memories: [], more: false };
@@ -442,6 +449,7 @@ export const readMemories = (
     memories,
     more: true,
     next: {
+      at: new Date(at),
       attribute: last.attribute,
       confirmed: last.confirmed !== null,
       learnedAt: last.learnedAt,
@@ -454,9 +462,10 @@ export const readMemories = (
  * `?1` the entity's row or null, `?6` the most facts, `?7` 1 to go on
  * after the fact whose place is `?8` (when its first memory the reader
  * may read was learned), `?9` (its entity's id) and `?10` (its
- * attribute): the current, contested memories of one-value attributes, of
- * the facts in that order, so where a fact stands, and whether it is
- * listed, depends on nothing hidden.
+ * attribute), `?11` the most sides of a fact to give: the current,
+ * contested memories of one-value attributes, of the facts in that order,
+ * so where a fact stands, and whether it is listed, depends on nothing
+ * hidden; each fact's first `?11` sides in `readMemories`' order.
  */
 // Its cost: without an entity, every current one-value memory the reader
 // may read is judged (with its ending and its rivals) before the facts
@@ -483,10 +492,17 @@ page AS (
   ORDER BY first, about, attribute
   LIMIT ?6
 )
-SELECT rows.* FROM rows
-JOIN page ON page.entity_row = rows.entity_row AND page.attribute = rows.attribute
-ORDER BY page.first, page.about, page.attribute, rows.confirmation IS NULL,
-  rows.learned_at DESC, rows.id DESC`,
+SELECT * FROM (
+  SELECT rows.*, page.first AS fact_first,
+    row_number() OVER (
+      PARTITION BY rows.entity_row, rows.attribute
+      ORDER BY rows.confirmation IS NULL, rows.learned_at DESC, rows.id DESC
+    ) AS side
+  FROM rows
+  JOIN page ON page.entity_row = rows.entity_row AND page.attribute = rows.attribute
+)
+WHERE side <= ?11
+ORDER BY fact_first, about, attribute, side`,
 });
 
 /**
@@ -499,7 +515,7 @@ export const listContested = (
   {
     entity,
     reader,
-    at,
+    at: asked,
     after,
     limit,
   }: {
@@ -510,11 +526,13 @@ export const listContested = (
     limit: number;
   }
 ): ContestedPage => {
+  // Every page of one listing is read at the moment of its first.
+  const at = after?.at.getTime() ?? asked;
   let entityRow: number | null = null;
   if (entity !== undefined) {
     const found = entityRowOf(sql, entity);
     if (found === undefined) {
-      return { facts: [], more: false };
+      return { facts: [], at: new Date(at), more: false };
     }
     entityRow = found.row;
   }
@@ -530,31 +548,44 @@ export const listContested = (
     after === undefined ? 0 : 1,
     after?.learnedAt.getTime() ?? 0,
     after?.entity ?? "",
-    after?.attribute ?? ""
+    after?.attribute ?? "",
+    factSidesShown + 1
   )) {
     const key = JSON.stringify([row.entity_row, row.attribute]);
     const fact = facts.get(key) ?? {
       about: row.about,
       attribute: row.attribute ?? "",
       memories: [],
-      first: row.learned_at,
+      more: false,
+      first: Number(row.fact_first),
     };
-    fact.first = Math.min(fact.first, row.learned_at);
-    fact.memories.push(memoryOf(row));
+    if (fact.memories.length < factSidesShown) {
+      fact.memories.push(memoryOf(row));
+    } else {
+      fact.more = true;
+    }
     facts.set(key, fact);
   }
   const all = [...facts.values()];
   const page = all
     .slice(0, limit)
-    .map(({ about, attribute, memories }) => ({ about, attribute, memories }));
+    .map(({ about, attribute, memories, more }) => ({
+      about,
+      attribute,
+      memories,
+      more,
+    }));
+  const moment = new Date(at);
   const last = all.at(limit - 1);
   if (all.length <= limit || last === undefined) {
-    return { facts: page, more: false };
+    return { facts: page, at: moment, more: false };
   }
   return {
     facts: page,
+    at: moment,
     more: true,
     next: {
+      at: moment,
       learnedAt: new Date(last.first),
       entity: last.about,
       attribute: last.attribute,
@@ -716,7 +747,7 @@ matched AS MATERIALIZED (
   columns: ", matched.words AS words, matched.exact AS exact",
   filter: "judged.is_current = 1",
   order: `matched.words DESC, matched.exact DESC, confirmation IS NULL,
-  m.learned_at DESC, m.row DESC`,
+  m.learned_at DESC, m.id DESC`,
 });
 
 /**

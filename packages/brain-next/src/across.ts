@@ -183,12 +183,15 @@ type MemoryOf = FoundMemory & { store: number };
 const memoryKeyOf = ({ store, id }: MemoryOf): string =>
   `memory ${store} ${id}`;
 
-/** After a way's own order: confirmed first, then newer, then by store and id, as one store orders them. */
+/**
+ * After a way's own order: confirmed first, then newer, then by id, as
+ * each store orders them (the contract's tie order), then by store.
+ */
 const byMemory = (a: MemoryOf, b: MemoryOf): number =>
   Number(a.confirmed === null) - Number(b.confirmed === null) ||
   b.learnedAt.getTime() - a.learnedAt.getTime() ||
-  a.store - b.store ||
-  byBytes(b.id, a.id);
+  byBytes(b.id, a.id) ||
+  a.store - b.store;
 
 /**
  * The memory ways' lists, merged over the stores as one store's

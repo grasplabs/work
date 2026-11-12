@@ -2,6 +2,7 @@ import { recallLimit } from "./contract.ts";
 import type { Finding, FoundMemory, Reader } from "./contract.ts";
 import { foldIdentifier, foldName } from "./entities.ts";
 import {
+  endedAtSql,
   memoriesByWords,
   memoriesSql,
   memoryOf,
@@ -110,8 +111,40 @@ WHERE m.learned_at <= ?4 AND ${visibleSql("m")}
   )`;
 
 /**
- * `?1` entities (JSON rows) to step from: the relations on them the
- * reader may read that are current as of `?4`, with both their ends.
+ * Whether the relation `m` is one the reader may read, current as of
+ * `?4`: learned and started by then, not ended for the reader (memories.ts
+ * `endedAtSql`), not yet expired.
+ */
+const currentRelationSql = `m.learned_at <= ?4 AND ${visibleSql("m")}
+  AND (m.valid_from IS NULL OR m.valid_from <= ?4)
+  AND (m.valid_until IS NULL OR m.valid_until > ?4)
+  AND ${endedAtSql} IS NULL`;
+
+/**
+ * `?1` entities (JSON rows), `?5` where to stop counting: for each, how
+ * many current relations the reader may read it is on (either side),
+ * counted up to `?5` and no further, so a hub's relations are never all
+ * read.
+ */
+const hubCountSql = `
+WITH ${readableSql}
+SELECT asked.value AS entity, (
+  SELECT count(*) FROM (
+    SELECT 1 FROM memories AS m
+    WHERE m.entity = asked.value AND m.object IS NOT NULL
+      AND ${currentRelationSql}
+    UNION ALL
+    SELECT 1 FROM memories AS m
+    WHERE m.object = asked.value AND ${currentRelationSql}
+    LIMIT ?5
+  )
+) AS relations
+FROM json_each(?1) AS asked`;
+
+/**
+ * `?1` entities (JSON rows) to step from, none a hub: the relations on
+ * them the reader may read that are current as of `?4`, with both their
+ * ends.
  */
 const stepSql = memoriesSql({
   base: `SELECT m.row FROM json_each(?1) AS asked
@@ -209,34 +242,32 @@ const byEntities = (
   const reached = new Map<number, { step: number; hub: boolean }>();
   let frontier = named.map(({ entity }) => entity);
   for (let step = 0; frontier.length > 0; step += 1) {
-    // The current relations the reader may read on each entity of this
-    // step: how many make it a hub, and, for the others, where they lead.
-    const relations = run<
-      MemoryRow & { entity_end: number; object_end: number }
-    >(sql, stepSql, JSON.stringify(frontier), reader, at, -1);
-    const counts = new Map<number, number>();
-    for (const { entity_end: from, object_end: to } of relations) {
-      for (const end of new Set([from, to])) {
-        counts.set(end, (counts.get(end) ?? 0) + 1);
-      }
-    }
+    const hubs = new Set(
+      run<{ entity: number; relations: number }>(
+        sql,
+        hubCountSql,
+        JSON.stringify(frontier),
+        reader,
+        at,
+        hubRelationsMax + 1
+      )
+        .filter(({ relations }) => relations > hubRelationsMax)
+        .map(({ entity }) => entity)
+    );
     for (const entity of frontier) {
-      reached.set(entity, {
-        step,
-        hub: (counts.get(entity) ?? 0) > hubRelationsMax,
-      });
+      reached.set(entity, { step, hub: hubs.has(entity) });
     }
-    if (step === stepsMax) {
+    const through = frontier.filter((entity) => !hubs.has(entity));
+    if (step === stepsMax || through.length === 0) {
       break;
     }
     const next = new Set<number>();
-    for (const { entity_end: from, object_end: to } of relations) {
-      for (const [here, there] of [
-        [from, to],
-        [to, from],
-      ] as const) {
-        if (reached.get(here)?.hub === false && !reached.has(there)) {
-          next.add(there);
+    for (const { entity_end: from, object_end: to } of run<
+      MemoryRow & { entity_end: number; object_end: number }
+    >(sql, stepSql, JSON.stringify(through), reader, at, -1)) {
+      for (const end of [from, to]) {
+        if (!reached.has(end)) {
+          next.add(end);
         }
       }
     }

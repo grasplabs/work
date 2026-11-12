@@ -165,29 +165,62 @@ export const eraseMemoriesOf = (
 };
 
 /**
- * Deletes the memories and extraction marks whose set of readers or
- * version is no longer stored: what a release before memories left when
- * it deleted them (an admin's rollback). No one reads them meanwhile
- * (memories.ts `visibleSql`); run as the store starts, in one
- * transaction. A set they named is gone already: none to drop.
+ * Deletes the memories and extraction marks of the source the ledger
+ * names `subject`, every version: what a source's erasure covered. Answers
+ * the sets of readers they named.
  */
-export const forgetStranded = (sql: SqlStorage): void => {
-  sql.exec(
-    `DELETE FROM memory_extractions
-    WHERE readers NOT IN (SELECT key FROM reader_sets)
-      OR NOT EXISTS (SELECT 1 FROM source_versions
-        WHERE source_versions.source = memory_extractions.source
-          AND source_versions.version = memory_extractions.version)`
-  );
-  deleteMemories(
-    sql,
-    rowsOf(
-      sql,
-      `SELECT row FROM memories
-      WHERE readers NOT IN (SELECT key FROM reader_sets)
-        OR (source IS NOT NULL AND NOT EXISTS (SELECT 1 FROM source_versions
-          WHERE source_versions.source = memories.source
-            AND source_versions.version = memories.version))`
+export const eraseMemoriesOfSource = (
+  sql: SqlStorage,
+  subject: string
+): number[] => {
+  const marks = sql
+    .exec<{ readers: string }>(
+      "DELETE FROM memory_extractions WHERE subject = ? RETURNING readers",
+      subject
     )
-  );
+    .toArray()
+    .map(({ readers }) => readers);
+  return [
+    ...setsOf(sql, marks),
+    ...deleteMemories(
+      sql,
+      rowsOf(sql, "SELECT row FROM memories WHERE subject = ?", subject)
+    ),
+  ];
+};
+
+/**
+ * Deletes the memories and extraction marks resting on the versions the
+ * person's erasure `erasure` hid (`erased_versions`): what it covered of
+ * sources others read too. Answers the sets of readers they named.
+ */
+export const eraseMemoriesHiddenBy = (
+  sql: SqlStorage,
+  erasure: string
+): number[] => {
+  const marks = sql
+    .exec<{ readers: string }>(
+      `DELETE FROM memory_extractions
+      WHERE (subject, version) IN (
+        SELECT subject, version FROM erased_versions WHERE erasure = ?
+      )
+      RETURNING readers`,
+      erasure
+    )
+    .toArray()
+    .map(({ readers }) => readers);
+  return [
+    ...setsOf(sql, marks),
+    ...deleteMemories(
+      sql,
+      rowsOf(
+        sql,
+        `SELECT memories.row AS row FROM erased_versions
+        JOIN memories ON memories.subject = erased_versions.subject
+          AND memories.version = erased_versions.version
+        WHERE erased_versions.erasure = ?`,
+        erasure
+      )
+    ),
+  ];
 };

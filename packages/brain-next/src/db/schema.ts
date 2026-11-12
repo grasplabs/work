@@ -626,9 +626,17 @@ export const memories = sqliteTable(
     // row id, which a release before memories may delete (an admin's
     // rollback) and SQLite then give to another version or group. A
     // memory whose version or set is gone is read by no one and deleted
-    // as the store starts (forget.ts `forgetStranded`).
+    // when the store starts if an erasure covered it (erasure.ts
+    // `replayMemoryErasures`); a set an older release dropped is made
+    // again from its key.
     source: text(),
     version: integer(),
+    /**
+     * The SHA-256 of `source`, as the erasure ledger names it: how a
+     * replay of the store's erasures at start finds what they covered
+     * (erasure.ts `replayMemoryErasures`).
+     */
+    subject: text(),
     writer: text(),
     lineage: text().notNull(),
     lineageOrder: integer("lineage_order").notNull(),
@@ -649,6 +657,7 @@ export const memories = sqliteTable(
     ),
     index("memories_object_idx").on(table.object),
     index("memories_version_idx").on(table.source, table.version),
+    index("memories_subject_idx").on(table.subject, table.version),
     index("memories_readers_idx").on(table.readers),
     index("memories_only_for_idx").on(table.onlyFor),
   ]
@@ -729,6 +738,8 @@ export const memoryExtractions = sqliteTable(
   {
     source: text().notNull(),
     version: integer().notNull(),
+    /** The SHA-256 of `source`, as `memories.subject`. */
+    subject: text().notNull(),
     lineage: text().notNull(),
     at: integer().notNull(),
     /** The add's readers, by their set's key: only they, of the version's, see it end what came before. */
@@ -740,6 +751,7 @@ export const memoryExtractions = sqliteTable(
     primaryKey({ columns: [table.source, table.version, table.readers] }),
     index("memory_extractions_lineage_idx").on(table.lineage, table.version),
     index("memory_extractions_readers_idx").on(table.readers),
+    index("memory_extractions_subject_idx").on(table.subject, table.version),
     index("memory_extractions_only_for_idx").on(table.onlyFor),
   ]
 );
@@ -754,3 +766,19 @@ export const memoryChanges = sqliteTable("memory_changes", {
   hash: text().notNull(),
   answer: text().notNull(),
 });
+
+/**
+ * How far the start-up replay of erasures on memories has come (erasure.ts
+ * `replayMemoryErasures`): the highest `erasures` rowid it applied. One
+ * row. A table older releases do not know, so an erasure one records
+ * after a rollback is above it, and replayed after the roll forward; a
+ * restore brings the mark back with its copy.
+ */
+export const memoryErasureReplay = sqliteTable(
+  "memory_erasure_replay",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+  },
+  () => [check("memory_erasure_replay_one", sql.raw("id = 1"))]
+);

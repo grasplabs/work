@@ -4,8 +4,13 @@ import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
-import { eraseMemoriesOf, eraseMemoriesOn } from "./forget.ts";
-import { readerSetKeyOf } from "./reader-sets.ts";
+import {
+  eraseMemoriesHiddenBy,
+  eraseMemoriesOf,
+  eraseMemoriesOfSource,
+  eraseMemoriesOn,
+} from "./forget.ts";
+import { readerSetKeyOf, rebuildMissingSets } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -1209,4 +1214,66 @@ export const deleteStoreObjects = async (
     }
   }
   return true;
+};
+
+/**
+ * Replays on memories what the erasures the store recorded since it last
+ * did covered, as the store starts, in one transaction: a person's (the
+ * memories only they read, learned up to it, and those on the versions it
+ * hid) and a source's (every memory drawn from it). So an erasure an older
+ * release recorded, which knew no memories (an admin's rollback), reaches
+ * them after the roll forward; one this release applied finds nothing
+ * more. Only those above the mark (`memory_erasure_replay`) are read, and
+ * the mark moves past them, so a start with none recorded since reads one
+ * row. When it replayed one, the sets of readers an older release dropped
+ * in that erasure's batches, which memories still name, are made again
+ * from their keys: nothing but an erasure deletes a memory. Answers how
+ * many it replayed.
+ */
+export const replayMemoryErasures = (sql: SqlStorage): number => {
+  const through =
+    sql
+      .exec<{ through: number }>(
+        "SELECT through FROM memory_erasure_replay WHERE id = 1"
+      )
+      .toArray()
+      .at(0)?.through ?? 0;
+  const recorded = sql
+    .exec<{
+      rowid: number;
+      key: string;
+      kind: string;
+      subject: string;
+      erased_at: number;
+    }>(
+      `SELECT rowid, key, kind, subject, erased_at FROM erasures
+      WHERE rowid > ? ORDER BY rowid`,
+      through
+    )
+    .toArray();
+  const last = recorded.at(-1);
+  if (last === undefined) {
+    return 0;
+  }
+  const sets: number[] = [];
+  for (const { key, kind, subject, erased_at: at } of recorded) {
+    if (kind === "person") {
+      sets.push(
+        ...eraseMemoriesOf(sql, subject, at),
+        ...eraseMemoriesHiddenBy(sql, key)
+      );
+    } else {
+      sets.push(...eraseMemoriesOfSource(sql, subject));
+    }
+  }
+  for (const readerSet of new Set(sets)) {
+    dropUnusedReaderSet(sql, readerSet);
+  }
+  rebuildMissingSets(sql);
+  sql.exec(
+    `INSERT INTO memory_erasure_replay (id, through) VALUES (1, ?1)
+    ON CONFLICT (id) DO UPDATE SET through = ?1`,
+    last.rowid
+  );
+  return recorded.length;
 };

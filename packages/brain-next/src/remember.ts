@@ -215,6 +215,8 @@ interface Into {
   ids: readonly string[];
   /** The add's readers, by their set's key (`reader_sets.key`). */
   readers: string;
+  /** Each source the add names, by its SHA-256 as the erasure ledger names it. */
+  subjects: ReadonlyMap<string, string>;
   learnedAt: number;
   onlyFor: string | null;
   memo: WordMemo;
@@ -238,14 +240,27 @@ const valueKeyOf = (
   return plan.object === undefined ? null : (ids[plan.object] ?? null);
 };
 
+/** The SHA-256 of `source`, which the add hashed before its transaction. */
+const subjectOfSource = (
+  subjects: ReadonlyMap<string, string>,
+  source: string
+): string => {
+  const subject = subjects.get(source);
+  if (subject === undefined) {
+    throw new Error("The Brain did not hash a source it adds");
+  }
+  return subject;
+};
+
 /** Where a memory's basis puts it: its version, writer, lineage and place in that lineage. */
 const basisOf = (
-  sql: SqlStorage,
+  { sql, subjects }: Into,
   basis: NewMemory["basis"],
   index: number
 ): {
   source: string | null;
   version: number | null;
+  subject: string | null;
   writer: string | null;
   lineage: string;
   order: number;
@@ -254,6 +269,7 @@ const basisOf = (
     return {
       source: null,
       version: null,
+      subject: null,
       writer: basis.writer,
       lineage: lineageOfWriter(basis.writer),
       order: 0,
@@ -268,6 +284,7 @@ const basisOf = (
   return {
     source: basis.source,
     version: basis.version,
+    subject: subjectOfSource(subjects, basis.source),
     writer: null,
     lineage: lineageOfSource(basis.source),
     order: basis.version,
@@ -303,15 +320,15 @@ const writeMemory = (
   if (plan === undefined || aboutRow === undefined) {
     throw refused(`memory ${index} names an entity the add doesn't give`);
   }
-  const based = basisOf(sql, memory.basis, index);
+  const based = basisOf(into, memory.basis, index);
   const id = crypto.randomUUID();
   const { row } = sql
     .exec<{ row: number }>(
       `INSERT INTO memories (id, entity, attribute, object, value, value_key,
-        one_value, type, statement, quote, source, version, writer, lineage,
-        lineage_order, speaker, valid_from, valid_until, learned_at,
+        one_value, type, statement, quote, source, version, subject, writer,
+        lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
         readers, only_for)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING row`,
       id,
       aboutRow,
@@ -325,6 +342,7 @@ const writeMemory = (
       memory.basis.quote ?? null,
       based.source,
       based.version,
+      based.subject,
       based.writer,
       based.lineage,
       based.order,
@@ -350,7 +368,7 @@ const writeMemory = (
 const markExtracted = (
   sql: SqlStorage,
   { source, version }: { source: string; version: number },
-  { learnedAt, readers, onlyFor }: Into
+  { learnedAt, readers, onlyFor, subjects }: Into
 ): void => {
   holdVersion(
     sql,
@@ -360,10 +378,11 @@ const markExtracted = (
   );
   sql.exec(
     `INSERT OR IGNORE INTO memory_extractions
-      (source, version, lineage, at, readers, only_for)
-    VALUES (?, ?, ?, ?, ?, ?)`,
+      (source, version, subject, lineage, at, readers, only_for)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`,
     source,
     version,
+    subjectOfSource(subjects, source),
     lineageOfSource(source),
     learnedAt,
     readers,
@@ -373,12 +392,15 @@ const markExtracted = (
 
 /**
  * Adds `adding` (above), or answers what its change added before. Its
+ * memories are learned at `learnedAt()`, asked inside the transaction
+ * (store.ts: past every moment a read was issued). Its
  * memories are readable by its `access` (and, resting on a version, by
  * that version's readers too: memories.ts).
  */
 export const addMemories = async (
   { storage, db }: RememberStore,
-  adding: Adding
+  adding: Adding,
+  learnedAt: () => number
 ): Promise<AddedMemories> => {
   const planned = planOf(adding);
   const { sql } = storage;
@@ -392,6 +414,19 @@ export const addMemories = async (
         adding.memories,
         adding.extracted ?? null,
       ])
+    )
+  );
+  const sources = new Set([
+    ...adding.memories.flatMap(({ basis }) =>
+      basis.kind === "source" ? [basis.source] : []
+    ),
+    ...(adding.extracted === undefined ? [] : [adding.extracted.source]),
+  ]);
+  const subjects = new Map(
+    await Promise.all(
+      [...sources].map(
+        async (source) => [source, await subjectOf(source)] as const
+      )
     )
   );
   const onlyFor =
@@ -433,7 +468,8 @@ export const addMemories = async (
       rows,
       ids,
       readers,
-      learnedAt: Date.now(),
+      subjects,
+      learnedAt: learnedAt(),
       onlyFor,
       memo: new Map(),
     };

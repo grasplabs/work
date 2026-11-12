@@ -6,10 +6,12 @@ import { readableSql } from "./reader-sets.ts";
 // Linking entities (contract.ts "Cards and proposals").
 //
 // An add links an entity on exact evidence: its known id or an exact
-// identifier (remember.ts), or an exact name (`linkedByName`) only where
-// one entity of its kind alone holds that name through memories read by
-// exactly the add's readers (entities.ts `coveredSql`), so no link is
-// decided on what other readers hold.
+// identifier (remember.ts), or an exact name of two words or more
+// (`linkedByName`) only where one entity of its kind alone holds that
+// name through memories read by exactly the add's readers (entities.ts
+// `coveredSql`), so no link is decided on what other readers hold. A
+// name of one word ("Jan") is no exact evidence: two people share one
+// easily, and nothing splits an entity again; it is a proposal.
 //
 // Short of that, a likely match is a proposal, never a link: worked out
 // when a reader asks (`listProposals`), from the names they may read
@@ -23,7 +25,8 @@ import { readableSql } from "./reader-sets.ts";
 
 /**
  * The entity of `kind` an add's entity links to by an exact name, given
- * no identifier: the one entity of that kind holding one of `names`
+ * no identifier: the one entity of that kind holding one of `names` of
+ * two words or more (a one-word name links nothing: above)
  * through a memory read by exactly the add's set of readers (`readers`,
  * its key), or none when none or several do.
  */
@@ -33,7 +36,10 @@ export const linkedByName = (
   names: readonly string[],
   readers: string
 ): number | undefined => {
-  if (names.length === 0) {
+  const exact = names
+    .map((name) => foldName(name))
+    .filter((folded) => folded.includes(" "));
+  if (exact.length === 0) {
     return undefined;
   }
   // Two rows are enough to tell one entity from several.
@@ -48,7 +54,7 @@ export const linkedByName = (
       WHERE entities.kind = ?1 AND ${coveredSql("m")}
       LIMIT 2`,
       kind,
-      JSON.stringify(names.map((name) => foldName(name))),
+      JSON.stringify(exact),
       readers
     )
     .toArray();
@@ -62,7 +68,9 @@ export const linkedByName = (
  * entity they may read (one name's words all among the other's, whole),
  * by id, each with the pair of names that matched first by the names
  * themselves. A folded name is words with single spaces between them
- * (entities.ts `foldName`), so its words are its spaces' pieces.
+ * (entities.ts `foldName`), so its words are its spaces' pieces, each
+ * counted once on either side: "X X" and "X" match both ways. Only the
+ * names that share a word with the asked entity's are cut into words.
  */
 const proposalsSql = `
 WITH ${readableSql},
@@ -106,6 +114,17 @@ shared AS (
     ON instr(' ' || others.folded || ' ', ' ' || own_words.word || ' ') > 0
   GROUP BY others.row, others.folded, own_words.name
 ),
+other_split(name, word, rest) AS (
+  SELECT DISTINCT folded, '', folded || ' ' FROM shared
+  UNION ALL
+  SELECT name, substr(rest, 1, instr(rest, ' ') - 1),
+    substr(rest, instr(rest, ' ') + 1)
+  FROM other_split WHERE rest != ''
+),
+other_sizes AS (
+  SELECT name, count(DISTINCT word) AS words FROM other_split
+  WHERE word != '' GROUP BY name
+),
 matched AS (
   SELECT shared.row AS row, shared.id AS id, shared.kind AS kind,
     shared.value AS other_name, own.value AS name,
@@ -114,10 +133,9 @@ matched AS (
     ) AS place
   FROM shared
   JOIN own_sizes ON own_sizes.name = shared.name
+  JOIN other_sizes ON other_sizes.name = shared.folded
   JOIN own ON own.folded = shared.name
-  WHERE shared.words = own_sizes.words
-    OR shared.words = length(shared.folded)
-      - length(replace(shared.folded, ' ', '')) + 1
+  WHERE shared.words = own_sizes.words OR shared.words = other_sizes.words
 )
 SELECT row, id, kind, name, other_name FROM matched
 WHERE place = 1 AND (?4 IS NULL OR id > ?4)

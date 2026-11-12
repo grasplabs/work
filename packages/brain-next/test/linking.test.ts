@@ -1,5 +1,5 @@
-// Entities as readers see them (cards.ts, linking.ts, joins.ts), through
-// the store's own methods. The threat model is on GRA-1740 (both parts);
+// Entities as readers see them (cards.ts, linking.ts), through the
+// store's own methods. The threat model is on GRA-1740;
 // each test says what it holds. Every test has its own people, groups and
 // words, so what earlier tests left in the shared store is hidden from it.
 //
@@ -69,10 +69,14 @@ describe("an entity's card", () => {
       entity,
       reader: readerOf(unique("eve"), unique("other")),
     });
+    const bothNames = await shared().readEntityNames({
+      entity,
+      reader: readerOf(unique("bob"), sales, finance),
+    });
 
     expect({
       sales: {
-        names: salesCard?.entity.names,
+        name: salesCard?.entity.name,
         attributes: salesCard?.attributes.map(
           ({ attribute, contested, memories }) => ({
             attribute,
@@ -81,12 +85,13 @@ describe("an entity's card", () => {
           })
         ),
         relations: salesCard?.relations.map(({ other, side }) => ({
-          names: other.names,
+          name: other.name,
           side,
         })),
       },
       both: {
-        names: bothCard?.entity.names,
+        name: bothCard?.entity.name,
+        names: bothNames.names.map(({ value }) => value),
         contested: bothCard?.attributes[0]?.contested,
         values: bothCard?.attributes[0]?.memories
           .map(({ value }) => value)
@@ -94,13 +99,14 @@ describe("an entity's card", () => {
       },
     }).toStrictEqual({
       sales: {
-        names: [name],
+        name,
         attributes: [
           { attribute: "status", contested: false, values: ["Active"] },
         ],
-        relations: [{ names: [`${name} Contact`], side: "about" }],
+        relations: [{ name: `${name} Contact`, side: "about" }],
       },
       both: {
+        name,
         names: [name, `${name} B.V.`],
         contested: true,
         values: ["Active", "On hold"],
@@ -162,7 +168,7 @@ describe("linking entities", () => {
   // Threat 2: an exact name links within the add's own set of readers only.
   it("links an entity by its exact name within the same readers, and proposes it across others", async () => {
     const [group, other] = [unique("team"), unique("other")];
-    const name = word();
+    const name = `${word()} ${word()}`;
     const first = await remember(
       audience(group),
       [{ key: "c", kind: "supplier", names: [name] }],
@@ -215,6 +221,63 @@ describe("linking entities", () => {
         },
       ],
       more: false,
+    });
+  });
+
+  // A name of one word is no exact evidence: a proposal, never a link.
+  it("never links two entities by a name of one word, and proposes them", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const name = word();
+    const first = await remember(
+      audience(group),
+      [{ key: "p", kind: "person", names: [name] }],
+      [fact("p", `${name} joined in March`)]
+    );
+    const second = await remember(
+      audience(group),
+      [{ key: "p", kind: "person", names: [name] }],
+      [fact("p", `${name} works in sales`)]
+    );
+    const proposals = await shared().listProposals({
+      entity: second.entities.p ?? "",
+      reader,
+    });
+
+    expect({
+      apart: first.entities.p !== second.entities.p,
+      candidates: proposals.proposals.map(({ candidate }) => candidate.id),
+    }).toStrictEqual({ apart: true, candidates: [first.entities.p] });
+  });
+
+  // A repeated word counts once, on either side: "X X" and "X" match.
+  it("matches a name with a repeated word both ways", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const name = word();
+    const { entities } = await remember(
+      audience(group),
+      [
+        { key: "a", kind: "customer", names: [`${name} ${name}`] },
+        { key: "b", kind: "customer", names: [name] },
+      ],
+      [fact("a", `${name} twice`), fact("b", `${name} once`)]
+    );
+    const fromRepeated = await shared().listProposals({
+      entity: entities.a ?? "",
+      reader,
+    });
+    const fromSingle = await shared().listProposals({
+      entity: entities.b ?? "",
+      reader,
+    });
+
+    expect({
+      fromRepeated: fromRepeated.proposals.map(({ candidate }) => candidate.id),
+      fromSingle: fromSingle.proposals.map(({ candidate }) => candidate.id),
+    }).toStrictEqual({
+      fromRepeated: [entities.b],
+      fromSingle: [entities.a],
     });
   });
 

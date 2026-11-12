@@ -256,7 +256,7 @@ describe("recall through memories", () => {
   it("carries both sides of a contested fact the reader may read", async () => {
     const group = unique("team");
     const reader = readerOf(unique("ann"), group);
-    const name = word();
+    const name = `${word()} ${word()}`;
     await remember(
       audience(group),
       [{ key: "c", kind: "customer", names: [name] }],

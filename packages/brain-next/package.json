@@ -8,6 +8,7 @@
   "exports": {
     "./across": "./src/across.ts",
     "./contract": "./src/contract.ts",
+    "./skills": "./src/skills.ts",
     "./store": "./src/store.ts",
     "./work": "./src/work.ts"
   },
@@ -17,6 +18,7 @@
   "dependencies": {
     "@grasp-os/shared": "workspace:*",
     "drizzle-orm": "catalog:",
+    "yaml": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

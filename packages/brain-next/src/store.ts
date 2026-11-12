@@ -15,12 +15,15 @@ import {
   confirmRequestSchema,
   contestedRequestSchema,
   entitiesRequestSchema,
+  entityNamesRequestSchema,
   entityRequestSchema,
   memoriesRequestSchema,
   newMemoriesSchema,
   retireRequestSchema,
   currentRequestSchema,
   embedModelSchema,
+  handOverRequestSchema,
+  handOverResultSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -44,6 +47,8 @@ import type {
   ContestedRequest,
   EntitiesRequest,
   Entity,
+  EntityNamesPage,
+  EntityNamesRequest,
   EntityPage,
   EntityRequest,
   MemoriesRead,
@@ -56,6 +61,9 @@ import type {
   Embedders,
   ErasureReason,
   Finding,
+  HandOverRequest,
+  HandOvers,
+  WorkRequest,
   NewInstructions,
   Reader,
   Access,
@@ -85,7 +93,7 @@ import {
   embeddingStep,
   reembed,
 } from "./embedding.ts";
-import { findEntities, readEntity } from "./entities.ts";
+import { findEntities, readEntity, readEntityNames } from "./entities.ts";
 import {
   confirmPending,
   deleteStoreObjects,
@@ -97,6 +105,7 @@ import {
   isStoreErased,
   storeErasedAt,
   keepMissingSubjects,
+  replayMemoryErasures,
   ledgerPrefix,
   readLedgerStart,
   recordStoreErased,
@@ -112,7 +121,7 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
-import { forgetStranded } from "./forget.ts";
+import { enqueueHandOvers } from "./handover.ts";
 import { listProposals } from "./linking.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
@@ -214,6 +223,9 @@ const workIdSchema = z.int().positive();
 /** What a person's own store answers a reader who is not that person. */
 const notTheirs =
   "The Brain refused it: this store answers only the person whose it is";
+
+/** What a person's own store answers a call only the shared store takes. */
+const sharedOnly = "The Brain refused it: only the shared store takes this";
 
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
@@ -455,10 +467,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       releaseInterrupted(this.ctx.storage);
       markWordsCurrentIfEmpty(this.ctx.storage.sql);
       await keepMissingSubjects(this.ctx.storage);
-      // What a rollback's older release left of memories, whose set of
-      // readers or version it deleted: read by no one, and gone now.
+      // What erasures covered of memories, replayed: one an older release
+      // recorded (an admin's rollback) reaches them now; and the sets of
+      // readers it dropped are made again from their keys.
       this.ctx.storage.transactionSync(() => {
-        forgetStranded(this.ctx.storage.sql);
+        replayMemoryErasures(this.ctx.storage.sql);
       });
       this.#opened = true;
       this.#schema = true;
@@ -499,6 +512,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   #refuseNoOnes(): never {
     this.ctx.abort(noOnes);
     throw new Error(noOnes);
+  }
+
+  /**
+   * The latest moment this instance gave a read to page from (`#readMoment`):
+   * every write after it is stamped past it (`#writeMoment`), so no later
+   * page of that read sees what was written after its first.
+   */
+  #issuedAt = 0;
+
+  /** The moment a first page is read at: `asOf`, or now, kept as issued. */
+  #readMoment(asOf?: Date): number {
+    if (asOf !== undefined) {
+      return asOf.getTime();
+    }
+    const now = Date.now();
+    this.#issuedAt = Math.max(this.#issuedAt, now);
+    return now;
+  }
+
+  /** The moment a write is stamped at: now, past every moment issued to a read. */
+  #writeMoment(): number {
+    return Math.max(Date.now(), this.#issuedAt + 1);
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */
@@ -893,18 +928,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
    * a step of embedding (embedding.ts), then the queue, asking `ask` for
-   * its model calls and `embedders` for vectors (work.ts). Each step is
+   * its model calls, `embedders` for vectors and `handOvers` for what is
+   * handed over (work.ts, handover.ts). Each step is
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async work({ ask, at, embedders, handOvers }: WorkRequest): Promise<void> {
     await this.#changing(async () => {
-      await this.#workNow(ask, at, embedders);
+      await this.#workNow(ask, at, embedders, handOvers);
     });
   }
 
   /** `work`, as one of the calls that may write to the bucket. */
-  async #workNow(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async #workNow(
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    handOvers?: HandOvers
+  ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
@@ -912,17 +953,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // Nothing was ever kept: nothing to do.
       return;
     }
-    await this.#tick(ask, tickAt, {
-      model,
-      embed: async (request) => await embedders.embed(request),
-    });
+    await this.#tick(
+      ask,
+      tickAt,
+      {
+        model,
+        embed: async (request) => await embedders.embed(request),
+      },
+      handOvers
+    );
   }
 
-  /** The tick of `work` at `tickAt`, with the host's checked `embedders`. */
+  /**
+   * The tick of `work` at `tickAt`, with the host's checked `embedders`,
+   * and its `handOvers` on the shared store only: hand-overs are queued
+   * there alone (`handOver`).
+   */
   async #tick(
     ask: AskModel,
     tickAt: Date,
-    embedders: Embedders
+    embedders: Embedders,
+    handOvers: HandOvers | undefined
   ): Promise<void> {
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
@@ -937,7 +988,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await workTick(
       this.ctx.storage,
       this.#work,
-      { ask, embedders, bucket: this.#bucket },
+      {
+        ask,
+        embedders,
+        bucket: this.#bucket,
+        ...(handOvers === undefined || this.#kind.kind !== "shared"
+          ? {}
+          : {
+              handOvers: {
+                handOver: async (source) =>
+                  checked(
+                    handOverResultSchema,
+                    await handOvers.handOver(source)
+                  ),
+              },
+            }),
+      },
       tickAt
     );
   }
@@ -975,7 +1041,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       if (this.alarmHost !== null) {
         const host = await this.alarmHost();
-        await this.work(host.ask, new Date(), host.embedders);
+        // No side of hand-overs: a person's own store never queues one
+        // (`handOver` refuses), so none is ever due here.
+        await this.#changing(async () => {
+          await this.#workNow(host.ask, new Date(), host.embedders);
+        });
       }
     } catch {
       // Nothing of the error is kept. A tick that couldn't run (its ledger
@@ -1060,6 +1130,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (set === null || set > at) {
       await this.ctx.storage.setAlarm(at);
     }
+  }
+  /**
+   * Puts sources on the queue to be handed over (handover.ts), each in
+   * place of one of its hand-overs still waiting or parked. The shared
+   * store's alone: the host's clock ticks it with its side of hand-overs
+   * (`work`), and a person's own store, which it never ticks, refuses.
+   */
+  async handOver(request: HandOverRequest): Promise<void> {
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    const checkedRequest = checked(handOverRequestSchema, request);
+    await this.#changing(async () => {
+      await this.#ready();
+      enqueueHandOvers(this.ctx.storage, checkedRequest);
+    });
   }
 
   /**
@@ -1357,7 +1443,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#readyToWrite();
       return await addMemories(
         { storage: this.ctx.storage, db: this.#db },
-        adding
+        adding,
+        () => this.#writeMoment()
       );
     });
   }
@@ -1398,7 +1485,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       entity: asked.entity,
       reader: asked.reader,
       ...(attribute === undefined ? {} : { attribute }),
-      at: (asked.asOf ?? new Date()).getTime(),
+      at: asked.after?.at.getTime() ?? this.#readMoment(asked.asOf),
       history: asked.history ?? false,
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
@@ -1410,12 +1497,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const asked = checked(contestedRequestSchema, request);
     this.#mayRead(asked.reader);
     if (!(await this.#readable())) {
-      return { facts: [], more: false };
+      return { facts: [], at: asked.after?.at ?? new Date(), more: false };
     }
     return listContested(this.ctx.storage.sql, {
       ...(asked.entity === undefined ? {} : { entity: asked.entity }),
       reader: asked.reader,
-      at: Date.now(),
+      at: asked.after?.at.getTime() ?? this.#readMoment(),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
@@ -1432,7 +1519,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return retireMemory(this.ctx.storage.sql, {
         id: memory,
         reader,
-        at: Date.now(),
+        at: this.#writeMoment(),
       });
     });
   }
@@ -1449,7 +1536,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         confirmMemory(this.ctx.storage.sql, {
           id: memory,
           reader,
-          at: Date.now(),
+          at: this.#writeMoment(),
         })
       );
     });
@@ -1464,11 +1551,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,
+      at: asked.after?.at.getTime() ?? this.#readMoment(),
       ...(asked.kind === undefined ? {} : { kind: asked.kind }),
       ...(asked.identifier === undefined
         ? {}
         : { identifier: asked.identifier }),
       ...(asked.name === undefined ? {} : { name: asked.name }),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
+  }
+
+  /** A page of the names and identifiers of an entity the reader may see (entities.ts). */
+  async readEntityNames(request: EntityNamesRequest): Promise<EntityNamesPage> {
+    const asked = checked(entityNamesRequestSchema, request);
+    this.#mayRead(asked.reader);
+    if (!(await this.#readable())) {
+      return { names: [], more: false };
+    }
+    return readEntityNames(this.ctx.storage.sql, {
+      entity: asked.entity,
+      reader: asked.reader,
+      at: asked.after?.at.getTime() ?? this.#readMoment(),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
