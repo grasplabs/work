@@ -38,18 +38,12 @@ const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
     "DELETE FROM memories WHERE row IN (SELECT value FROM json_each(?))",
     listed
   );
-  // An entity others were merged into stays while it stands for them;
-  // one merged into another leaves its merge with it.
   const orphans = `SELECT touched.value FROM json_each(?1) AS touched
     WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
-      AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
-      AND NOT EXISTS (
-        SELECT 1 FROM entity_merges WHERE entity_merges.into_entity = touched.value
-      )`;
+      AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)`;
   const affected = JSON.stringify(
     touched.flatMap(({ entity }) => entity ?? [])
   );
-  sql.exec(`DELETE FROM entity_merges WHERE merged IN (${orphans})`, affected);
   sql.exec(`DELETE FROM entities WHERE row IN (${orphans})`, affected);
   return [...new Set(touched.map(({ reader_set: readerSet }) => readerSet))];
 };
@@ -78,22 +72,36 @@ export const eraseMemoriesOn = (
 
 /**
  * Deletes the memories only the person the ledger names `subject` may
- * read, learned up to `at`, the erasure's time: what is learned for them
- * afterwards is new, and kept. Answers their sets of readers.
+ * read, learned up to `at`, the erasure's time, and the extraction marks
+ * of adds only they read: what is learned for them afterwards is new, and
+ * kept. Answers their sets of readers.
  */
 export const eraseMemoriesOf = (
   sql: SqlStorage,
   subject: string,
   at: number
-): number[] =>
-  deleteMemories(
-    sql,
-    sql
-      .exec<{ row: number }>(
-        "SELECT row FROM memories WHERE only_for = ? AND learned_at <= ?",
-        subject,
-        at
-      )
-      .toArray()
-      .map(({ row }) => row)
-  );
+): number[] => {
+  const markers = sql
+    .exec<{ reader_set: number }>(
+      `DELETE FROM memory_extractions WHERE only_for = ? AND at <= ?
+      RETURNING reader_set`,
+      subject,
+      at
+    )
+    .toArray()
+    .map(({ reader_set: readerSet }) => readerSet);
+  return [
+    ...markers,
+    ...deleteMemories(
+      sql,
+      sql
+        .exec<{ row: number }>(
+          "SELECT row FROM memories WHERE only_for = ? AND learned_at <= ?",
+          subject,
+          at
+        )
+        .toArray()
+        .map(({ row }) => row)
+    ),
+  ];
+};

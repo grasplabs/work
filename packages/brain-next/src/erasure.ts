@@ -518,7 +518,8 @@ const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
         OR EXISTS (SELECT 1 FROM vector_models
           JOIN vector_blocks ON vector_blocks.model = vector_models.id
             AND vector_blocks.reader_set = ?1)
-        OR EXISTS (SELECT 1 FROM memories WHERE reader_set = ?1) AS used`,
+        OR EXISTS (SELECT 1 FROM memories WHERE reader_set = ?1)
+        OR EXISTS (SELECT 1 FROM memory_extractions WHERE reader_set = ?1) AS used`,
       readerSet
     )
     .toArray();

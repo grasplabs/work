@@ -1199,9 +1199,10 @@ export const attributeRuleOf = (
 
 /**
  * What a memory says, as a kind: a fact, a decision, a preference or an
- * instruction. A preference or an instruction is only ever an internal
- * person's word (`Speaker`): text in a document or a mail never becomes
- * one, which the store refuses.
+ * instruction. A preference or an instruction, by its type or by a
+ * person's attribute of the name, is only ever an internal person's own
+ * word, written by them (`isPersonsOwnWordOnly`): text in a document or a
+ * mail never becomes one, which the store refuses.
  */
 export const memoryTypes = [
   "fact",
@@ -1321,6 +1322,23 @@ export const memoryBasisSchema = z.discriminatedUnion("kind", [
 export type MemoryBasis = z.infer<typeof memoryBasisSchema>;
 
 /**
+ * Whether a memory of `type`, filed under `attribute`, may only be an
+ * internal person's own word: an instruction or a preference, by its type
+ * or by its attribute (a person's `instruction` and `preference`). Such a
+ * memory is taken only as written by that person themselves (a writer's
+ * basis, the same person as its speaker): never drawn from a source, so
+ * text in a document or a mail never becomes one, whoever it quotes.
+ */
+const isPersonsOwnWordOnly = (
+  type: MemoryType,
+  attribute: string | undefined
+): boolean =>
+  type === "instruction" ||
+  type === "preference" ||
+  attribute === "instruction" ||
+  attribute === "preference";
+
+/**
  * A memory to add: what it is about (an entity's key in the add), filed
  * under an attribute of that entity's kind, or none; for a relation, the
  * entity it relates to (`object`, required for a relation attribute,
@@ -1350,11 +1368,14 @@ export const newMemorySchema = z
     { message: "Ends before it starts", path: ["validUntil"] }
   )
   .refine(
-    ({ type, speaker }) =>
-      (type !== "preference" && type !== "instruction") ||
-      speaker.kind === "internal",
+    ({ type, attribute, speaker, basis }) =>
+      !isPersonsOwnWordOnly(type, attribute) ||
+      (basis.kind === "writer" &&
+        speaker.kind === "internal" &&
+        speaker.person === basis.writer),
     {
-      message: "A preference or instruction is only an internal person's word",
+      message:
+        "An instruction or preference is only an internal person's own word, written by them",
       path: ["type"],
     }
   );
@@ -1369,8 +1390,9 @@ export type NewMemory = z.infer<typeof newMemorySchema>;
  *
  * `extracted` says a version of a source is fully extracted: every memory
  * drawn from an earlier version of that source ends then, as a newer
- * memory of its lineage ends it, for readers who may read that version
- * (it must be one this store holds). With it, `memories` may be empty.
+ * memory of its lineage ends it, for readers of the add (`access`) and of
+ * that version (it must be one this store holds). With it, `memories` may
+ * be empty.
  *
  * `reader` is who the add is made for, as the host resolved them: given,
  * an entity's `id` is taken only if they may see it; without it, only if

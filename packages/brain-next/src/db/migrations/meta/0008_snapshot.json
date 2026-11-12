@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b87c0a90-a8f4-4392-9269-1d21d2d99e89",
+  "id": "8ae06332-edb7-47c9-be0a-0fcea74052d8",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -218,65 +218,6 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "entity_merges": {
-      "name": "entity_merges",
-      "columns": {
-        "merged": {
-          "name": "merged",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "into_entity": {
-          "name": "into_entity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "entity_merges_into_idx": {
-          "name": "entity_merges_into_idx",
-          "columns": [
-            "into_entity"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "entity_merges_merged_entities_row_fk": {
-          "name": "entity_merges_merged_entities_row_fk",
-          "tableFrom": "entity_merges",
-          "tableTo": "entities",
-          "columnsFrom": [
-            "merged"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "entity_merges_into_entity_entities_row_fk": {
-          "name": "entity_merges_into_entity_entities_row_fk",
-          "tableFrom": "entity_merges",
-          "tableTo": "entities",
-          "columnsFrom": [
-            "into_entity"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -1045,7 +986,7 @@
         "version_row": {
           "name": "version_row",
           "type": "integer",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -1069,6 +1010,20 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "reader_set": {
+          "name": "reader_set",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "only_for": {
+          "name": "only_for",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1079,10 +1034,25 @@
             "version"
           ],
           "isUnique": false
+        },
+        "memory_extractions_only_for_idx": {
+          "name": "memory_extractions_only_for_idx",
+          "columns": [
+            "only_for"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "memory_extractions_version_row_reader_set_pk": {
+          "columns": [
+            "version_row",
+            "reader_set"
+          ],
+          "name": "memory_extractions_version_row_reader_set_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
