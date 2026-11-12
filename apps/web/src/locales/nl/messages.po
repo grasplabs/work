@@ -4897,11 +4897,6 @@ msgstr "Heb je iets dat uitlegt hoe jullie werken?"
 msgid "Document"
 msgstr "Document"
 
-#: src/brain/sources-page.tsx
-msgctxt "a source of the Brain"
-msgid "Document"
-msgstr "Document"
-
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Document not found"
 msgstr "Document niet gevonden"
@@ -15738,8 +15733,8 @@ msgid "What the brain kept of it"
 msgstr "Wat het brein ervan bewaarde"
 
 #: src/settings/erasures.tsx
-msgid "What the Brain took in of their documents and runs"
-msgstr "Wat het Brain heeft opgenomen uit hun documenten en runs"
+msgid "What the Brain took in of their uploads and runs"
+msgstr "Wat het Brain heeft opgenomen uit hun uploads en runs"
 
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."

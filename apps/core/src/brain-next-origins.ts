@@ -1,32 +1,27 @@
 import { eraseSource } from "./brain-next.ts";
 import type { SourceRef } from "./brain-next.ts";
 
-// What core hands the Brain comes from an origin core keeps (a Knowledge
-// document, a workflow run), and each origin's sources are named here
-// alone, one function per kind: producers add under these keys
-// (GRA-1727), and whatever deletes an origin erases them, so both always
-// name the same sources. Every id is the server's own (a Knowledge
-// document's, a run's), never anything a person typed. Chats have no key
-// here: none is handed over, and a chat goes only into its person's own
-// store (GRA-1762, GRA-1805).
+// What core hands the Brain comes from an origin core keeps (an upload, a
+// workflow run), and each origin's sources are named here alone, one
+// function per kind: producers add under these keys (GRA-1727, GRA-1824),
+// and whatever erases an origin erases them, so both always name the same
+// sources. Every id is the server's own (an upload's, a run's), never
+// anything a person typed. Chats have no key here: none is handed over,
+// and a chat goes only into its person's own store (GRA-1762, GRA-1805).
 //
 // Erasing what an origin had in the Brain comes before core lets go of
 // what names its keys, and a failure leaves the origin as it was, so the
 // erasure stays owed by the origin's own state until a retry returns
-// (the Brain's rule: only a call that returned is in its ledger): a
-// purge's step fails and stays owed, a run's retention marks nothing. Erasing a key that was never added closes it all the same, so
-// a hand-over still under way for a deleted origin is refused rather than
+// (the Brain's rule: only a call that returned is in its ledger): a run's
+// retention marks nothing, a person's erasure keeps its area pending.
+// Erasing a key that was never added closes it all the same, so a
+// hand-over still under way for an erased origin is refused rather than
 // landing after.
 
-/**
- * The source of a Knowledge document, uploaded or written: the one key
- * for it in the Brain. A purge that names the document, or deletes its
- * collection, closes it for good (knowledge/rpc.ts `coreErasure`): what
- * the purge leaves of it is never handed over again.
- */
-export const documentSource = (documentId: string): SourceRef => ({
-  producer: "document",
-  id: documentId,
+/** The source of an upload handed to the Brain: the upload's own id. */
+export const uploadSource = (uploadId: string): SourceRef => ({
+  producer: "upload",
+  id: uploadId,
 });
 
 /** The source of what a workflow run did: the run's own. */
