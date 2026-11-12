@@ -1214,11 +1214,14 @@ export const rememberAs = async (
     rememberedSchema,
     remembered
   );
-  const { person } = await readerOf(env, personId);
+  const reader = await readerOf(env, personId);
+  const { person } = reader;
   const { writer, speaker } = writerOf(person, word);
   const added = await personsOwn(env, person).addMemories({
     change,
     access: { kind: "owner", person },
+    // An entity's id is taken only as they may see it.
+    reader,
     entities: [{ key: "about", ...about }],
     memories: [
       {
@@ -1250,7 +1253,7 @@ const forgottenSchema = z.strictObject({
  * Retires one of the memories `word` saved for the member `personId`
  * (`rememberAs`): it stops being current, and stays as history. `nothing`
  * alike when there is no such memory, when another writer's it is, and
- * when it was no longer current. Refused once they are no longer a member.
+ * when it was no longer current as they see it. Refused once they are no longer a member.
  */
 export const forgetAs = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -1258,10 +1261,11 @@ export const forgetAs = async (
   forgotten: { memory: string; word: MemoryWord }
 ): Promise<MemoryChangeOutcome> => {
   const { memory, word } = checked(forgottenSchema, forgotten);
-  const { person } = await readerOf(env, personId);
-  return await personsOwn(env, person).retireMemory({
+  const reader = await readerOf(env, personId);
+  return await personsOwn(env, reader.person).retireMemory({
     memory,
-    writer: writerOf(person, word).writer,
+    writer: writerOf(reader.person, word).writer,
+    reader,
   });
 };
 
@@ -1339,6 +1343,7 @@ export const correctAs = async (
   const added = await own.addMemories({
     change: fix.change,
     access: { kind: "owner", person: reader.person },
+    reader,
     entities: [{ key: "about", id: about.id, kind: about.kind }],
     memories: [
       {
