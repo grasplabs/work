@@ -979,7 +979,7 @@ export const SourcesPage = ({
           </h2>
           <div className="grid min-h-0 gap-6 lg:grid-cols-2">
             <SourceList
-              key={listing}
+              key={`list-${listing}`}
               onPick={(source) => {
                 open(source);
               }}
@@ -987,7 +987,7 @@ export const SourcesPage = ({
             />
             {opened === undefined ? null : (
               <SourcePanel
-                key={opened.opening}
+                key={`panel-${opened.opening}`}
                 onChanged={() => {
                   setListing(listing + 1);
                   open(opened.source);

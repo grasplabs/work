@@ -488,6 +488,9 @@ describe("uploading a file straight into the Brain", () => {
         actions: [
           "brain.upload.received",
           "brain.upload.added",
+          "brain.upload.deleting",
+          "brain.upload.delete_failed",
+          "brain.upload.deleting",
           "brain.upload.deleted",
         ],
       });
@@ -533,6 +536,7 @@ describe("uploading a file straight into the Brain", () => {
           "brain.upload.added",
           "brain.upload.received",
           "brain.upload.refused",
+          "brain.upload.deleting",
           "brain.upload.deleted",
         ],
       });
@@ -564,6 +568,7 @@ describe("uploading a file straight into the Brain", () => {
         actions: [
           "brain.upload.received",
           "brain.upload.added",
+          "brain.upload.deleting",
           "brain.upload.deleted",
         ],
         received: {

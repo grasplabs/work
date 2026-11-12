@@ -20,7 +20,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { SourcesPage } from "./sources-page.tsx";
 
@@ -291,6 +291,7 @@ const section = (heading: string): string =>
 
 describe(SourcesPage, () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     act(() => {
       root?.unmount();
     });
@@ -484,6 +485,8 @@ describe(SourcesPage, () => {
   });
 
   it("uploads a file for the team chosen, then offers its uploader a new version and deleting it", async () => {
+    // React says what it can't render right (two children of one key) here.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const { calls } = await shown([]);
     const [, picker] = document.querySelectorAll("input");
     const readers = document.querySelector("select");
@@ -517,6 +520,7 @@ describe(SourcesPage, () => {
 
     expect({
       options,
+      errors: errors.mock.calls.map(([message]) => String(message)),
       opened: [
         "Team Finance can read this upload.",
         "Upload new version",
@@ -526,6 +530,7 @@ describe(SourcesPage, () => {
       calls: calls.filter((call) => !call.startsWith("read")),
     }).toStrictEqual({
       options: ["Only me", "Team Finance", "Everyone"],
+      errors: [],
       opened: [true, true, true],
       closed: "",
       calls: [

@@ -424,10 +424,11 @@ export const brainUploadOf = async (
 };
 
 /**
- * Deletes the upload `uploadId` for good, as `person`: its key erased in
- * the Brain, every version, then its row forgotten, with
- * `brain.upload.deleted`. A failure leaves the upload as it was, to
- * delete again: the erasure is safe to repeat.
+ * Deletes the upload `uploadId` for good, as `person`: recorded
+ * (`brain.upload.deleting`), its key erased in the Brain, every version,
+ * then its row forgotten, with `brain.upload.deleted`. An erasure that
+ * failed is recorded (`brain.upload.delete_failed`) and leaves the upload
+ * as it was, to delete again: the erasure is safe to repeat.
  */
 export const deleteBrainUpload = async (
   env: Env,
@@ -439,17 +440,40 @@ export const deleteBrainUpload = async (
   if (!mayDelete(member, row)) {
     throw brainUploadErrors.create("brain.upload_not_allowed");
   }
-  await eraseSource(env, {
-    source: uploadSource(row.id),
-    reason: "deleted",
-  });
   const db = drizzle(env.DB);
+  const actor = actorOf(person);
+  const target = { type: "brain_upload", id: row.id };
+  // Recorded before the erasure, and its outcome after, whichever it is.
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor,
+      target,
+      action: "brain.upload.deleting",
+      detail: {},
+    }),
+  ]);
+  try {
+    await eraseSource(env, {
+      source: uploadSource(row.id),
+      reason: "deleted",
+    });
+  } catch (error) {
+    await auditedBatch(env, db, [
+      outboxed(db, {
+        actor,
+        target,
+        action: "brain.upload.delete_failed",
+        detail: {},
+      }),
+    ]);
+    throw error;
+  }
   await auditedBatch(env, db, [
     db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
     outboxed(db, {
-      actor: actorOf(person),
+      actor,
+      target,
       action: "brain.upload.deleted",
-      target: { type: "brain_upload", id: row.id },
       detail: { readers: row.readers },
     }),
   ]);
