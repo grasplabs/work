@@ -2729,10 +2729,6 @@ msgstr "As the App's code sets it"
 msgid "As the company has it"
 msgstr "As the company has it"
 
-#: src/agents/agent-page.tsx
-msgid "As the company's first agent"
-msgstr "As the company's first agent"
-
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
@@ -5348,6 +5344,11 @@ msgstr "everyone who uses the App"
 msgid "Everyone who uses the App"
 msgstr "Everyone who uses the App"
 
+#: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
+msgid "Everyone with Grasp"
+msgstr "Everyone with Grasp"
+
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Everyone with the {name} role"
@@ -5777,6 +5778,10 @@ msgstr "For an address your company gave to someone else. Anyone signing in with
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "For an admin"
+
+#: src/agents/agent-page.tsx
+msgid "For each app, under Access"
+msgstr "For each app, under Access"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "For each item"
@@ -6651,6 +6656,10 @@ msgstr "Import or export"
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
+
+#: src/agents/agent-page.tsx
+msgid "In Grasp's chat. Chat apps are under Access."
+msgstr "In Grasp's chat. Chat apps are under Access."
 
 #: src/dashboard/pile-cards.tsx
 msgid "In one chat only, for {requester}"
@@ -9596,10 +9605,6 @@ msgstr "Open question"
 msgid "Open questions"
 msgstr "Open questions"
 
-#: src/agents/agent-page.tsx
-msgid "Open Settings › Stephen"
-msgstr "Open Settings › Stephen"
-
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
 msgstr "Open since {date}. Until it is answered, this stays unknown, never zero."
@@ -11977,14 +11982,13 @@ msgctxt "a kind of field"
 msgid "Set in code"
 msgstr "Set in code"
 
-#: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
-msgid "Set in Settings › Stephen"
-msgstr "Set in Settings › Stephen"
-
 #: src/routes/_shell.settings.profile.tsx
 msgid "Set in your organization’s directory."
 msgstr "Set in your organization’s directory."
+
+#: src/agents/agent-page.tsx
+msgid "Set per app"
+msgstr "Set per app"
 
 #: src/apps/app-settings.tsx
 msgid "Set the link"
@@ -15799,10 +15803,6 @@ msgstr "Who may use {name}"
 msgid "Who may use it"
 msgstr "Who may use it"
 
-#: src/agents/agent-page.tsx
-msgid "Who may use it, and what it may do"
-msgstr "Who may use it, and what it may do"
-
 #: src/apps/app-settings.tsx
 msgid "Who opens the App besides you, and as what."
 msgstr "Who opens the App besides you, and as what."
@@ -15834,10 +15834,6 @@ msgstr "Who’s who at your company?"
 #: src/chat/builds.tsx
 msgid "whoever added the row"
 msgstr "whoever added the row"
-
-#: src/agents/agent-page.tsx
-msgid "Whom the company's first agent reaches, where, and what it may do in each app is set in one place."
-msgstr "Whom the company's first agent reaches, where, and what it may do in each app is set in one place."
 
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx

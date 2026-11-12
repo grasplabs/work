@@ -22,7 +22,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AgentPage } from "./agent-page.tsx";
-import type { AgentTab } from "./agent-page.tsx";
+import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { AgentsOverview } from "./agents-overview.tsx";
 import type { ManagedAgents } from "./agents-overview.tsx";
 
@@ -111,6 +111,22 @@ const managed: ManagedAgents = {
     },
   },
   teams,
+};
+
+/** The first agent's access, as core keeps it for a company that changed nothing. */
+const firstAccess: FirstAgentAccess = {
+  reach: {
+    on: true,
+    audience: { who: "everyone" },
+    changedBy: null,
+    changedAt: null,
+    places: [],
+    apps: [],
+    teams,
+  },
+  classes: [],
+  week: null,
+  workflows: null,
 };
 
 const chatAgent = ({ id, name, face, job }: Agent): ChatAgent => ({
@@ -216,6 +232,7 @@ const page = (agent: Agent, tab: AgentTab, usable = true) => (
     agent={agent}
     editable
     first={agent.id === stephen.id}
+    firstAccess={agent.id === stephen.id ? firstAccess : undefined}
     models={["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6"]}
     onTab={() => {}}
     people={[]}
@@ -241,6 +258,7 @@ describe("the company's agents, on pages of their own", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
         <AgentsOverview
+          makes={false}
           managed={undefined}
           usable={[chatAgent(stephen), chatAgent(claire)]}
         />
@@ -268,6 +286,7 @@ describe("the company's agents, on pages of their own", () => {
     it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {
       await mounted(
         <AgentsOverview
+          makes
           managed={managed}
           // The admin isn't in Claire's teams; Milan is paused.
           usable={[chatAgent(stephen)]}
@@ -311,7 +330,7 @@ describe("the company's agents, on pages of their own", () => {
 
     it("narrows an admin's list to the paused ones", async () => {
       await mounted(
-        <AgentsOverview managed={managed} usable={[chatAgent(stephen)]} />
+        <AgentsOverview makes managed={managed} usable={[chatAgent(stephen)]} />
       );
       await press(buttonNamed("Paused"));
       expect(cards().map(({ name }) => name)).toStrictEqual(["Milan"]);
@@ -342,14 +361,14 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ paused: true, notTheirs: true });
     });
 
-    it("leads to Settings › Stephen for the first agent's access, with nothing to set here", async () => {
+    it("has the first agent's access on its own page: where people reach it, with no way out to Settings", async () => {
       await mounted(page(stephen, "access"));
+      const panel = document.querySelector("[role='tabpanel']:not([hidden])");
       expect({
+        places: panel?.textContent?.includes("Where people reach him"),
+        grasp: panel?.textContent?.includes("Grasp's chat"),
         link: document.querySelector("a[href='/settings/stephen']") !== null,
-        selects: document.querySelectorAll(
-          "[role='tabpanel']:not([hidden]) button"
-        ).length,
-      }).toStrictEqual({ link: true, selects: 0 });
+      }).toStrictEqual({ places: true, grasp: true, link: false });
     });
 
     it("saves new instructions with the agent's name and job as they were", async () => {

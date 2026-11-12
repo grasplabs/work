@@ -144,7 +144,7 @@ const ManagedFacts = ({
     <div className="text-muted-foreground flex flex-col gap-1.5 text-xs">
       <Fact icon={<UsersRoundIcon />}>
         {first || settings === undefined ? (
-          <Trans>Set in Settings › Stephen</Trans>
+          <Trans>Everyone with Grasp</Trans>
         ) : (
           audienceLine(settings.audience)
         )}
@@ -273,9 +273,12 @@ const shownOf = (
 export const AgentsOverview = ({
   usable,
   managed,
+  makes,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
+  /** Whether the person may make an agent: the company's own admins. */
+  makes: boolean;
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -296,7 +299,7 @@ export const AgentsOverview = ({
   return (
     <Page wide>
       <PageHeading
-        action={managed === undefined ? undefined : <NewAgentLink />}
+        action={makes ? <NewAgentLink /> : undefined}
         description={
           managed === undefined ? (
             <Trans>
@@ -334,11 +337,11 @@ export const AgentsOverview = ({
               )}
             </EmptyDescription>
           </EmptyHeader>
-          {managed === undefined ? null : (
+          {makes ? (
             <EmptyContent>
               <NewAgentLink />
             </EmptyContent>
-          )}
+          ) : null}
         </Empty>
       ) : (
         <>

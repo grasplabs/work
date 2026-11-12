@@ -11,6 +11,13 @@ import type { AppClassAudience } from "./stephen-reach.ts";
 // is the first of them; who reaches it and what it may do stays in
 // Settings › Stephen (stephen-reach.ts).
 
+/**
+ * The ID of the company's first agent, the one every company starts with:
+ * the organization's own, which every chat's agent was before there were
+ * others (core's `firstAgentId`).
+ */
+export const firstAgentId = "organization";
+
 /** One of the company's agents, as core keeps it. */
 export interface Agent {
   /** The ID its permissions, audit events and memory path name. */
