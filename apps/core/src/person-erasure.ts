@@ -574,16 +574,15 @@ const apps: ErasureStep = {
 
 /**
  * What the Brain keeps that only they may read (brain-next.ts
- * `erasePerson`): their chats' turns, their uploads and their runs as the
- * Brain took them in, every version. Nothing of theirs lands after it,
- * whichever areas are still pending: they were removed before they could
- * be erased, producers hand over nothing for someone no longer a member,
- * and a hand-over that began before is refused by the Brain as it
- * records. Run last, after what stops their chats and runs, so a pass
- * that goes well leaves nothing on its way. Complete only once the
- * Brain's call returned, which puts the erasure in its ledger; one that
- * fails or throws leaves the area pending for the clock, and asking the
- * Brain again is safe.
+ * `erasePerson`): their uploads and their runs as the Brain took them in,
+ * every version. Its place among the areas doesn't matter, and nothing
+ * orders a retry's pending areas: nothing of theirs lands after it,
+ * whichever areas are still pending, as they were removed before they
+ * could be erased, producers hand over nothing for someone no longer a
+ * member, and a hand-over that began before is refused by the Brain as it
+ * records. Complete only once the Brain's call returned, which puts the
+ * erasure in its ledger; one that fails or throws leaves the area pending
+ * for the clock, and asking the Brain again is safe.
  */
 const brainSources: ErasureStep = {
   area: "brain_sources",

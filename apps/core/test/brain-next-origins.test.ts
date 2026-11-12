@@ -1,19 +1,13 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  chatTurnSource,
-  runSource,
-  uploadSource,
-} from "../src/brain-next-origins.ts";
+import { runSource, uploadSource } from "../src/brain-next-origins.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
-import { personalChatsOf, says } from "./agent-chat.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import {
   holdNextBucketPut,
@@ -39,8 +33,8 @@ import { runMinuteTasks } from "./maintenance.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Erasure reaching the new Brain from what core deletes (GRA-1727), from
-// its threat model on the issue: a chat deleted, an upload's document
-// purged and a run past its retention each erase their sources, and a
+// its threat model on the issue: an upload's document purged and a run
+// past its retention each erase their sources, and a
 // person's erasure erases what only they may read. Each Brain call is
 // owed until it returns: one that fails (the Brain's bucket out of reach)
 // leaves the origin as it was, or the erasure's area pending, and the
@@ -107,15 +101,6 @@ const leftOf = async (marks: readonly string[]) => {
   };
 };
 
-/** Whether `chatId` is among `person`'s chats. */
-const listed = async (
-  person: Awaited<ReturnType<typeof signedInApi>>,
-  chatId: string
-): Promise<boolean> => {
-  const chats = await person.api.chats.list();
-  return chats.some(({ id }) => id === chatId);
-};
-
 const nothingLeft = { erasedWithin: true, tables: [], objects: [] };
 
 /** How many ledger entries name `source`. */
@@ -135,117 +120,16 @@ const failNextBucketPut = async (): Promise<void> => {
   });
 };
 
-describe("a chat deleted", { timeout: 120_000 }, () => {
-  /**
-   * A person's chat with one turn answered, its turns handed to the
-   * Brain under every message id it holds, each with a mark of its own.
-   */
-  const chatInBrain = async () => {
-    const person = await signedInApi(idp, "user");
-    const { stub, newChat } = await personalChatsOf(
-      person.userId,
-      says("Noted.")
-    );
-    const { chat, ask } = await newChat();
-    await ask("Where are we?");
-    const ids = await runInDurableObject(stub, (_instance, state) =>
-      state.storage.sql
-        .exec<{ id: number }>(
-          "SELECT id FROM chat_messages WHERE chat_id = ?",
-          chat.id
-        )
-        .toArray()
-        .map(({ id }) => id)
-    );
-    const marks = ids.map(() => newMark());
-    const sources = ids.map((id) => chatTurnSource(chat.id, id));
-    for (const [index, source] of sources.entries()) {
-      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
-      await handOver(source, markedText(marks[index] ?? ""), person.userId);
-    }
-    return { person, chat, marks, sources };
-  };
-
-  it("erases every turn of it, so its person recalls none and the store keeps nothing of them", async () => {
-    const { person, chat, marks, sources } = await chatInBrain();
-    const before = await recalled(person.userId, marks[0] ?? "");
-
-    await person.api.chats.remove(chat.id);
-
-    expect({
-      turns: sources.length,
-      before,
-      after: await Promise.all(
-        marks.map(async (mark) => await recalled(person.userId, mark))
-      ),
-      ledger: await Promise.all(sources.map(inLedger)),
-      left: await leftOf(marks),
-    }).toStrictEqual({
-      turns: 2,
-      before: 1,
-      after: [0, 0],
-      ledger: [1, 1],
-      left: nothingLeft,
-    });
-  });
-
-  it("stays, with its turns owed, while the Brain can't record their erasure, and is erased once deleted again", async () => {
-    const { person, chat, marks, sources } = await chatInBrain();
-
-    await failNextBucketPut();
-    const failed = await outcome(person.api.chats.remove(chat.id));
-    const meanwhile = await listed(person, chat.id);
-    await person.api.chats.remove(chat.id);
-
-    expect({
-      failed: failed === "ok" ? "deleted" : "refused",
-      meanwhile,
-      listed: await listed(person, chat.id),
-      ledger: await Promise.all(sources.map(inLedger)),
-      left: await leftOf(marks),
-    }).toStrictEqual({
-      failed: "refused",
-      meanwhile: true,
-      listed: false,
-      ledger: [1, 1],
-      left: nothingLeft,
-    });
-  });
-
-  it("refuses a hand-over of one of its turns that was writing its file as the chat was deleted", async () => {
-    const { person, chat, sources } = await chatInBrain();
-    const late = newMark();
-    const gate = await holdNextBucketPut();
-    const handing = settled(
-      handOver(
-        sources[0] ?? chatTurnSource(chat.id, 0),
-        markedText(late),
-        person.userId
-      )
-    );
-    await vi.waitFor(
-      () => {
-        expect(gate.reached).toBeTruthy();
-      },
-      { timeout: 10_000 }
-    );
-
-    await person.api.chats.remove(chat.id);
-    gate.released = true;
-
-    expect({
-      handed: await handing,
-      recalled: await recalled(person.userId, late),
-      left: await leftOf([late]),
-    }).toStrictEqual({
-      handed: {
-        error: refusedAsErased,
-      },
-      recalled: 0,
-      left: nothingLeft,
-    });
-  });
-});
+/** How many uploads share a collection and path with the one saved as `source`. */
+const uploadsKept = async (source: SourceRef): Promise<number | undefined> => {
+  const row = await env.DB.prepare(
+    `SELECT count(*) AS n FROM uploads WHERE (collection_id, path) IN
+      (SELECT collection_id, path FROM uploads WHERE document_id = ?)`
+  )
+    .bind(source.id)
+    .first<{ n: number }>();
+  return row?.n;
+};
 
 describe("an upload's document purged", { timeout: 120_000 }, () => {
   /**
@@ -268,24 +152,34 @@ describe("an upload's document purged", { timeout: 120_000 }, () => {
       text: "The facilities desk is at facilities@example.com.",
       ifVersion: 0,
     });
-    const now = Date.now();
-    await env.DB.prepare(
-      `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
-         uploaded_by, actor, status, document_id, version, created_at, updated_at)
-       VALUES (?, ?, ?, 'text/markdown', 1, ?, ?, ?, 'ready', ?, 1, ?, ?)`
-    )
-      .bind(
-        crypto.randomUUID(),
-        collection.id,
-        path,
-        "0".repeat(64),
-        uploader.userId,
-        JSON.stringify({ type: "person", userId: uploader.userId }),
-        document.id,
-        now,
-        now
+    /** Records an upload of `path` by the uploader, saved as `documentId` or not yet. */
+    const recordUpload = async (
+      status: "pending" | "ready",
+      documentId: string | null
+    ): Promise<string> => {
+      const id = crypto.randomUUID();
+      const now = Date.now();
+      await env.DB.prepare(
+        `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
+           uploaded_by, actor, status, document_id, version, created_at, updated_at)
+         VALUES (?, ?, ?, 'text/markdown', 1, ?, ?, ?, ?, ?, 1, ?, ?)`
       )
-      .run();
+        .bind(
+          id,
+          collection.id,
+          path,
+          "0".repeat(64),
+          uploader.userId,
+          JSON.stringify({ type: "person", userId: uploader.userId }),
+          status,
+          documentId,
+          now,
+          now
+        )
+        .run();
+      return id;
+    };
+    await recordUpload("ready", document.id);
     const mark = newMark();
     const source = uploadSource(document.id);
     await handOver(source, markedText(mark), uploader.userId);
@@ -299,7 +193,7 @@ describe("an upload's document purged", { timeout: 120_000 }, () => {
       const plan = await admin.api.knowledge.preparePurge(input);
       await admin.api.knowledge.purge(input, plan.token);
     };
-    return { uploader, mark, source, purge };
+    return { uploader, mark, source, purge, recordUpload };
   };
 
   it("erases its text in the Brain, so its uploader recalls none and the store keeps nothing of it, and a late hand-over is refused", async () => {
@@ -353,6 +247,32 @@ describe("an upload's document purged", { timeout: 120_000 }, () => {
       left: nothingLeft,
     });
   });
+
+  it("fails the purge, forgetting nothing, when one of its uploads is saved as a document after the Brain erased the others", async () => {
+    const { source, purge, recordUpload } = await uploadInBrain();
+    const later = await recordUpload("pending", null);
+    const gate = await holdNextBucketPut();
+    const purging = outcome(purge());
+    await vi.waitFor(
+      () => {
+        expect(gate.reached).toBeTruthy();
+      },
+      { timeout: 10_000 }
+    );
+
+    // Saved as a document of its own while the Brain writes its ledger.
+    await env.DB.prepare(
+      "UPDATE uploads SET status = 'ready', document_id = ? WHERE id = ?"
+    )
+      .bind(crypto.randomUUID(), later)
+      .run();
+    gate.released = true;
+
+    expect({
+      purge: await purging,
+      kept: await uploadsKept(source),
+    }).toStrictEqual({ purge: "knowledge.conflict", kept: 2 });
+  });
 });
 
 describe("a run past its retention", { timeout: 120_000 }, () => {
@@ -397,11 +317,23 @@ describe("a run past its retention", { timeout: 120_000 }, () => {
     });
   });
 
-  it("marks nothing while the Brain can't record the erasure, and the next sweep erases it", async () => {
+  it("marks nothing while the Brain can't record the erasure, still removes what needs no Brain, and the next sweep erases it", async () => {
     const { builder, mark, source } = await runInBrain();
+    // A snapshot no start names: retention removes it whatever the Brain does.
+    const orphan = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_state_snapshots (hash, body, created_at) VALUES (?, '{}', ?)"
+    )
+      .bind(orphan, Date.now())
+      .run();
 
     await failNextBucketPut();
     const failed = await outcome(sweep());
+    const orphanKept = await env.DB.prepare(
+      "SELECT count(*) AS n FROM workflow_state_snapshots WHERE hash = ?"
+    )
+      .bind(orphan)
+      .first<{ n: number }>();
     const marked = await env.DB.prepare(
       "SELECT details_removed_at AS removed FROM workflow_start_receipts WHERE id = ?"
     )
@@ -416,6 +348,7 @@ describe("a run past its retention", { timeout: 120_000 }, () => {
 
     expect({
       failed: failed === "ok" ? "swept" : "failed",
+      orphanKept: orphanKept?.n,
       marked: marked?.removed,
       swept: typeof swept?.removed,
       after: await recalled(builder.userId, mark),
@@ -423,6 +356,7 @@ describe("a run past its retention", { timeout: 120_000 }, () => {
       left: await leftOf([mark]),
     }).toStrictEqual({
       failed: "failed",
+      orphanKept: 0,
       marked: null,
       swept: "number",
       after: 0,
@@ -436,9 +370,8 @@ describe("a person erased", { timeout: 120_000 }, () => {
   it("is not complete while the Brain's erasure is owed, is once the clock retried it, and nothing of theirs comes back after a restore", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
-    const marks = [newMark(), newMark(), newMark()];
+    const marks = [newMark(), newMark()];
     const sources = [
-      chatTurnSource(crypto.randomUUID(), 1),
       uploadSource(crypto.randomUUID()),
       runSource(crypto.randomUUID()),
     ];
@@ -483,7 +416,7 @@ describe("a person erased", { timeout: 120_000 }, () => {
       erased,
       restored,
     }).toStrictEqual({
-      before: 3,
+      before: 2,
       pending: {
         completed: null,
         brain: { area: "brain_sources", state: "pending" },
@@ -492,7 +425,7 @@ describe("a person erased", { timeout: 120_000 }, () => {
         completed: "string",
         brain: { area: "brain_sources", state: "complete" },
       },
-      recalled: [0, 0, 0],
+      recalled: [0, 0],
       inLedger: true,
       erased: nothingLeft,
       restored: nothingLeft,

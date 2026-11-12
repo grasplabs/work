@@ -349,24 +349,29 @@ export const sweepWorkflowStartDetails = async (
   const db = drizzle(env.DB);
   let swept = 0;
   let after: DueStart | undefined;
-  while (swept < startDetailsPerSweep) {
-    const limit = Math.min(sweptPerBatch, startDetailsPerSweep - swept);
-    // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
-    const page = await dueStarts(db, before, after, limit);
-    if (page.length === 0) {
-      break;
+  // What follows the starts needs neither connect nor the Brain: it runs
+  // even when a page of starts failed on one of them.
+  try {
+    while (swept < startDetailsPerSweep) {
+      const limit = Math.min(sweptPerBatch, startDetailsPerSweep - swept);
+      // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
+      const page = await dueStarts(db, before, after, limit);
+      if (page.length === 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
+      await startDetailsRemoved(env, page, before, now);
+      swept += page.length;
+      if (page.length < limit) {
+        break;
+      }
+      after = page.at(-1);
     }
-    // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
-    await startDetailsRemoved(env, page, before, now);
-    swept += page.length;
-    if (page.length < limit) {
-      break;
-    }
-    after = page.at(-1);
+  } finally {
+    await paramValuesRemoved(db, before, now);
+    // The snapshots no start or test run names any more.
+    await orphanedSnapshotsRemoved(db);
   }
-  await paramValuesRemoved(db, before, now);
-  // The snapshots no start or test run names any more.
-  await orphanedSnapshotsRemoved(db);
 };
 
 /**

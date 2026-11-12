@@ -116,7 +116,6 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
-import { chatTurnSource, eraseSources } from "./brain-next-origins.ts";
 import {
   channelText,
   heldWriteRefusal,
@@ -3815,38 +3814,13 @@ export class Workspace extends DurableObject<Env> {
       // after this finds it being deleted, and takes it back.
       await Promise.allSettled(this.#delivering);
       await eraseCaptured(this.env, [id]);
-      // And its turns in the new Brain, by every message it holds, while
-      // they still name them: should one fail, the chat stays, to be
-      // deleted again (brain-next-origins.ts). A hand-over still on its
-      // way for one of them is refused from now on.
-      const messages = this.#db
-        .select({ id: chatMessages.id })
-        .from(chatMessages)
-        .where(eq(chatMessages.chatId, id))
-        .all();
-      await eraseSources(
-        this.env,
-        messages.map((message) => chatTurnSource(id, message.id)),
-        "deleted"
-      );
       // And what its agent kept, the transcript the model reads with it:
       // erased for good, so nothing told it meanwhile is kept.
       await this.#toSession(id, async (session) => {
         await session.erase();
       });
       // Their rows go with it below.
-      const erased = new Set(messages.map((message) => message.id));
       this.ctx.storage.transactionSync(() => {
-        // Only messages whose turns the Brain erased: one kept since
-        // (nothing should, the chat takes no question) keeps the chat.
-        const kept = this.#db
-          .select({ id: chatMessages.id })
-          .from(chatMessages)
-          .where(eq(chatMessages.chatId, id))
-          .all();
-        if (kept.some((message) => !erased.has(message.id))) {
-          throw agentErrors.create("agent.busy");
-        }
         this.#db
           .delete(brainCaptureIntents)
           .where(eq(brainCaptureIntents.evidenceId, id))

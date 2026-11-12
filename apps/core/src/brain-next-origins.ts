@@ -2,40 +2,33 @@ import { eraseSource } from "./brain-next.ts";
 import type { SourceRef } from "./brain-next.ts";
 
 // What core hands the Brain comes from an origin core keeps (an upload's
-// document, a chat, a workflow run), and each origin's sources are named
-// here alone, one function per kind: producers add under these keys
+// document, a workflow run), and each origin's sources are named here
+// alone, one function per kind: producers add under these keys
 // (GRA-1727), and whatever deletes an origin erases them, so both always
 // name the same sources. Every id is the server's own (a Knowledge
-// document's, a chat's UUID with one of its messages' row ids, a run's),
-// never anything a person typed, and none is ever used for another
-// origin: chat ids are random, message ids AUTOINCREMENT.
+// document's, a run's), never anything a person typed. Chats have no key
+// here: none is handed over, and a chat goes only into its person's own
+// store (GRA-1762, GRA-1805).
 //
 // Erasing what an origin had in the Brain comes before core lets go of
 // what names its keys, and a failure leaves the origin as it was, so the
 // erasure stays owed by the origin's own state until a retry returns
 // (the Brain's rule: only a call that returned is in its ledger): a
-// chat's deletion fails and the chat stays, a purge fails before it
-// forgets an upload, a run's retention marks nothing. Erasing a key that
-// was never added closes it all the same, so a hand-over still under way
-// for a deleted origin is refused rather than landing after.
+// purge fails before it forgets an upload, a run's retention marks
+// nothing. Erasing a key that was never added closes it all the same, so
+// a hand-over still under way for a deleted origin is refused rather than
+// landing after.
 
-/** The source an upload's text is under: its Knowledge document. */
+/**
+ * The source an upload's text is under: the Knowledge document it was
+ * saved as, the one key for that document in the Brain. A content purge
+ * that names the document closes it for good (knowledge/uploads.ts
+ * `forgetUploads`), as the purge forgets the uploads the Brain takes
+ * documents from.
+ */
 export const uploadSource = (documentId: string): SourceRef => ({
   producer: "upload",
   id: documentId,
-});
-
-/**
- * The source of one turn of chat `chatId`, named by the row id of one of
- * the turn's messages (`chat_messages.id`, by convention its first).
- * Deleting the chat erases the key of every message it holds.
- */
-export const chatTurnSource = (
-  chatId: string,
-  messageId: number
-): SourceRef => ({
-  producer: "chat",
-  id: `${chatId}/${messageId}`,
 });
 
 /** The source of what a workflow run did: the run's own. */
