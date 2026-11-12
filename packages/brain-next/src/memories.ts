@@ -257,15 +257,15 @@ candidates AS MATERIALIZED (
   SELECT row FROM base
   UNION
   SELECT partner.row FROM base
-  JOIN memories AS asked ON asked.row = base.row AND asked.one_value = 1
-  JOIN memories AS partner
+  CROSS JOIN memories AS asked ON asked.row = base.row AND asked.one_value = 1
+  CROSS JOIN memories AS partner
     ON partner.attribute = asked.attribute
     AND partner.entity = asked.entity
 ),
 seen AS MATERIALIZED (
   SELECT m.row AS row, ${endedAtSql} AS ended_at
   FROM candidates
-  JOIN memories AS m ON m.row = candidates.row
+  CROSS JOIN memories AS m ON m.row = candidates.row
   WHERE m.learned_at <= ?4 AND ${visibleSql("m")}
 ),
 judged AS MATERIALIZED (
@@ -273,7 +273,7 @@ judged AS MATERIALIZED (
     (seen.ended_at IS NULL
       AND (m.valid_from IS NULL OR m.valid_from <= ${validSql})
       AND (m.valid_until IS NULL OR m.valid_until > ${validSql})) AS is_current
-  FROM seen JOIN memories AS m ON m.row = seen.row
+  FROM seen CROSS JOIN memories AS m ON m.row = seen.row
 )`;
   const select = `
 SELECT m.row AS row, about.row AS entity_row, m.id AS id, about.id AS about,

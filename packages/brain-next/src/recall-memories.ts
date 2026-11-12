@@ -24,17 +24,17 @@ import type { WayRunner } from "./recall-counts.ts";
 //   reader may read gave, held in the question as whole words, or an exact
 //   identifier written in it), then one or two steps along the relations
 //   the reader may read that are current as of the moment asked. An entity
-//   with more than `hubRelationsMax` such relations is a hub: its own facts
-//   are found, but it is never stepped through, so one entity related to
-//   almost everything neither floods the pack nor slows recall. The
-//   memories about the entities reached come nearest first: those about a
-//   named entity (its facts and its relations), then one step on (theirs,
-//   but those of the step before), then the own facts of those two steps
-//   out; at most `recallLimit`, the contract's bound on each way's list.
+//   with more than `hubRelationsMax` such relations is a hub: it is never
+//   stepped through, so one entity related to almost everything neither
+//   floods the pack nor slows recall. What is returned: every fact of an
+//   entity reached, and every relation whose two ends were both reached
+//   (a relation is a memory about both, GRA-1742), at the step of its
+//   nearer end, or of its other end when the nearer is a hub; a relation
+//   leading to an entity not reached (a third step) is not. Nearest step
+//   first, at most `recallLimit`, the contract's bound on each way's list.
 //   Each step is read with the room the list has left, and none further
 //   once it is full: nearer steps always rank first, so what a fuller
-//   walk would add never reaches the list. A relation of a hub counts at
-//   the step of the entity at its other end.
+//   walk would add never reaches the list.
 //
 // And, for each memory found that is contested, the other current sides
 // the reader may read, so the pack carries both with their sources.
@@ -105,7 +105,9 @@ const namedSql = `
 WITH ${readableSql}
 SELECT DISTINCT entity_names.entity AS entity
 FROM entity_names
-JOIN memories AS m ON m.row = entity_names.memory
+-- Names first, then each one's memory by its row: never the memories
+-- the reader may read, scanned for the few that give a name.
+CROSS JOIN memories AS m ON m.row = entity_names.memory
 WHERE m.learned_at <= ?4 AND ${visibleSql("m")}
   AND (
     (entity_names.type = 'name' AND entity_names.folded != ''
@@ -164,13 +166,16 @@ const stepSql = memoriesSql({
 });
 
 /**
- * `?1` one step of the walk (JSON: `here`, each `[row, whole]`, and
- * `before`, rows), `?5` the room left: the current memories the reader
- * may read about the entities of this step, confirmed first, then the
- * newest. Of an entity read `whole`, its facts and its relations; of
- * another (a hub, or one on the last step), its own facts alone. Those
- * on an entity of an earlier step read whole are left out: that step
- * gave them already.
+ * `?1` one step of the walk (JSON: `here`, each `[row, whole]`; `before`,
+ * the rows read whole at an earlier step; `reached`, every row the walk
+ * has reached, this step's too), `?5` the room left: the current memories
+ * the reader may read about the entities of this step, confirmed first,
+ * then the newest. Of an entity read `whole`, its facts and its
+ * relations; of another (a hub, or one on the last step), its own facts
+ * and its relations to entities the walk reached: a relation between two
+ * reached entities is a memory about both (GRA-1742), and one leading
+ * further is not. Those on an entity of an earlier step read whole are
+ * left out: that step gave them already.
  */
 const stepReadSql = memoriesSql({
   prelude: `here AS MATERIALIZED (
@@ -179,11 +184,22 @@ const stepReadSql = memoriesSql({
 ),
 before AS MATERIALIZED (
   SELECT value AS entity FROM json_each(?1, '$.before')
+),
+reached AS MATERIALIZED (
+  SELECT value AS entity FROM json_each(?1, '$.reached')
 )`,
   base: `SELECT m.row FROM here JOIN memories AS m ON m.entity = here.entity
     WHERE here.whole = 1 OR m.object IS NULL
-    UNION SELECT m.row FROM here JOIN memories AS m ON m.object = here.entity
-    WHERE here.whole = 1`,
+    UNION SELECT m.row FROM here CROSS JOIN memories AS m ON m.object = here.entity
+    WHERE here.whole = 1
+    UNION SELECT m.row FROM here CROSS JOIN reached
+    CROSS JOIN memories AS m
+      ON m.object = reached.entity AND m.entity = here.entity
+    WHERE here.whole = 0
+    UNION SELECT m.row FROM here CROSS JOIN reached
+    CROSS JOIN memories AS m
+      ON m.entity = reached.entity AND m.object = here.entity
+    WHERE here.whole = 0`,
   filter: `judged.is_current = 1
     AND m.entity NOT IN (SELECT entity FROM before)
     AND (m.object IS NULL OR m.object NOT IN (SELECT entity FROM before))`,
@@ -291,8 +307,8 @@ const byEntities = (
     for (const entity of frontier) {
       reached.add(entity);
     }
-    // The last step gives its entities' own facts alone: whether one is a
-    // hub doesn't matter there, so it isn't counted.
+    // The last step is never stepped through: whether one of its entities
+    // is a hub doesn't matter there, so it isn't counted.
     const last = step === stepsMax;
     const hubs = last ? new Set<number>() : hubsOf(sql, frontier, reader, at);
     const whole = last ? [] : frontier.filter((entity) => !hubs.has(entity));
@@ -307,6 +323,7 @@ const byEntities = (
             wholeSet.has(entity) ? 1 : 0,
           ]),
           before,
+          reached: [...reached],
         }),
         reader,
         at,
