@@ -14337,6 +14337,10 @@ msgstr "Ce document a changé depuis que vous l’avez ouvert. La version {newer
 msgid "This document is empty."
 msgstr "Ce document est vide."
 
+#: src/brain/sources-page.tsx
+msgid "This file's text is too long for the Brain to keep. Split it into smaller files and upload those."
+msgstr "Le texte de ce fichier est trop long pour que le Brain le conserve. Divisez-le en fichiers plus petits et importez-les."
+
 #: src/routes/interview.tsx
 msgid "This interview can't be opened"
 msgstr "Cet entretien ne peut pas être ouvert"
@@ -14998,6 +15002,7 @@ msgstr "Importer une nouvelle version"
 msgid "Uploaded to knowledge"
 msgstr "A téléversé dans les connaissances"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Import en cours…"

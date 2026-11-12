@@ -14337,6 +14337,10 @@ msgstr "Este documento cambió desde que lo abriste. La versión {newerVersion} 
 msgid "This document is empty."
 msgstr "Este documento está vacío."
 
+#: src/brain/sources-page.tsx
+msgid "This file's text is too long for the Brain to keep. Split it into smaller files and upload those."
+msgstr "El texto de este archivo es demasiado largo para que el Brain lo guarde. Divídelo en archivos más pequeños y súbelos."
+
 #: src/routes/interview.tsx
 msgid "This interview can't be opened"
 msgstr "Esta entrevista no se puede abrir"
@@ -14998,6 +15002,7 @@ msgstr "Subir nueva versión"
 msgid "Uploaded to knowledge"
 msgstr "Subió al conocimiento"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Subiendo…"

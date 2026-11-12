@@ -2,6 +2,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   brainSourceErrors,
   brainUploadErrors,
+  brainUploadReadersSchema,
 } from "@grasp-os/shared/brain-sources";
 import type {
   BrainUpload,
@@ -69,12 +70,6 @@ const uploadFileSchema = z.strictObject({
   name: uploadNameSchema,
   bytes: z.custom<Uint8Array>((value) => value instanceof Uint8Array),
 });
-
-const readersSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("me") }),
-  z.strictObject({ kind: z.literal("team"), teamId: z.string().min(1) }),
-  z.strictObject({ kind: z.literal("everyone") }),
-]);
 
 /** An upload's id, as core mints them. */
 const uploadIdSchema = z.uuid();
@@ -145,18 +140,31 @@ const mayRead = (member: Member, row: UploadRow): boolean => {
 const mayAddVersion = (member: Member, row: UploadRow): boolean =>
   row.uploadedBy === member.userId;
 
+/**
+ * Whether `member` may delete `row`'s upload: its uploader always, also
+ * once they left its team; an admin when it isn't one person's own, also
+ * one they can't read (a team they aren't in, or one dissolved), so no
+ * shared upload is left that nobody can delete. Such an admin learns that
+ * it exists, but reaches it only by its id, which the audit log shows
+ * them already.
+ */
 const mayDelete = (member: Member, row: UploadRow): boolean =>
   row.uploadedBy === member.userId ||
   (isAdmin(member.role) && row.readers !== "me");
 
+/** Whether `member` may reach `row`'s upload at all: read it, or delete it. */
+const mayReach = (member: Member, row: UploadRow): boolean =>
+  mayDelete(member, row) || mayRead(member, row);
+
 /**
- * The upload `uploadId` for `member`: `brain.upload_not_found` when there
- * is none or they may not read it, alike.
+ * The upload `uploadId` for `member`, when `may` lets them reach it:
+ * `brain.upload_not_found` when there is none or it doesn't, alike.
  */
-const readableUpload = async (
+const reachableUpload = async (
   env: Env,
   member: Member,
-  uploadId: unknown
+  uploadId: unknown,
+  may: (member: Member, row: UploadRow) => boolean
 ): Promise<UploadRow> => {
   const id = uploadIdSchema.safeParse(uploadId);
   if (!id.success) {
@@ -166,11 +174,18 @@ const readableUpload = async (
     .select()
     .from(brainUploads)
     .where(eq(brainUploads.id, id.data));
-  if (row === undefined || !mayRead(member, row)) {
+  if (row === undefined || !may(member, row)) {
     throw brainUploadErrors.create("brain.upload_not_found");
   }
   return row;
 };
+
+/** The upload `uploadId` for `member`, if they may read it (`reachableUpload`). */
+const readableUpload = async (
+  env: Env,
+  member: Member,
+  uploadId: unknown
+): Promise<UploadRow> => await reachableUpload(env, member, uploadId, mayRead);
 
 /** The file `input` names, checked by what arrived: its name, size and first bytes. */
 const checkedFile = (
@@ -216,13 +231,11 @@ const textOf = async (
     if (error instanceof ExtractorUnavailableError) {
       throw brainUploadErrors.create("brain.upload_busy");
     }
-    // The extractor (files/extract.ts) still says text too large with
-    // Knowledge's error code; it is the upload's too large here.
+    // The extractor (files/extract.ts) still says its text is too long
+    // with Knowledge's error code: the file is within its size, its text
+    // isn't.
     if (knowledgeErrors.codeOf(error) === "knowledge.too_large") {
-      throw uploadErrors.create("upload.too_large", {
-        bytes: file.bytes.byteLength,
-        maxBytes: uploadMaxBytes,
-      });
+      throw brainUploadErrors.create("brain.upload_text_too_long");
     }
     if (isExpectedError(error)) {
       throw error;
@@ -276,8 +289,7 @@ const refusals: Readonly<
   },
   "brain.source_too_large": {
     reason: "too_large",
-    error: () =>
-      uploadErrors.create("upload.too_large", { maxBytes: uploadMaxBytes }),
+    error: () => brainUploadErrors.create("brain.upload_text_too_long"),
   },
 };
 
@@ -288,9 +300,12 @@ const refusalOf = (error: unknown) => {
 };
 
 /**
- * Adds `text` to the Brain as the next version of `row`'s upload, `first`
- * when it is the upload's first, with the one event the upload is audited
- * by, its counts with it, written before the person is answered:
+ * Adds `text` to the Brain as the next version of `row`'s upload, as the
+ * change `change`, with the one event the upload is audited by, its counts
+ * with it, written before the person is answered. `first` when it is the
+ * upload's first: its change is then the upload's own id, so a retry of
+ * it (the page's, after a lost answer) is the same version, never a
+ * second one.
  *
  * - `brain.upload.added`, with its version.
  * - `brain.upload.refused`, with why, as a hand-over is refused
@@ -298,11 +313,14 @@ const refusalOf = (error: unknown) => {
  *   certainly didn't land. The row goes with the event when it names
  *   nothing the Brain holds: always for `erased` (the key is closed), and
  *   for a first upload. The person is told why, in their words.
- * - `brain.upload.failed` for any other failure: a call that threw or
- *   whose answer was lost may still have added it, so the row stays,
- *   naming the key for its deletion. A first upload that failed so may
- *   then hold no version: the person can't see it on the page, and it
- *   holds nothing anyone reads; its row names only IDs.
+ * - `brain.upload.failed` for any other failure. A later version's row
+ *   stays: it names what the Brain holds of it. A first upload's goes with
+ *   the event, so no row is left that the page can't show. What remains
+ *   possible: a store that added it and whose answer was lost holds a
+ *   version no row names until the page retries with the same id, which
+ *   writes the row again and answers that same version; were it never
+ *   retried, it is erased with its person (only me), or stays readable to
+ *   its team or everyone with no delete on the page.
  */
 const addVersion = async (
   env: Env,
@@ -310,7 +328,7 @@ const addVersion = async (
   row: UploadRow,
   file: BrainUploadFile & { type: keyof typeof uploadTypes },
   text: string,
-  first: boolean
+  { first, change }: { first: boolean; change: string }
 ): Promise<SourceVersionRef> => {
   const db = drizzle(env.DB);
   const event = (action: string, detail: Record<string, unknown>) =>
@@ -320,27 +338,27 @@ const addVersion = async (
       action,
       detail: { ...detailOf(row, file), ...detail },
     });
+  const forgotten = db.delete(brainUploads).where(eq(brainUploads.id, row.id));
   let added: SourceVersionRef;
   try {
     added = await addSource(env, {
       source: uploadSource(row.id),
-      // One change per upload request, minted before its one try.
-      change: crypto.randomUUID(),
+      change,
       text,
       readers: sourceReadersOf(row),
     });
   } catch (error) {
     const refusal = refusalOf(error);
     if (refusal === undefined) {
-      await auditedBatch(env, db, [event("brain.upload.failed", {})]);
+      const failed = event("brain.upload.failed", {});
+      await (first
+        ? auditedBatch(env, db, [forgotten, failed])
+        : auditedBatch(env, db, [failed]));
       throw error;
     }
     const refused = event("brain.upload.refused", { reason: refusal.reason });
     await (first || refusal.reason === "erased"
-      ? auditedBatch(env, db, [
-          db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
-          refused,
-        ])
+      ? auditedBatch(env, db, [forgotten, refused])
       : auditedBatch(env, db, [refused]));
     throw refusal.error();
   }
@@ -352,21 +370,34 @@ const addVersion = async (
 
 /**
  * Uploads `input` into the Brain for `readersInput`, as `person`: a new
- * upload, its first version. Refused before the file is read when the
- * readers aren't theirs to choose, and again after, right before anything
- * is written, should that have changed meanwhile.
+ * upload, its first version, under `uploadIdInput`, the id the page mints
+ * for the file it was given and sends again when it retries (a UUID).
+ * Refused before the file is read when the readers aren't theirs to
+ * choose, and again after, right before anything is written, should that
+ * have changed meanwhile.
+ *
+ * A retry is the same upload: an id that is already this person's upload,
+ * for the same readers, adds its first version again, which the Brain
+ * answers with the version it made. An id anyone else's upload holds, or
+ * theirs for other readers, is refused (`brain.upload_retry_refused`),
+ * never their upload: the page mints a fresh one for the next file.
  */
 export const uploadToBrain = async (
   env: Env,
   person: Identity,
   input: unknown,
-  readersInput: unknown
+  readersInput: unknown,
+  uploadIdInput: unknown
 ): Promise<SourceVersionRef> => {
   const readers = brainUploadErrors.parse(
     "brain.upload_readers",
-    readersSchema,
+    brainUploadReadersSchema,
     readersInput
   );
+  const id = uploadIdSchema.safeParse(uploadIdInput);
+  if (!id.success) {
+    throw uploadErrors.create("upload.invalid");
+  }
   if (!mayGrant(await memberNow(env, person), readers)) {
     throw brainUploadErrors.create("brain.upload_readers");
   }
@@ -378,18 +409,37 @@ export const uploadToBrain = async (
     throw brainUploadErrors.create("brain.upload_readers");
   }
   const now = new Date();
-  const row: UploadRow = {
-    id: crypto.randomUUID(),
-    uploadedBy: person.userId,
-    readers: readers.kind,
-    teamId: readers.kind === "team" ? readers.teamId : null,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const db = drizzle(env.DB);
   // Before the Brain is given anything under its key, so every key it
-  // holds is named here for its deletion.
-  await drizzle(env.DB).insert(brainUploads).values(row);
-  return await addVersion(env, person, row, file, text, true);
+  // holds is named here for its deletion; kept as it is when the id is
+  // already an upload's, which is then read back whoever made it.
+  await db
+    .insert(brainUploads)
+    .values({
+      id: id.data,
+      uploadedBy: person.userId,
+      readers: readers.kind,
+      teamId: readers.kind === "team" ? readers.teamId : null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing();
+  const [row] = await db
+    .select()
+    .from(brainUploads)
+    .where(eq(brainUploads.id, id.data));
+  const theirs =
+    row !== undefined &&
+    row.uploadedBy === person.userId &&
+    row.readers === readers.kind &&
+    row.teamId === (readers.kind === "team" ? readers.teamId : null);
+  if (!theirs) {
+    throw brainUploadErrors.create("brain.upload_retry_refused");
+  }
+  return await addVersion(env, person, row, file, text, {
+    first: true,
+    change: row.id,
+  });
 };
 
 /**
@@ -421,10 +471,18 @@ export const uploadVersionToBrain = async (
     .update(brainUploads)
     .set({ updatedAt: new Date() })
     .where(eq(brainUploads.id, row.id));
-  return await addVersion(env, person, row, file, text, false);
+  return await addVersion(env, person, row, file, text, {
+    first: false,
+    // One change per upload request, minted before its one try.
+    change: crypto.randomUUID(),
+  });
 };
 
-/** The upload `uploadId`, as `person` may act on it: null when there is none or they may not read it, alike. */
+/**
+ * The upload `uploadId`, as `person` may act on it: for anyone who may
+ * read or delete it (`mayReach`); null when there is none or they may do
+ * neither, alike.
+ */
 export const brainUploadOf = async (
   env: Env,
   person: Identity,
@@ -433,7 +491,7 @@ export const brainUploadOf = async (
   const member = await memberNow(env, person);
   let row: UploadRow;
   try {
-    row = await readableUpload(env, member, uploadId);
+    row = await reachableUpload(env, member, uploadId, mayReach);
   } catch (error) {
     if (brainUploadErrors.codeOf(error) === "brain.upload_not_found") {
       return null;
@@ -443,7 +501,9 @@ export const brainUploadOf = async (
   return {
     source: uploadSource(row.id),
     readers: readersOf(row),
-    mayAddVersion: mayAddVersion(member, row),
+    // A new version is for readers its uploader may still choose.
+    mayAddVersion:
+      mayAddVersion(member, row) && mayGrant(member, readersOf(row)),
     mayDelete: mayDelete(member, row),
   };
 };
@@ -461,7 +521,7 @@ export const deleteBrainUpload = async (
   uploadId: unknown
 ): Promise<void> => {
   const member = await memberNow(env, person);
-  const row = await readableUpload(env, member, uploadId);
+  const row = await reachableUpload(env, member, uploadId, mayReach);
   if (!mayDelete(member, row)) {
     throw brainUploadErrors.create("brain.upload_not_allowed");
   }

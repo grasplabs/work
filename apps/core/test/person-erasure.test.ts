@@ -95,13 +95,13 @@ const emailOf = async (userId: string): Promise<string | undefined> => {
   return row?.email;
 };
 
-/** How many of `table`'s rows hold `userId` in `column`. */
 /** WebVTT captions saying `text`: a file the extractor reads. */
 const captions = (text: string): Uint8Array =>
   new TextEncoder().encode(
     `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}\n`
   );
 
+/** How many of `table`'s rows hold `userId` in `column`. */
 const rowsOf = async (table: string, column: string, userId: string) => {
   const row = await env.DB.prepare(
     `SELECT count(*) AS count FROM ${table} WHERE ${column} = ?`
@@ -1116,11 +1116,13 @@ describe("erasing a person", () => {
       .slice(0, 10)}`;
     await person.api.brainSources.upload(
       { name: "Mine.vtt", bytes: captions("Only mine") },
-      { kind: "me" }
+      { kind: "me" },
+      crypto.randomUUID()
     );
     const { source: shared } = await person.api.brainSources.upload(
       { name: "Team.vtt", bytes: captions(`For the team ${word}`) },
-      { kind: "team", teamId }
+      { kind: "team", teamId },
+      crypto.randomUUID()
     );
     const uploads = async (readers: string) => {
       const row = await env.DB.prepare(

@@ -270,8 +270,10 @@ const later = (ms: number): void => {
 /** The crash an add stops with: the store's own reset. */
 const crashed = /Crashed by the test/u;
 
-/** What the Brain or core says when it refuses an input. */
-/** How core refuses: its own check, the Brain's, or a text the Brain can't keep. */
+/**
+ * What core or the Brain says when it refuses an input: core's own
+ * check, the Brain's, or a text the Brain can't keep.
+ */
 const refused =
   /^(?:The Brain refused it|Refused|There's no text in this to keep|This text is too large for the Brain to keep)/u;
 

@@ -187,7 +187,8 @@ describe("uploading a file straight into the Brain", () => {
       const secret = word();
       const { source, version } = await uploader.api.brainSources.upload(
         fileOf(`Salary review ${secret}`, "Salary.vtt"),
-        me
+        me,
+        crypto.randomUUID()
       );
       const missing = crypto.randomUUID();
 
@@ -241,7 +242,8 @@ describe("uploading a file straight into the Brain", () => {
       const uploader = await signedInApi(idp, "user");
       const { source } = await uploader.api.brainSources.upload(
         fileOf("A note to myself"),
-        me
+        me,
+        crypto.randomUUID()
       );
       const key = `upload:${source.id}`;
       const namespace = inJurisdiction(env, env.BRAIN_STORE);
@@ -294,7 +296,8 @@ describe("uploading a file straight into the Brain", () => {
           async () =>
             await uploader.api.brainSources.upload(
               { name: "Scan.pdf", bytes: scan },
-              me
+              me,
+              crypto.randomUUID()
             )
         ),
         kept: await drizzle(env.DB)
@@ -321,7 +324,8 @@ describe("uploading a file straight into the Brain", () => {
       const minutes = word();
       const { source } = await uploader.api.brainSources.upload(
         fileOf(`Board minutes ${minutes}`),
-        teamReaders(teamId)
+        teamReaders(teamId),
+        crypto.randomUUID()
       );
       const asMember = {
         found: await found(mate, minutes),
@@ -371,7 +375,8 @@ describe("uploading a file straight into the Brain", () => {
               fileOf(`Planted ${leaked}`),
               // SAFETY: what a client outside TypeScript could send.
               // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-              readers as BrainUploadReaders
+              readers as BrainUploadReaders,
+              crypto.randomUUID()
             )
         );
       const refused = { refused: "brain.upload_readers" };
@@ -406,7 +411,12 @@ describe("uploading a file straight into the Brain", () => {
       const uploader = await signedInApi(idp, "user");
       const upload = async (file: { name: string; bytes: Uint8Array }) =>
         await outcome(
-          async () => await uploader.api.brainSources.upload(file, me)
+          async () =>
+            await uploader.api.brainSources.upload(
+              file,
+              me,
+              crypto.randomUUID()
+            )
         );
 
       expect({
@@ -443,7 +453,8 @@ describe("uploading a file straight into the Brain", () => {
       const [first, second] = [word(), word()];
       const { source } = await uploader.api.brainSources.upload(
         fileOf(`Handbook ${first}`, "Handbook.vtt"),
-        everyone
+        everyone,
+        crypto.randomUUID()
       );
       const next = await uploader.api.brainSources.uploadVersion(
         source.id,
@@ -493,11 +504,13 @@ describe("uploading a file straight into the Brain", () => {
       const [shared, own] = [word(), word()];
       const sharedUpload = await uploader.api.brainSources.upload(
         fileOf(`Price list ${shared}`),
-        everyone
+        everyone,
+        crypto.randomUUID()
       );
       const ownUpload = await uploader.api.brainSources.upload(
         fileOf(`Diary ${own}`),
-        me
+        me,
+        crypto.randomUUID()
       );
       const adminSees = await admin.api.brainSources.uploadOf(
         sharedUpload.source.id
@@ -539,7 +552,8 @@ describe("uploading a file straight into the Brain", () => {
       const kept = word();
       const { source } = await uploader.api.brainSources.upload(
         fileOf(`Contract ${kept}`),
-        teamReaders(teamId)
+        teamReaders(teamId),
+        crypto.randomUUID()
       );
       await failNextBucketPut();
 
@@ -578,7 +592,8 @@ describe("uploading a file straight into the Brain", () => {
       const late = word();
       const { source } = await uploader.api.brainSources.upload(
         fileOf("Draft"),
-        everyone
+        everyone,
+        crypto.randomUUID()
       );
       // Erased, but core never forgot the upload: as a delete whose
       // erasure returned and whose forgetting failed, or a version whose
@@ -625,7 +640,8 @@ describe("uploading a file straight into the Brain", () => {
       const [inName, inText] = [word(), word()];
       const { source } = await uploader.api.brainSources.upload(
         fileOf(`Merger plan ${inText}`, `Merger ${inName}.vtt`),
-        teamReaders(teamId)
+        teamReaders(teamId),
+        crypto.randomUUID()
       );
       await uploader.api.brainSources.deleteUpload(source.id);
       const events = await eventsOf(source.id);
@@ -648,6 +664,215 @@ describe("uploading a file straight into the Brain", () => {
         },
         deleted: { readers: "team" },
         leaked: [],
+      });
+    }
+  );
+
+  it(
+    "lets a team upload's uploader delete it after they left the team, and an admin outside the team; nobody else, and no admin someone's own",
+    slow,
+    async () => {
+      const [uploader, mate, admin, stranger] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const teamId = await teamOf(uploader, mate);
+      const left = await uploader.api.brainSources.upload(
+        fileOf("Left behind"),
+        teamReaders(teamId),
+        crypto.randomUUID()
+      );
+      const forAdmin = await mate.api.brainSources.upload(
+        fileOf("For an admin to delete"),
+        teamReaders(teamId),
+        crypto.randomUUID()
+      );
+      const own = await mate.api.brainSources.upload(
+        fileOf("The mate's own"),
+        me,
+        crypto.randomUUID()
+      );
+      const missing = crypto.randomUUID();
+      await leave(teamId, uploader);
+      const asStranger = await askedOf(stranger, left.source.id);
+      const asAdminOfOwn = await askedOf(admin, own.source.id);
+      const uploaderSees = await uploader.api.brainSources.uploadOf(
+        left.source.id
+      );
+      const adminSees = await admin.api.brainSources.uploadOf(
+        forAdmin.source.id
+      );
+      await uploader.api.brainSources.deleteUpload(left.source.id);
+      await admin.api.brainSources.deleteUpload(forAdmin.source.id);
+      const ownAfter = await mate.api.brainSources.uploadOf(own.source.id);
+
+      expect({
+        uploaderSees,
+        adminSees,
+        asStranger,
+        asAdminOfOwn,
+        gone: [
+          await mate.api.brainSources.uploadOf(left.source.id),
+          await mate.api.brainSources.uploadOf(forAdmin.source.id),
+        ],
+        ownKept: ownAfter?.source,
+      }).toStrictEqual({
+        uploaderSees: {
+          source: left.source,
+          readers: teamReaders(teamId),
+          mayAddVersion: false,
+          mayDelete: true,
+        },
+        adminSees: {
+          source: forAdmin.source,
+          readers: teamReaders(teamId),
+          mayAddVersion: false,
+          mayDelete: true,
+        },
+        asStranger: await askedOf(stranger, missing),
+        asAdminOfOwn: await askedOf(admin, missing),
+        gone: [null, null],
+        ownKept: own.source,
+      });
+    }
+  );
+
+  it(
+    "keeps a retried upload one source, and refuses an id someone else's upload holds without touching it",
+    slow,
+    async () => {
+      const [uploader, other] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const once = word();
+      const uploadId = crypto.randomUUID();
+      const file = fileOf(`Sent twice ${once}`);
+      const first = await uploader.api.brainSources.upload(
+        file,
+        everyone,
+        uploadId
+      );
+      // The answer lost, the page sends it again with the same id.
+      const again = await uploader.api.brainSources.upload(
+        file,
+        everyone,
+        uploadId
+      );
+      const otherReaders = await outcome(
+        async () => await uploader.api.brainSources.upload(file, me, uploadId)
+      );
+      const byOther = await outcome(
+        async () =>
+          await other.api.brainSources.upload(
+            fileOf(`Taken over ${word()}`),
+            everyone,
+            uploadId
+          )
+      );
+      const rows = await drizzle(env.DB)
+        .select()
+        .from(brainUploads)
+        .where(eq(brainUploads.id, uploadId));
+      const { versions } = await other.api.brainSources.versions(first.source);
+
+      expect({
+        first,
+        again,
+        otherReaders,
+        byOther,
+        found: await found(other, once),
+        versions: versions.length,
+        rows: rows.map(({ uploadedBy, readers }) => ({ uploadedBy, readers })),
+      }).toStrictEqual({
+        first: { source: { producer: "upload", id: uploadId }, version: 1 },
+        again: first,
+        otherReaders: { refused: "brain.upload_retry_refused" },
+        byOther: { refused: "brain.upload_retry_refused" },
+        found: [uploadId],
+        versions: 1,
+        rows: [{ uploadedBy: uploader.userId, readers: "everyone" }],
+      });
+    }
+  );
+
+  it(
+    "forgets a first upload whose add failed, and takes it again when retried",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const uploadId = crypto.randomUUID();
+      const file = fileOf(`Failed once ${word()}`);
+      await failNextBucketPut();
+
+      const failed = await outcome(
+        async () =>
+          await uploader.api.brainSources.upload(file, everyone, uploadId)
+      );
+      const rowsOf = async () =>
+        await drizzle(env.DB)
+          .select()
+          .from(brainUploads)
+          .where(eq(brainUploads.id, uploadId));
+      const afterFailure = await rowsOf();
+      const retried = await uploader.api.brainSources.upload(
+        file,
+        everyone,
+        uploadId
+      );
+      const afterRetry = await rowsOf();
+
+      expect({
+        failed,
+        afterFailure,
+        retried,
+        rows: afterRetry.length,
+        actions: await actionsOf(uploadId),
+      }).toStrictEqual({
+        failed: { refused: "internal.unexpected" },
+        afterFailure: [],
+        retried: { source: { producer: "upload", id: uploadId }, version: 1 },
+        rows: 1,
+        actions: ["brain.upload.failed", "brain.upload.added"],
+      });
+    }
+  );
+
+  it(
+    "says a file's text is too long, not that the file is, and keeps nothing of it",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      // Captions of about 1.4 MB: well within an upload's 10 MB, but text
+      // past what a source keeps.
+      const cue = "word ".repeat(3999);
+      const cues = Array.from(
+        { length: 70 },
+        (_, index) =>
+          `00:00:${String(index % 60).padStart(2, "0")}.000 --> 00:00:${String(index % 60).padStart(2, "0")}.500\n${cue}`
+      ).join("\n\n");
+      const bytes = new TextEncoder().encode(`WEBVTT\n\n${cues}\n`);
+
+      expect({
+        size: bytes.byteLength < uploadMaxBytes,
+        refused: await outcome(
+          async () =>
+            await uploader.api.brainSources.upload(
+              { name: "Long.vtt", bytes },
+              me,
+              crypto.randomUUID()
+            )
+        ),
+        kept: await drizzle(env.DB)
+          .select()
+          .from(brainUploads)
+          .where(eq(brainUploads.uploadedBy, uploader.userId)),
+      }).toStrictEqual({
+        size: true,
+        refused: { refused: "brain.upload_text_too_long" },
+        kept: [],
       });
     }
   );

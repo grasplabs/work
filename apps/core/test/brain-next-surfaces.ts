@@ -4039,9 +4039,13 @@ const askedOfUploads = async (
   // reader whose own store was erased still adds to.
   let own: string = crypto.randomUUID();
   const made = await answer("a file of their own, to act on", async () => {
-    const uploaded = await sourcesAs(personId).upload(plainFile(), {
-      kind: "everyone",
-    });
+    const uploaded = await sourcesAs(personId).upload(
+      plainFile(),
+      {
+        kind: "everyone",
+      },
+      crypto.randomUUID()
+    );
     own = uploaded.source.id;
     return uploaded;
   });
@@ -4232,18 +4236,28 @@ export const sourcesProbes = {
     await answer(
       "a file of their own, for everyone",
       async () =>
-        await sourcesAs(personId).upload(plainFile(), { kind: "everyone" })
+        await sourcesAs(personId).upload(
+          plainFile(),
+          { kind: "everyone" },
+          crypto.randomUUID()
+        )
     ),
     await answer(
       "a file of their own, for only them",
-      async () => await sourcesAs(personId).upload(plainFile(), { kind: "me" })
+      async () =>
+        await sourcesAs(personId).upload(
+          plainFile(),
+          { kind: "me" },
+          crypto.randomUUID()
+        )
     ),
     await answer(
       "for a team named by the markers",
       async () =>
         await sourcesAs(personId).upload(
           markedFile(markers),
-          unchecked({ kind: "team", teamId: markers.join("") })
+          unchecked({ kind: "team", teamId: markers.join("") }),
+          crypto.randomUUID()
         )
     ),
     await answer(
@@ -4251,7 +4265,8 @@ export const sourcesProbes = {
       async () =>
         await sourcesAs(personId).upload(
           markedFile(markers),
-          unchecked({ kind: "owner", personId: stranger() })
+          unchecked({ kind: "owner", personId: stranger() }),
+          crypto.randomUUID()
         )
     ),
     await answer(
@@ -4262,15 +4277,20 @@ export const sourcesProbes = {
             name: `${markers.join(" ")}.vtt`,
             bytes: new TextEncoder().encode(markers.join(" ")),
           },
-          { kind: "me" }
+          { kind: "me" },
+          crypto.randomUUID()
         )
     ),
     await answer(
       "as someone who isn't a member",
       async () =>
-        await sourcesAs(stranger()).upload(markedFile(markers), {
-          kind: "me",
-        })
+        await sourcesAs(stranger()).upload(
+          markedFile(markers),
+          {
+            kind: "me",
+          },
+          crypto.randomUUID()
+        )
     ),
   ],
 } satisfies Record<

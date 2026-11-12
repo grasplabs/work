@@ -574,7 +574,8 @@ describe(
               `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nUploaded ${sharedWord} ${marker}\n`
             ),
           },
-          readers
+          readers,
+          crypto.randomUUID()
         );
         return source;
       };

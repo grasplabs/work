@@ -110,6 +110,10 @@ interface Faked {
   empty?: boolean;
   /** Refuses uploads, and reading what may be done to one, with this. */
   uploadRefusal?: string;
+  /** Holds each upload until it settles. */
+  uploading?: Promise<boolean>;
+  /** Refuses the first upload with this coded error, as core refuses one. */
+  firstUploadRefused?: { code: string; message: string };
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
@@ -118,9 +122,19 @@ const unmatched = "zeppelin";
 /** Shows the page on a faked core, answering as `faked` says. */
 const shown = async (
   connections: Connection[],
-  { refusal, searched, firstRead, empty = false, uploadRefusal }: Faked = {}
+  {
+    refusal,
+    searched,
+    firstRead,
+    empty = false,
+    uploadRefusal,
+    uploading,
+    firstUploadRefused,
+  }: Faked = {}
 ) => {
   const calls: string[] = [];
+  /** The upload id each upload was sent with, in order. */
+  const uploadIds: string[] = [];
   const brainSources = {
     list: async (after?: BrainSourcesAfter) => {
       await Promise.resolve();
@@ -177,11 +191,18 @@ const shown = async (
     },
     upload: async (
       file: { name: string; bytes: Uint8Array },
-      readers: BrainUploadReaders
+      readers: BrainUploadReaders,
+      uploadId: string
     ) => {
-      await Promise.resolve();
+      uploadIds.push(uploadId);
+      await (uploading ?? Promise.resolve());
       if (uploadRefusal !== undefined) {
         throw new Error(uploadRefusal);
+      }
+      if (firstUploadRefused !== undefined && uploadIds.length === 1) {
+        throw Object.assign(new Error(firstUploadRefused.message), {
+          code: firstUploadRefused.code,
+        });
       }
       const team = readers.kind === "team" ? ` ${readers.teamId}` : "";
       calls.push(
@@ -245,7 +266,7 @@ const shown = async (
     await router.load();
   });
   await settle();
-  return { calls };
+  return { calls, uploadIds };
 };
 
 /** Presses the button whose text starts with `label`. */
@@ -590,6 +611,67 @@ describe(SourcesPage, () => {
       accepts: ".pdf,.docx,.xlsx,.vtt",
       uploadSaysWhy: true,
       panelSaysWhy: true,
+    });
+  });
+
+  it("says it uploads while it does, says a file's text is too long in the person's words, and retries with the same upload's id", async () => {
+    const held = Promise.withResolvers<boolean>();
+    const { uploadIds } = await shown([], {
+      uploading: held.promise,
+      firstUploadRefused: {
+        code: "brain.upload_text_too_long",
+        message: "Core's own words",
+      },
+    });
+    const [, picker] = document.querySelectorAll("input");
+    const form = picker?.closest("form");
+    if (!(picker && form)) {
+      throw new TypeError("No upload form");
+    }
+    const choose = async (name: string) => {
+      await act(async () => {
+        Object.defineProperty(picker, "files", {
+          configurable: true,
+          value: [new File(["WEBVTT"], name, { type: "text/vtt" })],
+        });
+        picker.dispatchEvent(new Event("change", { bubbles: true }));
+        await Promise.resolve();
+      });
+    };
+    const submit = async () => {
+      await act(async () => {
+        form.requestSubmit();
+        await Promise.resolve();
+      });
+      await settle();
+    };
+    await choose("long.vtt");
+    await submit();
+    const whileHeld = section("Upload a file");
+    held.resolve(true);
+    await settle();
+    const refusedText = section("Upload a file");
+    await submit();
+    await choose("other.vtt");
+    await submit();
+
+    expect({
+      whileHeld: whileHeld.includes("Uploading…"),
+      refused: [
+        refusedText.includes(
+          "This file's text is too long for the Brain to keep."
+        ),
+        refusedText.includes("Core's own words"),
+      ],
+      sameOnRetry: uploadIds[0] === uploadIds[1],
+      newForAnotherFile: uploadIds[2] !== uploadIds[1],
+      ids: uploadIds.length,
+    }).toStrictEqual({
+      whileHeld: true,
+      refused: [true, false],
+      sameOnRetry: true,
+      newForAnotherFile: true,
+      ids: 3,
     });
   });
 });

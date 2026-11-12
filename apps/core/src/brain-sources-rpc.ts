@@ -161,11 +161,13 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
 
   async upload(
     file: BrainUploadFile,
-    readers: BrainUploadReaders
+    readers: BrainUploadReaders,
+    uploadId: string
   ): Promise<{ source: BrainSourceRef; version: number }> {
     return await withPerson(
       this.#check,
-      async (person) => await uploadToBrain(this.#env, person, file, readers)
+      async (person) =>
+        await uploadToBrain(this.#env, person, file, readers, uploadId)
     );
   }
 

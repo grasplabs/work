@@ -14337,6 +14337,10 @@ msgstr "Dit document is gewijzigd sinds je het opende. Versie {newerVersion} sta
 msgid "This document is empty."
 msgstr "Dit document is leeg."
 
+#: src/brain/sources-page.tsx
+msgid "This file's text is too long for the Brain to keep. Split it into smaller files and upload those."
+msgstr "De tekst van dit bestand is te lang voor het Brain om te bewaren. Splits het in kleinere bestanden en upload die."
+
 #: src/routes/interview.tsx
 msgid "This interview can't be opened"
 msgstr "Dit gesprek kan niet worden geopend"
@@ -14998,6 +15002,7 @@ msgstr "Nieuwe versie uploaden"
 msgid "Uploaded to knowledge"
 msgstr "Naar kennis geüpload"
 
+#: src/brain/sources-page.tsx
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Wordt geüpload…"

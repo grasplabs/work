@@ -161,7 +161,12 @@ export interface BrainSourcesApi {
    */
   upload: (
     file: BrainUploadFile,
-    readers: BrainUploadReaders
+    readers: BrainUploadReaders,
+    /**
+     * The upload's id, a UUID the page mints for the file it was given
+     * and sends again when it retries: a retry is the same upload.
+     */
+    uploadId: string
   ) => Promise<{ source: BrainSourceRef; version: number }>;
   /** Uploads `file` as the next version of their upload `uploadId`, for the same readers. */
   uploadVersion: (
@@ -190,6 +195,10 @@ export const brainUploadErrors = defineErrorFamily({
     "You can share an upload only with yourself, a team you're in, or everyone.",
   "brain.upload_deleted":
     "This upload was deleted, so it takes no new version.",
+  "brain.upload_text_too_long":
+    "This file's text is too long to keep. Split it into smaller files and upload those.",
+  "brain.upload_retry_refused":
+    "This upload can't go on. Choose the file again to upload it.",
   "brain.upload_busy":
     "Files are being read for many people at the moment. Upload it again in a minute.",
 });

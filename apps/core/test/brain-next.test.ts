@@ -31,8 +31,10 @@ const idp = mockIdp();
 /** A word no other test's sources hold. */
 const word = () => `w${unique()}`;
 
-/** What core or the store says when it refuses an input. */
-/** How core refuses: its own check, the Brain's, or a text the Brain can't keep. */
+/**
+ * What core or the Brain says when it refuses an input: core's own
+ * check, the Brain's, or a text the Brain can't keep.
+ */
 const refused =
   /^(?:The Brain refused it|Refused|There's no text in this to keep|This text is too large for the Brain to keep)/u;
 

@@ -13,6 +13,7 @@ import type {
 } from "@grasp-os/shared/brain-sources";
 import {
   brainQuestionMaxLength,
+  brainUploadErrors,
   firstLineOf,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
@@ -43,6 +44,7 @@ import {
   PageHeaderDescription,
   PageHeaderTitle,
 } from "@grasp-os/ui/components/page-header";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 
@@ -75,7 +77,7 @@ type Sources = Session["brainSources"];
 /** What a read from core came to. */
 type Read<T> =
   | { state: "loading" }
-  | { state: "refused"; message: string }
+  | { state: "refused"; message: string; code?: string }
   | { state: "ready"; data: T };
 
 /**
@@ -92,8 +94,32 @@ const readFrom = async <T,>(
     );
     return { state: "ready", data };
   } catch (error) {
-    return { state: "refused", message: failureText(error) };
+    const code = brainUploadErrors.codeOf(error);
+    return {
+      state: "refused",
+      message: failureText(error),
+      ...(code === undefined ? {} : { code }),
+    };
   }
+};
+
+/**
+ * Why an upload was refused, as the person reads it: core's own words,
+ * but for a file whose text is too long, said in their language.
+ */
+const UploadRefusal = ({
+  refused,
+}: {
+  refused: { message: string; code?: string };
+}) => {
+  const { t } = useLingui();
+  return (
+    <ErrorText>
+      {refused.code === "brain.upload_text_too_long"
+        ? t`This file's text is too long for the Brain to keep. Split it into smaller files and upload those.`
+        : refused.message}
+    </ErrorText>
+  );
 };
 
 /** A file as core takes it: its name and its bytes. */
@@ -238,7 +264,9 @@ const UploadForm = ({
   const core = useCore();
   const fileId = useId();
   const readersId = useId();
-  const [file, setFile] = useState<File>();
+  // The upload's id, minted for the file chosen and sent again when it is
+  // retried, so a retry after a lost answer is the same upload.
+  const [file, setFile] = useState<{ chosen: File; uploadId: string }>();
   const [choice, setChoice] = useState("me");
   const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
   const busy = sent?.state === "loading";
@@ -256,7 +284,11 @@ const UploadForm = ({
           const answer = await readFrom(
             core,
             async (sources) =>
-              await sources.upload(await fileOf(file), readersOf(choice))
+              await sources.upload(
+                await fileOf(file.chosen),
+                readersOf(choice),
+                file.uploadId
+              )
           );
           setSent(answer);
           if (answer.state === "ready") {
@@ -276,7 +308,12 @@ const UploadForm = ({
             accept={uploadAccept}
             id={fileId}
             onChange={(event) => {
-              setFile(event.target.files?.[0]);
+              const chosen = event.target.files?.[0];
+              setFile(
+                chosen === undefined
+                  ? undefined
+                  : { chosen, uploadId: crypto.randomUUID() }
+              );
             }}
             type="file"
           />
@@ -306,7 +343,14 @@ const UploadForm = ({
           </NativeSelect>
         </Field>
         <Button disabled={file === undefined || busy} type="submit">
-          <Trans>Upload</Trans>
+          {busy ? (
+            <>
+              <Spinner aria-hidden="true" />
+              <Trans>Uploading…</Trans>
+            </>
+          ) : (
+            <Trans>Upload</Trans>
+          )}
         </Button>
       </FieldGroup>
       <FieldDescription>
@@ -316,7 +360,7 @@ const UploadForm = ({
           them.
         </Trans>
       </FieldDescription>
-      {sent?.state === "refused" ? <ErrorText>{sent.message}</ErrorText> : null}
+      {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}
     </form>
   );
 };
@@ -366,6 +410,8 @@ const UploadActions = ({
   });
   const [file, setFile] = useState<File>();
   const [acting, setActing] = useState<Read<unknown>>();
+  // Which action is under way: a new version shows it uploads.
+  const [uploading, setUploading] = useState(false);
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
@@ -404,12 +450,14 @@ const UploadActions = ({
               return;
             }
             setActing({ state: "loading" });
+            setUploading(true);
             void (async () => {
               const answer = await readFrom(
                 core,
                 async (sources) =>
                   await sources.uploadVersion(source.id, await fileOf(file))
               );
+              setUploading(false);
               setActing(answer);
               if (answer.state === "ready") {
                 onChanged();
@@ -435,7 +483,14 @@ const UploadActions = ({
             type="submit"
             variant="outline"
           >
-            <Trans>Upload new version</Trans>
+            {uploading ? (
+              <>
+                <Spinner aria-hidden="true" />
+                <Trans>Uploading…</Trans>
+              </>
+            ) : (
+              <Trans>Upload new version</Trans>
+            )}
           </Button>
         </form>
       ) : null}
@@ -461,9 +516,7 @@ const UploadActions = ({
           title={t`Delete this upload?`}
         />
       ) : null}
-      {acting?.state === "refused" ? (
-        <ErrorText>{acting.message}</ErrorText>
-      ) : null}
+      {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
     </div>
   );
 };
