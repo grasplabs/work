@@ -1,10 +1,12 @@
 /**
  * Which model the embedder runs, as its three files (scripts/export.py
  * writes them): the tokenizer and the encoder, which the module reads into
- * its memory, and the token table, one row per token, which stays in the
- * object's storage and is read row by row. Each file is named by its
- * SHA-256 and found in the model files bucket under `modelFileKey`, so a
- * file is never replaced in place and every copy can be checked.
+ * its memory, and the token table, one row per token (or, for a trimmed
+ * table, per piece the tokenizer keeps: its map writes every other piece
+ * as kept ones), which stays in the object's storage and is read row by
+ * row. Each file is named by its SHA-256 and found in the model files
+ * bucket under `modelFileKey`, so a file is never replaced in place and
+ * every copy can be checked.
  *
  * The model is data: its name and its files' hashes and sizes. Each
  * release names the files of `shippedModel` (scripts/release), and each

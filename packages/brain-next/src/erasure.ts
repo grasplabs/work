@@ -4,6 +4,11 @@ import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
+import {
+  eraseMemoriesHiddenBy,
+  eraseMemoriesOfSource,
+  eraseMemoriesOn,
+} from "./forget.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
@@ -68,6 +73,14 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // add for a person alone that began before that person's erasure and
 // lands after it. What is added for them after the erasure is new and
 // kept.
+//
+// Memories go with what they rest on (forget.ts): those drawn from a
+// version are hidden with it (memories.ts reads none whose version an
+// erasure holds) and deleted with it, and again by the replay at start
+// (`replayMemoryErasures`). No memory only one person may read is in the
+// shared store, and a person's own store is erased whole. An entity no
+// memory mentions any more goes with them, its names and identifiers
+// with it.
 //
 // Nothing an erasure answers depends on what it found: it is recorded
 // and answers alike for a source or person that held nothing.
@@ -496,6 +509,34 @@ const coveredFor = (sql: SqlStorage, person: string): Hidden =>
     .map(({ subject, version }) => [subject, version] as const);
 
 /**
+ * Deletes the set of readers `readerSet` once nothing points at it: an
+ * erased person's id goes with their last version.
+ */
+const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
+  const [used] = sql
+    .exec<{ used: number }>(
+      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE reader_set = ?1)
+        OR EXISTS (SELECT 1 FROM vector_models
+          JOIN vector_codes ON vector_codes.model = vector_models.id
+            AND vector_codes.reader_set = ?1)
+        OR EXISTS (SELECT 1 FROM vector_models
+          JOIN vector_blocks ON vector_blocks.model = vector_models.id
+            AND vector_blocks.reader_set = ?1)
+        OR EXISTS (SELECT 1 FROM memories
+          WHERE readers = (SELECT key FROM reader_sets WHERE id = ?1))
+        OR EXISTS (SELECT 1 FROM memory_extractions
+          WHERE readers = (SELECT key FROM reader_sets WHERE id = ?1)) AS used`,
+      readerSet
+    )
+    .toArray();
+  if (used?.used === 1) {
+    return;
+  }
+  sql.exec("DELETE FROM reader_set_members WHERE reader_set = ?", readerSet);
+  sql.exec("DELETE FROM reader_sets WHERE id = ?", readerSet);
+};
+
+/**
  * Applies the erasure `key` (`entry`, and for a person what it hid): the
  * store's record of it, and everything it covers hidden. Run it in one
  * transaction. Safe to repeat. Answers the sources whose current version
@@ -553,30 +594,6 @@ const apply = (
   return stopped;
 };
 
-/**
- * Deletes the set of readers `readerSet` once nothing points at it: an
- * erased person's id goes with their last version.
- */
-const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
-  const [used] = sql
-    .exec<{ used: number }>(
-      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE reader_set = ?1)
-        OR EXISTS (SELECT 1 FROM vector_models
-          JOIN vector_codes ON vector_codes.model = vector_models.id
-            AND vector_codes.reader_set = ?1)
-        OR EXISTS (SELECT 1 FROM vector_models
-          JOIN vector_blocks ON vector_blocks.model = vector_models.id
-            AND vector_blocks.reader_set = ?1) AS used`,
-      readerSet
-    )
-    .toArray();
-  if (used?.used === 1) {
-    return;
-  }
-  sql.exec("DELETE FROM reader_set_members WHERE reader_set = ?", readerSet);
-  sql.exec("DELETE FROM reader_sets WHERE id = ?", readerSet);
-};
-
 /** A version still to erase, as a batch takes it. */
 interface Erasing extends Record<string, SqlStorageValue> {
   row: number;
@@ -625,6 +642,9 @@ const eraseVersion = (sql: SqlStorage, version: Erasing): void => {
     version.source,
     version.row
   );
+  // The memories drawn from it, with names no other memory gives
+  // (forget.ts); hidden since the erasure, as their version is.
+  const memorySets = eraseMemoriesOn(sql, version.row);
   sql.exec("DELETE FROM current_versions WHERE version_row = ?", version.row);
   sql.exec("DELETE FROM erasing_versions WHERE version_row = ?", version.row);
   sql.exec("DELETE FROM source_versions WHERE row = ?", version.row);
@@ -638,7 +658,9 @@ const eraseVersion = (sql: SqlStorage, version: Erasing): void => {
   );
   // The sweep deletes the file once no version holds it (files.ts).
   sql.exec("UPDATE files SET refs = refs - 1 WHERE hash = ?", version.file);
-  dropUnusedReaderSet(sql, version.reader_set);
+  for (const readerSet of new Set([version.reader_set, ...memorySets])) {
+    dropUnusedReaderSet(sql, readerSet);
+  }
 };
 
 /** How a batch went: whether more are left, and whether any failed. */
@@ -1182,4 +1204,60 @@ export const deleteStoreObjects = async (
     }
   }
   return true;
+};
+
+/**
+ * Replays on memories what the erasures the store recorded since it last
+ * did covered, as the store starts, in one transaction: a person's (the
+ * memories on the versions it hid) and a source's (every memory drawn
+ * from it). So an erasure an older
+ * release recorded, which knew no memories (an admin's rollback), reaches
+ * them after the roll forward; one this release applied finds nothing
+ * more. Only those above the mark (`memory_erasure_replay`) are read, and
+ * the mark moves past them, so a start with none recorded since reads one
+ * row. (The mark orders by `erasures`' rowid: a column of its own would
+ * be null on every row an older release writes.) Answers how many it
+ * replayed.
+ */
+export const replayMemoryErasures = (sql: SqlStorage): number => {
+  const through =
+    sql
+      .exec<{ through: number }>(
+        "SELECT through FROM memory_erasure_replay WHERE id = 1"
+      )
+      .toArray()
+      .at(0)?.through ?? 0;
+  const recorded = sql
+    .exec<{
+      rowid: number;
+      key: string;
+      kind: string;
+      subject: string;
+    }>(
+      `SELECT rowid, key, kind, subject FROM erasures
+      WHERE rowid > ? ORDER BY rowid`,
+      through
+    )
+    .toArray();
+  const last = recorded.at(-1);
+  if (last === undefined) {
+    return 0;
+  }
+  const sets: number[] = [];
+  for (const { key, kind, subject } of recorded) {
+    if (kind === "person") {
+      sets.push(...eraseMemoriesHiddenBy(sql, key));
+    } else {
+      sets.push(...eraseMemoriesOfSource(sql, subject));
+    }
+  }
+  for (const readerSet of new Set(sets)) {
+    dropUnusedReaderSet(sql, readerSet);
+  }
+  sql.exec(
+    `INSERT INTO memory_erasure_replay (id, through) VALUES (1, ?1)
+    ON CONFLICT (id) DO UPDATE SET through = ?1`,
+    last.rowid
+  );
+  return recorded.length;
 };
