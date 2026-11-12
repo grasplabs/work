@@ -1212,6 +1212,10 @@ const leavingWork: Record<string, () => Promise<void>> = {
     await sawModel("m@1");
     await own().reembed();
   },
+  // The export is written by the queue (exports.ts).
+  startExport: async () => {
+    await own().startExport({ kind: "person", person });
+  },
   requeueWork: async () => {
     await add(own(), "Parked for good", theirs());
     let parked = 0;
@@ -1246,12 +1250,17 @@ const leavingWork: Record<string, () => Promise<void>> = {
 /** The methods that only read, or take work away (`erasePerson` erases it all). */
 const leavingNone = [
   "erasePerson",
+  "exportFile",
+  "exportStatus",
   "find",
   "readCurrent",
   "readVersion",
   "recall",
   "repackVectors",
+  "restoreStatus",
   "searchVectors",
+  // A person's own store refuses every restore.
+  "startRestore",
   "workOverview",
 ];
 

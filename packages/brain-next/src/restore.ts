@@ -202,28 +202,38 @@ const linesOf = async (
 };
 
 /**
- * Whether `line` is to be left out: a version of its source is there
- * already (this one, restored before), or the store's record of the
- * ledger names it (above). Asked in the transaction that writes it.
+ * Why `line` is not to be written, if it isn't: the store's record of the
+ * ledger names it (above), or it is there already (restored by a run
+ * before this one, stopped part-way). Asked again in the transaction that
+ * writes it.
  */
 const passedOver = (
   sql: SqlStorage,
   line: ExportLine,
   subject: string
-): boolean =>
-  isErased(sql, subject) ||
-  sql
+): "erased" | "there" | undefined => {
+  if (
+    isErased(sql, subject) ||
+    sql
+      .exec(
+        "SELECT 1 FROM erased_versions WHERE subject = ? AND version = ? LIMIT 1",
+        subject,
+        line.version
+      )
+      .toArray().length > 0
+  ) {
+    return "erased";
+  }
+  return sql
     .exec(
-      `SELECT 1 FROM erased_versions WHERE subject = ? AND version = ?
-      UNION ALL
-      SELECT 1 FROM source_versions WHERE source = ? AND version = ?
-      LIMIT 1`,
-      subject,
-      line.version,
+      "SELECT 1 FROM source_versions WHERE source = ? AND version = ? LIMIT 1",
       line.source,
       line.version
     )
-    .toArray().length > 0;
+    .toArray().length > 0
+    ? "there"
+    : undefined;
+};
 
 /** What a restore of a version that must be made again says. */
 const restoreAgain = "The restore lost a file while writing it: run it again";
@@ -231,7 +241,7 @@ const restoreAgain = "The restore lost a file while writing it: run it again";
 /**
  * Writes `line` back as the version it was (above): its file first, then
  * the version whole, in one transaction, unless it is passed over.
- * Answers whether it was written.
+ * Answers whether it is restored now: written, or there already.
  */
 const restoreVersion = async (
   storage: DurableObjectStorage,
@@ -241,8 +251,9 @@ const restoreVersion = async (
 ): Promise<boolean> => {
   const encoder = new TextEncoder();
   const subject = await subjectOf(line.source);
-  if (passedOver(storage.sql, line, subject)) {
-    return false;
+  const before = passedOver(storage.sql, line, subject);
+  if (before !== undefined) {
+    return before === "there";
   }
   const body = encoder.encode(line.text);
   const hash = await hashOf(body);
@@ -264,8 +275,9 @@ const restoreVersion = async (
   }
   return storage.transactionSync(() => {
     const { sql } = storage;
-    if (passedOver(sql, line, subject)) {
-      return false;
+    const now = passedOver(sql, line, subject);
+    if (now !== undefined) {
+      return now === "there";
     }
     if (isInDoubt(db, hash)) {
       throw new WorkError("failed");

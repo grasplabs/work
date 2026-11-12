@@ -886,7 +886,7 @@ export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
 
 /**
  * Where an export is: being written; done, with its files (the manifest
- * first); failed (a file it was to read was gone); or erased, as an
+ * first); failed (a file it was to read was gone: its files deleted); or erased, as an
  * erasure recorded after it started made it stale and its files are
  * deleted: start a new one.
  */

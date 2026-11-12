@@ -409,7 +409,9 @@ const textsOf = async (
 
 /**
  * The export's state set to `state`, in a transaction of its own, if it is
- * still being written and no erasure made it stale since.
+ * still being written and no erasure made it stale since. A failed one is
+ * served to no one, so its files are deleted as a stale one's are: none of
+ * an export's content stays in the bucket where no erasure would reach it.
  */
 const settle = (
   storage: DurableObjectStorage,
@@ -425,6 +427,10 @@ const settle = (
         Date.now(),
         id
       );
+      if (state === "failed") {
+        storage.sql.exec("DELETE FROM export_parts WHERE export = ?", id);
+        enqueueDrop(storage, id);
+      }
     }
   });
 };
