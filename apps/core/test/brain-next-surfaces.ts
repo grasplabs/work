@@ -355,10 +355,13 @@ const refusedChange = async (markers: readonly string[]): Promise<Answer[]> => {
   ];
 };
 
-/** Adds as the chat producer under `id`: the version it answers with. */
-const addAsChat = async (id: string): Promise<number> => {
+/** Adds as `producer` under `id`: the version it answers with. */
+const addAs = async (
+  producer: SourceRef["producer"],
+  id: string
+): Promise<number> => {
   const { version } = await coreBrain.addSource(env, {
-    source: { producer: "chat", id },
+    source: { producer, id },
     change: crypto.randomUUID(),
     // The same text and readers every pass: a later pass's add is the
     // version the first made, so every pass answers alike.
@@ -371,24 +374,31 @@ const addAsChat = async (id: string): Promise<number> => {
 /**
  * Adds as another producer kind, with a hidden source's id and with one no
  * one added: the version each answers with must be the same (a first), so
- * no producer learns what another kind holds under that id.
+ * no producer learns what another kind holds under that id. Never as the
+ * hidden source's own kind, which would add to the source itself (one an
+ * erasure closed refuses that, as it should).
  */
 const otherKindOf = async (
   hiddenVersions: Probing["hiddenVersions"]
 ): Promise<Answer[]> => {
-  const hidden = [...new Set(hiddenVersions.map(({ source }) => source.id))];
+  const hidden = [
+    ...new Map(
+      hiddenVersions.map(({ source }) => [keyOf(source), source])
+    ).values(),
+  ];
   return [
     await answer(
       "another kind, an id no one added",
-      async () => await addAsChat(crypto.randomUUID()),
+      async () => await addAs("chat", crypto.randomUUID()),
       "nothing"
     ),
     ...(await Promise.all(
       hidden.map(
-        async (id, index) =>
+        async ({ producer, id }, index) =>
           await answer(
             `another kind, hidden source ${index}'s id`,
-            async () => await addAsChat(id),
+            async () =>
+              await addAs(producer === "chat" ? "upload" : "chat", id),
             "hidden"
           )
       )
