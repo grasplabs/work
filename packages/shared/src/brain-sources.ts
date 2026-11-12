@@ -84,6 +84,16 @@ export interface BrainSearchPack {
   truncated: boolean;
 }
 
+/**
+ * The first line of `text` that holds something, trimmed: a source's
+ * title, as its listing and its page show it. Empty when none does.
+ */
+export const firstLineOf = (text: string): string =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "") ?? "";
+
 /** How many tokens a search's pack may hold (the Brain's own estimate). */
 export const brainSearchBudget = 4000;
 

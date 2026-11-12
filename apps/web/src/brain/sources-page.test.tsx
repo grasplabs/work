@@ -91,8 +91,15 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Shows the page on a faked core, refusing every call with `refusal` when given. */
-const shown = async (connections: Connection[], refusal?: string) => {
+/**
+ * Shows the page on a faked core, refusing every call with `refusal` when
+ * given, and holding each search until `searched` settles when given.
+ */
+const shown = async (
+  connections: Connection[],
+  refusal?: string,
+  searched?: Promise<boolean>
+) => {
   const calls: string[] = [];
   const brainSources = {
     list: async (after?: BrainSourcesAfter) => {
@@ -136,8 +143,8 @@ const shown = async (connections: Connection[], refusal?: string) => {
         : { source, version, addedAt: "2026-11-10T09:00:00.000Z", text };
     },
     search: async (question: string) => {
-      await Promise.resolve();
       calls.push(`search ${question}`);
+      await (searched ?? Promise.resolve());
       return pack;
     },
   };
@@ -211,7 +218,15 @@ const search = async (question: string): Promise<void> => {
 
 /** The text of the opened source's panel. */
 const panel = (): string =>
-  document.querySelector("section.rounded-lg")?.textContent ?? "";
+  document.querySelector("[data-slot=card]")?.textContent ?? "";
+
+/** The text of the section whose heading is `heading`. */
+const section = (heading: string): string =>
+  [...document.querySelectorAll("section[aria-labelledby]")].find(
+    (each) =>
+      document.querySelector(`[id="${each.getAttribute("aria-labelledby")}"]`)
+        ?.textContent === heading
+  )?.textContent ?? "";
 
 describe(SourcesPage, () => {
   afterEach(() => {
@@ -262,8 +277,7 @@ describe(SourcesPage, () => {
   it("shows recall's pack as core gives it, and opens a result's source at its version", async () => {
     const { calls } = await shown([]);
     await search("  invoices refunds  ");
-    const results = document.querySelector("#results")?.parentElement;
-    const resultText = results?.textContent ?? "";
+    const resultText = section("Results");
     await press("Invoices are paid monthly.");
 
     expect({
@@ -289,18 +303,32 @@ describe(SourcesPage, () => {
     });
   });
 
+  it("asks one search at a time: a question sent while one is searched is not asked", async () => {
+    const answered = Promise.withResolvers<boolean>();
+    const { calls } = await shown([], undefined, answered.promise);
+    await search("invoices");
+    await search("refunds");
+    answered.resolve(true);
+    await settle();
+
+    expect({
+      calls,
+      shown: section("Results").includes("Invoices are paid monthly."),
+    }).toStrictEqual({ calls: ["list", "search invoices"], shown: true });
+  });
+
   it("says for each connection that agents search it live and the Brain keeps nothing, and says when there are none", async () => {
     await shown([
       { name: "Gmail", status: "connected", via: "direct", matches: [] },
       { name: "HubSpot", status: "connected", via: "composio", matches: [] },
     ]);
-    const feeds = document.querySelector("#feeds")?.parentElement?.textContent;
+    const feeds = section("How your connections feed the Brain");
     act(() => {
       root?.unmount();
     });
     document.body.replaceChildren();
     await shown([]);
-    const none = document.querySelector("#feeds")?.parentElement?.textContent;
+    const none = section("How your connections feed the Brain");
 
     expect({ feeds, none }).toStrictEqual({
       feeds:

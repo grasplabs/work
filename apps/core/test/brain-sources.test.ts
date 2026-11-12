@@ -1,6 +1,11 @@
-import { brainOf, listPageMax } from "@grasp-os/brain-next/contract";
+import {
+  brainOf,
+  listPageMax,
+  questionMaxLength,
+} from "@grasp-os/brain-next/contract";
 import type { Reader } from "@grasp-os/brain-next/contract";
 import { brainSearchBudget } from "@grasp-os/shared/brain-sources";
+import { roleErrors } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -11,7 +16,7 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi } from "./sign-in.ts";
+import { openRpc, signedIn, signedInApi, staffPerson } from "./sign-in.ts";
 
 type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 
@@ -260,6 +265,31 @@ describe("the Brain's sources, as a person reads them", () => {
       { found: true, notFound: [missing], truncated: true },
       { found: false, notFound: [missing, missing], truncated: false },
     ]);
+  });
+
+  it("refuses a question longer than the Brain takes, as recall does for every caller", async () => {
+    const { api, userId } = await signedInApi(idp, "user");
+    const tooLong = "a".repeat(questionMaxLength + 1);
+    await expect(api.brainSources.search(tooLong)).rejects.toThrow(
+      "Something went wrong."
+    );
+    // Core's own refusal, not the store's ("The Brain refused it"): the
+    // question is checked before anything of it reaches the embedder.
+    await expect(
+      recallAs(env, userId, {
+        question: tooLong,
+        budget: { tokens: brainSearchBudget },
+      })
+    ).rejects.toThrow(/^Refused: /u);
+  });
+
+  it("refuses a Grasp staff session", async () => {
+    const staff = await openRpc(
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    await expect(staff.core.authenticate().brainSources.list()).rejects.toThrow(
+      roleErrors.create("role.forbidden").message
+    );
   });
 
   it("pages through what the person may read alone, newest first, and lists nothing erased", async () => {

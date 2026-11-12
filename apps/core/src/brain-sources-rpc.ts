@@ -9,7 +9,6 @@ import type {
   BrainSourceText,
   BrainSourceVersionPage,
 } from "@grasp-os/shared/brain-sources";
-import { z } from "zod";
 
 import {
   listSourcesAs,
@@ -32,21 +31,6 @@ import type { SessionCheck } from "./session-check.ts";
 // per read, as `recallAs` isn't: what a source is and who may read it
 // are the Brain's, and brain-next.ts checks every source and version it
 // is given with its own rules.
-
-/** Where a page starts, as the page sends back what `list` answered. */
-const afterSchema = z.strictObject({
-  addedAt: z.iso.datetime(),
-  source: z.strictObject({ producer: z.string(), id: z.string() }),
-});
-
-/** `input` as `schema` reads it, or an error naming what was wrong. */
-const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
-  const result = schema.safeParse(input);
-  if (!result.success) {
-    throw new Error(`Refused: ${z.prettifyError(result.error)}`);
-  }
-  return result.data;
-};
 
 /**
  * `source` as core's Brain takes it: its own rules check the producer and
@@ -87,17 +71,17 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
 
   async list(after?: BrainSourcesAfter): Promise<BrainSourcePage> {
     return await withPerson(this.#check, async (person) => {
-      const from =
-        after === undefined ? undefined : checked(afterSchema, after);
+      // Where the page starts, as `list` answered it: brain-next.ts checks
+      // it strictly (a time that is one, a source as its rules name one).
       const { sources, next } = await listSourcesAs(
         this.#env,
         person.userId,
-        from === undefined
+        after === undefined
           ? {}
           : {
               after: {
-                addedAt: new Date(from.addedAt),
-                source: refOf(from.source),
+                addedAt: new Date(after.addedAt),
+                source: refOf(after.source),
               },
             }
       );
@@ -155,7 +139,7 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
       this.#check,
       async (person) =>
         await recallAs(this.#env, person.userId, {
-          question: checked(z.string(), question),
+          question,
           budget: { tokens: brainSearchBudget },
         })
     );

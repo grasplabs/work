@@ -6,6 +6,7 @@ import {
   instructionsTextSchema,
   isOverInstructionsLimit,
   principalMaxLength,
+  questionMaxLength,
   sourceIdMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
@@ -41,6 +42,7 @@ import type {
   BrainStep,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
+import { firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
@@ -65,8 +67,11 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // A source is named by the producer that adds it (one of `producerKinds`)
 // and that producer's own id for it; the Brain's key for it is made only
 // here (`sourceKeyOf`), so one producer can never name another's sources.
-// `addSource` and `readSourceVersionAs` are server-side functions for
-// producers: never reached by people, Apps or the SDK directly.
+// `addSource` is a server-side function for producers: never reached by
+// people, Apps or the SDK directly. People read sources only through the
+// functions ending in `As` (the Brain's Sources page reaches
+// `listSourcesAs`, `listVersionsAs`, `readSourceVersionAs` and `recallAs`
+// through `session.brainSources`), which read as them.
 //
 // Every argument is checked here, strictly, before anything is named for
 // the Brain: an empty or missing ID would otherwise become a principal
@@ -346,6 +351,9 @@ const isUsableVector = (vector: readonly number[]): boolean =>
  * by words and exact parts. With no model shipped there is no why: going
  * without is no failure then.
  */
+/** A question as the Brain takes one (`recallRequestSchema`). */
+const questionSchema = wellFormedString().max(questionMaxLength);
+
 const meaningOf = async (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
   question: string
@@ -379,8 +387,10 @@ const meaningOf = async (
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question, budget, asOf }: Recall
+  { question: asked, budget, asOf }: Recall
 ): Promise<RecalledPack> => {
+  // As the Brain checks it, before the embedder sees any of it.
+  const question = checked(questionSchema, asked);
   const [reader, meaning] = await Promise.all([
     readerOf(env, personId),
     // As of a moment the Brain never searches by meaning: nothing to embed.
@@ -465,13 +475,6 @@ export interface SourcePage {
   sources: ListedSource[];
   next: SourcesAfter | null;
 }
-
-/** The first line of `opening` that holds text, trimmed. */
-const firstLineOf = (opening: string): string =>
-  opening
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line !== "") ?? "";
 
 /**
  * A page of the sources the member `personId` may read, of every
