@@ -484,9 +484,11 @@ describe("the interview link emails", () => {
     // Every reminder fails. Then Pam finishes, Pat withdraws, Pia deletes
     // her interview; Pol's link had failed too and he is still owed it;
     // Peg is sent hers again and finishes before it goes. In the order
-    // their mails go: by the roster for links, by id for reminders.
-    const [pam, pat, pia, pol, peg] = ["pa", "pb", "pc", "pd", "pe"];
-    const people = [pam, pat, pia, pol, peg];
+    // their mails go: by the roster for links, by id for reminders. Pip
+    // withdraws before reminder day: never reminded at all.
+    const [pam, pat, pia, pol, peg, pip] = ["pa", "pb", "pc", "pd", "pe", "pf"];
+    const owed = [pam, pat, pia, pol, peg];
+    const people = [...owed, pip];
     // Before anything goes: their links go out as the agreements are in.
     const mail = await captureMail(
       store,
@@ -495,7 +497,8 @@ describe("the interview link emails", () => {
       "sent",
       "E_RECIPIENT_SUPPRESSED",
       "sent",
-      ...people.map(() => "E_RECIPIENT_SUPPRESSED"),
+      "sent",
+      ...owed.map(() => "E_RECIPIENT_SUPPRESSED"),
       // Peg's, sent again: the service is busy, so it waits.
       "E_RATE_LIMIT_EXCEEDED"
     );
@@ -519,10 +522,17 @@ describe("the interview link emails", () => {
     const patLink = await openLink(pat);
     await participate(patLink);
     const piaLink = await openLink(pia);
+    const pipLink = await openLink(pip);
+    await participate(pipLink);
+    await onLink({ action: "withdraw", ...pipLink });
     const remindOn = `${addDays(today, 5)}T08:00:00.000Z`;
     const reminded = await store.remindDue(remindOn);
     await store.deliverMail(Date.parse(remindOn));
     const triedBefore = mail.tried.length;
+    const snapshot = await adminSnapshot();
+    const pipReminded = snapshot.links.find(
+      (link) => link.person === pip
+    )?.remindedAt;
 
     const now = new Date().toISOString();
     await store.noteInterview({
@@ -553,12 +563,14 @@ describe("the interview link emails", () => {
 
     expect({
       reminded,
+      pipReminded,
       notOwed,
       pegAgain,
       polAgain,
       after: mail.tried.slice(triedBefore).map(whichTo),
     }).toStrictEqual({
-      reminded: people,
+      reminded: owed,
+      pipReminded: null,
       notOwed: [
         "onboarding.reminder_not_owed",
         "onboarding.reminder_not_owed",

@@ -4858,7 +4858,7 @@ export class Onboarding extends DurableObject<Env> {
     ) {
       return [];
     }
-    const due = this.#remindable(roster, now);
+    const due = this.#remindable(now);
     if (due.length === 0) {
       return [];
     }
@@ -4949,19 +4949,12 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Whose reminder is due by `now`: their link out by email, and not
-   * finished. A link handed over on paper is the admin's to remind about.
+   * Whose reminder is due by `now`: not reminded yet, still owed one
+   * (`#reminderOwed`: never someone who finished, withdrew or deleted
+   * their interview), and their link out the working days before. A link
+   * handed over on paper is the admin's to remind about.
    */
-  #remindable(
-    roster: Roster,
-    now: string
-  ): { person: string; sentAt: string }[] {
-    const states = this.#interviews();
-    const taking = new Set(
-      roster.people
-        .filter((person) => takingPart(roster, person) && person.email !== "")
-        .map(({ id }) => id)
-    );
+  #remindable(now: string): { person: string; sentAt: string }[] {
     return this.#db
       .select()
       .from(links)
@@ -4970,11 +4963,9 @@ export class Onboarding extends DurableObject<Env> {
       .filter(
         (link) =>
           link.remindedAt === null &&
-          link.deletedAt === null &&
-          (states.get(link.person)?.completedAt ?? null) === null &&
-          taking.has(link.person) &&
           dayOf(now) >=
-            addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays)
+            addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays) &&
+          this.#reminderOwed(link.person)
       )
       .map(({ person, sentAt }) => ({ person, sentAt }));
   }

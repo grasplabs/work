@@ -348,7 +348,10 @@ export const deliverMail = async (
     }
     if (delivery.wanted?.(claimed) === false) {
       storage.exec("DELETE FROM mail_outbox WHERE key = ?", claimed.key);
-      log.info("mail.dropped", { key: claimed.key });
+      // Its kind only: whom it was for would say why it isn't wanted (a
+      // reminder dropped: they finished or withdrew).
+      const [kind = "mail"] = claimed.key.split("/");
+      log.info("mail.dropped", { kind });
       continue;
     }
     // One at a time: a burst would only run into the quota sooner.
