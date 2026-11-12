@@ -1749,7 +1749,7 @@ build: {
    * draft sealed as a release, on the App's preview's one store of test
    * data, which its builders share and which keeps what calls write
    * across your writes until a builder resets it, with no connections,
-   * Knowledge or models (\`permission.unavailable\`); what it wrote with
+   * Brain or models (\`permission.unavailable\`); what it wrote with
    * \`console\`, in the next \`check\`'s \`preview.logs\`. A failure
    * the draft's to fix comes back as \`ok: false\`: a path that names none
    * of its functions, code that doesn't seal (\`message\` names why: each
@@ -1771,7 +1771,7 @@ build: {
    * (React's development warnings); \`preview.seen\` is false when nobody
    * has the preview open, so its pages weren't run: say so, or \`call\`
    * the server yourself. A preview reaches nothing outside it: a
-   * function's call through a permission (a connection, Knowledge, a
+   * function's call through a permission (a connection, the Brain, a
    * model) rejects with \`permission.unavailable\`, and a page's workflow
    * run with \`app.preview_side_effect\`. Handle either as a failed call,
    * as a page must live. You never publish: once it passes, tell the

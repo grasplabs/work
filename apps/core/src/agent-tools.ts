@@ -4,8 +4,8 @@ import { Type } from "@earendil-works/pi-ai";
 import type { Message, Static, TSchema } from "@earendil-works/pi-ai";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { searchQueryMaxLength } from "@grasp-os/shared/knowledge";
 import { exports } from "cloudflare:workers";
 import { Value } from "typebox/value";
 import { z } from "zod";
@@ -992,7 +992,7 @@ const definitions = (known: Map<string, string>) => {
         {
           question: Type.String({
             minLength: 1,
-            maxLength: searchQueryMaxLength,
+            maxLength: brainQuestionMaxLength,
             description: "The question, in words.",
           }),
         },
