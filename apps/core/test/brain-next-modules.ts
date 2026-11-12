@@ -29,6 +29,10 @@ export const brainModules = {
   // Erases the sources of runs past their retention with core's
   // eraseSource, and answers nothing of it.
   "apps/core/src/brain-next-origins.ts": "core",
+  // Core's producers for the Brain's hand-overs and their relay: puts keys
+  // on the queue with core's queueHandOvers, and reads the sources it
+  // hands over from core's own records; answers nothing of the Brain.
+  "apps/core/src/brain-sources.ts": "core",
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",

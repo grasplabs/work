@@ -11,6 +11,7 @@ import { vi } from "vite-plus/test";
 
 import { brainWorkOverview, workBrain } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { noProducers } from "./no-producers.ts";
 
 /** The Brain's one store, as core reaches it. */
 const store = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
@@ -104,14 +105,14 @@ export const later = (ms: number): void => {
 /** Ticks core's clock past a file's grace, so the sweep takes what is due. */
 export const tickPastGrace = async (): Promise<void> => {
   later(fileGraceMs + 1);
-  await workBrain(env, new Date());
+  await workBrain(env, new Date(), noProducers);
 };
 
 /** Ticks until no erasure is left unfinished, at most `most` ticks. */
 export const tickUntilErased = async (most = 10): Promise<number> => {
   for (let tick = 1; tick <= most; tick += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time
     const { erasing } = await brainWorkOverview(env);
     if (erasing === 0) {
