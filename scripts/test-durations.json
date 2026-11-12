@@ -1023,6 +1023,7 @@
   "scripts apps/admin/vite.config.test.ts": 0,
   "scripts apps/core/build-blueprints.test.ts": 0.1,
   "scripts apps/core/host-json.bundle.test.ts": 3.6,
+  "scripts scripts/brain-eval-model.test.ts": 0.9,
   "scripts scripts/brain-eval-scoring.test.ts": 0.2,
   "scripts scripts/cf-worker.test.ts": 0,
   "scripts scripts/check-attribution.test.ts": 0,
