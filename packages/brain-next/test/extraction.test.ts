@@ -520,7 +520,7 @@ describe("extracting memories", () => {
   it("gives what a model drew from a restricted text only to its readers, whatever public text it quotes", async () => {
     const token = unique("t");
     const name = unique("Initech");
-    const owner = unique("owner");
+    const board = unique("board");
     const everyone = unique("company");
     const sentence = `${name} renews on 1 March 2027.`;
     // The same sentence in a source the whole company reads.
@@ -542,17 +542,94 @@ describe("extracting memories", () => {
       })
     );
     await added(
-      `${token}: Private notes. ${sentence} Salary talks next week.`,
-      { kind: "owner", person: owner },
+      `${token}: Board notes. ${sentence} Salary talks next week.`,
+      audience(board),
+      { extract: fromOutside() }
+    );
+    await tick();
+    const asBoard = await readAs(
+      { person: unique("p"), groups: [board] },
+      name
+    );
+    const asCompany = await readAs(
+      { person: unique("p"), groups: [everyone] },
+      name
+    );
+
+    expect({
+      board: asBoard.map(({ value }) => value),
+      company: asCompany,
+    }).toStrictEqual({ board: ["2027-03-01"], company: [] });
+  });
+
+  it("asks nothing of a version only one person may read in the shared store, which keeps no memory of theirs", async () => {
+    const token = unique("t");
+    answers.set(token, answering({ entities: [], memories: [] }));
+    await added(
+      `${token}: My own notes.`,
+      { kind: "owner", person: unique("owner") },
       { extract: fromOutside() }
     );
     await tick();
 
-    const asOwner = await readAs({ person: owner, groups: [] }, name);
+    expect(callsOf(token)).toStrictEqual([]);
+  });
+
+  it("draws from a person's own source in their own store, as that store's tick runs it, for them alone", async () => {
+    const token = unique("t");
+    const name = unique("Pied");
+    const person = unique("person");
+    const store = env.BRAIN_STORE.getByName(`person:${person}`);
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    await store.addSource({
+      source: unique("mine"),
+      change: crypto.randomUUID(),
+      text: `${token}: ${name} is active.`,
+      access: { kind: "owner", person },
+      extract: fromOutside({
+        speaker: { kind: "internal", person },
+      }),
+    });
+    clock += 60_000;
+    // As the person's own store's alarm runs a tick: its host's model,
+    // embedders and window; no hand-overs, which only the shared store
+    // queues.
+    await store.work({
+      ask,
+      at: new Date(clock),
+      embedders: noModel,
+      handOvers: noHandOvers,
+      contextTokens: null,
+    });
+    const reader = { person, groups: [] };
+    const {
+      entities: [entity],
+    } = await store.findEntities({ reader, name });
+    const { memories } =
+      entity === undefined
+        ? { memories: [] }
+        : await store.readMemories({ entity: entity.id, reader });
+
     expect({
-      owner: asOwner.length,
-      company: await readAs({ person: unique("p"), groups: [everyone] }, name),
-    }).toStrictEqual({ owner: 1, company: [] });
+      calls: callsOf(token).map(({ purpose }) => purpose),
+      memories: memories.map(({ value, speaker }) => ({ value, speaker })),
+    }).toStrictEqual({
+      calls: ["brain.extract", "brain.extract.check"],
+      memories: [{ value: "active", speaker: { kind: "internal", person } }],
+    });
   });
 
   it("draws once from the newest version waiting, and never twice from one", async () => {
