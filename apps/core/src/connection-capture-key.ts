@@ -24,20 +24,24 @@ const sha256Hex = async (text: string): Promise<string> =>
     .join("");
 
 /**
- * The id the item `itemId` (as its connector names it) read through
- * `connectionId` is kept under for `personId`: `<connection>/<hash>`.
- * Reading the item again makes its next version. The hash covers the
- * person, so no two people's reads share a source; an outside ID is
- * hashed, never put in a key as it is, so none reaches another kind's
- * keys or lengthens it. (A connection ID too long for a source's id is
- * refused by core's Brain module, as any producer's id is.)
+ * The id the item `itemId` (as its connector names it) read by the tool
+ * `action` through `connectionId` is kept under for `personId`:
+ * `<connection>/<hash>`. The same tool reading the item again makes its
+ * next version. The hash covers the tool, as tools read an item in
+ * different ways (a list's summary, a full read): one never replaces what
+ * another kept. It covers the person, so no two people's reads share a
+ * source. An outside ID is hashed, never put in a key as it is, so none
+ * reaches another kind's keys or lengthens it. (A connection ID too long
+ * for a source's id is refused by core's Brain module, as any producer's
+ * id is.)
  */
 export const captureIdOf = async (
   connectionId: string,
   personId: string,
+  action: string,
   itemId: string
 ): Promise<string> =>
-  `${connectionId}/${await sha256Hex(JSON.stringify([personId, itemId]))}`;
+  `${connectionId}/${await sha256Hex(JSON.stringify([personId, action, itemId]))}`;
 
 /** The connection a captured source's id names (`captureIdOf`), if it is one. */
 export const connectionOfCapture = (id: string): string | undefined => {

@@ -8,21 +8,27 @@ import { captureIdOf } from "../src/connection-capture-key.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { consentCode, stephenGraphUrl } from "./connect-providers.ts";
+import {
+  consentCode,
+  stephenGoogleUrl,
+  stephenGraphUrl,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { acmeTenant } from "./sign-in-config.ts";
+import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
 // Capture (GRA-1730, src/connection-capture.ts): what a chat's agent reads
-// through its person's own connection is kept in the Brain, an item a
-// source, for that person alone. These start from the ways it can fail
-// (the threat model and decisions on GRA-1730): someone else recalls what
-// was read in another's chat; a shared connection's read outlives the
-// person's access; a toolkit that forbids copies, a change, or an answer
-// naming no item is kept; overlapping reads pile up copies of one item; a
-// credential is stored; a failing Brain fails or holds up the agent.
+// through its person's own connection, with a tool that reaches their own
+// things, is kept in the Brain, an item a source per tool, for that person
+// alone, in their own store. These start from the ways it can fail (the
+// threat model and decisions on GRA-1730): someone else recalls what was
+// read in another's chat; a read of a shared connection, or of the
+// company's or others' things, outlives the person's access at the source;
+// a toolkit that forbids copies, a change, or an answer naming no item is
+// kept; one tool's view of an item replaces another's; a credential is
+// stored; a failing Brain fails or holds up the agent.
 
 const idp = mockIdp();
 
@@ -63,23 +69,22 @@ const grant = async (
   });
 };
 
-/** What the Microsoft 365 connection's reads need. */
-const rights =
-  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite";
-
-/**
- * `person`'s own Microsoft 365 connection, to the account they sign in
- * with, and its mailbox.
- */
-const ownMicrosoft = async (person: Person) => {
-  const subject = String(person.person.oid);
+/** `person`'s own connection to `provider`, as `subject` with `rights`. */
+const ownConnection = async (
+  person: Person,
+  provider: "google" | "microsoft",
+  subject: string,
+  rights: string
+) => {
   const { url } = await person.api.connections.start({
-    provider: "microsoft",
+    provider,
     scope: "personal",
   });
   const authorization = new URL(url);
+  const tenant =
+    provider === "google" ? signInConfig.google.hostedDomain : acmeTenant;
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject, rights),
+    code: consentCode(authorization, tenant, subject, rights),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {
@@ -95,39 +100,71 @@ const ownMicrosoft = async (person: Person) => {
   return { connectionId: connection.id, mailbox: `${subject}@acme.test` };
 };
 
+/** `person`'s own Google account, their sign-in's address: its mail reaches theirs alone. */
+const ownGmail = async (person: Person) =>
+  await ownConnection(
+    person,
+    "google",
+    String(person.person.email).replace(/@.*$/u, ""),
+    "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/gmail.readonly"
+  );
+
+/** `person`'s own Microsoft 365 account: its mail tools reach any mailbox. */
+const ownMicrosoft = async (person: Person) =>
+  await ownConnection(
+    person,
+    "microsoft",
+    String(person.person.oid),
+    "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite"
+  );
+
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
 
-/** Sets the messages of `mailbox` in the fake Graph. */
-const mailboxHolds = async (
-  mailbox: string,
-  messages: { id: string; subject: string }[]
-) => {
+/** Sets a world in the fake Google or Graph at `controlUrl`. */
+const worldHolds = async (controlUrl: string, world: unknown) => {
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {
     throw new TypeError("Expected the providers Worker");
   }
-  await providers.fetch(stephenGraphUrl, {
+  await providers.fetch(controlUrl, {
     method: "POST",
-    body: JSON.stringify({
-      mailbox,
-      events: [],
-      messages: messages.map(({ id, subject }) => ({
-        id,
-        subject,
-        body: { contentType: "text", content: `About ${subject}` },
-        receivedDateTime: "2026-11-12T09:00:00Z",
-        from: { emailAddress: { address: "ben@acme.test", name: "Ben" } },
-      })),
-    }),
+    body: JSON.stringify(world),
   });
 };
 
-/** A Composio answer naming the one message it read. */
-const messageRead = (id: string, subject: string) => ({
-  content: [{ type: "text", text: JSON.stringify({ id, subject }) }],
-  structuredContent: { id, subject },
-  _meta: { [provenanceMetaKey]: [id] },
+/** A message as Gmail holds it (`format=full`): `subject`, and `body`. */
+const gmailMessage = (id: string, subject: string, body: string) => ({
+  id,
+  threadId: id,
+  labelIds: ["INBOX"],
+  snippet: subject,
+  internalDate: String(Date.parse("2026-11-12T09:00:00Z")),
+  payload: {
+    mimeType: "text/plain",
+    headers: [
+      { name: "From", value: "Ben <ben@acme.test>" },
+      { name: "Subject", value: subject },
+      { name: "Message-ID", value: `<${id}@mail.gmail.com>` },
+    ],
+    body: {
+      size: new TextEncoder().encode(body).byteLength,
+      data: btoa(body)
+        .replaceAll("+", "-")
+        .replaceAll("/", "_")
+        .replaceAll("=", ""),
+    },
+  },
+});
+
+/** A message body whose own word is past what a list shows of it. */
+const bodyWith = (word: string) => `${"Dear Ben, ".repeat(40)}${word}`;
+
+/** A toolkit's answer naming the messages it read. */
+const messagesRead = (messages: { id: string; subject: string }[]) => ({
+  content: [{ type: "text", text: JSON.stringify({ messages }) }],
+  structuredContent: { messages },
+  _meta: { [provenanceMetaKey]: messages.map(({ id }) => id) },
 });
 
 /**
@@ -187,20 +224,24 @@ const shown = ({ action, actor, detail }: AuditEvent) => ({
 });
 
 describe("what a chat's agent reads through a connection", setUpTime, () => {
-  it("is kept item by item from the person's own native connection, for them alone, and their recall names it", async () => {
+  it("is kept item by item from the person's own mail, for them alone, and their recall names the connection", async () => {
     const [person, stranger] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
     ]);
     const marker = markerOf();
-    const { connectionId, mailbox } = await ownMicrosoft(person);
-    await mailboxHolds(mailbox, [
-      { id: `quote-${marker}`, subject: `Quote ${marker}` },
-      { id: `order-${marker}`, subject: `Order ${marker}` },
-    ]);
+    const { connectionId, mailbox } = await ownGmail(person);
+    await worldHolds(stephenGoogleUrl, {
+      mailbox,
+      events: [],
+      messages: [
+        gmailMessage(`quote-${marker}`, `Quote ${marker}`, "The quote."),
+        gmailMessage(`order-${marker}`, `Order ${marker}`, "The order."),
+      ],
+    });
     const chat = await chatOf(
       person.userId,
-      step(calling("MAIL", "mail.list", { mailbox })),
+      step(calling("MAIL", "mail.list", { mailbox, search: marker })),
       says("Found them.")
     );
     await grant(chat, connectionId, "MAIL", ["mail.list"]);
@@ -226,7 +267,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         {
           action: "brain.capture.kept",
           onBehalfOf: person.userId,
-          detail: { items: 2, kept: 2, failed: 0 },
+          detail: { items: 2, kept: 2, failed: 0, skipped: 0 },
         },
       ],
       items: [
@@ -239,50 +280,113 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     expect(JSON.stringify(events)).not.toContain(marker);
   });
 
-  it("keeps an item read again, alone or among others, as its next version, never a second copy", async () => {
+  it("keeps an item one tool reads again as its next version, and what another tool read of it beside it", async () => {
+    const person = await signedInApi(idp, "user");
+    const [marker, inBody] = [markerOf(), markerOf()];
+    const { connectionId, mailbox } = await ownGmail(person);
+    const id = `quote-${marker}`;
+    const read = calling("MAIL", "mail.get", { mailbox, message: id });
+    const chat = await chatOf(
+      person.userId,
+      step(read),
+      says("Read it."),
+      step(read),
+      says("Read it again."),
+      step(calling("MAIL", "mail.list", { mailbox, search: marker })),
+      says("Listed it.")
+    );
+    await grant(chat, connectionId, "MAIL", ["mail.get", "mail.list"]);
+
+    await worldHolds(stephenGoogleUrl, {
+      mailbox,
+      events: [],
+      messages: [gmailMessage(id, `Quote ${marker}`, bodyWith("draft"))],
+    });
+    await chat.ask("Read the quote.");
+    await captures(connectionId, 1);
+    await worldHolds(stephenGoogleUrl, {
+      mailbox,
+      events: [],
+      messages: [gmailMessage(id, `Quote ${marker}`, bodyWith(inBody))],
+    });
+    await chat.ask("Read it again.");
+    await captures(connectionId, 2);
+    await chat.ask("List it.");
+    await captures(connectionId, 3);
+
+    const bySubject = await recalled(person.userId, `quote ${marker}`);
+    const byBody = await recalled(person.userId, inBody);
+    expect({
+      // The full read, at its second version, and the list's view: two
+      // sources of one item, neither replacing the other.
+      bySubject: bySubject.texts
+        .map(({ version, text }) => ({
+          version,
+          full: text.includes(inBody),
+        }))
+        .toSorted((one, other) => Number(one.full) - Number(other.full)),
+      // The full text is still found after the list read it.
+      byBody: byBody.texts.map(({ version }) => version),
+    }).toStrictEqual({
+      bySubject: [
+        { version: 1, full: false },
+        { version: 2, full: true },
+      ],
+      byBody: [2],
+    });
+  });
+
+  it("keeps nothing of a tool that reaches beyond the person's own things, counted as skipped", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const { connectionId, mailbox } = await ownMicrosoft(person);
-    const list = calling("MAIL", "mail.list", { mailbox });
+    await worldHolds(stephenGraphUrl, {
+      mailbox,
+      events: [],
+      messages: [`quote-${marker}`, `order-${marker}`].map((id) => ({
+        id,
+        subject: `${id} ${marker}`,
+        body: { contentType: "text", content: "About it" },
+        receivedDateTime: "2026-11-12T09:00:00Z",
+        from: { emailAddress: { address: "ben@acme.test", name: "Ben" } },
+      })),
+    });
     const chat = await chatOf(
       person.userId,
-      step(list),
-      says("Found it."),
-      step(list),
+      step(calling("MAIL", "mail.list", { mailbox })),
       says("Found them.")
     );
     await grant(chat, connectionId, "MAIL", ["mail.list"]);
 
-    await mailboxHolds(mailbox, [
-      { id: `quote-${marker}`, subject: `Quote ${marker} draft` },
-    ]);
-    await chat.ask("Find the quote.");
-    await captures(connectionId, 1);
-    await mailboxHolds(mailbox, [
-      { id: `quote-${marker}`, subject: `Quote ${marker} final` },
-      { id: `order-${marker}`, subject: `Order ${marker}` },
-    ]);
-    await chat.ask("Find it again.");
-    await captures(connectionId, 2);
+    await chat.ask("Find them.");
+    const events = await captures(connectionId);
 
-    const { texts } = await recalled(person.userId, `quote ${marker}`);
-    expect(
-      texts
-        .filter(({ text }) => text.includes(`quote-${marker}`))
-        .map(({ version, text }) => ({
-          version,
-          final: text.includes("final"),
-        }))
-    ).toStrictEqual([{ version: 2, final: true }]);
+    expect({
+      events: events.map(shown),
+      recalled: await recalled(person.userId, marker),
+    }).toStrictEqual({
+      events: [
+        {
+          action: "brain.capture.skipped",
+          onBehalfOf: person.userId,
+          detail: { reason: "reach", items: 2, kept: 0, failed: 0, skipped: 2 },
+        },
+      ],
+      recalled: { texts: [], elsewhere: [] },
+    });
   });
 
-  it("is kept from the person's own Composio toolkit when its server names the item, and never of a change", async () => {
+  it("is kept from the person's own toolkit when its server names the item, and never of a change", async () => {
     const person = await signedInApi(idp, "user");
     const [named, sent] = [markerOf(), markerOf()];
     const mail = await mailConnection([], mailWithSearch, {
+      provider: "mail_own",
       owner: person.userId,
     });
-    await mail.answer("mail.search", messageRead(`message-${named}`, named));
+    await mail.answer(
+      "mail.search",
+      messagesRead([{ id: `message-${named}`, subject: named }])
+    );
     const chat = await chatOf(
       person.userId,
       step(
@@ -308,15 +412,19 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         {
           action: "brain.capture.kept",
           onBehalfOf: person.userId,
-          detail: { items: 1, kept: 1, failed: 0 },
+          detail: { items: 1, kept: 1, failed: 0, skipped: 0 },
         },
       ],
-      named: [JSON.stringify({ id: `message-${named}`, subject: named })],
+      named: [
+        JSON.stringify({
+          messages: [{ id: `message-${named}`, subject: named }],
+        }),
+      ],
       sent: { texts: [], elsewhere: [] },
     });
   });
 
-  it("keeps nothing from a shared connection, audited as skipped, nor from a toolkit that forbids copies or an answer naming no item", async () => {
+  it("keeps nothing from a shared connection, counted as skipped, nor from a toolkit that forbids copies or an answer naming no item", async () => {
     const person = await signedInApi(idp, "user");
     const [sharedMarker, privateMarker, unnamed, witness] = [
       markerOf(),
@@ -324,27 +432,34 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       markerOf(),
       markerOf(),
     ];
-    const shared = await mailConnection([], mailWithSearch);
+    const shared = await mailConnection([], mailWithSearch, {
+      provider: "mail_own",
+    });
     const forbidden = await mailConnection([], mailWithSearch, {
       provider: "mail_private",
       owner: person.userId,
     });
     // Its search answers as the test server does, naming no item.
     const plain = await mailConnection([], mailWithSearch, {
+      provider: "mail_own",
       owner: person.userId,
     });
     const own = await mailConnection([], mailWithSearch, {
+      provider: "mail_own",
       owner: person.userId,
     });
     await shared.answer(
       "mail.search",
-      messageRead(`message-${sharedMarker}`, sharedMarker)
+      messagesRead([{ id: `message-${sharedMarker}`, subject: sharedMarker }])
     );
     await forbidden.answer(
       "mail.search",
-      messageRead(`message-${privateMarker}`, privateMarker)
+      messagesRead([{ id: `message-${privateMarker}`, subject: privateMarker }])
     );
-    await own.answer("mail.search", messageRead(`message-${witness}`, witness));
+    await own.answer(
+      "mail.search",
+      messagesRead([{ id: `message-${witness}`, subject: witness }])
+    );
     const chat = await chatOf(
       person.userId,
       step(
@@ -388,7 +503,13 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         {
           action: "brain.capture.skipped",
           onBehalfOf: person.userId,
-          detail: { reason: "shared" },
+          detail: {
+            reason: "shared",
+            items: 1,
+            kept: 0,
+            failed: 0,
+            skipped: 1,
+          },
         },
       ],
       recalled: [
@@ -406,11 +527,17 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const marker = markerOf();
     const secret = `hunter2-${crypto.randomUUID()}`;
     const mail = await mailConnection([], mailWithSearch, {
+      provider: "mail_own",
       owner: person.userId,
     });
     await mail.answer(
       "mail.search",
-      messageRead(`message-${marker}`, `Login ${marker} password: ${secret}`)
+      messagesRead([
+        {
+          id: `message-${marker}`,
+          subject: `Login ${marker} password: ${secret}`,
+        },
+      ])
     );
     const chat = await chatOf(
       person.userId,
@@ -437,8 +564,12 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     }).toStrictEqual({
       own: [
         JSON.stringify({
-          id: `message-${marker}`,
-          subject: `Login ${marker} password: [redacted]`,
+          messages: [
+            {
+              id: `message-${marker}`,
+              subject: `Login ${marker} password: [redacted]`,
+            },
+          ],
         }),
       ],
       asApp: { texts: [], elsewhere: [] },
@@ -446,19 +577,30 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("gives the agent its answer when the Brain refuses to keep it, audited as failed", async () => {
+  it("counts each item of a call as kept, failed or skipped, and gives the agent its answer whatever the Brain did", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const mail = await mailConnection([], mailWithSearch, {
+      provider: "mail_own",
       owner: person.userId,
     });
-    const itemId = `message-${marker}`;
-    await mail.answer("mail.search", messageRead(itemId, marker));
-    // The item's key erased before it is read: the Brain refuses any add.
+    const keptId = `kept-${marker}`;
+    const refusedId = `refused-${marker}`;
+    const erasedId = `erased-${marker}`;
+    await mail.answer(
+      "mail.search",
+      messagesRead([
+        { id: keptId, subject: `Kept ${marker}` },
+        // Past the Brain's own limit once folded for its word index: refused.
+        { id: refusedId, subject: "ﷺ".repeat(35_000) },
+        { id: erasedId, subject: `Erased ${marker}` },
+      ])
+    );
+    // One item's key closed by an erasure before it is read.
     await eraseSource(env, {
       source: {
         producer: "capture",
-        id: await captureIdOf(mail.id, person.userId, itemId),
+        id: await captureIdOf(mail.id, person.userId, "mail.search", erasedId),
       },
       readers: { kind: "owner", personId: person.userId },
       reason: "deleted",
@@ -466,27 +608,31 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const chat = await chatOf(
       person.userId,
       step(calling("MAIL", "mail.search", { query: marker })),
-      says("Found it.")
+      says("Found them.")
     );
     await grant(chat, mail.id, "MAIL", ["mail.search"]);
 
-    await chat.ask("Find it.");
+    await chat.ask("Find them.");
     const events = await captures(mail.id);
+    const found = await recalled(person.userId, marker);
 
     expect({
       events: events.map(shown),
-      // The model read the answer the code got.
+      kept: found.texts.map(({ text }) => text.includes(`Kept ${marker}`)),
+      // The model read the answer the code got (shortened, as a long one
+      // is for a model, past its first item).
       answered: JSON.stringify(chat.provider.requests.at(-1)?.body).includes(
-        marker
+        `Kept ${marker}`
       ),
     }).toStrictEqual({
       events: [
         {
-          action: "brain.capture.failed",
+          action: "brain.capture.kept",
           onBehalfOf: person.userId,
-          detail: { items: 1, kept: 0, failed: 1 },
+          detail: { items: 3, kept: 1, failed: 1, skipped: 1 },
         },
       ],
+      kept: [true],
       answered: true,
     });
   });

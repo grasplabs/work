@@ -88,6 +88,9 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
   // The tests' mail server under a toolkit whose terms forbid copies
   // (`toolkitsWithoutCopies`): core's connection-capture.test.ts.
   mail_private: { "mail.search": "read-company", "mail.send": "reach-others" },
+  // The tests' mail server as a toolkit reaching its person's own mail:
+  // what core keeps of a person's own reads (connection-capture.test.ts).
+  mail_own: { "mail.search": "read-own", "mail.send": "reach-others" },
 } satisfies ComposioClasses;
 
 /** The release's, and the tests' mail server under `mail_private`. */

@@ -473,6 +473,7 @@ describe(
           id: await captureIdOf(
             captureConnection,
             holder,
+            "mail.get",
             `quote-${captureMarker}`
           ),
         }

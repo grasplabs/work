@@ -13,11 +13,19 @@ describe("redacting credentials", () => {
         "https://bucket.s3.amazonaws.com/q.pdf?X-Amz-Expires=300&X-Amz-Signature=4f1c2a9e0b7d&x-id=GetObject",
         "https://storage.googleapis.com/b/q.pdf?X-Goog-Date=20261112&x-goog-signature=9a8b7c6d5e4f",
         "https://acme.blob.core.windows.net/c/q.pdf?sv=2024-11-04&se=2026-11-13&sig=AbC%2Bd3fG%3D",
+        "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=Ab~Cd-Ef__&Key-Pair-Id=K2JCJMDEHXQW5F",
+        "https://storage.googleapis.com/b/q.pdf?GoogleAccessId=svc@acme.iam&Expires=1795000000&Signature=ZmFrZQ%3D%3D",
+        "https://acme.sharepoint.com/_layouts/15/download.aspx?UniqueId=abc&tempauth=eyJ0eXAi.x.y",
+        "https://acme.zoom.us/j/123456789?pwd=QWxhZGRpbjpvcGVu",
       ].map(redact)
     ).toStrictEqual([
       "https://bucket.s3.amazonaws.com/q.pdf?X-Amz-Expires=300&X-Amz-Signature=[redacted]&x-id=GetObject",
       "https://storage.googleapis.com/b/q.pdf?X-Goog-Date=20261112&x-goog-signature=[redacted]",
       "https://acme.blob.core.windows.net/c/q.pdf?sv=2024-11-04&se=2026-11-13&sig=[redacted]",
+      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=[redacted]&Key-Pair-Id=K2JCJMDEHXQW5F",
+      "https://storage.googleapis.com/b/q.pdf?GoogleAccessId=svc@acme.iam&Expires=1795000000&Signature=[redacted]",
+      "https://acme.sharepoint.com/_layouts/15/download.aspx?UniqueId=abc&tempauth=[redacted]",
+      "https://acme.zoom.us/j/123456789?pwd=[redacted]",
     ]);
   });
 

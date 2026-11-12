@@ -574,7 +574,8 @@ describe("the Google Workspace connector's Gmail tools", () => {
         encoding: "base64",
         content: pdfBase64,
       },
-      provenance: [messageId(invoices, 1)],
+      // A part of the message, named apart from it.
+      provenance: [`${messageId(invoices, 1)}/${partIds.pdf}`],
     });
     // One inline in its part needs no second request.
     await expect(
@@ -1570,7 +1571,8 @@ describe("the Google Workspace connector's Sheets tools", () => {
         rows: sheetRows[first],
         more: false,
       },
-      provenance: [fileIds.sheet],
+      // This range of this sheet: a part of the spreadsheet of its own.
+      provenance: [`${fileIds.sheet}/'${first}'!1:201`],
     });
     // Drive's metadata first, which says its drive; then Sheets: the
     // spreadsheet's sheets, then the first rows of the first, one more

@@ -537,7 +537,8 @@ const readAttachment = defineTool({
         size: full.size,
         ...contentAs(fromBase64(content), as ?? "base64"),
       },
-      provenance: [message],
+      // A part of the message, named apart from it.
+      provenance: [`${message}/${attachment}`],
     };
   },
 });

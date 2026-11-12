@@ -17,8 +17,9 @@
  * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
  * caught the same way, to the escaped closing quote. And a URL's
- * signature (`X-Amz-Signature`, `X-Goog-Signature`, an Azure SAS's `sig`)
- * and an OAuth redirect's `code`, as query parameters. Anything else
+ * signature (any `…signature`, an Azure SAS's `sig`), SharePoint's
+ * `tempauth`, a meeting link's `pwd` and an OAuth redirect's `code`, as
+ * query parameters. Anything else
  * shaped like a secret is not caught: this is a net for what an outside
  * system's data may carry, not a guarantee (a run holds no secret of its
  * own). Applied to what streams to the chat, to what the model reads, to
@@ -78,12 +79,19 @@ const credentials: readonly (readonly [
     /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
     redactedAssignment,
   ],
-  // A URL's query parameters that sign or grant it, by name alone: a
-  // signed URL's signature (S3's, Google Cloud Storage's, an Azure SAS's
-  // `sig`) and an OAuth redirect's `code`. Only as a parameter, after `?`
-  // or `&`: a field merely named for a code (`statusCode`) is no credential.
+  // A URL's query parameters that sign or grant it, by name alone: any
+  // name ending in `signature` (S3's `X-Amz-Signature`, Google Cloud
+  // Storage's `X-Goog-Signature` and V2 `Signature`, CloudFront's), an
+  // Azure SAS's `sig`, SharePoint's `tempauth`, a meeting link's `pwd`,
+  // and an OAuth redirect's `code`. Only as a parameter, after `?` or `&`:
+  // a field merely named for a code (`statusCode`) is no credential.
+  // Not caught: a credential in a URL's path, and an opaque download URL
+  // that grants by its whole self. What is left is bounded: such text
+  // reaches only the person who read it (the Brain keeps a connection's
+  // reads for their reader alone), and connectors select the fields they
+  // return.
   [
-    /(?<=[?&])(?<param>x-amz-signature|x-goog-signature|sig|code)=[^&#\s"']+/giu,
+    /(?<=[?&])(?<param>[\w-]*signature|sig|tempauth|pwd|code)=[^&#\s"']+/giu,
     "$<param>=[redacted]",
   ],
 ];
