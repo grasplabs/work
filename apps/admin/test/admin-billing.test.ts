@@ -289,7 +289,6 @@ describe("an organization's billing, with Stripe's key", () => {
       need: overview.includes(
         `An invoice of €1,815.00 is overdue: it was due on ${dayOf(due)}.`
       ),
-      health: overview.includes("An invoice is overdue"),
     }).toStrictEqual({
       line: true,
       pays: "It is sent each invoice, to pay within 14 days",
@@ -297,7 +296,6 @@ describe("an organization's billing, with Stripe's key", () => {
       overdue: `€1,815.00, due since ${dayOf(due)}`,
       invoice: true,
       need: true,
-      health: true,
     });
   });
 

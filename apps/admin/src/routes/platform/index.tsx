@@ -94,14 +94,18 @@ const needsALookLine = (live: Live): string | undefined => {
 };
 
 /**
- * The companies whose platform needs a look, isn't set up yet or wasn't
- * read: nothing when every one is healthy, for each stands under its
- * channel above with the release it runs.
+ * The companies whose platform needs a look, isn't set up yet or, once the
+ * accounts were read, didn't answer: nothing when every one is healthy,
+ * for each stands under its channel above with the release it runs.
  */
 const NeedsALook = ({ rows, live }: { rows: GridRow[]; live: Live }) => {
-  const read = live === null || live === "failed" ? {} : live;
-  const companies = companiesOf(rows, read).filter(
-    ({ standing }) => standing !== "healthy" && standing !== "offboarded"
+  const answered = live !== null && live !== "failed";
+  // Until the accounts are read, one that isn't read yet is no finding.
+  const companies = companiesOf(rows, answered ? live : {}).filter(
+    ({ standing }) =>
+      standing === "attention" ||
+      standing === "setup" ||
+      (standing === "unread" && answered)
   );
   if (companies.length === 0) {
     return null;
