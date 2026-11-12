@@ -845,13 +845,9 @@ const stepsFailedOf = (
   );
 
 /** A way's counts as the report says them, field by field. */
-const wayOf = ({ recalls, failed, totalMs }: WayCounts) => ({
-  recalls,
-  failed,
-  totalMs,
-});
+const wayOf = ({ recalls, failed }: WayCounts) => ({ recalls, failed });
 
-/** Recall by each way and without meaning, as the report says it: counts and times. */
+/** Recall by each way and without meaning, as the report says it: counts. */
 const recallOf = (recall: WorkOverview["recall"]): BrainReport["recall"] =>
   brainReportSchema.shape.recall.parse({
     since: recall.since.toISOString(),

@@ -264,20 +264,17 @@ export type SearchWay = (typeof searchWays)[number];
  * One way of recall since the store started: how many recalls searched by
  * it (a way runs only when the question has something for it: telling
  * words, an exact part, or a vector, not as of a moment), how many of
- * those it failed (its search threw, which fails the recall), and the
- * milliseconds it took in all, failed ones included, by the store's own
- * clock around its synchronous work.
+ * those it failed (its search threw, which fails the recall).
  */
 export interface WayCounts {
   recalls: number;
   failed: number;
-  totalMs: number;
 }
 
 /**
  * Recall as staff see it, since the store started (`since`): kept in
- * memory, so gone with the instance, as `stepsFailed`. Counts and times
- * alone: nothing of a question, a reader or what was found.
+ * memory, so gone with the instance, as `stepsFailed`. Counts alone:
+ * nothing of a question, a reader or what was found.
  */
 export interface RecallOverview {
   since: Date;

@@ -6,7 +6,7 @@ import { identifierMaxLength } from "./identifier.ts";
 // client's core (core's brain-report.ts), for Grasp's staff alone: its
 // work queue, its store's size against its limit, its embedding's
 // progress, its erasure ledger, the steps of its tick that failed, and
-// how its recall does by each way (counts and times);
+// how its recall does by each way (counts);
 // and the three things staff may do to it: put a parked item back in the
 // queue, rebuild the word indexes, and re-embed. The admin asks as it asks for the snapshot: through the
 // router's route with the router secret, signed with a key both derive
@@ -221,18 +221,17 @@ export const brainReportSchema = z.object({
   /** The tick's own steps, each with its last failure since the store started. */
   stepsFailed: z.record(z.enum(brainSteps), stepFailureSchema),
   /**
-   * Recall since the store started (`since`), counts and times alone:
-   * per way, how many recalls searched by it, how many it failed and the
-   * milliseconds it took in all (by the store's own clock); and how many
+   * Recall since the store started (`since`), counts alone: per way, how
+   * many recalls searched by it and how many it failed; and how many
    * recalls went without the question's vector, by why. Totals only:
    * keyed by way and reason, never by a person or a store, so the figures
-   * of several stores add field by field (a mean is taken after the sum).
+   * of several stores add field by field.
    */
   recall: z.object({
     since: isoTime,
     ways: z.record(
       z.enum(brainSearchWays),
-      z.object({ recalls: count, failed: count, totalMs: z.number().min(0) })
+      z.object({ recalls: count, failed: count })
     ),
     withoutMeaning: z.record(z.enum(brainWithoutMeaningReasons), count),
   }),

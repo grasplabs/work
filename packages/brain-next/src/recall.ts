@@ -416,7 +416,7 @@ const byMeaning = (
  * parts, but those capped, then its telling words, but those of its IDs.
  * Meaning finds no word, so it never takes one off that list.
  *
- * A way runs, through `way` (which counts and times it), only when the
+ * A way runs, through `way` (which counts it), only when the
  * question has something for it: telling words, exact parts, or a vector
  * for a question of some word (an empty question finds nothing by any
  * way), and by meaning never as of a moment: vectors are kept for current

@@ -493,13 +493,9 @@ describe("recall, as staff see it", () => {
     await recallAs(env, userId, { question: "", budget: whole });
     const { text, report } = await readReport();
     const after = recallCountsOf(report);
-    const ways = report?.recall.ways;
 
     expect({
       after,
-      // Words and exact took some time, by the store's clock: never less
-      // than none.
-      timed: ways === undefined ? null : ways.words.totalMs >= 0,
       content: [marked, userId, "INV-2026-17", "warehouse"].filter((each) =>
         text.includes(each)
       ),
@@ -513,7 +509,6 @@ describe("recall, as staff see it", () => {
               meaning: before.meaning,
               without: before.without,
             },
-      timed: true,
       content: [],
     });
   });

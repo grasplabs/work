@@ -302,9 +302,9 @@ const brainReport = (bytes: number): BrainReport => ({
   recall: {
     since: "2026-11-12T08:00:00.000Z",
     ways: {
-      words: { recalls: 40, failed: 0, totalMs: 120 },
-      exact: { recalls: 8, failed: 0, totalMs: 20 },
-      meaning: { recalls: 0, failed: 0, totalMs: 0 },
+      words: { recalls: 40, failed: 0 },
+      exact: { recalls: 8, failed: 0 },
+      meaning: { recalls: 0, failed: 0 },
     },
     withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
   },
@@ -677,9 +677,9 @@ describe("how an organization's Brain is doing", () => {
       recall: {
         since: "2026-11-12T08:00:00.000Z",
         ways: {
-          words: { recalls: 40, failed: 0, totalMs: 120 },
-          exact: { recalls: 8, failed: 0, totalMs: 20 },
-          meaning: { recalls: 30, failed: 2, totalMs: 450 },
+          words: { recalls: 40, failed: 0 },
+          exact: { recalls: 8, failed: 0 },
+          meaning: { recalls: 30, failed: 2 },
         },
         withoutMeaning: { timed_out: 3, failed: 0, refused: 1, unusable: 0 },
       },
@@ -698,15 +698,15 @@ describe("how an organization's Brain is doing", () => {
     expect({
       since: text.includes("Since the store last started, 2 hours ago."),
       ways: [
-        text.includes("Words 40 0 3.0 ms"),
-        text.includes("Exact parts 8 0 2.5 ms"),
-        text.includes("Meaning 30 2 15.0 ms"),
+        text.includes("Words 40 0"),
+        text.includes("Exact parts 8 0"),
+        text.includes("Meaning 30 2"),
       ],
       without: text.includes(
         "3 timed out, 0 failed, 1 refused, and 0 unusable"
       ),
       amber: failing.includes("text-status-attention"),
-      notYet: textOf(fine).includes("Meaning 0 0 –"),
+      notYet: textOf(fine).includes("Meaning 0 0"),
       calm: fine.includes("text-status-attention"),
     }).toStrictEqual({
       since: true,

@@ -1,8 +1,8 @@
 // What staff see of recall (src/recall-counts.ts, GRA-1800): per way, how
-// many recalls searched by it, how many it failed and how long it took,
-// and how many recalls the host made without the question's vector, by
-// why; since the store started. Each test in a store of its own, so the
-// counts start from nothing.
+// many recalls searched by it and how many it failed, and how many
+// recalls the host made without the question's vector, by why; since the
+// store started. Each test in a store of its own, so the counts start
+// from nothing.
 import type {
   Access,
   EmbedModel,
@@ -55,21 +55,16 @@ const recall = async (question: string, more: Partial<RecallRequest> = {}) =>
     ...more,
   });
 
-/** The overview's recall counts, each way's time as whether it is a sane number. */
-const countsOf = ({ recall: counted }: WorkOverview) => ({
-  ways: Object.fromEntries(
-    Object.entries(counted.ways).map(([way, { recalls, failed, totalMs }]) => [
-      way,
-      { recalls, failed, timed: Number.isFinite(totalMs) && totalMs >= 0 },
-    ])
-  ),
-  withoutMeaning: counted.withoutMeaning,
+/** The overview's recall counts. */
+const countsOf = ({ recall: { ways, withoutMeaning } }: WorkOverview) => ({
+  ways,
+  withoutMeaning,
 });
 
 const counts = async () => countsOf(await store().workOverview());
 
-/** A way's counts, as `countsOf` says them. */
-const way = (recalls: number, failed = 0) => ({ recalls, failed, timed: true });
+/** A way's counts. */
+const way = (recalls: number, failed = 0) => ({ recalls, failed });
 
 /** `value` as a type it isn't: what a caller outside TypeScript could send. */
 const unchecked = (value: unknown): never =>

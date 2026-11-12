@@ -9,7 +9,7 @@
  * read and action is in the company's audit log, by the staff member.
  *
  * Operational state only: counts, ages, kinds of work, error codes,
- * sizes, recall's counts and times, and erasures as counts alone. Amber
+ * sizes, recall's counts, and erasures as counts alone. Amber
  * marks what needs someone: parked items, a store near its limit, a ledger
  * that isn't read through, a step that failed, a way of recall that failed.
  */
@@ -511,19 +511,12 @@ const Words = ({
   );
 };
 
-/** A way's typical time: its mean, or a dash before it ran. */
-const meanWords = ({
-  recalls,
-  totalMs,
-}: BrainReport["recall"]["ways"][BrainSearchWay]): string =>
-  recalls === 0 ? "–" : `${oneDecimal.format(totalMs / recalls)} ms`;
-
 /** How recall did by each way, and how often it went without meaning. */
 const Recall = ({ report }: { report: BrainReport }) => {
   const { recall } = report;
   return (
     <Section
-      description={`Since the store last started, ${agoWords(Date.parse(recall.since), Date.parse(report.now))}. A recall searches by each way the question has something for; the time is the store's own clock around that way's work.`}
+      description={`Since the store last started, ${agoWords(Date.parse(recall.since), Date.parse(report.now))}. A recall searches by each way the question has something for.`}
       title="Recall"
     >
       <div className="border-t">
@@ -536,9 +529,6 @@ const Recall = ({ report }: { report: BrainReport }) => {
               </TableHead>
               <TableHead className="text-right" variant="card">
                 Failed
-              </TableHead>
-              <TableHead className="text-right" variant="card">
-                Mean time
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -559,9 +549,6 @@ const Recall = ({ report }: { report: BrainReport }) => {
                     ) : (
                       <span className="tabular-nums">0</span>
                     )}
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    <span className="tabular-nums">{meanWords(counts)}</span>
                   </TableCell>
                 </TableRow>
               );
