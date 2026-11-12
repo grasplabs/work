@@ -2133,11 +2133,12 @@ export const ownEntityAs = async (
 };
 
 /**
- * Retires one of the member `personId`'s own memories (`rememberAs`): it
- * stops being current, and stays as history; `done` again for one they
- * retired before, so a retry never reads as not found. `nothing` alike
- * when there is no such memory, when it isn't theirs, and when it ended
- * otherwise as they see it. Refused once they are no longer a member.
+ * Retires one of the member `personId`'s own memories (`rememberAs`),
+ * current or ended by a newer one of theirs: it never becomes current
+ * again, and stays as history; `done` again for one they retired before,
+ * so a retry never reads as not found. `nothing` alike when there is no
+ * such memory (an erased one included), when it isn't theirs, and when it
+ * has expired. Refused once they are no longer a member.
  */
 export const forgetAs = async (
   env: BrainEnv & Pick<Env, "DB">,

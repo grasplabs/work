@@ -103,8 +103,9 @@ export const rememberFor = async (
 
 /**
  * Retires one of `caller`'s person's own memories (`forgetAs`): `done`,
- * again for one retired before; `nothing` for none, another's, or one that
- * ended otherwise. Audited as `brain.memory.forgotten`.
+ * again for one retired before; `nothing` for none (an erased one
+ * included), another's, or an expired one. Audited as
+ * `brain.memory.forgotten`.
  */
 export const forgetFor = async (
   env: Env,

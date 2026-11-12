@@ -25,8 +25,9 @@ export const chatSavedMemorySchema = z.strictObject({
 export type ChatSavedMemory = z.infer<typeof chatSavedMemorySchema>;
 
 /**
- * What undoing a saved memory did: `done`, also for one undone before;
- * `nothing` alike for none, another's, or one that ended otherwise.
+ * What undoing a saved memory did: `done`, also for one undone before or
+ * one a later save had replaced; `nothing` alike for none (an erased one
+ * included), another's, or an expired one.
  */
 export type BrainMemoryOutcome = "done" | "nothing";
 
