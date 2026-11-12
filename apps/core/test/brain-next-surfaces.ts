@@ -734,41 +734,56 @@ const leakyEmbedders = (markers: readonly string[]): Embedders => ({
     throw new Error(`Could not embed ${[...texts, ...markers].join(" ")}`);
   },
 });
-/** The ids of the items parked now, as the store's overview lists them. */
-const parkedIds = async (): Promise<number[]> => {
-  const { parked } = await store().workOverview();
-  return parked.map(({ id }) => id);
-};
+/**
+ * Adds an item of `markedWork` that carries the markers and parks it as
+ * its last failure would, without a tick: its id. For the probes of
+ * staff's surfaces, which read and put back parked items. Working it to
+ * parking instead (`workMarked`) costs the harness a tick an attempt, each
+ * of which works the whole store's queue, embedding's backlog with it,
+ * and the harness runs every probe in every pass.
+ */
+const parkMarked = async (markers: readonly string[]): Promise<number> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_store, state) => {
+      const key = `probe-${crypto.randomUUID()}`;
+      enqueueWork(state.storage, markedWork, {
+        key,
+        payload: { marked: markers.join(" ") },
+        priority: "asked",
+      });
+      return state.storage.sql
+        .exec<{ id: number }>(
+          `UPDATE work_items SET parked_at = ?, parks = 1, attempts = ?,
+            last_error = 'failed'
+          WHERE kind = ? AND key = ? RETURNING id`,
+          Date.now(),
+          workAttemptsMax,
+          markedWork.kind,
+          key
+        )
+        .one().id;
+    }
+  );
 
 /**
- * A marked item worked to parking, then every way to put an item back:
- * each parked one (the marked among them), one twice, an id nothing has,
- * and ids that aren't one, the markers among them.
+ * A marked item parked, then every way to put an item back: that item,
+ * twice (the second finds it parked no more), an id nothing has, and ids
+ * that aren't one, the markers among them. Only the item it parked:
+ * putting back every parked item, embedding's among them, would have
+ * each later tick of the harness work them all again.
  */
 const requeueMarked = async (
   markers: readonly string[],
   requeue: (id: number) => Promise<unknown>
 ): Promise<Answer[]> => {
-  const worked = await workMarked(
-    markers,
-    async (at) => {
-      await store().work(quietModel, at, leakyEmbedders(markers));
-    },
-    "a marked item worked to parking"
-  );
-  const ids = await parkedIds();
-  const asked: Answer[] = [];
-  for (const id of [...ids, ...ids.slice(0, 1)]) {
-    // oxlint-disable-next-line no-await-in-loop -- one at a time
-    const answered = await answer(
-      `a requeue of ${id}`,
-      async () => await requeue(id)
-    );
-    asked.push(answered);
-  }
+  const id = await parkMarked(markers);
   return [
-    ...worked,
-    ...asked,
+    await answer("a requeue of the marked item", async () => await requeue(id)),
+    await answer(
+      "a requeue of the marked item again",
+      async () => await requeue(id)
+    ),
     await answer(
       "a requeue of an id nothing has",
       async () => await requeue(Number.MAX_SAFE_INTEGER)
@@ -1168,13 +1183,7 @@ export const coreProbes = {
     ),
   ],
   brainStaffReport: async ({ markers }) => [
-    ...(await workMarked(
-      markers,
-      async (at) => {
-        await store().work(quietModel, at, leakyEmbedders(markers));
-      },
-      "a marked item worked to parking"
-    )),
+    await answer("a marked item parked", async () => await parkMarked(markers)),
     await answer(
       "the staff's report, the marked item parked",
       async () => await coreBrain.brainStaffReport(env)
