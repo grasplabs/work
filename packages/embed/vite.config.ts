@@ -24,6 +24,7 @@ export default defineProject({
           DOT: { className: "DotEmbedder", useSQLite: true },
           PAIRS: { className: "PairsEmbedder", useSQLite: true },
           CUSTOM: { className: "CustomEmbedder", useSQLite: true },
+          TRAPPING: { className: "TrappingEmbedder", useSQLite: true },
         },
       },
     }),

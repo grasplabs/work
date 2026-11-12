@@ -8,6 +8,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { Embedder, questionEmbedder } from "../src/embedder.ts";
+import type { EmbedResult } from "../src/embedder.ts";
 import type { Kernel } from "../src/engine.ts";
 import { modelFileKey } from "../src/model-files.ts";
 import type { EmbedModel } from "../src/model-files.ts";
@@ -29,8 +30,15 @@ import {
   deepInt8Model,
   floatModel,
   int8Model,
+  abortWord,
+  trapOnceWord,
+  trapWord,
 } from "./worker.ts";
-import type { CustomEmbedder, Int8Embedder } from "./worker.ts";
+import type {
+  CustomEmbedder,
+  Int8Embedder,
+  TrappingEmbedder,
+} from "./worker.ts";
 
 /**
  * How close the embedder comes to the reference (Hugging Face transformers,
@@ -129,16 +137,11 @@ const [kind, heads, feedForward, floatChannels] = [0, 1, 2, 3] as const;
 const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
-/**
- * An embedder named `name` that runs a model made of `files`, each named
- * by its own hash and put in the bucket: for files that are wrong on
- * purpose but are what the model names.
- */
-const customEmbedder = async (
+/** A model named `name` made of `files`, each named by its own hash and put in the bucket. */
+const uploadedModel = async (
   name: string,
-  files: Record<Which, Uint8Array>,
-  kernel: Kernel = "auto"
-): Promise<DurableObjectStub<CustomEmbedder>> => {
+  files: Record<Which, Uint8Array>
+): Promise<EmbedModel> => {
   const named = async (bytes: Uint8Array) => ({
     sha256: hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))),
     size: bytes.byteLength,
@@ -150,6 +153,20 @@ const customEmbedder = async (
     tokens: await named(files.tokens),
   };
   await upload(model, files);
+  return model;
+};
+
+/**
+ * An embedder named `name` that runs a model made of `files`, each named
+ * by its own hash and put in the bucket: for files that are wrong on
+ * purpose but are what the model names.
+ */
+const customEmbedder = async (
+  name: string,
+  files: Record<Which, Uint8Array>,
+  kernel: Kernel = "auto"
+): Promise<DurableObjectStub<CustomEmbedder>> => {
+  const model = await uploadedModel(name, files);
   const stub = env.CUSTOM.getByName(name);
   await stub.use(model, kernel);
   return stub;
@@ -738,5 +755,450 @@ describe("embedder", () => {
     const after = await env.INT8.getByName("evicted").embed(text);
     expect(bitsOf(after.vector)).toBe(bitsOf(before.vector));
     expect(after.model).toStrictEqual(before.model);
+  });
+});
+
+/**
+ * What `call` ends with in `stub`'s object: its answer, or its error's
+ * message. Run inside the object, as an error thrown back across RPC
+ * reaches the test pool as unhandled.
+ */
+const inObject = async <T>(
+  stub:
+    | DurableObjectStub<Int8Embedder>
+    | DurableObjectStub<CustomEmbedder>
+    | DurableObjectStub<TrappingEmbedder>,
+  call: (embedder: Embedder) => Promise<T>
+): Promise<T | string> =>
+  await runInDurableObject(stub, async (instance) => {
+    if (!(instance instanceof Embedder)) {
+      throw new TypeError("Not an embedder.");
+    }
+    try {
+      return await call(instance);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  });
+
+/** Ends the object behind `stub`, as an eviction does: its next call starts a new one. */
+const evict = async (
+  stub: DurableObjectStub<Int8Embedder> | DurableObjectStub<CustomEmbedder>
+): Promise<void> => {
+  try {
+    await runInDurableObject(stub, (_, state) => {
+      state.abort("evicted by the test");
+    });
+  } catch {
+    // The abort breaks the call that made it.
+  }
+};
+
+/** Runs `query` on the storage of the object behind `stub`: to damage what it keeps. */
+const damage = async (
+  stub: DurableObjectStub<Int8Embedder> | DurableObjectStub<CustomEmbedder>,
+  query: string,
+  ...bindings: number[]
+): Promise<void> => {
+  await runInDurableObject(stub, (_, state) => {
+    state.storage.sql.exec(query, ...bindings);
+  });
+};
+
+/** Each result's vector bits, or what else it is. */
+const outcomes = (results: EmbedResult[]): string[] =>
+  results.map((result) => {
+    if (result.kind === "embedded") {
+      return bitsOf(result.vector);
+    }
+    return result.kind === "failed" ? `failed: ${result.reason}` : "deferred";
+  });
+
+/** `items` turned `by` places, the first 16 of them: one call's most. */
+const turned = <T>(items: readonly T[], by: number): T[] =>
+  [...items.slice(by), ...items.slice(0, by)].slice(0, 16);
+
+describe("embedder, several texts a call", () => {
+  it("gives each text the same bits alone and at every place in a call, for both shapes of model", async () => {
+    await Promise.all([
+      upload(int8Model, int8Files),
+      upload(deepInt8Model, deepInt8Files),
+    ]);
+    const deep = env.CUSTOM.getByName("many-deep");
+    await deep.use(deepInt8Model);
+    const shapes = [
+      {
+        stub: env.INT8.getByName("many-int8"),
+        texts: reference.embeddings.map(({ text }) => text),
+        bits: int8Bits,
+      },
+      {
+        stub: deep,
+        texts: deepReference.embeddings.map(({ text }) => text),
+        bits: deepInt8Bits,
+      },
+    ];
+    for (const { stub, texts, bits } of shapes) {
+      // oxlint-disable-next-line no-await-in-loop -- one shape at a time
+      const alone = await Promise.all(
+        texts.map(async (text) => {
+          const { vector } = await stub.embed(text);
+          return bitsOf(vector);
+        })
+      );
+      expect(alone).toStrictEqual(bits);
+      // Every text at every place from the first to the 16th.
+      for (const by of texts.keys()) {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        const results = await stub.embedMany(turned(texts, by));
+        expect(outcomes(results)).toStrictEqual(turned(bits, by));
+      }
+    }
+  });
+
+  it("names the same model and build for each text as for one text alone", async () => {
+    await upload(int8Model, int8Files);
+    const stub = env.INT8.getByName("many-identity");
+    const [alone, [first, second]] = await Promise.all([
+      stub.embed("Hallo"),
+      stub.embedMany(["Hallo", "Wereld"]),
+    ]);
+    expect([first, second]).toStrictEqual([
+      { kind: "embedded", vector: alone.vector, model: alone.model },
+      expect.objectContaining({ kind: "embedded", model: alone.model }),
+    ]);
+  });
+
+  it("answers a failure for the text that fails alone, saying nothing of it, and vectors for its neighbours", async () => {
+    await upload(int8Model, int8Files);
+    const stub = env.TRAPPING.getByName("mixed");
+    const [a, b, c] = [0, 1, 2].map((i) => reference.embeddings[i]?.text ?? "");
+    const tooLong = `${" ".repeat(262_144)}<mask>`;
+    const texts = [
+      a ?? "",
+      tooLong,
+      b ?? "",
+      "",
+      `Ein Satz, der den Kern zum Absturz bringt: ${trapWord}.`,
+      c ?? "",
+    ];
+    // Not a text in place 3: what a caller's bug can send over RPC, past the types.
+    Reflect.set(texts, 3, 42);
+    const results = await stub.embedMany(texts);
+    expect(outcomes(results)).toStrictEqual([
+      int8Bits[0],
+      "failed: too-long",
+      int8Bits[1],
+      "failed: not-text",
+      "failed: kernel",
+      int8Bits[2],
+    ]);
+    // A failure is its kind and reason, nothing more.
+    expect(results[4]).toStrictEqual({ kind: "failed", reason: "kernel" });
+  });
+
+  it("tries a text whose module trapped once more on a fresh instance, and embeds it when that runs", async () => {
+    await upload(int8Model, int8Files);
+    const [a, b] = [0, 1].map((i) => reference.embeddings[i]?.text ?? "");
+    const flaky = `Ein Satz, den eine abgenutzte Instanz nicht schafft: ${trapOnceWord}.`;
+    const [results, alone] = await Promise.all([
+      env.TRAPPING.getByName("trapped-once").embedMany([
+        a ?? "",
+        flaky,
+        b ?? "",
+      ]),
+      env.INT8.getByName("trapped-once").embed(flaky),
+    ]);
+    expect(outcomes(results)).toStrictEqual([
+      int8Bits[0],
+      bitsOf(alone.vector),
+      int8Bits[1],
+    ]);
+  });
+
+  it("counts the tokens of every attempt that trapped toward the call's bound, and defers the texts past it", async () => {
+    // A model reading 1,024 tokens: each text that traps twice is given
+    // 2,048, so 4 of them use up the 8,192 and the rest wait.
+    const model = await uploadedModel("trapping-tokens", {
+      tokenizer: new Uint8Array(tokenizer),
+      encoder: withMaxTokens(encoderInt8, 1024, 1),
+      tokens: new Uint8Array(tokensInt8),
+    });
+    const stub = env.TRAPPING.getByName("trapping-tokens");
+    await stub.use(model);
+    const texts = Array.from(
+      { length: 16 },
+      (_, i) => `${trapWord} ${String(i)} ${"a ".repeat(2000)}`
+    );
+    const results = await stub.embedMany(texts);
+    expect(outcomes(results)).toStrictEqual([
+      ...Array.from({ length: 4 }, () => "failed: kernel"),
+      ...Array.from({ length: 12 }, () => "deferred"),
+    ]);
+  });
+
+  it("takes at most 16 texts a call, and refuses more, embedding none", async () => {
+    await upload(int8Model, int8Files);
+    const stub = env.INT8.getByName("many-bound");
+    const texts = Array.from({ length: 17 }, (_, i) => `Text ${String(i)}`);
+    await expect(
+      inObject(stub, async (embedder) => await embedder.embedMany(texts))
+    ).resolves.toBe(
+      "An embedder call takes at most 16 texts: send more as several calls."
+    );
+    const sixteen = await stub.embedMany(texts.slice(0, 16));
+    expect(sixteen.map((result) => result.kind)).toStrictEqual(
+      Array.from({ length: 16 }, () => "embedded")
+    );
+  });
+
+  it("embeds at most 8,192 tokens a call and defers every text after, to send again", async () => {
+    // A model reading 1,024 tokens, so 8 long texts reach the bound.
+    const stub = await customEmbedder("many-tokens", {
+      tokenizer: new Uint8Array(tokenizer),
+      encoder: withMaxTokens(encoderInt8, 1024, 1),
+      tokens: new Uint8Array(tokensInt8),
+    });
+    const long = "a ".repeat(2000);
+    await expect(stub.tokenize(long)).resolves.toHaveLength(1024);
+    // 7 long texts and a short one fit; the next long one doesn't, so it
+    // and the short one after it wait for another call.
+    const sevenLong = Array.from({ length: 7 }, () => long);
+    const results = outcomes(
+      await stub.embedMany([...sevenLong, "Hallo", long, "Hallo"])
+    );
+    const [longBits, helloBits] = [results[0], results[7]];
+    expect(results).toStrictEqual([
+      ...sevenLong.map(() => longBits),
+      helloBits,
+      "deferred",
+      "deferred",
+    ]);
+    // Sent again, the deferred texts embed as they would have.
+    const again = await stub.embedMany([long, "Hallo"]);
+    expect(outcomes(again)).toStrictEqual([longBits, helloBits]);
+  });
+
+  it("answers the same texts with the same bits after its object ends in the middle of a call", async () => {
+    await upload(int8Model, int8Files);
+    const [a, b] = [0, 1].map((i) => reference.embeddings[i]?.text ?? "");
+    let ended = "";
+    try {
+      await runInDurableObject(
+        env.TRAPPING.getByName("ended"),
+        async (instance) => {
+          if (!(instance instanceof Embedder)) {
+            throw new TypeError("Not an embedder.");
+          }
+          await instance.embedMany([
+            a ?? "",
+            `Ein Satz, der das Objekt beendet: ${abortWord}.`,
+            b ?? "",
+          ]);
+        }
+      );
+    } catch (error) {
+      ended = error instanceof Error ? error.message : String(error);
+    }
+    expect(ended).toBe("Ended by the test");
+    const again = await env.TRAPPING.getByName("ended").embedMany([
+      a ?? "",
+      b ?? "",
+    ]);
+    expect(outcomes(again)).toStrictEqual([int8Bits[0], int8Bits[1]]);
+  });
+});
+
+/**
+ * What an older release (one that kept no row count or width) leaves in
+ * the storage of the object behind `stub` when it copies `model`: its
+ * constructor's table, and its copy, `files` in parts and rows.
+ */
+const asOlderRelease = async (
+  stub: DurableObjectStub<Int8Embedder>,
+  model: EmbedModel,
+  files: Files
+): Promise<void> => {
+  await runInDurableObject(stub, (_, state) => {
+    const { sql } = state.storage;
+    sql.exec(`CREATE TABLE IF NOT EXISTS loaded_model (
+      id INTEGER PRIMARY KEY CHECK (id = 1), files TEXT NOT NULL, format TEXT NOT NULL)`);
+    state.storage.transactionSync(() => {
+      sql.exec("DELETE FROM loaded_model");
+      sql.exec("DELETE FROM model_part");
+      sql.exec("DELETE FROM token_row");
+      // Each fixture file fits one part of 1 MiB.
+      sql.exec(
+        "INSERT INTO model_part (file, part, bytes) VALUES ('tokenizer', 0, ?), ('encoder', 0, ?)",
+        new Uint8Array(files.tokenizer),
+        new Uint8Array(files.encoder)
+      );
+      const rows = new Uint8Array(files.tokens).subarray(32);
+      // int8 rows of the fixtures' width, 128: a scale and 128 bytes.
+      const width = 4 + 128;
+      for (let id = 0; id * width < rows.byteLength; id += 1) {
+        sql.exec(
+          "INSERT INTO token_row (id, row) VALUES (?, ?)",
+          id,
+          rows.subarray(id * width, (id + 1) * width)
+        );
+      }
+      sql.exec(
+        "INSERT INTO loaded_model (id, files, format) VALUES (1, ?, 'int8')",
+        [
+          model.tokenizer.sha256,
+          model.encoder.sha256,
+          model.tokens.sha256,
+        ].join(" ")
+      );
+    });
+  });
+};
+
+describe("embedder, waking", () => {
+  const damaged =
+    "fixture-int8's token table in storage is damaged: the next call copies it from the model files bucket again.";
+
+  it("wakes without reading every token row, and refuses a text whose row is missing or the wrong width, then copies the table again", async () => {
+    await upload(int8Model, int8Files);
+    const other = "Customer onboarding starts with a call.";
+    const needing = "Zylinderkopfdichtung wechseln lassen";
+    const cases = [
+      ["missing", "DELETE FROM token_row WHERE id = ?"],
+      ["width", "UPDATE token_row SET row = substr(row, 2) WHERE id = ?"],
+    ] as const;
+    for (const [name, query] of cases) {
+      const stub = env.INT8.getByName(`middle-${name}`);
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time
+      const [before, otherIds, needingIds] = await Promise.all([
+        stub.embedMany([other, needing]).then(outcomes),
+        stub.tokenize(other),
+        stub.tokenize(needing),
+      ]);
+      // A row in the middle of the table that only `needing` reads.
+      const row = needingIds.find((id) => !otherIds.includes(id)) ?? 0;
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await damage(stub, query, row);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await evict(stub);
+      const woken = env.INT8.getByName(`middle-${name}`);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const answered = outcomes(await woken.embedMany([other]));
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const refused = await inObject(
+        woken,
+        async (embedder) => await embedder.embedMany([needing])
+      );
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const copied = outcomes(await woken.embedMany([other, needing]));
+      expect({ name, answered, refused, copied }).toStrictEqual({
+        name,
+        answered: [before[0]],
+        refused: damaged,
+        copied: before,
+      });
+    }
+  });
+
+  it("refuses a table that is cut short, has a row of the wrong width at either end, or disagrees with its record, then copies it again", async () => {
+    await upload(int8Model, int8Files);
+    const cases = [
+      [
+        "end",
+        "DELETE FROM token_row WHERE id = (SELECT MAX(id) FROM token_row)",
+      ],
+      ["ends", "DELETE FROM token_row WHERE id > 200"],
+      ["empty", "DELETE FROM token_row"],
+      ["first", "UPDATE token_row SET row = substr(row, 2) WHERE id = 0"],
+      [
+        "last",
+        "UPDATE token_row SET row = row || x'00' WHERE id = (SELECT MAX(id) FROM token_row)",
+      ],
+      ["record-fewer", "UPDATE loaded_model SET rows = rows - 1"],
+      ["record-more", "UPDATE loaded_model SET rows = rows + 1"],
+      ["record-width", "UPDATE loaded_model SET row_bytes = row_bytes + 1"],
+    ] as const;
+    const outcome = await Promise.all(
+      cases.map(async ([name, query]) => {
+        const stub = env.INT8.getByName(`wake-${name}`);
+        const { vector } = await stub.embed("Hallo");
+        await damage(stub, query);
+        await evict(stub);
+        const woken = env.INT8.getByName(`wake-${name}`);
+        const refused = await inObject(woken, async (embedder) => {
+          await embedder.embed("Hallo");
+          return "embedded";
+        });
+        const again = await woken.embed("Hallo");
+        return [name, refused, bitsOf(again.vector) === bitsOf(vector)];
+      })
+    );
+    expect(outcome).toStrictEqual(cases.map(([name]) => [name, damaged, true]));
+  });
+
+  it("copies the model again when its storage holds another build's", async () => {
+    await Promise.all([
+      upload(int8Model, int8Files),
+      upload(deepInt8Model, deepInt8Files),
+    ]);
+    const text = deepReference.embeddings[0]?.text ?? "";
+    const stub = env.CUSTOM.getByName("foreign");
+    await stub.use(int8Model);
+    await expect(stub.embed(text)).resolves.toMatchObject({
+      model: { name: "fixture-int8" },
+    });
+    await evict(stub);
+    const woken = env.CUSTOM.getByName("foreign");
+    await woken.use(deepInt8Model);
+    const { vector, model } = await woken.embed(text);
+    expect([model.name, bitsOf(vector)]).toStrictEqual([
+      "fixture-deep-int8",
+      deepInt8Bits[0],
+    ]);
+  });
+
+  it("copies its model again after an older release ran another model in its storage, and names each vector by the model that made it", async () => {
+    // An older release rolled back to (one that kept no row count or width)
+    // runs the deep model, whose table has as many rows of the same width
+    // as this one's; then this release runs again.
+    await upload(int8Model, int8Files);
+    const text = reference.embeddings[0]?.text ?? "";
+    const stub = env.INT8.getByName("rolled-back");
+    await stub.embed(text);
+    await evict(stub);
+    await asOlderRelease(
+      env.INT8.getByName("rolled-back"),
+      deepInt8Model,
+      deepInt8Files
+    );
+    await evict(env.INT8.getByName("rolled-back"));
+    const { vector, model } =
+      await env.INT8.getByName("rolled-back").embed(text);
+    expect([model.name, bitsOf(vector)]).toStrictEqual([
+      "fixture-int8",
+      int8Bits[0],
+    ]);
+  });
+
+  it("copies its model again, refusing nothing, after an older release copied the same model without its rows and width", async () => {
+    await upload(int8Model, int8Files);
+    const text = reference.embeddings[0]?.text ?? "";
+    const stub = env.INT8.getByName("rolled-back-same");
+    await stub.embed(text);
+    await evict(stub);
+    await asOlderRelease(
+      env.INT8.getByName("rolled-back-same"),
+      int8Model,
+      int8Files
+    );
+    await evict(env.INT8.getByName("rolled-back-same"));
+    const answer = await inObject(
+      env.INT8.getByName("rolled-back-same"),
+      async (embedder) => {
+        const { vector, model } = await embedder.embed(text);
+        return [model.name, bitsOf(vector)];
+      }
+    );
+    expect(answer).toStrictEqual(["fixture-int8", int8Bits[0]]);
   });
 });
