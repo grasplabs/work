@@ -34,6 +34,7 @@ import {
   listPageMax,
   listPrefixesMax,
   modelNameMaxLength,
+  personalBrainOf,
   questionMaxLength,
   readerGroupsMax,
   recallBudgetMax,
@@ -69,6 +70,7 @@ import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
+import * as brainMemories from "../src/brain-memories.ts";
 import * as coreBrain from "../src/brain-next.ts";
 import type {
   InstructionFile,
@@ -854,6 +856,14 @@ const pastAll = new Date(8.64e15);
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
 
+/** The exports of core's brain-next.ts for a person's memories, probed after the store's memories (`corePersonMemories`). */
+type CorePersonMember =
+  | "rememberAs"
+  | "forgetAs"
+  | "correctAs"
+  | "entityAs"
+  | "findEntitiesAs";
+
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
   addSource: async ({ markers, hiddenVersions }) => {
@@ -1399,7 +1409,7 @@ export const coreProbes = {
       "a marked item worked through core's clock after a re-embed"
     )),
   ],
-} satisfies Record<CoreMember, Probe>;
+} satisfies Record<Exclude<CoreMember, CorePersonMember>, Probe>;
 
 /** Each export of core's instruction-files.ts. */
 type InstructionMember = keyof typeof instructionFiles;
@@ -2480,6 +2490,525 @@ const memoryProbes = {
     ];
   },
 } satisfies Record<string, Probe>;
+
+/**
+ * A marked memory in someone else's own store (`person:<id>`), readable by
+ * them alone: its entity's id and its own. Every probe of a person's
+ * memories asks for these and must answer as for ids no one holds.
+ */
+const othersOwnMemory = async (
+  markers: readonly string[]
+): Promise<{ entity: string; memory: string }> => {
+  const person = stranger();
+  const text = markedText(markers);
+  const added = await personalBrainOf(
+    inJurisdiction(env, env.BRAIN_STORE),
+    person
+  ).addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "owner", person },
+    entities: [
+      {
+        key: "c",
+        kind: "customer",
+        names: [text],
+        identifiers: [{ type: "ref", value: `ref:${first(markers)}` }],
+      },
+    ],
+    memories: [
+      {
+        about: "c",
+        attribute: "status",
+        value: text,
+        type: "fact",
+        statement: text,
+        speaker: { kind: "internal", person },
+        basis: { kind: "writer", writer: person },
+      },
+    ],
+  });
+  return { entity: added.entities.c ?? "", memory: added.memories[0] ?? "" };
+};
+
+/**
+ * A person's memories, as a surface reaches them for `personId`: core's
+ * functions (brain-next.ts) or the callers' (brain-memories.ts). Each
+ * saves in the person's own word; reads take `personal` from the surface.
+ */
+interface PersonMemoryCalls {
+  remember: (
+    personId: string,
+    remembered: Readonly<Record<string, unknown>>
+  ) => Promise<unknown>;
+  forget: (personId: string, memory: string) => Promise<unknown>;
+  correct: (
+    personId: string,
+    correction: unknown,
+    personal: boolean
+  ) => Promise<unknown>;
+  entity: (
+    personId: string,
+    entity: string,
+    personal: boolean
+  ) => Promise<unknown>;
+  find: (
+    personId: string,
+    wanted: unknown,
+    personal: boolean
+  ) => Promise<unknown>;
+}
+
+/**
+ * The probes of a person's memories over `calls`. What a probe saves for
+ * the reader holds no marker: it is theirs to read, and later probes may
+ * find it. Markers go only in what is refused, and in others' memories,
+ * the hidden ones of `memoryFixture` and of someone else's own store.
+ */
+const personMemoryProbes = (calls: PersonMemoryCalls) => {
+  const plain = {
+    type: "fact",
+    statement: "Plain note",
+    attribute: "status",
+    value: "Active",
+  };
+  return {
+    remember: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await Promise.all([
+        memoryFixture(probing),
+        othersOwnMemory(markers),
+      ]);
+      const about = (id: string) => ({
+        change: crypto.randomUUID(),
+        about: { id, kind: "customer" },
+        ...plain,
+      });
+      // Each hidden id against the one no one holds, by what it answers
+      // or the words it is refused with: a stack names where it was asked.
+      const rememberAbout = async (
+        name: string,
+        id: string,
+        compared: Answer["about"]
+      ) =>
+        await answer(
+          name,
+          async () => {
+            try {
+              return { saved: await calls.remember(personId, about(id)) };
+            } catch (error) {
+              return {
+                refused: error instanceof Error ? error.message : error,
+              };
+            }
+          },
+          compared
+        );
+      return [
+        await answer(
+          "a plain memory of their own",
+          async () =>
+            await calls.remember(personId, {
+              change: crypto.randomUUID(),
+              about: { kind: "customer", names: ["Plain"] },
+              ...plain,
+            })
+        ),
+        ...(await Promise.all(
+          (
+            [
+              ["about an entity no one added", crypto.randomUUID(), "nothing"],
+              [
+                "about an entity only hidden memories name",
+                fixture.hidden,
+                "hidden",
+              ],
+              [
+                "about an entity drawn from a hidden source",
+                fixture.drawn,
+                "hidden",
+              ],
+              [
+                "about an entity in someone else's own store",
+                others.entity,
+                "hidden",
+              ],
+            ] as const
+          ).map(
+            async ([name, id, compared]) =>
+              await rememberAbout(name, id, compared)
+          )
+        )),
+        await answer(
+          "for someone who isn't a member",
+          async () =>
+            await calls.remember(stranger(), {
+              change: crypto.randomUUID(),
+              about: { kind: "customer", names: ["Plain"] },
+              ...plain,
+            })
+        ),
+        await answer(
+          "an attribute named by the markers",
+          async () =>
+            await calls.remember(personId, {
+              change: crypto.randomUUID(),
+              about: { kind: "customer", names: ["Plain"] },
+              ...plain,
+              attribute: markers.join("_").slice(0, 64),
+            })
+        ),
+        await answer(
+          "a statement past its limit, of the markers",
+          async () =>
+            await calls.remember(personId, {
+              change: crypto.randomUUID(),
+              about: { kind: "customer", names: ["Plain"] },
+              ...plain,
+              statement: markedText(markers).padEnd(2000, " x"),
+            })
+        ),
+        await answer(
+          "an unknown field holding the markers",
+          async () =>
+            await calls.remember(personId, {
+              change: crypto.randomUUID(),
+              about: { kind: "customer", names: ["Plain"] },
+              ...plain,
+              readers: markers,
+            })
+        ),
+      ];
+    },
+    forget: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await Promise.all([
+        memoryFixture(probing),
+        othersOwnMemory(markers),
+      ]);
+      const forget = async (
+        name: string,
+        memory: string,
+        about?: Answer["about"]
+      ) =>
+        await answer(
+          name,
+          async () => await calls.forget(personId, memory),
+          about
+        );
+      return [
+        await forget("a memory no one saved", crypto.randomUUID(), "nothing"),
+        await forget("a hidden memory", fixture.hiddenMemory, "hidden"),
+        await forget(
+          "a memory in someone else's own store",
+          others.memory,
+          "hidden"
+        ),
+        await forget(
+          "the reader's memory of another writer",
+          fixture.seenMemory,
+          "hidden"
+        ),
+        await answer(
+          "as someone who isn't a member",
+          async () => await calls.forget(stranger(), others.memory)
+        ),
+        await answer(
+          "an id of the markers",
+          async () => await calls.forget(personId, markers.join(""))
+        ),
+      ];
+    },
+    correct: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await Promise.all([
+        memoryFixture(probing),
+        othersOwnMemory(markers),
+      ]);
+      const kinds = [true, false].flatMap((personal) =>
+        [false, true].map((fixed) => ({ personal, fixed }))
+      );
+      const each = async ({
+        personal,
+        fixed,
+      }: {
+        personal: boolean;
+        fixed: boolean;
+      }): Promise<Answer[]> => {
+        const like = personal ? "personal" : "shared";
+        {
+          const fix = fixed
+            ? {
+                fix: {
+                  change: crypto.randomUUID(),
+                  statement: "Plain fix",
+                  value: "Ended",
+                },
+              }
+            : {};
+          const correct = async (
+            name: string,
+            memory: string,
+            entity: string,
+            about: Answer["about"]
+          ) =>
+            await answer(
+              `${name}${fixed ? ", with a fix" : ""}, ${like}`,
+              async () =>
+                await calls.correct(
+                  personId,
+                  { memory, entity, ...fix },
+                  personal
+                ),
+              about,
+              `${like}${fixed ? " fixed" : ""}`
+            );
+          return [
+            await correct(
+              "a memory no one saved",
+              crypto.randomUUID(),
+              crypto.randomUUID(),
+              "nothing"
+            ),
+            await correct(
+              "a hidden memory",
+              fixture.hiddenMemory,
+              fixture.hidden,
+              "hidden"
+            ),
+            await correct(
+              "a memory in someone else's own store",
+              others.memory,
+              others.entity,
+              "hidden"
+            ),
+          ];
+        }
+      };
+      const answered = await Promise.all(kinds.map(each));
+      const asked = answered.flat();
+      asked.push(
+        await answer(
+          "as someone who isn't a member",
+          async () =>
+            await calls.correct(
+              stranger(),
+              { memory: others.memory, entity: others.entity },
+              true
+            )
+        ),
+        await answer(
+          "a fix of the markers past its limit",
+          async () =>
+            await calls.correct(
+              personId,
+              {
+                memory: fixture.seenMemory,
+                entity: fixture.seen,
+                fix: {
+                  change: crypto.randomUUID(),
+                  statement: markedText(markers).padEnd(2000, " x"),
+                },
+              },
+              true
+            )
+        )
+      );
+      return asked;
+    },
+    entity: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await Promise.all([
+        memoryFixture(probing),
+        othersOwnMemory(markers),
+      ]);
+      const each = async (personal: boolean): Promise<Answer[]> => {
+        const like = personal ? "personal" : "shared";
+        const read = async (
+          name: string,
+          id: string,
+          about?: Answer["about"]
+        ) =>
+          await answer(
+            `${name}, ${like}`,
+            async () => await calls.entity(personId, id, personal),
+            about,
+            like
+          );
+        return [
+          await read("an entity no one added", crypto.randomUUID(), "nothing"),
+          await read(
+            "an entity only hidden memories name",
+            fixture.hidden,
+            "hidden"
+          ),
+          await read(
+            "an entity drawn from a hidden source",
+            fixture.drawn,
+            "hidden"
+          ),
+          await read(
+            "an entity in someone else's own store",
+            others.entity,
+            "hidden"
+          ),
+          await read(
+            "the reader's own, which hidden memories end and contest",
+            fixture.seen
+          ),
+        ];
+      };
+      const answered = await Promise.all([true, false].map(each));
+      const asked = answered.flat();
+      asked.push(
+        await answer(
+          "as someone who isn't a member",
+          async () => await calls.entity(stranger(), fixture.seen, false)
+        ),
+        await answer(
+          "an id of the markers",
+          async () => await calls.entity(personId, markers.join(""), true)
+        )
+      );
+      return asked;
+    },
+    find: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      await Promise.all([memoryFixture(probing), othersOwnMemory(markers)]);
+      const twins = markers.map((marker) => twinOf(marker));
+      const each = async (personal: boolean): Promise<Answer[]> => {
+        const like = personal ? "personal" : "shared";
+        const find = async (
+          name: string,
+          wanted: unknown,
+          about?: Answer["about"],
+          compared = like
+        ) =>
+          await answer(
+            `${name}, ${like}`,
+            async () => await calls.find(personId, wanted, personal),
+            about,
+            compared
+          );
+        return [
+          await find(
+            "a hidden identifier",
+            { identifier: { type: "ref", value: `ref:${first(markers)}` } },
+            "hidden"
+          ),
+          await find(
+            "its twin",
+            { identifier: { type: "ref", value: `ref:${first(twins)}` } },
+            "nothing"
+          ),
+          await find(
+            "a hidden name",
+            { name: markedText(markers) },
+            "hidden",
+            `${like} name`
+          ),
+          await find(
+            "its twin",
+            { name: markedText(twins) },
+            "nothing",
+            `${like} name`
+          ),
+          await find("every customer they may see", { kind: "customer" }),
+        ];
+      };
+      const answered = await Promise.all([true, false].map(each));
+      const asked = answered.flat();
+      asked.push(
+        await answer(
+          "as someone who isn't a member",
+          async () => await calls.find(stranger(), { kind: "customer" }, false)
+        ),
+        await answer(
+          "no filter, with the markers beside",
+          async () =>
+            await calls.find(personId, unchecked({ extra: markers }), true)
+        )
+      );
+      return asked;
+    },
+  } satisfies Record<keyof PersonMemoryCalls, Probe>;
+};
+
+/** A person's memories through core's own functions (brain-next.ts). */
+const corePersonProbes = personMemoryProbes({
+  remember: async (personId, remembered) =>
+    await coreBrain.rememberAs(env, personId, { kind: "own" }, remembered),
+  forget: async (personId, memory) =>
+    await coreBrain.forgetAs(env, personId, { memory, word: { kind: "own" } }),
+  correct: async (personId, correction, personal) =>
+    await coreBrain.correctAs(env, personId, unchecked(correction), {
+      personal,
+    }),
+  entity: async (personId, entity, personal) =>
+    await coreBrain.entityAs(env, personId, entity, { personal }),
+  find: async (personId, wanted, personal) =>
+    await coreBrain.findEntitiesAs(env, personId, unchecked(wanted), {
+      personal,
+    }),
+});
+
+/** One probe per export of core's brain-next.ts for a person's memories. */
+const corePersonMemories = {
+  rememberAs: corePersonProbes.remember,
+  forgetAs: corePersonProbes.forget,
+  correctAs: corePersonProbes.correct,
+  entityAs: corePersonProbes.entity,
+  findEntitiesAs: corePersonProbes.find,
+} satisfies Record<CorePersonMember, Probe>;
+
+/** The person themselves, as brain-memories.ts takes a caller. */
+const personCaller = (
+  personId: string,
+  personal: boolean
+): brainMemories.MemoryCaller => ({
+  person: personId,
+  actor: { type: "person", userId: personId },
+  word: { kind: "own" },
+  personal,
+});
+
+/** One probe per export of core's brain-memories.ts, as the person. */
+export const memoriesProbes = (() => {
+  const probes = personMemoryProbes({
+    remember: async (personId, remembered) =>
+      await brainMemories.rememberFor(
+        env,
+        personCaller(personId, true),
+        unchecked(remembered)
+      ),
+    forget: async (personId, memory) =>
+      await brainMemories.forgetFor(env, personCaller(personId, true), memory),
+    correct: async (personId, correction, personal) =>
+      await brainMemories.correctFor(
+        env,
+        personCaller(personId, personal),
+        unchecked(correction)
+      ),
+    entity: async (personId, entity, personal) =>
+      await brainMemories.entityFor(
+        env,
+        personCaller(personId, personal),
+        entity
+      ),
+    find: async (personId, wanted, personal) =>
+      await brainMemories.findEntitiesFor(
+        env,
+        personCaller(personId, personal),
+        unchecked(wanted)
+      ),
+  });
+  return {
+    rememberFor: probes.remember,
+    forgetFor: probes.forget,
+    correctFor: probes.correct,
+    entityFor: probes.entity,
+    findEntitiesFor: probes.find,
+  };
+})() satisfies Record<keyof typeof brainMemories, Probe>;
 
 /** One probe per public method of the Brain's store. */
 export const storeProbes = {
@@ -3616,10 +4145,15 @@ interface Surface {
  * of core that import brain-next.ts.
  */
 export const brainSurfaces = [
-  { name: "core", module: coreBrain, probes: coreProbes },
+  {
+    name: "core",
+    module: coreBrain,
+    probes: { ...coreProbes, ...corePersonMemories },
+  },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
   { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
+  { name: "memories", module: brainMemories, probes: memoriesProbes },
 ] as const satisfies readonly Surface[];
 
 /**

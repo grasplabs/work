@@ -30,4 +30,7 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Remembers, forgets and corrects for a person, and reads entities for
+  // them: its own surface, each export probed as the person.
+  "apps/core/src/brain-memories.ts": "memories",
 } as const satisfies Readonly<Record<string, string>>;

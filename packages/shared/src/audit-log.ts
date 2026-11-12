@@ -141,6 +141,11 @@ const typeRules: readonly {
   // Two entities of different collections decided to be one, or not
   // (GRA-1080): their IDs and evidence, never a name.
   { action: "brain.entity_match", type: "decision" },
+  // The new Brain's memories (core's src/brain-memories.ts): one saved,
+  // retired or corrected for a person, and an entity read. Ids, counts
+  // and codes only, never what a memory says.
+  { action: "brain.memory", type: "action" },
+  { action: "brain.entity.read", type: "read" },
   { action: "knowledge.search", type: "read" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },

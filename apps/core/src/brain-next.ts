@@ -1,13 +1,24 @@
 import {
   brainOf,
   currentReadMax,
+  entityIdSchema,
+  entityKinds,
   erasureReasons,
+  identifierSchema,
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
+  memoriesReadMax,
+  memoryIdSchema,
+  memoryTypes,
+  namesPerEntityMax,
+  personalBrainOf,
   principalMaxLength,
+  quoteMaxLength,
   questionMaxLength,
   sourceIdMaxLength,
+  statementMaxLength,
+  valueMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
   storeBytesMax,
@@ -18,6 +29,11 @@ import type {
   Brain,
   ErasureReason,
   Embedders,
+  Entity,
+  EntityId,
+  Memory,
+  MemoryChangeOutcome,
+  MemoryId,
   ModelReply,
   Pack,
   PackItem,
@@ -1080,4 +1096,372 @@ export const actOnBrainForStaff = async (
       throw new Error(`No such action (${typeof unhandled})`);
     }
   }
+};
+
+// Memories and entities, for a person core verified (GRA-1743): what
+// `brain-memories.ts` writes and reads for a chat, an App or a run acting
+// for them. Everything written here is readable by that person alone and
+// kept in their own store (`person:<id>`), never in the shared one: the
+// plan's rule is that a memory an agent writes is readable only by those
+// who can read everything its chat or run read, and never by more than
+// the chat's or App's own users. A person's own chat read what they may
+// read; an App's or workflow's run reads from several teams' content, App
+// data and connections, whose readers have no one set core can name, so
+// the plan's fallback holds for both: the person alone. Widening a memory
+// is a person's act of its own (the plan's "publish"), not built here.
+//
+// Reads take `personal` from core, never from a caller's input: only a
+// person's own chat reads their own store (as recall's `personal` does),
+// so what is theirs alone never reaches App data. Every read asks each
+// store as the same reader, which filters inside its own statements, and
+// joins the answers, the shared store's first: neither answer depends on
+// the other store's hidden rows.
+
+/** `person`'s own store, where what only they may read is kept. */
+const personsOwn = (env: BrainEnv, person: string): Brain =>
+  personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), person);
+
+/** The stores a read for `person` asks: the shared one, and theirs when `personal`. */
+const storesFor = (env: BrainEnv, person: string, personal: boolean) =>
+  personal ? [brain(env), personsOwn(env, person)] : [brain(env)];
+
+/** A short text of a memory: some text, at most `max` characters. */
+const memoryText = (max: number) => wellFormedString().regex(/\S/u).max(max);
+
+/**
+ * An agent writing for a person, as core names it: a kind, ":", and its
+ * id (`app:<id>`, `run:<id>`), so it is never a person's ID.
+ */
+const agentWriterSchema = wellFormedString()
+  .max(principalMaxLength)
+  .regex(/^[a-z]+:\S+$/u);
+
+/**
+ * Whose word a memory is: the person's own (`own`), said by them and
+ * saved for them, or an agent's acting for them (an App, a run), which is
+ * never a preference or an instruction (the Brain refuses one).
+ */
+const memoryWordSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("own") }),
+  z.strictObject({ kind: z.literal("agent"), agent: agentWriterSchema }),
+]);
+export type MemoryWord = z.infer<typeof memoryWordSchema>;
+
+/**
+ * What a memory is about: an entity by its id in the person's own store,
+ * or by its kind and the names and exact identifiers given, linked to one
+ * the store holds on an identifier alone.
+ */
+const memoryAboutSchema = z.strictObject({
+  id: entityIdSchema.optional(),
+  kind: z.enum(entityKinds),
+  names: z.array(memoryText(valueMaxLength)).max(namesPerEntityMax).default([]),
+  identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
+});
+
+const attributeSchema = wellFormedString().min(1).max(64);
+
+const rememberedSchema = z.strictObject({
+  change: changeSchema,
+  about: memoryAboutSchema,
+  attribute: attributeSchema.optional(),
+  value: memoryText(valueMaxLength).optional(),
+  type: z.enum(memoryTypes),
+  statement: memoryText(statementMaxLength),
+  quote: memoryText(quoteMaxLength).optional(),
+  validFrom: z.date().optional(),
+  validUntil: z.date().optional(),
+});
+
+/** A memory to save for a person (`rememberAs`), as its schema takes it. */
+export type Remembered = z.input<typeof rememberedSchema>;
+
+/** What `rememberAs` saved: the memory, and the entity it is about. */
+export interface RememberedMemory {
+  memory: MemoryId;
+  entity: EntityId;
+}
+
+/** The writer and the speaker a memory of `word` for `person` records. */
+const writerOf = (person: string, word: MemoryWord) =>
+  word.kind === "own"
+    ? { writer: person, speaker: { kind: "internal" as const, person } }
+    : {
+        writer: word.agent,
+        speaker: { kind: "agent" as const, agent: word.agent },
+      };
+
+/**
+ * Saves a memory for the member `personId` in `said` (whose word it is,
+ * which core sets), readable by them alone, in
+ * their own store: about an entity of theirs (by id), or one found by an
+ * exact identifier there, or a new one. The same writer saying something
+ * new of the same entity and one-value attribute ends their earlier
+ * memory, which stays as history. `change` names this one save, minted by
+ * core (a chat's tool call, a run's step): the same change again answers
+ * what it saved. Refused once they are no longer a member, and by the
+ * Brain for what its rules refuse (a preference or instruction that isn't
+ * their own word, an attribute their entity's kind doesn't have).
+ */
+export const rememberAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  said: MemoryWord,
+  remembered: Remembered | Readonly<Record<string, unknown>>
+): Promise<RememberedMemory> => {
+  const word = checked(memoryWordSchema, said);
+  const { change, about, quote, ...memory } = checked(
+    rememberedSchema,
+    remembered
+  );
+  const { person } = await readerOf(env, personId);
+  const { writer, speaker } = writerOf(person, word);
+  const added = await personsOwn(env, person).addMemories({
+    change,
+    access: { kind: "owner", person },
+    entities: [{ key: "about", ...about }],
+    memories: [
+      {
+        about: "about",
+        ...memory,
+        speaker,
+        basis: {
+          kind: "writer",
+          writer,
+          ...(quote === undefined ? {} : { quote }),
+        },
+      },
+    ],
+  });
+  const [saved] = added.memories;
+  const entity = added.entities.about;
+  if (saved === undefined || entity === undefined) {
+    throw new Error("The Brain saved no memory");
+  }
+  return { memory: saved, entity };
+};
+
+const forgottenSchema = z.strictObject({
+  memory: memoryIdSchema,
+  word: memoryWordSchema,
+});
+
+/**
+ * Retires one of the memories `word` saved for the member `personId`
+ * (`rememberAs`): it stops being current, and stays as history. `nothing`
+ * alike when there is no such memory, when another writer's it is, and
+ * when it was no longer current. Refused once they are no longer a member.
+ */
+export const forgetAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  forgotten: { memory: string; word: MemoryWord }
+): Promise<MemoryChangeOutcome> => {
+  const { memory, word } = checked(forgottenSchema, forgotten);
+  const { person } = await readerOf(env, personId);
+  return await personsOwn(env, person).retireMemory({
+    memory,
+    writer: writerOf(person, word).writer,
+  });
+};
+
+const correctionSchema = z.strictObject({
+  memory: memoryIdSchema,
+  entity: entityIdSchema,
+  attribute: attributeSchema.optional(),
+  fix: z
+    .strictObject({
+      change: changeSchema,
+      statement: memoryText(statementMaxLength),
+      value: memoryText(valueMaxLength).optional(),
+      quote: memoryText(quoteMaxLength).optional(),
+    })
+    .optional(),
+});
+
+/** A correction (`correctAs`). */
+export type Correction = z.input<typeof correctionSchema>;
+
+/**
+ * The member `personId` says a memory about `entity` is right, or wrong
+ * with a fix, in their own word. Without a fix, the memory is confirmed
+ * where it is kept: read first among those it was confirmed over. With
+ * one, the fix is saved as their memory of the same entity, attribute and
+ * type, readable by them alone, and confirmed: it ends their own earlier
+ * memory, and is read before any other writer's. Answers the memory
+ * confirmed, or null alike when they may not read one of that id (of
+ * `attribute`, when given), it is no longer current, or the fix can't be
+ * kept: a fix is filed in their own store, so only for a memory kept
+ * there (the Brain's shared store can't yet file a fix under the readers
+ * of the memory it corrects), and never for a relation. Reads their own
+ * store only when `personal`.
+ */
+export const correctAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  correction: Correction,
+  { personal }: { personal: boolean }
+): Promise<MemoryId | null> => {
+  const { memory, entity, attribute, fix } = checked(
+    correctionSchema,
+    correction
+  );
+  const reader = await readerOf(env, personId);
+  if (fix === undefined) {
+    for (const store of storesFor(env, reader.person, personal)) {
+      // One store holds a memory of this id: the next is asked only when
+      // this one confirmed nothing.
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      if ((await store.confirmMemory({ memory, reader })) === "done") {
+        return memory;
+      }
+    }
+    return null;
+  }
+  if (!personal) {
+    return null;
+  }
+  const own = personsOwn(env, reader.person);
+  const [{ memories }, about] = await Promise.all([
+    own.readMemories({
+      entity,
+      reader,
+      ...(attribute === undefined ? {} : { attribute }),
+      limit: memoriesReadMax,
+    }),
+    own.readEntity({ entity, reader }),
+  ]);
+  const corrected = memories.find(({ id }) => id === memory);
+  if (corrected === undefined || about === null || corrected.object !== null) {
+    return null;
+  }
+  const { writer, speaker } = writerOf(reader.person, { kind: "own" });
+  const added = await own.addMemories({
+    change: fix.change,
+    access: { kind: "owner", person: reader.person },
+    entities: [{ key: "about", id: about.id, kind: about.kind }],
+    memories: [
+      {
+        about: "about",
+        ...(corrected.attribute === null
+          ? {}
+          : { attribute: corrected.attribute }),
+        ...(fix.value === undefined ? {} : { value: fix.value }),
+        type: corrected.type,
+        statement: fix.statement,
+        speaker,
+        basis: {
+          kind: "writer",
+          writer,
+          ...(fix.quote === undefined ? {} : { quote: fix.quote }),
+        },
+      },
+    ],
+  });
+  const [saved] = added.memories;
+  if (saved === undefined) {
+    return null;
+  }
+  // A retry with the same change answers the same fix, and confirms it
+  // again: only a confirmation that took counts as corrected.
+  return (await own.confirmMemory({ memory: saved, reader })) === "done"
+    ? saved
+    : null;
+};
+
+/** A memory as a person reads it: its source as its producer named it. */
+export interface ReadMemory extends Omit<Memory, "source"> {
+  /**
+   * The source version it rests on; null for a writer's, and for one
+   * drawn from what no producer adds (an instruction file).
+   */
+  source: SourceVersionRef | null;
+}
+
+/** An entity as a person reads it, with the current memories about it they may read. */
+export interface EntityCard {
+  entity: Entity;
+  memories: ReadMemory[];
+}
+
+/** `memory` as a person reads it (`ReadMemory`). */
+const readMemoryOf = ({ source, ...memory }: Memory): ReadMemory => {
+  if (source === null) {
+    return { ...memory, source: null };
+  }
+  const colon = source.source.indexOf(":");
+  const ref = sourceRefSchema.safeParse({
+    producer: source.source.slice(0, colon),
+    id: source.source.slice(colon + 1),
+  });
+  return {
+    ...memory,
+    source: ref.success ? { source: ref.data, version: source.version } : null,
+  };
+};
+
+/**
+ * The entity `entity`, with the current memories about it, as the member
+ * `personId` may read them: from the shared store, or, when `personal`,
+ * their own, which holds it when the shared one doesn't (an entity's id is
+ * its store's own). Null alike when there is none or they may not.
+ * Refused once they are no longer a member.
+ */
+export const entityAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  entity: string,
+  { personal }: { personal: boolean }
+): Promise<EntityCard | null> => {
+  const id = checked(entityIdSchema, entity);
+  const reader = await readerOf(env, personId);
+  for (const store of storesFor(env, reader.person, personal)) {
+    // oxlint-disable-next-line no-await-in-loop -- one store at a time
+    const [read, { memories }] = await Promise.all([
+      store.readEntity({ entity: id, reader }),
+      store.readMemories({ entity: id, reader, limit: memoriesReadMax }),
+    ]);
+    if (read !== null) {
+      return { entity: read, memories: memories.map(readMemoryOf) };
+    }
+  }
+  return null;
+};
+
+const entitiesWantedSchema = z
+  .strictObject({
+    kind: z.enum(entityKinds).optional(),
+    identifier: identifierSchema.optional(),
+    name: memoryText(valueMaxLength).optional(),
+    limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+  })
+  .refine(
+    ({ kind, identifier, name }) =>
+      kind !== undefined || identifier !== undefined || name !== undefined,
+    { message: "Names no kind, identifier or name" }
+  );
+
+/** What entities to find (`findEntitiesAs`): at least one of a kind, an identifier or a name. */
+export type EntitiesWanted = z.input<typeof entitiesWantedSchema>;
+
+/**
+ * The entities the member `personId` may see that match: of a kind,
+ * holding an exact identifier, or a name (whole, without case), at most
+ * `limit`; the shared store's first, each store's in its own order, then,
+ * when `personal`, their own's. Refused once they are no longer a member.
+ */
+export const findEntitiesAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  wanted: EntitiesWanted,
+  { personal }: { personal: boolean }
+): Promise<Entity[]> => {
+  const request = checked(entitiesWantedSchema, wanted);
+  const reader = await readerOf(env, personId);
+  const found = await Promise.all(
+    storesFor(env, reader.person, personal).map(
+      async (store) => await store.findEntities({ ...request, reader })
+    )
+  );
+  return found.flat().slice(0, request.limit);
 };
