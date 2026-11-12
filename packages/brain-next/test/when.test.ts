@@ -16,18 +16,18 @@ describe("dates a memory names", () => {
       thisFriday: resolvedAt("2026-11-11T10:00:00Z", {
         kind: "weekday",
         weekday: 5,
-        weeksAhead: 0,
+        weeks: 0,
       }),
       fridayAfter: resolvedAt("2026-11-11T10:00:00Z", {
         kind: "weekday",
         weekday: 5,
-        weeksAhead: 1,
+        weeks: 1,
       }),
       // Said on a Friday: "Friday" is the one a week on, never the same day.
       onFriday: resolvedAt("2026-11-13T10:00:00Z", {
         kind: "weekday",
         weekday: 5,
-        weeksAhead: 0,
+        weeks: 0,
       }),
       // 23:30 UTC on Thursday is already Friday in Amsterdam.
       lateThursday: resolvedAt("2026-11-12T23:30:00Z", {
@@ -39,6 +39,38 @@ describe("dates a memory names", () => {
       fridayAfter: { date: "2026-11-20" },
       onFriday: { date: "2026-11-20" },
       lateThursday: { date: "2026-11-14" },
+    });
+  });
+
+  it("counts a weekday back for the last one before the day said, never the day itself", () => {
+    expect({
+      // Wednesday 11 November 2026: the Friday before, and the one before that.
+      lastFriday: resolvedAt("2026-11-11T10:00:00Z", {
+        kind: "weekday",
+        weekday: 5,
+        weeks: -1,
+      }),
+      twoBack: resolvedAt("2026-11-11T10:00:00Z", {
+        kind: "weekday",
+        weekday: 5,
+        weeks: -2,
+      }),
+      // Said on a Friday: "last Friday" is a week back.
+      onFriday: resolvedAt("2026-11-13T10:00:00Z", {
+        kind: "weekday",
+        weekday: 5,
+        weeks: -1,
+      }),
+      // Past the dates Temporal holds: unresolved, never a wrong date.
+      pastRange: resolvedAt("2026-11-13T10:00:00Z", {
+        kind: "offset",
+        years: 400_000,
+      }),
+    }).toStrictEqual({
+      lastFriday: { date: "2026-11-06" },
+      twoBack: { date: "2026-10-30" },
+      onFriday: { date: "2026-11-06" },
+      pastRange: null,
     });
   });
 

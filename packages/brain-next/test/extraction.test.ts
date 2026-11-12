@@ -13,10 +13,17 @@ import type {
   ModelRequest,
   Reader,
 } from "@grasp-os/brain-next/contract";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { tokensOf } from "../src/contract.ts";
+import {
+  checkInstructions,
+  enqueueExtraction,
+  proposeInstructions,
+} from "../src/extraction.ts";
 import type { BrainStore } from "../src/store.ts";
 
 type Store = DurableObjectStub<BrainStore>;
@@ -37,8 +44,12 @@ const noModel: Embedders = {
   },
 };
 
-/** What the model answers a call, by the test whose token its message holds. */
-type Answer = (request: ModelRequest) => string;
+/**
+ * What the model answers a call, by the test whose token its message
+ * holds: it may act on the store before it answers, as another call
+ * landing while the model thinks.
+ */
+type Answer = (request: ModelRequest) => string | Promise<string>;
 
 /** Each test's answers, by its token. */
 const answers = new Map<string, Answer>();
@@ -53,14 +64,20 @@ const ask: AskModel = async (request) => {
   const answer = [...answers].find(([token]) => request.input.includes(token));
   return answer === undefined
     ? { kind: "answer", text: '{"entities":[],"memories":[]}' }
-    : { kind: "answer", text: answer[1](request) };
+    : { kind: "answer", text: await answer[1](request) };
 };
 
-/** The queue's clock: a minute on per tick, so the model's pace never holds a call back. */
+/**
+ * The queue's clock: a minute on per tick, so the model's pace never holds
+ * a call back; with the host's models' context window when it knows one.
+ */
 let clock = Date.now();
-const tick = async (minutes = 1): Promise<void> => {
+const tick = async (
+  minutes = 1,
+  contextTokens: number | null = null
+): Promise<void> => {
   clock += minutes * 60_000;
-  await shared().work(ask, new Date(clock), noModel);
+  await shared().work(ask, new Date(clock), noModel, contextTokens);
 };
 
 /** The calls that held `token`: their purpose and role. */
@@ -68,6 +85,30 @@ const callsOf = (token: string) =>
   calls
     .filter(({ input }) => input.includes(token))
     .map(({ purpose, role }) => ({ purpose, role }));
+
+/** A check call's message, as far as the tests read it. */
+const checkedSchema = z.object({
+  written: z.string(),
+  statements: z.array(
+    z.object({ value: z.string().nullable(), until: z.string().nullable() })
+  ),
+});
+
+/** What the check call of `token`'s text was shown, beside the text: the day written, each value and end. */
+const checkedOf = (token: string) => {
+  const input = calls.find(
+    ({ purpose, input: message }) =>
+      purpose === "brain.extract.check" && message.includes(token)
+  )?.input;
+  if (input === undefined) {
+    throw new Error("No check call held the token");
+  }
+  const { written, statements } = checkedSchema.parse(JSON.parse(input));
+  return {
+    written,
+    statements: statements.map(({ value, until }) => ({ value, until })),
+  };
+};
 
 /** Wednesday 11 November 2026, 10:00 in Amsterdam. */
 const wednesday = new Date("2026-11-11T09:00:00Z");
@@ -104,7 +145,10 @@ const checkInputSchema = z.object({
 
 /** The answer to the first call (`proposed`) and to the check (the indexes it supports). */
 const answering =
-  (proposed: unknown, supported?: number[]): Answer =>
+  (
+    proposed: unknown,
+    supported?: number[]
+  ): ((request: ModelRequest) => string) =>
   ({ purpose, input }) => {
     if (purpose === "brain.extract") {
       return `Here you are:\n\`\`\`json\n${JSON.stringify(proposed)}\n\`\`\``;
@@ -201,6 +245,16 @@ const instructingProposal = (name: string) => ({
   ],
 });
 
+/** How many memories of the store, ended or not, hold `name` in their statement. */
+const memoriesHolding = async (name: string): Promise<number> =>
+  await runInDurableObject(
+    shared(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec("SELECT 1 FROM memories WHERE instr(statement, ?) > 0", name)
+        .toArray().length
+  );
+
 /** How long the store may take to start, its schema made and its first tick run. */
 const startMs = 30_000;
 
@@ -230,7 +284,7 @@ describe("extracting memories", () => {
           {
             about: "c",
             attribute: "renewal_date",
-            date: { kind: "weekday", weekday: 5, weeksAhead: 0 },
+            date: { kind: "weekday", weekday: 5, weeks: 0 },
             type: "fact",
             statement: `${name} renews its contract on Friday.`,
             quote: "We will renew the contract next Friday.",
@@ -250,6 +304,9 @@ describe("extracting memories", () => {
         ({ purpose, input }) =>
           purpose === "brain.extract" && input.includes(token)
       )?.input,
+      // The check is shown what would be stored: the resolved date, and
+      // the day written it counts from.
+      checked: checkedOf(token),
       inGroup: await readAs({ person: unique("p"), groups: [group] }, name),
       outside: await readAs({ person: unique("p"), groups: [] }, name),
     }).toStrictEqual({
@@ -258,6 +315,10 @@ describe("extracting memories", () => {
         { purpose: "brain.extract.check", role: "quick" },
       ],
       prompt: text,
+      checked: {
+        written: "2026-11-11",
+        statements: [{ value: "2026-11-13", until: null }],
+      },
       inGroup: [
         {
           attribute: "renewal_date",
@@ -548,5 +609,301 @@ describe("extracting memories", () => {
     await tick();
 
     expect(callsOf(token)).toStrictEqual([]);
+  });
+
+  it("keeps a value only when its words are in the quote, and a date the model writes out only when the quote states it", async () => {
+    const token = unique("t");
+    const name = unique("Wayne");
+    const group = unique("g");
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          // Its value is not what the quote says.
+          customerFact(
+            `${name} is in Rotterdam.`,
+            `${name} is based in Utrecht`,
+            "location",
+            "Rotterdam"
+          ),
+          customerFact(
+            `${name} is in Utrecht.`,
+            `${name} is based in Utrecht`,
+            "location",
+            "Utrecht"
+          ),
+          {
+            // A date the text never states: the model's guess.
+            about: "c",
+            attribute: "renewal_date",
+            date: { kind: "date", date: "2027-04-30" },
+            type: "fact",
+            statement: `${name} renews in spring.`,
+            quote: `${name} renews in spring`,
+          },
+        ],
+      })
+    );
+    await added(
+      `${token}: ${name} is based in Utrecht. ${name} renews in spring.`,
+      audience(group),
+      { extract: fromOutside() }
+    );
+    await tick();
+
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+    expect(
+      read
+        .map(({ attribute, value }) => ({ attribute, value }))
+        .toSorted((a, b) => String(a.value).localeCompare(String(b.value)))
+    ).toStrictEqual([
+      // Kept, filed under none, with no date nobody wrote.
+      { attribute: null, value: null },
+      { attribute: "location", value: "Utrecht" },
+    ]);
+  });
+
+  it("reads all of a long version a piece at a time, and ends what an earlier version said only once its last piece is read", async () => {
+    const token = unique("t");
+    const name = unique("Tyrell");
+    const group = unique("g");
+    const source = unique("doc");
+    const reader = { person: unique("p"), groups: [group] };
+    const complaint = (about: string) =>
+      `${name} complained about the ${about}`;
+    // What the reader read as each piece was asked about.
+    const seenDuringPieces: string[][] = [];
+    answers.set(token, async (request) => {
+      if (request.purpose === "brain.extract") {
+        const current = await readAs(reader, name);
+        seenDuringPieces.push(current.map(({ value }) => value ?? ""));
+      }
+      const found = ["invoices", "deliveries"].filter((about) =>
+        request.input.includes(complaint(about))
+      );
+      return answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: found.map((about) =>
+          customerFact(
+            `${complaint(about)}.`,
+            complaint(about),
+            "complaint",
+            about
+          )
+        ),
+      })(request);
+    });
+    await added(`${token}: ${complaint("invoices")}.`, audience(group), {
+      extract: fromOutside(),
+      source,
+    });
+    await tick();
+    // A newer version far longer than a piece: the complaint about
+    // deliveries only at its end.
+    const filler = Array.from(
+      { length: 40 },
+      (_, index) => `Sentence ${index} of ${token} says nothing to keep.`
+    ).join(" ");
+    await added(
+      `${token}: ${filler} ${complaint("deliveries")}.`,
+      audience(group),
+      { extract: fromOutside(), source }
+    );
+    // A window of the instructions and about 200 tokens of text a piece.
+    const window =
+      2 * (tokensOf(proposeInstructions) + tokensOf(checkInstructions) + 200);
+    for (let round = 0; round < 10; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one piece a tick at most
+      await tick(1, window);
+    }
+    const pieces = calls.filter(
+      ({ purpose, input }) =>
+        purpose === "brain.extract" &&
+        input.includes(token) &&
+        input.includes("Sentence")
+    );
+    const read = await readAs(reader, name);
+
+    expect({
+      // More than one piece, each shorter than the version.
+      pieces: pieces.length > 1,
+      // Every sentence of the version reached the model.
+      allRead: Array.from({ length: 40 }, (_, index) => index).every((index) =>
+        pieces.some(({ input }) => input.includes(`Sentence ${index} of`))
+      ),
+      // While the newer version's pieces were read, what the first said stood.
+      before: seenDuringPieces
+        .slice(1)
+        .every((values) => values.includes("invoices")),
+      now: read.map(({ value }) => value),
+    }).toStrictEqual({
+      pieces: true,
+      allRead: true,
+      before: true,
+      now: ["deliveries"],
+    });
+  });
+
+  it("writes nothing of a version a newer one replaced while the model was asked", async () => {
+    const token = unique("t");
+    const name = unique("Cyberdyne");
+    const group = unique("g");
+    const source = unique("doc");
+    let replaced = false;
+    answers.set(token, async (request) => {
+      if (!replaced && request.purpose === "brain.extract") {
+        replaced = true;
+        await added(`${token}: Nothing more about it.`, audience(group), {
+          extract: fromOutside(),
+          source,
+        });
+      }
+      return answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: request.input.includes("active")
+          ? [
+              customerFact(
+                `${name} is active.`,
+                `${name} is active`,
+                "status",
+                "active"
+              ),
+            ]
+          : [],
+      })(request);
+    });
+    await added(`${token}: ${name} is active.`, audience(group), {
+      extract: fromOutside(),
+      source,
+    });
+    await tick();
+    await tick();
+
+    await expect(memoriesHolding(name)).resolves.toBe(0);
+  });
+
+  it("writes nothing of a source erased while the model was asked", async () => {
+    const token = unique("t");
+    const name = unique("Soylent");
+    const group = unique("g");
+    const source = unique("doc");
+    answers.set(token, async (request) => {
+      if (request.purpose === "brain.extract") {
+        await shared().eraseSource({ source, reason: "deleted" });
+      }
+      return answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })(request);
+    });
+    await added(`${token}: ${name} is active.`, audience(group), {
+      extract: fromOutside(),
+      source,
+    });
+    await tick();
+    await tick();
+
+    await expect(memoriesHolding(name)).resolves.toBe(0);
+  });
+
+  it("asks nothing again and adds nothing twice when a piece runs again after its add landed", async () => {
+    const token = unique("t");
+    const name = unique("Oscorp");
+    const group = unique("g");
+    const extract = fromOutside();
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    const { source, version } = await added(
+      `${token}: ${name} is active.`,
+      audience(group),
+      { extract }
+    );
+    await tick();
+    const callsBefore = callsOf(token).length;
+    // As if the store stopped after the add and before the item settled:
+    // the same item is on the queue again.
+    await runInDurableObject(shared(), (_instance, state) => {
+      enqueueExtraction(state.storage, source, version, extract);
+    });
+    await tick();
+
+    expect({
+      calls: callsOf(token).length - callsBefore,
+      memories: await memoriesHolding(name),
+    }).toStrictEqual({ calls: 0, memories: 1 });
+  });
+
+  it("asks nothing of a version nobody may read", async () => {
+    const token = unique("t");
+    answers.set(token, answering({ entities: [], memories: [] }));
+    await added(
+      `${token}: Notes.`,
+      { kind: "none" },
+      { extract: fromOutside() }
+    );
+    await tick();
+
+    expect(callsOf(token)).toStrictEqual([]);
+  });
+
+  it("keeps an email only when the text writes that very address", async () => {
+    const token = unique("t");
+    const name = unique("Initrode");
+    const group = unique("g");
+    const domain = `${name.toLowerCase()}.example`;
+    answers.set(
+      token,
+      answering({
+        entities: [
+          {
+            key: "c",
+            kind: "customer",
+            names: [name],
+            // The first is only part of an address the text writes.
+            emails: [`jo@${domain}`, `Ann@${domain}`],
+          },
+        ],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    await added(
+      `${token}: ${name} is active. Mail jo@${domain}.org or <ann@${domain}>.`,
+      audience(group),
+      { extract: fromOutside() }
+    );
+    await tick();
+    const reader = { person: unique("p"), groups: [group] };
+    const [entity] = await shared().findEntities({ reader, name });
+
+    expect(entity?.identifiers).toStrictEqual([
+      { type: "email", value: `Ann@${domain}` },
+    ]);
   });
 });

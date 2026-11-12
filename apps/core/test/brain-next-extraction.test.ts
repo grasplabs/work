@@ -39,7 +39,7 @@ describe("extracting memories through core", () => {
                 {
                   about: "c",
                   attribute: "renewal_date",
-                  date: { kind: "weekday", weekday: 5, weeksAhead: 0 },
+                  date: { kind: "weekday", weekday: 5, weeks: 0 },
                   type: "fact",
                   statement: `${name} renews on Friday.`,
                   quote: "we renew the contract next Friday",

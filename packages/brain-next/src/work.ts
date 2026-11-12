@@ -242,6 +242,11 @@ export interface WorkContext {
   /** The host's Brain bucket, where the store keeps what it keeps in R2. */
   bucket: BrainBucket;
   /**
+   * The context window of the host's models, in tokens; null when the
+   * host doesn't know it (contract.ts `contextTokensSchema`).
+   */
+  contextTokens: number | null;
+  /**
    * Says more is left once this run returns (rule 7), having written
    * `progress` pieces of the work (more than 0, or the attempt fails): the
    * item is put back, due at once with its attempts reset, unless a newer
@@ -258,6 +263,7 @@ export interface WorkHost {
   ask: AskModel;
   embedders: Embedders;
   bucket: BrainBucket;
+  contextTokens: number | null;
 }
 
 /** A kind of work, and how one item of it is done. */
@@ -1152,6 +1158,7 @@ const runItem = async (
         storage,
         signal,
         bucket: host.bucket,
+        contextTokens: host.contextTokens,
         again: (progress) => {
           again = { progress };
         },

@@ -10,6 +10,7 @@ import {
   sourceIdMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
+  modelRoles as brainModelRoles,
   storeBytesMax,
   workPriorities,
 } from "@grasp-os/brain-next/contract";
@@ -57,6 +58,7 @@ import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { parseModelRef } from "./model-catalog.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { organizationTimeZone } from "./organization.ts";
 
@@ -213,6 +215,14 @@ const saidBySchema = z.discriminatedUnion("kind", [
  * To draw memories from a version as it is added: whose words it is, when
  * they were said (what "next Friday" counts from, in the organization's
  * time zone), and which class of the Brain's work it takes.
+ *
+ * It describes ONE message's own words: one speaker, one moment. A thread
+ * (a mail thread, a chat) is one source version per message, each with its
+ * own `said`, and the producer strips the history a message quotes or
+ * forwards before adding it: otherwise a customer's "we pay next Friday",
+ * quoted in a colleague's reply, would become the colleague's word and
+ * count from the reply's date. A document is one author's words at the
+ * moment it was saved.
  */
 const saidSchema = z.strictObject({
   by: saidBySchema,
@@ -973,6 +983,33 @@ const askModel =
   };
 
 /**
+ * The context window of the models the Brain's work asks, in tokens: the
+ * smaller of the careful and the quick one's, from the gateway's catalog;
+ * null when either isn't in it (an OpenAI-compatible endpoint's), or no
+ * model is set up (the calls then fail as the account's trouble).
+ */
+const contextTokensOf = async (env: Env): Promise<number | null> => {
+  let settings: Awaited<ReturnType<typeof modelSettings>>;
+  try {
+    settings = await modelSettings(env);
+  } catch {
+    return null;
+  }
+  const windows = brainModelRoles.map((role) => {
+    try {
+      const window = parseModelRef(modelForRole(settings, role))?.catalog
+        .contextWindow;
+      return window !== undefined && window > 0 ? window : null;
+    } catch {
+      return null;
+    }
+  });
+  return windows.every((window) => window !== null)
+    ? Math.min(...windows)
+    : null;
+};
+
+/**
  * Core's embedders, as the Brain's background work uses them: the bulk
  * embedders, running the model core ships, or none while none ships (then
  * the Brain embeds nothing, and its overview says so). Whatever an
@@ -993,7 +1030,12 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
  * twice.
  */
 export const workBrain = async (env: Env, at: Date): Promise<void> => {
-  await brain(env).work(askModel(env), at, await embeddersOf(env));
+  await brain(env).work(
+    askModel(env),
+    at,
+    await embeddersOf(env),
+    await contextTokensOf(env)
+  );
 };
 
 /** The Brain's work queue, store and ledger, as staff see it (brain-report.ts). */

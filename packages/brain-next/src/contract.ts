@@ -167,7 +167,9 @@ const isTimeZone = (timeZone: string): boolean => {
  * model's), when they were said (`saidAt`), in which time zone their
  * relative dates count ("next Friday"), and which class of work the
  * drawing takes (`workPriorities`). A version added without it is kept
- * and found, and no memory is drawn from it.
+ * and found, and no memory is drawn from it. The text is one message's
+ * own words: a thread is one version per message, its quoted or
+ * forwarded history stripped by the host (core's `said`).
  */
 export const extractSchema = z.strictObject({
   speaker: speakerSchema,
@@ -643,6 +645,14 @@ export interface ModelRequest {
   input: string;
   timeoutMs: number;
 }
+
+/**
+ * The context window, in tokens, of the models the Brain's work asks (the
+ * smallest of them): what a piece of a source read at once is cut to
+ * (extraction.ts). Null when the host doesn't know it: then a version is
+ * read whole, and a model whose window it overflows refuses the call.
+ */
+export const contextTokensSchema = z.int().positive().nullable();
 
 /** Most milliseconds a model call may be given: an item's longest time. */
 export const modelTimeoutMaxMs = 4 * 60_000;
@@ -1732,9 +1742,16 @@ export interface Brain {
    * and returns once what it started has ended and nothing more is due,
    * or its time to start more is up. `ask` and `embedders` are used only
    * while this call is open. A second tick at the same time shares the same
-   * limits and claims nothing the first has under way.
+   * limits and claims nothing the first has under way. `contextTokens` is
+   * the window of the host's models (`contextTokensSchema`), what the
+   * work reads a source by.
    */
-  work: (ask: AskModel, at: Date, embedders: Embedders) => Promise<void>;
+  work: (
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    contextTokens?: number | null
+  ) => Promise<void>;
   /**
    * Starts the rebuild for the host's model again: every current version
    * with chunks it hasn't embedded goes on the queue again, those parked

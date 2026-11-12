@@ -15,6 +15,7 @@ import {
   newMemoriesSchema,
   retireRequestSchema,
   currentRequestSchema,
+  contextTokensSchema,
   embedModelSchema,
   newInstructionsSchema,
   newSourceSchema,
@@ -146,6 +147,8 @@ import {
 export interface AlarmHost {
   ask: AskModel;
   embedders: Embedders;
+  /** The host's model's context window, in tokens; null when unknown. */
+  contextTokens: number | null;
 }
 
 /** What the store needs of its host's Worker: the Brain's bucket. */
@@ -875,32 +878,49 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async work(
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    contextTokens: number | null = null
+  ): Promise<void> {
     await this.#changing(async () => {
-      await this.#workNow(ask, at, embedders);
+      await this.#workNow(ask, at, embedders, contextTokens);
     });
   }
 
   /** `work`, as one of the calls that may write to the bucket. */
-  async #workNow(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async #workNow(
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    contextTokens: number | null
+  ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
+    const tokens = checked(contextTokensSchema, contextTokens);
     if (!this.#schema) {
       // Nothing was ever kept: nothing to do.
       return;
     }
-    await this.#tick(ask, tickAt, {
-      model,
-      embed: async (request) => await embedders.embed(request),
-    });
+    await this.#tick(
+      ask,
+      tickAt,
+      {
+        model,
+        embed: async (request) => await embedders.embed(request),
+      },
+      tokens
+    );
   }
 
   /** The tick of `work` at `tickAt`, with the host's checked `embedders`. */
   async #tick(
     ask: AskModel,
     tickAt: Date,
-    embedders: Embedders
+    embedders: Embedders,
+    contextTokens: number | null
   ): Promise<void> {
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
@@ -915,7 +935,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await workTick(
       this.ctx.storage,
       this.#work,
-      { ask, embedders, bucket: this.#bucket },
+      { ask, embedders, bucket: this.#bucket, contextTokens },
       tickAt
     );
   }
@@ -953,7 +973,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       if (this.alarmHost !== null) {
         const host = await this.alarmHost();
-        await this.work(host.ask, new Date(), host.embedders);
+        await this.work(
+          host.ask,
+          new Date(),
+          host.embedders,
+          host.contextTokens
+        );
       }
     } catch {
       // Nothing of the error is kept. A tick that couldn't run (its ledger

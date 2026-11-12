@@ -783,8 +783,9 @@ describe(
 
       expect({
         holderReads,
-        // Every version was drawn from: two calls each, but the
-        // outsider's own, where the model proposed nothing to check.
+        // Two calls for each version someone may read, but the
+        // outsider's own, where the model proposed nothing to check; none
+        // for the one nobody may read.
         promptCount: prompts.length,
         mixed: prompts.filter((held) => held.length > 1),
         findings,
@@ -793,7 +794,7 @@ describe(
         // person is never drawn from a source, the holder's own words
         // included.
         holderReads: [1, 1],
-        promptCount: 7,
+        promptCount: 5,
         mixed: [],
         findings: [],
       });

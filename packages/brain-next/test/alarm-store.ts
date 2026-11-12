@@ -25,6 +25,7 @@ export class BrainStore extends Store {
           throw new Error("No model in these tests");
         },
       },
+      contextTokens: null,
     };
   };
 }
