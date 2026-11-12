@@ -1,6 +1,9 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { brainUploadErrors } from "@grasp-os/shared/brain-sources";
+import {
+  brainSourceErrors,
+  brainUploadErrors,
+} from "@grasp-os/shared/brain-sources";
 import type {
   BrainUpload,
   BrainUploadFile,
@@ -238,7 +241,9 @@ const textOf = async (
   if (!hasText(markdown)) {
     throw uploadErrors.create("upload.no_text");
   }
-  const text = `${file.name}\n\n${markdown}`;
+  // A file's text may hold half a surrogate pair, which the Brain refuses:
+  // each becomes U+FFFD, as a decoder would make it.
+  const text = `${file.name}\n\n${markdown}`.toWellFormed();
   if (new TextEncoder().encode(text).byteLength > textMaxBytes) {
     throw uploadErrors.create("upload.too_large", {
       bytes: file.bytes.byteLength,
@@ -259,19 +264,23 @@ const detailOf = (
   bytes: file.bytes.byteLength,
 });
 
-/** Whether `error` is the Brain refusing an add to a key it erased. */
-const isErasedKey = (error: unknown): boolean =>
-  error instanceof Error && error.message.includes("what this adds was erased");
-
 /**
  * Adds `text` to the Brain as the next version of `row`'s upload, with
- * an event of the outcome: `brain.upload.added` with its version;
- * `brain.upload.refused` when its key was erased meanwhile (a delete ran
- * while the file was read), answered as `brain.upload_deleted`; or
- * `brain.upload.failed` when the Brain answered nothing it could tell,
- * which may still have added it (an answer lost): the person sees it
- * failed, and finds it as it is. Its row and `brain.upload.received` were
+ * an event of the outcome. Its row and `brain.upload.received` were
  * written before.
+ *
+ * - `brain.upload.added`, with its version.
+ * - `brain.upload.refused` when the Brain refused it because its key was
+ *   erased (a delete ran while the file was read): it certainly didn't
+ *   land, and the row, which names nothing the Brain holds any more, goes
+ *   with the event; answered as `brain.upload_deleted`.
+ * - `brain.upload.failed` for any other failure: a call that threw or
+ *   whose answer was lost may still have added it, so the row stays,
+ *   naming the key for its deletion. A first upload that failed so may
+ *   then hold no version at all: the person can't see it on the page,
+ *   and it holds nothing anyone reads; its row names only IDs. Everything
+ *   the Brain itself would refuse is ruled out before the call (the
+ *   readers are core's, the text well-formed and within its size).
  */
 const addVersion = async (
   env: Env,
@@ -295,8 +304,16 @@ const addVersion = async (
       readers: sourceReadersOf(row),
     });
   } catch (error) {
-    if (isErasedKey(error)) {
-      await outcome({ action: "brain.upload.refused", detail: {} });
+    if (brainSourceErrors.codeOf(error) === "brain.source_erased") {
+      await auditedBatch(env, db, [
+        db.delete(brainUploads).where(eq(brainUploads.id, row.id)),
+        outboxed(db, {
+          actor,
+          target,
+          action: "brain.upload.refused",
+          detail: {},
+        }),
+      ]);
       throw brainUploadErrors.create("brain.upload_deleted");
     }
     await outcome({ action: "brain.upload.failed", detail: {} });

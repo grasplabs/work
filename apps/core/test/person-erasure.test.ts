@@ -15,6 +15,7 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { publishVersion } from "../src/app-publish.ts";
 import { formSubmissionOf, queueFormSent } from "../src/app-webhook-queue.ts";
+import { organizationId } from "../src/auth/auth.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
@@ -93,6 +94,12 @@ const emailOf = async (userId: string): Promise<string | undefined> => {
 };
 
 /** How many of `table`'s rows hold `userId` in `column`. */
+/** WebVTT captions saying `text`: a file the extractor reads. */
+const captions = (text: string): Uint8Array =>
+  new TextEncoder().encode(
+    `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}\n`
+  );
+
 const rowsOf = async (table: string, column: string, userId: string) => {
   const row = await env.DB.prepare(
     `SELECT count(*) AS count FROM ${table} WHERE ${column} = ?`
@@ -1038,6 +1045,58 @@ describe("erasing a person", () => {
       theirs: await inKnowledge(theirs.id),
       others: await inKnowledge(others.id),
     }).toStrictEqual({ theirs: 0, others: 1 });
+  });
+
+  it("forgets their uploads into the Brain for themselves alone once the Brain erased them, and keeps what they uploaded for a team", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const mate = await signedInApi(idp, "user");
+    const teamId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(teamId, `Team ${teamId}`, organizationId, Date.now()),
+      ...[person, mate].map(({ userId }) =>
+        env.DB.prepare(
+          "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+        ).bind(crypto.randomUUID(), teamId, userId, Date.now())
+      ),
+    ]);
+    const word = `w${crypto
+      .randomUUID()
+      .replaceAll(/[^a-f]/gu, "")
+      .slice(0, 10)}`;
+    await person.api.brainSources.upload(
+      { name: "Mine.vtt", bytes: captions("Only mine") },
+      { kind: "me" }
+    );
+    const { source: shared } = await person.api.brainSources.upload(
+      { name: "Team.vtt", bytes: captions(`For the team ${word}`) },
+      { kind: "team", teamId }
+    );
+    const uploads = async (readers: string) => {
+      const row = await env.DB.prepare(
+        "SELECT count(*) AS count FROM brain_uploads WHERE uploaded_by = ? AND readers = ?"
+      )
+        .bind(person.userId, readers)
+        .first<{ count: number }>();
+      return row?.count ?? 0;
+    };
+    const before = { own: await uploads("me"), team: await uploads("team") };
+    await admin.api.members.remove(person.userId);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const { items } = await mate.api.brainSources.search(word);
+
+    expect({
+      before,
+      after: { own: await uploads("me"), team: await uploads("team") },
+      teamFinds: items.map(({ source }) => source.id),
+    }).toStrictEqual({
+      before: { own: 1, team: 1 },
+      after: { own: 0, team: 1 },
+      teamFinds: [shared.id],
+    });
   });
 
   it("stops what still runs for them, and takes their decision confirmations, and leaves everyone else's", async () => {

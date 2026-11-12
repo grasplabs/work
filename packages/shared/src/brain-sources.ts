@@ -174,6 +174,12 @@ export interface BrainSourcesApi {
   deleteUpload: (uploadId: string) => Promise<void>;
 }
 
+/** What core's Brain answers a producer whose add an erasure closed: final, never retried. */
+export const brainSourceErrors = defineErrorFamily({
+  "brain.source_erased":
+    "What this adds was erased: it stays erased, and isn't added.",
+});
+
 export const brainUploadErrors = defineErrorFamily({
   "brain.upload_not_found": "There's no such upload, or you can't see it.",
   "brain.upload_not_allowed":

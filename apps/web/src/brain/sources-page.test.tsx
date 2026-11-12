@@ -108,6 +108,8 @@ interface Faked {
   firstRead?: Promise<boolean>;
   /** Lists no source at all. */
   empty?: boolean;
+  /** Refuses uploads, and reading what may be done to one, with this. */
+  uploadRefusal?: string;
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
@@ -116,7 +118,7 @@ const unmatched = "zeppelin";
 /** Shows the page on a faked core, answering as `faked` says. */
 const shown = async (
   connections: Connection[],
-  { refusal, searched, firstRead, empty = false }: Faked = {}
+  { refusal, searched, firstRead, empty = false, uploadRefusal }: Faked = {}
 ) => {
   const calls: string[] = [];
   const brainSources = {
@@ -178,6 +180,9 @@ const shown = async (
       readers: BrainUploadReaders
     ) => {
       await Promise.resolve();
+      if (uploadRefusal !== undefined) {
+        throw new Error(uploadRefusal);
+      }
       const team = readers.kind === "team" ? ` ${readers.teamId}` : "";
       calls.push(
         `upload ${file.name} (${file.bytes.byteLength} bytes) for ${readers.kind}${team}`
@@ -195,6 +200,9 @@ const shown = async (
     // The handbook is the person's upload, for a team of theirs.
     uploadOf: async (uploadId: string) => {
       await Promise.resolve();
+      if (uploadRefusal !== undefined) {
+        throw new Error(uploadRefusal);
+      }
       return uploadId === handbook.id
         ? {
             source: handbook,
@@ -542,6 +550,46 @@ describe(SourcesPage, () => {
         "deleteUpload u-1",
         "list",
       ],
+    });
+  });
+
+  it("chooses Only me until the person picks other readers, and says why an upload or an upload's details were refused", async () => {
+    const refused = "Files are being read for many people at the moment.";
+    await shown([], { uploadRefusal: refused });
+    const [, picker] = document.querySelectorAll("input");
+    const readers = document.querySelector("select");
+    const form = picker?.closest("form");
+    if (!(picker && readers && form)) {
+      throw new TypeError("No upload form");
+    }
+    const chosen = readers.selectedOptions[0]?.textContent;
+    await act(async () => {
+      Object.defineProperty(picker, "files", {
+        configurable: true,
+        value: [new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })],
+      });
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      form.requestSubmit();
+      await Promise.resolve();
+    });
+    await settle();
+    const uploadText = section("Upload a file");
+    await press("Handbook");
+    await settle();
+
+    expect({
+      chosen,
+      accepts: picker.accept,
+      uploadSaysWhy: uploadText.includes(refused),
+      panelSaysWhy: panel().includes(refused),
+    }).toStrictEqual({
+      chosen: "Only me",
+      accepts: ".pdf,.docx,.xlsx,.vtt",
+      uploadSaysWhy: true,
+      panelSaysWhy: true,
     });
   });
 });

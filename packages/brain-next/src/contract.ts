@@ -18,6 +18,15 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/**
+ * What an add says that an erasure closed: to an erased source, whose key
+ * is closed for good, or for a person alone that began before that
+ * person's erasure (erasure.ts). Said only to the producer that adds it,
+ * which never retries it: the message alone, so a producer tells it from
+ * any other failure by comparing it whole.
+ */
+export const erasedSource = "The Brain refused it: what this adds was erased";
+
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
 

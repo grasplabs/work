@@ -16,6 +16,7 @@ import {
   firstLineOf,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
+import { uploadTypes } from "@grasp-os/shared/uploads";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -101,8 +102,10 @@ const fileOf = async (file: File) => ({
   bytes: new Uint8Array(await file.arrayBuffer()),
 });
 
-/** The file types an upload may be, for the file picker. */
-const uploadAccept = ".pdf,.docx,.xlsx,.vtt";
+/** The file types an upload may be, for the file picker: core's own list. */
+const uploadAccept = Object.keys(uploadTypes)
+  .map((extension) => `.${extension}`)
+  .join(",");
 
 /** Who may read an upload, as the form's choice names it: `me`, `everyone` or a team's id. */
 const readersOf = (choice: string): BrainUploadReaders => {
@@ -379,6 +382,9 @@ const UploadActions = ({
       left = true;
     };
   }, [core, source]);
+  if (upload.state === "refused") {
+    return <ErrorText>{upload.message}</ErrorText>;
+  }
   if (upload.state !== "ready" || upload.data === null) {
     return null;
   }

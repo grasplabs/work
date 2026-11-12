@@ -1,6 +1,7 @@
 import {
   brainOf,
   currentReadMax,
+  erasedSource,
   erasureReasons,
   instructionsMaxLength,
   instructionsTextSchema,
@@ -42,7 +43,7 @@ import type {
   BrainStep,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
-import { firstLineOf } from "@grasp-os/shared/brain-sources";
+import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
@@ -327,7 +328,8 @@ const readerOf = async (
  * the server, never from a person's input. An id is not a secret within
  * its kind (an upload's id is seen by those who can see the upload), so
  * a producer checks that whoever asks for the change may change that
- * source before it calls this; the Brain can't tell.
+ * source before it calls this; the Brain can't tell. An add an erasure
+ * closed is refused with `brain.source_erased`: final, never retried.
  */
 export const addSource = async (
   env: BrainEnv,
@@ -339,12 +341,22 @@ export const addSource = async (
   }
 ): Promise<SourceVersionRef> => {
   const { source, change, text, readers } = checked(newSourceSchema, added);
-  const { version } = await brain(env).addSource({
-    source: sourceKeyOf(source),
-    change,
-    text,
-    access: accessOf(readers),
-  });
+  let version: number;
+  try {
+    ({ version } = await brain(env).addSource({
+      source: sourceKeyOf(source),
+      change,
+      text,
+      access: accessOf(readers),
+    }));
+  } catch (error) {
+    // The Brain's own refusal of what an erasure closed, by its whole
+    // message (@grasp-os/brain-next/contract): a code producers can test.
+    if (error instanceof Error && error.message === erasedSource) {
+      throw brainSourceErrors.create("brain.source_erased");
+    }
+    throw error;
+  }
   return { source, version };
 };
 

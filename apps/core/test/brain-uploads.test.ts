@@ -498,7 +498,7 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
-    "refuses a version added after its upload was erased, and forgets the upload when deleted again",
+    "refuses a version added after its upload was erased, and forgets the upload with the refusal",
     slow,
     async () => {
       const uploader = await signedInApi(idp, "user");
@@ -520,24 +520,25 @@ describe("uploading a file straight into the Brain", () => {
           )
       );
       const foundLate = await found(uploader, late);
-      await uploader.api.brainSources.deleteUpload(source.id);
 
       expect({
         added,
         foundLate,
         info: await uploader.api.brainSources.uploadOf(source.id),
+        deletedAgain: await outcome(async () => {
+          await uploader.api.brainSources.deleteUpload(source.id);
+        }),
         actions: await actionsOf(source.id),
       }).toStrictEqual({
         added: { refused: "brain.upload_deleted" },
         foundLate: [],
         info: null,
+        deletedAgain: { refused: "brain.upload_not_found" },
         actions: [
           "brain.upload.received",
           "brain.upload.added",
           "brain.upload.received",
           "brain.upload.refused",
-          "brain.upload.deleting",
-          "brain.upload.deleted",
         ],
       });
     }

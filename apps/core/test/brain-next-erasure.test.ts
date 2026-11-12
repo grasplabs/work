@@ -509,7 +509,8 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       ],
       ledger: [1, 1],
       lateAdd: {
-        error: "Error: The Brain refused it: what this adds was erased",
+        error:
+          "Error: What this adds was erased: it stays erased, and isn't added.",
       },
       fileBefore: null,
       again: text,
@@ -540,7 +541,8 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       tables: await tablesHolding([mark]),
     }).toStrictEqual({
       added: {
-        error: "Error: The Brain refused it: what this adds was erased",
+        error:
+          "Error: What this adds was erased: it stays erased, and isn't added.",
       },
       recalled: [],
       file: null,
@@ -836,7 +838,8 @@ describe(
         tables: [],
         objects: [],
         lateAdd: {
-          error: "Error: The Brain refused it: what this adds was erased",
+          error:
+            "Error: What this adds was erased: it stays erased, and isn't added.",
         },
       });
     });
@@ -885,7 +888,8 @@ describe(
         tables: [],
         objects: [],
         lateAdd: {
-          error: "Error: The Brain refused it: what this adds was erased",
+          error:
+            "Error: What this adds was erased: it stays erased, and isn't added.",
         },
       });
     });
@@ -1027,7 +1031,8 @@ describe("an add under way as an erasure lands", { timeout: 120_000 }, () => {
       afterwards: await historyAs(leaver, afterwardSource, 1),
     }).toStrictEqual({
       added: {
-        error: "Error: The Brain refused it: what this adds was erased",
+        error:
+          "Error: What this adds was erased: it stays erased, and isn't added.",
       },
       recalled: [],
       history: null,
@@ -1065,7 +1070,8 @@ describe("an add under way as an erasure lands", { timeout: 120_000 }, () => {
       tables: await tablesHolding([theirs]),
     }).toStrictEqual({
       added: {
-        error: "Error: The Brain refused it: what this adds was erased",
+        error:
+          "Error: What this adds was erased: it stays erased, and isn't added.",
       },
       current: [`Team plan ${wordOf(teamMark)}`],
       version2: null,
@@ -1966,7 +1972,8 @@ describe(
       expect({ first: "error" in first, between, retried }).toStrictEqual({
         first: true,
         between: {
-          error: "Error: The Brain refused it: what this adds was erased",
+          error:
+            "Error: What this adds was erased: it stays erased, and isn't added.",
         },
         retried: { value: undefined },
       });

@@ -236,7 +236,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.brain_gap_states": { company: "who answered a gap, by ID" },
   "core.brain_uploads": {
     company:
-      "who uploaded which file into the Brain, for whom, by ID; its name and text are the Brain's",
+      "who uploaded which file into the Brain for a team or everyone, by ID; their uploads for themselves alone go with brain_sources, once the Brain erased them; a file's name and text are the Brain's",
   },
   "core.uploads": { company: "Knowledge uploads; Personal ones the Brain's" },
   "core.knowledge_signals": { erased: "apps" },
