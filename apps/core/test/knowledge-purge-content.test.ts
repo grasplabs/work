@@ -774,13 +774,18 @@ describe("a purge of content", setUpTime, () => {
       "note.md",
       `# Note\n${name} two.`
     );
-    // Knowledge as the purge's request sees it: once the purge first
-    // writes (its audit event, before any version), someone saves from the
-    // text they had open.
+    // Knowledge as the purge's request sees it: once the document's step
+    // rewrote its earlier version, before it saves the current one,
+    // someone saves from the text they had open. (A save before the step
+    // began is purged by it: the step reads the document as it begins.)
+    let rewriting = false;
     let saved = false;
     const racing = await apiWith(admin, {
+      prepare: (query) => {
+        rewriting ||= query.startsWith('update "versions"');
+      },
       afterBatch: async () => {
-        if (!saved) {
+        if (rewriting && !saved) {
           saved = true;
           await saveOver(admin, handbook.id, "note.md", `# Note\n${name} 3.`);
         }

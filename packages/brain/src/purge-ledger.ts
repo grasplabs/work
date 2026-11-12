@@ -4,7 +4,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { z } from "zod";
 
 import type { Brain } from "./brain.ts";
-import { brainPurgeSteps, brainPurges } from "./db/schema.ts";
+import { brainPurgeSteps, brainPurges, documents } from "./db/schema.ts";
 import type { Writer } from "./documents.ts";
 import { toBase64Url } from "./encoding.ts";
 import { canonicalJson } from "./json.ts";
@@ -523,11 +523,17 @@ export const runStep = async <C>(
  */
 export const finishPurge = async <C>(
   brain: Brain<C>,
-  held: PurgeAttempt
-): Promise<void> => {
+  held: PurgeAttempt,
+  /**
+   * Only while every document it names that is still there is at the
+   * version its step left it at (finishing by its ID, purge.ts): in the
+   * statement that completes it, so no save gets in between.
+   */
+  { provenDocuments = false }: { provenDocuments?: boolean } = {}
+): Promise<boolean> => {
   const now = brain.ports.clock();
   const { purgeId } = held;
-  await brain.db
+  const finished = await brain.db
     .update(brainPurges)
     .set({ completedAt: now, attempt: null, attemptAt: null, updatedAt: now })
     .where(
@@ -539,9 +545,14 @@ export const finishPurge = async <C>(
           new Date(now.getTime() - purgeAttemptLeaseMs)
         ),
         isNull(brainPurges.supersededBy),
-        sql`NOT EXISTS (SELECT 1 FROM ${brainPurgeSteps} WHERE ${brainPurgeSteps.purgeId} = ${purgeId} AND ${brainPurgeSteps.state} <> 'complete')`
+        sql`NOT EXISTS (SELECT 1 FROM ${brainPurgeSteps} WHERE ${brainPurgeSteps.purgeId} = ${purgeId} AND ${brainPurgeSteps.state} <> 'complete')`,
+        provenDocuments
+          ? sql`NOT EXISTS (SELECT 1 FROM ${brainPurgeSteps} JOIN ${documents} ON ${documents.id} = substr(${brainPurgeSteps.step}, ${documentStepPrefix.length + 1}) WHERE ${brainPurgeSteps.purgeId} = ${purgeId} AND substr(${brainPurgeSteps.step}, 1, ${documentStepPrefix.length}) = ${documentStepPrefix} AND (${brainPurgeSteps.version} IS NULL OR ${brainPurgeSteps.version} <> ${documents.currentVersion}))`
+          : undefined
       )
-    );
+    )
+    .returning({ id: brainPurges.id });
+  return finished.length > 0;
 };
 
 /**

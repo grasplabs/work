@@ -115,6 +115,38 @@ const failingOnce = async (person: Person, pattern: RegExp) => {
 };
 
 /**
+ * `person`'s API on a connection that runs `meanwhile` once, before the
+ * first batch after a statement `pattern` matches: something someone else
+ * does at that point of a purge.
+ */
+const withOnce = async (
+  person: Person,
+  pattern: RegExp,
+  meanwhile: () => Promise<unknown>
+) => {
+  let armed = false;
+  let done = false;
+  return await apiWith(person, {
+    prepare: (query) => {
+      armed ||= !done && pattern.test(query);
+    },
+    beforeBatch: async () => {
+      if (armed) {
+        armed = false;
+        done = true;
+        await meanwhile();
+      }
+    },
+  });
+};
+
+/** A statement that rebuilds the search index. */
+const rebuildsIndex = /VALUES \('rebuild'\)/u;
+
+/** A statement that changes a purge's step: one beginning, say. */
+const changesAStep = /^update "brain_purge_steps"/iu;
+
+/**
  * What `other` is told finishing `owner`'s one unfinished purge by its ID,
  * and whether that changed its steps, wrote to the audit log, or let an
  * export begin.
@@ -940,6 +972,87 @@ describe(
         state: finished.state,
         holds: texts.some((text) => text.includes(secret)),
       }).toStrictEqual({ state: "complete", holds: false });
+    });
+
+    it("is not finished by its ID when a document it purged is saved while it finishes", async () => {
+      const { owner, other, shared, secret, input } = await leftAtTheRebuild();
+      const open = await env.KNOWLEDGE.prepare(
+        "SELECT id FROM brain_purges WHERE by = ? AND completed_at IS NULL"
+      )
+        .bind(owner.userId)
+        .first<{ id: string }>();
+      const purgeId = open?.id ?? "";
+      // The term is saved back as the finish rebuilds the index: after it
+      // checked the document, before it completes.
+      const finishing = await withOnce(
+        other,
+        rebuildsIndex,
+        async () =>
+          await saveOver(
+            owner,
+            shared.collectionId,
+            shared.path,
+            `# Pay\nAsk ${secret} once more.`
+          )
+      );
+      const answer = await outcome(finishing.knowledge.finishPurge(purgeId));
+      const status = await other.api.knowledge.purgeStatus(purgeId);
+      // Its starter runs it again at once: nothing holds it.
+      const again = await outcome(purged(owner, input));
+      const texts = await versionTexts(shared.id);
+      expect({
+        answer,
+        state: status.state,
+        again,
+        holds: texts.some((text) => text.includes(secret)),
+      }).toStrictEqual({
+        answer: "knowledge.purge_needs_input",
+        state: "running",
+        again: "ok",
+        holds: false,
+      });
+    });
+
+    it("purges a document its own run named that was saved again before its turn", async () => {
+      const admin = await personOf("admin");
+      const writer = await personOf("admin");
+      const secret = `Pension${unique()}`;
+      const handbook = await writer.api.knowledge.createCollection({
+        name: `Handbook ${unique()}`,
+        access: "everyone",
+      });
+      const page = await saveOver(
+        writer,
+        handbook.id,
+        "plan.md",
+        "# Plan\nNothing yet."
+      );
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [page.id],
+        terms: [secret],
+        reason: "erasure_request",
+      };
+      const { token } = await admin.api.knowledge.preparePurge(input);
+      // Saved with the term once the purge named the document, before
+      // the purge's step reaches it.
+      const running = await withOnce(
+        admin,
+        changesAStep,
+        async () =>
+          await saveOver(
+            writer,
+            handbook.id,
+            "plan.md",
+            `# Plan\nAsk ${secret}.`
+          )
+      );
+      const result = await running.knowledge.purge(input, token);
+      const texts = await versionTexts(page.id);
+      expect({
+        stillFound: result.stillFound,
+        holds: texts.some((text) => text.includes(secret)),
+      }).toStrictEqual({ stillFound: 0, holds: false });
     });
   }
 );
