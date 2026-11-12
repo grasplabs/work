@@ -830,12 +830,13 @@ describe("ending a memory", () => {
       await shared().retireMemory({ memory: mine, writer, reader }),
     ];
 
+    // A retry of the same retire answers as the first did.
     expect(outcomes).toStrictEqual([
       "nothing",
       "nothing",
       "nothing",
       "done",
-      "nothing",
+      "done",
     ]);
     await expect(
       statementsAbout(entities.c ?? "", reader)
@@ -1399,6 +1400,162 @@ describe("what a reader sees of a retire and of an extraction", () => {
     expect({ empty, others }).toStrictEqual({
       empty: [[], [], "nothing"],
       others: Array.from({ length: 6 }, () => "refused"),
+    });
+  });
+});
+
+describe("an instruction, a retire's repeat, and an extraction mark's readers", () => {
+  // Threat 6: an instruction never steers anyone but its writer.
+  it("takes an instruction only for its writer alone, and a preference for a group too", async () => {
+    const group = unique("g");
+    const person = unique("pat");
+    const said = async (
+      type: NewMemory["type"],
+      attribute: "instruction" | "preference",
+      access: Access
+    ) =>
+      await remember(
+        access,
+        [{ key: "p", kind: "person", names: ["Pat"] }],
+        [
+          {
+            about: "p",
+            attribute,
+            value: "Mail first",
+            type,
+            statement: "Pat: mail first",
+            speaker: { kind: "internal", person },
+            basis: { kind: "writer", writer: person },
+          },
+        ]
+      ).then(
+        () => "added",
+        () => "refused"
+      );
+    const alone: Access = { kind: "owner", person };
+
+    await expect(
+      Promise.all([
+        said("instruction", "instruction", audience(group)),
+        said("fact", "instruction", audience(group)),
+        said("instruction", "instruction", {
+          kind: "owner",
+          person: unique("other"),
+        }),
+        said("instruction", "instruction", alone),
+        said("preference", "preference", audience(group)),
+      ])
+    ).resolves.toStrictEqual([
+      "refused",
+      "refused",
+      "refused",
+      "added",
+      "added",
+    ]);
+  });
+
+  it("answers nothing for a memory whose time is over", async () => {
+    const group = unique("g");
+    const writer = unique("w");
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [
+        fact(
+          { kind: "writer", writer },
+          {
+            attribute: "location",
+            value: "Delft",
+            statement: "Delft till 2020",
+            validFrom: new Date("2019-01-01"),
+            validUntil: new Date("2020-01-01"),
+          }
+        ),
+      ]
+    );
+
+    await expect(
+      shared().retireMemory({
+        memory: made.memories[0] ?? "",
+        writer,
+        reader: readerOf(unique("r"), group),
+      })
+    ).resolves.toBe("nothing");
+  });
+
+  // Threat 10: no erased person's id stays in a set of readers an extraction mark held.
+  it("keeps no erased person's id once the source of their extraction mark is erased first", async () => {
+    const group = unique("g");
+    const person = unique("solo");
+    const source = unique("doc");
+    await addSource("v1", audience(group), source);
+    const second = await addSource("v2", audience(group), source);
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "owner", person },
+      entities: [],
+      memories: [],
+      extracted: second,
+    });
+    await shared().eraseSource({ source, reason: "deleted" });
+    await tick();
+    await shared().erasePerson({ person, reason: "person_erased" });
+    await tick();
+
+    await expect(
+      runInDurableObject(
+        shared(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM reader_set_members WHERE principal = ?",
+              person
+            )
+            .one().count
+      )
+    ).resolves.toBe(0);
+  });
+
+  // Threat 10: a retry after an erasure answers what it added, and adds nothing back.
+  it("answers a retried add whose version was erased with its old ids, and adds nothing back", async () => {
+    const group = unique("g");
+    const source = unique("doc");
+    const version = await addSource("Acme is Active", audience(group), source);
+    const change = crypto.randomUUID();
+    const memory = fact(
+      { kind: "source", ...version, quote: "Acme is Active" },
+      { attribute: "status", value: "Active", statement: "Active" }
+    );
+    const first = await remember(
+      audience(group),
+      [customer()],
+      [memory],
+      shared(),
+      change
+    );
+    await shared().eraseSource({ source, reason: "deleted" });
+    await tick();
+    const again = await remember(
+      audience(group),
+      [customer()],
+      [memory],
+      shared(),
+      change
+    );
+    const count = await runInDurableObject(
+      shared(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM memories WHERE id = ?",
+            first.memories[0] ?? ""
+          )
+          .one().count
+    );
+
+    expect({ same: again.memories, count }).toStrictEqual({
+      same: first.memories,
+      count: 0,
     });
   });
 });

@@ -50,24 +50,35 @@ const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
 
 /**
  * Deletes the memories resting on the version at `versionRow`, and its
- * mark of being fully extracted, as the version is deleted: answers the
- * memories' sets of readers.
+ * marks of being fully extracted, as the version is deleted: answers the
+ * sets of readers they pointed at.
  */
 export const eraseMemoriesOn = (
   sql: SqlStorage,
   versionRow: number
 ): number[] => {
-  sql.exec("DELETE FROM memory_extractions WHERE version_row = ?", versionRow);
-  return deleteMemories(
-    sql,
-    sql
-      .exec<{ row: number }>(
-        "SELECT row FROM memories WHERE version_row = ?",
-        versionRow
-      )
-      .toArray()
-      .map(({ row }) => row)
-  );
+  // Their marks' sets of readers too, for the caller to drop once unused:
+  // a mark made for one person alone holds that person's id.
+  const markers = sql
+    .exec<{ reader_set: number }>(
+      "DELETE FROM memory_extractions WHERE version_row = ? RETURNING reader_set",
+      versionRow
+    )
+    .toArray()
+    .map(({ reader_set: readerSet }) => readerSet);
+  return [
+    ...markers,
+    ...deleteMemories(
+      sql,
+      sql
+        .exec<{ row: number }>(
+          "SELECT row FROM memories WHERE version_row = ?",
+          versionRow
+        )
+        .toArray()
+        .map(({ row }) => row)
+    ),
+  ];
 };
 
 /**
