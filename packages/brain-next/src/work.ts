@@ -1246,6 +1246,7 @@ export const workOverview = (
   | "storeBytes"
   | "words"
   | "erasures"
+  | "recall"
 > => {
   const db = drizzle(storage);
   const waiting = db

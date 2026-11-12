@@ -37,8 +37,13 @@ import type {
   Breakage,
 } from "../../embed/test/test-models.ts";
 import { vectorModelNameOf } from "../src/contract.ts";
-import { embedBatch } from "../src/embedding.ts";
-import { fileGraceMs, hashOf, vectorKeyOf } from "../src/files.ts";
+import { bucketCallMs, embedBatch } from "../src/embedding.ts";
+import {
+  fileGraceMs,
+  hashOf,
+  sweepDeleteMs,
+  vectorKeyOf,
+} from "../src/files.ts";
 import { workAttemptsMax } from "../src/work.ts";
 
 /** The test models' identities, as their embedders give them. */
@@ -190,25 +195,54 @@ const vectorsKept = async (
   return kept.filter(Boolean).length;
 };
 
-/** Waits until `open` says so. */
-const until = async (open: () => boolean): Promise<void> => {
-  while (!open()) {
+/** How often `until` looks, and how many times before it gives up: 10 s. */
+const untilEveryMs = 20;
+const untilLooks = 500;
+
+/**
+ * Waits until `open` says so, failing with `what` after 10 s. It waits by
+ * the runtime's `scheduler.wait`, which faked timers leave real.
+ */
+const until = async (open: () => boolean, what: string): Promise<void> => {
+  for (let look = 0; !open(); look += 1) {
+    if (look === untilLooks) {
+      throw new Error(`Waited 10 s for ${what}`);
+    }
     // oxlint-disable-next-line no-await-in-loop -- until released
-    await scheduler.wait(20);
+    await scheduler.wait(untilEveryMs);
+  }
+};
+
+/**
+ * Runs `run` with the clock and the timers faked, from `ms` ahead: the
+ * store's too, in this isolate. Only the store moves them on (`holding`):
+ * workerd fires a Durable Object's timer only in that object's context.
+ */
+const withTimersFaked = async (ms: number, run: () => Promise<void>) => {
+  vi.useFakeTimers({
+    toFake: ["Date", "setTimeout", "clearTimeout"],
+    now: Date.now() + ms,
+  });
+  try {
+    await run();
+  } finally {
+    vi.useRealTimers();
   }
 };
 
 /**
  * Has this test's store reach the bucket through one that holds what
  * `hold` names until released: deletes that never land, or writes of
- * vectors that never answer (they land once released). Notes every
- * vector it writes.
+ * vectors that never answer (they land once released). Each held call
+ * first moves the faked clock and timers (`withTimersFaked`) on by the ms
+ * `hold` gives it: the store's deadline for the call passes, as if the
+ * bucket had kept it waiting that long. Notes every vector it writes.
  */
-const holding = async (hold: { deletes?: boolean; puts?: boolean }) => {
+const holding = async (hold: { deletes?: number; puts?: number }) => {
   const puts: string[] = [];
   const release = {
-    deletes: hold.deletes !== true,
-    puts: hold.puts !== true,
+    deletes: hold.deletes === undefined,
+    puts: hold.puts === undefined,
   };
   /** Writes landed: a count, as no request may wait on another's promise. */
   const writes = { landed: 0 };
@@ -222,13 +256,19 @@ const holding = async (hold: { deletes?: boolean; puts?: boolean }) => {
         return await real.put(key, value);
       }
       puts.push(key);
-      await until(() => release.puts);
+      if (!release.puts) {
+        await vi.advanceTimersByTimeAsync(hold.puts ?? 0);
+      }
+      await until(() => release.puts, "the test to release a vector write");
       const written = await real.put(key, value);
       writes.landed += 1;
       return written;
     },
     delete: async (keys: string | string[]) => {
-      await until(() => release.deletes);
+      if (!release.deletes) {
+        await vi.advanceTimersByTimeAsync(hold.deletes ?? 0);
+      }
+      await until(() => release.deletes, "the test to release a delete");
       await real.delete(keys);
     },
   };
@@ -245,7 +285,10 @@ const holding = async (hold: { deletes?: boolean; puts?: boolean }) => {
     },
     /** Every write asked for so far, landed. */
     landed: async () => {
-      await until(() => writes.landed === puts.length);
+      await until(
+        () => writes.landed === puts.length,
+        "every vector write asked to land"
+      );
     },
   };
 };
@@ -826,75 +869,72 @@ describe("embedding through the queue", () => {
     }).toStrictEqual({ version: 1, lateAtOne: false, freshAtOne: true });
   });
 
-  it(
-    "keeps a vector write it stopped waiting for in the sweep's sight, so a late landing is swept, never left behind",
-    { timeout: 90_000 },
-    async () => {
-      const text = paragraph("Nunspeet", 0);
-      const key = vectorKeyOf(
-        vectorModelNameOf(int8),
-        await hashOf(encoder.encode(text))
-      );
-      const held = await holding({ puts: true });
+  it("keeps a vector write it stopped waiting for in the sweep's sight, so a late landing is swept, never left behind", async () => {
+    const text = paragraph("Nunspeet", 0);
+    const key = vectorKeyOf(
+      vectorModelNameOf(int8),
+      await hashOf(encoder.encode(text))
+    );
+    // Its writes answer only once released, past the run's wait for them.
+    const held = await holding({ puts: bucketCallMs });
+    const ticked: string[] = [];
+    await withTimersFaked(0, async () => {
       await add("doc", text, ownedBy("anna"));
       // Its write never answers: the run stops waiting, and fails.
-      await tick(embeddersOf(int8));
+      ticked.push(await tickNoting(embeddersOf(int8)));
       await add("doc", paragraph("Nunspeet", 1), ownedBy("anna"));
       // A sweep a little less than the grace after the run stopped
-      // waiting: the row is not due.
-      await withDateAhead(fileGraceMs - 5000, async () => {
-        await tick(embeddersOf(int8));
-      });
+      // waiting: the row is not due. That run's write never answers too.
+      vi.setSystemTime(Date.now() + fileGraceMs - 5000);
+      ticked.push(await tickNoting(embeddersOf(int8)));
       held.releasePuts();
       await held.landed();
       // Past the grace: the late object, and its row, go.
-      await withDateAhead(fileGraceMs + 60_000, async () => {
-        await tick(embeddersOf(int8));
-      });
-
-      await expect(env.BRAIN_OBJECTS.head(key)).resolves.toBeNull();
-    }
-  );
-
-  it(
-    "neither reads nor writes a vector object a sweep's late delete may still land on, embedding its passage with the model meanwhile",
-    { timeout: 60_000 },
-    async () => {
-      const text = paragraph("Kampen", 0);
-      await add("doc", text, ownedBy("anna"));
+      vi.setSystemTime(Date.now() + fileGraceMs + 60_000);
       await tick(embeddersOf(int8));
-      await add("doc", paragraph("Kampen", 1), ownedBy("anna"));
-      await tick(embeddersOf(int8));
-      const key = vectorKeyOf(
-        vectorModelNameOf(int8),
-        await hashOf(encoder.encode(text))
-      );
-      const held = await holding({ deletes: true });
-      // The sweep takes the replaced passage's vector, and R2 never
-      // answers its delete: the sweep gives up, the object is in doubt.
-      await withDateAhead(fileGraceMs + 60_000, async () => {
-        await tick(embeddersOf(int8));
-      });
-      asked.length = 0;
+    });
 
-      const version = await add("again", text, ownedBy("anna"));
-      await tick(embeddersOf(int8));
-      const stillThere = (await env.BRAIN_OBJECTS.head(key)) !== null;
-      held.releaseDeletes();
+    expect({
+      ticked,
+      late: await env.BRAIN_OBJECTS.head(key),
+    }).toStrictEqual({ ticked: ["ended", "ended"], late: null });
+  });
 
-      expect({
-        stillThere,
-        embeddedByTheModel: asked.includes(text),
-        written: held.puts.includes(key),
-        anna: await placesFound("anna", text),
-      }).toStrictEqual({
-        stillThere: true,
-        embeddedByTheModel: true,
-        written: false,
-        anna: [...placesOf("again", version, 1), "doc@2#0"].toSorted(),
-      });
-    }
-  );
+  it("neither reads nor writes a vector object a sweep's late delete may still land on, embedding its passage with the model meanwhile", async () => {
+    const text = paragraph("Kampen", 0);
+    await add("doc", text, ownedBy("anna"));
+    await tick(embeddersOf(int8));
+    await add("doc", paragraph("Kampen", 1), ownedBy("anna"));
+    await tick(embeddersOf(int8));
+    const key = vectorKeyOf(
+      vectorModelNameOf(int8),
+      await hashOf(encoder.encode(text))
+    );
+    const held = await holding({ deletes: sweepDeleteMs });
+    // The sweep takes the replaced passage's vector, and R2 never
+    // answers its delete: the sweep gives up, the object is in doubt.
+    await withTimersFaked(fileGraceMs + 60_000, async () => {
+      await tick(embeddersOf(int8));
+    });
+    asked.length = 0;
+
+    const version = await add("again", text, ownedBy("anna"));
+    await tick(embeddersOf(int8));
+    const stillThere = (await env.BRAIN_OBJECTS.head(key)) !== null;
+    held.releaseDeletes();
+
+    expect({
+      stillThere,
+      embeddedByTheModel: asked.includes(text),
+      written: held.puts.includes(key),
+      anna: await placesFound("anna", text),
+    }).toStrictEqual({
+      stillThere: true,
+      embeddedByTheModel: true,
+      written: false,
+      anna: [...placesOf("again", version, 1), "doc@2#0"].toSorted(),
+    });
+  });
 
   it("stays rebuilt while new sources wait or park, and is not while what a rebuild put on the queue is parked", async () => {
     await add("first", textOf("Tiel", 1), ownedBy("anna"));

@@ -111,7 +111,7 @@ export const dropBlocksPerTick = 16;
 const dropRowsPerTick = 1000;
 
 /** How long one call to the bucket may take: as long as a sweep waits. */
-const bucketCallMs = 10_000;
+export const bucketCallMs = 10_000;
 
 /** The kind of work an item of embedding is. */
 const embedKind = "embed";

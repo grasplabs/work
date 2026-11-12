@@ -26,6 +26,7 @@ import type {
 } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -347,6 +348,12 @@ describe("erasing a person", () => {
     );
     const whileDeleting = await textsFor(person, word, true);
     await undeletable.heal();
+    // Its files deleted, it is still deleting until an add under way
+    // could have written its file: as if that time had passed.
+    await expect(erasePerson(env, erasing)).rejects.toThrow(
+      /still deleting its files/u
+    );
+    await ageOwnErasure(person);
     await erasePerson(env, erasing);
 
     expect({

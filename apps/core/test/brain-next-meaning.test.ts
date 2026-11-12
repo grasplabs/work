@@ -1,5 +1,6 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type { Pack } from "@grasp-os/brain-next/contract";
+import { brainWithoutMeaningReasons } from "@grasp-os/shared/brain-report";
 import { env } from "cloudflare:workers";
 import {
   beforeAll,
@@ -22,6 +23,7 @@ import type {
 } from "../../../packages/embed/test/test-models.ts";
 import {
   addSource,
+  brainStaffReport,
   brainWorkOverview,
   recallAs,
   workBrain,
@@ -91,6 +93,21 @@ const embedEverything = async (): Promise<void> => {
     }
   }
   throw new Error("Not every passage was embedded");
+};
+
+/** How many recalls the store counted by meaning, and without it for any reason. */
+const recallCounts = async (): Promise<{
+  meaning: number;
+  without: number;
+}> => {
+  const { recall } = await brainStaffReport(env);
+  return {
+    meaning: recall.ways.meaning.recalls,
+    without: Object.values(recall.withoutMeaning).reduce(
+      (sum, count) => sum + count,
+      0
+    ),
+  };
 };
 
 /** What core logged as warnings while `run` ran, and its answer. */
@@ -187,8 +204,10 @@ describe("recall by meaning, through core", () => {
     await setUp();
   });
 
-  it("finds a passage that shares no word with the question by meaning, and logs nothing", async () => {
+  it("finds a passage that shares no word with the question by meaning, logs nothing, and counts the recall by meaning for staff", async () => {
+    const before = await recallCounts();
     const { value, warned } = await recalled(question);
+    const after = await recallCounts();
     const byWords = await withoutMeaning(question);
 
     expect({
@@ -197,10 +216,14 @@ describe("recall by meaning, through core", () => {
         .map(({ found }) => found),
       byWords: byWords.items,
       warned,
+      meaning: after.meaning - before.meaning,
+      without: after.without - before.without,
     }).toStrictEqual({
       english: ["meaning"],
       byWords: [],
       warned: [],
+      meaning: 1,
+      without: 0,
     });
   });
 
@@ -215,11 +238,13 @@ describe("recall by meaning, through core", () => {
     { breakage: "nan", asked: withWords, reason: "unusable" },
     { breakage: "zeros", asked: withWords, reason: "unusable" },
   ])(
-    "answers by words and exact parts alone when the question embedder is $breakage, logging $reason and nothing of the question or the person",
+    "answers by words and exact parts alone when the question embedder is $breakage, logging $reason and nothing of the question or the person, and counting it for staff",
     async ({ breakage, asked, reason }) => {
       await questions().breakAs(breakage);
 
+      const before = await brainStaffReport(env);
       const { value, warned } = await recalled(asked);
+      const after = await brainStaffReport(env);
       await questions().breakAs(null);
 
       const byWords = await withoutMeaning(asked);
@@ -230,12 +255,29 @@ describe("recall by meaning, through core", () => {
         warned,
         tellsQuestion: said.includes("leverancier"),
         tellsPerson: said.includes(personId),
+        counted: Object.fromEntries(
+          brainWithoutMeaningReasons.map((each) => [
+            each,
+            after.recall.withoutMeaning[each] -
+              before.recall.withoutMeaning[each],
+          ])
+        ),
+        meaning:
+          after.recall.ways.meaning.recalls -
+          before.recall.ways.meaning.recalls,
       }).toStrictEqual({
         pack: byWords,
         byWords: [{ text: dutch, found: "words" }],
         warned: [{ event: "brain.recall.without_meaning", reason }],
         tellsQuestion: false,
         tellsPerson: false,
+        counted: Object.fromEntries(
+          brainWithoutMeaningReasons.map((each) => [
+            each,
+            each === reason ? 1 : 0,
+          ])
+        ),
+        meaning: 0,
       });
     }
   );
