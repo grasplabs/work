@@ -177,12 +177,16 @@ describe("commands from an organization's pages", () => {
       await toldFor({ status: 403, code: "onboarding.staff_only" }),
       await toldFor({ status: 409, code: "admin.command_pending" }),
       await toldFor({ status: 409, code: "onboarding.no_team" }),
+      await toldFor({ status: 409, code: "onboarding.no_address" }),
+      await toldFor({ status: 409, code: "onboarding.reminder_not_owed" }),
       await toldFor({ status: 500, code: "request.failed" }),
     ];
     expect(answers).toStrictEqual([
       { refused: "shut_out" },
       { refused: "pending" },
       { refused: "onboarding.no_team" },
+      { refused: "onboarding.no_address" },
+      { refused: "onboarding.reminder_not_owed" },
       { refused: "not_answered" },
     ]);
   });

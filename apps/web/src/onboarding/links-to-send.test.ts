@@ -15,7 +15,7 @@ const link = (
   email: "",
   path: out ? `/interview#secret-${person}` : null,
   fresh,
-  failedMail: null,
+  mailFailed: false,
 });
 
 describe("the links the admin takes", () => {

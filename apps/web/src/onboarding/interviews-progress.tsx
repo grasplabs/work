@@ -203,7 +203,7 @@ const LinkRow = ({
   const { t } = useLingui();
   const { name, team } = link;
   let about = t`${team} · not out yet`;
-  if (link.failedMail !== null) {
+  if (link.mailFailed) {
     about = t`${team} · our email didn’t reach them`;
   } else if (link.fresh) {
     about = t`${team} · new`;

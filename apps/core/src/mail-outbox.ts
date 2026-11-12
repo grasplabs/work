@@ -90,6 +90,12 @@ export interface Delivery {
    * failed.
    */
   fill: (fill: string) => Promise<Record<string, string> | null>;
+  /**
+   * Whether a mail is still to go, read as it is about to: one that isn't
+   * (a reminder to someone who has finished since) is dropped from the
+   * outbox, never sent. Every mail goes when it isn't given.
+   */
+  wanted?: (mail: { key: string; about: string | null }) => boolean;
   /** Called once a mail is sent or ended failed, to log it. */
   settled: (mail: MailState) => void;
   now: number;
@@ -156,18 +162,21 @@ export const mailAbout = (storage: SqlStorage, about: string): MailState[] =>
     .map(stateOf);
 
 /**
- * Queues the failed mail `key` again, from its first try: true when there
- * was one. A mail queued or sent stays as it is.
+ * Queues the failed mail `key` again, from its first try, to `to`: the
+ * address as it is now, which may have been put right since. True when
+ * there was one. A mail queued or sent stays as it is.
  */
 export const queueAgain = (
   storage: SqlStorage,
   key: string,
+  to: string,
   now: number = Date.now()
 ): boolean =>
   storage
     .exec(
-      "UPDATE mail_outbox SET state = 'queued', attempts = 0, next_at = ?, settled_at = NULL, reason = NULL WHERE key = ? AND state = 'failed' RETURNING key",
+      "UPDATE mail_outbox SET state = 'queued', attempts = 0, next_at = ?, settled_at = NULL, reason = NULL, to_address = ? WHERE key = ? AND state = 'failed' RETURNING key",
       now,
+      to,
       key
     )
     .toArray().length > 0;
@@ -335,6 +344,14 @@ export const deliverMail = async (
       )
       .toArray();
     if (claimed === undefined) {
+      continue;
+    }
+    if (delivery.wanted?.(claimed) === false) {
+      storage.exec("DELETE FROM mail_outbox WHERE key = ?", claimed.key);
+      // Its kind only: whom it was for would say why it isn't wanted (a
+      // reminder dropped: they finished or withdrew).
+      const [kind = "mail"] = claimed.key.split("/");
+      log.info("mail.dropped", { kind });
       continue;
     }
     // One at a time: a burst would only run into the quota sooner.

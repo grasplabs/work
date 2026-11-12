@@ -414,6 +414,40 @@ const gonePrefix = "gone:";
 /** How long after a purge of the brain failed it is tried again. */
 const purgeRetryMs = 60 * 1000;
 
+/** What the reminder rule (`owesReminder`) reads of one person. */
+interface ReminderFacts {
+  /** Their team isn't off and they aren't away (`takingPart`). */
+  takingPart: boolean;
+  email: string;
+  /** Their link, once out. */
+  link: { deletedAt: string | null } | undefined;
+  /** Their interview is finished. */
+  completed: boolean;
+  /** They withdrew from it, for good. */
+  withdrawn: boolean;
+}
+
+/**
+ * The one rule for whether someone is owed their reminder: taking part
+ * with an address, their link out and not deleted, their interview not
+ * finished, and not withdrawn. The scheduled reminder (`#remindable`),
+ * a failed one sent again and one about to go (`#reminderOwed`) all ask
+ * it, each reading the facts as suits it.
+ */
+const owesReminder = ({
+  takingPart: taking,
+  email,
+  link,
+  completed,
+  withdrawn,
+}: ReminderFacts): boolean =>
+  taking &&
+  email !== "" &&
+  link !== undefined &&
+  link.deletedAt === null &&
+  !completed &&
+  !withdrawn;
+
 /** The days of the week the admin's update goes out: Monday and Thursday. */
 const updateWeekdays: ReadonlySet<number> = new Set([1, 4]);
 
@@ -3167,27 +3201,100 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Sends someone's latest mail that failed again, from its first try:
-   * staff do it once what stopped it is put right. The audit log has that
-   * they did, and which kind of mail, not for whom. False when none failed.
+   * Sends every mail of someone's that failed again, from its first try,
+   * to their address as the roster has it now: staff do it once what
+   * stopped it is put right, an address the admin corrected among it.
+   * Their link with the reminder, when both failed: the link is what the
+   * company's admin is told failed (`#linkMailFailed`), so it must go too.
+   * A reminder only while it is still owed (`#reminderOwed`): never to
+   * someone who finished, withdrew or deleted their interview since it
+   * failed. The audit log has that staff did, never for whom nor which
+   * mail: the admin reads it, and a reminder goes only to whoever hasn't
+   * finished. Says why when nothing goes: none failed, they have no
+   * address now, or what failed was a reminder no longer owed.
    */
-  sendAgain(person: string, by: AuditActor): boolean {
-    const failed = mailAbout(this.ctx.storage.sql, person).find(
+  sendAgain(
+    person: string,
+    by: AuditActor
+  ): "sent" | "none_failed" | "no_address" | "not_owed" {
+    const failed = mailAbout(this.ctx.storage.sql, person).filter(
       ({ state }) => state === "failed"
     );
-    if (failed === undefined) {
-      return false;
+    if (failed.length === 0) {
+      return "none_failed";
+    }
+    const to = this.#roster()?.people.find(({ id }) => id === person)?.email;
+    if (to === undefined || to === "") {
+      return "no_address";
+    }
+    const owed = this.#reminderOwed(person);
+    const again = failed.filter(
+      ({ key }) => owed || !key.startsWith("reminder/")
+    );
+    if (again.length === 0) {
+      return "not_owed";
     }
     const now = new Date().toISOString();
-    const [kind = "mail"] = failed.key.split("/");
     this.ctx.storage.transactionSync(() => {
-      queueAgain(this.ctx.storage.sql, failed.key);
-      this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
-      this.#changed(by, "onboarding.mail.resent", { kind });
+      for (const { key } of again) {
+        const [kind = "mail"] = key.split("/");
+        // All due at once, so they go in the order they were first queued.
+        queueAgain(this.ctx.storage.sql, key, to, Date.parse(now));
+        this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
+      }
+      this.#changed(by, "onboarding.mail.resent", {});
     });
     this.#deliverAudit();
     this.#deliverMailSoon();
-    return true;
+    return "sent";
+  }
+
+  /**
+   * Whether `person` is still owed their reminder now (`owesReminder`),
+   * reading only what the rule needs of them: when a failed reminder is
+   * sent again, and again as it goes (`#mailWanted`), since they may have
+   * finished in between.
+   */
+  #reminderOwed(person: string): boolean {
+    const [one] = this.#db
+      .select()
+      .from(people)
+      .where(eq(people.id, person))
+      .all();
+    if (one === undefined) {
+      return false;
+    }
+    // Their team alone: all `takingPart` reads of the roster.
+    const theirs = this.#db
+      .select()
+      .from(teams)
+      .where(eq(teams.id, one.team))
+      .all();
+    const [link] = this.#db
+      .select({ deletedAt: links.deletedAt })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    const [state] = this.#db
+      .select({ completedAt: interviewStates.completedAt })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    return owesReminder({
+      takingPart: takingPart({ teams: theirs, people: [one] }, one),
+      email: one.email,
+      link,
+      completed: (state?.completedAt ?? null) !== null,
+      withdrawn: this.#withdrawnAt(person) !== null,
+    });
+  }
+
+  /** Whether a mail about to go still should: a reminder only while it is owed. */
+  #mailWanted({ key, about }: { key: string; about: string | null }): boolean {
+    return (
+      !key.startsWith("reminder/") ||
+      (about !== null && this.#reminderOwed(about))
+    );
   }
 
   /** People whose link went out, and when: for the links themselves (GRA-287) and the admin's list. */
@@ -3230,7 +3337,7 @@ export class Onboarding extends DurableObject<Env> {
           email: person.email,
           path: taken === undefined ? null : await this.linkOf(person.id),
           fresh: taken === null,
-          failedMail: this.#failedMail(person.id),
+          mailFailed: this.#linkMailFailed(person.id),
         };
       })
     );
@@ -4327,7 +4434,11 @@ export class Onboarding extends DurableObject<Env> {
     return kickoffBrief(reading, answers);
   }
 
-  /** Everyone on the roster whose latest mail failed for good, by id: for the admin's snapshot. */
+  /**
+   * Everyone on the roster whose latest mail failed for good, by id: for
+   * Grasp's admin snapshot (staff), never the company's admin, as it says
+   * which mail.
+   */
   failedMails(): Map<string, FailedMail> {
     const failed = new Map<string, FailedMail>();
     for (const { id } of this.#roster()?.people ?? []) {
@@ -4340,20 +4451,47 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Someone's latest mail, when it failed for good: what `sendAgain`
-   * sends again. A mail sent or still queued since means it isn't.
+   * Someone's latest mail, when it failed for good, for staff: which, why
+   * and when. A mail sent or still queued since means it isn't, unless it
+   * is their link that failed: the company's admin is told of that
+   * (`#linkMailFailed`) until it goes, so staff see it too, to send it
+   * again, though a reminder reached them since.
    */
   #failedMail(person: string): FailedMail | null {
-    const [latest] = mailAbout(this.ctx.storage.sql, person);
-    if (latest?.state !== "failed") {
+    const mails = mailAbout(this.ctx.storage.sql, person);
+    const [latest] = mails;
+    const link = mails.find(({ key }) => key.startsWith("link/"));
+    let failed: MailState | undefined;
+    if (latest?.state === "failed") {
+      failed = latest;
+    } else if (link?.state === "failed") {
+      failed = link;
+    }
+    if (failed === undefined) {
       return null;
     }
-    const [kind] = latest.key.split("/");
+    const [kind] = failed.key.split("/");
     return {
       kind: kind === "reminder" ? "reminder" : "link",
-      reason: latest.reason,
-      at: latest.settledAt ?? latest.queuedAt,
+      reason: failed.reason,
+      at: failed.settledAt ?? failed.queuedAt,
     };
+  }
+
+  /**
+   * Whether someone's latest link mail failed for good, and wasn't sent
+   * since: what the company's admin is told, to put their address right
+   * or hand them their link. Only the link, which everyone taking part
+   * gets on their day whatever they do after: a reminder goes only to
+   * whoever hasn't finished, so its failing, its kind, its date, or a
+   * notice that appears once it fails, would tell the admin that of
+   * someone they can name.
+   */
+  #linkMailFailed(person: string): boolean {
+    const link = mailAbout(this.ctx.storage.sql, person).find(({ key }) =>
+      key.startsWith("link/")
+    );
+    return link?.state === "failed";
   }
 
   /**
@@ -4710,6 +4848,7 @@ export class Onboarding extends DurableObject<Env> {
       return await deliverMail(this.ctx.storage.sql, {
         send: async (mail) => await sendMail(this.env, mail),
         fill: async (person) => await this.#linkFill(person),
+        wanted: (mail) => this.#mailWanted(mail),
         settled: (state) => {
           this.#mailSettled(state, now);
         },
@@ -4773,7 +4912,7 @@ export class Onboarding extends DurableObject<Env> {
     ) {
       return [];
     }
-    const due = this.#remindable(roster, now);
+    const due = this.#remindable(now);
     if (due.length === 0) {
       return [];
     }
@@ -4864,33 +5003,48 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Whose reminder is due by `now`: their link out by email, and not
-   * finished. A link handed over on paper is the admin's to remind about.
+   * Whose reminder is due by `now`: not reminded yet, still owed one
+   * (`#reminderOwed`: never someone who finished, withdrew or deleted
+   * their interview), and their link out the working days before. A link
+   * handed over on paper is the admin's to remind about.
    */
-  #remindable(
-    roster: Roster,
-    now: string
-  ): { person: string; sentAt: string }[] {
+  #remindable(now: string): { person: string; sentAt: string }[] {
+    // Each read once for everyone: the roster can be thousands of people.
+    const roster = this.#roster();
+    if (roster === null) {
+      return [];
+    }
+    const byId = new Map(roster.people.map((person) => [person.id, person]));
     const states = this.#interviews();
-    const taking = new Set(
-      roster.people
-        .filter((person) => takingPart(roster, person) && person.email !== "")
-        .map(({ id }) => id)
+    const withdrawn = new Set(
+      this.#db
+        .select({ person: participations.person })
+        .from(participations)
+        .where(isNotNull(participations.withdrawnAt))
+        .all()
+        .map(({ person }) => person)
     );
     return this.#db
       .select()
       .from(links)
       .orderBy(asc(links.sentAt), asc(links.person))
       .all()
-      .filter(
-        (link) =>
+      .filter((link) => {
+        const one = byId.get(link.person);
+        return (
           link.remindedAt === null &&
-          link.deletedAt === null &&
-          (states.get(link.person)?.completedAt ?? null) === null &&
-          taking.has(link.person) &&
           dayOf(now) >=
-            addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays)
-      )
+            addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays) &&
+          one !== undefined &&
+          owesReminder({
+            takingPart: takingPart(roster, one),
+            email: one.email,
+            link,
+            completed: (states.get(link.person)?.completedAt ?? null) !== null,
+            withdrawn: withdrawn.has(link.person),
+          })
+        );
+      })
       .map(({ person, sentAt }) => ({ person, sentAt }));
   }
 
