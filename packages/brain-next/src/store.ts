@@ -10,6 +10,8 @@ import {
   currentRequestSchema,
   embedModelSchema,
   erasureLookupSchema,
+  handOverRequestSchema,
+  handOverResultSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -30,6 +32,9 @@ import type {
   Finding,
   ErasureLookup,
   ErasureStatus,
+  HandOverRequest,
+  HandOvers,
+  WorkRequest,
   NewInstructions,
   Reader,
   Access,
@@ -87,6 +92,7 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
+import { enqueueHandOvers } from "./handover.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   countingInto,
@@ -180,6 +186,9 @@ const workIdSchema = z.int().positive();
 /** What a person's own store answers a reader who is not that person. */
 const notTheirs =
   "The Brain refused it: this store answers only the person whose it is";
+
+/** What a person's own store answers a call only the shared store takes. */
+const sharedOnly = "The Brain refused it: only the shared store takes this";
 
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
@@ -879,18 +888,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
    * a step of embedding (embedding.ts), then the queue, asking `ask` for
-   * its model calls and `embedders` for vectors (work.ts). Each step is
+   * its model calls, `embedders` for vectors and `handOvers` for what is
+   * handed over (work.ts, handover.ts). Each step is
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async work({ ask, at, embedders, handOvers }: WorkRequest): Promise<void> {
     await this.#changing(async () => {
-      await this.#workNow(ask, at, embedders);
+      await this.#workNow(ask, at, embedders, handOvers);
     });
   }
 
   /** `work`, as one of the calls that may write to the bucket. */
-  async #workNow(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async #workNow(
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    handOvers?: HandOvers
+  ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
@@ -898,17 +913,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // Nothing was ever kept: nothing to do.
       return;
     }
-    await this.#tick(ask, tickAt, {
-      model,
-      embed: async (request) => await embedders.embed(request),
-    });
+    await this.#tick(
+      ask,
+      tickAt,
+      {
+        model,
+        embed: async (request) => await embedders.embed(request),
+      },
+      handOvers
+    );
   }
 
-  /** The tick of `work` at `tickAt`, with the host's checked `embedders`. */
+  /**
+   * The tick of `work` at `tickAt`, with the host's checked `embedders`,
+   * and its `handOvers` on the shared store only: hand-overs are queued
+   * there alone (`handOver`).
+   */
   async #tick(
     ask: AskModel,
     tickAt: Date,
-    embedders: Embedders
+    embedders: Embedders,
+    handOvers: HandOvers | undefined
   ): Promise<void> {
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
@@ -923,7 +948,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await workTick(
       this.ctx.storage,
       this.#work,
-      { ask, embedders, bucket: this.#bucket },
+      {
+        ask,
+        embedders,
+        bucket: this.#bucket,
+        ...(handOvers === undefined || this.#kind.kind !== "shared"
+          ? {}
+          : {
+              handOvers: {
+                handOver: async (source) =>
+                  checked(
+                    handOverResultSchema,
+                    await handOvers.handOver(source)
+                  ),
+              },
+            }),
+      },
       tickAt
     );
   }
@@ -961,7 +1001,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       if (this.alarmHost !== null) {
         const host = await this.alarmHost();
-        await this.work(host.ask, new Date(), host.embedders);
+        // No side of hand-overs: a person's own store never queues one
+        // (`handOver` refuses), so none is ever due here.
+        await this.#changing(async () => {
+          await this.#workNow(host.ask, new Date(), host.embedders);
+        });
       }
     } catch {
       // Nothing of the error is kept. A tick that couldn't run (its ledger
@@ -1046,6 +1090,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (set === null || set > at) {
       await this.ctx.storage.setAlarm(at);
     }
+  }
+  /**
+   * Puts sources on the queue to be handed over (handover.ts), each in
+   * place of one of its hand-overs still waiting or parked. The shared
+   * store's alone: the host's clock ticks it with its side of hand-overs
+   * (`work`), and a person's own store, which it never ticks, refuses.
+   */
+  async handOver(request: HandOverRequest): Promise<void> {
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    const checkedRequest = checked(handOverRequestSchema, request);
+    await this.#changing(async () => {
+      await this.#ready();
+      enqueueHandOvers(this.ctx.storage, checkedRequest);
+    });
   }
 
   /**

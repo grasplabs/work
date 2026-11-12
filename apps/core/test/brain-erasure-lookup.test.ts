@@ -34,6 +34,7 @@ import {
 } from "./brain-next-store-copy.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import {
   auditedDuring,
   routed,
@@ -338,7 +339,7 @@ describe("whether something was erased", () => {
     });
     const lookup = { kind: "source", key: `upload:${source.id}` } as const;
     const unwritten = await answerTo(lookup);
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     const written = await answerTo(lookup);
 
     expect({
@@ -396,7 +397,7 @@ describe("whether a person was erased, as core's own record and the shared ledge
     const lookup = { kind: "person", id: erased.userId } as const;
     const pending = await answerTo(lookup);
     // The Brain's tick writes the entry: its ledger has it, core not yet.
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     const ledgerOnly = await answerTo(lookup);
     // Core's clock asks the Brain again, which returns: the area is complete.
     await retryErasures(env);
@@ -468,7 +469,7 @@ describe("whether something was erased, while its versions wait to be deleted", 
       await eraseSource(env, { source, reason: "deleted" });
       waiting = await answerTo(lookup);
     });
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     const deleted = await answerTo(lookup);
 
     expect({ waiting, deleted: deleted?.state }).toStrictEqual({

@@ -26,6 +26,7 @@
     "check:branch": "node scripts/check-branch-name.ts",
     "stephen:report": "node scripts/stephen-eval.ts report",
     "brain:eval": "node scripts/brain-eval.ts",
+    "brain:eval:model": "node scripts/brain-eval-model.ts",
     "check:secrets": "secretlint \"**/*\"",
     "test:durations": "node scripts/test-durations.ts",
     "e2e:durations": "node scripts/e2e-durations.ts",
