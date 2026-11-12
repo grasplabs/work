@@ -187,6 +187,13 @@ export interface SourceVersionRef {
 export interface Recall {
   question: string;
   budget: { tokens: number };
+  /**
+   * Read each source as it was at this moment, to the millisecond and
+   * including it: a version added at it counts. A caller who means "on
+   * that day" passes the day's last millisecond in the time zone they
+   * mean (for 14 March 2026 in Amsterdam, 2026-03-14T23:59:59.999+01:00),
+   * not its midnight, which leaves out what was added that day.
+   */
   asOf?: Date;
 }
 

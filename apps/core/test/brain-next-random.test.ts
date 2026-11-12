@@ -47,20 +47,19 @@ import { testBinding } from "./test-env.ts";
 //   the readable chunks holding only its stop words follow: more of them
 //   first, then as above. At most `recallLimit`. A version replaced by a
 //   newer one is never in it.
-// - Exact (GRA-1728): every word of the question with a digit is an ID
-//   (its letters and digits, as the vocabulary has them). The chunks of
-//   current versions the reader may read that hold one as written, those
-//   holding more of them first, then in the words list's order, then the
+// - Exact (GRA-1728): the words of roots a and b hold a digit, so they are
+//   IDs (those of c and d are letters alone); the words way asks them too. For each, in the
+//   question's order, a list: the chunks of current versions the reader
+//   may read that hold it as written, in the words list's order, then the
 //   shorter; at most `recallLimit`.
 //   No question here has a quoted phrase, a date or a name.
-// - The pack (GRA-1728): the exact list and the words list fused by
+// - The pack (GRA-1728): the ID lists and the words list fused by
 //   reciprocal rank (1 / (60 + rank), summed; ties to the better rank,
-//   then to the exact list), each chunk whole at the largest budget,
-//   found "exact" when the exact list holds it, else by its words or its
+//   then to the list given first), each chunk whole at the largest budget,
+//   found "exact" when an ID list holds it, else by its words or its
 //   stop words alone. Not found: the IDs no readable current chunk holds,
 //   as written, then the telling words none holds in any form, folded,
-//   but the IDs' own words: so, here, only the stop words of a question
-//   of stop words alone. Never cut short.
+//   but the IDs' own. Never cut short.
 // - History: a version, whole, to a person among its readers and among
 //   the current version's readers, with the teams they are in now; to
 //   anyone else exactly what a source no one added answers (null).
@@ -194,6 +193,10 @@ const stopPrefix = "~";
 
 const isStop = (token: Token): boolean => token.startsWith(stopPrefix);
 
+/** Whether a token's word is an ID: roots a and b (`vocabulary`). */
+const isId = (token: Token): boolean =>
+  !isStop(token) && (token.startsWith("a") || token.startsWith("b"));
+
 /** A token's root: its letter, or the stop word itself. */
 const rootOf = (token: Token): string =>
   isStop(token) ? token : token.slice(0, 1);
@@ -263,15 +266,17 @@ const currentOf = ({ versions }: Planned): Version => {
  */
 const vocabulary = (seed: number) => {
   // From the seed, so a failure that turns on the words comes back with it.
-  // A digit first, so every root's word is an ID (the exact way).
-  const prefix = `r1${Math.floor(seededRandom(seed)() * 2 ** 32)
+  const hex = Math.floor(seededRandom(seed)() * 2 ** 32)
     .toString(16)
-    .padStart(8, "0")
-    .slice(1)}`;
+    .padStart(8, "0");
+  // Roots a and b with a digit, so their words are IDs (the exact way);
+  // c and d of letters alone, each digit a consonant, so they are words.
+  const idPrefix = `r1${hex.slice(1)}`;
+  const wordPrefix = `r${hex.replaceAll(/\d/gu, (digit) => "ghjklmnpst".charAt(Number(digit)))}`;
   return (token: Token): string =>
     isStop(token)
       ? token.slice(stopPrefix.length)
-      : `${prefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
+      : `${isId(token) ? idPrefix : wordPrefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
 };
 
 /** Characters of the longest word: "r", eight hex digits, its letter and ending. */
@@ -464,7 +469,7 @@ const exactOf = (
   membership: Membership,
   ids: readonly Token[],
   byWords: readonly ExpectedChunk[]
-): { chunks: ExpectedChunk[]; held: Set<Token> } => {
+): { lists: ExpectedChunk[][]; held: Set<Token> } => {
   const rankOf = (name: string): number => {
     const rank = byWords.findIndex((chunk) => chunk.name === name);
     return rank === -1 ? recallLimit : rank;
@@ -493,15 +498,19 @@ const exactOf = (
         };
       });
     })
-    .filter(({ exact }) => exact > 0)
-    .toSorted(
-      (a, b) =>
-        b.exact - a.exact ||
-        rankOf(a.name) - rankOf(b.name) ||
-        a.length - b.length
-    )
-    .slice(0, recallLimit);
-  return { chunks, held };
+    .filter(({ exact }) => exact > 0);
+  // A list per ID, in the question's order.
+  const lists = ids.map((id) =>
+    chunks
+      .filter(({ version, position }) =>
+        (version.paragraphs[position] ?? []).includes(id)
+      )
+      .toSorted(
+        (a, b) => rankOf(a.name) - rankOf(b.name) || a.length - b.length
+      )
+      .slice(0, recallLimit)
+  );
+  return { lists, held };
 };
 
 /** Reciprocal rank fusion's constant: the store's. */
@@ -552,12 +561,15 @@ const packOf = (
   written: (token: Token) => string,
   wordOf: (token: Token) => string
 ): { chunks: Packed[]; notFound: string[] } => {
-  // The IDs, each once, in the question's order: every root's word.
-  const ids = [...new Set(asked.filter((token) => !isStop(token)))];
+  // The IDs, each once, in the question's order: the words of roots a and
+  // b.
+  const ids = [...new Set(asked.filter(isId))];
   const byWords = expectedOf(planned, person, membership, asked);
   const exact = exactOf(planned, person, membership, ids, byWords);
   const chunks = fused([
-    exact.chunks.map((chunk) => ({ chunk, found: "exact" as const })),
+    ...exact.lists.map((list) =>
+      list.map((chunk) => ({ chunk, found: "exact" as const }))
+    ),
     byWords.map((chunk) => ({
       chunk,
       found: chunk.telling > 0 ? ("words" as const) : ("stop words" as const),
@@ -568,7 +580,7 @@ const packOf = (
   // stop words alone is all telling.
   const distinct = [...new Set(asked)];
   const telling = distinct.some((token) => !isStop(token))
-    ? distinct.filter((token) => !isStop(token))
+    ? distinct.filter((token) => !isStop(token) && !isId(token))
     : distinct;
   const readable = planned.flatMap((source) => {
     const version = currentOf(source);
@@ -581,11 +593,7 @@ const packOf = (
     notFound: [
       ...missing.map(written),
       ...telling
-        .filter(
-          (token) =>
-            !ids.includes(token) &&
-            !readable.some((words) => holds(words, [token]))
-        )
+        .filter((token) => !readable.some((words) => holds(words, [token])))
         .map(wordOf),
     ],
   };

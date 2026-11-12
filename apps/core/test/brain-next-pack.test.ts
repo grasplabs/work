@@ -1,11 +1,12 @@
 import {
+  exactCandidatesMax,
   packItemTokens,
   recallBudgetMax,
   recallLimit,
 } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource, readSourceVersionAs, recallAs } from "../src/brain-next.ts";
@@ -107,11 +108,30 @@ const packFor = async (
     ...(asOf === undefined ? {} : { asOf }),
   });
 
-/** A moment between what was added before it and what is added after. */
-const moment = async (): Promise<Date> => {
-  const at = new Date();
-  await scheduler.wait(5);
-  return at;
+/** The first hour of the as-of test's clock. */
+const start = Date.UTC(2026, 0, 1);
+
+const hourMs = 3_600_000;
+
+/** `hours` past `start`. */
+const hoursIn = (hours: number): Date => new Date(start + hours * hourMs);
+
+/**
+ * Adds as `add` does with the clock at `hours` past `start`: the store
+ * runs in this isolate, so its `new Date()` is the one faked here, and
+ * each version's added time is exactly the one set.
+ */
+const addAt = async (
+  hours: number,
+  ...adding: Parameters<typeof add>
+): Promise<SourceRef> => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(hoursIn(hours));
+  try {
+    return await add(...adding);
+  } finally {
+    vi.useRealTimers();
+  }
 };
 
 /** The tokens `pack`'s items take of its budget, as the Brain counts them. */
@@ -173,6 +193,66 @@ describe("the cited pack", () => {
     ).toStrictEqual([[], [], []]);
   });
 
+  it("finds an ID past more chunks a common date part holds than the exact way checks, and still says another ID was not found", async () => {
+    const reader = await person();
+    const [topic, other] = [word(), word()];
+    const invoice = id();
+    const missing = id();
+    // More short chunks than the cap holding the date, every one shorter
+    // than the ID's and as likely to hold it in a row: the date part is
+    // capped, and has its own cap, so the ID's is never crowded out.
+    for (let index = 0; index <= exactCandidatesMax + 4; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(
+        index % 2 === 0 ? "Due 04-01-2026" : "Due on 04/01/2026",
+        owner(reader)
+      );
+    }
+    // And more chunks than a list holds with more of the question's words
+    // than the ID's: word search ranks it past its limit.
+    for (let index = 0; index <= recallLimit; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`${topic} ${other} paid, number ${index}.`, owner(reader));
+    }
+    const byId = await add(
+      `A longer note: order ${invoice} was booked in full on time.`,
+      owner(reader)
+    );
+
+    const [found, notFound] = await Promise.all([
+      packFor(reader, `${topic} ${other} paid ${invoice} on 2026-01-04`),
+      packFor(reader, `${topic} ${other} paid ${missing} on 2026-01-04`),
+    ]);
+
+    // First in its own part's list, tied there with the date's first and
+    // the words way's first, the date's list before it.
+    expect(
+      found.items.slice(0, 3).find(({ source }) => source.id === byId.id)
+    ).toMatchObject({ source: byId, found: "exact" });
+    // The capped date is never said to be missing; the missing ID is.
+    expect({ found: found.notFound, missing: notFound.notFound }).toStrictEqual(
+      { found: [], missing: [missing] }
+    );
+  });
+
+  it("finds a phrase held in a row in a longer chunk past more chunks than the cap that hold its words apart", async () => {
+    const reader = await person();
+    const [first, second] = [word(), word()];
+    for (let index = 0; index <= exactCandidatesMax + 4; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`${second} q ${first} i`, owner(reader));
+    }
+    const inARow = await add(
+      `Here, in a longer chunk, ${first} ${second} stand in a row, as asked.`,
+      owner(reader)
+    );
+
+    const pack = await packFor(reader, `"${first} ${second}"`);
+
+    expect(pack.items[0]).toMatchObject({ source: inARow, found: "exact" });
+    expect(pack.notFound).toStrictEqual([]);
+  });
+
   it("never passes its budget, with text of several scripts and a passage larger than the whole budget, and says when it was cut short", async () => {
     const reader = await person();
     const topic = word();
@@ -226,18 +306,19 @@ describe("the cited pack", () => {
     const together = await teamOf(reader, other);
     const topic = word();
     // Rewritten: as of before the rewrite, the first text, cited as v1.
-    const rewritten = await add(`${topic} first draft`, team(together));
-    const beforeRewrite = await moment();
-    await add(`${topic} final text`, team(together), rewritten);
+    const rewritten = await addAt(1, `${topic} first draft`, team(together));
+    const beforeRewrite = hoursIn(1.5);
+    await addAt(2, `${topic} final text`, team(together), rewritten);
     // Narrowed away from the reader: never theirs again, then or now.
-    const narrowed = await add(`${topic} narrowed draft`, team(together));
-    const beforeNarrowing = await moment();
-    await add(`${topic} narrowed final`, owner(other), narrowed);
+    const narrowed = await addAt(3, `${topic} narrowed draft`, team(together));
+    const beforeNarrowing = hoursIn(3.5);
+    await addAt(4, `${topic} narrowed final`, owner(other), narrowed);
     // Widened to the reader: what came before was never theirs.
-    const widened = await add(`${topic} widened draft`, owner(other));
-    const beforeWidening = await moment();
-    await add(`${topic} widened final`, team(together), widened);
-    const now = await moment();
+    const widened = await addAt(5, `${topic} widened draft`, owner(other));
+    const beforeWidening = hoursIn(5.5);
+    await addAt(6, `${topic} widened final`, team(together), widened);
+    // The moment of the last version itself: the bound includes it.
+    const atTheLastVersion = hoursIn(6);
 
     const cited = async (asOf?: Date) => {
       const { items } = await packFor(
@@ -272,7 +353,7 @@ describe("the cited pack", () => {
       beforeRewrite: await cited(beforeRewrite),
       beforeNarrowing: await cited(beforeNarrowing),
       beforeWidening: await cited(beforeWidening),
-      atTheLast: await cited(now),
+      atTheLast: await cited(atTheLastVersion),
       beforeAnything: await cited(new Date(0)),
     }).toStrictEqual({
       now: [of(rewritten, 2, "final text"), of(widened, 2, "widened final")],

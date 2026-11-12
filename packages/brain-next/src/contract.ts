@@ -32,6 +32,17 @@ export const principalMaxLength = 256;
  */
 export const recallLimit = 10;
 
+/**
+ * Most chunks the exact way checks in code for each exact part: of those
+ * the reader may read that hold all its words, the likeliest to hold it in
+ * a row first (exact.ts `near`), then the shortest, then the newest. A
+ * part with more such chunks is capped: what lies past them is unknown,
+ * so that part, and only that one, is never reported not found. A capped
+ * part can still be missed in a long chunk where its words first appear
+ * apart, past 200 likelier ones; the words way still ranks that chunk.
+ */
+export const exactCandidatesMax = 200;
+
 /** Most tokens a pack may be asked to fill. */
 export const recallBudgetMax = 32_000;
 
@@ -164,7 +175,8 @@ export type Reader = z.infer<typeof readerSchema>;
 /**
  * A recall: a question, in the reader's words, the reader, how many tokens
  * the pack may hold (`tokensOf`), and, to read the past, the moment the
- * sources are read as of: what each was then.
+ * sources are read as of: what each was then, to the millisecond and
+ * including it (for "on a day", the day's last millisecond).
  */
 export const recallRequestSchema = z.strictObject({
   question: wellFormedString().max(questionMaxLength),
@@ -215,33 +227,53 @@ export interface Pack {
   truncated: boolean;
 }
 
+/** An ASCII letter or the space: a third of a token each (`tokensOf`). */
+const thirdOfAToken = /[A-Za-z ]/u;
+
 /**
- * The tokens `text` counts as in a pack's budget: a stated estimate, the
- * Brain's own, since it knows no model. One token for every three bytes
- * of ASCII and for every two bytes of anything else (UTF-8), rounded up.
- * Above what the tokenizers of today's models give prose in the five
- * languages (about four characters a token in English, three and a half in
- * Dutch and German) and accented letters, and at or above them for text in
- * other scripts (a Chinese character, three bytes, counts as one and a
- * half). Text that is mostly symbols or digits may count higher on a real
- * tokenizer.
+ * The tokens `text` counts as in a pack's budget: an upper estimate, the
+ * Brain's own, since it knows no model and makes no outside call.
+ *
+ * - An ASCII letter, or a space: a third of a token. A real tokenizer
+ *   takes a word of prose, with the space before it, as one token or two:
+ *   about four characters a token in English, three to four in Dutch,
+ *   German, French and Spanish.
+ * - Any other ASCII character (a digit, punctuation, a symbol, a newline
+ *   or a tab): a whole token. Dates, amounts, IDs and invoice lines run at
+ *   one token per one or two characters; a newline is often a token of
+ *   its own. The space alone is cheaper, because a tokenizer joins it to
+ *   the word after it.
+ * - A character of two bytes in UTF-8 (an accented or Greek or Cyrillic
+ *   letter): a token. One of three or four bytes (Chinese, Japanese, an
+ *   emoji): a token per byte, as a tokenizer that falls back to bytes
+ *   splits a rare one.
+ *
+ * Rounded up. Checked by hand against how byte-pair tokenizers of today's
+ * models cut text (no tokenizer is a dependency): "The invoice is paid." is
+ * 8 here and about 5 there; "INV-2024-0042: € 1.250,00" is 24 here and
+ * about 15 there; "financiële" is 4 here and 3 there; "請求書" is 9 here
+ * and 3 to 6 there.
  */
 export const tokensOf = (text: string): number => {
-  let ascii = 0;
-  let other = 0;
+  let thirds = 0;
+  let whole = 0;
   for (const character of text) {
     const point = character.codePointAt(0) ?? 0;
     if (point < 0x80) {
-      ascii += 1;
+      if (thirdOfAToken.test(character)) {
+        thirds += 1;
+      } else {
+        whole += 1;
+      }
     } else if (point < 0x8_00) {
-      other += 2;
+      whole += 1;
     } else if (point < 0x1_00_00) {
-      other += 3;
+      whole += 3;
     } else {
-      other += 4;
+      whole += 4;
     }
   }
-  return Math.ceil((2 * ascii + 3 * other) / 6);
+  return Math.ceil(thirds / 3) + whole;
 };
 
 /**
@@ -605,10 +637,11 @@ export interface Brain {
    * more of its commonest words, the stop words of English, Dutch, German,
    * French and Spanish, then more of them as asked, then shorter, then
    * newer; passages holding only its commonest words after them, and only
-   * when the others are fewer than the limit), and exact (those holding
-   * its IDs, dates, quoted phrases and names as written: more of them,
-   * then shorter, then newer). The two lists are fused by rank and packed
-   * to the budget: each passage's best part first, then whole passages.
+   * when the others are fewer than the limit), and exact (for each of its
+   * IDs, dates and quoted phrases, the passages holding it as written, in
+   * the words way's order, then shorter, then newer). The lists are fused
+   * by rank and packed to the budget: each passage's best part first,
+   * then whole passages.
    *
    * The versions searched are the current ones; as of a moment, each
    * source's version current then, only if the reader is among that

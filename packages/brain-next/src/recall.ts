@@ -1,4 +1,4 @@
-import { recallLimit } from "./contract.ts";
+import { exactCandidatesMax, recallLimit } from "./contract.ts";
 import type { FoundBy, Pack, Reader, RecallRequest } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
@@ -186,35 +186,55 @@ ORDER BY matched.stops DESC, length(chunks.text),
 LIMIT ?4`;
 
 /**
- * Most chunks the exact way checks in code: those the reader may read
- * that may hold an exact part, shortest first. When there are this many,
- * what lies past them is unknown, so no exact part is reported not found.
- */
-export const exactCandidatesMax = 200;
-
-/**
- * `?1` the exact parts' queries (JSON, exact.ts `Exact.query`), `?2` the
- * reader's person, `?3` their groups (JSON), `?4` the most to check: the
- * chunks the reader may read that may hold one of them,
- * shortest first, then newer, each with the parts (by index) it may hold.
+ * `?1` the exact parts (JSON: each its `query` and `near`, exact.ts), `?2`
+ * the reader's person, `?3` their groups (JSON), `?4` the most to check of
+ * each part: the chunks the reader may read that may hold one of them,
+ * each with the parts (by index) within whose most it is (`parts`), and
+ * those whose most it is the first past (`past`), which are capped. The
+ * cap counts only what the reader may read, in the one statement that
+ * checks access: `near` only orders what `found` holds.
  */
 const exactSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
+asked AS (
+  SELECT key, value ->> '$.query' AS query, value ->> '$.near' AS near
+  FROM json_each(?1)
+),
 found AS (
   SELECT chunks.row AS row, asked.key AS part
-  FROM json_each(?1) AS asked
+  FROM asked
   CROSS JOIN chunk_words
   JOIN chunks ON chunks.row = chunk_words.rowid${searched(asOf)}
-    AND chunk_words MATCH asked.value
+    AND chunk_words MATCH asked.query
+),
+near AS (
+  SELECT asked.key AS part, chunk_words.rowid AS row
+  FROM asked
+  CROSS JOIN chunk_words
+  WHERE chunk_words MATCH asked.near
+),
+ranked AS (
+  SELECT found.row AS row, found.part AS part,
+    row_number() OVER (
+      PARTITION BY found.part
+      ORDER BY near.row IS NOT NULL DESC, length(chunks.text),
+        source_versions.added_at DESC, source_versions.source, chunks.position
+    ) AS rank
+  FROM found
+  LEFT JOIN near ON near.part = found.part AND near.row = found.row
+  JOIN chunks ON chunks.row = found.row
+  JOIN source_versions ON source_versions.row = chunks.version_row
 )
-SELECT ${chunkColumns}, json_group_array(found.part) AS parts
-FROM found
-JOIN chunks ON chunks.row = found.row
+SELECT ${chunkColumns},
+  json_group_array(ranked.part) FILTER (WHERE ranked.rank <= ?4) AS parts,
+  json_group_array(ranked.part) FILTER (WHERE ranked.rank > ?4) AS past
+FROM ranked
+JOIN chunks ON chunks.row = ranked.row
 JOIN source_versions ON source_versions.row = chunks.version_row
+WHERE ranked.rank <= ?4 + 1
 GROUP BY chunks.row
 ORDER BY length(chunks.text), source_versions.added_at DESC,
-  source_versions.source, chunks.position
-LIMIT ?4`;
+  source_versions.source, chunks.position`;
 
 /** A chunk a statement found. */
 interface Row extends Record<string, SqlStorageValue> {
@@ -294,12 +314,13 @@ const byWords = (
 };
 
 /**
- * The exact way: its list, best first, the parts it found, and whether it
- * checked every chunk that may hold one. Best first: the chunks holding
- * more of the exact parts as written; then in the words way's order
- * (`byWords`), so among the chunks an ID every one of them holds, the one
- * that holds the question's words comes first; then those the words way
- * didn't list, shortest first, then newer.
+ * The exact way: a list per exact part, best first, the parts it found,
+ * and those it capped (`exactCandidatesMax`). A part's list holds the
+ * chunks that hold it as written, in the words way's order (`byWords`), so
+ * among the chunks an ID every one of them holds, the one that holds the
+ * question's words comes first; then those the words way didn't list, as
+ * the statement orders them. A list per part, fused with the others, so
+ * chunks holding one part never crowd out those holding another.
  */
 const byExact = (
   sql: SqlStorage,
@@ -307,60 +328,78 @@ const byExact = (
   reader: Reader,
   asOf: AsOf,
   byWordsRank: ReadonlyMap<number, number>
-): { found: Found[]; parts: Set<number>; checked: boolean } => {
+): { lists: Found[][]; parts: Set<number>; capped: Set<number> } => {
   if (exacts.length === 0) {
-    return { found: [], parts: new Set(), checked: true };
+    return { lists: [], parts: new Set(), capped: new Set() };
   }
   const rows = sql
-    .exec<Row & { parts: string }>(
+    .exec<Row & { parts: string; past: string }>(
       exactSql(asOf.length > 0 ? 5 : undefined),
-      JSON.stringify(exacts.map(({ query }) => query)),
+      JSON.stringify(exacts.map(({ query, near }) => ({ query, near }))),
       reader.person,
       JSON.stringify(reader.groups),
       exactCandidatesMax,
       ...asOf
     )
     .toArray();
-  const parts = new Set<number>();
-  const holding = rows.flatMap((row) => {
-    const held = foundIn(row.text, exacts, indexesOf(row.parts));
-    for (const part of held) {
-      parts.add(part);
-    }
-    return held.length > 0 ? [{ row, held: held.length }] : [];
-  });
-  return {
-    found: foundAs(
-      holding
-        .toSorted(
-          (a, b) =>
-            b.held - a.held ||
-            (byWordsRank.get(a.row.row) ?? recallLimit) -
-              (byWordsRank.get(b.row.row) ?? recallLimit)
-        )
-        .slice(0, recallLimit)
-        .map(({ row }) => row),
+  const capped = new Set(rows.flatMap(({ past }) => indexesOf(past)));
+  const held = rows.map((row) => ({
+    row,
+    parts: new Set(foundIn(row.text, exacts, indexesOf(row.parts))),
+  }));
+  const rankOf = ({ row }: Row): number => byWordsRank.get(row) ?? recallLimit;
+  const lists = exacts.map((_, part) =>
+    foundAs(
+      held
+        .filter(({ parts }) => parts.has(part))
+        .map(({ row }) => row)
+        .toSorted((a, b) => rankOf(a) - rankOf(b))
+        .slice(0, recallLimit),
       "exact"
+    )
+  );
+  return {
+    lists,
+    parts: new Set(
+      lists.flatMap((list, part) => (list.length > 0 ? [part] : []))
     ),
-    parts,
-    checked: rows.length < exactCandidatesMax,
+    capped,
   };
 };
 
 /**
  * What the reader may read for the question, as a pack within its budget
- * (contract.ts `Brain.recall`): the exact way's list and the words way's,
- * fused by rank (the exact way's first on a tie), and the parts of the
- * question neither found: its exact parts but names, once every chunk
- * that may hold one was checked, then its telling words but those of its
- * IDs and dates.
+ * (contract.ts `Brain.recall`): the exact way's lists, one per part, and
+ * the words way's, fused by rank (the exact parts' first on a tie, in the
+ * question's order), and the parts of the
+ * question neither found: its exact parts, but those capped, then its
+ * telling words, but those of its IDs and dates.
  */
 export const recall = (
   sql: SqlStorage,
   { question, reader, budget, asOf }: RecallRequest
 ): Pack => {
-  const terms = termsOf(question);
   const exacts = exactsOf(question);
+  const wordsOfKind = (kinds: readonly Exact["kind"][]): Set<string> =>
+    new Set(
+      exacts
+        .filter(({ kind }) => kinds.includes(kind))
+        .flatMap(({ forms }) => forms.flat())
+    );
+  // A date's words are the exact way's alone: a day, a month and a year
+  // are common numbers, which the words way would find in chunks of other
+  // dates and rank with the date's own list once more; the exact way finds
+  // the date however it is written. An ID's words stay words: rare, and
+  // the ID's own, found in any form.
+  const ofDates = wordsOfKind(["date"]);
+  const asked = termsOf(question);
+  const terms: Terms = {
+    telling: asked.telling.filter(({ word }) => !ofDates.has(word)),
+    stops: asked.stops,
+  };
+  // An ID or a date stands for its words: none is said not found apart,
+  // as "03" would be when "2026-03-04" was found as "4 maart 2026".
+  const standing = wordsOfKind(["date", "id"]);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
   const words = byWords(sql, terms, reader, at);
   const exact = byExact(
@@ -370,20 +409,10 @@ export const recall = (
     at,
     new Map(words.found.map(({ row }, rank) => [row, rank]))
   );
-  const missing = exact.checked
-    ? exacts.filter(
-        ({ kind }, index) => kind !== "name" && !exact.parts.has(index)
-      )
-    : [];
-  // An ID or a date stands for its words, found or not: "2026-03-04"
-  // found as "4 maart 2026" leaves "03" unfound, which says nothing.
-  const standing = new Set(
-    exacts
-      .filter(({ kind }) => kind === "id" || kind === "date")
-      .flatMap(({ forms }) => forms.flat())
-  );
   const notFound = [
-    ...missing.map(({ asked }) => asked),
+    ...exacts
+      .filter((_, index) => !exact.parts.has(index) && !exact.capped.has(index))
+      .map(({ asked: part }) => part),
     ...terms.telling
       .filter(
         ({ word }, index) => !words.terms.has(index) && !standing.has(word)
@@ -391,7 +420,7 @@ export const recall = (
       .map(({ word }) => word),
   ];
   return packOf(
-    fuse([exact.found, words.found]),
+    fuse([...exact.lists, words.found]),
     { terms: terms.telling, exacts },
     budget.tokens,
     notFound

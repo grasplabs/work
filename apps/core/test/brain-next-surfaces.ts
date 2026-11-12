@@ -76,8 +76,6 @@ export interface Probing {
   reader: Reader;
   /** A word in the reader's own source and in every marked one. */
   sharedWord: string;
-  /** A word no source holds. */
-  unknownWord: string;
   /**
    * Words only in sources the reader may not read. Probes ask for them
    * and put them in what they add, so a value echoed anywhere shows.

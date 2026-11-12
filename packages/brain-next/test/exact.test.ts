@@ -2,8 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { exactsOf, foundIn } from "../src/exact.ts";
 
-// What a question asks for as written: its quoted phrases, dates, IDs and
-// names, read by fixed rules from the question alone. Finding them in the
+// What a question asks for as written: its quoted phrases, dates and IDs,
+// read by fixed rules from the question alone. Finding them in the
 // store, with access, is tested in apps/core (brain-next-pack.test.ts).
 
 /** Each exact part of `question`: as asked, and by which rule. */
@@ -15,7 +15,7 @@ const holds = (question: string, text: string): boolean =>
   foundIn(text, exactsOf(question), [0]).length === 1;
 
 describe("the exact parts of a question", () => {
-  it("reads quoted phrases, dates, IDs and names, each once, in that order", () => {
+  it("reads quoted phrases, dates and IDs, each once, in that order, and leaves names to the words way", () => {
     expect(
       partsOf(
         `Did Anna Jansen sign "het nieuwe contract" for PO-77812 on 14 maart 2026, and PO-77812 again?`
@@ -23,7 +23,6 @@ describe("the exact parts of a question", () => {
     ).toStrictEqual([
       { asked: "het nieuwe contract", kind: "phrase" },
       { asked: "14 maart 2026", kind: "date" },
-      { asked: "Anna Jansen", kind: "name" },
       { asked: "PO-77812", kind: "id" },
     ]);
   });
@@ -37,16 +36,6 @@ describe("the exact parts of a question", () => {
       { asked: "4400", kind: "id" },
       { asked: "Q3", kind: "id" },
     ]);
-  });
-
-  it("never takes a stop word or a word at a sentence's end into a name", () => {
-    expect(
-      partsOf("Is Anna Jansen here? Where Does Rotterdam End")
-    ).toStrictEqual([
-      { asked: "Anna Jansen", kind: "name" },
-      { asked: "Rotterdam End", kind: "name" },
-    ]);
-    expect(partsOf("Wat zei Anna. Jansen kwam later")).toStrictEqual([]);
   });
 
   it("finds a date written in any of the five languages' ways, and no other day", () => {

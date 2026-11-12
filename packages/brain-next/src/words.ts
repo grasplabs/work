@@ -185,11 +185,23 @@ export interface Word {
   readonly stems: readonly string[];
 }
 
+/** The words a word as written folds into, without their stems. */
+const foldedOf = (written: string): string[] =>
+  (foldForSearch(written).match(wordPattern) ?? []).filter((word) =>
+    letterOrDigit.test(word)
+  );
+
+/** `text`'s words as written, as both `wordsOf` and `sequenceOf` cut it. */
+const writtenOf = (text: string): string[] =>
+  // Cut after compatibility folding (NFKC), so a symbol that folds into
+  // letters is words too ("㍿" is "株式会社", "℡" is "tel", "Ⓐ" is "a"),
+  // as `foldForSearch` reads it; NFKC keeps accents, which the stemmers
+  // need, composed.
+  text.normalize("NFKC").toLowerCase().match(wordPattern) ?? [];
+
 /** The words a word as written folds into, with their stems. */
 const wordsOfWritten = (written: string): Word[] => {
-  const folded = (foldForSearch(written).match(wordPattern) ?? []).filter(
-    (word) => letterOrDigit.test(word)
-  );
+  const folded = foldedOf(written);
   // As written too, when it is written otherwise (accented) and folds
   // into one word alone.
   const asWritten =
@@ -229,13 +241,7 @@ export type WordMemo = Map<string, Word[]>;
  */
 export const wordsOf = (text: string, memo: WordMemo = new Map()): Word[] => {
   const words = new Map<string, Set<string>>();
-  // Cut after compatibility folding (NFKC), so a symbol that folds into
-  // letters is words too ("㍿" is "株式会社", "℡" is "tel", "Ⓐ" is "a"),
-  // as `foldForSearch` reads it; NFKC keeps accents, which the stemmers
-  // need, composed.
-  for (const written of new Set(
-    text.normalize("NFKC").toLowerCase().match(wordPattern)
-  )) {
+  for (const written of new Set(writtenOf(text))) {
     let found = memo.get(written);
     if (found === undefined) {
       found = wordsOfWritten(written);
@@ -345,17 +351,13 @@ export const holdsTerm = (words: readonly Word[], term: Word): boolean => {
   );
 };
 
-/** Whether `word`, folded, is a stop word of one of the five languages. */
-export const isStopWord = (word: string): boolean => stopWords.has(word);
-
 /**
- * `text`'s words in order, folded, repeats kept: what an exact match
- * compares, a question's phrase against a chunk's text (exact.ts).
+ * `text`'s words in order, folded, repeats kept: the words `wordsOf` holds,
+ * cut the same way, without their stems. What an exact match compares, a
+ * question's phrase against a chunk's text (exact.ts).
  */
 export const sequenceOf = (text: string): string[] =>
-  (foldForSearch(text.normalize("NFKC")).match(wordPattern) ?? []).filter(
-    (word) => letterOrDigit.test(word)
-  );
+  writtenOf(text).flatMap(foldedOf);
 
 /** `words` as one FTS5 query: all of them, each a quoted word. */
 export const allOf = (words: readonly string[]): string =>

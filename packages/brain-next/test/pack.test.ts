@@ -51,20 +51,20 @@ const alphabet = [
 ];
 
 describe("the token estimate", () => {
-  it("counts a token per three bytes of ASCII and per two of anything else, rounded up", () => {
+  it("counts a third of a token per ASCII letter or space, a token per other ASCII character or two-byte character, and a token per byte past that", () => {
     expect(
-      ["", "abc", "abcd", "éé", "請求", "🧾"].map((text) => tokensOf(text))
-    ).toStrictEqual([
-      0, 1,
-      // Four ASCII bytes: a token and a third.
-      2,
-      // Two bytes each: a token each.
-      2,
-      // Three bytes each: a token and a half each.
-      3,
-      // Four bytes, one character: two tokens.
-      2,
-    ]);
+      [
+        "",
+        "abc",
+        "abcd",
+        "The invoice is paid.",
+        "INV-2024-0042: € 1.250,00",
+        "financiële",
+        "請求書",
+        "🧾",
+        "line\nline",
+      ].map((text) => tokensOf(text))
+    ).toStrictEqual([0, 1, 2, 8, 24, 4, 9, 4, 4]);
   });
 });
 

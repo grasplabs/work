@@ -1,4 +1,4 @@
-import { allOf, foldForSearch, isStopWord, sequenceOf } from "./words.ts";
+import { allOf, foldForSearch, sequenceOf } from "./words.ts";
 
 // The exact way of recall: the parts of a question that must be found as
 // written, word for word in that order, not word by word in any form.
@@ -15,17 +15,20 @@ import { allOf, foldForSearch, isStopWord, sequenceOf } from "./words.ts";
 //    first (03/14/2026) is read so.
 // 3. IDs: a word holding a digit and a letter (INV-2024-0042, PO12345) or
 //    at least three digits (4400, 2027).
-// 4. Names: two or more words in a row, each capitalised, none a stop word
-//    and none holding a digit (Anna Jansen, Rotterdam Warehouse). A guess:
-//    a German noun is capitalised too, so a name only ranks, and is never
-//    reported as not found.
+//
+// Names are left to the words way: no rule tells a name from a sentence's
+// first word or a run of German nouns, and the words way finds a name's
+// words already.
 //
 // Each part of the question is read by the first rule that takes it, and
 // then is no longer there for the next.
 //
 // What the word index holds of a chunk is its distinct words, so it finds
 // the chunks holding every word of a part (`query`), and the order is
-// checked here, against the chunk's text (`foundIn`).
+// checked here, against the chunk's text (`foundIn`). The index holds a
+// chunk's distinct words in the order they first appear, so a phrase
+// query on it (`near`) finds most chunks holding a form in a row, though
+// not all and not only those: it orders the candidates, never decides.
 
 /** A part of the question to find as written. */
 export interface Exact {
@@ -36,11 +39,15 @@ export interface Exact {
   /** An FTS5 query finding the chunks that may hold one of its forms. */
   query: string;
   /**
-   * Which rule read it: a pack says when no chunk holds a phrase, a date
-   * or an ID, never a name, a guess. A date or an ID stands for its words:
-   * a pack never says them apart (recall.ts).
+   * An FTS5 query finding the chunks whose distinct words hold one of its
+   * forms as a phrase: likely to hold it in a row (above).
    */
-  kind: "phrase" | "date" | "id" | "name";
+  near: string;
+  /**
+   * Which rule read it. A date or an ID stands for its words: a pack never
+   * says them apart (recall.ts).
+   */
+  kind: "phrase" | "date" | "id";
 }
 
 /** Most exact parts of a question that count. */
@@ -176,15 +183,17 @@ const quoted = /["“”„«»](?<inner>[^"“”„«»]+)["“”„«»]/gu;
 /** What surrounds a word that isn't part of it: punctuation and symbols. */
 const aroundWord = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
 
-/** A word that starts with a capital. */
-const capitalised = /^[\p{Lu}\p{Lt}]/u;
-
-/** Ends a sentence, so a name never runs on past it. */
-const sentenceEnd = /[.!?;:]$/u;
-
 const digit = /\p{N}/u;
 const letter = /\p{L}/u;
 const threeDigits = /(?:\p{N}[^\p{N}]*){3}/u;
+
+/** `forms` as one FTS5 query: any of them, each a phrase. */
+const phrasesOf = (forms: readonly (readonly string[])[]): string =>
+  [...new Set(forms.map((form) => `"${form.join(" ")}"`))].join(" OR ");
+
+/** Any of `words` as one FTS5 query, each a quoted word. */
+const anyWordOf = (words: readonly string[]): string =>
+  `(${words.map((word) => `"${word}"`).join(" OR ")})`;
 
 /**
  * An exact part written one way, `words`, or none when it holds no word:
@@ -193,24 +202,37 @@ const threeDigits = /(?:\p{N}[^\p{N}]*){3}/u;
 const exactOf = (
   asked: string,
   words: string[],
-  kind: "phrase" | "id" | "name"
+  kind: "phrase" | "id"
 ): Exact | undefined =>
   words.length === 0
     ? undefined
-    : { asked, forms: [words], query: allOf(words), kind };
+    : {
+        asked,
+        forms: [words],
+        query: allOf(words),
+        near: phrasesOf([words]),
+        kind,
+      };
 
 /**
- * A date as an exact part: the chunks holding its year and its day, with
- * or without a leading zero, may hold one of its forms.
+ * A date as an exact part: the chunks holding its year, its day (with or
+ * without a leading zero) and its month (its number, so written, or one of
+ * its names) may hold one of its forms.
  */
-const dateOf = (asked: string, day: Day): Exact => ({
-  asked,
-  forms: formsOfDay(day),
-  query: `"${day.year}" AND (${padded(day.day)
-    .map((written) => `"${written}"`)
-    .join(" OR ")})`,
-  kind: "date",
-});
+const dateOf = (asked: string, day: Day): Exact => {
+  const forms = formsOfDay(day);
+  return {
+    asked,
+    forms,
+    query: [
+      `"${day.year}"`,
+      anyWordOf(padded(day.day)),
+      anyWordOf([...padded(day.month), ...namesOfMonth(day.month)]),
+    ].join(" AND "),
+    near: phrasesOf(forms),
+    kind: "date",
+  };
+};
 
 /** `text` with each of `pattern`'s matches `read` takes taken out, and what they read as. */
 const takeOut = <T>(
@@ -236,48 +258,15 @@ const takeOut = <T>(
 const isId = (word: string): boolean =>
   digit.test(word) && (letter.test(word) || threeDigits.test(word));
 
-/** Whether a word, as the question wrote it, may be part of a name (rule 4). */
-const inName = (word: string): boolean =>
-  capitalised.test(word) &&
-  !digit.test(word) &&
-  !sequenceOf(word).every((folded) => isStopWord(folded));
-
-/** The IDs and names among `text`'s words, in order (rules 3 and 4). */
-const idsAndNames = (text: string): Exact[] => {
-  const found: Exact[] = [];
-  let name: string[] = [];
-  const endName = (): void => {
-    if (name.length >= 2) {
-      const asked = name.join(" ");
-      const exact = exactOf(asked, sequenceOf(asked), "name");
-      if (exact !== undefined) {
-        found.push(exact);
-      }
-    }
-    name = [];
-  };
-  for (const written of text.split(/\s+/u)) {
+/** The IDs among `text`'s words, in order (rule 3). */
+const idsOf = (text: string): Exact[] =>
+  text.split(/\s+/u).flatMap((written) => {
     const word = written.replaceAll(aroundWord, "");
-    if (word === "") {
-      endName();
-    } else if (isId(word)) {
-      endName();
-      const exact = exactOf(word, sequenceOf(word), "id");
-      if (exact !== undefined) {
-        found.push(exact);
-      }
-    } else if (inName(word)) {
-      name.push(word);
-      if (sentenceEnd.test(written)) {
-        endName();
-      }
-    } else {
-      endName();
-    }
-  }
-  endName();
-  return found;
-};
+    const exact = isId(word)
+      ? exactOf(word, sequenceOf(word), "id")
+      : undefined;
+    return exact === undefined ? [] : [exact];
+  });
 
 /**
  * The parts of `question` to find as written (above), in the order the
@@ -299,7 +288,7 @@ export const exactsOf = (question: string): Exact[] => {
   const all = [
     ...phrases.found.map(({ value }) => value),
     ...dates,
-    ...idsAndNames(rest),
+    ...idsOf(rest),
   ];
   const seen = new Set<string>();
   return all
