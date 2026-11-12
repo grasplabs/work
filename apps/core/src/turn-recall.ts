@@ -90,6 +90,9 @@ const analysisAnswerTokens = 200;
 /** The tool the chat shows the recall as: the brain's own search. */
 export const turnRecallTool = "searchBrain";
 
+/** Why the audit log says a recall failed when it ran past its deadline. */
+export const recallTimeoutReason = "recall.timeout";
+
 /** The method the audit log records the recall as, a call of the agent's. */
 export const turnRecallMethod = "brain.recall";
 
@@ -108,7 +111,8 @@ const controlCharacters = /\p{Cc}/u;
 
 /** `query` as a recall takes it, or `null` when it isn't one. */
 const usableQuery = (query: string): string | null => {
-  const trimmed = query.trim();
+  // Well-formed, as the question is: the Brain refuses half a pair.
+  const trimmed = query.trim().toWellFormed();
   return trimmed === "" ||
     trimmed.length > queryMaxLength ||
     controlCharacters.test(trimmed)
@@ -358,6 +362,10 @@ export const recallForTurn = async (
     };
     // In the log before the model gets any of it: straight to it, so a
     // log that doesn't take it fails the recall, and nothing is handed over.
+    // Recorded before the hand-over: a later failure of the turn (the
+    // object restarting, the run's close failing, the turn stopping before
+    // its first request) is not this event's to tell, so its `ok` may stand
+    // for a recall the model never got.
     await appendAuditEvent(env, agentCallEntry(scope, call));
     await recordToolCall(env, scope, call);
     result = JSON.stringify(forModel(pack));
@@ -368,7 +376,10 @@ export const recallForTurn = async (
       env,
       scope,
       { method: turnRecallMethod, detail: { run: runId } },
-      endedBy(error)
+      // Too slow told apart from a crash.
+      isTimeout(error)
+        ? { outcome: "failed", reason: recallTimeoutReason }
+        : endedBy(error)
     );
     // Why it failed, never what it read: the turn goes on without it.
     status = isTimeout(error) ? "wall_expired" : "threw";

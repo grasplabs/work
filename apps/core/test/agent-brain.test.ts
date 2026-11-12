@@ -1,8 +1,12 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { addSource } from "../src/brain-next.ts";
+import { turnRecallMethod, turnRecallTool } from "../src/turn-recall.ts";
 import {
+  chatOf,
   codeResults,
   codeStep,
   model,
@@ -232,6 +236,67 @@ describe("a chat's brain", setUpTime, () => {
         [false, false],
         [false, true],
       ],
+    });
+  });
+
+  it("recalls nothing before a question while the agent lacks the brain permission, and recalls once it holds it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const depot = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const fact = `Depot ${depot} opens at seven`;
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: fact,
+      readers: { kind: "owner", personId: person.userId },
+    });
+    const { stub, chat, provider, ask, agent } = await chatOf(
+      person.userId,
+      says("I can't look."),
+      says("Seven.")
+    );
+    const question = `When does depot ${depot} open?`;
+
+    await ask(question);
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    await ask(question);
+
+    /** Each request's own recall part, if it carries one. */
+    const recalled = provider.requests.map(({ body }) =>
+      JSON.stringify(body).includes("[Recall ")
+    );
+    // Once the granted turn's recall is in the log: the first turn's
+    // would be before it.
+    const recalls = await vi.waitFor(
+      async () => {
+        const logged = await allEvents();
+        const events = logged.filter(
+          ({ action, detail }) =>
+            action === "agent.call" &&
+            detail.method === turnRecallMethod &&
+            detail.chat === chat.id
+        );
+        expect(events.length).toBeGreaterThan(0);
+        return events;
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    const results = await toolResults(stub, chat.id);
+    const steps = results.filter(({ tool }) => tool === turnRecallTool);
+    expect({
+      recalled,
+      steps: steps.map(({ text }) => text.includes(fact)),
+      recalls: recalls.length,
+    }).toStrictEqual({
+      // The first request, before the grant, carried none.
+      recalled: [false, true],
+      steps: [true],
+      recalls: 1,
     });
   });
 });

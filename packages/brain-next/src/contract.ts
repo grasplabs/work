@@ -1039,6 +1039,7 @@ export interface Brain {
    * exist and one they may not read.
    */
   listVersions: (request: VersionListRequest) => Promise<VersionList>;
+  /**
    * Of the versions asked for, those the reader may read now, as
    * `readVersion` decides it, in the order asked and each once, without
    * reading their text: what a host checks before it sends again what it

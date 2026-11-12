@@ -11,7 +11,11 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { analysisPurpose, turnRecallMethod } from "../src/turn-recall.ts";
+import {
+  analysisPurpose,
+  recallTimeoutReason,
+  turnRecallMethod,
+} from "../src/turn-recall.ts";
 import { chatOf, says, setObjectEnv, toolResults } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents, loggedEvents } from "./audit-events.ts";
@@ -456,17 +460,21 @@ describe("the recall before a chat's question", setUpTime, () => {
     const slow = await recalledWith({ hang: true });
     // Had the others answered in time with words, they would have found it.
     const steered = await recalledWith(analysed(`warehouse ${decoy}`));
+    // Half a pair in its words: mended, not refused by the Brain.
+    const malformed = await recalledWith(analysed(`warehouse ${decoy} \uD800`));
 
     expect({
       first: alone.recalled?.includes(decoy),
       failing: failing.recalled,
       slow: slow.recalled,
       steered: steered.recalled?.includes(decoy),
+      malformed: malformed.recalled?.includes(decoy),
     }).toStrictEqual({
       first: false,
       failing: alone.recalled,
       slow: alone.recalled,
       steered: true,
+      malformed: true,
     });
     // The slow one was let go of.
     await vi.waitFor(
@@ -568,7 +576,7 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
       late: {
         fact: false,
         told: true,
-        logged: [{ outcome: "failed", reason: "internal.unexpected" }],
+        logged: [{ outcome: "failed", reason: recallTimeoutReason }],
       },
     });
   });

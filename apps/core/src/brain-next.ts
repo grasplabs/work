@@ -605,6 +605,7 @@ export const listVersionsAs = async (
     versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
     before: more && last !== undefined ? last.version : null,
   };
+};
 
 const versionRefsSchema = z.array(versionRefSchema);
 
