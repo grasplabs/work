@@ -23,10 +23,17 @@ describe(findAiAttribution, () => {
       "Co-authored-by: Copilot <198982749+Copilot@users.noreply.github.com>",
       "Co-authored-by: Cursor Agent <cursoragent@cursor.com>",
       "> **Generated with Claude Code**",
+      // Commit authors, as the hook and CI pass them in.
+      "Co-authored-by: Claude <noreply@anthropic.com> 1794491466 +0100",
+      "Co-authored-by: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>",
+      "Co-authored-by: chatgpt-codex-connector[bot] <199175422+chatgpt-codex-connector[bot]@users.noreply.github.com>",
+      "Co-authored-by: gemini-code-assist[bot] <176961590+gemini-code-assist[bot]@users.noreply.github.com>",
+      "Co-authored-by: Cascade <cascade@windsurf.com>",
+      "Generated with [Windsurf](https://windsurf.com)",
     ].join("\n");
 
     expect(findAiAttribution(message).map(({ line }) => line)).toStrictEqual([
-      5, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+      5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
     ]);
   });
 
@@ -41,6 +48,8 @@ describe(findAiAttribution, () => {
       "",
       "Co-authored-by: Nick <nick@joingrasp.com>",
       "Co-authored-by: Jkob <jakob@joingrasp.com>",
+      "Co-authored-by: GitHub <noreply@github.com>",
+      "Co-authored-by: Nick <12345+nickruigrok@users.noreply.github.com> 1794491466 +0100",
     ].join("\n");
 
     expect(findAiAttribution(message)).toStrictEqual([]);

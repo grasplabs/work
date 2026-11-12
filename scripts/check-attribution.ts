@@ -4,15 +4,24 @@
  * commit-msg hook checks each commit; CI checks the PR description and every
  * commit of the PR and its title, because the squash commit on main is the
  * title, the description and a Co-authored-by trailer for each co-author of
- * those commits.
+ * those commits. A commit whose author is an agent (Claude Code on the web,
+ * Cursor's or Codex's cloud agents, Copilot's coding agent) becomes such a
+ * trailer, so the hook and CI pass each commit's author and committer in as
+ * Co-authored-by lines.
  *
  * usage: check-attribution.ts [file]   reads stdin without a file
  */
 import { readFileSync } from "node:fs";
 
-/** Co-authors that are AI tools, by name or by email. */
-const aiCoAuthor =
-  /^\s*co-authored-by:.*\b(?:claude|anthropic|openai|chatgpt|codex|copilot|cursor|gemini|aider|devin)\b/iu;
+/** AI coding tools and their makers, as they appear in names, emails and bot logins. */
+const aiTools =
+  "claude|anthropic|openai|chatgpt|codex|copilot|cursor|gemini|google-labs-jules|aider|devin|windsurf|codeium|cline|opencode";
+
+/** Co-authors that are AI tools, by name, email or bot login. */
+const aiCoAuthor = new RegExp(
+  `^\\s*co-authored-by:.*\\b(?:${aiTools})\\b`,
+  "iu"
+);
 
 /**
  * Footers and trailers agents add to what they write. A footer opens its
@@ -20,7 +29,7 @@ const aiCoAuthor =
  * sentence that quotes one is left alone.
  */
 const aiFooters: readonly RegExp[] = [
-  /^[^\p{L}\p{N}]*generated (?:with|by) \[?(?:claude|codex|cursor|copilot|gemini|aider|devin)/iu,
+  new RegExp(`^[^\\p{L}\\p{N}]*generated (?:with|by) \\[?(?:${aiTools})`, "iu"),
   /^\s*claude-session:/iu,
   /https:\/\/claude\.ai\/code\/session_/u,
 ];
@@ -46,7 +55,7 @@ if (import.meta.main) {
         .map(({ line, text }) => `  ${line}: ${text}`)
         .join(
           "\n"
-        )}\nClaude Code: set "attribution": { "commit": "", "pr": "" } in your settings.`
+        )}\nCommit as yourself: set your git user.name and user.email where the agent runs (in a cloud agent, its git identity setting), and turn off its attribution (Claude Code: "attribution": { "commit": "", "pr": "" } in your settings).`
     );
     process.exit(1);
   }
