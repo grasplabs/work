@@ -331,7 +331,18 @@ export const publishDraft = async (
   );
   await draftRevised(env, found.id);
   // A write that landed meanwhile left the draft over the version before.
-  await rebaseDraft(env, by, found.id);
+  // Only tidying once the version is live: whatever stops it (the App
+  // archived, the role taken away, D1 failing) never says the publish
+  // failed, and the next publish rebases a stale draft all the same.
+  try {
+    await rebaseDraft(env, by, found.id);
+  } catch (error) {
+    log.warn("app.draft_rebase_failed", {
+      app: found.id,
+      version,
+      ...errorFields(error),
+    });
+  }
   return live;
 };
 
