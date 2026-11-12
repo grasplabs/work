@@ -96,11 +96,12 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
       # The squash commit on main is the title, the description and a
-      # Co-authored-by trailer for each co-author of the PR's commits: none
-      # may credit an AI tool (scripts/check-attribution.ts).
+      # Co-authored-by trailer for each co-author of the PR's commits, its
+      # authors among them: none may credit an AI tool
+      # (scripts/check-attribution.ts).
       - if: github.event_name == 'pull_request'
         run: |
-          { printf '%s\n' "$PR_TITLE" "$PR_BODY"; git log --format=%B "$BASE..$HEAD"; } |
+          { printf '%s\n' "$PR_TITLE" "$PR_BODY"; git log --format='%B%nCo-authored-by: %an <%ae>' "$BASE..$HEAD"; } |
             node scripts/check-attribution.ts
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
