@@ -17,6 +17,7 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
+  BotIcon,
   BrainIcon,
   FolderIcon,
   LayoutGridIcon,
@@ -39,7 +40,14 @@ import { SurfaceNav } from "./surface-nav.tsx";
 // onboarding alone get none: Grasp steers the onboarding from its admin.
 
 interface Section {
-  to: "/" | "/brain" | "/projects" | "/apps" | "/workflows" | "/integrations";
+  to:
+    | "/"
+    | "/brain"
+    | "/projects"
+    | "/apps"
+    | "/workflows"
+    | "/agents"
+    | "/integrations";
   label: MessageDescriptor;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
@@ -50,6 +58,8 @@ const sections: readonly Section[] = [
   { to: "/projects", label: msg`Projects`, icon: FolderIcon },
   { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
+  // The company's agents: the ones a person may ask, and for admins all of them.
+  { to: "/agents", label: msg`Agents`, icon: BotIcon },
   { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
 ];
 

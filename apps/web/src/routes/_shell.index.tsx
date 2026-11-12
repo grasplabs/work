@@ -132,8 +132,10 @@ const NewChat = ({
   efforts: Record<string, ModelEfforts>;
   agents: ChatAgent[];
 }) => {
-  // The agent the new chat is with: the first one until another is picked.
-  const [picked, setPicked] = useState<string>();
+  // The agent the new chat is with: the one the address names (the Agents
+  // page's "Chat"), else the first one, until another is picked.
+  const { agent: asked } = Route.useSearch();
+  const [picked, setPicked] = useState<string | undefined>(asked);
   const agentId = startingAgent(agents, picked)?.id;
   const { composer, ask } = useAsk(
     undefined,
@@ -480,15 +482,22 @@ export const Route = createFileRoute("/_shell/")({
   pendingComponent: PageLoading,
   validateSearch: (
     search: Record<string, unknown>
-  ): { chat?: string; panel?: true } => ({
+  ): { chat?: string; panel?: true; agent?: string } => ({
     ...(typeof search.chat === "string" ? { chat: search.chat } : {}),
+    // The agent a new chat starts with, as the Agents page names it.
+    ...(typeof search.agent === "string" ? { agent: search.agent } : {}),
     ...(search.panel === true ? { panel: true } : {}),
   }),
   // Chat opens on the open chat, the one the dock carries on, whatever led
   // here (the sidebar, the logo); only "New chat" lets go of it first.
   beforeLoad: ({ search }) => {
     const active = activeChat();
-    if (search.chat === undefined && active !== undefined) {
+    // A chat with a named agent is a new one: the open chat stays behind.
+    if (
+      search.chat === undefined &&
+      search.agent === undefined &&
+      active !== undefined
+    ) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/", search: { chat: active }, replace: true });
     }

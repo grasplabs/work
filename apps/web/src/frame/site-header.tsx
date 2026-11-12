@@ -17,6 +17,7 @@ export type Crumb =
         | "/knowledge"
         | "/apps"
         | "/workflows"
+        | "/agents"
         | "/integrations";
     }
   | {
