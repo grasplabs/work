@@ -1,6 +1,6 @@
 // Exports and restores (exports.ts, restore.ts, GRA-1755): a company's
 // Brain written as checked files in its own bucket and read back into an
-// empty store, and a person's own export. The threat model is on
+// empty store. A person's own store refuses both. The threat model is on
 // GRA-1755; each test names the threats it holds. Every test has sources,
 // people and teams of its own; the restores empty the shared store first,
 // as a store whose storage was lost, its bucket kept.
@@ -330,6 +330,73 @@ const holdingBucket = async (
       await swap(bucket);
     },
   };
+};
+
+/**
+ * `store`'s bucket swapped for one that, at the `nth` call `call` of `key`
+ * (before or after it lands), never answers, as a store that stopped there:
+ * `reached` says when. The test then stops the store.
+ */
+const stoppingBucket = async (
+  store: Store,
+  call: (typeof r2Calls)[number],
+  key: string,
+  nth: number,
+  before: boolean
+): Promise<{ reached: () => boolean }> => {
+  const flags = { reached: false, seen: 0 };
+  const bucket = env.BRAIN_OBJECTS;
+  const through = async (name: string, args: unknown[]): Promise<unknown> => {
+    const method: unknown = Reflect.get(bucket, name);
+    if (typeof method !== "function") {
+      throw new TypeError(`R2 has no ${name}`);
+    }
+    const result: unknown = await Reflect.apply(method, bucket, args);
+    return result;
+  };
+  const stopsHere = async (): Promise<void> => {
+    flags.reached = true;
+    await until(() => false, "a store that stopped");
+  };
+  await runInDurableObject(store, (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    const swapped = Object.fromEntries(
+      r2Calls.map((name) => [
+        name,
+        async (...args: unknown[]) => {
+          const hit = name === call && args[0] === key;
+          if (hit) {
+            flags.seen += 1;
+          }
+          const here = hit && flags.seen === nth;
+          if (here && before) {
+            await stopsHere();
+          }
+          const result = await through(name, args);
+          if (here && !before) {
+            await stopsHere();
+          }
+          return result;
+        },
+      ])
+    );
+    Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: swapped });
+  });
+  return { reached: () => flags.reached };
+};
+
+/** Stops `store`, as a crash or a deploy would. */
+const stop = async (store: Store): Promise<void> => {
+  try {
+    await runInDurableObject(store, (_instance, state) => {
+      state.abort("Stopped by the test");
+    });
+  } catch {
+    // The kill ends the call it was made in.
+  }
 };
 
 /** Ticks the shared store until the restore of `id` is no longer running: at most 10 ticks. */
@@ -1215,7 +1282,7 @@ describe("exports and restores", () => {
       });
     });
 
-    it("checks an erasure that lands during a sweep against every export the sweep passed (threat 6)", async () => {
+    it("keeps a sweep's pass going when an erasure lands during it, and checks that erasure against every export, those it passed too (threat 6)", async () => {
       await putBack(shared(), emptyShared);
       const source = `test:${unique()}`;
       await add(
@@ -1250,6 +1317,7 @@ describe("exports and restores", () => {
       await shared().eraseSource({ source: unrelated, reason: "deleted" });
       const heldKey = `exports/${ids[2] ?? ""}/part-0000.holds.json`;
       const held = await holdingBucket(shared(), (key) => key === heldKey);
+      let place: string | null = null;
       try {
         const ticking = tick(shared());
         await held.reached();
@@ -1257,6 +1325,17 @@ describe("exports and restores", () => {
         // the first ones.
         await shared().eraseSource({ source, reason: "deleted" });
         await tick(shared());
+        // The pass the erasure landed in keeps its place: it is not
+        // started over from the first key.
+        place = await runInDurableObject(
+          shared(),
+          (_instance, state) =>
+            state.storage.sql
+              .exec<{ cursor: string | null }>(
+                "SELECT cursor FROM export_sweep WHERE id = 1"
+              )
+              .one().cursor
+        );
         held.release();
         await ticking;
       } finally {
@@ -1274,7 +1353,62 @@ describe("exports and restores", () => {
           left.push(each);
         }
       }
-      expect(left).toStrictEqual([]);
+      expect({
+        place: place?.slice(0, 44) ?? null,
+        left,
+      }).toStrictEqual({ place: heldKey.slice(0, 44), left: [] });
+    });
+
+    it("settles a restore whose item of the queue is gone as failed, with what it wrote, and lets it start again and finish (threat 9)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const sources = Array.from({ length: 60 }, () => `test:${unique()}`);
+      for (const source of sources) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(shared(), source, `words of ${source}`, team(group));
+      }
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+      // The write pass's read of the second part (its second read) stops
+      // the store, its first part written.
+      const stopping = await stoppingBucket(
+        shared(),
+        "get",
+        `exports/${id}/part-0001.jsonl`,
+        2,
+        true
+      );
+      await shared().startRestore(id, "test");
+      const ticking = called(tick(shared())).catch(() => {});
+      await until(stopping.reached, "the second part's write-pass read");
+      // Its item gone, as one parked for good, and the store stopped.
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec(
+          "DELETE FROM work_items WHERE kind = 'brain.restore'"
+        );
+      });
+      await stop(shared());
+      await ticking;
+      const halfway = await versionsHeld();
+      await tick(shared());
+      await tick(shared());
+      const stuck = await shared().restoreStatus(id);
+      const again = await shared().startRestore(id, "test");
+      const done = await restoreSettled(id);
+      expect({
+        halfway,
+        stuck: stuck?.state,
+        again: again.state,
+        done: done?.state,
+        held: await versionsHeld(),
+      }).toStrictEqual({
+        halfway: 50,
+        stuck: "failed",
+        again: "running",
+        done: "done",
+        held: 60,
+      });
     });
 
     it("lets go of a failed restore's export once the ledger names what it holds, and won't restart it into a store in use (threats 6, 7)", async () => {

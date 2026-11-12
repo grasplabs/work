@@ -20,6 +20,7 @@ CREATE INDEX `export_sources_subject_idx` ON `export_sources` (`subject`,`versio
 CREATE TABLE `export_sweep` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`through` integer NOT NULL,
+	`checked` integer DEFAULT 0 NOT NULL,
 	`cursor` text,
 	CONSTRAINT "export_sweep_one" CHECK(id = 1)
 );

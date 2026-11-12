@@ -11,7 +11,7 @@ import type {
 import { subjectOf } from "./erasure.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
-import { isRestoring } from "./restoring.ts";
+import { isRestoring, restoreFailedSql } from "./restoring.ts";
 import { defineWork, enqueueWork, workParksMax } from "./work.ts";
 import type { WorkContext } from "./work.ts";
 
@@ -548,14 +548,32 @@ const stuckRestoreSql = `restores.state = 'running'
 /** The last erasure the store recorded: where a sweep is due past. */
 const lastErasureSql = "(SELECT coalesce(max(rowid), 0) FROM erasures)";
 
-/** Whether a sweep of `exports/` is due: an erasure recorded since the last. */
+/**
+ * `?1` the parks that make an item parked for good: whether a pass of the
+ * sweep is on the queue.
+ */
+const sweepQueuedSql = `EXISTS (
+  SELECT 1 FROM work_items
+  WHERE work_items.kind = 'brain.export_sweep'
+    AND (work_items.parked_at IS NULL OR work_items.parks < ?1)
+)`;
+
+/**
+ * `?1` the parks that make an item parked for good: whether the tick has
+ * an erasure to check every export against (recorded since it last did,
+ * `checked`), or a pass of the sweep to start (an erasure past the one the
+ * last pass started for, `through`, and no pass on the queue).
+ */
+const sweepDueSql = `SELECT 1 WHERE
+  ${lastErasureSql} > coalesce((SELECT checked FROM export_sweep WHERE id = 1), 0)
+  OR (
+    ${lastErasureSql} > coalesce((SELECT through FROM export_sweep WHERE id = 1), 0)
+    AND NOT ${sweepQueuedSql}
+  )`;
+
+/** Whether the tick has an erasure to check exports against, or a pass to start (`sweepDueSql`). */
 const sweepDue = (sql: SqlStorage): boolean =>
-  sql
-    .exec(
-      `SELECT 1 WHERE ${lastErasureSql} >
-        coalesce((SELECT through FROM export_sweep WHERE id = 1), 0)`
-    )
-    .toArray().length > 0;
+  sql.exec(sweepDueSql, workParksMax).toArray().length > 0;
 
 /**
  * Whether the export files `key` names, of an export the store has no row
@@ -622,40 +640,24 @@ const orphanFileDrops = async (
   }
 };
 
-/** The last erasure the sweep under way was started for. */
-const sweepThrough = (sql: SqlStorage): number =>
-  sql
-    .exec<{ through: number }>(
-      "SELECT coalesce((SELECT through FROM export_sweep WHERE id = 1), 0) AS through"
-    )
-    .one().through;
-
 /**
  * The sweep's place saved at `key`, in one transaction with the deletion
  * of export `id`'s files put on the queue when `drop` says so and the store
- * still has no row of it (a restore may have recorded it meanwhile); unless
- * a new sweep began since `through` (then false: this run ends, and the new
- * one goes over every export from the first).
+ * still has no row of it (a restore may have recorded it meanwhile).
  */
 const sweptKey = (
   storage: DurableObjectStorage,
   id: string,
   key: string,
-  drop: boolean,
-  through: number
-): boolean =>
+  drop: boolean
+): void => {
   storage.transactionSync(() => {
     if (drop && rowOf(storage.sql, id) === undefined) {
       enqueueExport(storage, id);
     }
-    // An erasure recorded since this run began started a sweep anew from
-    // the first key: this run's place is not its to save.
-    if (sweepThrough(storage.sql) !== through) {
-      return false;
-    }
     storage.sql.exec("UPDATE export_sweep SET cursor = ? WHERE id = 1", key);
-    return true;
   });
+};
 
 /**
  * The sweep of `exports/` (above), a key at a time from where the last run
@@ -663,14 +665,16 @@ const sweptKey = (
  * export may go (`orphanFileDrops`) puts the deletion of that export's
  * files on the queue. Its place is saved after each key, with what it
  * decided; it makes at most `sweepReads` reads a run, and goes on again
- * while the listing does.
+ * while the listing does. A pass is never started over: an erasure that
+ * lands during it is checked against the exports it already passed by the
+ * next pass, which the tick starts once this one is through, so each pass
+ * ends and every erasure is covered by the first whole pass after it.
  */
 const sweepWork = defineWork({
   kind: "brain.export_sweep",
   payload: z.strictObject({}),
   run: async (_payload, { storage, bucket, again }) => {
     const { sql } = storage;
-    const through = sweepThrough(sql);
     const cursor =
       sql
         .exec<{ cursor: string | null }>(
@@ -697,17 +701,15 @@ const sweepWork = defineWork({
         judged = await orphanFileDrops(sql, bucket, id, file);
       }
       reads += judged.reads;
-      if (!sweptKey(storage, id, key, judged.drop, through)) {
-        return;
-      }
+      sweptKey(storage, id, key, judged.drop);
     }
     if (page.truncated) {
       again(Math.max(reads, 1));
       return;
     }
-    if (sweepThrough(sql) === through) {
-      sql.exec("UPDATE export_sweep SET cursor = NULL WHERE id = 1");
-    }
+    // The pass is through: the tick starts another if an erasure was
+    // recorded past the one it started for.
+    sql.exec("UPDATE export_sweep SET cursor = NULL WHERE id = 1");
   },
 });
 
@@ -721,8 +723,7 @@ const sweepWork = defineWork({
 const settleStuck = (storage: DurableObjectStorage): void => {
   retire(storage, "failed", stuckExportSql, Date.now(), workParksMax);
   storage.sql.exec(
-    `UPDATE restores SET state = 'failed', finished_at = ?1
-    WHERE ${stuckRestoreSql}`,
+    `UPDATE restores SET ${restoreFailedSql} WHERE ${stuckRestoreSql}`,
     Date.now(),
     0,
     workParksMax
@@ -772,21 +773,37 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
  */
 export const exportsStep = (storage: DurableObjectStorage): void => {
   storage.transactionSync(() => {
+    const { sql } = storage;
     settleStuck(storage);
     giveUpRestores(storage);
-    if (!sweepDue(storage.sql)) {
-      return;
-    }
-    retire(storage, "erased", staleNowSql);
-    storage.sql.exec(
-      `INSERT INTO export_sweep (id, through, cursor) VALUES (1, ${lastErasureSql}, NULL)
-      ON CONFLICT (id) DO UPDATE SET through = excluded.through, cursor = NULL`
+    const at = sql
+      .exec<{ last: number; checked: number; through: number }>(
+        `SELECT ${lastErasureSql} AS last,
+          coalesce((SELECT checked FROM export_sweep WHERE id = 1), 0) AS checked,
+          coalesce((SELECT through FROM export_sweep WHERE id = 1), 0) AS through`
+      )
+      .one();
+    sql.exec(
+      "INSERT OR IGNORE INTO export_sweep (id, through, checked, cursor) VALUES (1, 0, 0, NULL)"
     );
-    enqueueWork(storage, sweepWork, {
-      key: "exports",
-      payload: {},
-      priority: "asked",
-    });
+    if (at.last > at.checked) {
+      retire(storage, "erased", staleNowSql);
+      sql.exec("UPDATE export_sweep SET checked = ? WHERE id = 1", at.last);
+    }
+    const queued =
+      sql.exec(`SELECT 1 WHERE ${sweepQueuedSql}`, workParksMax).toArray()
+        .length > 0;
+    if (at.last > at.through && !queued) {
+      sql.exec(
+        "UPDATE export_sweep SET through = ?, cursor = NULL WHERE id = 1",
+        at.last
+      );
+      enqueueWork(storage, sweepWork, {
+        key: "exports",
+        payload: {},
+        priority: "asked",
+      });
+    }
   });
 };
 

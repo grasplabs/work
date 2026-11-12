@@ -9,3 +9,12 @@
 export const isRestoring = (sql: SqlStorage): boolean =>
   sql.exec("SELECT 1 FROM restores WHERE state = 'running' LIMIT 1").toArray()
     .length > 0;
+
+/**
+ * `?1` the time: what settling a restore as failed records, whoever
+ * settles it (its own run, or the tick for one whose item is gone): when,
+ * and the last version's row the store held then, so a restart is refused
+ * once anything is added past it, and what it wrote never counts as added.
+ */
+export const restoreFailedSql = `state = 'failed', finished_at = ?1,
+  held_to = (SELECT coalesce(max(row), 0) FROM source_versions)`;

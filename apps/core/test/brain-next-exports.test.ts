@@ -147,8 +147,10 @@ describe(
       });
 
       let bodies: string[] = [];
+      let id = "";
       const events = await auditedDuring(async () => {
-        bodies = await writtenFiles(admin.session, await start(admin.session));
+        id = await start(admin.session);
+        bodies = await writtenFiles(admin.session, id);
       });
       const all = bodies.join("\n");
       const exportEvents = events.filter(({ action }) =>
@@ -160,6 +162,9 @@ describe(
         theirs: all.includes(theirs),
         // On record, naming no content.
         actions: exportEvents.map(({ action }) => action),
+        answeredWith: exportEvents.find(
+          ({ action }) => action === "brain.export.answered"
+        )?.detail,
         named: JSON.stringify(exportEvents).includes(shared),
       }).toStrictEqual({
         shared: true,
@@ -169,6 +174,7 @@ describe(
           "brain.export.answered",
           ...bodies.map(() => "brain.export.downloaded"),
         ],
+        answeredWith: { outcome: "started", exportId: id },
         named: false,
       });
     });

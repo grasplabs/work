@@ -668,17 +668,20 @@ export const restores = sqliteTable("restores", {
 
 /**
  * The sweep of export files the store has no record of (exports.ts
- * `sweepWork`): the last erasure (`erasures.rowid`) it was started for, and
- * where its listing of `exports/` goes on (null once it is through), saved
- * after each export it checks. One row at most. A store whose rows were
- * lost, or rolled back, replays its ledger into `erasures` past it, so the
- * sweep is due again.
+ * `sweepWork`): the last erasure (`erasures.rowid`) its pass was started
+ * for, and where its listing of `exports/` goes on (null once it is
+ * through), saved after each key; and the last erasure every export was
+ * checked against. One row at most. A store whose rows were lost, or
+ * rolled back, replays its ledger into `erasures` past both, so both are
+ * due again.
  */
 export const exportSweep = sqliteTable(
   "export_sweep",
   {
     id: integer().primaryKey(),
     through: integer().notNull(),
+    /** The last erasure every export was checked against (`staleSql`). */
+    checked: integer().notNull().default(0),
     cursor: text(),
   },
   () => [check("export_sweep_one", sql.raw("id = 1"))]

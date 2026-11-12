@@ -883,9 +883,8 @@ type CoreMember = keyof typeof coreBrain;
 // Exports (GRA-1755). A company's export holds what the company holds,
 // markers among them, by design: it is for an admin, and core's route
 // lets no one else ask for it (brain-next-exports.ts), so no probe reads
-// one. What a probe reads is a person's own export, which must hold none
-// of what that person may not read; and every other export asked as them,
-// or as the company for a person's, must answer as one no one started.
+// its files. Probes ask of it only what answers no content, and a
+// person's own store refuses every export and restore call.
 
 /** A store, as a probe ticks it: the shared one, or a person's own. */
 const personalStore = (person: string): Brain =>

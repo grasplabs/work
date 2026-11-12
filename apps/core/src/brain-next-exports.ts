@@ -140,7 +140,11 @@ const entryOf = (
  */
 const audited = async <T>(
   env: Env,
-  entry: (action: string, outcome?: string) => ReturnType<typeof entryOf>,
+  entry: (
+    action: string,
+    outcome?: string,
+    value?: T
+  ) => ReturnType<typeof entryOf>,
   run: () => Promise<T>
 ): Promise<T> => {
   await appendAuditEvent(env, entry("asked"));
@@ -151,7 +155,7 @@ const audited = async <T>(
     await appendAuditEvent(env, entry("answered", "failed"));
     throw error;
   }
-  await appendAuditEvent(env, entry("answered", "started"));
+  await appendAuditEvent(env, entry("answered", "started", value));
   return value;
 };
 
@@ -165,13 +169,12 @@ const startExport = async (
   try {
     started = await audited(
       env,
-      (step, outcome) =>
-        entryOf(
-          person,
-          `brain.export.${step}`,
-          requestId,
-          outcome === undefined ? {} : { outcome }
-        ),
+      (step, outcome, answered) =>
+        entryOf(person, `brain.export.${step}`, requestId, {
+          ...(outcome === undefined ? {} : { outcome }),
+          // The new export's random id, once it is started.
+          ...(answered === undefined ? {} : { exportId: answered.id }),
+        }),
       async () => await startBrainExport(env)
     );
   } catch (error) {
@@ -302,10 +305,9 @@ export const brainRestoreResponse = async (
     );
     return answer(status);
   } catch (error) {
-    // Refused for the state the Brain is in, not for the request: a
+    // Refused for the state the Brain is in, not for the request (the
+    // skills' install meeting a restore that began meanwhile among it): a
     // conflict, its answer in the audit log as failed.
-    // Refused for the state the Brain is in, the skills' install meeting a
-    // restore that began meanwhile among it: a conflict.
     const code = brainExportErrors.codeOf(error);
     if (code === "brain.restore_refused" || code === "brain.restoring") {
       return errorResponse(409, brainExportErrors.create(code), requestId);

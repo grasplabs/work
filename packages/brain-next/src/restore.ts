@@ -38,6 +38,7 @@ import {
   noteWrite,
 } from "./files.ts";
 import { readerSetOf } from "./reader-sets.ts";
+import { restoreFailedSql } from "./restoring.ts";
 import { indexWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 import { WorkError, defineWork, enqueueWork } from "./work.ts";
@@ -93,6 +94,10 @@ const refusals = {
   notEmpty: `${refusalPrefix} a restore goes only into a store that holds nothing`,
   running: `${refusalPrefix} a restore is under way`,
   notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
+  // An abandoned restore's export id is refused for good: the store it
+  // half-filled has been used since, or its export holds what the ledger
+  // erased (its files are then deleted), so restoring it again would mix
+  // what it wrote with what came after, or bring back nothing whole.
   givenUp: `${refusalPrefix} that restore was given up: the store took something since, or the ledger names what the export holds`,
 } as const;
 
@@ -427,15 +432,14 @@ const settle = (
   state: "done" | "failed"
 ): void => {
   const { sql } = storage;
-  // Failed, it records the last row the store held, so a restart is
-  // refused once anything is added past it.
+  // Failed, it records the last row the store held (`restoreFailedSql`).
   const settled = sql
     .exec(
-      `UPDATE restores SET state = ?1, finished_at = ?2,
-        held_to = CASE WHEN ?1 = 'failed'
-          THEN (SELECT coalesce(max(row), 0) FROM source_versions) END
-      WHERE export = ?3 AND state = 'running' RETURNING export`,
-      state,
+      state === "failed"
+        ? `UPDATE restores SET ${restoreFailedSql}
+          WHERE export = ?2 AND state = 'running' RETURNING export`
+        : `UPDATE restores SET state = 'done', finished_at = ?1
+          WHERE export = ?2 AND state = 'running' RETURNING export`,
       Date.now(),
       id
     )
