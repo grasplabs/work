@@ -157,7 +157,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     none: "the organization's billing and Pulse settings",
   },
   "core.run_brain_evidence": {
-    company: "what a run recalled, as runs are (D3)",
+    none: "nothing writes or reads it; dropped by a later contract migration",
+  },
+  "core.run_brain_versions": {
+    company:
+      "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
   "core.guest_chats": { company: "guest chats they opened for an App" },
   // An App's visitor list (app-visitors.ts): the company's, as its builders
