@@ -1183,7 +1183,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           throw appErrors.create("app.conflict");
         }
         const files = await draftFiles(this.env, found.id, draft);
-        return await this.#save(found, draft, files, written);
+        return await this.#save(by, found, draft, files, written);
       },
       (written) => ({
         app: typeof app === "string" ? app : null,
@@ -1212,7 +1212,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           found,
           operation,
           async (draft, files, changes, definition) =>
-            await this.#save(found, draft, files, changes, definition)
+            await this.#save(by, found, draft, files, changes, definition)
         );
         return defined.ok
           ? { ok: true, plan: defined.plan, ...defined.saved }
@@ -1228,7 +1228,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Saves `changes` into the App's `draft` of `id`, whose files are
-   * `files`, with its definition as `definition` if given, refused as a
+   * `files`, by `by`, the chat's person as the agent acts for them
+   * (`buildingAs`), with its definition as `definition` if given, refused as a
    * whole as the changes of a commit would be, or when it writes a file
    * under `workflows/`, which the agent never does (it may delete one).
    * Answers with what the draft's pages compile to now, as its preview
@@ -1236,6 +1237,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * type check and the lint wait for the turn's check.
    */
   async #save(
+    by: Acting,
     found: Pick<App, "id" | "name" | "currentVersion">,
     draft: Draft,
     files: Map<string, string>,
@@ -1243,14 +1245,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     definition?: AppDefinition
   ): Promise<DraftWrite> {
     const { env } = this;
-    const { workspaceId, chatId, personId, runId } = this.ctx.props;
+    const { workspaceId, chatId, runId } = this.ctx.props;
     const chats = workspace(env, workspaceId);
     // The turn and code step that write it, from the run's own record:
     // never what the run's code says.
     const run = await chats.codeRunOf(chatId, runId);
     const changed = await saveDraftChanges(
       env,
-      { chat: { personId, chatId, ...run } },
+      { by, chat: { chatId, ...run } },
       found,
       {
         draft,

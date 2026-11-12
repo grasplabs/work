@@ -28,6 +28,7 @@ import {
   turnChecks,
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
 import { stoppingUltracite } from "./ultracite-stops.ts";
 
@@ -162,14 +163,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       appIdSchema.parse(existing),
       { ...draft, base: 1 },
       { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },
-      {
-        chat: {
-          personId: builder.userId,
-          chatId: crypto.randomUUID(),
-          turnId: null,
-          callId: null,
-        },
-      }
+      await agentWriting(builder, crypto.randomUUID())
     );
 
     await chat.ask("Rewrite them");

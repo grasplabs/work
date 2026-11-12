@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
@@ -30,6 +31,7 @@ import { notesFiles } from "./notes-client-app.ts";
 import { runObject, sleeping, whileEngineRefuses } from "./runs.ts";
 import { person as acting } from "./sealed-apps.ts";
 import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // An App is open to the people it is shared with once a version of it
 // is live, and to nobody once archived (app-status.ts). These tests
@@ -210,6 +212,64 @@ describe("an App's archive", () => {
       live: open,
       archived: noSuchApp,
       restored: open,
+    });
+  });
+
+  it("stays as closed as its status had it once the release that archives by time carries it over", async () => {
+    const [builder, user] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "user"),
+    ]);
+    const [archived, drafted, published] = await Promise.all([
+      liveApp(builder, user),
+      liveApp(builder, user),
+      liveApp(builder, user),
+    ]);
+    // As the release before left them: whom each reached was its status.
+    const changedAt = Date.parse("2026-10-01T09:00:00Z");
+    const changedBy = JSON.stringify({ userId: builder.userId, staff: false });
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE apps SET archived_at = NULL, archived_by = NULL, status = 'published' WHERE id = ?"
+      ).bind(published),
+      ...[
+        [archived, "archived"],
+        [drafted, "draft"],
+      ].map(([app, status]) =>
+        env.DB.prepare(
+          "UPDATE apps SET archived_at = NULL, archived_by = NULL, status = ?, status_changed_at = ?, status_changed_by = ? WHERE id = ?"
+        ).bind(status, changedAt, changedBy, app)
+      ),
+    ]);
+    const carried = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"))
+      .find(({ name }) => name.includes("_shared_app_drafts"))
+      ?.queries.filter((query) => query.includes("UPDATE `apps` SET"));
+    if (carried === undefined || carried.length === 0) {
+      throw new Error("shared_app_drafts carries no App over");
+    }
+    await env.DB.batch(carried.map((query) => env.DB.prepare(query)));
+
+    const kept = await env.DB.prepare(
+      "SELECT archived_at AS at, archived_by AS by FROM apps WHERE id = ?"
+    )
+      .bind(archived)
+      .first();
+    expect({
+      archived: await outcome(user.api.apps.get(archived)),
+      drafted: await outcome(user.api.apps.get(drafted)),
+      published: await outcome(user.api.apps.get(published)),
+      // Archived when, and by whom, its status said.
+      kept,
+      // A builder restores the draft, as any archived App.
+      restorable: await outcome(builder.api.apps.restore(drafted)),
+    }).toStrictEqual({
+      archived: "app.not_found",
+      drafted: "app.not_found",
+      published: "ok",
+      kept: { at: changedAt, by: changedBy },
+      restorable: "ok",
     });
   });
 

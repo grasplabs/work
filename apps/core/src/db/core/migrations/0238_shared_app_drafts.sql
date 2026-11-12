@@ -56,6 +56,17 @@ CREATE UNIQUE INDEX `app_versions_label` ON `app_versions` (`app_id`,`label`);--
 ALTER TABLE `apps` ADD `live_label` text;--> statement-breakpoint
 ALTER TABLE `apps` ADD `archived_at` integer;--> statement-breakpoint
 ALTER TABLE `apps` ADD `archived_by` text;--> statement-breakpoint
+-- Each App stays as closed as its status had it, now that whom it is open
+-- to is `current_version` and `archived_at` (src/app-access.ts): one
+-- archived is archived when and by whom its status said; a draft with a
+-- version current, open to its builders alone until now, is archived too,
+-- for a builder to restore. Its status stays, for a roll back to the
+-- release before. Before `apps_removed_kept` covers these columns below,
+-- so a removed App is carried too.
+UPDATE `apps` SET
+	`archived_at` = coalesce(`status_changed_at`, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+	`archived_by` = `status_changed_by`
+WHERE `status` = 'archived' OR (`status` = 'draft' AND `current_version` IS NOT NULL);--> statement-breakpoint
 -- An App's one shared draft and its undo points (src/app-drafts.ts) take
 -- nothing new for a removed App, as its other rows don't (migration 0170).
 CREATE TRIGGER `app_drafts_removed_app_insert` BEFORE INSERT ON `app_drafts`

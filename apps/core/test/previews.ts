@@ -29,6 +29,7 @@ import {
 } from "../src/durable-objects.ts";
 import { sourceParts } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
@@ -77,9 +78,7 @@ export const chatWithDraft = async (
           ? {}
           : { definition: definitionText(definition) }),
       },
-      {
-        chat: { personId: person.userId, chatId, turnId: null, callId: null },
-      }
+      await agentWriting(person, chatId)
     );
     return revision + 1;
   };

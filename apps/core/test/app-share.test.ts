@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { readDraft, saveDraft } from "../src/app-drafts.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -47,7 +48,7 @@ const writeDraft = async (
     app,
     await readDraft(env, app),
     { changes, unchanged: [] },
-    { chat: { personId: person.userId, chatId, turnId: null, callId: null } }
+    await agentWriting(person, chatId)
   );
   return written.revision;
 };

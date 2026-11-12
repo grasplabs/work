@@ -412,7 +412,7 @@ export class AppDraftsRpc extends CoreRpcTarget implements AppDraftsApi {
       const preview = this.#previewOf(id);
       let watchId: string;
       try {
-        watchId = await preview.watch(listener);
+        watchId = await preview.watch(by.userId, listener);
       } catch (error) {
         listener[Symbol.dispose]();
         throw error;

@@ -61,7 +61,7 @@ import {
   createWorkflowResource,
   requireWorkflowRole,
 } from "./workflow-resources.ts";
-import { makeOf, questionSchema } from "./workspace.ts";
+import { makeOf, questionSchema, stopReason } from "./workspace.ts";
 import type { Chat } from "./workspace.ts";
 
 /**
@@ -447,8 +447,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * whose connections aren't all there yet makes nothing and stays to
    * build once they are: nothing is promised and then left out. What the
    * first make refuses (the person's role, the project's) leaves the plan
-   * to build again; a later failure leaves what was made, as any App or
-   * workflow stays until a person removes it, and the plan taken.
+   * to build again. A later failure (the next make, filing one in the
+   * project, or the turn not starting) leaves what was made, as any App
+   * or workflow stays until a person removes it, and the plan taken: the
+   * chat keeps Build it with what was made all the same, and why it
+   * stopped (`Workspace.keepBuilt`), and what was made is answered.
    */
   async build(chatId: string, build: ChatBuild): Promise<ChatBuilt> {
     return await withPerson(this.#check, async (person) => {
@@ -465,6 +468,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       const appPart = plan.parts.find(({ kind }) => kind === "app");
       const workflowPart = plan.parts.find(({ kind }) => kind === "workflow");
       const made: ChatBuilt = {};
+      let failure: unknown;
       try {
         // No App or workflow made for a chat whose paused agent couldn't
         // build them.
@@ -474,57 +478,78 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         if (appPart !== undefined) {
           const named = { name: appPart.name, description: appPart.does };
           const { blueprint } = appPart;
-          const app = await makeInProject(
+          await makeInProject(
             this.#env,
             person,
             project,
             "app",
             async () => {
-              if (blueprint === undefined) {
-                return await createApp(this.#env, person, named);
-              }
-              const started = await createFromBlueprint(
-                this.#env,
-                person,
-                blueprint,
-                named
-              );
-              return started.app;
+              const started =
+                blueprint === undefined
+                  ? { app: await createApp(this.#env, person, named) }
+                  : await createFromBlueprint(
+                      this.#env,
+                      person,
+                      blueprint,
+                      named
+                    );
+              const { app } = started;
+              // Known as made at once: a filing that fails leaves it made.
+              made.app = { id: app.id, name: app.name };
+              return app;
             },
             ({ id: appId }) => appId
           );
-          made.app = { id: app.id, name: app.name };
         }
         if (workflowPart !== undefined) {
-          const workflow = await makeInProject(
+          await makeInProject(
             this.#env,
             person,
             project,
             "workflow",
-            async () =>
-              await createWorkflowResource(
+            async () => {
+              const workflow = await createWorkflowResource(
                 this.#env,
                 person,
                 workflowNameOf(workflowPart.name)
-              ),
+              );
+              made.workflow = { id: workflow.id, name: workflowPart.name };
+              return workflow;
+            },
             ({ id: workflowId }) => workflowId
           );
-          made.workflow = { id: workflow.id, name: workflowPart.name };
         }
       } catch (error) {
-        if (made.app === undefined) {
+        if (made.app === undefined && made.workflow === undefined) {
           await chats.releasePlan(id, callId);
+          throw error;
         }
-        throw error;
+        failure = error;
       }
-      await chats.send(id, person.userId, {
-        ...asked,
-        ...subjectOfBuilt(made),
-        built: {
-          plan: callId,
-          ...made,
-          ...(project === undefined ? {} : { project }),
-        },
+      const built = {
+        plan: callId,
+        ...made,
+        ...(project === undefined ? {} : { project }),
+      };
+      if (failure === undefined) {
+        try {
+          await chats.send(id, person.userId, {
+            ...asked,
+            ...subjectOfBuilt(made),
+            built,
+          });
+          return made;
+        } catch (error) {
+          failure = error;
+        }
+      }
+      // What was made stays made and the plan taken, so no retry makes it
+      // twice: the chat keeps Build it with what it made, and why it
+      // stopped, to go on from there.
+      await chats.keepBuilt(id, person.userId, {
+        text: asked.text,
+        built,
+        stopped: stopReason(id, failure),
       });
       return made;
     });

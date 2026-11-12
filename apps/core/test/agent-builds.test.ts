@@ -25,6 +25,7 @@ import {
   turnChecks,
 } from "./agent-chat.ts";
 import { commitApp, withFiles } from "./app-definitions.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
 import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
 
@@ -365,9 +366,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         unchanged: [],
         definition: definitionText(files.definition),
       },
-      {
-        chat: { personId: person.userId, chatId, turnId: null, callId: null },
-      }
+      await agentWriting(person, chatId)
     );
     // The sandbox ends the first inspection only, as its deadline would.
     const { LOADER: loader } = env;

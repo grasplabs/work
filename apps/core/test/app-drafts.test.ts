@@ -9,6 +9,7 @@ import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { loadFrame, modulePartsOf } from "./page-frames.ts";
 import type { Framed } from "./page-frames.ts";
@@ -119,14 +120,7 @@ const agentWrites = async (
     app,
     { ...now, base: 1, revision: revision ?? now.revision },
     { changes: { "src/routes/index.tsx": desk(marker) }, unchanged: [] },
-    {
-      chat: {
-        personId: person.userId,
-        chatId,
-        turnId,
-        callId: `call-${turnId}`,
-      },
-    }
+    await agentWriting(person, chatId, { turnId, callId: `call-${turnId}` })
   );
 };
 
@@ -224,7 +218,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
         app,
         await readDraft(env, app),
         { changes, unchanged: [] },
-        { chat: { personId: builder.userId, chatId, turnId, callId: null } }
+        await agentWriting(builder, chatId, { turnId })
       );
     };
 
@@ -281,14 +275,8 @@ describe("an App's draft", { timeout: 180_000 }, () => {
         // oxlint-disable-next-line no-await-in-loop -- read as each turn writes
         await readDraft(env, app),
         { changes, unchanged: [] },
-        {
-          chat: {
-            personId: builder.userId,
-            chatId,
-            turnId: `turn-${turn}`,
-            callId: null,
-          },
-        }
+        // oxlint-disable-next-line no-await-in-loop -- as each turn writes
+        await agentWriting(builder, chatId, { turnId: `turn-${turn}` })
       );
     }
 
@@ -557,6 +545,58 @@ describe("an App's draft", { timeout: 180_000 }, () => {
         preview: "role.forbidden",
         restore: "role.forbidden",
       },
+    });
+  });
+
+  it("commits nothing of a builder who stops building the App while they write, and records each write it commits as the writer's", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const app = await deskOf(owner);
+    const builder = await builderOf(owner, app);
+    const chatId = await chatOf(builder);
+    const write = async (marker: string, admit?: () => Promise<void>) =>
+      await failure(async () => {
+        await saveDraft(
+          env,
+          app,
+          await readDraft(env, app),
+          { changes: { "src/routes/index.tsx": desk(marker) }, unchanged: [] },
+          await agentWriting(builder, chatId),
+          admit
+        );
+      });
+
+    const kept = await write("Kept");
+    // Taken off the App's builders after the write was let in, before it
+    // commits.
+    const demoted = await write("Lost", async () => {
+      await owner.api.apps.members.add(app, {
+        type: "person",
+        id: builder.userId,
+        role: "user",
+      });
+    });
+    const draft = await readDraft(env, app);
+    const events = await allEvents();
+
+    expect({
+      kept,
+      demoted,
+      page: draft.changes["src/routes/index.tsx"],
+      revision: draft.revision,
+      recorded: events
+        .filter(
+          ({ action, target }) =>
+            action === "app.draft.defined" && target?.id === app
+        )
+        .map(({ actor, detail }) => ({ actor, detail })),
+    }).toMatchObject({
+      kept: "ok",
+      demoted: "role.forbidden",
+      page: desk("Kept"),
+      revision: 1,
+      recorded: [
+        { actor: { userId: builder.userId }, detail: { revision: 1 } },
+      ],
     });
   });
 

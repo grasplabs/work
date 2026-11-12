@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { readDraft, saveDraft } from "../src/app-drafts.ts";
 import { commitApp, redefined, testApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { deskFiles } from "./preview-drafts.ts";
 import { chatWithDraft } from "./previews.ts";
@@ -104,7 +105,7 @@ describe("an App's draft files, for the App's code view", () => {
       app,
       await readDraft(env, app),
       { changes: {}, unchanged: [], definition: definitionText(reIded) },
-      { chat: { personId: builder.userId, chatId, turnId: null, callId: null } }
+      await agentWriting(builder, chatId)
     );
     const after = await builder.api.apps.drafts.get(app);
     expect({

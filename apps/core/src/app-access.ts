@@ -379,6 +379,24 @@ export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
 export const appsOwnedOrSharedNow = (userId: string): SQL =>
   sql`(${apps.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId})) OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, userId)})))`;
 
+/**
+ * That an `app_members` row is `by`'s when the statement runs: their own,
+ * a team's they are in then, or a project's (`viaProjectSql`).
+ */
+const theirRows = (by: Pick<Person, "userId">): SQL =>
+  sql`((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})) OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, by.userId)})`;
+
+/** That `by` owns App `app` when the statement runs. */
+const ownedBy = (by: Pick<Person, "userId">, app: AppId): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId})`;
+
+/**
+ * That `by` owns App `app` or has it shared with them as a builder when
+ * the statement runs, whatever their role in the organization.
+ */
+const buildRole = (by: Pick<Person, "userId">, app: AppId): SQL =>
+  sql`${ownedBy(by, app)} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${appMembers.role} = 'builder' AND ${theirRows(by)})`;
+
 /** That App `app` isn't removed (app-removal.ts) when the statement runs. */
 const kept = (app: AppId): SQL =>
   sql`NOT EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.removedAt} IS NOT NULL)`;
@@ -395,13 +413,27 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
   if (isAdmin(by.role)) {
     return kept(app);
   }
-  const theirs = sql`((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})) OR ${viaProjectSql(appMembers.memberType, appMembers.memberId, by.userId)})`;
-  const role = sql`(EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${theirs}))`;
+  const role = sql`(${ownedBy(by, app)} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${theirRows(by)}))`;
   // As `openInItsStatus`, read when the statement runs.
-  const builds = canBuild(by.role)
-    ? sql` OR EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${appMembers.role} = 'builder' AND ${theirs})`
-    : sql``;
+  const builds = canBuild(by.role) ? sql` OR ${buildRole(by, app)}` : sql``;
   return sql`(${role} AND (EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${openToUsersSql})${builds}) AND ${kept(app)})`;
+};
+
+/**
+ * That `by` still builds `app` when the statement runs, as SQL, as
+ * `appsBuiltBy` decides it: an admin (as their session said), or one whose
+ * role in the organization builds and who owns the App or has it shared
+ * with them (or a team of theirs) as builders. For guarding a builder's
+ * write an earlier check allowed, so a role lost since stops it.
+ */
+export const stillBuiltBy = (by: Person, app: AppId): SQL => {
+  if (isAdmin(by.role)) {
+    return kept(app);
+  }
+  if (!canBuild(by.role)) {
+    return sql`0`;
+  }
+  return sql`((${buildRole(by, app)}) AND ${kept(app)})`;
 };
 
 /**

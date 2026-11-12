@@ -400,7 +400,11 @@ const makeNoteText = ({ kind }: ChatMake): string =>
   `The person started this chat from "Make something", to make ${kind === "app" ? "an App: a page their team opens" : "a workflow: something that runs on its own"}. Make it as Grasp makes anything new: a plan first, with proposePlan.`;
 
 /** What the model reads beside Build it: what was made, and building it. */
-const builtNoteText = ({ app, workflow, project }: QuestionBuilt): string => {
+export const builtNoteText = ({
+  app,
+  workflow,
+  project,
+}: QuestionBuilt): string => {
   const made = [
     ...(app === undefined
       ? []

@@ -9,6 +9,7 @@ import { readDraft, saveDraft } from "../src/app-drafts.ts";
 import { sourceParts, testApp } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { storedGrant } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -83,7 +84,7 @@ const writeDraft = async (
         ? {}
         : { definition: definitionText(definition) }),
     },
-    { chat: { personId: person.userId, chatId, turnId: null, callId: null } }
+    await agentWriting(person, chatId)
   );
   return written.revision;
 };
@@ -111,6 +112,20 @@ const versionsOf = async (builder: Person, app: AppId): Promise<number[]> => {
   const versions = await builder.api.apps.versions.list(app);
   return versions.map(({ version }) => version);
 };
+
+/** An App test that takes a second. */
+const aSecondsSuite = `import { appTest } from "@grasp-os/sdk/testing";
+import schema from "../server/schema.ts";
+
+export default appTest(schema, {
+  "takes a second": async () => {
+    // oxlint-disable-next-line promise/avoid-new -- a timer, to take a second
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1000);
+    });
+  },
+});
+`;
 
 /** A Notes App of spec 8's layout, with its App tests in `suite`. */
 const notesWithTests = (suite: string): TestApp =>
@@ -495,6 +510,96 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
       published: "ok",
       live: 2,
       versions: [2, 1],
+    });
+  });
+
+  it("keeps a write that lands while the draft goes live, and publishes it next over the new version", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appOf(builder);
+    // Its App test takes a second: the time between committing a version
+    // and making it live.
+    await publishing(builder, app, notesWithTests(aSecondsSuite));
+    const revision = await writeDraft(builder, app, { "notes.md": "One\n" });
+    const { id: chatId } = await builder.api.chats.forApp(app);
+    const writer = await agentWriting(builder, chatId);
+
+    const going = builder.api.apps.drafts.publish(app, revision, "One");
+    // Once version 2 is committed, before it goes live, an agent writes.
+    while (
+      // oxlint-disable-next-line no-await-in-loop -- polled until it is
+      (await env.DB.prepare(
+        "SELECT 1 FROM app_versions WHERE app_id = ? AND version = 2"
+      )
+        .bind(app)
+        .first()) === null
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polled until it is
+      await scheduler.wait(5);
+    }
+    await saveDraft(
+      env,
+      app,
+      await readDraft(env, app),
+      { changes: { "later.md": "Two\n" }, unchanged: [] },
+      writer
+    );
+    await going;
+    const left = await builder.api.apps.drafts.get(app);
+    const live = await builder.api.apps.drafts.publish(
+      app,
+      left.revision,
+      "Two"
+    );
+
+    const files = await builder.api.apps.files.read(app, 3);
+    const version = await builder.api.apps.versions.get(app, 3);
+    expect({
+      left: { base: left.base, changed: left.changed },
+      live: live.currentVersion,
+      parent: version.parent,
+      notes: files["notes.md"],
+      later: files["later.md"],
+    }).toStrictEqual({
+      // The write landed over version 1, which publishing 2 couldn't empty.
+      left: { base: 1, changed: ["later.md", "notes.md"] },
+      live: 3,
+      parent: 2,
+      notes: "One\n",
+      later: "Two\n",
+    });
+  });
+
+  it("restores a point from before a publish over the version live, and publishes it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appOf(builder);
+    await publishing(builder, app, deskSaying("Approve"));
+    await writeDraft(builder, app, { "notes.md": "Old\n" });
+    const [old] = await builder.api.apps.drafts.points(app);
+    await publishing(builder, app, { "notes.md": "New\n" });
+    const { revision } = await builder.api.apps.drafts.get(app);
+
+    await builder.api.apps.drafts.restorePoint(app, old?.number ?? 0, revision);
+    const restored = await builder.api.apps.drafts.get(app);
+    const live = await builder.api.apps.drafts.publish(
+      app,
+      restored.revision,
+      "Old again"
+    );
+
+    const files = await builder.api.apps.files.read(app, 3);
+    const version = await builder.api.apps.versions.get(app, 3);
+    expect({
+      restored: { base: restored.base, changed: restored.changed },
+      live: live.currentVersion,
+      parent: version.parent,
+      notes: files["notes.md"],
+      desk: files["src/routes/index.tsx"],
+    }).toStrictEqual({
+      restored: { base: 2, changed: ["notes.md"] },
+      live: 3,
+      parent: 2,
+      notes: "Old\n",
+      desk: deskSaying("Approve")["src/routes/index.tsx"],
     });
   });
 });

@@ -12,6 +12,7 @@ import { readDraft, saveDraft } from "../src/app-drafts.ts";
 import { commitApp, sourceParts, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
 import { release } from "./apps.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { loadFrame, servedAll } from "./page-frames.ts";
 import { deskFiles, notesApp, notesFiles } from "./preview-drafts.ts";
@@ -87,7 +88,7 @@ const writeDraft = async (
         ? {}
         : { definition: definitionText(definition) }),
     },
-    { chat: { personId: person.userId, chatId, turnId: null, callId: null } }
+    await agentWriting(person, chatId)
   );
 };
 
@@ -207,6 +208,45 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       shared: shared.revision,
       drafted: /["`]Drafted ["`]/u.test(served.code),
     }).toStrictEqual({ outside: "app.not_found", shared: 1, drafted: true });
+  });
+
+  it("tells every builder's pages of each write, one builder's newest pages at most, so nobody crowds out the others", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const preview = previewOf(app);
+    const heard = new Map<string, number[]>();
+    const follow = async (personId: string, page: string): Promise<void> => {
+      await preview.watch(personId, async (revision: number) => {
+        heard.set(page, [...(heard.get(page) ?? []), revision]);
+        await Promise.resolve();
+      });
+    };
+    // One builder opens a page more than they may follow at once.
+    for (let page = 1; page <= 21; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- opened one after the other
+      await follow(builder.userId, `mine-${page}`);
+    }
+    await follow("another-builder", "theirs");
+
+    await writeDraft(
+      builder,
+      app,
+      { "src/routes/index.tsx": deskSaying("Drafted") },
+      0
+    );
+
+    expect({
+      oldest: heard.get("mine-1"),
+      newest: heard.get("mine-21"),
+      following: [...heard.keys()].filter((page) => page.startsWith("mine-"))
+        .length,
+      theirs: heard.get("theirs"),
+    }).toStrictEqual({
+      oldest: undefined,
+      newest: [1],
+      following: 20,
+      theirs: [1],
+    });
   });
 
   it("opens a draft whose page doesn't build on the App's latest version, its calls on the draft as it is and heard by the draft's check, then takes the next write that builds", async () => {

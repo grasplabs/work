@@ -14,7 +14,16 @@ import { and, asc, desc, eq, gte, isNull, lt, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { archivedNow, changeEntry, changesAnything, findApp } from "./apps.ts";
+import { stillBuiltBy } from "./app-access.ts";
+import {
+  archivedNow,
+  changeEntry,
+  changesAnything,
+  draftFiles,
+  editableApp,
+  findApp,
+  findVersion,
+} from "./apps.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -49,10 +58,11 @@ import { appPreview } from "./durable-objects.ts";
 //   moved the draft since, so a turn is one point to step back to; a
 //   person's own edit and a restore are each a point of their own.
 //   Nothing has to notice a turn's end, which a restart may skip.
-// - A write to an archived or removed App. The revision a write takes is
-//   NULL, failing the batch, once the App was archived since the writer
-//   was let in (`nextRevision`); a removed App takes no row at all
-//   (migration 0232's triggers).
+// - A write to an archived or removed App, or by someone who no longer
+//   builds it. The revision a write takes is NULL, failing the batch, once
+//   the App was archived or the writer lost their role since they were
+//   let in (`nextRevision`); a removed App takes no row at all (migration
+//   0232's triggers).
 // - Growth. A point holds each path's content by its SHA-256, each
 //   content once per App, so most writes add a file or two; what a turn
 //   wrote and then wrote over is dropped once no point holds it.
@@ -74,20 +84,24 @@ export interface Draft {
 }
 
 /**
- * Who writes a draft: a chat's agent, for the chat's person, in turn
+ * Who writes a draft, `by`, one of the App's builders: a chat's agent
+ * acting for the chat's person (agent-builds.ts, `buildingAs`), in turn
  * `turnId` and its code step `callId` (from its run's own record); or a
  * person themselves, the write audited with `detail`.
  */
-export type DraftWriter =
+export type DraftWriter = { by: Acting } & (
   | {
       chat: {
-        personId: string;
         chatId: string;
         turnId: string | null;
         callId: string | null;
       };
     }
-  | { by: Acting; detail: Record<string, AuditDetailValue> };
+  | { detail: Record<string, AuditDetailValue> }
+);
+
+/** Who writes, as far as whether they still build the App goes. */
+type Builder = Pick<Acting, "userId" | "role" | "teams">;
 
 /** Core's database, as a draft's write batches over it. */
 type CoreDb = ReturnType<typeof drizzle<Record<string, never>, D1Database>>;
@@ -177,6 +191,55 @@ export const draftOf = async (env: Env, app: AppId): Promise<Draft> => {
 };
 
 /**
+ * App `app`'s `draft` over version `onto` instead of its own base: the
+ * same files and definition, the very ones its preview and code view
+ * show, as changes over `onto`. Never a merge, so it never conflicts and
+ * drops nothing: a draft left over an older base (a write that landed
+ * while a publish went live, a point restored from before one, a roll
+ * back) keeps its work over the version live, and only what the live
+ * version has already stops counting as a change.
+ */
+export const rebasedOnto = async (
+  env: Env,
+  app: AppId,
+  draft: Draft,
+  onto: number | null
+): Promise<Draft> => {
+  if (draft.base === onto) {
+    return draft;
+  }
+  const [files, live] = await Promise.all([
+    draftFiles(env, app, draft),
+    draftFiles(env, app, { base: onto, changes: {} }),
+  ]);
+  const changes: Draft["changes"] = {};
+  for (const [path, content] of files) {
+    if (live.get(path) !== content) {
+      changes[path] = content;
+    }
+  }
+  for (const path of live.keys()) {
+    if (!files.has(path)) {
+      changes[path] = null;
+    }
+  }
+  const definitionOf = async (version: number | null) => {
+    if (version === null) {
+      return null;
+    }
+    const row = await findVersion(env, app, version);
+    return row.definition;
+  };
+  const definition = draft.definition ?? (await definitionOf(draft.base));
+  return {
+    base: onto,
+    changes,
+    definition: definition === (await definitionOf(onto)) ? null : definition,
+    revision: draft.revision,
+  };
+};
+
+/**
  * App `app`'s draft as its builders see it: which paths it changes,
  * without their content, and whether it changes the definition, over its
  * base (`draftBase`).
@@ -213,11 +276,12 @@ export const draftSummary = async (env: Env, app: AppId): Promise<AppDraft> => {
 
 /**
  * The draft's next revision, over `revision`, as SQL: NULL, which fails
- * the batch, once another write took it or the App was archived since the
- * writer's `editableApp` let it in (`notNullFailed`).
+ * the batch, once another write took it, or the App was archived or `by`
+ * no longer builds it since the writer's `editableApp` let it in
+ * (`notNullFailed`).
  */
-const nextRevision = (app: string, revision: number) =>
-  sql`(SELECT ${revision + 1} WHERE COALESCE((SELECT revision FROM app_drafts WHERE app_id = ${app}), 0) = ${revision} AND NOT ${archivedNow(app)})`;
+const nextRevision = (app: AppId, revision: number, by: Builder) =>
+  sql`(SELECT ${revision + 1} WHERE COALESCE((SELECT revision FROM app_drafts WHERE app_id = ${app}), 0) = ${revision} AND NOT ${archivedNow(app)} AND ${stillBuiltBy(by, app)})`;
 
 /**
  * Tells App `app`'s preview (app-preview.ts) its draft moved, so every
@@ -234,23 +298,25 @@ export const draftRevised = async (env: Env, app: AppId): Promise<void> => {
 };
 
 /**
- * Runs `statements`, a write of App `app`'s draft over `revision` that
- * sets its next revision first (`nextRevision`): `app.archived` when the
- * App was archived since, else `app.conflict` when another write took it
+ * Runs `statements`, a write of App `app`'s draft by `by` over `revision`
+ * that sets its next revision first (`nextRevision`): refused as
+ * `editableApp` refuses `by` now when the App was archived or they no
+ * longer build it since, else `app.conflict` when another write took it
  * since. Then tells the App's preview (`draftRevised`).
  */
 const writeOver = async (
   env: Env,
   db: CoreDb,
   app: AppId,
+  by: Builder,
   statements: Parameters<typeof auditedBatch>[2]
 ): Promise<void> => {
   try {
     await auditedBatch(env, db, statements);
   } catch (error) {
     if (notNullFailed(error, "app_drafts.revision")) {
-      const { archived } = await findApp(env, app);
-      throw appErrors.create(archived ? "app.archived" : "app.conflict");
+      await editableApp(env, by, app);
+      throw appErrors.create("app.conflict");
     }
     throw error;
   }
@@ -469,14 +535,14 @@ const keepPoint = async (
 
 /**
  * The statement that sets App `app`'s draft row at the revision after
- * `revision`, over `base`, with `definition` as its own.
+ * `revision`, over `base`, with `definition` as its own, by `by`.
  */
 const draftRow = (
   db: CoreDb,
-  app: string,
+  app: AppId,
   { base, definition }: { base: number | null; definition: string | null },
   revision: number,
-  updatedBy: string,
+  by: Builder,
   updatedAt: Date
 ) =>
   db
@@ -484,10 +550,10 @@ const draftRow = (
     .values({
       appId: app,
       base,
-      revision: nextRevision(app, revision),
+      revision: nextRevision(app, revision, by),
       definition,
       updatedAt,
-      updatedBy,
+      updatedBy: by.userId,
     })
     .onConflictDoUpdate({
       target: appDrafts.appId,
@@ -496,7 +562,7 @@ const draftRow = (
         revision: sql`excluded.revision`,
         definition,
         updatedAt,
-        updatedBy,
+        updatedBy: by.userId,
       },
     });
 
@@ -506,9 +572,11 @@ const draftRow = (
  * `unchanged` (back as the base has them), and sets its own definition to
  * `definition` if given (null: back to its base's), over the revision it
  * read: `app.conflict`, and nothing written, when another write landed
- * since. Kept as an undo point in the same batch (`keepPoint`): a chat's
- * agent's as its turn's, a person's own as one of its own, audited as
- * theirs. `admit`, if given, admits the write right before it is sent.
+ * since, or as `writeOver` refuses one whose writer lost their role. Kept
+ * as an undo point in the same batch (`keepPoint`): a chat's agent's as
+ * its turn's, a person's own as one of its own; audited as the writer's,
+ * the agent's acting for its person. `admit`, if given, admits the write
+ * right before it is sent.
  * Answers the draft as written.
  */
 export const saveDraft = async (
@@ -539,21 +607,24 @@ export const saveDraft = async (
     definition,
     revision: draft.revision + 1,
   };
-  const personId = "chat" in writer ? writer.chat.personId : writer.by.userId;
+  const { by } = writer;
   const updatedAt = new Date();
   const point = await keepPoint(
     db,
     app,
     after,
     draft.revision,
-    "chat" in writer
-      ? writer.chat
-      : { personId, chatId: null, turnId: null, callId: null },
+    {
+      personId: by.userId,
+      ...("chat" in writer
+        ? writer.chat
+        : { chatId: null, turnId: null, callId: null }),
+    },
     updatedAt
   );
   await admit?.();
-  await writeOver(env, db, app, [
-    draftRow(db, app, after, draft.revision, personId, updatedAt),
+  await writeOver(env, db, app, by, [
+    draftRow(db, app, after, draft.revision, by, updatedAt),
     ...Object.entries(changes).map(([path, content]) =>
       db
         .insert(appDraftFiles)
@@ -569,17 +640,13 @@ export const saveDraft = async (
         .where(and(eq(appDraftFiles.appId, app), eq(appDraftFiles.path, path)))
     ),
     ...point.statements,
-    ...("by" in writer
-      ? [
-          outboxed(
-            db,
-            changeEntry(writer.by, "app.draft.defined", app, {
-              revision: after.revision,
-              ...writer.detail,
-            })
-          ),
-        ]
-      : []),
+    outboxed(
+      db,
+      changeEntry(by, "app.draft.defined", app, {
+        revision: after.revision,
+        ...("detail" in writer ? writer.detail : {}),
+      })
+    ),
   ]);
   return after;
 };
@@ -603,7 +670,7 @@ export const emptyDraft = async (
   }: {
     revision: number;
     base: number | null;
-    by: Pick<Acting, "userId" | "staff" | "actor">;
+    by: Builder & Pick<Acting, "staff" | "actor">;
     published?: boolean;
   }
 ): Promise<void> => {
@@ -620,8 +687,8 @@ export const emptyDraft = async (
         updatedAt
       )
     : undefined;
-  await writeOver(env, db, app, [
-    draftRow(db, app, emptied, revision, by.userId, updatedAt),
+  await writeOver(env, db, app, by, [
+    draftRow(db, app, emptied, revision, by, updatedAt),
     db.delete(appDraftFiles).where(eq(appDraftFiles.appId, app)),
     ...(point?.statements ?? []),
     outboxed(
@@ -640,8 +707,8 @@ export const emptyDraft = async (
  * never keeps changes the live version has. With `discards`, a roll back
  * that drops the draft's unpublished changes, audited as `by`'s discard.
  * A write that landed on the draft since `revision` keeps it as it is,
- * over the version it was based on, which a builder discards to publish
- * again (app-publish.ts).
+ * over the version it was based on, its work kept: the next publish takes
+ * it over the version live (`rebasedOnto`, app-publish.ts).
  */
 export const emptiedWhenLive = async (
   db: CoreDb,
@@ -870,7 +937,9 @@ export const readPoint = async (
 /**
  * Makes undo point `number` of App `app`'s draft the draft again, over
  * `revision`, which `by` read, as its next point, audited as theirs: no
- * point is changed. `app.conflict` when the draft moved since.
+ * point is changed. A point from before a publish or a roll back comes
+ * back over the version live now (`rebasedOnto`), holding the files it
+ * held. `app.conflict` when the draft moved since.
  */
 export const restorePoint = async (
   env: Env,
@@ -880,7 +949,8 @@ export const restorePoint = async (
   revision: number
 ): Promise<AppDraftPoint> => {
   const db = drizzle(env.DB);
-  const { point, draft } = await readPoint(env, app, number);
+  const { point, draft: held } = await readPoint(env, app, number);
+  const draft = await rebasedOnto(env, app, held, await liveBase(env, app));
   const restored: Draft = { ...draft, revision: revision + 1 };
   const createdAt = new Date();
   const kept = await keepPoint(
@@ -897,8 +967,8 @@ export const restorePoint = async (
     },
     createdAt
   );
-  await writeOver(env, db, app, [
-    draftRow(db, app, draft, revision, by.userId, createdAt),
+  await writeOver(env, db, app, by, [
+    draftRow(db, app, draft, revision, by, createdAt),
     db.delete(appDraftFiles).where(eq(appDraftFiles.appId, app)),
     ...Object.entries(draft.changes).map(([path, content]) =>
       db.insert(appDraftFiles).values({ appId: app, path, content })

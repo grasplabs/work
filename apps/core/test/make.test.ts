@@ -5,6 +5,8 @@ import type {
   ChatPlan,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -19,6 +21,7 @@ import type { WorkspaceStub } from "./agent-chat.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import type { Answer, FakeProvider } from "./model-provider.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -86,18 +89,28 @@ const offered = (provider: FakeProvider, at: number): Map<string, string> =>
       .tools.map(({ name, description }) => [name, description])
   );
 
-/** The chat's messages, as a page that opens it reads them. */
-const messagesOf = async (
+/** The chat's first updates, as a page that opens it reads them. */
+const watched = async (
   stub: WorkspaceStub,
   chatId: string,
   personId: string
-): Promise<ChatMessage[]> => {
+): Promise<ChatUpdate[]> => {
   const updates: ChatUpdate[] = [];
   await stub.watch(chatId, personId, null, async (update: ChatUpdate) => {
     updates.push(update);
     await Promise.resolve();
   });
   await expect.poll(() => updates.length).toBeGreaterThan(0);
+  return updates;
+};
+
+/** The chat's messages, as a page that opens it reads them. */
+const messagesOf = async (
+  stub: WorkspaceStub,
+  chatId: string,
+  personId: string
+): Promise<ChatMessage[]> => {
+  const updates = await watched(stub, chatId, personId);
   return updates.flatMap(({ messages }) => messages);
 };
 
@@ -474,6 +487,100 @@ describe("Make something", { timeout: 120_000 }, () => {
     expect({ name: app.name, blueprint: app.blueprint }).toStrictEqual({
       name: "My ledger",
       blueprint,
+    });
+  });
+
+  it("keeps what it made when a later part fails: shown as built, the chat the App's, why it stopped said, and nothing made twice", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { chat, callId, stub } = await plannedChat(builder, closePlan);
+    const build = async () =>
+      await builder.api.chats.build(chat.id, {
+        plan: callId,
+        text: "Build it",
+        model,
+      });
+
+    // Room for no more workflows: the App is made, the workflow refused.
+    await builder.api.workflowResources.create(`taken-${unique()}`);
+    const before = await madeBy(builder);
+    env.TEST_QUOTA_LIMITS = {
+      ...configuredLimits,
+      workflowResourcesPerPerson: 1,
+    };
+    let made: Awaited<ReturnType<typeof build>>;
+    try {
+      made = await build();
+    } finally {
+      env.TEST_QUOTA_LIMITS = configuredLimits;
+    }
+    const again = await outcome(build());
+    const after = await madeBy(builder);
+    const updates = await watched(stub, chat.id, builder.userId);
+    const { id: appChat } = await builder.api.chats.forApp(made.app?.id ?? "");
+
+    expect({
+      made,
+      apps: after.apps.filter((id) => !before.apps.includes(id)),
+      workflows: after.workflows.filter((id) => !before.workflows.includes(id)),
+      said: updates
+        .flatMap(({ messages }) => messages)
+        .findLast(({ role }) => role === "user"),
+      stopped: updates.at(-1)?.stopped,
+      appChat,
+      again,
+    }).toMatchObject({
+      made: { app: { name: "Month-end close" } },
+      apps: [made.app?.id],
+      workflows: [],
+      said: { text: "Build it", built: { plan: callId, app: made.app } },
+      stopped: workflowResourceErrors.create("workflow.resource_limit").message,
+      appChat: chat.id,
+      again: "agent.plan_not_found",
+    });
+    expect(made.workflow).toBeUndefined();
+  });
+
+  it("keeps an App it made whose filing in the project fails, and never makes it twice", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const { id: project } = await owner.api.projects.create({
+      name: `Close ${unique()}`,
+      description: "The month-end close",
+      icon: "coins",
+    });
+    const started = { kind: "app", project } as const;
+    const { chat, callId, stub } = await plannedChat(owner, pagePlan, started);
+    const before = await madeBy(owner);
+    const build = async () =>
+      await owner.api.chats.build(chat.id, {
+        plan: callId,
+        text: "Build it",
+        model,
+      });
+
+    // The database refuses filing anything in the project, as one removed
+    // or no longer theirs midway would.
+    const refusing = `refuse_filing_${unique().replaceAll("-", "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${refusing} BEFORE INSERT ON project_items WHEN NEW.project_id = '${project}' BEGIN SELECT RAISE(ABORT, 'refused'); END`
+    ).run();
+    let made: Awaited<ReturnType<typeof build>>;
+    try {
+      made = await build();
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER ${refusing}`).run();
+    }
+    const again = await outcome(build());
+    const after = await madeBy(owner);
+    const messages = await messagesOf(stub, chat.id, owner.userId);
+
+    expect({
+      apps: after.apps.filter((id) => !before.apps.includes(id)),
+      said: messages.findLast(({ role }) => role === "user"),
+      again,
+    }).toMatchObject({
+      apps: [made.app?.id],
+      said: { text: "Build it", built: { plan: callId, app: made.app } },
+      again: "agent.plan_not_found",
     });
   });
 

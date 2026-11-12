@@ -17,6 +17,7 @@ import {
   emptiedWhenLive,
   emptyDraft,
   liveBase,
+  rebasedOnto,
 } from "./app-drafts.ts";
 import { sealedEvidence, sealRelease } from "./app-releases.ts";
 import { requireAppTestsPass } from "./app-tests.ts";
@@ -87,9 +88,11 @@ import { requireMigrationEvidence } from "./migration-run.ts";
 //   as the agent's turn checks it, and emptied over the new version in
 //   the batch that makes it live (app-drafts.ts, `emptiedWhenLive`), so
 //   it never keeps changes the live version has; a write that landed
-//   meanwhile keeps the draft as it is. A draft is published only over
-//   the version live (`app.conflict` otherwise), and committed exactly as
-//   checked, so nothing discarded, rolled back or failed comes back. A
+//   meanwhile keeps the draft as it is, over the version it read, and
+//   the next publish takes it over the version live as it reads
+//   (`rebasedOnto`), so that write is neither lost nor a dead end. A draft
+//   is committed only over the version live, exactly as checked, so
+//   nothing discarded, rolled back or failed comes back. A
 //   roll back moves the draft onto the version it makes live, discarding
 //   its unpublished changes only over the revision the builder read.
 // - Someone without the right: only the App's builders publish
@@ -244,9 +247,10 @@ const draftEmptied =
  * with what the App's preview of it ran into), committed as it was
  * checked, over its base, as the App's next version (`commitDraft`),
  * published and made live over its base, the draft emptied over it with
- * the batch that does (`draftEmptied`). Refused with `app.conflict` once
- * the draft moved past `revision` or its base is no longer the version
- * live (`liveBase`), `app.draft_empty` when it changes nothing and
+ * the batch that does (`draftEmptied`). A draft over an older version
+ * than the one live (`liveBase`) is taken over it as it reads
+ * (`rebasedOnto`). Refused with `app.conflict` once the draft moved past
+ * `revision`, `app.draft_empty` when it changes nothing and
  * `app.draft_failed` when its check fails, with nothing committed. A
  * version committed whose publish fails is marked `failed` and never
  * live, with no label; the draft keeps its changes over its base.
@@ -259,13 +263,19 @@ export const publishDraft = async (
   message: unknown
 ): Promise<App> => {
   const found = await editableApp(env, by, app);
-  const draft = await draftOf(env, found.id);
-  if (
-    draft.revision !== revision ||
-    draft.base !== (await liveBase(env, found.id))
-  ) {
+  const read = await draftOf(env, found.id);
+  if (read.revision !== revision) {
     throw appErrors.create("app.conflict");
   }
+  // A draft left over an older version (written while a publish went
+  // live, or restored from before one) is published as it reads, over the
+  // version live: never a dead end, nothing of it lost.
+  const draft = await rebasedOnto(
+    env,
+    found.id,
+    read,
+    await liveBase(env, found.id)
+  );
   if (!changesAnything(draft)) {
     throw appErrors.create("app.draft_empty");
   }

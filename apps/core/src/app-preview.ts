@@ -1,4 +1,3 @@
-import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import { readOnlyRevision } from "@grasp-os/shared/chat";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
@@ -48,8 +47,12 @@ import type { Reports } from "./preview-reports.ts";
 // draft: a restart loses its reports and watchers, which a page's next
 // call and watch make again.
 
-/** Most pages one preview tells of the draft's writes at once. */
-const maxWatchers = 100;
+/**
+ * Most pages of one person's one preview tells of the draft's writes at
+ * once: a page past it takes the place of their oldest, so nobody fills
+ * the preview for the others.
+ */
+const watchersPerPerson = 20;
 
 /** How often a check waiting for the preview reads its reports again. */
 const pollMs = 100;
@@ -71,8 +74,14 @@ export class AppPreview extends DurableObject<Env> {
   readonly #reports = new PreviewReports();
   /** What bounds the preview's builds (preview-builds.ts). */
   readonly #builds = new PreviewBuilds();
-  /** The pages that follow the draft's writes (`watch`), by ID. */
-  readonly #watchers = new Map<string, DraftListener>();
+  /**
+   * The pages that follow the draft's writes (`watch`), by ID, each with
+   * whose it is, oldest first.
+   */
+  readonly #watchers = new Map<
+    string,
+    { personId: string; listener: DraftListener }
+  >();
 
   /** The App this object previews: the name it was made by. */
   get #app(): AppId {
@@ -88,7 +97,7 @@ export class AppPreview extends DurableObject<Env> {
   async revised(): Promise<void> {
     const { revision } = await readDraft(this.env, this.#app);
     await Promise.all(
-      [...this.#watchers].map(async ([id, listener]) => {
+      [...this.#watchers].map(async ([id, { listener }]) => {
         try {
           await listener(revision);
         } catch {
@@ -99,15 +108,21 @@ export class AppPreview extends DurableObject<Env> {
   }
 
   /**
-   * Follows the draft's writes for one page (`revised`): `listener` hears
-   * each revision. Returns the ID `unwatch` drops it by.
+   * Follows the draft's writes for one page of `personId`'s (`revised`):
+   * `listener` hears each revision. Past {@link watchersPerPerson} of
+   * theirs, their oldest page stops following, which reads the draft
+   * afresh at its next call anyway. Returns the ID `unwatch` drops it by.
    */
-  watch(listener: DraftListener): string {
-    if (this.#watchers.size >= maxWatchers) {
-      throw agentErrors.create("agent.too_many_watches");
+  watch(personId: string, listener: DraftListener): string {
+    const theirs = [...this.#watchers].filter(
+      ([, watcher]) => watcher.personId === personId
+    );
+    const displaced = Math.max(0, theirs.length - watchersPerPerson + 1);
+    for (const [id] of theirs.slice(0, displaced)) {
+      this.#drop(id);
     }
     const id = crypto.randomUUID();
-    this.#watchers.set(id, listener.dup());
+    this.#watchers.set(id, { personId, listener: listener.dup() });
     return id;
   }
 
@@ -117,7 +132,7 @@ export class AppPreview extends DurableObject<Env> {
   }
 
   #drop(id: string): void {
-    this.#watchers.get(id)?.[Symbol.dispose]();
+    this.#watchers.get(id)?.listener[Symbol.dispose]();
     this.#watchers.delete(id);
   }
 

@@ -1090,8 +1090,9 @@ export const fileItem = async (
  * given: what is made inside a project starts in it and shared with
  * everyone in it as users. Whether `by` builds the project is checked
  * before anything is made, so a refusal leaves nothing behind; filing
- * and sharing then run as `fileItem` does them. Without a project, just
- * `make`.
+ * and sharing then run as `fileItem` does them, and one that fails
+ * leaves the item made: a caller that must know what was made keeps it
+ * in `make` (chats-rpc.ts, `build`). Without a project, just `make`.
  */
 export const makeInProject = async <Made>(
   env: Env,

@@ -102,8 +102,8 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
-import { inOwnWords } from "./agent.ts";
-import type { TurnContext, TurnResult } from "./agent.ts";
+import { builtNoteText, inOwnWords } from "./agent.ts";
+import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -619,7 +619,7 @@ const turnStopError = (stop: TurnStop): Error => {
  * it: an unplanned error is logged, and shown as one, with the log line's
  * request ID for them to quote.
  */
-const stopReason = (chatId: ChatId, error: unknown): string => {
+export const stopReason = (chatId: ChatId, error: unknown): string => {
   if (isExpectedError(error)) {
     return error.message;
   }
@@ -3415,6 +3415,56 @@ export class Workspace extends DurableObject<Env> {
         key,
         kept.data.filter((each) => each !== callId)
       );
+    }
+  }
+
+  /**
+   * Keeps Build it on `personId`'s chat `chatId` when what it made can't
+   * go on in a turn (`ChatsApi.build`): their `text` with what was made
+   * (`built`), shown as a turn shows it, so the plan waits no more; the
+   * chat made the App's when it is for none, so the App's page carries on
+   * in it and what is asked there is about the App; the agent told what
+   * was made (`#note`), and the chat stopped for `stopped`, to try again.
+   */
+  async keepBuilt(
+    chatId: unknown,
+    personId: string,
+    {
+      text,
+      built,
+      stopped,
+    }: { text: string; built: QuestionBuilt; stopped: string }
+  ): Promise<void> {
+    const chat = this.#ownChat(chatId, personId);
+    const { plan, app, workflow } = built;
+    this.#keep(
+      chat.id,
+      { role: "user", content: text, timestamp: Date.now() },
+      {
+        built: {
+          plan,
+          ...(app === undefined ? {} : { app }),
+          ...(workflow === undefined ? {} : { workflow }),
+        },
+      }
+    );
+    if (app !== undefined && chat.appId === null) {
+      this.#db
+        .update(chats)
+        .set({ appId: app.id })
+        .where(eq(chats.id, chat.id))
+        .run();
+    }
+    this.#stopped.set(chat.id, stopped);
+    this.#changed(chat.id);
+    try {
+      await this.#note(chat.id, builtNoteText(built));
+    } catch (error) {
+      // Kept and shown all the same: the next question is about the App.
+      log.warn("agent.built_untold", {
+        chatId: chat.id,
+        ...errorFields(error),
+      });
     }
   }
 
