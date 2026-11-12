@@ -50,6 +50,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@grasp-os/shared": "workspace:*",
     "drizzle-orm": "catalog:",
     "yaml": "catalog:",
     "zod": "catalog:"

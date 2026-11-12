@@ -3,8 +3,8 @@ import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
 import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import { z } from "zod";
 
+import { ExtractorUnavailableError } from "../files/extract.ts";
 import type { RunStep } from "../workflows/host.ts";
-import { ExtractorUnavailableError } from "./extract.ts";
 import { extractUpload, failUpload, finalFailures } from "./uploads.ts";
 
 // The extraction workflow: core's own, run on the engine like an App's
@@ -18,7 +18,7 @@ import { extractUpload, failUpload, finalFailures } from "./uploads.ts";
 // the reason: its code, or `internal.unexpected` for a failure that had
 // none.
 //
-// An extractor with no place in the sandbox (extract.ts: its owner's share
+// An extractor with no place in the sandbox (files/extract.ts: its owner's share
 // taken, the pool full) is neither: the step ends, the run sleeps (30 s,
 // doubling, at most 5 minutes) and a new step tries again, so waiting for
 // a place spends none of the retries a failing file gets. Crafted files

@@ -1,3 +1,5 @@
+import { transcriptSchema } from "@grasp-os/shared/transcripts";
+import type { Transcript } from "@grasp-os/shared/transcripts";
 import { and, asc, desc, eq, gt, lt, ne } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -60,12 +62,11 @@ import type { StagedPayload } from "./payloads.ts";
 import {
   hasTranscript,
   transcriptDetail,
-  transcriptSchema,
   isTranscriptMoved,
   transcriptUnmoved,
   transcriptWrites,
 } from "./transcripts.ts";
-import type { ReadAt, Transcript } from "./transcripts.ts";
+import type { ReadAt } from "./transcripts.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its

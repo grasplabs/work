@@ -1,3 +1,5 @@
+import { transcriptMaxTurns } from "@grasp-os/shared/transcripts";
+import type { Transcript } from "@grasp-os/shared/transcripts";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -8,12 +10,7 @@ import type { Writer } from "../src/documents.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import { search } from "../src/search.ts";
-import {
-  listTranscripts,
-  readTranscript,
-  transcriptMaxTurns,
-} from "../src/transcripts.ts";
-import type { Transcript } from "../src/transcripts.ts";
+import { listTranscripts, readTranscript } from "../src/transcripts.ts";
 import type { Caller } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 

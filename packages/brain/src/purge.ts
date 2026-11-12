@@ -1,3 +1,4 @@
+import type { Transcript } from "@grasp-os/shared/transcripts";
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -86,7 +87,7 @@ import {
   storedTranscript,
   transcriptTexts,
 } from "./transcripts.ts";
-import type { ReadAt, Transcript } from "./transcripts.ts";
+import type { ReadAt } from "./transcripts.ts";
 import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 
 // Purging personal data from Knowledge, for good, when someone leaves or
