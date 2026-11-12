@@ -415,7 +415,7 @@ export const AgentPage = ({
             )}
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="overview">
+        <TabsContent keepMounted value="overview">
           <div className="flex flex-col gap-6">
             <Glances
               agent={agent}
@@ -446,7 +446,7 @@ export const AgentPage = ({
             )}
           </div>
         </TabsContent>
-        <TabsContent value="instructions">
+        <TabsContent keepMounted value="instructions">
           <div className="flex flex-col gap-6">
             <SettingsSection
               description={t`What ${name} should know and how it should work, on top of Grasp's own rules. Those always hold over what is written here.`}
@@ -463,7 +463,7 @@ export const AgentPage = ({
             </SettingsSection>
           </div>
         </TabsContent>
-        <TabsContent value="access">
+        <TabsContent keepMounted value="access">
           <div className="flex flex-col gap-6">
             <Access
               agent={agent}
@@ -475,7 +475,7 @@ export const AgentPage = ({
             />
           </div>
         </TabsContent>
-        <TabsContent value="schedule">
+        <TabsContent keepMounted value="schedule">
           <div className="flex flex-col gap-6">
             <Card variant="panel">
               <ul className="[&>li:first-child]:border-t-0">
