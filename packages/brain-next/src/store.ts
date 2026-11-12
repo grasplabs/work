@@ -9,6 +9,10 @@ import type { BrainBucket } from "./bucket.ts";
 import {
   currentRequestSchema,
   embedModelSchema,
+  exportFileRequestSchema,
+  exportIdSchema,
+  exportRequestSchema,
+  exportScopeSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -24,6 +28,10 @@ import type {
   CurrentRequest,
   Embedders,
   ErasureReason,
+  ExportFileRequest,
+  ExportRequest,
+  ExportScope,
+  ExportStatus,
   Finding,
   NewInstructions,
   Reader,
@@ -33,6 +41,7 @@ import type {
   PersonErasure,
   RecallRequest,
   Pack,
+  RestoreStatus,
   SourceErasure,
   SourceVersion,
   SourceVersionRef,
@@ -69,6 +78,16 @@ import {
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
 import {
+  exportFile,
+  exportStatus,
+  exportsPrefix,
+  exportsToDrop,
+  markStaleExports,
+  personKeyOf,
+  startExport,
+  whoseOf,
+} from "./exports.ts";
+import {
   fileGraceMs,
   filesPrefix,
   hashOf,
@@ -83,6 +102,7 @@ import {
   recallOverviewOf,
 } from "./recall-counts.ts";
 import { find, recall } from "./recall.ts";
+import { restoreStatus, startRestore } from "./restore.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import {
@@ -172,6 +192,10 @@ const notTheirs =
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
+
+/** What a person's own store answers a restore: restores go into the shared store. */
+const sharedOnly =
+  "The Brain refused it: a restore goes only into the shared store";
 
 /** What a store whose name says no one's answers every call. */
 const noOnes =
@@ -796,6 +820,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         filesPrefix,
         vectorsPrefix,
         ledgerPrefix,
+        exportsPrefix,
       ]);
       done = quiet && settled && emptied;
     } catch {
@@ -854,6 +879,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#repack(tickAt);
     this.#reindex(tickAt);
     this.#embedding(tickAt, embedders.model);
+    this.#markStaleExports();
     await workTick(
       this.ctx.storage,
       this.#work,
@@ -935,6 +961,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * - words.ts `wordsRebuilding`: word indexes behind their rules;
    * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
    *   still to remove;
+   * - exports.ts `exportsToDrop`: an export an erasure made stale, whose
+   *   files' deletion is still to put on the queue (the writing of an
+   *   export, a restore and the deletion are items of the queue);
    * - work.ts `queueDueAt`: an item of the queue, due or coming back from
    *   parked, once the queue's pause is over.
    *
@@ -948,7 +977,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       erasureDue(sql) ||
       repackDue(sql) ||
       wordsRebuilding(sql) ||
-      embeddingDue(storage)
+      embeddingDue(storage) ||
+      exportsToDrop(sql)
     ) {
       return now;
     }
@@ -1045,6 +1075,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     } catch {
       // Nothing of the error is kept: the batch stays to do.
       this.#stepsFailed.erase = { at, reason: "failed" };
+    }
+  }
+
+  /**
+   * Every export an erasure made stale marked erased, the deletion of its
+   * files put on the queue (exports.ts `markStaleExports`), in one
+   * transaction. A failure changes nothing and never reaches the queue:
+   * it is due again next tick (`#nextWorkAt`), and meanwhile a stale
+   * export is served to no one (`exportFile` asks itself).
+   */
+  #markStaleExports(): void {
+    try {
+      markStaleExports(this.ctx.storage);
+    } catch {
+      // Nothing of the error is kept.
     }
   }
 
@@ -1256,6 +1301,76 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return (await this.#readable())
       ? searchVectors(this.ctx.storage.sql, asked)
       : { chunks: [] };
+  }
+
+  /** Refuses `scope` on a person's own store unless it is that person's. */
+  #mayExport(scope: ExportScope): void {
+    if (
+      this.#kind.kind === "person" &&
+      (scope.kind !== "person" || scope.person !== this.#kind.person)
+    ) {
+      throw new Error(notTheirs);
+    }
+  }
+
+  /**
+   * Starts an export of `scope` (exports.ts), or answers with the one of
+   * that scope being written. A person's own store takes only its
+   * person's, and makes its schema for it.
+   */
+  async startExport(scope: ExportScope): Promise<{ id: string }> {
+    const asked = checked(exportScopeSchema, scope);
+    this.#mayExport(asked);
+    const whose = await whoseOf(asked);
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      return { id: startExport(this.ctx.storage, whose, personKeyOf(asked)) };
+    });
+  }
+
+  /** Where an export of the request's scope is: null for any other, alike. */
+  async exportStatus(request: ExportRequest): Promise<ExportStatus | null> {
+    const asked = checked(exportRequestSchema, request);
+    this.#mayExport(asked.scope);
+    const whose = await whoseOf(asked.scope);
+    return (await this.#readable())
+      ? exportStatus(this.ctx.storage.sql, asked, whose)
+      : null;
+  }
+
+  /** A file of a done export of the request's scope: null for any other, alike. */
+  async exportFile(request: ExportFileRequest): Promise<string | null> {
+    const asked = checked(exportFileRequestSchema, request);
+    this.#mayExport(asked.scope);
+    const whose = await whoseOf(asked.scope);
+    return (await this.#readable())
+      ? await exportFile(this.ctx.storage.sql, this.#bucket, asked, whose)
+      : null;
+  }
+
+  /**
+   * Starts restoring a company export into this shared store, which holds
+   * nothing (restore.ts); a person's own store refuses.
+   */
+  async startRestore(id: string): Promise<RestoreStatus> {
+    const asked = checked(exportIdSchema, id);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    return await this.#changing(async () => {
+      await this.#ready();
+      return await startRestore(this.ctx.storage, this.#bucket, asked);
+    });
+  }
+
+  /** Where the restore of export `id` is: null when none was started. */
+  async restoreStatus(id: string): Promise<RestoreStatus | null> {
+    const asked = checked(exportIdSchema, id);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#ready();
+    return restoreStatus(this.ctx.storage.sql, asked);
   }
 
   /** Repacks one block holding removed codes: true when more are left. */

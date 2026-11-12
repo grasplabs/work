@@ -57,6 +57,13 @@
       "when": 1794450706838,
       "tag": "0007_embedding",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794505473972,
+      "tag": "0008_exports",
+      "breakpoints": true
     }
   ]
 }

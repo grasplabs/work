@@ -30,6 +30,7 @@ import {
   currentReadMax,
   instructionsMaxLength,
   modelNameMaxLength,
+  personalBrainOf,
   questionMaxLength,
   readerGroupsMax,
   recallBudgetMax,
@@ -45,6 +46,7 @@ import type {
   EmbedModel,
   ErasureReason,
   Embedders,
+  ExportScope,
   Reader,
   VectorModel,
   VectorsToPut,
@@ -626,6 +628,20 @@ const refusalOf = async (call: () => Promise<unknown>): Promise<unknown> => {
   }
 };
 
+/**
+ * The words `call` was refused with, or `null` when it wasn't: for a
+ * refusal of the Brain's own, which carries no code, as two answers that
+ * must be alike are compared.
+ */
+const refusedWith = async (call: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    await call();
+    return { refused: null };
+  } catch (error) {
+    return { refused: error instanceof Error ? error.message : "not an error" };
+  }
+};
+
 /** `personId`'s session, as the RPC layer builds an `Identity`. */
 const sessionOf = (personId: string): Identity => ({
   userId: personId,
@@ -822,6 +838,97 @@ const requeueMarked = async (
 
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
+
+// Exports (GRA-1755). A company's export holds what the company holds,
+// markers among them, by design: it is for an admin, and core's route
+// lets no one else ask for it (brain-next-exports.ts), so no probe reads
+// one. What a probe reads is a person's own export, which must hold none
+// of what that person may not read; and every other export asked as them,
+// or as the company for a person's, must answer as one no one started.
+
+/** A store, as a probe ticks it: the shared one, or a person's own. */
+const personalStore = (person: string): Brain =>
+  personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), person);
+
+/**
+ * Ticks `brain` until its export `id` of `scope` is no longer being
+ * written: at most 5 ticks, then fails.
+ */
+const exportSettled = async (
+  brain: Brain,
+  id: string,
+  scope: ExportScope
+): Promise<void> => {
+  for (let ticks = 0; ticks < 5; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await brain.work(quietModel, new Date(), noEmbedders);
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const status = await brain.exportStatus({ id, scope });
+    if (status?.state !== "writing") {
+      return;
+    }
+  }
+  throw new Error("An export was still being written after 5 ticks");
+};
+
+/** The reader's own exports, written, and someone else's marked one. */
+interface ProbeExports {
+  /** The reader's export in the shared store, and in their own. */
+  shared: string;
+  own: string;
+  /** Someone else's own export in the shared store, holding every marker. */
+  others: string;
+}
+
+/** The reader's own exports, and someone else's marked one, each written. */
+const exportsFor = async ({
+  personId,
+  markers,
+}: Probing): Promise<ProbeExports> => {
+  const holder = stranger();
+  await coreBrain.addSource(env, {
+    source: missingSource(),
+    change: crypto.randomUUID(),
+    text: markedText(markers),
+    readers: { kind: "owner", personId: holder },
+  });
+  const theirs: ExportScope = { kind: "person", person: holder };
+  const { id: others } = await store().startExport(theirs);
+  const started = await coreBrain.startBrainExport(env, {
+    kind: "person",
+    personId,
+  });
+  const idIn = (where: "shared" | "own"): string =>
+    started.find(({ store: at }) => at === where)?.id ?? "";
+  const own: ExportScope = { kind: "person", person: personId };
+  await exportSettled(store(), others, theirs);
+  await exportSettled(store(), idIn("shared"), own);
+  await exportSettled(personalStore(personId), idIn("own"), own);
+  return { shared: idIn("shared"), own: idIn("own"), others };
+};
+
+/** Every file of the reader's export `id` in `where`, read through core. */
+const filesOf = async (
+  personId: string,
+  where: "shared" | "own",
+  id: string
+): Promise<(string | null)[]> => {
+  const asker = { kind: "person", personId } as const;
+  const status = await coreBrain.brainExportStatus(env, asker, {
+    store: where,
+    id,
+  });
+  return await Promise.all(
+    (status?.files ?? []).map(
+      async (file) =>
+        await coreBrain.brainExportFile(env, asker, {
+          store: where,
+          id,
+          file: unchecked(file),
+        })
+    )
+  );
+};
 
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
@@ -1250,6 +1357,251 @@ export const coreProbes = {
       "a marked item worked through core's clock after a re-embed"
     )),
   ],
+  startBrainExport: async ({ personId, markers }) => [
+    await answer("the reader's own export", async () => {
+      const started = await coreBrain.startBrainExport(env, {
+        kind: "person",
+        personId,
+      });
+      return started.map(({ store: where }) => where);
+    }),
+    await answer("the company's export, started", async () => {
+      const started = await coreBrain.startBrainExport(env, {
+        kind: "company",
+      });
+      return started.map(({ store: where }) => where);
+    }),
+    await answer(
+      "someone who is no member",
+      async () =>
+        await coreBrain.startBrainExport(env, {
+          kind: "person",
+          personId: stranger(),
+        })
+    ),
+    await answer(
+      "a person named by the markers, too long",
+      async () =>
+        await coreBrain.startBrainExport(env, {
+          kind: "person",
+          personId: markers.join("").repeat(300),
+        })
+    ),
+    await answer(
+      "an asker named by the markers",
+      async () =>
+        await coreBrain.startBrainExport(
+          env,
+          unchecked({ kind: markers.join(" ") })
+        )
+    ),
+  ],
+  brainExportStatus: async (probing) => {
+    const { personId, markers } = probing;
+    const exports = await exportsFor(probing);
+    const asPerson = { kind: "person", personId } as const;
+    const company = { kind: "company" } as const;
+    const status = async (
+      name: string,
+      asker: coreBrain.ExportAsker,
+      ref: coreBrain.ExportRef,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.brainExportStatus(env, asker, ref),
+        about,
+        like
+      );
+    return [
+      await status("the reader's own, in the shared store", asPerson, {
+        store: "shared",
+        id: exports.shared,
+      }),
+      await status("the reader's own, in their own store", asPerson, {
+        store: "own",
+        id: exports.own,
+      }),
+      await status(
+        "someone else's marked export",
+        asPerson,
+        { store: "shared", id: exports.others },
+        "hidden"
+      ),
+      await status(
+        "an export no one started",
+        asPerson,
+        { store: "shared", id: crypto.randomUUID() },
+        "nothing"
+      ),
+      await status(
+        "someone else's export, asked of the reader's own store",
+        asPerson,
+        { store: "own", id: exports.others },
+        "hidden",
+        "own"
+      ),
+      await status(
+        "none, asked of the reader's own store",
+        asPerson,
+        { store: "own", id: crypto.randomUUID() },
+        "nothing",
+        "own"
+      ),
+      await status(
+        "the company's ask of a person's export",
+        company,
+        { store: "shared", id: exports.others },
+        "hidden",
+        "company"
+      ),
+      await status(
+        "the company's ask of one no one started",
+        company,
+        { store: "shared", id: crypto.randomUUID() },
+        "nothing",
+        "company"
+      ),
+      await status("the company's ask of a person's own store", company, {
+        store: "own",
+        id: exports.own,
+      }),
+      await status(
+        "an id named by the markers",
+        asPerson,
+        unchecked({ store: "shared", id: markers.join(" ") })
+      ),
+    ];
+  },
+  brainExportFile: async (probing) => {
+    const { personId, markers } = probing;
+    const exports = await exportsFor(probing);
+    const asPerson = { kind: "person", personId } as const;
+    const read = async (
+      name: string,
+      asker: coreBrain.ExportAsker,
+      ref: coreBrain.ExportFileRef,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.brainExportFile(env, asker, ref),
+        about,
+        like
+      );
+    return [
+      await answer(
+        "every file of the reader's own export, in the shared store",
+        async () => await filesOf(personId, "shared", exports.shared)
+      ),
+      await answer(
+        "every file of the reader's own export, in their own store",
+        async () => await filesOf(personId, "own", exports.own)
+      ),
+      await read(
+        "someone else's marked export's manifest",
+        asPerson,
+        { store: "shared", id: exports.others, file: "manifest.json" },
+        "hidden"
+      ),
+      await read(
+        "an export no one started",
+        asPerson,
+        { store: "shared", id: crypto.randomUUID(), file: "manifest.json" },
+        "nothing"
+      ),
+      await read(
+        "someone else's marked export's first part",
+        asPerson,
+        { store: "shared", id: exports.others, file: "part-0000.jsonl" },
+        "hidden",
+        "part"
+      ),
+      await read(
+        "a part of an export no one started",
+        asPerson,
+        { store: "shared", id: crypto.randomUUID(), file: "part-0000.jsonl" },
+        "nothing",
+        "part"
+      ),
+      await read(
+        "the company's ask of a person's marked export",
+        { kind: "company" },
+        { store: "shared", id: exports.others, file: "part-0000.jsonl" },
+        "hidden",
+        "company"
+      ),
+      await read(
+        "the company's ask of one no one started",
+        { kind: "company" },
+        { store: "shared", id: crypto.randomUUID(), file: "part-0000.jsonl" },
+        "nothing",
+        "company"
+      ),
+      await read(
+        "a file named by the markers",
+        asPerson,
+        unchecked({
+          store: "shared",
+          id: exports.others,
+          file: markers.join(" "),
+        })
+      ),
+    ];
+  },
+  // A restore has no reader: it goes only into a shared store that holds
+  // nothing, so here, where it holds the markers, it is refused alike
+  // whatever export it names.
+  startBrainRestore: async (probing) => {
+    const exports = await exportsFor(probing);
+    return [
+      await answer(
+        "someone else's marked export",
+        async () =>
+          await refusedWith(
+            async () => await coreBrain.startBrainRestore(env, exports.others)
+          ),
+        "hidden"
+      ),
+      await answer(
+        "an export no one started",
+        async () =>
+          await refusedWith(
+            async () =>
+              await coreBrain.startBrainRestore(env, crypto.randomUUID())
+          ),
+        "nothing"
+      ),
+      await answer(
+        "an export named by the markers",
+        async () =>
+          await coreBrain.startBrainRestore(env, probing.markers.join(" "))
+      ),
+    ];
+  },
+  brainRestoreStatus: async (probing) => {
+    const exports = await exportsFor(probing);
+    return [
+      await answer(
+        "someone else's marked export",
+        async () => await coreBrain.brainRestoreStatus(env, exports.others),
+        "hidden"
+      ),
+      await answer(
+        "an export no one started",
+        async () =>
+          await coreBrain.brainRestoreStatus(env, crypto.randomUUID()),
+        "nothing"
+      ),
+      await answer(
+        "an export named by the markers",
+        async () =>
+          await coreBrain.brainRestoreStatus(env, probing.markers.join(" "))
+      ),
+    ];
+  },
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */
@@ -2763,6 +3115,164 @@ export const storeProbes = {
       async () => await store().rebuildWords()
     ),
   ],
+  // As core's (above), through the contract itself.
+  startExport: async ({ reader, markers }) => [
+    await answer("the reader's own export", async () => {
+      await store().startExport({ kind: "person", person: reader.person });
+    }),
+    await answer("a scope named by the markers", async () => {
+      await store().startExport(unchecked({ kind: markers.join(" ") }));
+    }),
+    await answer("a person's own store, asked for the company's", async () => {
+      await personalStore(reader.person).startExport({ kind: "company" });
+    }),
+    await answer("a person's own store, asked for someone else's", async () => {
+      await personalStore(reader.person).startExport({
+        kind: "person",
+        person: stranger(),
+      });
+    }),
+  ],
+  exportStatus: async (probing) => {
+    const { reader, markers } = probing;
+    const { others } = await exportsFor(probing);
+    const scope: ExportScope = { kind: "person", person: reader.person };
+    return [
+      await answer(
+        "someone else's marked export",
+        async () => await store().exportStatus({ id: others, scope }),
+        "hidden"
+      ),
+      await answer(
+        "an export no one started",
+        async () =>
+          await store().exportStatus({ id: crypto.randomUUID(), scope }),
+        "nothing"
+      ),
+      await answer(
+        "the company's ask of someone else's export",
+        async () =>
+          await store().exportStatus({
+            id: others,
+            scope: { kind: "company" },
+          }),
+        "hidden",
+        "company"
+      ),
+      await answer(
+        "the company's ask of one no one started",
+        async () =>
+          await store().exportStatus({
+            id: crypto.randomUUID(),
+            scope: { kind: "company" },
+          }),
+        "nothing",
+        "company"
+      ),
+      await answer(
+        "a request named by the markers",
+        async () =>
+          await store().exportStatus(
+            unchecked({ id: others, scope: { kind: markers.join(" ") } })
+          )
+      ),
+    ];
+  },
+  exportFile: async (probing) => {
+    const { reader, markers } = probing;
+    const { others } = await exportsFor(probing);
+    const scope: ExportScope = { kind: "person", person: reader.person };
+    const file = "part-0000.jsonl";
+    return [
+      await answer(
+        "someone else's marked export",
+        async () => await store().exportFile({ id: others, scope, file }),
+        "hidden"
+      ),
+      await answer(
+        "an export no one started",
+        async () =>
+          await store().exportFile({ id: crypto.randomUUID(), scope, file }),
+        "nothing"
+      ),
+      await answer(
+        "the company's ask of someone else's export",
+        async () =>
+          await store().exportFile({
+            id: others,
+            scope: { kind: "company" },
+            file,
+          }),
+        "hidden",
+        "company"
+      ),
+      await answer(
+        "the company's ask of one no one started",
+        async () =>
+          await store().exportFile({
+            id: crypto.randomUUID(),
+            scope: { kind: "company" },
+            file,
+          }),
+        "nothing",
+        "company"
+      ),
+      await answer(
+        "a file named by the markers",
+        async () =>
+          await store().exportFile(
+            unchecked({ id: others, scope, file: markers.join(" ") })
+          )
+      ),
+    ];
+  },
+  startRestore: async (probing) => {
+    const { others } = await exportsFor(probing);
+    return [
+      await answer(
+        "someone else's marked export",
+        async () =>
+          await refusedWith(async () => await store().startRestore(others)),
+        "hidden"
+      ),
+      await answer(
+        "an export no one started",
+        async () =>
+          await refusedWith(
+            async () => await store().startRestore(crypto.randomUUID())
+          ),
+        "nothing"
+      ),
+      await answer(
+        "a person's own store",
+        async () =>
+          await personalStore(probing.reader.person).startRestore(others)
+      ),
+      await answer(
+        "an export named by the markers",
+        async () => await store().startRestore(probing.markers.join(" "))
+      ),
+    ];
+  },
+  restoreStatus: async (probing) => {
+    const { others } = await exportsFor(probing);
+    return [
+      await answer(
+        "someone else's marked export",
+        async () => await store().restoreStatus(others),
+        "hidden"
+      ),
+      await answer(
+        "an export no one started",
+        async () => await store().restoreStatus(crypto.randomUUID()),
+        "nothing"
+      ),
+      await answer(
+        "an export named by the markers",
+        async () => await store().restoreStatus(probing.markers.join(" "))
+      ),
+    ];
+  },
 } satisfies Record<StoreMember, Probe>;
 
 /** One way into the Brain: a module, or the store's class, and its probes. */

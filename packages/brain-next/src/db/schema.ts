@@ -569,3 +569,72 @@ export const unembeddable = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.model, table.hash] })]
 );
+
+// Exports and restores (exports.ts, restore.ts). An export writes what a
+// scope holds as files in the store's part of the bucket (`exports/<id>/`),
+// a part a run of the queue, and its manifest last; a restore reads a
+// company export's files back into an empty shared store.
+
+/**
+ * An export: whose (`scope`, and for a person the SHA-256 of their id, as
+ * the erasure ledger names them: no plain id outlives an erasure of them),
+ * how far it has come, and where the store's record of erasures was when it
+ * started (`erasureMark`): any erasure recorded after that makes it stale,
+ * and its files are deleted (exports.ts).
+ */
+export const exportsTable = sqliteTable(
+  "exports",
+  {
+    id: text().primaryKey(),
+    scope: text({ enum: ["company", "person"] }).notNull(),
+    /** The SHA-256 of the person's id, in hex: for a person's export only. */
+    subject: text(),
+    /** The person's set of readers when it started: null when they had none. */
+    readerSet: integer("reader_set"),
+    /** The last version's row it takes: what was there when it started. */
+    upTo: integer("up_to").notNull(),
+    /** The last version's row written to a part. */
+    cursor: integer().notNull(),
+    erasureMark: integer("erasure_mark").notNull(),
+    state: text({ enum: ["writing", "done", "failed", "erased"] }).notNull(),
+    /** Parts written, and the versions in them. */
+    parts: integer().notNull(),
+    versions: integer().notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    // What runs or stands, for the tick's check of erasures since.
+    index("exports_state_idx").on(table.state, table.erasureMark),
+    check("exports_scope", sql`${table.scope} IN ('company', 'person')`),
+  ]
+);
+
+/** A part of an export, as written: its SHA-256 and how many versions it holds. */
+export const exportParts = sqliteTable(
+  "export_parts",
+  {
+    export: text()
+      .notNull()
+      .references(() => exportsTable.id),
+    part: integer().notNull(),
+    hash: text().notNull(),
+    versions: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.export, table.part] })]
+);
+
+/**
+ * A restore of a company export into the shared store: the export's
+ * manifest as read when it started, the next part to restore, and how many
+ * versions it restored.
+ */
+export const restores = sqliteTable("restores", {
+  export: text().primaryKey(),
+  manifest: text().notNull(),
+  part: integer().notNull(),
+  restored: integer().notNull(),
+  state: text({ enum: ["running", "done", "failed"] }).notNull(),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+});

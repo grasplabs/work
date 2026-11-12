@@ -21,4 +21,8 @@ export const brainModules = {
   // Answers the staff with core's brainStaffReport and actOnBrainForStaff,
   // through their schemas.
   "apps/core/src/brain-report.ts": "core",
+  // Answers a person's or an admin's request with core's export and
+  // restore functions, whose probes hold what they return, as they return
+  // it.
+  "apps/core/src/brain-next-exports.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;

@@ -852,6 +852,60 @@ export const personErasureSchema = z.strictObject({
 });
 export type PersonErasure = z.infer<typeof personErasureSchema>;
 
+/**
+ * Whose content an export holds: the company's (everything the shared
+ * store holds that more than one person, or no one known, may read), or
+ * one person's (what they alone may read).
+ */
+export const exportScopeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("company") }),
+  z.strictObject({ kind: z.literal("person"), person: principalSchema }),
+]);
+export type ExportScope = z.infer<typeof exportScopeSchema>;
+
+/** An export, by its id: random, made by the store. */
+export const exportIdSchema = z.uuid();
+
+/** An export to ask about, and for whom: only its own scope finds it. */
+export const exportRequestSchema = z.strictObject({
+  id: exportIdSchema,
+  scope: exportScopeSchema,
+});
+export type ExportRequest = z.infer<typeof exportRequestSchema>;
+
+/** An export's file: its manifest, or one of its parts. */
+export const exportFileNameSchema = z
+  .string()
+  .regex(/^(?:manifest\.json|part-\d{4}\.jsonl)$/u);
+
+/** A file of an export to read, and for whom. */
+export const exportFileRequestSchema = exportRequestSchema.extend({
+  file: exportFileNameSchema,
+});
+export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
+
+/**
+ * Where an export is: being written; done, with its files (the manifest
+ * first); failed (a file it was to read was gone); or erased, as an
+ * erasure recorded after it started made it stale and its files are
+ * deleted: start a new one.
+ */
+export interface ExportStatus {
+  id: string;
+  state: "writing" | "done" | "failed" | "erased";
+  /** Versions written so far. */
+  versions: number;
+  /** Its files, once done: none before. */
+  files: string[];
+}
+
+/** Where a restore of a company export is, and how many versions it restored. */
+export interface RestoreStatus {
+  export: string;
+  state: "running" | "done" | "failed";
+  restored: number;
+}
+
 /** Most vectors one put takes. */
 export const vectorsPerPutMax = 256;
 
@@ -1089,6 +1143,33 @@ export interface Brain {
    * Answers alike whatever they held, and is safe to repeat.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
+  /**
+   * Starts an export of `scope`, written by the queue a part a run as
+   * files in the store's part of the bucket (exports.ts): what the store
+   * holds as it starts, every version with its readers, current or
+   * history. A company's leaves out every version one person alone may
+   * read; a person's holds only those. A person's own store takes only its
+   * person's. While one of the same scope is being written, it answers
+   * with that one.
+   */
+  startExport: (scope: ExportScope) => Promise<{ id: string }>;
+  /** Where an export of the request's scope is: null for any other, alike. */
+  exportStatus: (request: ExportRequest) => Promise<ExportStatus | null>;
+  /**
+   * A file of a done export of the request's scope, as written: null for
+   * any other, alike, and for one an erasure made stale.
+   */
+  exportFile: (request: ExportFileRequest) => Promise<string | null>;
+  /**
+   * Starts restoring the company export `id` from the bucket into this
+   * shared store, which must hold no version: a part a run of the queue,
+   * each part checked against the manifest first, and each version left
+   * out when the erasure ledger names it. Answers with the restore of
+   * that export when one was started already.
+   */
+  startRestore: (id: string) => Promise<RestoreStatus>;
+  /** Where the restore of export `id` is: null when none was started. */
+  restoreStatus: (id: string) => Promise<RestoreStatus | null>;
 }
 
 /** The shared store's name: everything readable by more than one person. */
