@@ -117,7 +117,11 @@ const checkedSchema = z.object({
 
 /** A check call's statements, as far as their filing. */
 const shownEntitySchema = z
-  .object({ kind: z.string(), names: z.array(z.string()) })
+  .object({
+    kind: z.string(),
+    names: z.array(z.string()),
+    emails: z.array(z.string()).optional(),
+  })
   .nullable();
 const filingSchema = z.object({
   statements: z.array(
@@ -1784,9 +1788,9 @@ describe("extracting memories", () => {
       shown: [
         {
           index: 0,
-          about: { kind: "person", names: [alice] },
+          about: { kind: "person", names: [alice], emails: [] },
           attribute: "manager",
-          object: { kind: "person", names: [bob] },
+          object: { kind: "person", names: [bob], emails: [] },
           value: null,
           type: "fact",
         },
@@ -1942,6 +1946,164 @@ describe("extracting memories", () => {
       asked: 2,
       again: 2,
       read: ["active"],
+    });
+  });
+
+  it("draws from a later version a new change asks for while an older version's item waits", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Later");
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    const source = unique("doc");
+    const addAs = async (text: string, extract?: Extract) =>
+      await shared().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text,
+        access: audience(group),
+        ...(extract === undefined ? {} : { extract }),
+      });
+    // The first version asks, its item still waiting.
+    await addAs(`${token}: draft. ${name} is pending.`, fromOutside());
+    // The second, kept without asking; then a new change asks for it.
+    await addAs(`${token}: ${name} is active.`);
+    await addAs(`${token}: ${name} is active.`, fromOutside());
+    for (let round = 0; round < 3; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick after another
+      await tick();
+    }
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
+    expect({
+      calls: callsOf(token).length,
+      read: read.map(({ value }) => value),
+    }).toStrictEqual({ calls: 2, read: ["active"] });
+  });
+
+  it("leaves a parked item of the same version to its own return, never a second one beside it", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    // A model that never answers what extraction takes: the item parks.
+    answers.set(token, () => "Not today.");
+    const source = unique("doc");
+    const text = `${token}: Nothing it can read.`;
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text,
+      access: audience(group),
+      extract: fromOutside(),
+    });
+    for (let round = 0; round < 5; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- past each failure's wait
+      await tick(20);
+    }
+    const overview = await shared().workOverview();
+    const parked = overview.parked.filter(({ key }) => key === source).length;
+    // A new change adds the same version again and asks for memories.
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text,
+      access: audience(group),
+      extract: fromOutside(),
+    });
+    const items = await runInDurableObject(
+      shared(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec("SELECT 1 FROM work_items WHERE key = ?", source)
+          .toArray().length
+    );
+
+    expect({ parked, items }).toStrictEqual({ parked: 1, items: 1 });
+  });
+
+  it("refuses to file a memory under the entity an email someone was only copied on names", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const alice = unique("Alice");
+    const bob = unique("Bob");
+    const bobsMail = `${bob.toLowerCase()}@acme.example`;
+    // Bob, known to the store by his address.
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: audience(group),
+      entities: [
+        {
+          key: "b",
+          kind: "person",
+          names: [bob],
+          identifiers: [{ type: "email", value: bobsMail }],
+        },
+      ],
+      memories: [
+        {
+          about: "b",
+          type: "fact",
+          statement: `${bob} works in sales.`,
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer: unique("w") },
+        },
+      ],
+    });
+    const shownAbout: unknown[] = [];
+    answers.set(token, (request) => {
+      if (request.purpose === "brain.extract") {
+        return answering({
+          entities: [
+            // Alice, with the address the mail only copied.
+            { key: "a", kind: "person", names: [alice], emails: [bobsMail] },
+          ],
+          memories: [
+            {
+              about: "a",
+              attribute: "role",
+              value: "CFO",
+              type: "fact",
+              statement: `${alice} is our new CFO.`,
+              quote: `${alice} (cc ${bobsMail}) is our new CFO`,
+            },
+          ],
+        })(request);
+      }
+      const { statements } = filingSchema.parse(JSON.parse(request.input));
+      shownAbout.push(...statements.map(({ about }) => about));
+      // A checker that reads whose the address is: not Alice's.
+      return JSON.stringify({
+        supported: statements
+          .filter(({ about }) => about?.emails?.includes(bobsMail) !== true)
+          .map(({ index }) => index),
+      });
+    });
+    await added(
+      `${token}: ${alice} (cc ${bobsMail}) is our new CFO.`,
+      audience(group),
+      { extract: fromOutside() }
+    );
+    await tick();
+    const reader = { person: unique("p"), groups: [group] };
+    const bobRead = await readAs(reader, bob);
+
+    expect({
+      shownAbout,
+      bob: bobRead.map(({ statement }) => statement),
+    }).toStrictEqual({
+      shownAbout: [{ kind: "person", names: [alice], emails: [bobsMail] }],
+      bob: [`${bob} works in sales.`],
     });
   });
 });
