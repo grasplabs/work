@@ -78,6 +78,7 @@ import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 
 /** The reader a probe calls as, and what they may not see. */
 export interface Probing {
@@ -89,6 +90,11 @@ export interface Probing {
    * brain-next.ts).
    */
   reader: Reader;
+  /**
+   * Whether core's recall reads the reader's own store too, as their own
+   * web chat does, or the shared store alone, as an App's does.
+   */
+  personal: boolean;
   /** A word in the reader's own source and in every marked one. */
   sharedWord: string;
   /**
@@ -852,6 +858,20 @@ const pastAll = new Date(8.64e15);
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
 
+/**
+ * `personId`, once a first erasure of them settled and its time passed: a
+ * person's own store answers that it is still deleting until an add under
+ * way could have written its file, so each is compared after that, as if
+ * the time had passed.
+ */
+const erasedBefore = async (personId: string): Promise<string> => {
+  await Promise.allSettled([
+    coreBrain.erasePerson(env, { personId, reason: "withdrawn" }),
+  ]);
+  await ageOwnErasure(personId);
+  return personId;
+};
+
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
   addSource: async ({ markers, hiddenVersions }) => {
@@ -1083,7 +1103,10 @@ export const coreProbes = {
   },
   recallAs: async (probing) => {
     const recall = async (asking: PackAsk) =>
-      await coreBrain.recallAs(env, probing.personId, asking);
+      await coreBrain.recallAs(env, probing.personId, {
+        ...asking,
+        personal: probing.personal,
+      });
     const hidden = probing.markers.join(" ");
     const whole = { tokens: recallBudgetMax };
     return [
@@ -1122,6 +1145,7 @@ export const coreProbes = {
         "the markers, as someone who isn't a member",
         async () =>
           await coreBrain.recallAs(env, stranger(), {
+            personal: true,
             question: hidden,
             budget: whole,
           })
@@ -1259,6 +1283,9 @@ export const coreProbes = {
   // content of its own (someone else's), never the planted sources later
   // passes read.
   eraseSource: async ({ markers }) => {
+    // Someone else's own, in their own store: a source no one added is
+    // asked of in the same store.
+    const readers: SourceReaders = { kind: "owner", personId: stranger() };
     const erase = async (
       name: string,
       source: SourceRef,
@@ -1268,7 +1295,7 @@ export const coreProbes = {
       await answer(
         name,
         async () => {
-          await coreBrain.eraseSource(env, { source, reason });
+          await coreBrain.eraseSource(env, { source, readers, reason });
         },
         about
       );
@@ -1277,7 +1304,7 @@ export const coreProbes = {
       source: marked,
       change: crypto.randomUUID(),
       text: markedText(markers),
-      readers: { kind: "owner", personId: stranger() },
+      readers,
     });
     return [
       await erase(
@@ -1301,6 +1328,13 @@ export const coreProbes = {
         missingSource(),
         unchecked(markers.join(" "))
       ),
+      await answer("readers named by the markers", async () => {
+        await coreBrain.eraseSource(env, {
+          source: missingSource(),
+          readers: unchecked({ kind: "owner", personId: markers.join("\n") }),
+          reason: "deleted",
+        });
+      }),
     ];
   },
   erasePerson: async ({ markers }) => {
@@ -1325,8 +1359,18 @@ export const coreProbes = {
       readers: { kind: "owner", personId: holder },
     });
     return [
-      await erase("someone with nothing", stranger(), "withdrawn", "nothing"),
-      await erase("someone with marked sources", holder, "withdrawn", "hidden"),
+      await erase(
+        "someone with nothing",
+        await erasedBefore(stranger()),
+        "withdrawn",
+        "nothing"
+      ),
+      await erase(
+        "someone with marked sources",
+        await erasedBefore(holder),
+        "withdrawn",
+        "hidden"
+      ),
       await erase("the same erasure again", holder, "withdrawn", "hidden"),
       await erase("no person", ""),
       await erase(
@@ -2890,6 +2934,28 @@ export const storeProbes = {
             })
           )
       ),
+    ];
+  },
+  // Whether the store holds a key, for core alone, whoever reads it: yes
+  // or no, and nothing of the key or what it holds.
+  holdsSource: async ({ markers, hiddenVersions }) => {
+    const holds = async (name: string, source: unknown) =>
+      await answer(
+        name,
+        async () => await store().holdsSource(unchecked(source))
+      );
+    return [
+      await holds("a source no one added", keyOf(missingSource())),
+      await holds(
+        "a hidden source",
+        keyOf(hiddenVersions[0]?.source ?? missingSource())
+      ),
+      await holds("a key named by the markers", `upload:${markers.join(" ")}`),
+      await holds(
+        "a key of the markers and control characters",
+        `${markers.join("\n")}\u0000`
+      ),
+      await holds("no key", ""),
     ];
   },
   listSources: async ({ reader, hiddenVersions, markers }) => {

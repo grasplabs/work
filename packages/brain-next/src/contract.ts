@@ -1077,6 +1077,13 @@ export interface Brain {
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
+   * Whether this store was ever given the source `source`: a version of
+   * it, current or history, or an erasure that closed its key. Yes or no
+   * alone, whoever may read it, so for the host only, before it keeps a
+   * source in another store (one person's own): a key lives in one store.
+   */
+  holdsSource: (source: SourceId) => Promise<boolean>;
+  /**
    * The sources whose current version the reader may read, among those
    * whose key starts with one of the prefixes asked: newest first by when
    * their current version was added, then by key, a page at a time. Each

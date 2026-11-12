@@ -29,7 +29,7 @@ describe("embedding the Brain's content through core", () => {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: "De factuur van de leverancier in Rotterdam.\n\nTe betalen binnen dertig dagen.",
-      readers: { kind: "owner", personId: crypto.randomUUID() },
+      readers: { kind: "none" },
     });
 
     await tick();
