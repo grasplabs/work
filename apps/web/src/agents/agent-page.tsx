@@ -1,4 +1,9 @@
-import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
+import type {
+  Agent,
+  AgentSettings,
+  AgentUsage,
+  AgentWake,
+} from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import {
@@ -31,7 +36,8 @@ import type { ReactNode } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { Page, PageHeading } from "../frame/page.tsx";
+import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
+import { dollars } from "../settings/money.ts";
 import { SettingsSection } from "../settings/settings-parts.tsx";
 import {
   AudienceControl,
@@ -177,6 +183,58 @@ const Glances = ({
   );
 };
 
+/** A month such as `2026-11`, as people read it: November 2026. */
+const useMonthName = () => {
+  const { i18n } = useLingui();
+  return (month: string): string => {
+    const [year = 0, of = 1] = month.split("-").map(Number);
+    return new Intl.DateTimeFormat(i18n.locale, {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(year, of - 1, 1)));
+  };
+};
+
+/**
+ * What the agent used of the organization's models this month: what it
+ * cost, how often a model was asked, for how many people, and when last.
+ * How much, never what: core says no more (agent-usage.ts).
+ */
+const Usage = ({ usage }: { usage: AgentUsage }) => {
+  const { t } = useLingui();
+  const moment = useMoment();
+  const monthName = useMonthName();
+  const before = dollars(usage.spentBefore);
+  const { requests, people } = usage;
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionTitle>{monthName(usage.month)}</SectionTitle>
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Glance
+          label={t`Cost`}
+          line={t`${before} the month before`}
+          value={dollars(usage.spent)}
+        />
+        <Glance
+          label={t`Requests to a model`}
+          line={t`Several for one question`}
+          value={String(requests)}
+        />
+        <Glance
+          label={t`People it worked for`}
+          line={t`Asked it, or it works for them on a schedule`}
+          value={String(people)}
+        />
+        <Glance
+          label={t`Last asked`}
+          value={usage.lastAt === null ? t`Not yet` : moment(usage.lastAt)}
+        />
+      </dl>
+    </section>
+  );
+};
+
 /** Whom an agent answers and what it may do, or where that is set for the first agent. */
 const Access = ({
   agent,
@@ -295,6 +353,7 @@ export const AgentPage = ({
   people,
   editable,
   usable,
+  usage,
   models,
   tab,
   onTab,
@@ -311,6 +370,8 @@ export const AgentPage = ({
   editable: boolean;
   /** Whether the person may talk to it themselves. */
   usable: boolean;
+  /** What it used of the models this month; none where core didn't say. */
+  usage: AgentUsage | undefined;
   /** The models the organization chose, which an agent can be given. */
   models: readonly string[];
   tab: AgentTab;
@@ -449,6 +510,7 @@ export const AgentPage = ({
               teams={teams}
               wakes={wakes}
             />
+            {usage === undefined ? null : <Usage usage={usage} />}
             <SettingsSection
               description={t`What people call it, one line on what it is for, and its picture. All three show where people pick an agent.`}
               title={t`Name, job and picture`}

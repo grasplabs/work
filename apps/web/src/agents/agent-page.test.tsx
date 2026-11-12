@@ -255,6 +255,7 @@ const Page = ({
       tab={tab}
       teams={teams}
       usable
+      usage={undefined}
       wakes={data.wakes[agent.id] ?? []}
     />
   );
