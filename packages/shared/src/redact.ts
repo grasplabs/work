@@ -83,15 +83,18 @@ const credentials: readonly (readonly [
   // name ending in `signature` (S3's `X-Amz-Signature`, Google Cloud
   // Storage's `X-Goog-Signature` and V2 `Signature`, CloudFront's), an
   // Azure SAS's `sig`, SharePoint's `tempauth`, a meeting link's `pwd`,
-  // and an OAuth redirect's `code`. Only as a parameter, after `?` or `&`:
-  // a field merely named for a code (`statusCode`) is no credential.
+  // and an OAuth redirect's `code`. Only as a parameter, after `?` or `&`
+  // (or `&amp;` and `&#38;`, as a link in HTML mail writes it): a field
+  // merely named for a code (`statusCode`) is no credential. This is the
+  // last such pattern: a further case means replacing these patterns with
+  // a real URL parse over the links found in the text (GRA-1845).
   // Not caught: a credential in a URL's path, and an opaque download URL
   // that grants by its whole self. What is left is bounded: such text
   // reaches only the person who read it (the Brain keeps a connection's
   // reads for their reader alone), and connectors select the fields they
   // return.
   [
-    /(?<=[?&])(?<param>[\w-]*signature|sig|tempauth|pwd|code)=[^&#\s"']+/giu,
+    /(?<=[?&]|&amp;|&#38;)(?<param>[\w-]*signature|sig|tempauth|pwd|code)=[^&#\s"'<>]+/giu,
     "$<param>=[redacted]",
   ],
 ];

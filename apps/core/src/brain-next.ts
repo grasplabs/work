@@ -222,6 +222,7 @@ const newSourceSchema = z.strictObject({
   change: changeSchema,
   text: wellFormedString(),
   readers: sourceReadersSchema,
+  readAt: z.date().optional(),
 });
 
 /** A question as the Brain takes one (`recallRequestSchema`). */
@@ -479,19 +480,35 @@ export const addSource = async (
     change: string;
     text: string;
     readers: SourceReaders;
+    /**
+     * When the producer read `text` where it lives: a text read before the
+     * source's current version was is not added (`newer`), whatever order
+     * the adds arrive in.
+     */
+    readAt?: Date;
   }
-): Promise<SourceVersionRef> => {
-  const { source, change, text, readers } = checked(newSourceSchema, added);
+): Promise<SourceVersionRef & { newer?: true }> => {
+  const { source, change, text, readers, readAt } = checked(
+    newSourceSchema,
+    added
+  );
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
   let version: number;
+  let newer: true | undefined;
   try {
-    ({ version } = await keptIn(
+    ({ version, newer } = await keptIn(
       env,
       key,
       access,
       async (store) =>
-        await store.addSource({ source: key, change, text, access })
+        await store.addSource({
+          source: key,
+          change,
+          text,
+          access,
+          ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
+        })
     ));
   } catch (error) {
     // The Brain's own refusals of what an erasure closed, by their whole
@@ -505,7 +522,7 @@ export const addSource = async (
     }
     throw error;
   }
-  return { source, version };
+  return { source, version, ...(newer === true ? { newer } : {}) };
 };
 
 /** Whether `vector` is one the Brain takes: finite numbers, not all zero. */

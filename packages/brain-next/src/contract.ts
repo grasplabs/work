@@ -167,6 +167,14 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
+  /**
+   * When the producer read this text from where it lives, in milliseconds
+   * since the epoch, if it read it: an add of a text read before the
+   * source's current version was read writes nothing (`AddedVersion`'s
+   * `newer`), so a late add of an older read never replaces a newer one,
+   * whatever order the adds arrive in.
+   */
+  readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
 
@@ -324,6 +332,15 @@ export interface RecallOverview {
 export interface SourceVersionRef {
   source: SourceId;
   version: number;
+}
+
+/**
+ * What an add answers: the version it made or already is, or, `newer`, the
+ * source's current version, read later than the add's text (`readAt`):
+ * then the add wrote nothing.
+ */
+export interface AddedVersion extends SourceVersionRef {
+  newer?: true;
 }
 
 /**
@@ -1865,7 +1882,7 @@ export interface Brain {
    * current version is that version. So an add is safe to repeat, late
    * or at once, after a lost reply or a crash.
    */
-  addSource: (source: NewSource) => Promise<SourceVersionRef>;
+  addSource: (source: NewSource) => Promise<AddedVersion>;
   /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:

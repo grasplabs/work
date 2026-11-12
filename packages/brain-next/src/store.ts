@@ -37,6 +37,7 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  AddedVersion,
   AddedMemories,
   ConfirmRequest,
   ContestedPage,
@@ -681,7 +682,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * chunks and words, in one transaction, visible only once whole. The
    * same text and readers as the current version answer with it.
    */
-  async addSource(source: NewSource): Promise<SourceVersionRef> {
+  async addSource(source: NewSource): Promise<AddedVersion> {
     const adding = checked(newSourceSchema, source);
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {

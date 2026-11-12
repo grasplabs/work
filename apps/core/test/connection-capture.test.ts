@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { erasePerson, eraseSource, recallAs } from "../src/brain-next.ts";
 import { captureIdOf } from "../src/connection-capture-key.ts";
+import { captureRead } from "../src/connection-capture.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -728,6 +729,70 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       })),
       kept: [true],
       answered: true,
+    });
+  });
+
+  it("keeps the later read current when an earlier read's capture lands after it", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const chat = await chatOf(person.userId);
+    const scope = {
+      workspaceId: chat.id,
+      agentId: chat.agent.agentId,
+      chatId: chat.chat.id,
+      personId: person.userId,
+      runId: crypto.randomUUID(),
+    };
+    const id = `quote-${marker}`;
+    // Two reads of one message, as connect answered them, a second apart.
+    const readOf = (subject: string, at: number) => ({
+      result: {
+        output: JSON.stringify({ message: { id, subject } }),
+        provenance: [id],
+        keep: true as const,
+      },
+      readAt: new Date(at),
+    });
+    const at = Date.now();
+    const capture = async (read: ReturnType<typeof readOf>) => {
+      await captureRead(
+        env,
+        scope,
+        connectionId,
+        "mail.get",
+        { mailbox, message: id },
+        read
+      );
+    };
+
+    // The earlier read's capture is held: the later one lands first, then
+    // the earlier one is let go.
+    await capture(readOf(`Quote ${marker} later`, at + 1000));
+    await capture(readOf(`Quote ${marker} earlier`, at));
+    const events = await captures(connectionId, 2);
+    const { texts } = await recalled(person.userId, `quote ${marker}`);
+
+    expect({
+      current: texts.map(({ version, text }) => ({
+        version,
+        later: text.includes("later"),
+      })),
+      events: events.map(shown),
+    }).toStrictEqual({
+      current: [{ version: 1, later: true }],
+      events: [
+        {
+          action: "brain.capture.kept",
+          onBehalfOf: person.userId,
+          detail: { items: 1, kept: 1, failed: 0, skipped: 0 },
+        },
+        {
+          action: "brain.capture.skipped",
+          onBehalfOf: person.userId,
+          detail: { reason: "stale", items: 1, kept: 0, failed: 0, skipped: 1 },
+        },
+      ],
     });
   });
 });

@@ -1,0 +1,1 @@
+ALTER TABLE `source_versions` ADD `read_at` integer;

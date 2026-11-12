@@ -29,6 +29,16 @@ describe("redacting credentials", () => {
     ]);
   });
 
+  it("redacts a signed link in HTML mail, whose separators are written as entities", () => {
+    expect(
+      redact(
+        '<a href="https://d111.cloudfront.net/q.pdf?Expires=1795000000&amp;Signature=Ab~Cd-Ef__&amp;Key-Pair-Id=K2J">Quote</a> <a href="https://acme.blob.core.windows.net/c/q.pdf?sv=2024&#38;sig=AbC%2Bd3fG%3D">Q</a>'
+      )
+    ).toBe(
+      '<a href="https://d111.cloudfront.net/q.pdf?Expires=1795000000&amp;Signature=[redacted]&amp;Key-Pair-Id=K2J">Quote</a> <a href="https://acme.blob.core.windows.net/c/q.pdf?sv=2024&#38;sig=[redacted]">Q</a>'
+    );
+  });
+
   it("redacts an OAuth code in a redirect, but not a field merely named for a code", () => {
     expect(
       [

@@ -97,6 +97,11 @@ export const sourceVersions = sqliteTable(
       .notNull()
       .references(() => readerSets.id),
     addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * When its producer read its text from where it lives, if it said
+     * (`NewSource.readAt`): no add of an earlier read replaces it.
+     */
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     unique("source_versions_source_version_unique").on(

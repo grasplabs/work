@@ -6,6 +6,7 @@ import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
 import { erasedSource } from "./contract.ts";
 import type {
+  AddedVersion,
   CurrentRequest,
   NewSource,
   SourceVersion,
@@ -160,6 +161,35 @@ const madeBefore = (
 };
 
 /**
+ * The source's current version when it was read later than `added`'s
+ * text (both say when they were read), marked `newer`: then `added` is
+ * written nowhere.
+ */
+const newerThan = (
+  db: DrizzleSqliteDODatabase,
+  added: NewSource
+): AddedVersion | undefined => {
+  if (added.readAt === undefined) {
+    return undefined;
+  }
+  const current = db
+    .select({ version: sourceVersions.version, readAt: sourceVersions.readAt })
+    .from(currentVersions)
+    .innerJoin(
+      sourceVersions,
+      eq(sourceVersions.row, currentVersions.versionRow)
+    )
+    .where(eq(currentVersions.source, added.source))
+    .get();
+  const currentReadAt = current?.readAt ?? undefined;
+  return current !== undefined &&
+    currentReadAt !== undefined &&
+    currentReadAt.getTime() > added.readAt
+    ? { source: added.source, version: current.version, newer: true }
+    : undefined;
+};
+
+/**
  * Writes the next version of `adding.added.source`, whole: the version,
  * its chunks and their words when it is indexed, with an item on the
  * queue to embed them (embedding.ts), its count on the file,
@@ -174,7 +204,7 @@ const record = (
   db: DrizzleSqliteDODatabase,
   storage: DurableObjectStorage,
   adding: Adding
-): SourceVersionRef | undefined => {
+): AddedVersion | undefined => {
   // Erased while this add wrote its file: closed for good. Or for one
   // person alone, whose erasure came after it began and before this: it
   // may have missed it, so it is refused, writing nothing (its file is
@@ -193,6 +223,13 @@ const record = (
     return before;
   }
   const { added, hash } = adding;
+  // Read before the current version was: a late add of an older read
+  // never replaces a newer one. Checked here, in the transaction that
+  // would make it current, so no other add slips in between.
+  const newer = newerThan(db, added);
+  if (newer !== undefined) {
+    return newer;
+  }
   if (isInDoubt(db, hash)) {
     return undefined;
   }
@@ -221,6 +258,7 @@ const record = (
       file: hash,
       readerSet: readerSetOf(db, added.access),
       addedAt: new Date(),
+      ...(added.readAt === undefined ? {} : { readAt: new Date(added.readAt) }),
     })
     .returning({ row: sourceVersions.row })
     .get();
@@ -292,7 +330,7 @@ export const addVersion = async (
   { storage, db, bucket }: SourcesStore,
   added: NewSource,
   { indexed }: { indexed: boolean }
-): Promise<SourceVersionRef> => {
+): Promise<AddedVersion> => {
   const soFar = erasuresSoFar(storage.sql);
   const body = encoder.encode(added.text);
   const adding: Adding = {

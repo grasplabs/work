@@ -52,7 +52,11 @@ import { nativeClasses } from "./tool-classes.ts";
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
 //   items): kept, failed, or skipped with the reason (`shared`, `reach`,
-//   `list`, `file`, `erased`).
+//   `list`, `file`, `erased`, `stale`). Captures of one item run
+//   independently and may land out of order: each carries when its tool
+//   answered (`readAt`), and the Brain, in the transaction that would make
+//   it current, writes nothing for a read older than the current version's
+//   (`stale`). So a late capture never replaces a newer one.
 
 type CaptureEvent =
   | "brain.capture.kept"
@@ -104,6 +108,16 @@ const asksText = (input: unknown): boolean =>
   "as" in input &&
   input.as === "text";
 
+/**
+ * A tool's answer, and when it answered (taken before anything else is
+ * awaited): captures of one item run independently and may land in any
+ * order, and the Brain keeps the one read last (`readAt`).
+ */
+export interface Read {
+  result: ConnectResult;
+  readAt: Date;
+}
+
 /** What a call's capture ended in: its event and the event's detail. */
 type Ended = [CaptureEvent, Record<string, string | number>];
 
@@ -130,7 +144,7 @@ const captured = async (
   connectionId: string,
   action: string,
   input: unknown,
-  result: ConnectResult
+  { result, readAt }: Read
 ): Promise<Ended> => {
   const named = new Set(result.provenance).size;
   const [owner] = await connectionOwnersOf(env, [connectionId]);
@@ -154,7 +168,7 @@ const captured = async (
   try {
     // Owner content: core's Brain module keeps it in the person's own
     // store, never the shared one.
-    await addSource(env, {
+    const added = await addSource(env, {
       source: { producer: "capture", id },
       // A change of its own each time: the same text again is the current
       // version (the Brain's rule), so reading an unchanged item adds
@@ -162,7 +176,12 @@ const captured = async (
       change: crypto.randomUUID(),
       text: redact(result.output),
       readers: { kind: "owner", personId: scope.personId },
+      readAt,
     });
+    // A later read of it was kept first: this older one is not.
+    if (added.newer === true) {
+      return skippedAll("stale", 1);
+    }
   } catch (error) {
     if (brainSourceErrors.codeOf(error) === "brain.source_erased") {
       // Its key closed by an erasure, or the person's store erased: final.
@@ -187,14 +206,15 @@ export const captureRead = async (
   connectionId: string,
   action: string,
   input: unknown,
-  result: ConnectResult
+  read: Read
 ): Promise<void> => {
+  const { result } = read;
   if (result.keep !== true) {
     return;
   }
   let ended: Ended;
   try {
-    ended = await captured(env, scope, connectionId, action, input, result);
+    ended = await captured(env, scope, connectionId, action, input, read);
   } catch (error) {
     // Connect unreachable, or the Brain refused the item (a text past its
     // limit) or couldn't be reached: each item failed.
