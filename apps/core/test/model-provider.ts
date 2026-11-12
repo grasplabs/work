@@ -146,31 +146,14 @@ const pollMs = 10;
 const running = new Set<() => void>();
 
 /**
- * Replies to the analysis alongside a chat's recall before its question
- * (src/turn-recall.ts), the current provider's, in the order a test queued
- * them after starting it, apart from its script; once none is left,
- * nothing to look up. Each request of it that reached the current
- * provider is kept in `recallAnalysisRequests`. Both are emptied whenever
- * a provider starts (`answeringProvider`, `fakeProvider`), so what a test
- * counts there is its own provider's alone.
- */
-export const recallAnalysisReplies: ProviderReply[] = [];
-
-/** Every request of a recall's analysis that reached the current provider, oldest first. */
-export const recallAnalysisRequests: SentRequest[] = [];
-
-/**
- * Stops every bridge still looking, and empties the analysis's replies
- * and requests: when a provider starts (`answeringProvider`), and at a
- * file's end (test/start-each-file.ts).
+ * Stops every bridge still looking: when a provider starts
+ * (`answeringProvider`), and at a file's end (test/start-each-file.ts).
  */
 export const stopModelProviders = (): void => {
   for (const stop of running) {
     stop();
   }
   running.clear();
-  recallAnalysisReplies.length = 0;
-  recallAnalysisRequests.length = 0;
 };
 
 /** The model the tests use unless they choose others. */
@@ -278,6 +261,14 @@ export interface FakeProvider {
   models: readonly string[];
   /** Every request that reached it, oldest first, as they come. */
   requests: SentRequest[];
+  /**
+   * Its replies to the analysis alongside a chat's recall before its
+   * question (src/turn-recall.ts), in the order a test queues them, apart
+   * from its script; once none is left, nothing to look up.
+   */
+  analysisReplies: ProviderReply[];
+  /** Every request of a recall's analysis that reached it, oldest first. */
+  analyses: SentRequest[];
 }
 
 /**
@@ -302,7 +293,12 @@ export const answeringProvider = async (
   await bridged.body?.cancel();
   await connectModels(key, models);
   const requests: SentRequest[] = [];
+  const analysisReplies: ProviderReply[] = [];
+  const analyses: SentRequest[] = [];
   const cutOff = new Map<string, AbortController>();
+  // Cancelled before its answer began, as one look can report a request
+  // both new and gone: its controller is aborted as it is made.
+  const cancelled = new Set<string>();
   const state = { stopped: false };
   const stop = () => {
     state.stopped = true;
@@ -327,9 +323,12 @@ export const answeringProvider = async (
     }
     const controller = new AbortController();
     cutOff.set(taken.id, controller);
+    if (cancelled.has(taken.id)) {
+      controller.abort(new Error("The request was aborted"));
+    }
     // A chat's recall analysis too, as it runs alongside the turn's script.
     if (isRecallAnalysis(body)) {
-      recallAnalysisRequests.push({
+      analyses.push({
         url: `https://${taken.host}${taken.path}`,
         headers: new Headers(taken.headers),
         body,
@@ -338,7 +337,7 @@ export const answeringProvider = async (
       await answerWith(
         taken.id,
         taken.path,
-        recallAnalysisReplies.shift() ?? nothingToLookUp
+        analysisReplies.shift() ?? nothingToLookUp
       );
       return;
     }
@@ -382,6 +381,7 @@ export const answeringProvider = async (
         await response.json()
       );
       for (const id of gone) {
+        cancelled.add(id);
         cutOff.get(id)?.abort(new Error("The request was aborted"));
       }
       // In order, each answered on its own: a paused answer holds up no other.
@@ -393,7 +393,7 @@ export const answeringProvider = async (
     }
   };
   void look();
-  return { key, models, requests };
+  return { key, models, requests, analysisReplies, analyses };
 };
 
 /**

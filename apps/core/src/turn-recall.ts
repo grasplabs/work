@@ -31,11 +31,16 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // searched at once. A cheap model call, the analysis, starts alongside,
 // never in front: it reads the last few messages and says what the
 // question asks in words that stand alone ("he" and "that deal" resolved),
-// or that there is nothing to look up. It is waited for only when the
-// first pass comes back thin (`isThin`), and only until `analysisWaitMs`
-// after the recall started; then a second pass searches its words and is
-// merged into the first (`mergeRecalled`). An analysis that fails, is slow
-// or says nothing leaves exactly the first pass. Its answer is only ever a
+// or that there is nothing to look up. A chat's first message has nothing
+// before it to resolve, so it gets no analysis: no model call, no wait.
+// The analysis is waited for only when the first pass comes back thin
+// (`isThin`), and only until `analysisWaitMs` after the recall started;
+// then a second pass searches its words and is merged into the first
+// (`mergeRecalled`), within what is left of `turnRecallDeadlineMs`. So the
+// most a recall holds up the model's first request is about that
+// deadline, 3 s, and only on a follow-up whose first pass found nothing.
+// An analysis that fails, is slow or says nothing leaves exactly the
+// first pass. Its answer is only ever a
 // query of the same person's recall, which checks what they may read: a
 // chat's history that steers it can waste a recall, never widen one.
 //
@@ -43,7 +48,8 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // (agent-tools.ts): opened, its reads pinned with it (the agent's `brain`
 // grant, and each version it hands over, `brainVersionRead`), recorded in
 // the audit log as the agent's call (`brain.recall`, how many versions it
-// hands over: never what they say) before anything is handed over, closed. So
+// hands over, and its run: never what they say) before anything is handed
+// over, closed; one revoked meanwhile is recorded as failed after. So
 // the chat shows it as a step ("Searched the brain for …"), and once the
 // person may no longer read a version or the agent lost its grant, its
 // result is withheld from every later request (history-access.ts). What
@@ -156,8 +162,8 @@ interface Recalling {
  * failed, never what it read or said, and nothing once its caller let go.
  */
 const analyse = async (
-  { env, turn: { scope }, history, provenance }: Recalling,
-  question: string,
+  { env, turn: { scope }, provenance }: Recalling,
+  input: ReturnType<typeof analysisInput>,
   signal: AbortSignal
 ): Promise<string | null | undefined> => {
   try {
@@ -165,7 +171,7 @@ const analyse = async (
     const { output } = await models(env).call({
       model: modelForRole(await modelSettings(env), "quick"),
       system: analysisInstructions,
-      input: analysisInput(history, question),
+      input,
       schema: analysisSchema,
       // Asked once: a second request wouldn't be waited for.
       askAgain: false,
@@ -204,6 +210,10 @@ const analyse = async (
 export const isThin = (pack: RecalledPack): boolean =>
   !pack.items.some(({ found }) => found === "exact" || found === "words");
 
+/** Whether two queries are the same words, whatever their case or edges. */
+const sameWords = (a: string, b: string): boolean =>
+  a.trim().toLowerCase() === b.trim().toLowerCase();
+
 /** The time left of `ms` after `started`, never less than none. */
 const leftOf = (started: number, ms: number): number =>
   Math.max(0, started + ms - Date.now());
@@ -241,7 +251,7 @@ const recalled = async (
     log.warn("chat.recall_analysis_late", {});
     return first;
   }
-  if (query === null || query === undefined || query === question) {
+  if (query === null || query === undefined || sameWords(query, question)) {
     return first;
   }
   try {
@@ -296,7 +306,9 @@ export const recallForTurn = async (
   recalling: Recalling,
   question: string
 ): Promise<TurnRecall | undefined> => {
-  const query = question.trim().slice(0, queryMaxLength);
+  // Well-formed: half a pair, cut here or typed, is a string the Brain
+  // refuses, and the recall would be lost for it.
+  const query = question.trim().slice(0, queryMaxLength).toWellFormed();
   // A shared conversation recalls nothing, and must keep recalling
   // nothing once `recallAs` can leave a person's own store out (GRA-1762):
   // `personal: false` still reads what the asker's teams may read, and the
@@ -307,9 +319,14 @@ export const recallForTurn = async (
   }
   const { env, turn } = recalling;
   // Alongside the first pass from the start; let go of once the recall
-  // ends, however it ends, so no request of it outlives the recall.
+  // ends, however it ends, so no request of it outlives the recall. None
+  // for a chat's first message: nothing before it to resolve.
   const analysis = new AbortController();
-  const analysed = analyse(recalling, query, analysis.signal);
+  const input = analysisInput(recalling.history, query);
+  const analysed =
+    input.chat.length === 0
+      ? Promise.resolve(null)
+      : analyse(recalling, input, analysis.signal);
   const callId = `recall_${crypto.randomUUID().replaceAll("-", "")}`;
   const source = JSON.stringify({ tool: turnRecallTool, input: { query } });
   let runId: string;
@@ -337,7 +354,7 @@ export const recallForTurn = async (
     await recordRunReads(env, scope, [brainGrantRead, ...versions]);
     const call = {
       method: turnRecallMethod,
-      detail: { versions: versions.length },
+      detail: { versions: versions.length, run: runId },
     };
     // In the log before the model gets any of it: straight to it, so a
     // log that doesn't take it fails the recall, and nothing is handed over.
@@ -350,7 +367,7 @@ export const recallForTurn = async (
     await auditToolCall(
       env,
       scope,
-      { method: turnRecallMethod },
+      { method: turnRecallMethod, detail: { run: runId } },
       endedBy(error)
     );
     // Why it failed, never what it read: the turn goes on without it.
@@ -362,6 +379,16 @@ export const recallForTurn = async (
     analysis.abort();
   }
   const ended = await turn.runs.close(runId, status);
+  // Recorded as done, then revoked before it was handed over: so the log
+  // holds what happened, not only the `ok`.
+  if (status === "completed" && ended === "revoked") {
+    await auditToolCall(
+      env,
+      scope,
+      { method: turnRecallMethod, detail: { run: runId } },
+      { outcome: "failed", reason: "agent.run_revoked" }
+    );
+  }
   const text = describeRun({
     status: ended,
     logs: [],

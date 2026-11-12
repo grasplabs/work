@@ -429,6 +429,7 @@ export const readableSources = async (
     })
     .from(collections)
     .where(inList(collections.id, sourceIds));
+  // `readableBrain` reads today's Brain, and goes with it (GRA-1735).
   const [apps, connections, brain, versions] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
