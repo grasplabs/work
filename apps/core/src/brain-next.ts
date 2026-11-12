@@ -29,6 +29,8 @@ import type {
   Brain,
   ErasureReason,
   Embedders,
+  EntityKind,
+  Identifier,
   EntityId,
   MemoryChangeOutcome,
   MemoryId,
@@ -1210,6 +1212,35 @@ export const rememberAs = async (
     throw new Error("The Brain saved no memory");
   }
   return { memory: saved, entity };
+};
+
+/** An entity of a person's own store, as they may read it: its kind and names. */
+export interface OwnEntity {
+  kind: EntityKind;
+  names: string[];
+  identifiers: Identifier[];
+}
+
+/**
+ * The entity `entity` of the member `personId`'s own store, as they may
+ * read it: what a memory about it is about, named as the store holds it.
+ * Null alike when there is none or they may not. Refused once they are no
+ * longer a member.
+ */
+export const ownEntityAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  entity: string
+): Promise<OwnEntity | null> => {
+  const id = checked(entityIdSchema, entity);
+  const reader = await readerOf(env, personId);
+  const read = await personsOwn(env, reader.person).readEntity({
+    entity: id,
+    reader,
+  });
+  return read === null
+    ? null
+    : { kind: read.kind, names: read.names, identifiers: read.identifiers };
 };
 
 /**
