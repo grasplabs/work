@@ -962,3 +962,53 @@ describe("the Brain's actions when the log fails after they applied", () => {
     });
   });
 });
+
+describe("the Brain's upkeep, as staff see it", () => {
+  it("shows an embedding step that failed as a code and a time, never what it failed with", async () => {
+    const marked = marker();
+    // The store sees the test model first, so core's own tick (no model)
+    // changes the model it embeds for, which the step writes.
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work(
+      quietModel,
+      nextDay(),
+      await testModelEmbedders()
+    );
+    // The step's own table refuses every write, with the marker in its words.
+    await runInDurableObject(storeObject(), (_store, state) => {
+      for (const when of ["INSERT", "UPDATE"]) {
+        state.storage.sql.exec(
+          `CREATE TRIGGER report_breaks_embedding_${when.toLowerCase()}
+          BEFORE ${when} ON embedding_state
+          BEGIN SELECT RAISE(ABORT, '${marked}'); END`
+        );
+      }
+    });
+    try {
+      // Core's embedders run no model, which the store last saw running
+      // one: the step writes its state, and fails.
+      await workBrain(env, nextDay());
+      const { status, text, report } = await readReport();
+
+      expect({
+        status,
+        failed: report?.stepsFailed.embedding?.reason,
+        at: typeof report?.stepsFailed.embedding?.at,
+        content: text.includes(marked),
+      }).toStrictEqual({
+        status: 200,
+        failed: "failed",
+        at: "string",
+        content: false,
+      });
+    } finally {
+      await runInDurableObject(storeObject(), (_store, state) => {
+        state.storage.sql.exec(
+          "DROP TRIGGER IF EXISTS report_breaks_embedding_insert"
+        );
+        state.storage.sql.exec(
+          "DROP TRIGGER IF EXISTS report_breaks_embedding_update"
+        );
+      });
+    }
+  });
+});

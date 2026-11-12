@@ -12,11 +12,12 @@
  * needs someone: parked items, a store near its limit, a ledger that
  * isn't read through, a step that failed.
  */
-import { storeNearLimit } from "@grasp-os/shared/brain-report";
+import { brainSteps, storeNearLimit } from "@grasp-os/shared/brain-report";
 import type {
   BrainAction,
   BrainActionOutcome,
   BrainReport,
+  BrainStep,
 } from "@grasp-os/shared/brain-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -83,15 +84,14 @@ const replayWords: Record<BrainReport["ledger"]["replay"], string> = {
   unreadable: "Can't be read",
 };
 
-const stepWords: Record<keyof BrainReport["stepsFailed"], string> = {
+const stepWords: Record<BrainStep, string> = {
   ledger: "Writing erasures to the ledger",
   erase: "Deleting what erasures hid",
   sweep: "Sweeping files nothing holds",
   repack: "Repacking vector codes",
   reindex: "Rebuilding the word indexes",
+  embedding: "Putting passages on the queue to embed",
 };
-
-const stepOrder = ["ledger", "erase", "sweep", "repack", "reindex"] as const;
 
 const reasonOrder = [
   "deleted",
@@ -556,7 +556,7 @@ const Steps = ({ report }: { report: BrainReport }) => {
       description="The Brain's own upkeep before its queue, each tick. A failure shows until a later tick gets through."
       title="Upkeep"
     >
-      {stepOrder.map((step) => {
+      {brainSteps.map((step) => {
         const failed = report.stepsFailed[step];
         return (
           <SectionRow key={step} label={stepWords[step]}>

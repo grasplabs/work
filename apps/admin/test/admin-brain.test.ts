@@ -297,6 +297,7 @@ const brainReport = (bytes: number): BrainReport => ({
     sweep: null,
     repack: null,
     reindex: null,
+    embedding: null,
   },
 });
 
@@ -624,5 +625,30 @@ describe("how an organization's Brain is doing", () => {
       answered: { outcome: "done" },
       asked: [["grace@grasp.test", { type: "reembed" }]],
     });
+  });
+
+  it("shows an embedding step that failed in its Upkeep, in amber", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    const report = brainReport(1_000_000);
+    acme.core.brain = {
+      ...report,
+      stepsFailed: {
+        ...report.stepsFailed,
+        embedding: { at: "2026-11-12T09:55:00.000Z", reason: "failed" },
+      },
+    };
+
+    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const label = "Putting passages on the queue to embed";
+    const row = html.slice(
+      html.indexOf(label),
+      html.indexOf("</div>", html.indexOf("Failed 5 min ago"))
+    );
+
+    expect({
+      shown: textOf(row).includes(`${label} Failed 5 min ago`),
+      amber: row.includes("text-status-attention"),
+    }).toStrictEqual({ shown: true, amber: true });
   });
 });

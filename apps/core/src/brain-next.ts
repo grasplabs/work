@@ -25,10 +25,12 @@ import type {
   StepFailure,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
+import { brainReportSchema, brainSteps } from "@grasp-os/shared/brain-report";
 import type {
   BrainAction,
   BrainActionOutcome,
   BrainReport,
+  BrainStep,
 } from "@grasp-os/shared/brain-report";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
@@ -739,6 +741,21 @@ export const workBrain = async (env: Env, at: Date): Promise<void> => {
 export const brainWorkOverview = async (env: BrainEnv): Promise<WorkOverview> =>
   await brain(env).workOverview();
 
+/**
+ * The store's steps and the report's (`brainSteps`) are the same keys: a
+ * step either names and the other doesn't fails to compile here, so none
+ * is dropped silently.
+ */
+type StoreStep = keyof WorkOverview["stepsFailed"];
+type SameSteps = [StoreStep] extends [BrainStep]
+  ? [BrainStep] extends [StoreStep]
+    ? readonly StoreStep[]
+    : never
+  : never;
+
+/** Every step the store names, in the tick's order. */
+const reportedSteps = brainSteps satisfies SameSteps;
+
 /** A step's last failure as the staff report says it. */
 const failureOf = (
   failure: StepFailure | null
@@ -746,6 +763,16 @@ const failureOf = (
   failure === null
     ? null
     : { at: failure.at.toISOString(), reason: failure.reason };
+
+/** Each of the store's steps' last failure, as the report says it: a code and a time. */
+const stepsFailedOf = (
+  steps: WorkOverview["stepsFailed"]
+): BrainReport["stepsFailed"] =>
+  brainReportSchema.shape.stepsFailed.parse(
+    Object.fromEntries(
+      reportedSteps.map((step) => [step, failureOf(steps[step])])
+    )
+  );
 
 /**
  * The Brain as Grasp's staff see it (brain-report.ts): its overview, field
@@ -803,13 +830,7 @@ export const brainStaffReport = async (env: BrainEnv): Promise<BrainReport> => {
       person: overview.erasures.person,
       byReason: overview.erasures.byReason,
     },
-    stepsFailed: {
-      ledger: failureOf(overview.stepsFailed.ledger),
-      erase: failureOf(overview.stepsFailed.erase),
-      sweep: failureOf(overview.stepsFailed.sweep),
-      repack: failureOf(overview.stepsFailed.repack),
-      reindex: failureOf(overview.stepsFailed.reindex),
-    },
+    stepsFailed: stepsFailedOf(overview.stepsFailed),
   };
 };
 

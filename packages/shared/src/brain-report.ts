@@ -94,6 +94,22 @@ const count = z.int().min(0);
 /** A kind of work, an error code or a reason: a name in code. */
 const codeName = z.string().min(1).max(128);
 
+/**
+ * The steps of the store's tick, in the tick's order: every one the
+ * store's overview names (core's brain-next.ts holds the two to the same
+ * keys, so one the store adds and the report doesn't carry fails to
+ * compile).
+ */
+export const brainSteps = [
+  "ledger",
+  "erase",
+  "sweep",
+  "repack",
+  "reindex",
+  "embedding",
+] as const;
+export type BrainStep = (typeof brainSteps)[number];
+
 /** A step of the store's tick that last failed: when, and the store's own code for why. */
 const stepFailureSchema = z
   .object({ at: isoTime, reason: z.enum(["timed_out", "failed"]) })
@@ -181,13 +197,7 @@ export const brainReportSchema = z.object({
     }),
   }),
   /** The tick's own steps, each with its last failure since the store started. */
-  stepsFailed: z.object({
-    ledger: stepFailureSchema,
-    erase: stepFailureSchema,
-    sweep: stepFailureSchema,
-    repack: stepFailureSchema,
-    reindex: stepFailureSchema,
-  }),
+  stepsFailed: z.record(z.enum(brainSteps), stepFailureSchema),
 });
 export type BrainReport = z.infer<typeof brainReportSchema>;
 
