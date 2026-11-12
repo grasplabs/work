@@ -1,8 +1,10 @@
 import { z } from "zod";
 
-import { entityKinds } from "./contract.ts";
+import { entityKinds, entityNamesShown } from "./contract.ts";
 import type {
+  EntitiesCursor,
   Entity,
+  EntityPage,
   EntityId,
   EntityKind,
   Identifier,
@@ -52,26 +54,29 @@ const mentionedSql = (entity: string): string => `(
 )`;
 
 /**
- * Whether the memory `alias` is read by exactly the set of readers `?3`:
+ * Whether the memory `alias` is read by exactly the set of readers whose
+ * key (`reader_sets.key`) is `?3`:
  * its own set is it, and, resting on a version, so are the version's and
  * its source's current version's, the version not hidden by an erasure.
  * So everyone who may read an add with those readers may read it too.
  */
 const coveredSql = (alias: string): string => `(
-  ${alias}.reader_set = ?3
-  AND (${alias}.version_row IS NULL OR EXISTS (
+  ${alias}.readers = ?3
+  AND (${alias}.source IS NULL OR EXISTS (
     SELECT 1 FROM source_versions AS based
     JOIN current_versions ON current_versions.source = based.source
     JOIN source_versions AS current ON current.row = current_versions.version_row
-    WHERE based.row = ${alias}.version_row
+    JOIN reader_sets AS based_set ON based_set.id = based.reader_set
+    JOIN reader_sets AS current_set ON current_set.id = current.reader_set
+    WHERE based.source = ${alias}.source AND based.version = ${alias}.version
       AND based.row NOT IN (SELECT version_row FROM erasing_versions)
-      AND based.reader_set = ?3 AND current.reader_set = ?3
+      AND based_set.key = ?3 AND current_set.key = ?3
   ))
 )`;
 
 /**
  * The first entity of `kind` holding one of `identifiers` by a memory
- * read by exactly the set of readers `readerSet` (`coveredSql`): what an add with those readers links to. An
+ * read by exactly the readers whose set's key is `readers` (`coveredSql`): what an add with those readers links to. An
  * identifier only a memory others read gave links nothing, so no add
  * learns that two identifiers are one entity through a memory its readers
  * may not read: it makes a new entity, and joining the two is a person's
@@ -81,7 +86,7 @@ export const linkedBy = (
   sql: SqlStorage,
   kind: EntityKind,
   identifiers: readonly Identifier[],
-  readerSet: number
+  readers: string
 ): number | undefined => {
   if (identifiers.length === 0) {
     return undefined;
@@ -98,7 +103,7 @@ export const linkedBy = (
       WHERE entities.kind = ?1 AND ${coveredSql("m")}`,
       kind,
       JSON.stringify(identifiers.map((id) => [id.type, foldIdentifier(id)])),
-      readerSet
+      readers
     )
     .toArray();
   return found?.row ?? undefined;
@@ -106,12 +111,12 @@ export const linkedBy = (
 
 /**
  * Whether an add may name the entity at `entity` by its id: `reader` may see it, or, with no reader, a memory
- * read by exactly the add's set of readers `readerSet` mentions it.
+ * read by exactly the add's readers (their set's key, `readers`) mentions it.
  */
 export const mayName = (
   sql: SqlStorage,
   entity: number,
-  readerSet: number,
+  readers: string,
   reader: Reader | undefined
 ): boolean => {
   if (reader !== undefined) {
@@ -135,7 +140,7 @@ export const mayName = (
         LIMIT 1`,
         entity,
         null,
-        readerSet
+        readers
       )
       .toArray().length > 0
   );
@@ -163,25 +168,27 @@ export const keepNames = (
 };
 
 /**
- * The first memory the reader may read that mentions the entity at
- * `entity`, by row: null when there is none, so they may not see it. What
+ * When the first memory the reader may read that mentions the entity at
+ * `entity` was learned: null when there is none, so they may not see it. What
  * entities are ordered by, so where one stands among those a reader sees
  * depends only on what they may read: an entity linked long ago through
  * a hidden memory stands where its first memory they may read puts it.
  */
 const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
-  SELECT m.row AS first FROM memories AS m
+  SELECT m.learned_at AS first FROM memories AS m
   WHERE m.entity = ${entity} AND ${visibleSql("m")}
   UNION ALL
-  SELECT m.row FROM memories AS m
+  SELECT m.learned_at FROM memories AS m
   WHERE m.object = ${entity} AND ${visibleSql("m")}
 ))`;
 
 /**
  * `?1` the kind or null, `?4` the names and identifiers asked (JSON, each
- * `[type, folded]`, every one to be held), `?5` the limit: the entities
- * the reader may see that hold each, by a memory they may read, in the
- * order of the first memory they may read that mentions each.
+ * `[type, folded]`, every one to be held), `?5` the most to read, `?6` 1
+ * to go on after the entity whose place is `?7` (when its first memory
+ * the reader may read was learned) and `?8` (its id): the entities the
+ * reader may see that hold each, by a memory they may read, in that
+ * order, then by id.
  */
 // Its cost: by kind alone, every entity of that kind is checked for a
 // memory the reader may read (and its first one found) before the limit,
@@ -213,24 +220,45 @@ found AS MATERIALIZED (
       )
     )
 )
-SELECT row, id, kind FROM found
+SELECT row, id, kind, first FROM found
 WHERE first IS NOT NULL
-ORDER BY first
+  AND (?6 = 0 OR first > ?7 OR (first = ?7 AND id > ?8))
+ORDER BY first, id
 LIMIT ?5`;
 
 /**
- * `?1` the entities asked (JSON rows): each name and identifier of them a
- * memory the reader may read gave, the earliest memory first.
+ * `?1` the entities asked (JSON rows), `?4` the most of each kind of name
+ * to give: each name and identifier of them a memory the reader may read
+ * gave, once (as the earliest such memory wrote it), the earliest first,
+ * at most `?4` names and `?4` identifiers an entity, each with how many
+ * there are of its kind in all.
  */
 const namesSql = `
-WITH ${readableSql}
-SELECT asked.value AS entity, entity_names.type AS type,
-  entity_names.value AS value, entity_names.folded AS folded
-FROM json_each(?1) AS asked
-JOIN entity_names ON entity_names.entity = asked.value
-JOIN memories AS m ON m.row = entity_names.memory
-WHERE ${visibleSql("m")}
-ORDER BY asked.value, m.row, entity_names.rowid`;
+WITH ${readableSql},
+given AS (
+  SELECT asked.value AS entity, entity_names.type AS type,
+    entity_names.value AS value, entity_names.folded AS folded,
+    m.row AS first,
+    row_number() OVER (
+      PARTITION BY asked.value, entity_names.type, entity_names.folded
+      ORDER BY m.row, entity_names.rowid
+    ) AS copy
+  FROM json_each(?1) AS asked
+  JOIN entity_names ON entity_names.entity = asked.value
+  JOIN memories AS m ON m.row = entity_names.memory
+  WHERE ${visibleSql("m")}
+),
+placed AS (
+  SELECT entity, type, value,
+    row_number() OVER (
+      PARTITION BY entity, type = 'name' ORDER BY first, type, folded
+    ) AS place,
+    count(*) OVER (PARTITION BY entity, type = 'name') AS total
+  FROM given WHERE copy = 1
+)
+SELECT entity, type, value, total FROM placed
+WHERE place <= ?4
+ORDER BY entity, place`;
 
 /** Entities found, as the reader sees them: with the names they may see. */
 const asSeen = (
@@ -238,38 +266,43 @@ const asSeen = (
   found: readonly { row: number; id: string; kind: string }[],
   reader: Reader
 ): Entity[] => {
-  const seen = new Map<number, { entity: Entity; keys: Set<string> }>();
+  const seen = new Map<number, Entity>();
   for (const { row, id, kind } of found) {
     seen.set(row, {
-      entity: { id, kind: kindSchema.parse(kind), names: [], identifiers: [] },
-      keys: new Set(),
+      id,
+      kind: kindSchema.parse(kind),
+      names: [],
+      identifiers: [],
+      nameCount: 0,
+      identifierCount: 0,
     });
   }
   if (seen.size === 0) {
     return [];
   }
   const names = sql
-    .exec<{ entity: number; type: string; value: string; folded: string }>(
+    .exec<{ entity: number; type: string; value: string; total: number }>(
       namesSql,
       JSON.stringify([...seen.keys()]),
       reader.person,
-      JSON.stringify(reader.groups)
+      JSON.stringify(reader.groups),
+      entityNamesShown
     )
     .toArray();
-  for (const { entity, type, value, folded } of names) {
+  for (const { entity, type, value, total } of names) {
     const into = seen.get(entity);
-    const key = JSON.stringify([type, folded]);
-    if (into === undefined || into.keys.has(key)) {
+    if (into === undefined) {
       continue;
     }
-    into.keys.add(key);
     if (type === "name") {
-      into.entity.names.push(value);
+      into.names.push(value);
+      into.nameCount = total;
     } else if (type === "email" || type === "ref") {
-      into.entity.identifiers.push({ type, value });
+      into.identifiers.push({ type, value });
+      into.identifierCount = total;
     }
   }
-  return [...seen.values()].map(({ entity }) => entity);
+  return [...seen.values()];
 };
 
 /** What a find of entities asks (contract.ts `EntitiesRequest`, checked). */
@@ -278,14 +311,19 @@ export interface EntitiesAsked {
   kind?: EntityKind;
   identifier?: Identifier;
   name?: string;
+  after?: EntitiesCursor;
   limit: number;
 }
 
-/** The entities the reader may see that match (contract.ts `findEntities`). */
+/**
+ * A page of the entities the reader may see that match (contract.ts
+ * `findEntities`): one more is read than asked, to tell whether more
+ * follow.
+ */
 export const findEntities = (
   sql: SqlStorage,
-  { reader, kind, identifier, name, limit }: EntitiesAsked
-): Entity[] => {
+  { reader, kind, identifier, name, after, limit }: EntitiesAsked
+): EntityPage => {
   const asked = [
     ...(identifier === undefined
       ? []
@@ -293,16 +331,28 @@ export const findEntities = (
     ...(name === undefined ? [] : [["name", foldName(name)]]),
   ];
   const found = sql
-    .exec<{ row: number; id: string; kind: string }>(
+    .exec<{ row: number; id: string; kind: string; first: number }>(
       findSql,
       kind ?? null,
       reader.person,
       JSON.stringify(reader.groups),
       JSON.stringify(asked),
-      limit
+      limit + 1,
+      after === undefined ? 0 : 1,
+      after?.learnedAt.getTime() ?? 0,
+      after?.entity ?? ""
     )
     .toArray();
-  return asSeen(sql, found, reader);
+  const entities = asSeen(sql, found.slice(0, limit), reader);
+  const last = found.at(limit - 1);
+  if (found.length <= limit || last === undefined) {
+    return { entities, more: false };
+  }
+  return {
+    entities,
+    more: true,
+    next: { learnedAt: new Date(last.first), entity: last.id },
+  };
 };
 
 /** `?1` the entity's id: it, if the reader may see it. */
