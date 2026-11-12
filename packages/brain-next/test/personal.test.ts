@@ -1285,12 +1285,19 @@ const leavingNone = [
   // erased with what they rest on: none of their methods leaves work.
   "addMemories",
   "confirmMemory",
+  // Proposals, cards and the member link likewise: written or read whole
+  // in their call (linking.ts, cards.ts).
+  "decideProposal",
   "erasePerson",
   "find",
   "findEntities",
+  "linkMember",
   "listContested",
+  "listProposals",
   "listSources",
   "listVersions",
+  "memberEntity",
+  "readCard",
   "readCurrent",
   "readEntity",
   "readMemories",

@@ -19,8 +19,12 @@ import type {
   ErasureReason,
   Embedders,
   ModelReply,
+  Card,
+  EntityId,
+  Memory,
   Pack,
   PackItem,
+  Proposal,
   Reader,
   RecallRequest,
   SourceId,
@@ -49,10 +53,13 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
+import { users } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
@@ -244,6 +251,41 @@ export interface RecalledPack extends Omit<Pack, "items"> {
   items: RecalledItem[];
 }
 
+/** A memory, citing its source as its producer named it. */
+export interface BrainMemory extends Omit<Memory, "source"> {
+  source: SourceVersionRef | null;
+}
+
+/** An entity's card, its memories citing sources as producers named them. */
+export interface EntityCard extends Omit<
+  Card,
+  "attributes" | "relations" | "notes"
+> {
+  attributes: {
+    attribute: string;
+    memories: BrainMemory[];
+    contested: boolean;
+  }[];
+  relations: (Omit<Card["relations"][number], "memory"> & {
+    memory: BrainMemory;
+  })[];
+  notes: BrainMemory[];
+}
+
+/** `source` of the Brain as its producer named it, or none. */
+const versionRefOf = (
+  source: { source: SourceId; version: number } | null
+): SourceVersionRef | null =>
+  source === null
+    ? null
+    : { source: sourceRefOf(source.source), version: source.version };
+
+/** `memory`, citing its source as its producer named it. */
+const brainMemoryOf = (memory: Memory): BrainMemory => ({
+  ...memory,
+  source: versionRefOf(memory.source),
+});
+
 /** A version of a source, whole. */
 export interface SourceVersion extends SourceVersionRef {
   text: string;
@@ -416,6 +458,106 @@ export const recallAs = async (
     truncated,
   };
 };
+
+const entityIdSchema = z.uuid();
+
+/**
+ * The card of the entity `entity` as the member `personId` may see it,
+ * as core counts their teams now: built when asked from the memories they
+ * may read (the Brain's `readCard`), or null when they may see no such
+ * entity. With `asOf`, as it read then. Refused once they are no longer
+ * a member. For GRA-1743's `entities.get`.
+ */
+export const entityCardAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  { entity, asOf }: { entity: EntityId; asOf?: Date }
+): Promise<EntityCard | null> => {
+  const card = await brain(env).readCard({
+    entity: checked(entityIdSchema, entity),
+    reader: await readerOf(env, personId),
+    ...(asOf === undefined ? {} : { asOf }),
+  });
+  if (card === null) {
+    return null;
+  }
+  return {
+    ...card,
+    attributes: card.attributes.map((attribute) => ({
+      ...attribute,
+      memories: attribute.memories.map(brainMemoryOf),
+    })),
+    relations: card.relations.map((relation) => ({
+      ...relation,
+      memory: brainMemoryOf(relation.memory),
+    })),
+    notes: card.notes.map(brainMemoryOf),
+  };
+};
+
+/**
+ * The open proposals that two entities are one that the member
+ * `personId` may see: both names that matched are theirs to read. Of one
+ * entity, if given.
+ */
+export const entityProposalsAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  { entity }: { entity?: EntityId } = {}
+): Promise<Proposal[]> =>
+  await brain(env).listProposals({
+    reader: await readerOf(env, personId),
+    ...(entity === undefined
+      ? {}
+      : { entity: checked(entityIdSchema, entity) }),
+  });
+
+/**
+ * The member `personId` accepts or declines a proposal they may see:
+ * accepted, the two entities read as one. `nothing` alike when there is
+ * none, they may not see it, or it was decided.
+ */
+export const decideEntityProposalAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  { proposal, accept }: { proposal: string; accept: boolean }
+): Promise<"done" | "nothing"> =>
+  await brain(env).decideProposal({
+    proposal: checked(entityIdSchema, proposal),
+    reader: await readerOf(env, personId),
+    accept: checked(z.boolean(), accept),
+  });
+
+/**
+ * Links the member `personId` to their person entity in the Brain, after
+ * a sign-in core verified: by the email core's own records hold for them,
+ * only when it is verified, never by anything a caller hands in. Nothing
+ * else writes the link (the Brain's `linkMember`). Once per member.
+ */
+export const linkMemberAtSignIn = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string
+): Promise<void> => {
+  const member = await memberOf(env.DB, checked(idSchema, personId));
+  if (member === undefined) {
+    return;
+  }
+  const [user] = await drizzle(env.DB)
+    .select({ email: users.email, verified: users.emailVerified })
+    .from(users)
+    .where(eq(users.id, member.userId));
+  if (user === undefined || !user.verified) {
+    return;
+  }
+  await brain(env).linkMember({ member: member.userId, email: user.email });
+};
+
+/** The member `personId`'s own person entity, if linked and they may see it. */
+export const memberEntityAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string
+): Promise<EntityId | null> =>
+  await brain(env).memberEntity({ reader: await readerOf(env, personId) });
 
 /**
  * Version `version` of `source`, current or history, whole, for the

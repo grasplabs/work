@@ -17,6 +17,7 @@ import {
 } from "./entities.ts";
 import { erasuresSoFar, isPersonErasedSince, subjectOf } from "./erasure.ts";
 import { hashOf } from "./files.ts";
+import { linkedByName, proposeFor } from "./linking.ts";
 import { entityRowOf, lineageOfSource, lineageOfWriter } from "./memories.ts";
 import { readerSetOf } from "./reader-sets.ts";
 import { indexMemoryWords } from "./words.ts";
@@ -132,12 +133,15 @@ const erasedPerson = "The Brain refused it: what this adds was erased";
 /**
  * The entities of an add as rows: each known `id` (of its kind), else
  * the first holding one of its identifiers, or another entity of the add
- * with one of them, else a new one.
+ * with one of them, else, given no identifier, the one entity of its kind
+ * holding one of its names by memories of exactly the add's readers
+ * (linking.ts `linkedByName`), else a new one (in `made`).
  */
 const entityRowsOf = (
   sql: SqlStorage,
   { entities, reader }: Adding,
-  readerSet: number
+  readerSet: number,
+  made: Set<number>
 ): number[] => {
   const linked = new Map<string, number>();
   return entities.map((entity, index) => {
@@ -150,7 +154,10 @@ const entityRowsOf = (
         keys
           .map((key) => linked.get(key))
           .find((found) => found !== undefined) ??
-        linkedBy(sql, entity.kind, entity.identifiers, readerSet);
+        linkedBy(sql, entity.kind, entity.identifiers, readerSet) ??
+        (entity.identifiers.length === 0
+          ? linkedByName(sql, entity.kind, entity.names, readerSet)
+          : undefined);
     } else {
       const known = entityRowOf(sql, entity.id);
       // An id the add may not name is refused in the words of an unknown
@@ -164,13 +171,16 @@ const entityRowsOf = (
       }
       ({ row } = known);
     }
-    row ??= sql
-      .exec<{ row: number }>(
-        "INSERT INTO entities (id, kind) VALUES (?, ?) RETURNING row",
-        crypto.randomUUID(),
-        entity.kind
-      )
-      .one().row;
+    if (row === undefined) {
+      ({ row } = sql
+        .exec<{ row: number }>(
+          "INSERT INTO entities (id, kind) VALUES (?, ?) RETURNING row",
+          crypto.randomUUID(),
+          entity.kind
+        )
+        .one());
+      made.add(row);
+    }
     for (const key of keys) {
       if (!linked.has(key)) {
         linked.set(key, row);
@@ -405,7 +415,8 @@ export const addMemories = async (
       throw new Error(erasedPerson);
     }
     const readerSet = readerSetOf(db, adding.access);
-    const rows = entityRowsOf(sql, adding, readerSet);
+    const made = new Set<number>();
+    const rows = entityRowsOf(sql, adding, readerSet, made);
     const ids = rows.map(
       (row) =>
         sql
@@ -425,6 +436,10 @@ export const addMemories = async (
     const memories = adding.memories.map((memory, index) =>
       writeMemory(into, memory, planned[index], index)
     );
+    // A likely match of a new entity's names is a proposal, never a link.
+    for (const row of made) {
+      proposeFor(sql, row);
+    }
     if (adding.extracted !== undefined) {
       markExtracted(sql, adding.extracted, into);
     }

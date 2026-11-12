@@ -44,7 +44,7 @@ export const foldIdentifier = ({ type, value }: Identifier): string =>
 /**
  * An entity the reader may see: a memory they may read mentions it.
  */
-const mentionedSql = (entity: string): string => `(
+export const mentionedSql = (entity: string): string => `(
   EXISTS (SELECT 1 FROM memories AS m
     WHERE m.entity = ${entity} AND ${visibleSql("m")})
   OR EXISTS (SELECT 1 FROM memories AS m
@@ -57,7 +57,7 @@ const mentionedSql = (entity: string): string => `(
  * its source's current version's, the version not hidden by an erasure.
  * So everyone who may read an add with those readers may read it too.
  */
-const coveredSql = (alias: string): string => `(
+export const coveredSql = (alias: string): string => `(
   ${alias}.reader_set = ?3
   AND (${alias}.version_row IS NULL OR EXISTS (
     SELECT 1 FROM source_versions AS based
@@ -233,7 +233,7 @@ WHERE ${visibleSql("m")}
 ORDER BY asked.value, m.row, entity_names.rowid`;
 
 /** Entities found, as the reader sees them: with the names they may see. */
-const asSeen = (
+export const asSeen = (
   sql: SqlStorage,
   found: readonly { row: number; id: string; kind: string }[],
   reader: Reader

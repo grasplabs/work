@@ -6,7 +6,13 @@ import { z } from "zod";
 import { packAcross } from "./across.ts";
 import { bucketUnder } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
+import { readCard } from "./cards.ts";
 import {
+  cardRequestSchema,
+  memberEntityRequestSchema,
+  memberLinkSchema,
+  proposalDecisionSchema,
+  proposalsRequestSchema,
   confirmRequestSchema,
   contestedRequestSchema,
   entitiesRequestSchema,
@@ -29,6 +35,14 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  Card,
+  CardRequest,
+  EntityId,
+  MemberEntityRequest,
+  MemberLink,
+  Proposal,
+  ProposalDecision,
+  ProposalsRequest,
   AddedMemories,
   ConfirmRequest,
   ContestedFact,
@@ -86,6 +100,7 @@ import {
   erasuresUnfinished,
   isStoreErased,
   storeErasedAt,
+  subjectOf,
   keepMissingSubjects,
   ledgerPrefix,
   readLedgerStart,
@@ -102,6 +117,12 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
+import {
+  decideProposal,
+  linkMember,
+  listProposals,
+  memberEntity,
+} from "./linking.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   confirmMemory,
@@ -109,6 +130,7 @@ import {
   readMemories,
   retireMemory,
 } from "./memories.ts";
+import { readerSetOf } from "./reader-sets.ts";
 import {
   countingInto,
   countWithoutMeaning,
@@ -1435,6 +1457,91 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayRead(asked.reader);
     return (await this.#readable())
       ? readEntity(this.ctx.storage.sql, asked)
+      : null;
+  }
+
+  /** An entity's card as the reader sees it, built now (cards.ts). */
+  async readCard(request: CardRequest): Promise<Card | null> {
+    const asked = checked(cardRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? readCard(this.ctx.storage.sql, {
+          entity: asked.entity,
+          reader: asked.reader,
+          at: (asked.asOf ?? new Date()).getTime(),
+        })
+      : null;
+  }
+
+  /** The open proposals the reader may see (linking.ts). */
+  async listProposals(request: ProposalsRequest): Promise<Proposal[]> {
+    const asked = checked(proposalsRequestSchema, request);
+    this.#mayRead(asked.reader);
+    if (!(await this.#readable())) {
+      return [];
+    }
+    return listProposals(this.ctx.storage.sql, {
+      reader: asked.reader,
+      ...(asked.entity === undefined ? {} : { entity: asked.entity }),
+      limit: asked.limit,
+    });
+  }
+
+  /** The reader accepts or declines a proposal they may see (linking.ts). */
+  async decideProposal(
+    request: ProposalDecision
+  ): Promise<MemoryChangeOutcome> {
+    const { proposal, reader, accept } = checked(
+      proposalDecisionSchema,
+      request
+    );
+    this.#mayRead(reader);
+    // A join is the person's own: for their own set of readers alone.
+    const onlyFor = await subjectOf(reader.person);
+    return await this.#changing(async () => {
+      if (!(await this.#readable())) {
+        return "nothing";
+      }
+      return this.ctx.storage.transactionSync(() =>
+        decideProposal(
+          this.ctx.storage.sql,
+          { id: proposal, reader, accept, at: Date.now() },
+          {
+            readerSet: readerSetOf(this.#db, {
+              kind: "owner",
+              person: reader.person,
+            }),
+            onlyFor,
+          }
+        )
+      );
+    });
+  }
+
+  /** Records a member's verified sign-in: their person entity, once (linking.ts). */
+  async linkMember(link: MemberLink): Promise<void> {
+    const { member, email } = checked(memberLinkSchema, link);
+    this.#mayRead({ person: member, groups: [] });
+    const subject = await subjectOf(member);
+    await this.#changing(async () => {
+      await this.#readyToWrite();
+      this.ctx.storage.transactionSync(() => {
+        linkMember(this.ctx.storage.sql, {
+          member,
+          subject,
+          email,
+          at: Date.now(),
+        });
+      });
+    });
+  }
+
+  /** The reader's own person entity, if linked and they may see it (linking.ts). */
+  async memberEntity(request: MemberEntityRequest): Promise<EntityId | null> {
+    const { reader } = checked(memberEntityRequestSchema, request);
+    this.#mayRead(reader);
+    return (await this.#readable())
+      ? memberEntity(this.ctx.storage.sql, reader)
       : null;
   }
 

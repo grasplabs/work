@@ -4,7 +4,7 @@ import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
-import { eraseMemoriesOf, eraseMemoriesOn } from "./forget.ts";
+import { eraseLinksOf, eraseMemoriesOf, eraseMemoriesOn } from "./forget.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
@@ -585,6 +585,7 @@ const apply = (
     for (const readerSet of eraseMemoriesOf(sql, entry.subject, entry.at)) {
       dropUnusedReaderSet(sql, readerSet);
     }
+    eraseLinksOf(sql, entry.subject);
   }
   const stopped: string[] = [];
   for (const [subject, versions] of bySubject) {
