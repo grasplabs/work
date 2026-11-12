@@ -794,7 +794,6 @@ describe(
         personId,
         reader: { person: personId, groups: [`team:${team}`] },
         sharedWord,
-        unknownWord: `u${unique()}`,
         markers: Object.values(markers),
         hiddenVersions: erased,
         hiddenInstructionFiles,

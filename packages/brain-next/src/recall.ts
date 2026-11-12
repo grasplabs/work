@@ -63,8 +63,11 @@ type AsOf = [] | [number];
  * may read in the versions searched, for a statement whose `chunks` are
  * joined and whose `?2` and `?3` are the reader (`readableSql`): the
  * current versions, or, as of the moment bound at `asOf` (its parameter's
- * number), the version of each source added last by then. Either only if
- * the reader is among its readers and the source's current version's.
+ * number), the version of each source added last by then that no
+ * erasure holds (`erasing_versions`, until the tick deletes it). Either
+ * only if the reader is among its readers and the source's current
+ * version's: a source whose current version is erased has no pointer, so
+ * it answers nothing, as `readVersion` does.
  * Ends in a WHERE the caller adds to with AND.
  */
 const searched = (asOf: number | undefined): string =>
@@ -79,11 +82,13 @@ const searched = (asOf: number | undefined): string =>
   JOIN source_versions AS current
     ON current.row = current_versions.version_row
   WHERE source_versions.added_at <= ?${asOf}
+    AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)
     AND NOT EXISTS (
       SELECT 1 FROM source_versions AS later
       WHERE later.source = source_versions.source
         AND later.version > source_versions.version
         AND later.added_at <= ?${asOf}
+        AND later.row NOT IN (SELECT version_row FROM erasing_versions)
     )
     AND source_versions.reader_set IN (SELECT reader_set FROM readable)
     AND current.reader_set IN (SELECT reader_set FROM readable)`;

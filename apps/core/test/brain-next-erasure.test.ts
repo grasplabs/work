@@ -1,4 +1,4 @@
-import { brainOf } from "@grasp-os/brain-next/contract";
+import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type {
   Access,
   ChunkRef,
@@ -131,8 +131,11 @@ const recalledAs = async (
   personId: string,
   question: string
 ): Promise<string[]> => {
-  const { chunks } = await recallAs(env, personId, question);
-  return chunks.map(({ text }) => text);
+  const { items } = await recallAs(env, personId, {
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return items.map(({ text }) => text);
 };
 
 /** `source`'s `version` as `personId` reads it: null if not. */
@@ -2295,3 +2298,207 @@ describe(
     });
   }
 );
+
+/** Adds as `add` does with the clock at `at`. */
+const addAt = async (
+  at: number,
+  ...adding: Parameters<typeof add>
+): Promise<number> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: at });
+  try {
+    return await add(...adding);
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/** Every version `personId`'s packs cite for the questions, as of each moment. */
+const citedBy = async (
+  personId: string,
+  questions: readonly string[],
+  moments: readonly (Date | undefined)[]
+): Promise<string[]> => {
+  const packs = await Promise.all(
+    questions.flatMap((question) =>
+      moments.map(
+        async (asOf) =>
+          await recallAs(env, personId, {
+            question,
+            budget: { tokens: recallBudgetMax },
+            ...(asOf === undefined ? {} : { asOf }),
+          })
+      )
+    )
+  );
+  return packs.flatMap(({ items }) =>
+    items.map(({ source, version }) => `${source.id} v${version}`)
+  );
+};
+
+// The cited pack (GRA-1728) after an erasure: no way of recall (words,
+// an exact ID, a quoted phrase, as of a moment) reaches an erased version,
+// before the tick deletes it or after; a source added again for a person
+// after their erasure is cited at its new version; and while the store
+// replays its ledger, recall is refused as every call is.
+describe("a pack after an erasure", { timeout: 120_000 }, () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("never cites a version erased with its source or its person, by words, ID, phrase or as of when it was current, before the tick deletes it or after", async () => {
+    const [reader, erased] = await Promise.all([person(), person()]);
+    const team = await teamOf(reader, erased);
+    const [sourceMark, personMark] = [newMark(), newMark()];
+    const hour = 3_600_000;
+    const start = Date.now() - 10 * hour;
+    // More of the erased person's own chunks than one batch deletes, added
+    // first: the erasure returns with the versions below still to delete.
+    const access: Access = { kind: "owner", person: erased };
+    await chunkedSource(newSource(), access, 600, "Archive one");
+    await chunkedSource(newSource(), access, 600, "Archive two");
+    // A source of the reader's, two versions, erased whole.
+    const whole = newSource();
+    await addAt(
+      start,
+      whole,
+      `Draft ${wordOf(sourceMark)} INV-${sourceMark} "night rota ${sourceMark}"`,
+      owner(reader)
+    );
+    await addAt(
+      start + 2 * hour,
+      whole,
+      `Final ${wordOf(sourceMark)} INV-${sourceMark} night rota ${sourceMark}`,
+      owner(reader)
+    );
+    // A team's source with a middle version the erased person alone could
+    // read: as of then, the version before it answers, never it.
+    const middle = newSource();
+    const before = await addAt(
+      start,
+      middle,
+      `Team plan ${wordOf(personMark)}`,
+      { kind: "team", teamId: team }
+    );
+    await addAt(
+      start + 2 * hour,
+      middle,
+      `Private plan ${wordOf(personMark)} INV-${personMark} night rota ${personMark}`,
+      owner(erased)
+    );
+    await addAt(
+      start + 4 * hour,
+      middle,
+      `Team plan again ${wordOf(personMark)}`,
+      {
+        kind: "team",
+        teamId: team,
+      }
+    );
+    const questions = (mark: string): string[] => [
+      wordOf(mark),
+      `INV-${mark}`,
+      `"night rota ${mark}"`,
+    ];
+    const moments = [
+      undefined,
+      new Date(start + hour),
+      new Date(start + 3 * hour),
+      new Date(start + 5 * hour),
+    ];
+
+    await eraseSource(env, { source: whole, reason: "deleted" });
+    await erasePerson(env, { personId: erased, reason: "withdrawn" });
+    const { erasing: left } = await brainWorkOverview(env);
+    const erasing = {
+      source: await citedBy(reader, questions(sourceMark), moments),
+      person: await citedBy(reader, questions(personMark), moments),
+    };
+    await tickUntilErased();
+    const deleted = {
+      source: await citedBy(reader, questions(sourceMark), moments),
+      person: await citedBy(reader, questions(personMark), moments),
+    };
+
+    // Of the team's source: by its words, the version current at each
+    // moment that isn't erased (v1 for the hours v1 and the erased v2
+    // were current, v3 since and now); never v2, and nothing of the
+    // erased source.
+    const team1 = `${middle.id} v${before}`;
+    const team3 = `${middle.id} v3`;
+    const expected = {
+      source: [],
+      person: [team3, team1, team1, team3],
+    };
+    expect({ left: left > 0, erasing, deleted }).toStrictEqual({
+      left: true,
+      erasing: expected,
+      deleted: expected,
+    });
+  });
+
+  it("cites a source added again for a person after their erasure at its new version", async () => {
+    const reader = await person();
+    const mark = newMark();
+    const source = newSource();
+    await add(source, `Old note ${wordOf(mark)} INV-${mark}`, owner(reader));
+    await erasePerson(env, { personId: reader, reason: "withdrawn" });
+    await tickUntilErased();
+    const again = `New note ${wordOf(mark)} INV-${mark}`;
+    const version = await add(source, again, owner(reader));
+
+    const { items } = await recallAs(env, reader, {
+      question: `INV-${mark}`,
+      budget: { tokens: recallBudgetMax },
+    });
+
+    expect(
+      items.map(({ source: cited, version: at, text }) => ({
+        source: cited,
+        version: at,
+        text,
+      }))
+    ).toStrictEqual([{ source, version, text: again }]);
+    await expect(historyAs(reader, source, version)).resolves.toBe(again);
+  });
+
+  it("refuses a recall while the store replays its ledger after a restore, as every other call", async () => {
+    const reader = await person();
+    const source = newSource();
+    await add(source, "Recalled once through", owner(reader));
+    const backup = await copyOfStore();
+    for (let erased = 0; erased < 9; erased += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await erasePerson(env, {
+        personId: `nobody-${crypto.randomUUID()}`,
+        reason: "withdrawn",
+      });
+    }
+
+    await restoreStore(backup);
+    // Each read of the ledger takes 4 s, as the clock sees it: a step
+    // reads three of nine, so the store is still replaying after it.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    const counted = countLedgerCalls(() => {
+      vi.setSystemTime(Date.now() + 4000);
+    });
+    try {
+      const recalled = await settled(
+        recallAs(env, reader, {
+          question: "recalled",
+          budget: { tokens: recallBudgetMax },
+        })
+      );
+      const { ledgerReplay } = await brainWorkOverview(env);
+
+      expect({ recalled, ledgerReplay }).toStrictEqual({
+        recalled: {
+          error:
+            "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
+        },
+        ledgerReplay: "replaying",
+      });
+    } finally {
+      await counted.restore();
+    }
+  });
+});
