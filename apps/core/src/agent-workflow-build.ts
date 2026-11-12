@@ -11,6 +11,7 @@ import type {
   WorkflowDraft,
 } from "@grasp-os/shared/workflow-resources";
 import {
+  brainActions,
   formatLimits,
   reservedStepIds,
   workflowSchemaUrl,
@@ -382,8 +383,9 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Asks for a permission for the workflow itself (a connection its
-   * bindings are served by, or a collection), as its builders do: it
-   * allows nothing until an admin grants it.
+   * bindings are served by, or the platform's `brain` to recall the
+   * Brain), as its builders do: it allows nothing until an admin grants
+   * it.
    */
   async requestPermission(
     workflow: unknown,
@@ -483,14 +485,15 @@ const workflowBuildDeclaration = `/**
  * events?: { [alias]: { contract } }, files?: { [alias]: { contract } }, brain?: { [alias]: { contract } } }\`.
  * \`ai\` is the workflow's one model (its alias is \`ai\`); a connection, decision or event permission names a contract of its kind from
  * \`catalog()\` (an event contract's \`events\` are the types a wait for it takes), a files permission a
- * \`files\` one and a brain permission a \`knowledge\` one. An apps permission names an App by its ID and each
+ * \`files\` one and a brain permission a \`brain\` one. An apps permission names an App by its ID and each
  * of its queries or mutations the workflow calls by the stable ID the App's definition gives it (its
  * \`functions\` list), with the function's path (\`notes.create\`) as a hint the code's member is named by;
  * never an action. The ID is what is called, so the App renaming the function breaks nothing; a run calls
  * it only once an admin has granted the workflow \`call\` on that function, and it acts as the run's person,
  * within the App's roles and row rules. Each alias is used once across every kind. A files permission is
- * the run's own files, and a brain permission one Brain collection, read as the run's person may: a
- * \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
+ * the run's own files, and a brain permission the Brain, read as the run's person's teams may (never
+ * what only they may read), served by the workflow's own grant of the platform's \`brain\`
+ * (\`requestPermission\` below): a \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
  * sha256 }\`, never its content, and found by its \`file\` ID in its own run alone.
  * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <descriptor> }\`, at
  * most 64 KB in all.
@@ -508,9 +511,10 @@ const workflowBuildDeclaration = `/**
  *   (\`{ file }\`: \`{ file: <reference>, text }\`, a text, CSV, Markdown or JSON file of at most 512 KB,
  *   whole), \`write\` (\`{ name, type, text }\`, \`type\` one of text/plain, text/csv, text/markdown and
  *   application/json: its reference), \`list\` (\`{}\`: the references) or \`delete\` (\`{ file }\`).
- *   \`{ brain, action, args }\` reads Brain collection \`brain\`: \`search\` (\`{ text, limit? }\`:
- *   \`[{ id, title, excerpt }]\`), \`read\` (\`{ id }\`: \`{ title, text }\`) or \`recall\` (\`{ query }\`:
- *   the evidence that applies, \`items\`, each citing its source);
+ *   \`{ brain, action, args }\` recalls the Brain through brain permission \`brain\`: ${brainActions.map((action) => `\`${action}\``).join(", ")}
+ *   (\`{ question, budget: { tokens }, asOf? }\`, \`asOf\` an ISO 8601 date-time with its offset: a pack,
+ *   \`{ items, notFound, truncated }\`, each item citing its \`source\`, \`version\` and \`position\`, with its
+ *   \`text\`);
  *   \`{ app, function, args?, timeout? }\` calls a query or mutation of an App (\`app\` an apps permission's
  *   alias, \`function\` an ID it lists; its result is what the function returns);
  * - \`generate\`: \`{ instructions, input, returns, timeout? }\` asks the workflow's model (\`permissions.ai\`)
@@ -604,11 +608,11 @@ workflowBuild: {
   }>;
   /** Binds an exact published version to an App the person builds, replacing that alias's binding. */
   bind(workflow: string, binding: { app: string; alias: string; version: number }): Promise<{ id: string; app: string; alias: string; version: number }>;
-  /** Asks for a permission for the workflow itself (a connection for its connection permissions, or a collection), \`binding\` its alias; nothing holds until an admin grants it. */
+  /** Asks for a permission for the workflow itself (a connection for its connection permissions, or \`{ type: "platform" }\` with actions \`["brain"]\` for its brain permission), \`binding\` its alias; nothing holds until an admin grants it. */
   requestPermission(workflow: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
-      | { type: "collection"; collectionId: string };
+      | { type: "platform" };
     actions: string[];
     binding: string;
   }): Promise<{ id: string; status: string }>;

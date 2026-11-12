@@ -1309,9 +1309,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Asks for a permission for `app` (a connection, a collection or a
-   * workflow), as its builders do: it allows
-   * nothing until an admin grants it.
+   * Asks for a permission for `app` (a connection, the platform's `brain`
+   * or a workflow), as its builders do: it allows nothing until an admin
+   * grants it.
    */
   async requestPermission(app: unknown, request: unknown): Promise<Permission> {
     return await this.#build(
@@ -1782,14 +1782,15 @@ build: {
   /**
    * Asks for a permission the App needs, as its builders do: an admin
    * grants it or not, and it allows nothing until then. \`binding\` is the
-   * name the App's code reaches it by, such as \`MAIL\`. On a collection,
-   * an App asks only to \`read\`: it never writes one (what it writes goes
-   * to its own store).
+   * name the App's code reaches it by, such as \`MAIL\`. To recall the
+   * Brain (\`ctx.brain.recall\`, declared as \`permission.brain({ operations:
+   * ["recall"] })\`), it asks for \`{ type: "platform" }\` with actions
+   * \`["brain"]\`.
    */
   requestPermission(app: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
-      | { type: "collection"; collectionId: string }
+      | { type: "platform" }
       | { type: "workflow"; workflowId: string };
     actions: string[];
     binding: string;
