@@ -371,9 +371,9 @@ const cast = {
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
   chat: { user: "user" },
-  chatDock: { user: "user" },
+  globalChat: { user: "user" },
   exports: { admin: "admin" },
-  chatBuilds: { builder: "builder" },
+  chatBuilds: { builder: "builder", user: "user" },
   chatPackages: { builder: "builder" },
   chartPackages: { builder: "builder" },
   dashboard: { admin: "admin" },
@@ -394,7 +394,6 @@ const cast = {
   brainMemoryShare: { admin: "admin", one: "user", two: "user" },
   brainQuestions: { admin: "admin", member: "user" },
   boardGoals: { admin: "admin", member: "user" },
-  brainChat: { member: "user" },
   tour: { member: "user" },
   setupVoice: { admin: "admin" },
   setupConnect: { admin: "admin" },
@@ -729,8 +728,8 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
- * Writes `files` to the App (null deletes one), commits them and makes
- * that version current.
+ * Writes `files` to the App (null deletes one), commits them and publishes
+ * that version.
  */
 export const release = async (
   api: ReturnType<typeof apiOf>["api"],
@@ -739,8 +738,7 @@ export const release = async (
   message: string
 ): Promise<void> => {
   const { version } = await commitApp(api.apps.files, app, files, message);
-  await api.apps.versions.setCurrent(app, version);
-  // Published, for the people it is shared with (a draft is its
+  // Live, for the people it is shared with (until then, its
   // builders' alone).
-  await api.apps.publish(app);
+  await api.apps.versions.publish(app, version);
 };

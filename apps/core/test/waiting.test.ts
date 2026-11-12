@@ -2,7 +2,6 @@ import type { WaitingFeed, WaitingKind } from "@grasp-os/shared/waiting";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { chatOf, codeStep, says } from "./agent-chat.ts";
-import { commitApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -186,35 +185,6 @@ describe("what waits", slow, () => {
       status: "active",
       waiting: [],
       by: [{ type: "person", userId: admin.userId }],
-    });
-  });
-
-  it("puts a version up for review before the member who answers for its App, not every admin who sees it", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const admin = await signedInApi(idp, "admin");
-    const { id } = await builder.api.apps.create({ name: "Invoices" });
-    await commitApp(
-      builder.api.apps.files,
-      id,
-      { "AGENTS.md": "# Invoices\n" },
-      "First"
-    );
-    await builder.api.apps.versions.propose(id, 1);
-
-    const [mine, admins] = await Promise.all([
-      itemsOf(builder, "goLive"),
-      itemsOf(admin, "goLive"),
-    ]);
-    expect({
-      builder: mine.map(({ app, version, verdicts }) => ({
-        app,
-        version,
-        verdicts,
-      })),
-      admin: admins.filter(({ app }) => app.id === id),
-    }).toStrictEqual({
-      builder: [{ app: { id, name: "Invoices" }, version: 1, verdicts: [] }],
-      admin: [],
     });
   });
 

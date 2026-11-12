@@ -1,23 +1,22 @@
+import { definitionText } from "@grasp-os/runtime/definition";
 import { expect } from "@playwright/test";
 
-import {
-  commitApp,
-  testApp,
-  withFiles,
-} from "../apps/core/test/app-definitions.ts";
+import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
+import { writeDraft } from "./draft-writes.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
-// The side panel of a chat shows the App being built: a version up for
-// review, with what core says it changes, and a builder making it
-// current from there. The local stack reaches no model, so the version is
-// proposed through the builder's own API, as the chat's agent proposes
-// one (`env.build.propose`); the agent's drafts, checks and proposals
-// themselves are core's tests (apps/core/test/agent-builds.test.ts).
+// A chat's agent builds an App's draft, and a builder publishes it from
+// the App's workspace: the draft checked and live as the App's next
+// version, in one step. The local stack reaches no model,
+// so the draft is written straight into core's database, as the agent's
+// `env.build.write` leaves it (draft-writes.ts); the agent's writes and
+// checks, and what a publish refuses, are core's tests
+// (apps/core/test/agent-builds.test.ts).
 
 /**
- * The desk's data and functions, of spec 8's layout: an invoices table,
- * and a mutation that books one, which changes the App's data.
+ * What the chat's agent adds to the desk, of spec 8's layout: an invoices
+ * table, and a mutation that books one, which changes the App's data.
  */
 const invoices = testApp(
   {
@@ -42,23 +41,27 @@ export const book = mutation({
   }
 );
 
+/**
+ * The desk's page, as its builders' lint wants it (a function component
+ * as an arrow function): publishing checks every file of the draft, the
+ * version's own included.
+ */
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
 
-function Desk() {
-  return (
-    <main className="flex flex-col gap-4 p-6">
-      <Button variant="outline">Approve</Button>
-    </main>
-  );
-}
+const Desk = () => (
+  <main className="flex flex-col gap-4 p-6">
+    <Button variant="outline">Approve</Button>
+  </main>
+);
+
 export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-test("the side panel shows an App being built, and a builder makes its version current", async ({
+test("a builder publishes the draft a chat built from the App's workspace, which makes it the App's next version, live", async ({
   pageOf,
 }) => {
-  const { builder } = peopleIn("chatBuilds");
+  const { builder, user } = peopleIn("chatBuilds");
   const { core, api } = apiOf(builder);
   const tag = crypto.randomUUID().slice(0, 8);
   const name = `Invoice desk ${tag}`;
@@ -67,46 +70,60 @@ test("the side panel shows an App being built, and a builder makes its version c
     const { version } = await commitApp(
       api.apps.files,
       app.id,
-      withFiles(invoices, { "src/routes/index.tsx": appPage }),
-      "An invoice desk for invoices@"
+      testApp({ name: "Invoice desk" }, { "src/routes/index.tsx": appPage }),
+      "An invoice desk"
     );
-    await api.apps.versions.propose(app.id, version);
+    await api.apps.versions.publish(app.id, version);
+    // Shared with a colleague, who uses the live version.
+    await api.apps.members.add(app.id, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    // The chat's agent adds the desk's invoices, a table and a mutation, to
+    // the draft.
     const chat = await api.chats.create(`Build ${tag}`);
+    await writeDraft(
+      builder.userId,
+      chat.id,
+      app.id,
+      version,
+      invoices.files,
+      definitionText(invoices.definition)
+    );
 
     const page = await pageOf(builder);
-    await page.goto(`/?chat=${chat.id}`);
-    await page.getByRole("button", { name: "Side panel" }).click();
-    const built = page
-      .getByRole("complementary", { name: "Side panel" })
-      .getByRole("region", { name: "Being built" });
-    await expect(built).toContainText(
-      `${name}: version ${version} waiting for review`
-    );
-    await expect(built.getByRole("region", { name: "Files" })).toHaveText(
-      /Added src\/routes\/index\.tsx/u
-    );
-    await expect(built).toContainText(
-      "Nothing runs yet: this would be the App's first current version."
-    );
-    // Who proposed it, and the proposer's own words, labelled as such.
-    await expect(built).toContainText("Committed by a person.");
-    await expect(built.getByRole("blockquote")).toHaveText(
-      "In the proposer's wordsAn invoice desk for invoices@"
-    );
-    const makeCurrent = built.getByRole("button", {
-      name: `Make version ${version} current`,
-      exact: true,
+    await page.goto(`/apps/${app.id}`);
+    // The changes only its builder sees, under the bar: Share changes
+    // makes them the App's next version, for everyone it is shared with.
+    await expect(page.getByText(/^\d+ changes? only you see$/u)).toBeVisible({
+      timeout: 20_000,
     });
-    await expect(makeCurrent).toBeEnabled();
+    await page
+      .getByRole("button", { name: "Share changes" })
+      .click({ timeout: 20_000 });
+    // Its sheet: Share, once the changes are checked.
+    await page
+      .getByRole("dialog", { name: `Share ${name}` })
+      .getByRole("button", { name: "Share", exact: true })
+      .click({ timeout: 20_000 });
+    await expect(page.getByText("Your changes are shared")).toBeVisible();
 
-    await makeCurrent.click();
-    await expect(built).toHaveCount(0);
+    // Live as the App's next version; the draft starts over from it.
     await expect
-      .poll(async () => {
-        const listed = await api.apps.list();
-        return listed.find(({ id }) => id === app.id)?.currentVersion;
-      })
-      .toBe(version);
+      .poll(
+        async () => {
+          const { currentVersion } = await api.apps.get(app.id);
+          return currentVersion;
+        },
+        { timeout: 20_000 }
+      )
+      .toBeGreaterThan(version);
+    const live = await api.apps.get(app.id);
+    expect(await api.apps.drafts.get(app.id)).toMatchObject({
+      base: live.currentVersion,
+      changed: [],
+    });
   } finally {
     core[Symbol.dispose]();
   }

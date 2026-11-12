@@ -22,7 +22,7 @@ import {
 } from "./people.ts";
 
 // The Notes App end to end on the platform's own runtime and React SDK: a
-// builder's App of spec 8's layout, sealed and current, its page in its
+// builder's App of spec 8's layout, sealed and live, its page in its
 // sandboxed frame reading and writing the App's store through the session
 // client the platform mounts, with the generated `@server/_generated/api` references, an
 // function-bound create form and a record editor with explicit Save.

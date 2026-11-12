@@ -111,7 +111,7 @@ export const Route = createFileRoute("/")({ component: Desk });
 
 /**
  * A new App of `appFiles` whose `followUp` binds version 1 of a new
- * holding workflow of `builder`'s, released and current, the App's
+ * holding workflow of `builder`'s, released and live, the App's
  * `start` grant given by `admin`. Bound
  * before the release, so the page's `workflows.followUp` is generated
  * from the binding.
@@ -144,7 +144,7 @@ const boundApp = async (
       appFiles(),
       "Requests"
     );
-    await builds.api.apps.versions.setCurrent(app, version);
+    await builds.api.apps.versions.publish(app, version);
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

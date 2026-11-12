@@ -159,6 +159,7 @@ const objectNamespaces = (
 > => ({
   WORKSPACES: env.WORKSPACES,
   APPS: env.APPS,
+  APP_PREVIEWS: env.APP_PREVIEWS,
   AUDIT_LOG: env.AUDIT_LOG,
   BUILTINS: env.BUILTINS,
   CLOCK: env.CLOCK,

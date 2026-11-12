@@ -29,7 +29,7 @@ const {
 } = await import("@tanstack/react-router");
 const { routeBy } = await import("@grasp-os/runtime/page");
 
-// A chat's preview taking an update of its pages, with React, React Fast
+// The App's preview taking an update of its pages, with React, React Fast
 // Refresh and TanStack Router themselves: the route tree's module
 // evaluated (its components registered by file and name, as the
 // compiler's instrumentation does), routed by (page-runtime.ts

@@ -1337,16 +1337,11 @@ const readTextsOf = async (
 
 /**
  * The persona's Workspace object's tables that a chat's code could change
- * and no turn changes on its own: drafts
- * and dashboards; and its chats, messages, sources and code runs, but
- * the trial's own chat, whose turns write those as they go.
+ * and no turn changes on its own: dashboards; and its chats, messages,
+ * sources and code runs, but the trial's own chat, whose turns write those
+ * as they go. Apps' drafts are core's (app-drafts.ts).
  */
-const workspaceTables = [
-  "chat_drafts",
-  "chat_draft_files",
-  "dashboards",
-  "dashboard_widgets",
-] as const;
+const workspaceTables = ["dashboards", "dashboard_widgets"] as const;
 
 /** Tables of chats' history, by the column naming their chat. */
 const historyTables = [

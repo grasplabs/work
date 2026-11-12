@@ -16,7 +16,6 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
@@ -31,6 +30,7 @@ import {
   RenameField,
   useChatChanges,
 } from "./chat-menus.tsx";
+import { useOpenChat } from "./chat-presence.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
 // The person's chats in one window, one quiet icon and ⌘K away, in place
@@ -243,26 +243,35 @@ const shownChats = ({
   return found.hits.flatMap(({ chat }) => byId.get(chat.id) ?? []);
 };
 
-/** The window and what it shows, while it is open. */
-export const ChatWindow = ({
-  open,
-  onOpenChange,
+/**
+ * The person's chats: a search on top, a new chat where it offers one
+ * (`onNew`), then the chats by when they were last used, each to open,
+ * rename or delete. Read each time it is `shown`, so it shows what changed
+ * elsewhere. In the chats window and the Recents on Chat's own page.
+ */
+export const ChatList = ({
+  shown,
+  onOpen,
+  onNew,
+  fill = false,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  shown: boolean;
+  onOpen: (chatId: string) => void;
+  onNew?: () => void;
+  /** Fills a window of fixed height, rather than sizing to the chats. */
+  fill?: boolean;
 }) => {
   const { t, i18n } = useLingui();
-  const navigate = useNavigate();
   const activeId = useActiveChat();
   const [search, setSearch] = useState("");
   const [deleting, setDeleting] = useState<ChatSummary>();
   const said = useSaidSearch();
   const listing = useListed();
-  const [readOnOpen, setReadOnOpen] = useState(false);
-  // Read again each time it opens, so it shows what changed elsewhere.
-  if (open !== readOnOpen) {
-    setReadOnOpen(open);
-    if (open) {
+  const [readWhenShown, setReadWhenShown] = useState(false);
+  // Read again each time it shows, so it shows what changed elsewhere.
+  if (shown !== readWhenShown) {
+    setReadWhenShown(shown);
+    if (shown) {
       setSearch("");
     }
   }
@@ -270,10 +279,10 @@ export const ChatWindow = ({
     listing.read();
   });
   useEffect(() => {
-    if (open) {
+    if (shown) {
       read();
     }
-  }, [open]);
+  }, [shown]);
 
   const chats = listing.listed ?? [];
   const query = search.trim();
@@ -282,90 +291,76 @@ export const ChatWindow = ({
   const hits = new Map((answered?.hits ?? []).map((hit) => [hit.chat.id, hit]));
   const now = new Date();
   const groups = groupChats(shownChats({ chats, query, found: answered }), now);
-  const openChat = (chatId: string): void => {
-    onOpenChange(false);
-    void navigate({ to: "/", search: { chat: chatId } });
-  };
-  const newChat = (): void => {
-    onOpenChange(false);
-    setActiveChat(undefined);
-    void navigate({ to: "/", search: {} });
-  };
   return (
     <>
-      <CommandDialog
-        className="top-1/8 sm:max-w-3xl"
-        description={t`Search your chats, and open one.`}
-        onOpenChange={onOpenChange}
-        open={open}
-        title={t`Chats`}
+      <Command
+        // cmdk names its search by a label of its own: this one.
+        label={t`Search chats`}
+        loop
+        shouldFilter={false}
       >
-        <Command
-          flush
-          // cmdk names its search by a label of its own: this one.
-          label={t`Search chats`}
-          loop
-          shouldFilter={false}
+        <CommandInput
+          aria-label={t`Search chats`}
+          onValueChange={(value) => {
+            setSearch(value);
+            said.search(value);
+          }}
+          placeholder={t`Search chats`}
+          size={fill ? "lg" : "default"}
+          value={search}
+        />
+        <div
+          className={
+            fill ? "flex h-112 min-h-0 flex-col" : "flex min-h-0 flex-col"
+          }
         >
-          <CommandInput
-            aria-label={t`Search chats`}
-            onValueChange={(value) => {
-              setSearch(value);
-              said.search(value);
-            }}
-            placeholder={t`Search chats`}
-            size="lg"
-            value={search}
-          />
-          <div className="flex h-112 min-h-0 flex-col">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex border-b p-2">
-                <Button onClick={newChat} size="sm" variant="outline">
-                  <PlusIcon data-icon="inline-start" />
-                  <Trans>New chat</Trans>
-                </Button>
-              </div>
-              <ErrorText>{listing.failure ?? said.failure}</ErrorText>
-              <CommandList fill>
-                {listing.listed === undefined ? null : (
-                  <CommandEmpty>
-                    {searching ? (
-                      <Trans>No chat has that.</Trans>
-                    ) : (
-                      <Trans>No chats here yet.</Trans>
-                    )}
-                  </CommandEmpty>
-                )}
-                {groups.map((group) => (
-                  <CommandGroup
-                    heading={i18n._(periodLabel[group.period])}
-                    key={group.period}
-                  >
-                    {group.chats.map((chat) => (
-                      <ChatRow
-                        active={chat.id === activeId}
-                        chat={chat}
-                        hit={hits.get(chat.id)}
-                        key={chat.id}
-                        now={now}
-                        onChanged={() => {
-                          listing.read();
-                        }}
-                        onDelete={() => {
-                          setDeleting(chat);
-                        }}
-                        onOpen={() => {
-                          openChat(chat.id);
-                        }}
-                      />
-                    ))}
-                  </CommandGroup>
-                ))}
-              </CommandList>
+          {onNew === undefined ? null : (
+            <div className="flex border-b p-2">
+              <Button onClick={onNew} size="sm" variant="outline">
+                <PlusIcon data-icon="inline-start" />
+                <Trans>New chat</Trans>
+              </Button>
             </div>
-          </div>
-        </Command>
-      </CommandDialog>
+          )}
+          <ErrorText>{listing.failure ?? said.failure}</ErrorText>
+          <CommandList fill={fill}>
+            {listing.listed === undefined ? null : (
+              <CommandEmpty>
+                {searching ? (
+                  <Trans>No chat has that.</Trans>
+                ) : (
+                  <Trans>No chats here yet.</Trans>
+                )}
+              </CommandEmpty>
+            )}
+            {groups.map((group) => (
+              <CommandGroup
+                heading={i18n._(periodLabel[group.period])}
+                key={group.period}
+              >
+                {group.chats.map((chat) => (
+                  <ChatRow
+                    active={chat.id === activeId}
+                    chat={chat}
+                    hit={hits.get(chat.id)}
+                    key={chat.id}
+                    now={now}
+                    onChanged={() => {
+                      listing.read();
+                    }}
+                    onDelete={() => {
+                      setDeleting(chat);
+                    }}
+                    onOpen={() => {
+                      onOpen(chat.id);
+                    }}
+                  />
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </div>
+      </Command>
       {deleting === undefined ? null : (
         <DeleteChatDialog
           active={deleting.id === activeId}
@@ -380,5 +375,52 @@ export const ChatWindow = ({
         />
       )}
     </>
+  );
+};
+
+/**
+ * Opens chat `chatId`, or a new one, in Grasp's chat (global-chat.tsx),
+ * where this page allows it (chat-presence.ts), so the person stays where
+ * they are.
+ */
+export const useSelectChat = () => {
+  const openHere = useOpenChat();
+  return (chatId?: string): void => {
+    setActiveChat(chatId);
+    openHere();
+  };
+};
+
+/** The window and what it shows, while it is open. */
+export const ChatWindow = ({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
+  const { t } = useLingui();
+  const selectChat = useSelectChat();
+  return (
+    <CommandDialog
+      className="top-1/8 sm:max-w-3xl"
+      description={t`Search your chats, and open one.`}
+      onOpenChange={onOpenChange}
+      open={open}
+      title={t`Chats`}
+    >
+      <ChatList
+        fill
+        onNew={() => {
+          onOpenChange(false);
+          selectChat();
+        }}
+        onOpen={(chatId) => {
+          onOpenChange(false);
+          selectChat(chatId);
+        }}
+        shown={open}
+      />
+    </CommandDialog>
   );
 };

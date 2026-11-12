@@ -6,15 +6,17 @@ import { ownFiles } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { definitionRefusal } from "../src/app-definition.ts";
-import { draftOverLatest } from "../src/apps.ts";
+import { findApp } from "../src/apps.ts";
+import { memberOf } from "../src/auth/identity.ts";
+import { reviewDraft } from "../src/version-review.ts";
 import {
   commitApp,
   definitionInput,
@@ -316,8 +318,8 @@ export const Route = createFileRoute("/")({ component: Page });
     });
   });
 
-  it("reviews a change of the definition as a change of the server code, with what it does to the records, renames included", async () => {
-    const { apps } = await appsApi("admin");
+  it("reviews a change of the definition in a draft as a change of the server code, with what it does to the records, renames included", async () => {
+    const { apps, userId } = await appsApi("admin");
     const app = await newApp(apps);
     const two = definitionOf({
       name: "Invoice desk",
@@ -351,7 +353,7 @@ export const Route = createFileRoute("/")({ component: Page });
       "Notes",
       definitionInput(two)
     );
-    await apps.versions.setCurrent(app.id, 1);
+    await apps.versions.publish(app.id, 1);
     await apps.files.commit(
       app.id,
       unchanged,
@@ -374,23 +376,36 @@ export const Route = createFileRoute("/")({ component: Page });
         tables: [{ ...table, fields: [{ ...title, name: "heading" }, body] }],
       })
     );
+    // A draft holding each version, against version 1, live.
+    const live = await findApp(env, app.id);
+    const by = await memberOf(env.DB, userId);
+    if (by === undefined) {
+      throw new Error("Not a member");
+    }
+    const reviewOf = async (version: number) =>
+      await reviewDraft(env, by, live, {
+        base: version,
+        changes: {},
+        definition: null,
+        revision: 0,
+      });
     const [swappedReview, filesOnly, renamedReview] = await Promise.all([
-      apps.versions.review(app.id, 2),
-      apps.versions.review(app.id, 3),
-      apps.versions.review(app.id, 4),
+      reviewOf(2),
+      reviewOf(3),
+      reviewOf(4),
     ]);
     expect({
-      files: swappedReview.files,
+      serverFiles: swappedReview.serverFiles,
       server: swappedReview.server,
       // The store takes no swap of two fields' names: it needs a migration.
-      refused: swappedReview.schema?.refused.map(({ reason }) => reason),
-      filesOnly: [filesOnly.server, filesOnly.schema],
-      renamed: renamedReview.schema?.renamedFields,
+      refused: swappedReview.plan?.refused.map(({ reason }) => reason),
+      filesOnly: [filesOnly.server, filesOnly.plan?.renamedFields],
+      renamed: renamedReview.plan?.renamedFields,
     }).toStrictEqual({
-      files: [],
+      serverFiles: [],
       server: "modified",
       refused: ["name_taken", "name_taken"],
-      filesOnly: [null, null],
+      filesOnly: [null, []],
       renamed: [{ table: "notes", from: "title", to: "heading" }],
     });
   });
@@ -432,7 +447,7 @@ export const Route = createFileRoute("/")({ component: Page });
     } catch (error) {
       refusal = error;
     }
-    const seal = await outcome(apps.versions.setCurrent(app.id, 1));
+    const seal = await outcome(apps.versions.publish(app.id, 1));
     const versions = await apps.versions.list(app.id);
     expect({
       commit: appErrors.codeOf(refusal),
@@ -445,75 +460,6 @@ export const Route = createFileRoute("/")({ component: Page });
       seal: "app.definition_invalid",
       versions: [1],
     });
-  });
-
-  it("refuses a chat's draft that changed the definition over a version that changed it since, and takes that version's when the draft didn't", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    const appId = appIdSchema.parse(app.id);
-    await commit(apps, app.id, first);
-    // A builder's version changes the definition after the drafts began.
-    await apps.files.commit(
-      app.id,
-      { "AGENTS.md": first.files["AGENTS.md"] ?? "" },
-      "Notes",
-      definitionInput(withTable("notes"))
-    );
-    let changedToo: unknown;
-    try {
-      await draftOverLatest(env, appId, {
-        base: 1,
-        changes: {},
-        definition: definitionText(withTable("tasks")),
-      });
-    } catch (error) {
-      changedToo = error;
-    }
-    const unchanged = await draftOverLatest(env, appId, {
-      base: 1,
-      changes: { "AGENTS.md": "# Drafted\n" },
-      definition: null,
-    });
-    expect({
-      changedToo: appErrors.codeOf(changedToo),
-      issues: refusalSchema.parse(changedToo).details.issues,
-      kept: unchanged.definition,
-    }).toStrictEqual({
-      changedToo: "app.conflict",
-      issues: [
-        "The App's definition: Changed in a version committed since this draft began",
-      ],
-      kept: withTable("notes"),
-    });
-  });
-
-  it("takes a chat's draft that changed the definition over a version that only brought a function, whose ID the commit gives", async () => {
-    const { apps } = await appsApi("builder");
-    const app = await newApp(apps);
-    const appId = appIdSchema.parse(app.id);
-    await commit(apps, app.id, first);
-    // A builder's version adds a query: its ID is the version's own.
-    await apps.files.commit(
-      app.id,
-      {
-        "server/extra.ts": `import { v } from "@grasp-os/sdk";
-import { query } from "@server/_generated/server";
-
-export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
-`,
-      },
-      "Extra"
-    );
-
-    const drafted = await draftOverLatest(env, appId, {
-      base: 1,
-      changes: {},
-      definition: definitionText(withTable("tasks")),
-    });
-
-    expect(drafted.definition?.tables.map(({ name }) => name)).toStrictEqual([
-      "tasks",
-    ]);
   });
 
   it("fails loudly when a version's files are missing or damaged", async () => {
@@ -678,19 +624,19 @@ export const Route = createFileRoute("/")({ component: Page });
     await expect(apps.versions.diff(app.id, 2, 2)).resolves.toStrictEqual([]);
   });
 
-  it("runs the version made current, after review, without changing any version's files", async () => {
+  it("runs the version published, labelled as it first goes live, without changing any version's files", async () => {
     const { apps } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
-    await apps.versions.setCurrent(app.id, 1);
+    const one = await apps.versions.publish(app.id, 1);
     await commit(apps, app.id, { "AGENTS.md": "# Changed\n" });
 
-    const proposed = await apps.versions.propose(app.id, 2);
-    const approved = await apps.versions.setCurrent(app.id, 2);
-    expect({ app, proposed, approved }).toMatchObject({
-      app: { currentVersion: null, pendingVersion: null },
-      proposed: { currentVersion: 1, pendingVersion: 2 },
-      approved: { currentVersion: 2, pendingVersion: null },
+    const approved = await apps.versions.publish(app.id, 2);
+    const month = releaseMonthPrefix(new Date());
+    expect({ app, one, approved }).toMatchObject({
+      app: { currentVersion: null, liveLabel: null },
+      one: { currentVersion: 1, liveLabel: `${month}1` },
+      approved: { currentVersion: 2, liveLabel: `${month}2` },
     });
     // As its builder reads it: with their own role in it.
     await expect(apps.get(app.id)).resolves.toStrictEqual({
@@ -698,9 +644,13 @@ export const Route = createFileRoute("/")({ component: Page });
       role: "builder",
     });
 
-    // Rolling back is making an earlier version current.
-    const rolledBack = await apps.versions.setCurrent(app.id, 1);
-    expect(rolledBack).toMatchObject({ currentVersion: 1 });
+    // Rolling back is publishing an earlier version again, under its
+    // label.
+    const rolledBack = await apps.versions.publish(app.id, 1);
+    expect(rolledBack).toMatchObject({
+      currentVersion: 1,
+      liveLabel: `${month}1`,
+    });
     await expect(
       Promise.all([apps.files.read(app.id, 1), apps.files.read(app.id, 2)])
     ).resolves.toStrictEqual([
@@ -711,8 +661,8 @@ export const Route = createFileRoute("/")({ component: Page });
     ]);
     await expect(
       Promise.all([
-        outcome(apps.versions.setCurrent(app.id, 3)),
-        outcome(apps.versions.propose(app.id, 0)),
+        outcome(apps.versions.publish(app.id, 3)),
+        outcome(apps.versions.publish(app.id, 0)),
       ])
     ).resolves.toStrictEqual([
       "app.version_not_found",
@@ -725,7 +675,7 @@ export const Route = createFileRoute("/")({ component: Page });
     const app = await newApp(apps);
     await commit(apps, app.id, first);
     const none = await apps.contents(app.id);
-    await apps.versions.setCurrent(app.id, 1);
+    await apps.versions.publish(app.id, 1);
     await commit(apps, app.id, {
       "src/routes/archive.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => null;
@@ -737,7 +687,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
     });
     // Committed, not yet current: what runs is still version 1.
     const beforeCurrent = await apps.contents(app.id);
-    await apps.versions.setCurrent(app.id, 2);
+    await apps.versions.publish(app.id, 2);
 
     expect({
       none,
@@ -765,11 +715,9 @@ export const Route = createFileRoute("/archive")({ component: Page });
         sourceParts(first).files,
         "Secret plans in the message"
       ));
-      await apps.versions.propose(app.id, 1);
-      await apps.versions.setCurrent(app.id, 1);
+      await apps.versions.publish(app.id, 1);
       // Already current: nothing changes, nothing is recorded.
-      await apps.versions.setCurrent(app.id, 1);
-      await apps.versions.propose(app.id, 1);
+      await apps.versions.publish(app.id, 1);
     });
     // The App's own events; indexing it into the Apps collection records
     // its entry's (apps-collection.test.ts).
@@ -804,12 +752,6 @@ export const Route = createFileRoute("/archive")({ component: Page });
           files: 8,
         },
       },
-      {
-        by: actor,
-        action: "app.version.proposed",
-        on: target,
-        detail: { version: 1 },
-      },
       // Its server code, the config and schema its definition generates,
       // sealed as it builds.
       {
@@ -836,9 +778,10 @@ export const Route = createFileRoute("/archive")({ component: Page });
         by: actor,
         action: "app.version.current",
         on: target,
-        // What it replaced.
+        // Its label, and what it replaced.
         detail: {
           version: 1,
+          label: `${releaseMonthPrefix(new Date())}1`,
           previous: null,
         },
       },
@@ -862,8 +805,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
       outcome(user.files.commit(app.id, { "AGENTS.md": "# Mine\n" }, "Mine")),
       outcome(user.versions.list(app.id)),
       outcome(user.versions.diff(app.id, 1, 1)),
-      outcome(user.versions.propose(app.id, 1)),
-      outcome(user.versions.setCurrent(app.id, 1)),
+      outcome(user.versions.publish(app.id, 1)),
     ]);
     expect(new Set(refused)).toStrictEqual(new Set(["app.not_found"]));
     await expect(builder.get(app.id)).resolves.toMatchObject({

@@ -254,7 +254,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       files,
       "First"
     );
-    await builder.api.apps.versions.setCurrent(app, version);
+    await builder.api.apps.versions.publish(app, version);
     // Made current, its App's data sensitive, and no admin looked at it.
     const page = await pageOf(builder, app);
     const id = await upload(page.channel, blobOf(png(), "image/png"));

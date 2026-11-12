@@ -29,17 +29,13 @@ import { beginNoteReveal } from "../brain/note-reveal.tsx";
 import { isRegion } from "../brain/region-id.ts";
 import { useBrainThinking } from "../brain/thinking/brain-thinking.ts";
 import { ThinkingDive } from "../brain/thinking/dive.tsx";
-import {
-  dockDrawer,
-  useDockDrawerWidth,
-  useDockMode,
-} from "../chat/dock-mode.ts";
-import type { DockMode } from "../chat/dock-mode.ts";
+import { floatingChatCover, useChatLayout } from "../chat/chat-layout.ts";
+import type { ChatLayout } from "../chat/chat-layout.ts";
 
 // The brain's own address: the brain as an atlas, as in the prototype
 // (`routes/brain/index.tsx`). The prototype's chat at its foot, which tells
 // a region's story and answers its open questions there, is the app's own
-// chat here (chat/chat-dock.tsx), the same on every page: the atlas keeps
+// chat here (chat/global-chat.tsx), the same on every page: the atlas keeps
 // its bar clear, and lights nothing until an answer can name notes. While
 // Grasp answers in it and shows its thinking, the brain plays it as a dive
 // over the atlas (brain/thinking/*), the legend stepping aside; "See it in
@@ -164,13 +160,13 @@ const atlasWith = (
   readAtlas: Atlas
 ): Atlas => (brain === read ? readAtlas : atlasOf(ws, brain));
 
-/** While Grasp thinks, its shape keeps clear of the chat: its drawer (as wide as it is), or its frame, where the answer is written beside it. */
-const diveClearOf = (dock: DockMode, drawerWidth: number): number => {
-  if (dock === "drawer") {
-    return drawerWidth;
-  }
-  return dock === "frame" ? dockDrawer.normal : 0;
-};
+/**
+ * While Grasp thinks, its shape keeps clear of the chat floating over the
+ * page, where the answer is written beside it. Open beside the page, the
+ * chat narrows the page itself, so there is nothing to keep clear of.
+ */
+const diveClearOf = ({ open, placement }: ChatLayout): number =>
+  open && placement === "floating" ? floatingChatCover : 0;
 
 /** The part of the brain a thinking is about, as the way back names it. */
 const aboutOf = (
@@ -249,9 +245,7 @@ const keyOnControl = (event: KeyboardEvent): boolean =>
  * notes, Enter goes into a region or opens the note, Escape steps out.
  */
 const AtlasPage = () => {
-  // The brain's chat, open as a drawer, takes the right of the canvas.
-  const dock = useDockMode();
-  const drawerWidth = useDockDrawerWidth();
+  const chatLayout = useChatLayout();
   const { t } = useLingui();
   const { workspace: ws, brain: read } = useBrainData();
   const search = Route.useSearch();
@@ -401,7 +395,7 @@ const AtlasPage = () => {
       clear={{
         ...CLEAR,
         corner: legendCorner(groups.length),
-        right: dock === "drawer" ? drawerWidth : 0,
+        right: 0,
       }}
       controls={controls}
       dive={dive}
@@ -425,7 +419,7 @@ const AtlasPage = () => {
     >
       {/* Grasp's thinking: a dive into the brain over the atlas, which rests under it. */}
       <ThinkingDive
-        clear={{ ...CLEAR, right: diveClearOf(dock, drawerWidth) }}
+        clear={{ ...CLEAR, right: diveClearOf(chatLayout) }}
         onOpen={open}
         still={reduce}
         thought={thinking.thought}

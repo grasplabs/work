@@ -47,7 +47,7 @@ const shown = async (rows: WorkflowSummary[]): Promise<void> => {
     getParentRoute: () => rootRoute,
     path: "/workflows/$workflow",
     validateSearch: (search: Record<string, unknown>) =>
-      search.tab === "runs" ? { tab: "runs" as const } : {},
+      search.view === "runs" ? { view: "runs" as const } : {},
   });
   const core = {
     withSession: async (): Promise<never> => {
@@ -82,7 +82,7 @@ describe("the Workflows page's table", () => {
     document.body.innerHTML = "";
   });
 
-  it("links an independent workflow's waiting and failed runs to its page's Runs tab", async () => {
+  it("links an independent workflow's waiting and failed runs to its page's Runs", async () => {
     await shown([independent]);
     const links = [...document.querySelectorAll("a")].flatMap((link) => {
       const kind = /waiting|failed/u.exec(link.textContent ?? "")?.[0];
@@ -92,8 +92,8 @@ describe("the Workflows page's table", () => {
     // Where it stands shows twice, under its name for a narrow table and
     // in its own column: each place links alike.
     expect([...new Set(links)]).toStrictEqual([
-      "waiting /workflows/wf-1?tab=runs",
-      "failed /workflows/wf-1?tab=runs",
+      "waiting /workflows/wf-1?view=runs",
+      "failed /workflows/wf-1?view=runs",
     ]);
   });
 });

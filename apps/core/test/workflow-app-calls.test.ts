@@ -122,7 +122,7 @@ const published = async (
 ): Promise<unknown> => {
   const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
   const admin = await signedInApi(idp, "admin");
-  return await refusal(admin.api.apps.versions.setCurrent(id, version));
+  return await refusal(admin.api.apps.versions.publish(id, version));
 };
 
 /**
@@ -575,7 +575,7 @@ export const create = mutation({
     );
     const admin = await signedInApi(idp, "admin");
     const rolledBack = await refusal(
-      admin.api.apps.versions.setCurrent(rolled.app, 1)
+      admin.api.apps.versions.publish(rolled.app, 1)
     );
     // A new version without the function the waiting run calls: refused
     // while the workflow holds its grant, so the run still reaches it.

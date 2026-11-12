@@ -12,42 +12,60 @@ import {
 import {
   InputGroup,
   InputGroupAddon,
-  InputGroupTextarea,
 } from "@grasp-os/ui/components/input-group";
+import { PromptEditor } from "@grasp-os/ui/components/prompt-editor";
+import type {
+  PromptEditorHandle,
+  PromptMention,
+  PromptMentionKind,
+  PromptTrigger,
+} from "@grasp-os/ui/components/prompt-editor";
 import {
-  PromptInputAttachmentsContext,
+  PromptInputSubjectBar,
   PromptInputBody,
   PromptInputButton,
+  PromptInputCover,
   PromptInputFooter,
   PromptInputHeader,
   PromptInputSubmit,
-  PromptInputTextarea,
   PromptInputTools,
 } from "@grasp-os/ui/components/prompt-input";
+import { Separator } from "@grasp-os/ui/components/separator";
 import { msg, select } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { ChevronDownIcon, SparklesIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { ChevronDownIcon } from "lucide-react";
+import { useRef } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { ErrorText } from "../error-text.tsx";
-import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
-import { AttachFiles, FileCards } from "./chat-files.tsx";
+import {
+  ConnectAiProvider,
+  ConnectAiProviderCover,
+} from "../frame/connect-ai-provider.tsx";
+import { FileCards } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
+import { ComposerMenu } from "./composer-menu.tsx";
+import {
+  useMentionables,
+  useMentionKinds,
+  useMentionTrigger,
+} from "./mentions.tsx";
 import { isEffort } from "./model-choice.ts";
+import { ProviderMark } from "./provider-marks.tsx";
 
-// Where a question is written, in the prototype's look
-// (grasplabs/prototype `components/chat/chat-composer.tsx`): a box that
-// grows with what is typed, the model that answers below it on the left,
-// and send, or stop while Grasp answers, on the right. Enter sends;
-// Shift+Enter starts a new line. The models are core's: no keys or
-// providers are set here. One control picks the model and, for a model
-// that thinks, how hard (grasplabs/prototype `model-picker.tsx`). It is
-// laid out on the kit's prompt input parts, the prototype's AI Elements
-// prompt input. Files are attached with the button beside the model, or
-// by pasting them, and shown as cards over the text until the question
-// carries them (chat-files.tsx); the compact box takes none. The
-// prototype's screenshot and dictation aren't here: dictation waits on a
-// decision about where its audio goes.
+// Where a question is written: a box that grows with what is typed, and
+// under it, on the left, the model that answers, by its provider's mark,
+// its name and how hard it thinks; on the right, what the page adds (the
+// recent chats, on Chat's own page), the add menu (composer-menu.tsx:
+// files, mentions, commands and skills) and send, or stop while Grasp
+// answers. Enter sends; Shift+Enter starts a new line. The models are
+// core's: no keys or providers are set here. While the organization has
+// no AI provider, the box is covered, blurred and out of reach, with the
+// way to connect one. It is laid out on the kit's prompt input parts.
+// Files are attached from the add menu, or by pasting them, and shown as
+// cards over the text until the question carries them (chat-files.tsx);
+// the compact box takes none. Dictation waits on a decision about where
+// its audio goes.
 
 /** How a model is named in the box: the last part of its ID. */
 
@@ -115,7 +133,9 @@ const ChoiceLabel = ({
     <>
       <span className="max-w-48 min-w-0 truncate">{name}</span>
       {effort === undefined ? null : (
-        <span className="text-muted-foreground">{t(effortNames[effort])}</span>
+        <span className="text-muted-foreground shrink-0">
+          {t(effortNames[effort])}
+        </span>
       )}
     </>
   );
@@ -154,10 +174,10 @@ const ModelPicker = ({
               })}. Change model or thinking`
             : t`Model: ${name}. Change model`
         }
-        // It gives way on a narrow screen, so the box's buttons stay apart.
+        // In a narrow box the name gives way, never the buttons beside it.
         render={<PromptInputButton className="min-w-0 shrink" size="sm" />}
       >
-        <SparklesIcon className="text-status-attention" />
+        <ProviderMark model={model} />
         <ChoiceLabel effort={thinks ? effort : undefined} name={name} />
         <ChevronDownIcon className="text-muted-foreground size-3.5" />
       </DropdownMenuTrigger>
@@ -245,7 +265,7 @@ const AgentModel = ({ model }: { model: string }) => {
       aria-label={t`Model: ${name}, set for this agent`}
       className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-2 text-sm"
     >
-      <SparklesIcon aria-hidden className="size-4 shrink-0" />
+      <ProviderMark model={model} />
       <span aria-hidden className="max-w-48 min-w-0 truncate">
         {name}
       </span>
@@ -253,7 +273,7 @@ const AgentModel = ({ model }: { model: string }) => {
   );
 };
 
-/** The model a question names, where there are models to pick from, and the button that attaches files. */
+/** The model a question names, where there are models to pick from. */
 const ModelChoice = ({
   models,
   model,
@@ -261,7 +281,6 @@ const ModelChoice = ({
   efforts,
   effort,
   onEffort,
-  attach,
   agent,
   agentModel,
 }: {
@@ -271,12 +290,10 @@ const ModelChoice = ({
   efforts: readonly ModelEffort[];
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
-  attach: ReactNode;
   agent: ReactNode;
   agentModel: string | undefined;
 }) => (
   <PromptInputTools>
-    {attach}
     {agent}
     {agentModel === undefined ? null : <AgentModel model={agentModel} />}
     {agentModel !== undefined ||
@@ -295,67 +312,82 @@ const ModelChoice = ({
   </PromptInputTools>
 );
 
-/** What the question is typed in: Enter sends it, Shift+Enter starts a new line. */
-const QuestionField = ({
-  text,
-  onText,
-  compact,
-  label,
-  describedBy,
-  placeholder,
-  maxLength,
-}: {
+/** What the box takes typed: its text, its mentions, and what it does with keys and pastes. */
+export interface FieldProps {
   text: string;
   onText: (text: string) => void;
-  compact: boolean;
+  mentions: readonly PromptMention[] | undefined;
+  onMentions: ((mentions: readonly PromptMention[]) => void) | undefined;
+  onSubmit: () => void;
   label: string | undefined;
   describedBy: string | undefined;
   placeholder: string | undefined;
   maxLength: number | undefined;
+  onPasteFiles: ((files: File[]) => void) | undefined;
+  onBackspaceEmpty: (() => void) | undefined;
+  editor: Ref<PromptEditorHandle>;
+}
+
+/** The box's field: what is typed, and what it mentions (`triggers`, `kinds`). */
+const QuestionField = ({
+  text,
+  onText,
+  mentions,
+  onMentions,
+  onSubmit,
+  label,
+  describedBy,
+  placeholder,
+  maxLength,
+  onPasteFiles,
+  onBackspaceEmpty,
+  editor,
+  size,
+  triggers,
+  kinds,
+}: FieldProps & {
+  size: "prompt" | "compact" | "bar";
+  triggers?: readonly PromptTrigger[];
+  kinds?: Readonly<Record<string, PromptMentionKind>>;
 }) => {
   const { t } = useLingui();
-  const name = label ?? t`Your question`;
-  const hint = placeholder ?? t`Ask anything, or describe a process`;
-  const longest = maxLength ?? maxQuestionLength;
-  if (compact) {
-    // One line in the input group's own spacing, which the prompt box's
-    // field, spaced for the box, doesn't fit.
-    return (
-      <InputGroupTextarea
-        aria-describedby={describedBy}
-        aria-label={name}
-        className="field-sizing-content max-h-40 min-h-0"
-        maxLength={longest}
-        name="message"
-        onChange={(event) => {
-          onText(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          if (
-            event.key === "Enter" &&
-            !event.shiftKey &&
-            !event.nativeEvent.isComposing
-          ) {
-            event.preventDefault();
-            event.currentTarget.form?.requestSubmit();
-          }
-        }}
-        placeholder={hint}
-        rows={1}
-        value={text}
-      />
-    );
-  }
   return (
-    <PromptInputTextarea
-      aria-label={name}
-      maxLength={longest}
-      onChange={(event) => {
-        onText(event.target.value);
+    <PromptEditor
+      describedBy={describedBy}
+      kinds={kinds}
+      label={label ?? t`Your question`}
+      maxLength={maxLength ?? maxQuestionLength}
+      onBackspaceEmpty={onBackspaceEmpty}
+      mentions={mentions}
+      onChange={({ text: typed, mentions: mentioned }) => {
+        onText(typed);
+        onMentions?.(mentioned);
       }}
-      placeholder={hint}
+      onPasteFiles={onPasteFiles}
+      onSubmit={onSubmit}
+      placeholder={placeholder ?? t`Ask anything, or describe a process`}
+      ref={editor}
+      size={size}
+      triggers={triggers}
       value={text}
     />
+  );
+};
+
+/**
+ * The full box's field, or the chat bar's (`size`), where the person can
+ * mention an App, a workflow or someone (`@`, mentions.tsx), as chips in
+ * the text.
+ */
+export const MentioningField = ({
+  size = "prompt",
+  ...props
+}: FieldProps & { size?: "prompt" | "bar" }) => {
+  const mentionables = useMentionables();
+  const kinds = useMentionKinds();
+  const trigger = useMentionTrigger(mentionables);
+  return (
+    <QuestionField {...props} kinds={kinds} size={size} triggers={[trigger]} />
   );
 };
 
@@ -379,9 +411,10 @@ export const NoModelNotice = ({
   models,
 }: {
   model: string | undefined;
-  models: readonly string[];
+  /** Undefined while core hasn't said which yet. */
+  models: readonly string[] | undefined;
 }) =>
-  model === undefined || models.length > 0 ? null : (
+  model === undefined || models === undefined || models.length > 0 ? null : (
     <ConnectAiProvider size="xs" />
   );
 
@@ -395,7 +428,9 @@ const noFiles: readonly CardFile[] = [];
 export const Composer = ({
   text,
   onText,
-  models = noModels,
+  mentions,
+  onMentions,
+  models: offered,
   model,
   onModel,
   efforts = noLevels,
@@ -411,6 +446,8 @@ export const Composer = ({
   describedBy,
   placeholder,
   children,
+  actions,
+  subject,
   maxLength,
   disabled = false,
   files = noFiles,
@@ -421,9 +458,14 @@ export const Composer = ({
 }: {
   text: string;
   onText: (text: string) => void;
+  /** What is typed mentions, as chips; none in a compact box. */
+  mentions?: readonly PromptMention[];
+  /** The mentions in what is typed, as they change. */
+  onMentions?: (mentions: readonly PromptMention[]) => void;
   /**
    * The models a question may name, the default first, and the one it
-   * names; none where nobody picks one, such as a guest's chat.
+   * names; none where nobody picks one, such as a guest's chat, and
+   * undefined too while core hasn't said which yet.
    */
   models?: readonly string[];
   model?: string;
@@ -457,6 +499,10 @@ export const Composer = ({
   placeholder?: string;
   /** Beside the button, in a compact box only: such as the way to open the dock. */
   children?: ReactNode;
+  /** Before the add menu, in a full box: such as the recent chats on Chat's own page. */
+  actions?: ReactNode;
+  /** What the question is about, on the bar above a full box: a page's subject (`PromptInputSubjectBar`). */
+  subject?: ReactNode;
   /** The longest message it takes; a question's by default. */
   maxLength?: number;
   /** Takes nothing for now, while something else is on its way to core. */
@@ -479,17 +525,42 @@ export const Composer = ({
   agentModel?: string;
 }) => {
   const empty = text.trim() === "";
+  const models = offered ?? noModels;
+  // No AI provider to call yet: the box is covered, and takes nothing. Not
+  // while the models are still being read, so what is typed then stays.
+  const noProvider = offered !== undefined && lacksModel(model);
+  const form = useRef<HTMLFormElement>(null);
+  const editor = useRef<PromptEditorHandle>(null);
   // A question names a model where there are any to name.
   const canSend =
     !running && !busy && !disabled && !empty && !lacksModel(model);
   // Pasting files adds them, and Backspace in an empty box takes the last off.
-  const attachments =
-    onAttach === undefined || onRemoveFile === undefined
-      ? undefined
-      : { files, add: onAttach, remove: onRemoveFile };
+  const last = files.at(-1);
+  const field: FieldProps = {
+    text,
+    onText,
+    mentions,
+    onMentions,
+    onSubmit: () => {
+      form.current?.requestSubmit();
+    },
+    label,
+    describedBy,
+    placeholder,
+    maxLength,
+    onPasteFiles: onAttach,
+    onBackspaceEmpty:
+      onRemoveFile === undefined || last === undefined
+        ? undefined
+        : () => {
+            onRemoveFile(last.id);
+          },
+    editor,
+  };
   return (
     <form
       className="flex flex-col gap-1.5"
+      ref={form}
       onSubmit={(event) => {
         event.preventDefault();
         if (canSend) {
@@ -500,15 +571,7 @@ export const Composer = ({
       {compact ? (
         // One line, its button beside it: the chat dock and the guest page.
         <InputGroup size="chat">
-          <QuestionField
-            compact={compact}
-            describedBy={describedBy}
-            label={label}
-            maxLength={maxLength}
-            onText={onText}
-            placeholder={placeholder}
-            text={text}
-          />
+          <QuestionField {...field} size="compact" />
           <InputGroupAddon align="inline-end" className="self-end">
             <div className="flex items-center gap-1">
               {children}
@@ -523,59 +586,69 @@ export const Composer = ({
           </InputGroupAddon>
         </InputGroup>
       ) : (
-        <InputGroup size="prompt">
-          {files.length === 0 ? null : (
-            <PromptInputHeader>
-              {/* Not removable while the question is on its way with them. */}
-              <FileCards
-                files={files}
-                onRemove={busy ? undefined : onRemoveFile}
-              />
-            </PromptInputHeader>
+        // The bar and the box as one: the box's top over the bar's bottom.
+        <div className="flex flex-col">
+          {subject === undefined ? null : (
+            <PromptInputSubjectBar>{subject}</PromptInputSubjectBar>
           )}
-          <PromptInputAttachmentsContext value={attachments}>
-            <PromptInputBody>
-              <QuestionField
-                compact={compact}
-                describedBy={undefined}
-                label={label}
-                maxLength={maxLength}
-                onText={onText}
-                placeholder={placeholder}
-                text={text}
-              />
+          <InputGroup size="prompt">
+            {files.length === 0 ? null : (
+              <PromptInputHeader>
+                {/* Not removable while the question is on its way with them. */}
+                <FileCards
+                  files={files}
+                  onRemove={busy ? undefined : onRemoveFile}
+                />
+              </PromptInputHeader>
+            )}
+            <PromptInputBody inert={noProvider}>
+              <MentioningField {...field} describedBy={undefined} />
             </PromptInputBody>
-          </PromptInputAttachmentsContext>
-          <PromptInputFooter>
-            <ModelChoice
-              agent={agent}
-              agentModel={agentModel}
-              attach={
-                onAttach === undefined ? null : (
-                  <AttachFiles
-                    disabled={busy || disabled}
-                    onAttach={onAttach}
-                  />
-                )
-              }
-              effort={effort}
-              efforts={efforts}
-              model={model}
-              models={models}
-              onEffort={onEffort}
-              onModel={onModel}
-            />
-            <SendOrStop
-              busy={busy}
-              canSend={canSend}
-              compact={compact}
-              onStop={onStop}
-              running={running}
-            />
-          </PromptInputFooter>
-        </InputGroup>
+            <PromptInputFooter inert={noProvider}>
+              <ModelChoice
+                agent={agent}
+                agentModel={agentModel}
+                effort={effort}
+                efforts={efforts}
+                model={model}
+                models={models}
+                onEffort={onEffort}
+                onModel={onModel}
+              />
+              <div className="flex items-center gap-1">
+                {actions === undefined ? null : (
+                  <>
+                    {actions}
+                    {/* As tall as the icons, centred on them. */}
+                    <div className="mx-1 flex h-4">
+                      <Separator orientation="vertical" />
+                    </div>
+                  </>
+                )}
+                <ComposerMenu
+                  disabled={busy || disabled}
+                  onAttach={onAttach}
+                  onMention={(mentioned, trigger) => {
+                    editor.current?.insertMention(mentioned, trigger);
+                  }}
+                />
+                <SendOrStop
+                  busy={busy}
+                  canSend={canSend}
+                  compact={compact}
+                  onStop={onStop}
+                  running={running}
+                />
+              </div>
+            </PromptInputFooter>
+            {noProvider ? (
+              <PromptInputCover>
+                <ConnectAiProviderCover />
+              </PromptInputCover>
+            ) : null}
+          </InputGroup>
+        </div>
       )}
-      {compact ? null : <NoModelNotice model={model} models={models} />}
       <ErrorText>{failure}</ErrorText>
     </form>
   );

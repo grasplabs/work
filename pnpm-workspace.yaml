@@ -181,9 +181,23 @@ catalog:
   "@lingui/vite-plugin": 6.8.0
   "@messageformat/parser": 5.1.1
   "@rolldown/plugin-babel": 0.2.4
-  # The kit's chat components (message-scroller, questionnaire): shadcn's
-  # own headless primitives.
+  # The kit's chat components (message-scroller): shadcn's own headless
+  # primitives.
   "@shadcn/react": 0.3.1
+  # The kit's PromptEditor: the box to ask in, with its mentions as chips in
+  # the text and the dropdown that picks them (\`@\`, later \`/\`). TipTap's
+  # MIT core on ProseMirror, lean: no StarterKit, no formatting, none of its
+  # paid Pro extensions.
+  "@tiptap/core": 3.33.0
+  "@tiptap/extension-document": 3.33.0
+  "@tiptap/extension-hard-break": 3.33.0
+  "@tiptap/extension-mention": 3.33.0
+  "@tiptap/extension-paragraph": 3.33.0
+  "@tiptap/extension-text": 3.33.0
+  "@tiptap/extensions": 3.33.0
+  "@tiptap/pm": 3.33.0
+  "@tiptap/react": 3.33.0
+  "@tiptap/suggestion": 3.33.0
   # The kit's SortableList: drag, with a keyboard and a screen reader too.
   "@dnd-kit/core": 6.3.1
   "@dnd-kit/sortable": 10.0.0

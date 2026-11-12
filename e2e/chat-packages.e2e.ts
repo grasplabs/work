@@ -1,7 +1,10 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { seedDependencyRequest } from "./dependency-request.ts";
+import {
+  chatAskingForPackages,
+  seedDependencyRequest,
+} from "./dependency-request.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
 // The npm packages the chat's agent asked for, on a card in that chat:
@@ -19,7 +22,7 @@ test("the App's builder approves the packages its chat's agent asked for, on the
   try {
     const name = `Totals ${crypto.randomUUID().slice(0, 8)}`;
     const { id: app } = await api.apps.create({ name });
-    const chat = await api.chats.create(`Build ${name}`);
+    const chat = await chatAskingForPackages(api, `Build ${name}`);
     const { userId } = await api.whoami();
     const request = await seedDependencyRequest({
       app,

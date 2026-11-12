@@ -18,6 +18,8 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
+import { isShortcut, shortcutLabel } from "../shortcuts.ts";
+
 // The way to the person's chats window (chat-window.tsx) on every page: ⌘K
 // anywhere, and the icon a page's header may show. The window itself, with
 // its command list, loads the first time it opens.
@@ -27,20 +29,8 @@ const ChatWindow = lazy(async () => {
   return { default: window };
 });
 
-const applePlatform = /mac|iphone|ipad/iu;
-
-/** ⌘K on a Mac, Ctrl K elsewhere. */
-const shortcutLabel = (): string =>
-  typeof navigator !== "undefined" && applePlatform.test(navigator.userAgent)
-    ? "⌘K"
-    : "Ctrl K";
-
-/** Whether `event` is ⌘K or Ctrl K, and nothing else held. */
-const isShortcut = (event: KeyboardEvent): boolean =>
-  (event.metaKey || event.ctrlKey) &&
-  !event.altKey &&
-  !event.shiftKey &&
-  event.key.toLowerCase() === "k";
+/** The chats window's key: ⌘K, or Ctrl K off a Mac. */
+export const chatsKey = "k";
 
 /** A quiet icon in the page's header, named by its tooltip. */
 export const HeaderIcon = ({
@@ -100,7 +90,7 @@ export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   });
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (!isShortcut(event)) {
+      if (!isShortcut(event, chatsKey)) {
         return;
       }
       event.preventDefault();
@@ -123,6 +113,9 @@ export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
+/** Opens (or closes) the frame's chats window, as ⌘K does. */
+export const useChatsWindow = (): ((open: boolean) => void) => use(OpenChats);
+
 /** The quiet icon in a page's header that opens the chats window. */
 export const ChatSwitcherButton = () => {
   const { t } = useLingui();
@@ -133,7 +126,7 @@ export const ChatSwitcherButton = () => {
       onClick={() => {
         setOpen(true);
       }}
-      shortcut={shortcutLabel()}
+      shortcut={shortcutLabel(chatsKey)}
     >
       <MessagesSquareIcon />
     </HeaderIcon>

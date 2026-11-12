@@ -21,8 +21,8 @@ export interface ChatState {
   running: boolean;
   stopped: string | null;
   held: number;
-  /** Changes whenever the chat's drafts do. */
-  drafts: number;
+  /** Changes whenever the chat's agent writes an App's draft. */
+  worked: number;
   /** Changes whenever the chat's provenance does. */
   provenanceVersion: number;
   /** Whether its turn checks the drafts it wrote now. */
@@ -162,7 +162,7 @@ export class ChatWatch {
       running,
       stopped,
       held,
-      drafts,
+      worked,
       provenanceVersion,
       checking,
     } = this.#state();
@@ -175,7 +175,7 @@ export class ChatWatch {
       running,
       stopped,
       held,
-      drafts,
+      worked,
       checking,
       ...(provenanceVersion === this.#provenanceSent
         ? {}

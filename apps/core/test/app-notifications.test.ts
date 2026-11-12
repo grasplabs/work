@@ -45,7 +45,7 @@ import { hostFunctionCall } from "../src/function-host.ts";
 import type { HostedApp, Invocation } from "../src/function-host.ts";
 import { listNotifications } from "../src/notifications.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb } from "./apps.ts";
+import { racingDb, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { applied } from "./store-schemas.ts";
 
@@ -195,6 +195,8 @@ const fixture = async (): Promise<Fixture> => {
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
     ).bind(app, bob.userId, ada.userId, Date.now()),
   ]);
+  // Live at version 1, as publishing leaves it.
+  await standInLive(app);
   const sealed = releaseManifestSchema.parse({
     formatVersion: releaseFormatVersion,
     resourceId: app,

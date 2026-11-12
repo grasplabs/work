@@ -86,7 +86,7 @@ export interface FrameTarget {
    */
   leaveGuard: (guarded: boolean) => void;
   /**
-   * A chat's preview's alone: takes the frame's receiver of its draft's
+   * The App's preview's alone: takes the frame's receiver of its draft's
    * updates (preview-updates.ts), which only the target calls. A live
    * page's target has none, and nothing is ever sent to its frame.
    */

@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { updateApp } from "../src/app-settings.ts";
-import { outlook, published, requestGranted } from "./apps.ts";
+import { outlook, published, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { racingDb } from "./racing-db.ts";
@@ -115,7 +115,9 @@ describe("an App's name and description", slow, () => {
     const seen = await user.api.apps.get(app);
 
     expect({
-      audited: said(audited),
+      // The App's own events; indexing it into the Apps collection records
+      // its entry's (apps-collection.test.ts).
+      audited: said(audited.filter(({ target }) => target?.id === app)),
       unchanged: unchanged.length,
       refused,
       seen: { name: seen.name, description: seen.description },
@@ -396,7 +398,7 @@ describe("an App's owner, named again to answer for it", slow, () => {
     };
     const kept = await builder.api.apps.get(ofDemoted);
     // Published, the App is open to its owner as a user: they may answer.
-    await published(ofDemoted);
+    await release(builder, ofDemoted, { "README.md": "A draft.\n" });
     const named = await builder.api.apps.update(ofDemoted, {
       responsible: demoted.userId,
     });

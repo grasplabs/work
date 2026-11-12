@@ -1,14 +1,14 @@
 import { readDefinition } from "@grasp-os/runtime/definition";
 import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors } from "@grasp-os/shared/apps";
-import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import { readDraft } from "../src/app-drafts.ts";
 import { chatOf, setObjectEnv, toolStep } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
-import { published, release, requestGranted } from "./apps.ts";
+import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { createIdp } from "./fake-idp.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -71,7 +71,7 @@ export default workflow("intake", { params: {}, input: v.object({ invoice: v.str
 `,
 };
 
-/** Code that finds the App the agent created, by its name, as `app`. */
+/** Code that finds the App the agent builds, by its name, as `app`. */
 export const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
 
 /** What a code step returned, as JSON. */
@@ -102,15 +102,22 @@ export const tryEach = (calls: Record<string, string>, before = ""): string =>
 export const setUp = async (
   /** The model's replies, or those it gives about the released App. */
   replies: ProviderReply[] | ((existing: string) => ProviderReply[]),
-  role: "admin" | "builder" | "user" = "builder"
+  role: "admin" | "builder" | "user" = "builder",
+  /**
+   * Whether the person has made the App the agent builds ({@link appName},
+   * as Build it makes one: the agent creates none), which `findApp` finds.
+   */
+  made = false
 ) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const { id: existing } = await builder.api.apps.create({ name: "Ledger" });
-  await published(existing);
   await release(builder, existing, { "AGENTS.md": "# Ledger\n" });
   const others = { admin, builder };
   const person = role === "user" ? await signedInApi(idp, role) : others[role];
+  if (made) {
+    await person.api.apps.create({ name: appName });
+  }
   const chat = await chatOf(
     person.userId,
     ...(typeof replies === "function" ? replies(existing) : replies)
@@ -127,14 +134,13 @@ export const setUp = async (
 };
 
 /**
- * The definition `chat`'s draft of `app` holds, as its Workspace object
- * keeps it beside the draft's files: the one the definition tools change.
+ * The definition App `app`'s draft holds, as core keeps it beside the
+ * draft's files: the one the definition tools change.
  */
 export const draftDefinitionOf = async (
-  chat: Awaited<ReturnType<typeof setUp>>["chat"],
   app: string
 ): Promise<AppDefinition> => {
-  const draft = await chat.stub.draft(chatIdSchema.parse(chat.chat.id), app);
+  const draft = await readDraft(env, app);
   return readDefinition(JSON.parse(draft.definition ?? "null"));
 };
 
@@ -248,14 +254,14 @@ export const createdApp = async (
   const listed = await api.apps.list();
   const app = listed.find(({ name }) => name === appName);
   if (app === undefined) {
-    throw new Error("The agent created no App");
+    throw new Error("No App named as the one the agent builds");
   }
   return app;
 };
 
 /** Code that writes `changes` into the draft of `app`. */
 export const writing = (changes: Record<string, string>): string =>
-  `await env.build.write(app.id, ${JSON.stringify(changes)})`;
+  `await env.build.write(app.id, ${JSON.stringify(changes)}, { revision: (await env.build.files(app.id)).revision })`;
 
 /** A write or a create refused for the workflows it would add, naming them. */
 export const noWorkflows = (issues: string[]) => ({

@@ -123,8 +123,6 @@ describe("Workspace schema", () => {
         "INSERT INTO chats (id, title, created_at, restricted, person_id, agent_id) VALUES ('owned', 'Owned', 1, 1, 'person-1', 'agent-1'), ('nobodys', 'Nobody', 2, 0, NULL, NULL), ('no-agent', 'No agent', 3, 0, 'person-1', NULL)",
         "INSERT INTO chat_messages (chat_id, message, created_at) VALUES ('owned', '{\"n\":1}', 1), ('nobodys', '{}', 2), ('owned', '{\"n\":2}', 3), ('no-agent', '{}', 4)",
         "INSERT INTO chat_sources (chat_id, source_id, created_at) VALUES ('owned', 'collection-1', 1), ('nobodys', 'collection-1', 1), ('no-agent', 'collection-2', 1)",
-        "INSERT INTO chat_drafts (chat_id, app_id, base, revision, updated_at) VALUES ('owned', 'app-1', NULL, 1, 1), ('no-agent', 'app-1', NULL, 1, 1)",
-        "INSERT INTO chat_draft_files (chat_id, app_id, path, content) VALUES ('owned', 'app-1', 'index.ts', 'a'), ('no-agent', 'app-1', 'index.ts', 'b')",
       ]) {
         state.storage.sql.exec(statement);
       }
@@ -145,8 +143,6 @@ describe("Workspace schema", () => {
           "SELECT chat_id AS chatId, message FROM chat_messages ORDER BY id"
         ),
         sources: rows("SELECT chat_id AS chatId FROM chat_sources"),
-        drafts: rows("SELECT chat_id AS chatId FROM chat_drafts"),
-        files: rows("SELECT chat_id AS chatId FROM chat_draft_files"),
       }).toStrictEqual({
         chats: [
           {
@@ -162,8 +158,6 @@ describe("Workspace schema", () => {
           { chatId: "owned", message: '{"n":2}' },
         ],
         sources: [{ chatId: "owned" }],
-        drafts: [{ chatId: "owned" }],
-        files: [{ chatId: "owned" }],
       });
       // Its rows still refer to a chat that exists, and must.
       expect(() => {

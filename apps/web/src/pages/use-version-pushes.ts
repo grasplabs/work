@@ -4,8 +4,8 @@ import { useCore } from "../use-core.ts";
 import { followAppVersion } from "./tab-link.ts";
 
 // What the page heard of `apps`' versions (spec 11.5): core pushes each
-// App's version at once and again whenever another is committed, made
-// current or proposed, on the tab's one subscription its frames share. A
+// App's version at once and again whenever another is committed or
+// published, on the tab's one subscription its frames share. A
 // preview that found nothing to show keys its next try on the count, so
 // a version committed from another tab brings the App back, with no
 // timer asking.

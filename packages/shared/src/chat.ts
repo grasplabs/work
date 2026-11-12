@@ -1,11 +1,10 @@
 import { z } from "zod";
 
-import type { AppFiles } from "./apps.ts";
-import type { DataModelChange, DraftDataModel } from "./data-model.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
-import type { PageBundle, PageProblem } from "./pages.ts";
+import type { PageBundle } from "./pages.ts";
+import type { Role } from "./roles.ts";
 import type { ThinkingStep } from "./thinking.ts";
 import { uploadTypes } from "./uploads.ts";
 
@@ -58,7 +57,63 @@ export const chatChannelSchema = z.union([
 export type ChatChannel = z.infer<typeof chatChannelSchema>;
 
 /** A chat's title: what the person, or their first question, named it. */
-export const chatTitleSchema = z.string().trim().min(1).max(200);
+/** The longest a chat's name may be. */
+/**
+ * The kinds of thing a question may be about: the page it is asked on
+ * (the web's chat-subject.ts), as an App's workspace is about the App and
+ * a workflow's page about the workflow.
+ */
+export const chatSubjectKinds = ["app", "workflow"] as const;
+export type ChatSubjectKind = (typeof chatSubjectKinds)[number];
+
+/** What a question is about: one thing of a kind, by its ID. */
+export const chatSubjectSchema = z.strictObject({
+  kind: z.enum(chatSubjectKinds),
+  id: z.string().min(1).max(256),
+});
+export type ChatSubject = z.infer<typeof chatSubjectSchema>;
+
+/**
+ * The kinds of thing a question may mention: what the person picks with
+ * `@` in the composer, an App, a workflow or a member of the organization.
+ */
+export const chatMentionKinds = ["app", "workflow", "person"] as const;
+export type ChatMentionKind = (typeof chatMentionKinds)[number];
+
+/** One thing a question mentions: of a kind, by its ID (a person's user ID). */
+export const chatMentionSchema = z.strictObject({
+  kind: z.enum(chatMentionKinds),
+  id: z.string().min(1).max(256),
+});
+export type ChatMention = z.infer<typeof chatMentionSchema>;
+
+/**
+ * A member of the organization a question can mention (`ChatsApi.people`):
+ * by name and user ID, and by role for the organization's admins alone,
+ * whose member list shows it.
+ */
+export interface MentionablePerson {
+  id: string;
+  name: string;
+  role?: Role;
+}
+
+/** Most things one question mentions. */
+export const chatMentionsMax = 20;
+
+/** A question's mentions: at most {@link chatMentionsMax}, each once. */
+export const chatMentionsSchema = z
+  .array(chatMentionSchema)
+  .max(chatMentionsMax)
+  .refine(
+    (mentions) =>
+      new Set(mentions.map(({ kind, id }) => `${kind}:${id}`)).size ===
+      mentions.length,
+    { message: "Each mention once" }
+  );
+
+export const chatTitleMaxLength = 200;
+export const chatTitleSchema = z.string().trim().min(1).max(chatTitleMaxLength);
 
 /**
  * One of the company's agents as a person who may talk to it sees it:
@@ -102,6 +157,8 @@ export interface ChatSummary {
    * platform by its adapter's name (`teams`, `slack`), for good.
    */
   via: ChatChannel;
+  /** What "Make something" started it to make, for good; null for any other chat. */
+  make: ChatMake | null;
 }
 
 /**
@@ -187,40 +244,23 @@ export interface ChatFileInput {
 }
 
 /**
- * An App the chat's agent changes in the chat's own draft
- * (`ChatsApi.drafts`): with no `changed` paths once its changes were
- * proposed or discarded, when its preview shows the App's latest version.
+ * What a chat's agent worked on (`ChatsApi.worked`): an App whose draft
+ * it wrote, when it last did, and in which code step or tool call
+ * (`ChatCode.callId`, `ChatToolCall.callId`), where the chat's thread shows
+ * it. Shaped to name a workflow too, once workflows have drafts.
  */
-export interface ChatDraft {
-  app: string;
-  /** The version the draft is over; null for an App with none yet. */
-  base: number | null;
-  /** The paths it changes, sorted. */
-  changed: string[];
-  /** Those of `changed` it deletes, sorted: nothing to open or preview. */
-  deleted: string[];
-  /**
-   * Whether it changes the App's definition: a change of its stable IDs
-   * alone changes no file, yet is a change of the App all the same.
-   */
-  definitionChanged: boolean;
-  /** Which write of the draft this is: a preview of an earlier one is out of date. */
-  revision: number;
-  /** When it was last written (ISO 8601). */
+export interface ChatWork {
+  kind: "app";
+  id: string;
+  /** When the chat's agent last wrote it (ISO 8601). */
   updatedAt: string;
-  /**
-   * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
-   * that wrote this revision:
-   * where the thread shows the draft's preview. Null when core doesn't
-   * know it (a revision written before it kept one).
-   */
   callId: string | null;
 }
 
 /**
- * The revision a preview of a version of the draft carries
- * (`ChatsApi.preview` with `version`): no draft
- * is ever at it (a chat's draft starts at 0, before its first write), so
+ * The revision a preview of an undo point of an App's draft carries
+ * (`AppDraftsApi.preview` with `point`): no draft
+ * is ever at it (a draft starts at 0, before its first write), so
  * every call of that preview (function, query, stream) is refused, the
  * latest version's too, and nothing it reports is kept. Read-only by
  * construction.
@@ -228,9 +268,9 @@ export interface ChatDraft {
 export const readOnlyRevision = -1;
 
 /**
- * The build a frame of a chat's preview shows, which its reports name and
+ * The build a frame of a draft's preview shows, which its reports name and
  * its updates are asked from: the draft at its revision
- * (`readOnlyRevision` for a version of the draft opened read-only), or a
+ * (`readOnlyRevision` for an undo point opened read-only), or a
  * version of the App, shown while the draft changes nothing or its page
  * doesn't build. Only the draft's own revision counts toward the agent's
  * check of the draft. Its calls name nothing of it: they run on the draft
@@ -246,56 +286,30 @@ export const shownAt = ({
   appVersion === undefined ? revision : { appVersion };
 
 /**
- * One agent turn's writes of the chat's draft of an App, kept as the turn
- * left the draft, or one restore (`ChatsApi.draftVersions`): the newest
- * follows its turn's writes while the turn runs, then never changes; and
- * is restored only as a new one.
- */
-export interface ChatDraftVersion {
-  /** Its place among the draft's versions, from 1, in the order they landed. */
-  number: number;
-  /** The draft's revision it made: its preview's calls name it. */
-  revision: number;
-  /** The version of the App it is over; null for an App with none yet. */
-  base: number | null;
-  /** The SHA-256 of what it holds: two versions alike hold the same. */
-  contentHash: string;
-  /**
-   * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
-   * that wrote it last, when the
-   * chat's agent did; null when the person restored an earlier one.
-   */
-  callId: string | null;
-  /** The version the person restored as this one, if they did. */
-  restoredFrom: number | null;
-  /** When it was written (ISO 8601). */
-  createdAt: string;
-}
-
-/**
- * A page of the chat's draft of an App, ready for a frame, as
- * `PageBundle` is for a running App (`ChatsApi.preview`): at the draft's
+ * A page of an App's draft, ready for a frame, as
+ * `PageBundle` is for a running App (`AppDraftsApi.preview`): at the draft's
  * revision instead of a version, with the names of the draft's pages.
  */
 export interface PreviewBundle extends Omit<PageBundle, "version" | "lease"> {
   /**
-   * The draft's revision it was opened at; `readOnlyRevision` for a
-   * version of the draft opened read-only. A frame that takes updates
+   * The draft's revision it was opened at; `readOnlyRevision` for an
+   * undo point or a version opened read-only. A frame that takes updates
    * names what its `refresh` shows (`shownAt`) in its reports.
    */
   revision: number;
   /**
-   * Core's lease for the builder on the chat's draft, which the frame's
+   * Core's lease for the builder on the App's draft, which the frame's
    * calls and live queries carry on the path every page calls on, as a
    * running App's page carries its own: they run on the draft as it is
-   * then, on a throwaway store with no resources. Only for the draft as it
-   * is now; a version opened read-only has none, and calls nothing.
+   * then, as the builder, on the preview's test data, shared by everyone
+   * who builds the App, with no resources. Only for the draft as it is
+   * now; one opened read-only has none, and calls nothing.
    */
   lease?: string;
   /**
    * The pages' modules, as the frame opened them: what later updates
    * are measured against (`PreviewUpdate`). Only for the draft as it is
-   * now; a version opened read-only never updates.
+   * now; an undo point opened read-only never updates.
    */
   refresh?: PreviewRefresh;
   /**
@@ -309,7 +323,7 @@ export interface PreviewBundle extends Omit<PageBundle, "version" | "lease"> {
 }
 
 /**
- * A chat's draft's pages at one revision, for the preview's frame to
+ * An App's draft's pages at one revision, for the preview's frame to
  * import and swap in with React Fast Refresh: their route tree's module's
  * address, among the modules core staged for the preview, which the frame
  * loads from core as it imports it, only those it hasn't loaded yet, and
@@ -344,19 +358,19 @@ export interface PreviewRefresh {
 }
 
 /**
- * What an open frame of a chat's preview shows as it asks for an update
- * (`ChatsApi.previewUpdate`): the App's version it shows, when it shows
+ * What an open frame of a draft's preview shows as it asks for an update
+ * (`AppDraftsApi.previewUpdate`): the App's version it shows, when it shows
  * one rather than the draft's changes.
  */
 export const previewShownSchema = z.strictObject({
   appVersion: z.int().positive().optional(),
 });
 
-/** What an open frame of a chat's preview shows (`previewShownSchema`). */
+/** What an open frame of a draft's preview shows (`previewShownSchema`). */
 export type PreviewShown = z.infer<typeof previewShownSchema>;
 
 /**
- * What `ChatsApi.previewUpdate` answers an open frame: a build of its
+ * What `AppDraftsApi.previewUpdate` answers an open frame: a build of its
  * pages to swap in (`refresh`); that the build it shows is still the
  * one to show (`unchanged`); or that the one to show is one it can't swap
  * in, another version of the App (`restart`), which it opens afresh on,
@@ -369,7 +383,7 @@ export type PreviewUpdate =
   | { app: AppId; restart: true };
 
 /**
- * A problem a preview of a draft reported (`ChatsApi.previewReport`), or
+ * A problem a preview of a draft reported (`AppDraftsApi.previewReport`), or
  * one its server code failed with: text the draft's code wrote, held to
  * size, and only ever read as data.
  */
@@ -524,24 +538,26 @@ export interface ChatCitedDocument {
 export const citedSnippetMax = 200;
 
 /**
- * How much the chat's agent may ask at once (`askQuestions`, GRA-1001):
- * a few short questions, each with a few short choices, plain text, one
- * line each. The person can always answer otherwise ("Something else") or
- * type instead.
+ * How much the chat's agent may ask at once (`askQuestions`): a few short
+ * questions, each with a few options, plain text, one line each. The
+ * person can always answer in their own words, which the page offers
+ * itself, or type instead.
  */
 export const chatAskLimits = {
   questions: 4,
-  choicesMin: 2,
-  choices: 6,
+  optionsMin: 2,
+  options: 4,
+  headerLength: 24,
   questionLength: 300,
-  choiceLength: 120,
+  labelLength: 80,
+  descriptionLength: 160,
 } as const;
 
 /** Text starting and ending with something other than space. */
 const unpadded = /^\S(?:.*\S)?$/su;
 
 /**
- * What a question or a choice never holds: controls (line breaks among
+ * What a question or an option never holds: controls (line breaks among
  * them), invisible formatting (bidi overrides, zero-width characters) and
  * the line and paragraph separators, so it shows as the one line it reads
  * as, and can't pass for something the page itself shows.
@@ -549,8 +565,8 @@ const unpadded = /^\S(?:.*\S)?$/su;
 const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 /**
- * One line of plain text, as a question or a choice is: taken as written
- * or refused, never trimmed.
+ * One line of plain text, as everything asked is: taken as written or
+ * refused, never trimmed.
  */
 const askLine = (max: number) =>
   z
@@ -559,34 +575,199 @@ const askLine = (max: number) =>
     .regex(unpadded)
     .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
       message:
-        "A question or choice is one line of well-formed text, with no control or invisible formatting characters",
+        "One line of well-formed text, with no control or invisible formatting characters",
     });
+
+/** An option to pick: a few words, and a line saying what it means. */
+const askOptionSchema = z.strictObject({
+  label: askLine(chatAskLimits.labelLength),
+  description: askLine(chatAskLimits.descriptionLength).optional(),
+});
+
+/**
+ * A question with options to pick from: one, or several (`multiple`),
+ * the agent's own pick marked (`recommended`, an option's index). A short
+ * `header` names what it is about.
+ */
+const choiceAskSchema = z
+  .strictObject({
+    kind: z.literal("choice"),
+    header: askLine(chatAskLimits.headerLength).optional(),
+    question: askLine(chatAskLimits.questionLength),
+    options: z
+      .array(askOptionSchema)
+      .min(chatAskLimits.optionsMin)
+      .max(chatAskLimits.options)
+      .refine(
+        (options) =>
+          new Set(options.map(({ label }) => label)).size === options.length,
+        { message: "A question's options all have different labels" }
+      ),
+    multiple: z.boolean().optional(),
+    recommended: z.int().min(0).optional(),
+  })
+  .refine(
+    ({ options, recommended }) =>
+      recommended === undefined || recommended < options.length,
+    { message: "`recommended` is the index of one of the options" }
+  );
+
+/**
+ * One thing the agent asks, by its `kind`: so far a question with options.
+ * Another kind (a yes or no, a few words) is a variant here and a way to
+ * answer it on the page (asked-questions.tsx), nothing else.
+ */
+const askSchema = z.discriminatedUnion("kind", [choiceAskSchema]);
+export type ChatAskItem = z.infer<typeof askSchema>;
 
 /** What the agent asks the person at once, as it calls `askQuestions`. */
 export const chatAskSchema = z.strictObject({
-  questions: z
-    .array(
-      z.strictObject({
-        question: askLine(chatAskLimits.questionLength),
-        choices: z
-          .array(askLine(chatAskLimits.choiceLength))
-          .min(chatAskLimits.choicesMin)
-          .max(chatAskLimits.choices)
-          .refine((choices) => new Set(choices).size === choices.length, {
-            message: "A question's choices are all different",
-          }),
-      })
-    )
-    .min(1)
-    .max(chatAskLimits.questions),
+  questions: z.array(askSchema).min(1).max(chatAskLimits.questions),
 });
 export type ChatAsk = z.infer<typeof chatAskSchema>;
 
 /**
- * Questions the agent asked the person, with choices: data, never
- * commands. A choice only says what the person may answer; their answer
- * is their own next message, and anything the agent then changes still
- * waits for them to confirm it in Grasp.
+ * Making something, in any chat: when the person asks for something new
+ * (from "Make something", which starts a chat with what to make,
+ * `ChatMake`, or in their own words anywhere), the agent asks at most
+ * {@link chatMakeLimits.questions} questions with answers to tap, only
+ * when the answer changes what gets made, then proposes a plan
+ * (`proposePlan`): a page the team opens (an App), something that runs on
+ * its own (a workflow), or both, each with a name and one plain sentence,
+ * the connections each needs, and who gets it. Nothing new is made until
+ * the person says Build it (`ChatsApi.build`).
+ */
+export const chatMakeLimits = {
+  questions: 2,
+  nameLength: 100,
+  sentenceLength: 300,
+  whoLength: 100,
+  needs: 4,
+  needNameLength: 60,
+  providerLength: 100,
+  blueprintLength: 256,
+} as const;
+
+/** What a plan makes: a page the team opens (an App), or what runs on its own (a workflow). */
+export const chatPlanKinds = ["app", "workflow"] as const;
+export type ChatPlanKind = (typeof chatPlanKinds)[number];
+
+/**
+ * What "Make something" started a chat to make, which the chat keeps
+ * (`ChatsApi.create`): an App or a workflow, and the project what Build it
+ * makes goes in, shared with everyone in it.
+ */
+export const chatMakeSchema = z.strictObject({
+  kind: z.enum(chatPlanKinds),
+  project: z.string().min(1).max(256).optional(),
+});
+export type ChatMake = z.infer<typeof chatMakeSchema>;
+
+/**
+ * A connection a part of a plan needs to do what it says (sending mail
+ * through Outlook, say), as the integrations name it: who carries it out
+ * (`native` connect, or `composio`), its provider (`microsoft`, a
+ * toolkit's slug) and the name the person knows it by.
+ */
+const planNeedSchema = z.strictObject({
+  source: z.enum(["native", "composio"]),
+  provider: askLine(chatMakeLimits.providerLength),
+  name: askLine(chatMakeLimits.needNameLength),
+});
+export type ChatPlanNeed = z.infer<typeof planNeedSchema>;
+
+/**
+ * One thing a plan makes: its kind, its name, one plain sentence of what
+ * it does, the connections it needs, and, for an App, the blueprint it
+ * starts from (`apps.blueprints.list`), if any.
+ */
+const planPartSchema = z
+  .strictObject({
+    kind: z.enum(chatPlanKinds),
+    name: askLine(chatMakeLimits.nameLength),
+    does: askLine(chatMakeLimits.sentenceLength),
+    needs: z.array(planNeedSchema).max(chatMakeLimits.needs).optional(),
+    blueprint: z.string().min(1).max(chatMakeLimits.blueprintLength).optional(),
+  })
+  .refine(({ kind, blueprint }) => blueprint === undefined || kind === "app", {
+    message: "Only an App starts from a blueprint",
+  });
+export type ChatPlanPart = z.infer<typeof planPartSchema>;
+
+/**
+ * A plan, as the agent proposes it (`proposePlan`): one or two parts, at
+ * most one of each kind, and who gets it, in the person's words.
+ */
+export const chatPlanSchema = z.strictObject({
+  parts: z
+    .array(planPartSchema)
+    .min(1)
+    .max(chatPlanKinds.length)
+    .refine(
+      (parts) => new Set(parts.map(({ kind }) => kind)).size === parts.length,
+      { message: "A plan makes at most one App and one workflow" }
+    ),
+  who: askLine(chatMakeLimits.whoLength),
+});
+export type ChatPlan = z.infer<typeof chatPlanSchema>;
+
+/** A plan the agent proposed: data, never commands, made only on Build it. */
+export interface ChatPlanned extends ChatPlan {
+  /** The call that proposed it: what Build it names (`ChatBuild.plan`). */
+  callId: string;
+}
+
+/**
+ * The needs of `plan` none of `connections` meets, each once: a need is
+ * met by an active connection of its source and provider the person can
+ * use. Build it waits until there are none (`agent.plan_needs_connection`).
+ */
+export const unmetNeeds = (
+  plan: ChatPlan,
+  connections: readonly {
+    source: string;
+    provider: string;
+    status: string;
+  }[]
+): ChatPlanNeed[] => {
+  const met = (need: ChatPlanNeed): boolean =>
+    connections.some(
+      ({ source, provider, status }) =>
+        status === "active" &&
+        source === need.source &&
+        provider === need.provider
+    );
+  const unmet = new Map<string, ChatPlanNeed>();
+  for (const need of plan.parts.flatMap(({ needs = [] }) => needs)) {
+    if (!met(need)) {
+      unmet.set(`${need.source}:${need.provider}`, need);
+    }
+  }
+  return [...unmet.values()];
+};
+
+/** Build it, for a chat's plan (`ChatsApi.build`). */
+export interface ChatBuild {
+  /** The plan, by the call that proposed it (`ChatPlanned.callId`). */
+  plan: string;
+  /** What the person said, in their words: their message in the chat. */
+  text: string;
+  /** One of `ChatsApi.models()`, as a question names it. */
+  model: string;
+  effort?: ModelEffort;
+}
+
+/** What Build it made, each by its ID and name. */
+export interface ChatBuilt {
+  app?: { id: string; name: string };
+  workflow?: { id: string; name: string };
+}
+
+/**
+ * Questions the agent asked the person: data, never commands. An option
+ * only says what the person may answer; their answer is their own next
+ * message, and anything the agent then changes still waits for them to
+ * confirm it in Grasp.
  */
 export interface ChatAsked extends ChatAsk {
   /** The call that asked them. */
@@ -620,6 +801,12 @@ export type ChatMessage =
       text: string;
       /** The files the question carried, in the order they were attached. */
       files?: ChatFile[];
+      /**
+       * For the person's Build it (`ChatsApi.build`): the plan it built,
+       * by its call, and what that made, which the thread shows being
+       * built from here on.
+       */
+      built?: ChatBuilt & { plan: string };
       at: string;
     }
   | {
@@ -645,6 +832,11 @@ export type ChatMessage =
        * composer until they answer.
        */
       asked?: ChatAsked;
+      /**
+       * The plan it proposed, if it ended its response proposing one
+       * (`proposePlan`): shown as a card with Build it.
+       */
+      planned?: ChatPlanned;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -876,11 +1068,11 @@ export interface ChatUpdate {
    */
   held: number;
   /**
-   * Changes whenever the chat's agent writes or drops a draft: read the
-   * drafts again then, and preview the latest. Only a count, from when
-   * the object last started.
+   * Changes whenever the chat's agent writes an App's draft: read what it
+   * worked on again then (`ChatsApi.worked`). Only a count, from when the
+   * object last started.
    */
-  drafts: number;
+  worked: number;
   /**
    * Whether the turn checks the drafts it wrote now, past its answer
    * (core's agent-builds.ts, `turnCheck`): the chat takes no question
@@ -934,6 +1126,20 @@ export interface ChatQuestion {
    * carried by another question.
    */
   files?: string[];
+  /**
+   * What it is about: the page it was asked on, as an App's workspace is
+   * about the App. Core tells the agent, by name, with the question, so
+   * "this" and "it" mean that; only one the person may change.
+   */
+  subject?: ChatSubject;
+  /**
+   * What the person picked with `@` as they wrote it, at most
+   * {@link chatMentionsMax}, each once: core tells the agent each by name
+   * and ID with the question, so it knows which one they mean rather than
+   * guessing from a name. Each must be one the person may see: an App or
+   * workflow they have a role in, a member of the organization.
+   */
+  mentions?: ChatMention[];
 }
 
 /**
@@ -977,9 +1183,14 @@ export interface ChatsApi {
   /**
    * Makes a chat with the agent `agentId`, one of `agents()`, or with
    * the company's first agent when none is named. An agent the person may
-   * not talk to is `agent.unknown`, as one the company doesn't have.
+   * not talk to is `agent.unknown`, as one the company doesn't have. From
+   * "Make something", with what to make (`make`), which it keeps.
    */
-  create: (title: string, agentId?: string) => Promise<ChatSummary>;
+  create: (
+    title: string,
+    agentId?: string,
+    make?: ChatMake
+  ) => Promise<ChatSummary>;
   /**
    * The person's chat for App `app`, where its agent changes the App with
    * them: the one they last used, or a new one named after the App. Only
@@ -987,15 +1198,10 @@ export interface ChatsApi {
    */
   forApp: (app: string) => Promise<ChatSummary>;
   /**
-   * A new App (`apps.create`'s input), owned by the person, with its own
-   * chat (`forApp`), made together. Like every App, it stays until a
-   * person removes it. Refused before anything is made when the person
-   * has no room for another chat. Only for a builder.
+   * The organization's members, by name, that a question can mention
+   * (`ChatQuestion.mentions`): whoever asks needn't be an admin.
    */
-  newApp: (input: {
-    name: string;
-    description: string;
-  }) => Promise<ChatSummary & { appId: string }>;
+  people: () => Promise<MentionablePerson[]>;
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
   /**
@@ -1025,124 +1231,27 @@ export interface ChatsApi {
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
   /**
-   * The Apps the chat's agent changes in the chat's drafts, those whose
-   * changes are proposed or discarded too, most recently written first.
+   * Build it: makes what the chat's plan `build.plan` lists (an App, a
+   * workflow, or both), owned by the person, in the project the chat was
+   * started with (`ChatSummary.make`, shared with everyone in it), each
+   * once; then asks the chat's agent, in the person's words
+   * (`build.text`), to build them. Only for a builder; a plan the chat
+   * doesn't hold, or built already, is refused (`agent.plan_not_found`),
+   * and one whose connections aren't all there yet (`unmetNeeds`) is
+   * refused (`agent.plan_needs_connection`), with nothing made.
    */
-  drafts: (chatId: string) => Promise<ChatDraft[]>;
+  build: (chatId: string, build: ChatBuild) => Promise<ChatBuilt>;
+  /**
+   * What the chat's agent worked on, the most recently written first: each
+   * App whose draft it wrote (`ChatWork`).
+   */
+  worked: (chatId: string) => Promise<ChatWork[]>;
   /**
    * The documents the chat's answer `messageId` cites, in the order it
    * first links to them, each only while the chat's agent may still read
    * it for the person; none for a message that isn't an answer.
    */
   cited: (chatId: string, messageId: number) => Promise<ChatCitedDocument[]>;
-  /**
-   * Every version of the chat's draft of `app`, newest first: for the
-   * person while they build the App.
-   */
-  draftVersions: (chatId: string, app: string) => Promise<ChatDraftVersion[]>;
-  /**
-   * Every file of the chat's draft of `app` as it is now, as its agent
-   * reads them: its changes over the version it is over, or the App's
-   * latest version while it changes nothing. For the App's code view,
-   * read-only: for the person while they build the App.
-   */
-  draftFiles: (chatId: string, app: string) => Promise<AppFiles>;
-  /**
-   * Makes version `version` of the chat's draft of `app` the draft again,
-   * as a new version: for the person while they build the App.
-   */
-  restoreDraftVersion: (
-    chatId: string,
-    app: string,
-    version: number
-  ) => Promise<ChatDraftVersion>;
-  /**
-   * Discards the chat's draft of `app`: its changes go, and the agent's
-   * next write starts over from the App's latest version; its versions
-   * stay, to restore one. For the person while they build the App.
-   */
-  discardDraft: (chatId: string, app: string) => Promise<void>;
-  /**
-   * Proposes the chat's draft of `app` as the App's next version, up for
-   * review, by the person themselves, with `message`: checked first, as
-   * when the chat's agent proposes it, and refused with
-   * `app.draft_failed` when the check fails. Resolves with the version.
-   * For the person while they build the App, and not from a chat that
-   * read restricted data.
-   */
-  proposeDraft: (
-    chatId: string,
-    app: string,
-    message: string
-  ) => Promise<number>;
-  /**
-   * The data model of the chat's draft of `app`, from its definition,
-   * and what publishing the draft does to the App's records: for the
-   * person while they build the App.
-   */
-  dataModel: (chatId: string, app: string) => Promise<DraftDataModel>;
-  /**
-   * Changes the definition of the chat's draft of `app` by `operation`
-   * (an operation of `@grasp-os/runtime/definition`, as the chat's agent's
-   * definition tools make them, or a few made as one: a field renamed and
-   * retyped), by the person themselves: the model after it, the plan, and
-   * what this change alone does (`change`), or the problem, which changed
-   * nothing. With
-   * `preview`, nothing is saved: what it would do, to show first. For the
-   * person while they build the App, unless it is archived.
-   */
-  defineDraft: (
-    chatId: string,
-    app: string,
-    operation: unknown,
-    preview?: boolean
-  ) => Promise<DataModelChange>;
-  /**
-   * The pages of the chat's draft of `app`, built, to preview: for the
-   * person while they build the App, from a chat that changes it or is its
-   * own
-   * (`app.not_in_chat` otherwise). A draft that changes nothing previews
-   * the App's latest version, at the draft's revision, so its next write
-   * comes into the frame; one whose changes leave no page that builds
-   * opens on that version too (`PreviewBundle.fallback`). With `version`,
-   * of that version of the draft, read-only: at `readOnlyRevision`, so its
-   * calls are all refused.
-   */
-  preview: (
-    chatId: string,
-    app: string,
-    version?: number
-  ) => Promise<PreviewBundle>;
-  /**
-   * What an open frame of the chat's preview of `app`, showing `shown`,
-   * takes at `revision`, the newest the preview knows of
-   * (`PreviewUpdate`): a build of the draft is built and its modules
-   * staged for the frame to import and swap in with React Fast Refresh,
-   * one build per revision, shared by every preview that asks for it, and
-   * `app.preview_outdated` once the draft moved past `revision`. No frame
-   * is staged and nothing sealed, and the build's type check and lint
-   * don't hold it up. For the person while they build the App.
-   */
-  previewUpdate: (
-    chatId: string,
-    app: string,
-    revision: number,
-    shown: PreviewShown
-  ) => Promise<PreviewUpdate>;
-  /**
-   * Tells the chat's agent of `problem`, one the preview of the draft at
-   * `at` ran into at the route `path` (an uncaught error, an unhandled
-   * rejection or a `console.error`). Its next check of the draft reads them. A
-   * report of a revision the draft moved past, or of a version of the
-   * App, is dropped.
-   */
-  previewReport: (
-    chatId: string,
-    app: string,
-    at: PreviewAt,
-    path: string,
-    problem: PageProblem
-  ) => Promise<void>;
   /** Stops the agent's work on the chat; `false` when there was none. */
   cancel: (chatId: string) => Promise<boolean>;
   /** The npm packages the chat's agent asked for that wait, oldest first. */

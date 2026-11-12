@@ -36,6 +36,7 @@ const chat = (id: string, title: string): ChatSummary => ({
   running: false,
   appId: null,
   via: "web",
+  make: null,
 });
 
 const board = chat("board", "Board report");

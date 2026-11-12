@@ -8,7 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { addMember, removeMember } from "../src/app-members.ts";
 import { removeApp } from "../src/app-removal.ts";
-import { changeStatus } from "../src/app-status.ts";
+import { setArchived } from "../src/app-status.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { buildPackages } from "../src/packages/build.ts";
@@ -882,7 +882,7 @@ describe("rescanning approved packages", () => {
   it("stops on a removed App's packages: its approval is withdrawn, audited", async () => {
     const name = await published();
     const { builder, app, request } = await approvedPackage(name);
-    await changeStatus(env, builder, app, "archive");
+    await setArchived(env, builder, app, true);
 
     const events = await auditedDuring(async () => {
       await removeApp(env, builder, app);

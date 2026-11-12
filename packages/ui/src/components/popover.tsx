@@ -20,6 +20,7 @@ function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
 // the kit's menus and selects: what doesn't fit scrolls.
 function PopoverContent({
   className,
+  anchor,
   align = "center",
   alignOffset = 0,
   side = "bottom",
@@ -29,12 +30,13 @@ function PopoverContent({
 }: PopoverPrimitive.Popup.Props &
   Pick<
     PopoverPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "anchor" | "side" | "sideOffset"
   > & { variant?: "default" | "flush" | "snug" }) {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Positioner
         align={align}
+        anchor={anchor}
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}

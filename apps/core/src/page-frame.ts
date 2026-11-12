@@ -62,8 +62,8 @@ import { pageFramePolicy } from "./security-headers.ts";
 // closes each way:
 //
 // - Another App's build, another version's (an older one, say), or another
-//   chat's preview: each is its own scope, a hash of exactly its code (a
-//   published build's artifact) or of its chat and App (a preview's), and
+//   viewer's preview: each is its own scope, a hash of exactly its code (a
+//   published build's artifact) or of its viewer and App (a preview's), and
 //   a module is served only with core's MAC over its scope, address and
 //   bytes (`stagedMac`), so nothing is ever served under a directory but
 //   what was staged for it. The same code is the same artifact, so a
@@ -154,7 +154,7 @@ export interface FrameCode {
 // modules a build loads (`kitScopeOf`), shared by every build that loads
 // the same set; a build's own, for a published page (its artifact, the
 // hash of exactly its code, so of one version of one App's page) or one
-// version of a draft opened read-only; and a chat's preview's of an App
+// version of a draft opened read-only; and a viewer's preview's of an App
 // (`previewFrame`), shared by every frame of it that takes its draft's
 // writes, and every write. A scope's token reads only that scope's
 // modules: a module is kept under its scope with core's MAC over the
@@ -183,7 +183,7 @@ const frameAccessMs = 10 * minute;
  * A windowed token (`windowedAccess`) holds until the end of the next
  * window, so every frame in one window names a file at the same address,
  * which the browser caches, and one open for a while can still load one
- * late: between one window and two. A chat's preview's module tokens hold
+ * late: between one window and two. A preview's module tokens hold
  * at most an hour, whose frame the page opens again with a fresh token
  * when one expires (@grasp-os/runtime's preview-runtime.ts); a published
  * build's at most six, which a person keeps
@@ -225,7 +225,7 @@ export const frameAccess = async (
   await accessToken(env, `frame:${artifact}`, now + frameAccessMs);
 
 /**
- * A token for the frame of `artifact`, a chat's preview of its draft as
+ * A token for the frame of `artifact`, the App's preview of its draft as
  * it is now, that takes the draft's updates (`previewScripts`): only core
  * hands one out, for that preview alone. A version of a draft or an App
  * opened read-only is framed with `frameAccess`, and takes none, whatever
@@ -275,23 +275,23 @@ const kitScopeOf = async (kit: Record<string, string>): Promise<string> =>
   `${kitScopePrefix}${await sha256Hex(canonicalJson(["kit", kit]))}`;
 
 /**
- * Where a chat's preview of App `app` is staged, for a frame of
+ * Where `personId`'s preview of App `app`'s draft is staged, for a frame of
  * `artifact`, a build of the draft: the scope its modules are kept in,
  * and the artifact its frame is staged under. One that takes the draft's
  * writes (`updates`) keeps them in a scope shared by every such frame of
  * it and every write; one that doesn't, a version opened read-only, in
  * one of its own build alone, so its policy's directory holds nothing of
  * the draft's other writes. The build's own artifact is a hash of its
- * code alone, the same in every chat that previews the same code: its
- * frame here names the chat, so it is this preview's only.
+ * code alone, the same for everyone who previews the same code: its
+ * frame here names the person, so it is this preview's only.
  */
 export const previewFrame = async (
-  chatId: string,
+  personId: string,
   app: string,
   artifact: string,
   { updates }: { updates: boolean }
 ): Promise<{ scope: string; artifact: string }> => {
-  const shared = await sha256Hex(canonicalJson(["preview", chatId, app]));
+  const shared = await sha256Hex(canonicalJson(["preview", personId, app]));
   if (!updates) {
     const own = await sha256Hex(canonicalJson([artifact, shared, "version"]));
     return { scope: own, artifact: own };
@@ -304,7 +304,7 @@ export const previewFrame = async (
 
 /**
  * A token for the modules of `scope`, in their address's query: for a
- * frame of a chat's preview (`preview`) or of a published build, which
+ * frame of the App's preview (`preview`) or of a published build, which
  * hold for different lengths (`accessWindowsMs`).
  */
 const moduleAccess = async (
@@ -407,7 +407,7 @@ const frameManifestSchema = z
     app: z.record(z.string(), z.string().regex(hashPattern)),
     /** Each module's Subresource Integrity, by its address. */
     integrity: z.record(z.string(), z.string().startsWith("sha384-")),
-    /** A chat's preview's frame, whose policy takes its updates (`previewScripts`). */
+    /** A frame of the App's preview, whose policy takes its updates (`previewScripts`). */
     preview: z.boolean(),
   })
   .refine(
@@ -1314,7 +1314,7 @@ parent.postMessage({ type: "${pageFrameReady}", load, supported: enforced }, "*"
 const scriptJson = (value: unknown): string =>
   JSON.stringify(value).replaceAll("<", "\\u003c");
 
-// A chat's preview takes each write of its draft in the frame it has open
+// The App's preview takes each write of its draft in the frame it has open
 // (spec 19.2.1), as Vite's dev server takes a change: core stages the
 // write's modules under the preview's scope (`previewFrame`), and the page
 // hands the frame the address of its page's module, which the frame

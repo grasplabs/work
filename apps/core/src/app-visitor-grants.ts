@@ -19,7 +19,7 @@ import {
 import { appVisitorGrants, auditOutbox } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 
-// What a published App's visitors may call, and how their calls are held
+// What a live App's visitors may call, and how their calls are held
 // to it (app-visitors.ts for how a visitor signs in and `visitorCall`;
 // page-calls.ts for the one path every page calls on; app-functions.ts,
 // `callVisitorFunction`, for the call). A visitor is never a person: their
@@ -36,13 +36,13 @@ import { requireNotStaff } from "./sharing.ts";
 //   for a member.
 // - Keeping a grant after it was taken away. The grant is read again
 //   before the call and before each commit (the call's one `admit`), with
-//   the session, the App's status and version, and the visitor's place on
-//   the list. Granting fewer functions, making another version current,
-//   unpublishing or taking the visitor off the list stops a call already
-//   running, before it commits. Grants are per version: a new current
-//   version grants nothing until granted again. Unpublishing also ends
-//   every visitor's session, in the same batch as the status, and a
-//   sign-in's session goes in only while the App is still published.
+//   the session, whether the App is live and its version, and the
+//   visitor's place on the list. Granting fewer functions, publishing
+//   another version, archiving or taking the visitor off the list stops a
+//   call already running, before it commits. Grants are per version: a
+//   new live version grants nothing until granted again. Archiving also
+//   ends every visitor's session, in the same batch as the archive, and a
+//   sign-in's session goes in only while the App is still live.
 // - Code core didn't lease, or of a revoked release. A call runs only for
 //   a page build that gets the App's data, read before it runs and
 //   again before its answer or error is handed over

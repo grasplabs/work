@@ -1,22 +1,24 @@
 import { definitionText } from "@grasp-os/runtime/definition";
-import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { openTestRun } from "./agent-chat.ts";
+import { readDraft, saveDraft } from "../src/app-drafts.ts";
 import { commitApp, redefined, testApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { deskFiles } from "./preview-drafts.ts";
-import { chatsOf, chatWithDraft } from "./previews.ts";
+import { chatWithDraft } from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// The App's code view reads the files of a chat's draft as the chat's
-// agent reads them (`chats.draftFiles`): its changes over the version it
-// is over, each write as it lands, or the App's latest version while the
-// chat has no draft. The ways it can fail: a write that doesn't show, a
-// deleted file that still does, and someone else reading the draft, by
-// another person's chat or once they no longer build the App.
+// The App's code view reads the files of the App's draft as its writers
+// read them (`apps.drafts.files`): its changes over the version it is
+// over, each write as it lands, or the App's live version while the draft
+// changes nothing. The ways it can fail: a write that doesn't show, a
+// deleted file that still does, and someone reading the draft who doesn't
+// build the App, or no longer does.
 
 const idp = mockIdp();
 
@@ -42,29 +44,32 @@ const deskOf = async (owner: Person) => {
   return appIdSchema.parse(id);
 };
 
-describe("a chat's draft files, for the App's code view", () => {
-  it("are the draft's as each write lands, and the App's latest version in a chat without one", async () => {
+describe("an App's draft files, for the App's code view", () => {
+  it("are the draft's as each write lands, and the App's live version while it changes nothing", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
-    const { chatId, revision, write } = await chatWithDraft(builder, app, {
+    const { drafts } = builder.api.apps;
+    const before = await drafts.files(app);
+    const { revision, write } = await chatWithDraft(builder, app, {
       "server/notes.ts": notes(10),
       "src/routes/index.tsx": null,
     });
-    const { chats } = builder.api;
 
-    const first = await chats.draftFiles(chatId, app);
-    await write({ "server/notes.ts": notes(25) }, revision);
-    const second = await chats.draftFiles(chatId, app);
-    const empty = await chats.create("Nothing written");
-    const before = await chats.draftFiles(empty.id, app);
+    const first = await drafts.files(app);
+    const written = await write({ "server/notes.ts": notes(25) }, revision);
+    const second = await drafts.files(app);
+    await drafts.discard(app, written);
+    const discarded = await drafts.files(app);
+    // A version committed, not live: the draft stays over the live one.
     await commitApp(builder.api.apps.files, app, renamed, "Rename");
-    const latest = await chats.draftFiles(empty.id, app);
+    const committed = await drafts.files(app);
 
-    expect({ first, second, before, latest }).toStrictEqual({
+    expect({ before, first, second, discarded, committed }).toStrictEqual({
+      before: released.files,
       first: { ...unpageed, "server/notes.ts": notes(10) },
       second: { ...unpageed, "server/notes.ts": notes(25) },
-      before: released.files,
-      latest: renamed.files,
+      discarded: released.files,
+      committed: released.files,
     });
   });
 
@@ -77,7 +82,7 @@ describe("a chat's draft files, for the App's code view", () => {
     const { id } = await builder.api.apps.create({ name: "Notes" });
     await release(builder, id, notesApp);
     const app = appIdSchema.parse(id);
-    const { chatId, revision } = await chatWithDraft(builder, app, {});
+    const { chatId } = await chatWithDraft(builder, app, {});
     // The title's ID changed, its name and type not: the same code.
     const [table] = notesApp.definition.tables;
     const reIded = {
@@ -94,36 +99,25 @@ describe("a chat's draft files, for the App's code view", () => {
           ]
         : [],
     };
-    const before = await builder.api.chats.drafts(chatId);
-    await chatsOf(builder).saveDraft(
-      chatIdSchema.parse(chatId),
+    const before = await builder.api.apps.drafts.get(app);
+    await saveDraft(
+      env,
       app,
-      1,
-      {},
-      [],
-      revision,
-      {
-        runId: await openTestRun(chatsOf(builder), chatIdSchema.parse(chatId)),
-      },
-      definitionText(reIded)
+      await readDraft(env, app),
+      { changes: {}, unchanged: [], definition: definitionText(reIded) },
+      await agentWriting(builder, chatId)
     );
-    const after = await builder.api.chats.drafts(chatId);
+    const after = await builder.api.apps.drafts.get(app);
     expect({
-      before: before.map(({ changed, definitionChanged }) => [
-        changed,
-        definitionChanged,
-      ]),
-      after: after.map(({ changed, definitionChanged }) => [
-        changed,
-        definitionChanged,
-      ]),
+      before: [before.changed, before.definitionChanged],
+      after: [after.changed, after.definitionChanged],
     }).toStrictEqual({
-      before: [[[], false]],
-      after: [[[], true]],
+      before: [[], false],
+      after: [[], true],
     });
   });
 
-  it("are only for the chat's person while they build the App", async () => {
+  it("are for whoever builds the App, while they build it", async () => {
     const owner = await signedInApi(idp, "builder");
     const app = await deskOf(owner);
     const [builder, other, outsider] = await Promise.all([
@@ -139,11 +133,11 @@ describe("a chat's draft files, for the App's code view", () => {
         role: "builder",
       });
     }
-    const { chatId } = await chatWithDraft(builder, app, {
+    await chatWithDraft(builder, app, {
       "server/notes.ts": notes(10),
     });
     const read = async (person: Person): Promise<string> =>
-      await failure(async () => await person.api.chats.draftFiles(chatId, app));
+      await failure(async () => await person.api.apps.drafts.files(app));
 
     const own = await read(builder);
     const another = await read(other);
@@ -157,7 +151,8 @@ describe("a chat's draft files, for the App's code view", () => {
 
     expect({ own, another, notMember, demoted }).toStrictEqual({
       own: "ok",
-      another: "agent.chat_not_found",
+      // The App's draft, which every builder of it shares.
+      another: "ok",
       notMember: "app.not_found",
       demoted: "role.forbidden",
     });

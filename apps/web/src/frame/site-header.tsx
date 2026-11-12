@@ -34,6 +34,11 @@ export type Crumb =
   | { label: string; to: "/apps/$app"; params: { app: string } }
   | {
       label: string;
+      to: "/projects/$projectId";
+      params: { projectId: string };
+    }
+  | {
+      label: string;
       to: "/knowledge/$collection";
       params: { collection: string };
     }
@@ -55,6 +60,9 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
   if (crumb.to === "/workflows/$workflow") {
     return <Link params={crumb.params} to="/workflows/$workflow" />;
   }
+  if (crumb.to === "/projects/$projectId") {
+    return <Link params={crumb.params} to="/projects/$projectId" />;
+  }
   if (crumb.to === "/brain/$noteId") {
     return <Link params={crumb.params} to="/brain/$noteId" />;
   }
@@ -70,23 +78,27 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
 
 /**
  * The bar above every signed-in page (`SiteHeader` in the kit, the same
- * as the admin's): the sidebar's trigger, then where the page is, and on
- * the right any page action. `phoneCrumbs` says which crumbs a phone
- * keeps (the kit's `phoneCrumbs`).
+ * as the admin's): the sidebar's trigger, then where the page is, with
+ * where its subject stands after it (`trailing`), and on the right any
+ * page action. `phoneCrumbs` says which crumbs a phone keeps (the kit's
+ * `phoneCrumbs`).
  */
 export const SiteHeader = ({
   crumbs,
   actions,
+  trailing,
   phoneCrumbs,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
+  trailing?: ReactNode;
   phoneCrumbs?: "last-two" | "first";
 }) => {
   const { t } = useLingui();
   return (
     <SiteHeaderBar
       actions={actions}
+      trailing={trailing}
       phoneCrumbs={phoneCrumbs}
       breadcrumbLabel={t`Breadcrumb`}
       crumbs={crumbs.map((crumb) =>
@@ -94,6 +106,8 @@ export const SiteHeader = ({
           ? { label: crumb.label, link: crumbLink(crumb) }
           : { label: crumb.label }
       )}
+      // The sidebar holds its own fold on a wider screen (frame/sidebar-brand.tsx).
+      trigger="mobile"
       triggerLabel={t`Show or hide the sidebar`}
     />
   );

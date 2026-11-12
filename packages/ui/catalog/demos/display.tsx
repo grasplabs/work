@@ -69,6 +69,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemGroup,
+  ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Kbd, KbdGroup } from "@grasp-os/ui/components/kbd";
@@ -298,6 +299,20 @@ const ItemDemo = () => (
       <ItemContent>
         <ItemTitle>Weekly report</ItemTitle>
         <ItemDescription>Every Monday at 9:00.</ItemDescription>
+      </ItemContent>
+    </Item>
+    {/* A card on its own, as an App a chat builds above its box. */}
+    <Item
+      render={<a aria-label="Invoice desk" href="#app" />}
+      size="sm"
+      variant="card"
+    >
+      <ItemMedia variant="tile">
+        <LayoutGridIcon />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>Invoice desk</ItemTitle>
+        <ItemDescription>Unpublished changes</ItemDescription>
       </ItemContent>
     </Item>
     {/* Questions to start from: buttons in a named list. */}

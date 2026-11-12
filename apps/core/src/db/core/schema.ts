@@ -647,9 +647,8 @@ export const permissions = sqliteTable(
 
 /**
  * The App registry. Each App's code is a series of versions
- * (`app_versions`); `current_version` is the one that runs and
- * `pending_version` one put up for review. Both only ever name a version
- * the App has.
+ * (`app_versions`); `current_version` is the live one, the one that runs,
+ * and only ever names a version the App has.
  */
 export const apps = sqliteTable(
   "apps",
@@ -676,16 +675,39 @@ export const apps = sqliteTable(
      */
     process: text(),
     blueprint: text(),
-    currentVersion: integer("current_version"),
-    pendingVersion: integer("pending_version"),
     /**
-     * Where it is in its life (app-status.ts): a new App is a draft, open to
-     * its builders alone, until one publishes it.
+     * The live version; null until its first publish, while the App is
+     * open to its builders alone (app-access.ts).
      */
+    currentVersion: integer("current_version"),
+    /**
+     * The live version's label (`app_versions.label`), set with it in one
+     * statement, so reading an App needs no join; null while none is live.
+     */
+    liveLabel: text("live_label"),
+    /**
+     * When it was archived (app-status.ts), and who archived it; null
+     * while it isn't. An archived App is open to nobody and runs nothing.
+     */
+    archivedAt: timestamp("archived_at"),
+    archivedBy: text("archived_by", { mode: "json" }).$type<{
+      userId: string;
+      staff: boolean;
+    }>(),
+    /**
+     * The version put up for review, and where the App was in its life
+     * (draft, published, archived), with when and by whom that last
+     * changed. Unused since publishing went straight from the App's draft:
+     * nothing reads them, `pending_version` is never written either, and
+     * only `status` is still written (as a
+     * publish, an archive and a restore change it), so a roll back to the
+     * release before finds each App open or closed as it is. Dropped in a
+     * later release (expand, then contract).
+     */
+    pendingVersion: integer("pending_version"),
     status: text({ enum: ["draft", "published", "archived"] })
       .notNull()
       .default("draft"),
-    /** When its status last changed, and who changed it; null until then. */
     statusChangedAt: timestamp("status_changed_at"),
     statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
       userId: string;
@@ -695,7 +717,7 @@ export const apps = sqliteTable(
     /**
      * The last part of its own address under the workspace's (app-own-links.ts),
      * one App's at most; null while its builders gave it none. It opens the
-     * App only while it is published.
+     * App only while it is live.
      */
     link: text(),
     /**
@@ -1055,11 +1077,21 @@ export const appVersions = sqliteTable(
      */
     pages: integer({ mode: "boolean" }).notNull().default(false),
     /**
-     * The chat's agent that wrote and proposed it, for `author_id` (JSON,
-     * `AgentProposer`); null for a version a person committed. A row the
-     * previous release writes gets none.
+     * The chat's agent that wrote and proposed it (JSON, `AgentProposer`).
+     * Unused since a builder publishes the App's shared draft themselves:
+     * nothing reads or writes it. Kept so a roll back to the release before
+     * still has it; dropped in a later release (expand, then contract).
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
+    /**
+     * What people call it, `YY.MM.N` as the platform's releases are
+     * (@grasp-os/shared/release-id): given in the statement that first
+     * makes it live (apps.ts, `makeCurrent`), so only a version that went
+     * live has one and the count has no gaps; kept when a roll back makes
+     * it live again. Null for a version never live. The integer `version`
+     * stays its ID.
+     */
+    label: text(),
     /**
      * Where publishing left the version (src/app-publish.ts): `published`
      * once it was built, sealed and its tests passed, `failed` when its
@@ -1075,7 +1107,125 @@ export const appVersions = sqliteTable(
      */
     publishedManifestHash: text("published_manifest_hash"),
   },
-  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+  (table) => [
+    primaryKey({ columns: [table.appId, table.version] }),
+    uniqueIndex("app_versions_label").on(table.appId, table.label),
+  ]
+);
+
+/**
+ * Each App's draft (src/app-drafts.ts): the one every builder of the App
+ * and their chats' agents write, over the version it began from (`base`,
+ * null for an App with none). Each write is the next `revision`, and
+ * lands only over the revision it read, so of two writes made from the
+ * same read the second is refused. A draft whose changes are all gone
+ * (published or discarded) keeps its row and its revision.
+ */
+export const appDrafts = sqliteTable("app_drafts", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  base: integer(),
+  revision: integer().notNull(),
+  /**
+   * The draft's own App definition, as its text (`definitionText`), next
+   * to its changed files: what the definition tools change. Null while it
+   * is its base's (none for an App without a version).
+   */
+  definition: text(),
+  updatedAt: timestamp("updated_at").notNull(),
+  /** Who wrote it last: the person, themselves or through their chat's agent. */
+  updatedBy: text("updated_by").notNull(),
+});
+
+/**
+ * A draft's changes (`appDrafts`): a file's new content by path, or null
+ * to delete it, a row each, so no row holds more than one file.
+ */
+export const appDraftFiles = sqliteTable(
+  "app_draft_files",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => appDrafts.appId),
+    path: text().notNull(),
+    content: text(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.path] })]
+);
+
+/**
+ * The undo points of each App's draft: one per agent turn that wrote it,
+ * kept as the turn left the draft, one per person's own edit, and one per
+ * restore. `number` counts up from 1 per App in the order they landed;
+ * `revision` is the draft's revision it made, `base` the version it is
+ * over, `definition` its own definition (as `app_drafts.definition`), and
+ * `contentHash` the SHA-256 of what it holds (the canonical JSON of
+ * `base`, each path's content hash and its definition). Who wrote it:
+ * `personId`, through the agent of chat `chatId` in turn `turnId` (its
+ * last write in the code step `callId`), or themselves, restoring point
+ * `restoredFrom`. The draft's own rows hold only the latest; these hold
+ * every one, to list, preview and restore, and to say what a chat worked
+ * on.
+ */
+export const appDraftPoints = sqliteTable(
+  "app_draft_points",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    definition: text(),
+    contentHash: text("content_hash").notNull(),
+    personId: text("person_id").notNull(),
+    chatId: text("chat_id"),
+    turnId: text("turn_id"),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.number] }),
+    // What a chat worked on, and what its turn wrote, without a scan.
+    index("app_draft_points_chat").on(table.chatId, table.turnId),
+  ]
+);
+
+/**
+ * What an undo point (`appDraftPoints`) changes over its base: each
+ * path's content by its SHA-256 (`appDraftContents`), or null to delete
+ * the file, a row each.
+ */
+export const appDraftPointFiles = sqliteTable(
+  "app_draft_point_files",
+  {
+    appId: text("app_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.number, table.path] }),
+    index("app_draft_point_files_content").on(table.appId, table.sha256),
+  ]
+);
+
+/**
+ * The contents an App's undo points name, each once, by its SHA-256: most
+ * writes change a file or two, so the points share the rest.
+ */
+export const appDraftContents = sqliteTable(
+  "app_draft_contents",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.sha256] })]
 );
 
 /**

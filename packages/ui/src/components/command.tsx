@@ -7,27 +7,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
-import {
-  InputGroup,
-  InputGroupAddon,
-} from "@grasp-os/ui/components/input-group";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Command as CommandPrimitive } from "cmdk";
 import { SearchIcon, CheckIcon } from "lucide-react";
 import * as React from "react";
 
-/** A command menu. `flush` fills a window of its own to its edges, so its lines run from side to side. */
+/**
+ * A command menu: a search over a list a keyboard moves through, laid out
+ * as the kit's menus are, on whatever holds it (a popover, a dialog),
+ * whose corners it takes. Focused itself, as a menu without a search is
+ * for its keys, it shows no ring: its selected row says where it is.
+ */
 function Command({
   className,
-  flush = false,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive> & { flush?: boolean }) {
+}: React.ComponentProps<typeof CommandPrimitive>) {
   return (
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "bg-popover text-popover-foreground flex size-full flex-col overflow-hidden rounded-xl!",
-        flush ? "p-0" : "p-1",
+        "bg-popover text-popover-foreground flex size-full flex-col overflow-hidden rounded-[inherit] outline-hidden",
         className
       )}
       {...props}
@@ -69,51 +68,48 @@ function CommandDialog({
 }
 
 /**
- * The search on top of a command list. `lg` is the one of a window of its
- * own: the whole width, taller, with a line under it instead of a box
- * around it.
+ * The search on top of a command list: a row as wide as the menu, a line
+ * under it, the search's icon on its left, or what takes its place
+ * (`start`, such as the way back from a list opened in a menu's place).
+ * `lg` is the one of a window of its own: taller, its words larger.
  */
 function CommandInput({
   className,
   size = "default",
+  start,
   ...props
 }: Omit<React.ComponentProps<typeof CommandPrimitive.Input>, "size"> & {
   size?: "default" | "lg";
+  start?: React.ReactNode;
 }) {
   return (
     <div
       data-slot="command-input-wrapper"
       data-size={size}
-      className="p-1 pb-0 data-[size=lg]:border-b data-[size=lg]:p-0"
+      className="flex h-10 shrink-0 items-center gap-2 border-b px-3 data-[size=lg]:h-13 data-[size=lg]:px-4"
     >
-      <InputGroup
-        className={cn(
-          "rounded-lg! shadow-none! *:data-[slot=input-group-addon]:pl-2!",
-          size === "lg"
-            ? "h-13! rounded-none! border-0! bg-transparent! px-2 text-base *:data-[slot=input-group-addon]:pl-3!"
-            : "border-input/30 bg-input/30 h-8!"
-        )}
-      >
-        <CommandPrimitive.Input
-          data-slot="command-input"
-          className={cn(
-            "w-full text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
-            className
-          )}
-          {...props}
+      {start ?? (
+        <SearchIcon
+          aria-hidden="true"
+          className="text-muted-foreground size-4 shrink-0"
         />
-        <InputGroupAddon>
-          <SearchIcon className="size-4 shrink-0 opacity-50" />
-        </InputGroupAddon>
-      </InputGroup>
+      )}
+      <CommandPrimitive.Input
+        data-slot="command-input"
+        className={cn(
+          "placeholder:text-muted-foreground h-full w-full min-w-0 bg-transparent text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50 in-data-[size=lg]:text-base",
+          className
+        )}
+        {...props}
+      />
     </div>
   );
 }
 
 /**
- * The list of a command menu. `fill` takes the height its place has, with
- * room around its rows, for a list beside something else in a window of
- * its own.
+ * The list of a command menu, with the kit's menus' room round its rows.
+ * `fill` takes the height its place has, for a list beside something else
+ * in a window of its own.
  */
 function CommandList({
   className,
@@ -124,8 +120,8 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "no-scrollbar scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
-        fill ? "h-full max-h-none p-2" : "max-h-72",
+        "no-scrollbar scroll-py-1 overflow-x-hidden overflow-y-auto p-1 outline-none",
+        fill ? "h-full max-h-none" : "max-h-72",
         className
       )}
       {...props}
@@ -140,7 +136,10 @@ function CommandEmpty({
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className={cn("py-6 text-center text-sm", className)}
+      className={cn(
+        "text-muted-foreground py-6 text-center text-sm",
+        className
+      )}
       {...props}
     />
   );
@@ -154,7 +153,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        "text-foreground **:[[cmdk-group-heading]]:text-muted-foreground overflow-hidden p-1 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium",
+        "text-foreground **:[[cmdk-group-heading]]:text-muted-foreground overflow-hidden **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium",
         className
       )}
       {...props}
@@ -169,7 +168,7 @@ function CommandSeparator({
   return (
     <CommandPrimitive.Separator
       data-slot="command-separator"
-      className={cn("bg-border -mx-1 h-px w-auto", className)}
+      className={cn("bg-border -mx-1 my-1 h-px", className)}
       {...props}
     />
   );
@@ -189,7 +188,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item data-selected:bg-muted data-selected:text-foreground data-selected:**:[svg]:text-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none in-data-[slot=dialog-content]:rounded-lg! data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "group/command-item data-selected:bg-accent data-selected:text-accent-foreground data-selected:**:[svg]:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
@@ -210,7 +209,7 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "text-muted-foreground group-data-selected/command-item:text-foreground ml-auto text-xs tracking-widest",
+        "text-muted-foreground group-data-selected/command-item:text-accent-foreground ml-auto text-xs tracking-widest",
         className
       )}
       {...props}

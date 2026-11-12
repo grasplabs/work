@@ -201,7 +201,46 @@ const ChangeItem = ({ change }: { change: RecordChange }) => {
   );
 };
 
-/** A record's fields and its change history, in a sheet. */
+/** A record's change history as read, and reading older changes. */
+const RecordHistory = ({
+  changes,
+  failure,
+  busy,
+  onOlder,
+}: {
+  changes: RecordChange[] | undefined;
+  failure: string | undefined;
+  busy: boolean;
+  onOlder: (() => void) | undefined;
+}) => (
+  <>
+    <h3 className="font-medium">
+      <Trans>History</Trans>
+    </h3>
+    {failure === undefined ? null : <ErrorText>{failure}</ErrorText>}
+    {changes?.length === 0 ? (
+      <p className="text-muted-foreground">
+        <Trans>No changes are kept for this record.</Trans>
+      </p>
+    ) : (
+      <ul>
+        {changes?.map((change) => (
+          <ChangeItem change={change} key={change.id} />
+        ))}
+      </ul>
+    )}
+    {onOlder === undefined ? null : (
+      <Button disabled={busy} onClick={onOlder} size="sm" variant="outline">
+        <Trans>Older changes</Trans>
+      </Button>
+    )}
+  </>
+);
+
+/**
+ * A record's fields and its change history, in a sheet: the history of
+ * the live App's version `version`'s record; none for test data.
+ */
 const RecordSheet = ({
   app,
   table,
@@ -213,7 +252,7 @@ const RecordSheet = ({
 }: {
   app: string;
   table: string;
-  version: number;
+  version: number | null;
   record: AppDataRecord;
   stale: boolean;
   onStale: () => void;
@@ -224,6 +263,9 @@ const RecordSheet = ({
   const [changes, setChanges] = useState<RecordChange[]>();
   const [next, setNext] = useState<number | null>(null);
   const load = async (before: number | null) => {
+    if (version === null) {
+      return;
+    }
     const page = await run(
       async (session) =>
         await unlessStale(
@@ -246,7 +288,13 @@ const RecordSheet = ({
       setNext(page.next);
     }
   };
-  if (changes === undefined && !busy && failure === undefined && !stale) {
+  if (
+    version !== null &&
+    changes === undefined &&
+    !busy &&
+    failure === undefined &&
+    !stale
+  ) {
     void load(null);
   }
   const { id } = record;
@@ -277,32 +325,19 @@ const RecordSheet = ({
               </div>
             ))}
           </dl>
-          <h3 className="font-medium">
-            <Trans>History</Trans>
-          </h3>
-          {failure === undefined ? null : <ErrorText>{failure}</ErrorText>}
-          {changes?.length === 0 ? (
-            <p className="text-muted-foreground">
-              <Trans>No changes are kept for this record.</Trans>
-            </p>
-          ) : (
-            <ul>
-              {changes?.map((change) => (
-                <ChangeItem change={change} key={change.id} />
-              ))}
-            </ul>
-          )}
-          {next === null ? null : (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void load(next);
-              }}
-              size="sm"
-              variant="outline"
-            >
-              <Trans>Older changes</Trans>
-            </Button>
+          {version === null ? null : (
+            <RecordHistory
+              busy={busy}
+              changes={changes}
+              failure={failure}
+              onOlder={
+                next === null
+                  ? undefined
+                  : () => {
+                      void load(next);
+                    }
+              }
+            />
           )}
         </div>
       </SheetContent>
@@ -639,14 +674,28 @@ const RecordNotes = ({
 };
 
 /**
- * The records of `live`'s table, a page at a time, read apart from what
+ * Where a table's records are read: the live App's, under the version
+ * whose tables the page read; or the test data of the preview of the
+ * App's draft (`apps.drafts.testRecords`), which nothing records,
+ * exports or imports.
+ */
+export type RecordSource = { kind: "live"; version: number } | { kind: "test" };
+
+/** A table, and where its records are read. */
+interface ReadTable {
+  table: AppDataTable;
+  source: RecordSource;
+}
+
+/**
+ * The records of `read`'s table, a page at a time, read apart from what
  * else the page does: the first page at once, the next one on `handleEnd`
  * (none while a read is out, once the last came, or after one failed),
  * all again on `reload`; and how many there are, when that's known.
  */
 const useRecordPages = (
   app: string,
-  live: { table: AppDataTable; version: number } | undefined,
+  live: ReadTable | undefined,
   stale: boolean,
   onStale: () => void
 ) => {
@@ -657,18 +706,21 @@ const useRecordPages = (
     if (live === undefined) {
       return;
     }
+    const { table, source } = live;
     const page = await run(
       async (session) =>
-        await unlessStale(
-          async () =>
-            await session.apps.data.records(
-              app,
-              live.table.name,
-              live.version,
-              from
-            ),
-          onStale
-        )
+        await (source.kind === "test"
+          ? session.apps.drafts.testRecords(app, table.name, from)
+          : unlessStale(
+              async () =>
+                await session.apps.data.records(
+                  app,
+                  table.name,
+                  source.version,
+                  from
+                ),
+              onStale
+            ))
     );
     if (page !== undefined) {
       setRecords([...(from === null ? [] : (records ?? [])), ...page.records]);
@@ -779,28 +831,31 @@ const RecordActions = ({
 };
 
 /**
- * One table's records in a grid, a page at a time, with find, export and
- * import, the App's version `version` read: its columns the page's
+ * One table's records in a grid, a page at a time, read from `source`:
+ * the live App's, with find, export and import, the App's version read;
+ * or the draft preview's test data. Its columns are the page's
  * (`columns`, by field), and the start of the bar above it (`toolbar`)
- * the page's too. The next page loads as the grid nears its last row, so
- * a table of any size scrolls through. None for a table the version
- * doesn't have (`table` undefined), or with no version.
+ * the page's too, its end too (`end`). The next page loads as the grid
+ * nears its last row, so a table of any size scrolls through. None for a
+ * table the source doesn't have (`table` undefined), or with no source.
  */
 export const TableRecords = ({
   app,
-  version,
+  source,
   table,
   label,
   columns,
   toolbar,
+  end,
   instead,
 }: {
   app: string;
-  version: number | null;
+  source: RecordSource | null;
   table: AppDataTable | undefined;
   label: string;
   columns: RecordColumn[];
   toolbar?: ReactNode;
+  end?: ReactNode;
   /** What the page shows in place of the records (the table's fields), if anything. */
   instead?: ReactNode;
 }) => {
@@ -815,9 +870,14 @@ export const TableRecords = ({
   const [open, setOpen] = useState<AppDataRecord>();
   const [importing, setImporting] = useState(false);
   const [missing, setMissing] = useState(false);
+  const read =
+    table !== undefined && source !== null ? { table, source } : undefined;
+  const pages = useRecordPages(app, read, stale, onStale);
+  // The live App's version read: what find, export and import name.
   const live =
-    table !== undefined && version !== null ? { table, version } : undefined;
-  const pages = useRecordPages(app, live, stale, onStale);
+    table !== undefined && source?.kind === "live"
+      ? { table, version: source.version }
+      : undefined;
   const exportTable = async (name: string) => {
     const text = await action.run(
       async (session) =>
@@ -857,6 +917,7 @@ export const TableRecords = ({
       <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
         {toolbar}
         <div className="flex-1" />
+        {end}
         {live === undefined || instead !== undefined ? null : (
           <RecordActions
             busy={action.busy}
@@ -897,7 +958,7 @@ export const TableRecords = ({
           total={pages.total}
         />
       ) : null}
-      {open === undefined || live === undefined ? null : (
+      {open === undefined || read === undefined ? null : (
         <RecordSheet
           app={app}
           onClose={() => {
@@ -906,8 +967,8 @@ export const TableRecords = ({
           onStale={onStale}
           record={open}
           stale={stale}
-          table={live.table.name}
-          version={live.version}
+          table={read.table.name}
+          version={live?.version ?? null}
         />
       )}
       {importing && live !== undefined ? (
@@ -996,7 +1057,7 @@ export const AppData = ({
           </SelectContent>
         </Select>
       }
-      version={version}
+      source={{ kind: "live", version }}
     />
   );
 };

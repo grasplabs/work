@@ -24,7 +24,7 @@ import {
 // to invite guests), for the person whose call it runs in. These
 // tests start from the way that can fail: a builder who can't grant the
 // permission ships other code under it, and the next version they make
-// current acts as the admin who uses it, under a grant that admin gave the
+// publishes acts as the admin who uses it, under a grant that admin gave the
 // code before.
 
 const idp = mockIdp();
@@ -153,7 +153,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     }));
   });
 
-  it("is asked again for its permission to invite guests when a builder makes it current, and keeps reading", async () => {
+  it("is asked again for its permission to invite guests when a builder publishes it, and keeps reading", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),
       personApi("builder"),
@@ -279,7 +279,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     });
   });
 
-  it("is asked again for a permission an admin grants just before the batch that makes it current", async () => {
+  it("is asked again for a permission an admin grants just before the batch that makes it live", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),
       personApi("builder"),
@@ -338,7 +338,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     });
   });
 
-  it("is refused a grant for the version the admin reviewed once a builder made another current", async () => {
+  it("is refused a grant for the version the admin reviewed once a builder published another", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),
       personApi("builder"),
@@ -377,7 +377,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       personApi("admin"),
       personApi("builder"),
     ]);
-    // A version never made current, marked as a blueprint.
+    // A version never live, marked as a blueprint.
     const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
     const source = appIdSchema.parse(id);
     const { version } = await commitApp(
@@ -395,7 +395,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const [asked] = created.permissions;
     await grantReviewed(admin.api, asked?.id ?? "");
 
-    await builder.api.apps.versions.setCurrent(copy, 1);
+    await builder.api.apps.versions.publish(copy, 1);
     const listed = await permissionsOf(admin, copy);
 
     expect(listed.map(({ status }) => status)).toStrictEqual(["requested"]);
@@ -442,7 +442,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const racing: Env = {
       ...env,
       DB: racingDb(async () => {
-        await admin.api.apps.versions.setCurrent(app, version);
+        await admin.api.apps.versions.publish(app, version);
       }, /^update "app_versions" set "status"/iu),
     };
 
@@ -464,7 +464,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     });
   });
 
-  it("is asked again when the admin making it current is no longer one as the change lands", async () => {
+  it("is asked again when the admin publishing it is no longer one as the change lands", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),
       personApi("builder"),
@@ -512,7 +512,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     });
   });
 
-  it("keeps its permissions when an admin makes it current, as they could grant them, and not when Grasp staff do", async () => {
+  it("keeps its permissions when an admin publishes it, as they could grant them, and not when Grasp staff do", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),
       personApi("builder"),

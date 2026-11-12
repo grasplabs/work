@@ -190,7 +190,7 @@ export const withDraftReferences = async (
   env: Env,
   app: AppId,
   files: Record<string, string>,
-  /** Its build profile: `preview` for a chat's draft. */
+  /** Its build profile: `preview` for an App's draft. */
   options?: BuildOptions,
   inspection: () => Promise<DraftInspection> = async () =>
     await inspectDraft(env, app, files, options)

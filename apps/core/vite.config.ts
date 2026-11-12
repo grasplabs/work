@@ -68,6 +68,7 @@ export const pageTests = [
   "test/release-controls.test.ts",
   "test/app-publish-stores.test.ts",
   "test/app-publish.test.ts",
+  "test/draft-publish.test.ts",
   "test/app-tests.test.ts",
   "test/app-test-live*.test.ts",
   "test/draft-runs.test.ts",

@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { PreviewUpdates } from "./preview-updates.ts";
 import type { PreviewHealth } from "./preview-updates.ts";
 
-// The page handing a chat's preview its draft's writes (preview-updates.ts):
+// The page handing the App's preview its draft's writes (preview-updates.ts):
 // what can go wrong is the frame shown another App's module, a stale one,
 // or one it can't load as it is; code it ran before imported again, which
 // a browser doesn't evaluate twice, so Refresh would keep the newer code;
@@ -83,14 +83,12 @@ const following = (
   const askedFor: number[] = [];
   // The App's version the frame said it shows, with each ask.
   const showing: (number | undefined)[] = [];
-  const shows: (number | undefined)[] = [];
   const seen = {
     handed: handedOver,
     health: healths,
     moved,
     askedFor,
     showing,
-    shows,
     resets: 0,
     asked: 0,
   };
@@ -120,9 +118,6 @@ const following = (
       },
       moved: (at) => {
         seen.moved.push(at);
-      },
-      shows: (appVersion) => {
-        seen.shows.push(appVersion);
       },
     },
     fallback
@@ -358,15 +353,12 @@ describe("a preview taking its draft's writes in the frame it has open", () => {
       health: seen.health,
       callsAt: updates.runningAt(),
       callsWhileHanded,
-      shows: seen.shows,
     }).toStrictEqual({
       opened: { health: [], callsAt: { appVersion: 1 } },
       broken: { appVersion: 1 },
       health: ["working"],
       callsAt: 3,
       callsWhileHanded: [2, { appVersion: 1 }, 3],
-      // The App's version 1, then the draft's own changes.
-      shows: [1, undefined],
     });
   });
 

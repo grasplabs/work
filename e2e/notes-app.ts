@@ -717,17 +717,14 @@ export const Route = createFileRoute("/notes/$id")({ component: Note });
   });
 
 /**
- * The navigation fixture with surfaces: the start page as a panel, the
- * list in the sidebar, and preferences as the App's settings.
+ * The navigation fixture with surfaces: the list in the sidebar, and
+ * preferences as the App's settings.
  */
 export const surfaceFiles = (): TestApp => {
   const files = navigationFiles();
   return withFiles(files, {
     "src/routes/index.tsx": `${files.files["src/routes/index.tsx"] ?? ""}
 export const surface = { kind: "sidebar", title: "All notes" };
-`,
-    "src/routes/start.tsx": `${files.files["src/routes/start.tsx"] ?? ""}
-export const surface = { kind: "panel", title: "Start beside" };
 `,
     "src/routes/prefs.tsx": `import { createFileRoute } from "@tanstack/react-router";
 

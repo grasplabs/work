@@ -21,12 +21,13 @@ import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { appStartFiles } from "../src/app-start-files.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor } from "../src/apps.ts";
-import type { Acting } from "../src/auth/identity.ts";
+import { appFor, findApp } from "../src/apps.ts";
+import type { Acting, Member } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeOutboxConsumers } from "../src/store-outbox-consumers.ts";
+import { reviewDraft } from "../src/version-review.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -394,6 +395,26 @@ const dispatched = async (
     }
   );
 };
+
+/**
+ * What publishing a draft holding version `version` of the fixture's App
+ * would change, as its builder reviews it (`AppDraftsApi.changes`).
+ */
+const reviewOf = async (
+  fixture: { app: string; builder: { acting: Member } },
+  version: number
+) =>
+  await reviewDraft(
+    env,
+    fixture.builder.acting,
+    await findApp(env, fixture.app),
+    {
+      base: version,
+      changes: {},
+      definition: null,
+      revision: 0,
+    }
+  );
 
 describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
   it("copies a file the person may read into the run, which reads it by the same shape, audited once, and copies nothing more for the same start sent again", async () => {
@@ -855,12 +876,9 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
     });
   });
 
-  it("tells the version's reviewer it may hand files people can read to its bound workflows, and no longer once it can't read files", async () => {
+  it("tells whoever publishes a draft it may hand files people can read to its bound workflows, and no longer once it can't read files", async () => {
     const fixture = await reviewsApp();
-    const handing = await fixture.builder.api.apps.versions.review(
-      fixture.app,
-      1
-    );
+    const handing = await reviewOf(fixture, 1);
     const withoutRead = files({ operations: '["upload", "delete"]' });
     const { version } = await commitApp(
       fixture.builder.api.apps.files,
@@ -868,10 +886,7 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       withoutRead,
       "Uploads only"
     );
-    const notHanding = await fixture.builder.api.apps.versions.review(
-      fixture.app,
-      version
-    );
+    const notHanding = await reviewOf(fixture, version);
 
     expect({
       handing: handing.handsFilesToWorkflows,
@@ -879,7 +894,7 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
     }).toStrictEqual({ handing: true, notHanding: false });
   });
 
-  it("tells the reviewer it may hand files when the App declares a plain object where its bound workflow takes a file", async () => {
+  it("tells whoever publishes it may hand files when the App declares a plain object where its bound workflow takes a file", async () => {
     const fixture = await reviewsApp();
     // The same `{ id }` reaches the bound workflow, which takes it as a
     // file: copied all the same (`handFiles`).
@@ -890,15 +905,12 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       aliased,
       "Doc as an object"
     );
-    const review = await fixture.builder.api.apps.versions.review(
-      fixture.app,
-      version
-    );
+    const review = await reviewOf(fixture, version);
 
     expect(review.handsFilesToWorkflows).toBeTruthy();
   });
 
-  it("tells the reviewer it may hand files when the version binds, once current, a workflow version taking a file that the App doesn't bind yet", async () => {
+  it("tells whoever publishes it may hand files when the version binds, once current, a workflow version taking a file that the App doesn't bind yet", async () => {
     const fixture = await reviewsApp();
     // `review` bound directly to a workflow taking no file instead.
     const plain = await createWorkflowResource(
@@ -936,15 +948,12 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       }),
       "Bind the file-taking workflow again"
     );
-    const review = await fixture.builder.api.apps.versions.review(
-      fixture.app,
-      version
-    );
+    const review = await reviewOf(fixture, version);
 
     expect(review.handsFilesToWorkflows).toBeTruthy();
   });
 
-  it("tells the reviewer so for an App that names more workflows than one query takes parameters", async () => {
+  it("tells whoever publishes so for an App that names more workflows than one query takes parameters", async () => {
     const fixture = await reviewsApp();
     // 120 more workflows, none of them taking a file, beside `review`,
     // declared as a plain object, whose bound workflow takes one.
@@ -962,13 +971,10 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
       many,
       "Many workflows"
     );
-    const review = await fixture.builder.api.apps.versions.review(
-      fixture.app,
-      version
-    );
+    const review = await reviewOf(fixture, version);
     // Made current, each alias it declares held to what it binds.
     const current = await outcome(
-      fixture.builder.api.apps.versions.setCurrent(fixture.app, version)
+      fixture.builder.api.apps.versions.publish(fixture.app, version)
     );
 
     expect({

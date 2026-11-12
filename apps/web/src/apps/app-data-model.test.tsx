@@ -23,7 +23,7 @@ import { AppDataModel } from "./app-data-model.tsx";
 import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
 
 // An App's data model in its workspace's Data view (app-data-model.tsx),
-// against core's `chats.dataModel` and `chats.defineDraft` as the page
+// against core's `apps.drafts.dataModel` and `apps.drafts.define` as the page
 // reaches them: what a person does becomes the definition's own
 // operations, each previewed first, and what publishing does to the
 // records the App holds is said before a change that needs a value,
@@ -123,13 +123,44 @@ const shown = async (
 ) => {
   const sent: Sent[] = [];
   let held = model;
-  const chats = {
+  // The preview's test data: one note, until it is reset.
+  let notes = [
+    {
+      id: "note-1",
+      owner: "user-1",
+      revision: 1,
+      createdAt: "2026-11-09T09:00:00.000Z",
+      updatedAt: "2026-11-09T09:00:00.000Z",
+      fields: { title: "Call the bank" },
+    },
+  ];
+  const drafts = {
+    testTables: async () => {
+      await Promise.resolve();
+      return [
+        {
+          name: "notes",
+          read: "appMembers" as const,
+          write: "appMembers" as const,
+          sensitive: false,
+          fields: [{ name: "title", kind: "string", required: true }],
+          records: notes.length,
+        },
+      ];
+    },
+    testRecords: async () => {
+      await Promise.resolve();
+      return { records: notes, cursor: null };
+    },
+    resetTestData: async () => {
+      await Promise.resolve();
+      notes = [];
+    },
     dataModel: async () => {
       await Promise.resolve();
       return { model: held, plan: nothingPlanned, uses };
     },
-    defineDraft: async (
-      _chatId: string,
+    define: async (
       _app: string,
       operation: ModelChange,
       preview = false
@@ -152,31 +183,15 @@ const shown = async (
       return { ok: true, model: after, plan, change: plan };
     },
   };
-  // The live App: no version yet, so no records to read.
-  const apps = {
-    data: {
-      tables: async () => {
-        await Promise.resolve();
-        return { version: null, tables: [] };
-      },
-    },
-  };
+  const apps = { drafts };
   const core = {
     withSession: async <T,>(
-      action: (session: {
-        chats: typeof chats;
-        apps: typeof apps;
-      }) => Promise<T>
-    ): Promise<T> => await action({ chats, apps }),
+      action: (session: { apps: typeof apps }) => Promise<T>
+    ): Promise<T> => await action({ apps }),
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <AppDataModel
-        app="app-1"
-        chatId="chat-1"
-        revision={1}
-        running={running}
-      />
+      <AppDataModel app="app-1" revision={1} running={running} />
     ),
   });
   const router = createRouter({
@@ -954,6 +969,32 @@ describe("an App's data model, changed in its workspace", () => {
         "v.number().max(10).nullable().default(0)",
         "v.string().max(100).optional()",
       ],
+    });
+  });
+
+  it("shows the test data's records, never the live App's, and resets it for everyone once the person confirms", async () => {
+    const sent = await shown(notesModel(), () => {
+      throw new Error("Nothing is defined");
+    });
+    const before = document.body.textContent.includes("Call the bank");
+
+    await press(button("Reset test data"));
+    const warned = document.body.textContent.includes(
+      "Every test record goes, for everyone who builds this App."
+    );
+    await press(button("Reset"));
+
+    expect({
+      before,
+      warned,
+      sent,
+      after: document.body.textContent.includes("Call the bank"),
+    }).toStrictEqual({
+      before: true,
+      warned: true,
+      // Nothing of the definition changed: only the test data, gone.
+      sent: [],
+      after: false,
     });
   });
 

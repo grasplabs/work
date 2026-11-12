@@ -233,6 +233,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "APP_CALL_TIMEOUT_MS",
   // Grasp's OAuth apps at the apps that aren't suites (connect's providers.ts).
   "APP_OAUTH_CLIENTS",
+  // One App's preview of its draft (core's src/app-preview.ts).
+  "APP_PREVIEWS",
   "APPS",
   "ASSETS",
   "AUDIT_ARCHIVE",
@@ -477,7 +479,8 @@ export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
  * An App's active permission on a connection or to start a workflow goes
  * back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
- * (`AppVersionsApi.setCurrent`), until an admin grants it again.
+ * (`AppVersionsApi.publish`, `AppDraftsApi.publish`), until an admin
+ * grants it again.
  */
 export const permissionStatusSchema = z.enum([
   "requested",
@@ -511,7 +514,7 @@ export interface Permission {
   requestedAt: string;
   /**
    * Who granted it last, and when. On a requested permission, it was
-   * granted before and is asked for again (`AppVersionsApi.setCurrent`);
+   * granted before and is asked for again (`AppVersionsApi.publish`);
    * only `status` says what it allows.
    */
   grantedBy: string | null;

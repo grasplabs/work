@@ -21,7 +21,6 @@ import { classifyOutput } from "../src/data-policy-rpc.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { commitApp, testApp, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   appModulesOf,
@@ -245,14 +244,13 @@ const release = async (
     files,
     "Release"
   );
-  await builder.api.apps.versions.setCurrent(app, version);
+  await builder.api.apps.versions.publish(app, version);
   return version;
 };
 
 /** A new App running the sample, whose data is sensitive, as every App's is. */
 const sampleApp = async (builder: Person): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  await published(id);
   await release(builder, id, sampleFiles);
   return id;
 };
@@ -730,7 +728,6 @@ describe("page delivery", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const plainApp = async (): Promise<string> => {
       const { id } = await builder.api.apps.create({ name: "Notes" });
-      await published(id);
       await release(
         builder,
         id,

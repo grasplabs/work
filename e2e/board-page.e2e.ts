@@ -80,13 +80,12 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
         { timeout: installedMs }
       )
       .toBeTruthy();
-    /** An App of the admin's from the built-in `builtin`, current. */
+    /** An App of the admin's from the built-in `builtin`, live. */
     const copy = async (builtin: string, name: string): Promise<string> => {
       const created = await api.apps.blueprints.create(builtin, { name });
-      await api.apps.versions.setCurrent(created.app.id, 1);
-      // Published, for the people it is shared with (a draft is its
+      // Live, for the people it is shared with (until then, its
       // builders' alone).
-      await api.apps.publish(created.app.id);
+      await api.apps.versions.publish(created.app.id, 1);
       return created.app.id;
     };
     // Its statistics stay unbound: nothing here runs.

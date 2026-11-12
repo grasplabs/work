@@ -33,6 +33,7 @@ import m0030 from './0030_build_job_notice_owed.sql';
 import m0031 from './0031_drop_chat_attachments.sql';
 import m0032 from './0032_chat_turn_versions.sql';
 import m0033 from './0033_draft_definitions.sql';
+import m0034 from './0034_chat_make.sql';
 
   export default {
     journal,
@@ -70,7 +71,8 @@ m0029,
 m0030,
 m0031,
 m0032,
-m0033
+m0033,
+m0034
     }
   }
   

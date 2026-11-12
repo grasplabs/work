@@ -23,12 +23,13 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { UserPlusIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 
 // Sharing an independent workflow (GRA-1304): whom it is open to besides
 // its owner and the admins, as a user (it follows and starts it) or a
@@ -198,7 +199,10 @@ export const ShareWorkflow = ({
     >
       <DialogTrigger render={<Button size="sm" variant="outline" />}>
         <UserPlusIcon aria-hidden="true" />
-        <Trans>Share</Trans>
+        {/* Its icon alone where its bar is narrow (frame/item-shell.tsx). */}
+        <span className="@max-5xl/bar:sr-only">
+          <Trans>Share</Trans>
+        </span>
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
         <DialogHeader>
@@ -351,4 +355,54 @@ export const ShareWorkflow = ({
       </DialogContent>
     </Dialog>
   );
+};
+
+/**
+ * Whom workflow `workflow` is shared with, by name, for one who builds
+ * it (`builds`), who may read whom to share with: what its status says
+ * it runs for. None while read, refused, or for anyone else.
+ */
+export const useWorkflowUsers = (
+  workflow: string,
+  builds: boolean
+): string[] | undefined => {
+  const core = useCore();
+  const [read, setRead] = useState<{ workflow: string; names: string[] }>();
+  useEffect(() => {
+    if (!builds) {
+      return () => {
+        // Nothing was read.
+      };
+    }
+    let current = true;
+    const load = async (): Promise<void> => {
+      try {
+        const names = await core.withSession(async (session) => {
+          const [candidates, members] = await Promise.all([
+            session.workflowResources.shareCandidates(workflow),
+            session.workflowResources.members(workflow),
+          ]);
+          return members.flatMap((member) => {
+            if (member.type !== "project") {
+              return [nameOf(member, candidates)];
+            }
+            return member.projectName === null ||
+              member.projectName === undefined
+              ? []
+              : [member.projectName];
+          });
+        });
+        if (current) {
+          setRead({ workflow, names });
+        }
+      } catch {
+        // Its status says it runs for the team, without names.
+      }
+    };
+    void load();
+    return () => {
+      current = false;
+    };
+  }, [core, workflow, builds]);
+  return read?.workflow === workflow ? read.names : undefined;
 };

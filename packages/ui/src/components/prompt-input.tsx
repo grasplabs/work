@@ -303,6 +303,50 @@ function PromptInputActionMenuItem(
 }
 
 /**
+ * What the box asks about, on a bar tucked behind its top, as wide as it:
+ * a page's subject, such as the App or workflow it edits, by its icon and
+ * name (`children`), or a link to what the chat worked on, and any actions
+ * at its end. Above the box (`PromptInput`'s form), whose top
+ * covers the bar's bottom.
+ */
+function PromptInputSubjectBar({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="prompt-input-subject-bar"
+      className={cn(
+        "bg-muted text-muted-foreground [&>a]:hover:text-foreground -mb-4 flex min-w-0 items-center gap-1.5 rounded-t-2xl border border-b-0 px-4 pt-2 pb-6 text-xs [&>a]:truncate [&>a]:transition-colors [&>span]:truncate [&>svg]:size-3.5 [&>svg]:shrink-0",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * Over the whole composer, blurring it: why nothing can be written in it
+ * yet, and the way out. What it covers should take no presses or keys
+ * (`inert` on the body and footer).
+ */
+function PromptInputCover({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="prompt-input-cover"
+      className={cn(
+        "bg-card/70 text-foreground absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-[inherit] p-4 text-center text-sm backdrop-blur-xs",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
  * Where the message being sent is: ready to send, sent and waiting for an
  * answer, being answered, or failed.
  */
@@ -366,7 +410,9 @@ export {
   PromptInputActionMenuTrigger,
   PromptInputAttachmentsContext,
   PromptInputBody,
+  PromptInputSubjectBar,
   PromptInputButton,
+  PromptInputCover,
   PromptInputFooter,
   PromptInputHeader,
   PromptInputSubmit,

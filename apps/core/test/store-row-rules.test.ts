@@ -42,7 +42,7 @@ import { hostFunctionCall } from "../src/function-host.ts";
 import type { Runner } from "../src/function-host.ts";
 import type { SessionCheck } from "../src/session-check.ts";
 import type { MigrationRow } from "../src/store-host.ts";
-import { reviewVersion } from "../src/version-review.ts";
+import { reviewDraft } from "../src/version-review.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
@@ -1916,8 +1916,8 @@ describe("a record's long history, read by row rules", () => {
   });
 });
 
-describe("a version's review", () => {
-  it("shows each table's row rules as the version declares them", async () => {
+describe("a draft's changes", () => {
+  it("show each table's row rules as the draft declares them", async () => {
     const fixture = await appWith(
       testApp({
         name: "Requests",
@@ -1972,21 +1972,18 @@ describe("a version's review", () => {
         },
       })
     );
-    const review = await reviewVersion(env, fixture.owner, fixture.app, 1);
+    const review = await reviewDraft(
+      env,
+      fixture.owner,
+      { id: fixture.app, currentVersion: null },
+      { base: 1, changes: {}, definition: null, revision: 0 }
+    );
     // Only the tables that have rules: the other is its access mode's
     // alone. Writes are shown as the store holds them: read rules stand
     // for writing too where there are no write rules, an `owner` mode
-    // writes its owner's rows among those, and `none` writes none.
+    // writes its owner's rows among those, and `none` writes none. By
+    // table, as the draft's sealed manifest holds them.
     expect(review.rowRules).toStrictEqual([
-      {
-        table: "requests",
-        read: [
-          { kind: "owner" },
-          { kind: "team", field: "team" },
-          { kind: "role", role: "builder" },
-        ],
-        write: [{ kind: "person", field: "assignee" }],
-      },
       {
         table: "deals",
         read: [{ kind: "team", field: "team" }],
@@ -2001,6 +1998,15 @@ describe("a version's review", () => {
         table: "notes",
         read: [{ kind: "team", field: "team" }],
         write: null,
+      },
+      {
+        table: "requests",
+        read: [
+          { kind: "owner" },
+          { kind: "team", field: "team" },
+          { kind: "role", role: "builder" },
+        ],
+        write: [{ kind: "person", field: "assignee" }],
       },
     ]);
   });

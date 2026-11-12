@@ -4,11 +4,11 @@ import { RpcStub } from "capnweb";
 import type { Session } from "../core.ts";
 import { isTransient, reconnectDelay, wait } from "../core.ts";
 
-// How a tab's frames hear that their App has another current version
+// How a tab's frames hear that their App has another live version
 // (spec 11.5): one subscription per App on the tab's connection (core's
 // `pages.watchVersion`), shared by every frame of that App, in place of
-// each frame asking on a timer. Core pushes the version current now at
-// once, again when another is made current, and whenever the person's
+// each frame asking on a timer. Core pushes the version live now at
+// once, again when another goes live, and whenever the person's
 // access may have dropped (`recheck`), each push read for the person;
 // once they lost the App, the refusal is the last.
 //

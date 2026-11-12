@@ -1,11 +1,12 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { readDraft, saveDraft } from "../src/app-drafts.ts";
 import {
   editing,
   fixed,
@@ -27,6 +28,7 @@ import {
   turnChecks,
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
+import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
 import { stoppingUltracite } from "./ultracite-stops.ts";
 
@@ -121,17 +123,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
           },
           { timeout: 15_000, interval: 20 }
         );
-        await chat.stub.discardDraft(chatId, person.userId, existing, {
-          type: "person",
-          userId: person.userId,
-        });
+        const { revision } = await person.api.apps.drafts.get(existing);
+        await person.api.apps.drafts.discard(existing, revision);
         gate.released = true;
         await reply;
       }
     );
     const results = await toolResults(chat.stub, chatId);
     const overtaken = results.at(-1);
-    const { changes } = await chat.stub.draft(chatId, existing);
+    const { changes } = await readDraft(env, existing);
     expect({
       overtaken: [overtaken?.tool, overtaken?.isError],
       conflict: overtaken?.text.includes(
@@ -142,6 +142,93 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       overtaken: ["editFile", true],
       conflict: true,
       draft: {},
+    });
+  });
+
+  it("replaces a file only as it last read it, never over another builder's change since, and again once it read that", async () => {
+    const mine = { "AGENTS.md": "# Mine\n" };
+    const { builder, existing, chat } = await setUp((app) => [
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      says("Read."),
+      toolStep("writeFile", { app, files: mine }),
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      toolStep("writeFile", { app, files: mine }),
+      says("Written."),
+    ]);
+    await chat.ask("Read the App's notes");
+    // Another builder's chat changes the file after the agent read it.
+    const draft = await readDraft(env, existing);
+    await saveDraft(
+      env,
+      appIdSchema.parse(existing),
+      { ...draft, base: 1 },
+      { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },
+      await agentWriting(builder, crypto.randomUUID())
+    );
+
+    await chat.ask("Rewrite them");
+
+    const [, refused, read, written] = await toolResults(
+      chat.stub,
+      chat.chat.id
+    );
+    const { changes } = await readDraft(env, existing);
+    expect({
+      refused: [refused?.tool, refused?.isError],
+      says: refused?.text.includes("changed in the draft since you last read"),
+      read: [read?.tool, read?.text.includes("# Theirs")],
+      written: [written?.tool, written?.isError],
+      draft: changes,
+    }).toStrictEqual({
+      refused: ["writeFile", true],
+      says: true,
+      read: ["readFile", true],
+      written: ["writeFile", false],
+      draft: mine,
+    });
+  });
+
+  it("edits a file only as it last read it, never over another builder's change since, and again once it read that", async () => {
+    const edit = { oldText: "# Theirs", newText: "# Mine" };
+    const { builder, existing, chat } = await setUp((app) => [
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      says("Read."),
+      toolStep("editFile", { app, path: "AGENTS.md", ...edit }),
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      toolStep("editFile", { app, path: "AGENTS.md", ...edit }),
+      says("Edited."),
+    ]);
+    await chat.ask("Read the App's notes");
+    // Another builder's chat changes the file after the agent read it: the
+    // text the edit replaces is there, but the agent never saw it.
+    const draft = await readDraft(env, existing);
+    await saveDraft(
+      env,
+      appIdSchema.parse(existing),
+      { ...draft, base: 1 },
+      { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },
+      await agentWriting(builder, crypto.randomUUID())
+    );
+
+    await chat.ask("Edit them");
+
+    const [, refused, read, edited] = await toolResults(
+      chat.stub,
+      chat.chat.id
+    );
+    const { changes } = await readDraft(env, existing);
+    expect({
+      refused: [refused?.tool, refused?.isError],
+      says: refused?.text.includes("changed in the draft since you last read"),
+      read: [read?.tool, read?.text.includes("# Theirs")],
+      edited: [edited?.tool, edited?.isError],
+      draft: changes,
+    }).toStrictEqual({
+      refused: ["editFile", true],
+      says: true,
+      read: ["readFile", true],
+      edited: ["editFile", false],
+      draft: { "AGENTS.md": "# Mine\n" },
     });
   });
 
@@ -315,10 +402,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Write fifty-one notes");
 
     const [refused] = await toolResults(chat.stub, chat.chat.id);
-    const { changes } = await chat.stub.draft(
-      chatIdSchema.parse(chat.chat.id),
-      existing
-    );
+    const { changes } = await readDraft(env, existing);
     expect({
       refused: refused?.isError,
       short: (refused?.text.length ?? Infinity) < 500,
@@ -340,7 +424,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         toolStep("writeFile", { app, files: { "a.md": "a" } }),
         codeStep(
           tryEach({
-            write: `await env.build.write(${JSON.stringify(app)}, { "a.md": "a" })`,
+            write: `await env.build.write(${JSON.stringify(app)}, { "a.md": "a" }, { revision: (await env.build.files(${JSON.stringify(app)})).revision })`,
           })
         ),
         says("No."),
@@ -383,8 +467,8 @@ export const list = query({ args: {}, handler: async () => [] });
       }),
       codeStep(
         tryEach({
-          write: `await env.build.write(${JSON.stringify(app)}, { ${JSON.stringify(api)}: ${JSON.stringify(forged)} })`,
-          remove: `await env.build.write(${JSON.stringify(app)}, { ${JSON.stringify(api)}: null })`,
+          write: `await env.build.write(${JSON.stringify(app)}, { ${JSON.stringify(api)}: ${JSON.stringify(forged)} }, { revision: (await env.build.files(${JSON.stringify(app)})).revision })`,
+          remove: `await env.build.write(${JSON.stringify(app)}, { ${JSON.stringify(api)}: null }, { revision: (await env.build.files(${JSON.stringify(app)})).revision })`,
         })
       ),
       toolStep("writeFile", { app, files: { "server/tasks.ts": tasks } }),
@@ -402,10 +486,7 @@ export const list = query({ args: {}, handler: async () => [] });
     const { api: generated } = z
       .object({ api: z.string() })
       .parse(returned(after?.text));
-    const draft = await chat.stub.draft(
-      chatIdSchema.parse(chat.chat.id),
-      existing
-    );
+    const draft = await readDraft(env, existing);
     const refusals = z
       .record(z.string(), z.string())
       .parse(returned(code?.text));
@@ -435,10 +516,14 @@ export const list = query({ args: {}, handler: async () => [] });
   });
 
   it("writes no App code from a restricted chat, though building needs no grant", async () => {
-    const calls = tryEach({
-      create: `(await env.build.create({ name: "Refused" })).name`,
-    });
-    const { chat } = await setUp([codeStep(calls), says("No.")]);
+    const { chat } = await setUp((app) => [
+      codeStep(
+        tryEach({
+          write: `await env.build.write(${JSON.stringify(app)}, { "AGENTS.md": "# Refused\\n" }, { revision: (await env.build.files(${JSON.stringify(app)})).revision })`,
+        })
+      ),
+      says("No."),
+    ]);
     await runInDurableObject(chat.stub, (instance) =>
       instance.restrictChat(chatIdSchema.parse(chat.chat.id))
     );
@@ -446,7 +531,7 @@ export const list = query({ args: {}, handler: async () => [] });
 
     const [restricted] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(restricted?.text)).toStrictEqual({
-      create: permissionErrors.create("permission.restricted").message,
+      write: permissionErrors.create("permission.restricted").message,
     });
   });
 });

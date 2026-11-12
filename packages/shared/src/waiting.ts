@@ -11,7 +11,6 @@ import type { DecisionView } from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
-import type { AppId } from "./ids.ts";
 import type {
   AppMessageNotification,
   EventsStoppedNotification,
@@ -87,14 +86,6 @@ export interface PermissionRequestItem extends ItemBase {
    * none current.
    */
   reviewedVersion: number | null;
-}
-
-/** A version of an App up for review, for the person who answers for the App: made current under Versions in the App's details. */
-export interface GoLiveItem extends ItemBase {
-  kind: "goLive";
-  verdicts: never[];
-  app: { id: AppId; name: string };
-  version: number;
 }
 
 /**
@@ -190,7 +181,6 @@ export type WaitingItem =
   | HeldWriteItem
   | UnknownOutcomeItem
   | PermissionRequestItem
-  | GoLiveItem
   | WorkflowGoLiveItem
   | OpenQuestionItem
   | StoppedScheduleItem
@@ -212,7 +202,6 @@ export const waitingParts = [
   "held",
   "outcomes",
   "requests",
-  "versions",
   "workflowGoLives",
   "notifications",
   "connections",

@@ -597,8 +597,8 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
-   * Empties this throwaway store for good, at once: its chat was deleted,
-   * its draft dropped, or its person removed or erased. It refuses every
+   * Empties this throwaway store for good, at once: a builder reset its
+   * App's preview's test data, or the App was removed. It refuses every
    * call after, one under way included, and is never held again; a
    * preview that runs on afterwards gets a store of a new name.
    */

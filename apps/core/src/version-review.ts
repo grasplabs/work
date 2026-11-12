@@ -10,12 +10,8 @@ import type {
   RowRule,
   WorkflowBindingExtras,
 } from "@grasp-os/runtime/host";
-import type {
-  ReviewChange,
-  TableRowRules,
-  VersionReview,
-} from "@grasp-os/shared/apps";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
+import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
+import type { App, ReviewChange, TableRowRules } from "@grasp-os/shared/apps";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -24,66 +20,52 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { definitionPlan } from "./app-definition.ts";
+import type { Draft } from "./app-drafts.ts";
+import { versionManifest } from "./app-releases.ts";
+import type { Release } from "./app-releases.ts";
 import {
-  isSealed,
-  loadRelease,
-  sealedEvidence,
-  versionManifest,
-} from "./app-releases.ts";
-import {
-  appFor,
+  draftDefinition,
+  draftFiles,
   findVersion,
   readStored,
-  toVersion,
   versionFiles,
 } from "./apps.ts";
-import type { VersionRow } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
-import { sealedWorkflowPins } from "./bound-workflows.ts";
 import {
   appWorkflowBindings,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
-import { workspace } from "./durable-objects.ts";
+import { draftRelease } from "./draft-runs.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
 import { takesFile } from "./workflows/start-files.ts";
 
-// What a version changes, for the builder who reviews it before making
-// it current: worked out here from the version and the App as they are
-// now, never taken from whoever proposed it (the chat's agent, say), so a
-// proposal can't describe itself as less than it is. Against the current
-// version: who proposed it, its files and server code, its migrations,
-// what the App asks for that no admin granted yet, what it holds, and
-// which of that making it current would ask an admin for again. What it
-// may reach is what it declares (its manifest), each binding approved for
-// that declaration: no code is read to say what it calls.
+// What publishing an App's draft changes, for the builder who publishes
+// it (`AppDraftsApi.changes`): worked out here from the draft and the App
+// as they are now, never taken from whoever wrote it (a chat's agent,
+// say), so a draft can't describe itself as less than it is. Against the
+// live version: its server code, its migrations, what the App asks for
+// that no admin granted yet, what it holds, and which of that publishing
+// would ask an admin for again. What it may reach is what it declares
+// (its manifest, read from the release the draft seals to, the one its
+// preview runs: draft-runs.ts), each binding approved for that
+// declaration: no code is read to say what it calls.
 
 /** The args of a bound workflow version's contract. */
 const boundContractSchema = z.object({ args: z.json() });
 
 /**
- * Whether any workflow version `proposed` of App `app` may bind once
- * current takes a file in its args, as that version's contract says:
- * what its release seals, sealed or not (bound-workflows.ts,
- * `sealedWorkflowPins`), so a binding the version records counts as it
- * will bind, and what the App binds now.
+ * Whether any workflow version the draft of App `app` may bind once live
+ * takes a file in its args, as that version's contract says: what its
+ * release seals (`pins`, bound-workflows.ts), so a binding the draft
+ * records counts as it will bind, and what the App binds now.
  */
 const boundTakesFile = async (
   env: Env,
   app: AppId,
-  proposed: { version: number },
+  pins: readonly WorkflowBindingExtras[],
   manifest: AppManifest
 ): Promise<boolean> => {
-  let pins: readonly WorkflowBindingExtras[];
-  if (await isSealed(env, app, proposed.version)) {
-    ({ workflows: pins } = await loadRelease(env, app, proposed.version));
-  } else {
-    const { definition } = await readStored(
-      await findVersion(env, app, proposed.version)
-    );
-    pins = await sealedWorkflowPins(env, app, manifest, definition);
-  }
   // And what the App binds now under each alias the version declares: a
   // binding of the same contract made since its seal stays bound
   // (app-workflow-bindings.ts, `versionBindingChanges`).
@@ -144,29 +126,12 @@ const boundTakesFile = async (
 };
 
 /**
- * The row rules of version `proposed`'s tables (`VersionReview.rowRules`),
- * as its schema's manifest holds them: what the store will enforce, read
- * from the version, never from what its proposer says of it. Null when
- * its manifest can't be read.
+ * The row rules of the draft's tables (`AppDraftChanges.rowRules`), as
+ * its schema's manifest holds them: what the store will enforce, read
+ * from the draft, never from what its writer says of it.
  */
-const rowRulesOf = async (
-  env: Env,
-  app: AppId,
-  proposed: { version: number; files: Readonly<Record<string, string>> }
-): Promise<TableRowRules[] | null> => {
-  let manifest: AppManifest;
-  try {
-    manifest = await versionManifest(
-      env,
-      app,
-      proposed.version,
-      proposed.files
-    );
-  } catch (error) {
-    log.warn("version_review.manifest_unread", errorFields(error));
-    return null;
-  }
-  return Object.entries(manifest.schema.tables)
+const rowRulesOf = (manifest: AppManifest): TableRowRules[] =>
+  Object.entries(manifest.schema.tables)
     .filter(([, table]) => table.rules !== undefined)
     .map(([table, { rules, access }]) => {
       // Who changes its rows, as the store holds writes: its write rules;
@@ -189,31 +154,17 @@ const rowRulesOf = async (
         write: write === undefined ? null : [...write],
       };
     });
-};
 
 /**
- * Whether version `proposed` may hand files people can read to the
- * workflows it binds (`VersionReview.handsFilesToWorkflows`): a boundary
- * its reviewer sees, whatever else changed. Null when its manifest can't
- * be read.
+ * Whether the draft may hand files people can read to the workflows it
+ * binds (`AppDraftChanges.handsFilesToWorkflows`): a boundary whoever
+ * publishes it sees, whatever else changed.
  */
 const handsFilesOf = async (
   env: Env,
   app: AppId,
-  proposed: { version: number; files: Readonly<Record<string, string>> }
-): Promise<boolean | null> => {
-  let manifest: AppManifest;
-  try {
-    manifest = await versionManifest(
-      env,
-      app,
-      proposed.version,
-      proposed.files
-    );
-  } catch (error) {
-    log.warn("version_review.manifest_unread", errorFields(error));
-    return null;
-  }
+  { app: manifest, workflows }: Pick<Release, "app" | "workflows">
+): Promise<boolean> => {
   const readsFiles =
     declaredPermission(manifest, "files", "files")?.operations.includes(
       "read"
@@ -221,91 +172,48 @@ const handsFilesOf = async (
   if (!readsFiles) {
     return false;
   }
-  const workflows = declaredPermissions(manifest, "workflows");
-  if (workflows.some(({ args }) => takesFile(args))) {
+  if (
+    declaredPermissions(manifest, "workflows").some(({ args }) =>
+      takesFile(args)
+    )
+  ) {
     return true;
   }
   // What a start hands is copied by the bound workflow's own input
-  // (`handFiles`), whatever the App declares for its alias: read from
-  // the version each alias is bound to once this version is current.
-  return await boundTakesFile(env, app, proposed, manifest);
+  // (`handFiles`), whatever the App declares for its alias: read from the
+  // version each alias is bound to once the draft is live.
+  return await boundTakesFile(env, app, workflows, manifest);
 };
 
 /**
- * Whether version `proposed` reads the organization's people
- * (`VersionReview.readsPeople`): every member's name, email and teams. Null
- * when its manifest can't be read.
+ * The explicit migrations of the draft (`next`, its manifest) the live
+ * version (`previous`, none while none is) doesn't have as they are (see
+ * `AppDraftChanges.migrations`), read from each one's App manifest, so
+ * wherever and however they are declared or registered. A migration
+ * declared the same counts as modified when the server code changed
+ * (`serverChanged`): its transform may run any of it.
  */
-const readsPeopleOf = async (
-  env: Env,
-  app: AppId,
-  proposed: { version: number; files: Readonly<Record<string, string>> }
-): Promise<boolean | null> => {
-  try {
-    const manifest = await versionManifest(
-      env,
-      app,
-      proposed.version,
-      proposed.files
-    );
-    return declaredPermission(manifest, "people", "people") !== undefined;
-  } catch (error) {
-    log.warn("version_review.manifest_unread", errorFields(error));
-    return null;
-  }
-};
-
-/**
- * The explicit migrations of version `proposed` the current version
- * (`before`) doesn't have as they are (see `VersionReview.migrations`),
- * read from each version's App manifest, so wherever and however they
- * are declared or registered; every one when there is no current
- * version. A migration declared the same counts as modified when the
- * server code changed (`serverChanged`): its transform may run any of it.
- * Null when either manifest can't be read.
- */
-const migrationsOf = async (
-  env: Env,
-  app: AppId,
-  proposed: { version: number; files: Readonly<Record<string, string>> },
-  before:
-    | { version: number; files: Readonly<Record<string, string>> }
-    | undefined,
+const migrationsOf = (
+  next: AppManifest,
+  previous: AppManifest | undefined,
   serverChanged: boolean
-): Promise<VersionReview["migrations"]> => {
-  let next: AppManifest;
-  let previous: AppManifest | undefined;
-  let evidence: Awaited<ReturnType<typeof sealedEvidence>>;
-  try {
-    next = await versionManifest(env, app, proposed.version, proposed.files);
-    evidence = await sealedEvidence(env, app, proposed.version);
-    previous =
-      before === undefined
-        ? undefined
-        : await versionManifest(env, app, before.version, before.files);
-  } catch (error) {
-    log.warn("version_review.migrations_unread", errorFields(error));
-    return null;
-  }
+): NonNullable<AppDraftChanges["migrations"]> => {
   const had = previous?.migrations ?? {};
-  const listed: NonNullable<VersionReview["migrations"]> = [];
+  const listed: NonNullable<AppDraftChanges["migrations"]> = [];
   for (const declared of Object.values(next.migrations)) {
     const old = Object.hasOwn(had, declared.name)
       ? had[declared.name]
       : undefined;
     const { name, table } = declared;
-    const found = evidence?.find(({ migration }) => migration === name);
-    const checked = {
-      fixtures: declared.fixtures.length,
-      fixturesPassed: found === undefined ? null : found.passed,
-    };
+    // A draft's fixtures run only as it is published, sealed.
+    const fixtures = declared.fixtures.length;
     if (old === undefined) {
-      listed.push({ name, table, change: "added", ...checked });
+      listed.push({ name, table, change: "added", fixtures });
     } else if (
       canonicalText(old) !== canonicalText(declared) ||
       serverChanged
     ) {
-      listed.push({ name, table, change: "modified", ...checked });
+      listed.push({ name, table, change: "modified", fixtures });
     }
   }
   return listed;
@@ -364,73 +272,132 @@ const differences = <T>(
       : [{ name, change, now: now.get(name), before: before.get(name) }];
   });
 
-/** The chat's agent that proposed `row`, with its chat's title for them. */
-const proposerOf = async (
+/** What a draft's review reads from its manifest, or nulls when it can't be read. */
+type ManifestReview = Pick<
+  AppDraftChanges,
+  "migrations" | "handsFilesToWorkflows" | "readsPeople" | "rowRules"
+>;
+
+/**
+ * What the draft's manifest says (`ManifestReview`), from the release it
+ * seals to (`draftRelease`), against the live version's: nulls when
+ * either can't be read (its code doesn't build or inspect), as it may
+ * then do anything.
+ */
+const manifestReviewOf = async (
   env: Env,
-  by: Member,
-  { proposedBy }: VersionRow
-): Promise<VersionReview["proposedBy"]> => {
-  if (proposedBy === null) {
-    return null;
+  found: Pick<App, "id">,
+  draft: Draft,
+  before:
+    | { version: number; files: Readonly<Record<string, string>> }
+    | undefined,
+  serverChanged: boolean
+): Promise<ManifestReview> => {
+  try {
+    const release = await draftRelease(env, found.id, draft);
+    if (release === null) {
+      return {
+        migrations: [],
+        handsFilesToWorkflows: false,
+        readsPeople: false,
+        rowRules: [],
+      };
+    }
+    const previous =
+      before === undefined
+        ? undefined
+        : await versionManifest(env, found.id, before.version, before.files);
+    return {
+      migrations: migrationsOf(release.app, previous, serverChanged),
+      handsFilesToWorkflows: await handsFilesOf(env, found.id, release),
+      readsPeople:
+        declaredPermission(release.app, "people", "people") !== undefined,
+      rowRules: rowRulesOf(release.app),
+    };
+  } catch (error) {
+    log.warn("version_review.manifest_unread", errorFields(error));
+    return {
+      migrations: null,
+      handsFilesToWorkflows: null,
+      readsPeople: null,
+      rowRules: null,
+    };
   }
-  const workspaceId = workspaceIdSchema.safeParse(proposedBy.workspaceId);
-  const ownChat = by.userId === proposedBy.onBehalfOf;
-  const chatTitle =
-    ownChat && workspaceId.success
-      ? await workspace(env, workspaceId.data).chatTitle(
-          proposedBy.chatId,
-          by.userId
-        )
-      : null;
-  return { ...proposedBy, ownChat, chatTitle };
 };
 
 /**
- * Whether version `row`'s definition differs from the current version's
- * (`current`, none while none is), and what that does to the records
- * (`schema`, the store's plan). The definition is no file: a change of it
- * alone (two fields' IDs swapped, say) changes no code, yet moves the
- * records' values as the version is made current, so it counts as a
- * change of the server code.
+ * Whether `draft`'s definition (its own, or its base's) differs from the
+ * live version's (none while none is), and what publishing it does to the
+ * App's records (`plan`, the store's plan of the move from the live
+ * version's): null when the definition can't be read. A draft that holds
+ * its base's starts with none of its answers: an answer belongs to the
+ * version it was committed with (agent-builds.ts, `draftDefinitions`).
  */
 const definitionReviewOf = async (
-  row: VersionRow,
-  current: VersionRow | undefined
-): Promise<{ changed: boolean; schema: VersionReview["schema"] }> => {
-  const changed = row.definitionHash !== current?.definitionHash;
-  if (!changed) {
-    return { changed, schema: null };
+  env: Env,
+  found: Pick<App, "id" | "currentVersion">,
+  draft: Draft
+): Promise<{ changed: boolean; plan: AppDraftChanges["plan"] }> => {
+  try {
+    const own = await draftDefinition(env, found.id, draft);
+    const live =
+      found.currentVersion === null
+        ? null
+        : await readStored(
+            await findVersion(env, found.id, found.currentVersion)
+          );
+    const changed = (own?.hash ?? null) !== (live?.hash ?? null);
+    if (own === null) {
+      return { changed, plan: null };
+    }
+    const moved =
+      draft.definition === null
+        ? { ...own.definition, answers: [] }
+        : own.definition;
+    return { changed, plan: definitionPlan(live?.definition ?? null, moved) };
+  } catch (error) {
+    log.warn("version_review.definition_unread", errorFields(error));
+    return { changed: draft.definition !== null, plan: null };
   }
-  const { definition } = await readStored(row);
-  const held = current === undefined ? null : await readStored(current);
-  return {
-    changed,
-    schema: definitionPlan(held?.definition ?? null, definition),
-  };
 };
 
-/** What version `version` of App `app` changes, for its builders. */
-export const reviewVersion = async (
+/**
+ * What publishing App `found`'s `draft` would change against its live
+ * version, for `by`, one of its builders (see the header): its server
+ * code, what its manifest declares, and the access the App holds and asks
+ * for, with which of it publishing would ask an admin for again
+ * (`askedAgainBy`), as the permissions API shows them to `by`.
+ */
+export const reviewDraft = async (
   env: Env,
   by: Member,
-  app: unknown,
-  version: unknown
-): Promise<VersionReview> => {
-  const found = await appFor(env, by, app, "builder");
-  const row = await findVersion(env, found.id, version);
-  const files = ownFiles(await versionFiles(env, found.id, row.version));
+  found: Pick<App, "id" | "currentVersion">,
+  draft: Draft
+): Promise<
+  Pick<
+    AppDraftChanges,
+    | "server"
+    | "serverFiles"
+    | "migrations"
+    | "handsFilesToWorkflows"
+    | "readsPeople"
+    | "rowRules"
+    | "permissions"
+    | "grants"
+    | "callers"
+    | "plan"
+  >
+> => {
   const { currentVersion: current } = found;
-  // The current version itself changes nothing against itself.
-  const currentRow =
-    current === null ? undefined : await findVersion(env, found.id, current);
+  const files = ownFiles(
+    Object.fromEntries(await draftFiles(env, found.id, draft))
+  );
   const before =
-    currentRow === undefined
+    current === null
       ? undefined
       : {
-          version: currentRow.version,
-          files: ownFiles(
-            await versionFiles(env, found.id, currentRow.version)
-          ),
+          version: current,
+          files: ownFiles(await versionFiles(env, found.id, current)),
         };
   const fileChanges = differences(
     new Map(Object.entries(before?.files ?? {})),
@@ -442,27 +409,30 @@ export const reviewVersion = async (
     new Map(Object.entries(appCodeFiles(files))),
     (one, other) => one === other
   );
-  const { changed: definitionChanged, schema } = await definitionReviewOf(
-    row,
-    currentRow
-  );
   const codeChange = serverChangeOf(
     serverChanges,
     Object.keys(appCodeFiles(before?.files ?? {})).length,
     Object.keys(appCodeFiles(files)).length
   );
+  // The definition is no file: a change of it alone (two fields' IDs
+  // swapped, say) changes no code, yet moves the records' values as the
+  // draft goes live, so it counts as a change of the server code.
+  const { changed: definitionChanged, plan } = await definitionReviewOf(
+    env,
+    found,
+    draft
+  );
   let definitionChange: ReviewChange | null = null;
   if (definitionChanged) {
-    definitionChange = currentRow === undefined ? "added" : "modified";
+    definitionChange = current === null ? "added" : "modified";
   }
   const server = codeChange ?? definitionChange;
-  const migrations = await migrationsOf(
+  const manifest = await manifestReviewOf(
     env,
-    found.id,
-    { version: row.version, files },
+    found,
+    draft,
     before,
     server !== null ||
-      definitionChanged ||
       fileChanges.some(
         ({ name }) =>
           name === "grasp.config.ts" ||
@@ -470,54 +440,31 @@ export const reviewVersion = async (
           name.startsWith("server/")
       )
   );
-  // Asked for again only if not kept, as `madeCurrent` says: an App's
-  // first version copied from a blueprint, made current for the first time.
-  const keep = current === null && row.approved === 1;
   // What the App holds, and the workflows' grants to call its functions,
   // which trust its code alike (`madeCurrent`), as the permissions API
-  // shows them to this reviewer.
-  const [held, callers] = await Promise.all([
+  // shows them to this person. Never kept as a blueprint copy's first
+  // version is: a draft is someone's change of it.
+  const [held, callers, requested] = await Promise.all([
     permissionsOpenTo(env, by, { type: "app", appId: found.id }, "active"),
     permissionsOpenTo(env, by, undefined, "active", found.id),
+    permissionsOpenTo(env, by, { type: "app", appId: found.id }, "requested"),
   ]);
   return {
-    version: toVersion(row),
-    proposedBy: await proposerOf(env, by, row),
-    current,
-    files: fileChanges.map(({ name, change }) => ({ path: name, change })),
     server,
+    plan,
     serverFiles: serverChanges.map(({ name, change }) => ({
       path: name,
       change,
     })),
-    migrations,
-    schema,
-    handsFilesToWorkflows: await handsFilesOf(env, found.id, {
-      version: row.version,
-      files,
-    }),
-    readsPeople: await readsPeopleOf(env, found.id, {
-      version: row.version,
-      files,
-    }),
-    rowRules: await rowRulesOf(env, found.id, {
-      version: row.version,
-      files,
-    }),
-    // As the permissions API shows them to this reviewer, no more.
-    permissions: await permissionsOpenTo(
-      env,
-      by,
-      { type: "app", appId: found.id },
-      "requested"
-    ),
+    ...manifest,
+    permissions: requested,
     grants: held.map((permission) => ({
       permission,
-      askedAgain: askedAgainBy(by, permission, keep),
+      askedAgain: askedAgainBy(by, permission),
     })),
     callers: callers.map((permission) => ({
       permission,
-      askedAgain: askedAgainBy(by, permission, keep),
+      askedAgain: askedAgainBy(by, permission),
     })),
   };
 };
