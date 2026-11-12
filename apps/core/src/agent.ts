@@ -274,6 +274,11 @@ export interface TurnContext {
    * agent as Grasp ships it, which is told nothing more.
    */
   agent?: { name: string; instructions: string };
+  /**
+   * The model an admin gave the chat's agent for its turns; none for an
+   * agent that answers with the model its asker picked.
+   */
+  agentModel?: string;
   /** The App the chat is its own chat of (`ChatsApi.forApp`); none for any other chat. */
   app?: string;
   /**

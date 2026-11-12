@@ -1,6 +1,17 @@
 import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
 import { Switch } from "@grasp-os/ui/components/switch";
@@ -12,8 +23,8 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
-import { MessageCircleIcon } from "lucide-react";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
+import { MessageCircleIcon, TrashIcon } from "lucide-react";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
@@ -28,9 +39,9 @@ import {
   audienceOf,
   chosenOf,
 } from "../settings/stephen-audience.tsx";
-import { StephenAvatar } from "../settings/stephen-avatar.tsx";
 import { classNames, Row } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AgentAvatar } from "./agent-avatar.tsx";
 import {
   AgentStateBadge,
   classesOn,
@@ -284,6 +295,7 @@ export const AgentPage = ({
   people,
   editable,
   usable,
+  models,
   tab,
   onTab,
 }: {
@@ -299,11 +311,14 @@ export const AgentPage = ({
   editable: boolean;
   /** Whether the person may talk to it themselves. */
   usable: boolean;
+  /** The models the organization chose, which an agent can be given. */
+  models: readonly string[];
   tab: AgentTab;
   onTab: (tab: AgentTab) => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  const navigate = useNavigate();
   const switchId = useId();
   const moment = useMoment();
   const { busy, failure, run } = useCoreAction();
@@ -326,15 +341,25 @@ export const AgentPage = ({
     name: agent.name,
     job: agent.job,
     instructions: agent.instructions,
+    face: agent.face,
+    model: agent.model,
   };
   const save = async (next: typeof typed): Promise<void> => {
     await change(async (session) => {
       await session.connections.changeAgent(agent.id, {
         ...next,
-        face: agent.face,
         modelRole: agent.modelRole,
       });
     });
+  };
+  const remove = async (): Promise<void> => {
+    const done = await run(async (session) => {
+      await session.connections.deleteAgent(agent.id);
+      return true;
+    });
+    if (done === true) {
+      await navigate({ to: "/agents", replace: true });
+    }
   };
   const scheduled = wakesOn(wakes).length;
   return (
@@ -384,7 +409,7 @@ export const AgentPage = ({
         }
         title={
           <span className="flex items-center gap-3">
-            <StephenAvatar />
+            <AgentAvatar face={agent.face} />
             {name}
           </span>
         }
@@ -425,20 +450,78 @@ export const AgentPage = ({
               wakes={wakes}
             />
             <SettingsSection
-              description={t`What people call it, and one line on what it is for. Both show where people pick an agent.`}
-              title={t`Name and job`}
+              description={t`What people call it, one line on what it is for, and its picture. All three show where people pick an agent.`}
+              title={t`Name, job and picture`}
             >
               <AgentForm
                 can={can}
                 initial={typed}
                 // By what core keeps: what is typed and not yet saved stays
                 // while the agent is paused or its reach changes.
-                key={`${agent.id}:${agent.name}:${agent.job}`}
+                key={`${agent.id}:${agent.name}:${agent.job}:${agent.face}`}
                 onSave={save}
-                parts={["name", "job"]}
+                parts={["name", "job", "face"]}
                 submit={t`Save`}
               />
             </SettingsSection>
+            <SettingsSection
+              description={t`Which model answers when ${name} is asked.`}
+              title={t`Model`}
+            >
+              <AgentForm
+                can={can}
+                initial={typed}
+                key={`${agent.id}:${agent.model ?? ""}`}
+                models={models}
+                onSave={save}
+                parts={["model"]}
+                submit={t`Save`}
+              />
+            </SettingsSection>
+            {first ? null : (
+              <SettingsSection
+                action={
+                  <AlertDialog>
+                    <AlertDialogTrigger
+                      disabled={!can}
+                      render={<Button size="sm" variant="destructive" />}
+                    >
+                      <TrashIcon data-icon="inline-start" />
+                      <Trans>Delete</Trans>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          <Trans>Delete {name}?</Trans>
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          <Trans>
+                            It is gone for good: it answers nobody, and its
+                            schedule and settings are removed. The chats people
+                            had with it stay theirs to read.
+                          </Trans>
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>
+                          <Trans>Cancel</Trans>
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => {
+                            void remove();
+                          }}
+                          variant="destructive"
+                        >
+                          <Trans>Delete for good</Trans>
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                }
+                description={t`For good. To stop it answering for a while, turn it off instead.`}
+                title={t`Delete ${name}`}
+              />
+            )}
             {agent.changedAt === null ? null : (
               <p className="text-muted-foreground text-xs">
                 <Trans>Last changed {moment(agent.changedAt)}</Trans>

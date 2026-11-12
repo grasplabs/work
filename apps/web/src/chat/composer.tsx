@@ -236,6 +236,23 @@ const SendOrStop = ({
   );
 };
 
+/** The model the chat's agent answers with, where an admin gave it one: said, with nothing to pick. */
+const AgentModel = ({ model }: { model: string }) => {
+  const { t } = useLingui();
+  const name = modelName(model);
+  return (
+    <span
+      aria-label={t`Model: ${name}, set for this agent`}
+      className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-2 text-sm"
+    >
+      <SparklesIcon aria-hidden className="size-4 shrink-0" />
+      <span aria-hidden className="max-w-48 min-w-0 truncate">
+        {name}
+      </span>
+    </span>
+  );
+};
+
 /** The model a question names, where there are models to pick from, and the button that attaches files. */
 const ModelChoice = ({
   models,
@@ -246,6 +263,7 @@ const ModelChoice = ({
   onEffort,
   attach,
   agent,
+  agentModel,
 }: {
   models: readonly string[];
   model: string | undefined;
@@ -255,11 +273,14 @@ const ModelChoice = ({
   onEffort: ((effort: ModelEffort) => void) | undefined;
   attach: ReactNode;
   agent: ReactNode;
+  agentModel: string | undefined;
 }) => (
   <PromptInputTools>
     {attach}
     {agent}
-    {models.length === 0 ||
+    {agentModel === undefined ? null : <AgentModel model={agentModel} />}
+    {agentModel !== undefined ||
+    models.length === 0 ||
     model === undefined ||
     onModel === undefined ? null : (
       <ModelPicker
@@ -396,6 +417,7 @@ export const Composer = ({
   onAttach,
   onRemoveFile,
   agent,
+  agentModel,
 }: {
   text: string;
   onText: (text: string) => void;
@@ -450,6 +472,11 @@ export const Composer = ({
    * Not in a compact box.
    */
   agent?: ReactNode;
+  /**
+   * The model the chat's agent answers with, where an admin gave it one:
+   * shown in place of the picker, as core asks it whichever is picked.
+   */
+  agentModel?: string;
 }) => {
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
@@ -522,6 +549,7 @@ export const Composer = ({
           <PromptInputFooter>
             <ModelChoice
               agent={agent}
+              agentModel={agentModel}
               attach={
                 onAttach === undefined ? null : (
                   <AttachFiles

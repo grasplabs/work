@@ -7,16 +7,13 @@ import { SettingsSection } from "../settings/settings-parts.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentForm } from "./agent-form.tsx";
 
-// A new agent, for the company's admins: its name, what it is for and its
-// instructions, typed once. Core makes it on, reaching nobody and with
+// A new agent, for the company's admins: its name, what it is for, its
+// picture, its model and its instructions, said once. Core makes it on, reaching nobody and with
 // nothing it may do (agent-builder.ts), so the page it then opens is the
 // agent's Access tab: an agent nobody may ask is not yet any use.
 
-/** The figure a new agent is drawn with, until an admin can choose one. */
-const defaultFace = "stephen";
-
-/** The page a new agent is made on. */
-export const NewAgent = () => {
+/** The page a new agent is made on; `models`, the ones the organization chose. */
+export const NewAgent = ({ models }: { models: readonly string[] }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
@@ -32,17 +29,23 @@ export const NewAgent = () => {
         title={<Trans>New agent</Trans>}
       />
       <SettingsSection
-        description={t`Its name and job show where people pick an agent. Its instructions are for the agent alone.`}
+        description={t`Its name, job and picture show where people pick an agent. Its instructions are for the agent alone.`}
         title={t`What it is`}
       >
         <AgentForm
           can={!busy}
-          initial={{ name: "", job: "", instructions: "" }}
+          initial={{
+            name: "",
+            job: "",
+            instructions: "",
+            face: "stephen",
+            model: null,
+          }}
+          models={models}
           onSave={async (typed) => {
             await run(async (session) => {
               const made = await session.connections.makeAgent({
                 ...typed,
-                face: defaultFace,
                 modelRole: null,
               });
               await navigate({
@@ -52,7 +55,7 @@ export const NewAgent = () => {
               });
             });
           }}
-          parts={["name", "job", "instructions"]}
+          parts={["name", "job", "face", "model", "instructions"]}
           submit={t`Make agent`}
         />
       </SettingsSection>

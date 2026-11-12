@@ -3139,6 +3139,7 @@ msgstr "Vinculado"
 msgid "Bound to"
 msgstr "Vinculado a"
 
+#: src/agents/agent-form.tsx
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
@@ -3272,6 +3273,7 @@ msgstr "No se puede leer"
 msgid "Can't offer Start: {unread}"
 msgstr "No se puede ofrecer Iniciar: {unread}"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-remove.tsx
@@ -3648,6 +3650,10 @@ msgstr "Revisar un flujo"
 #: src/workflows/workflow-flow.tsx
 msgid "Check and save"
 msgstr "Comprobar y guardar"
+
+#: src/agents/agent-form.tsx
+msgid "Check mark"
+msgstr "Marca de verificación"
 
 #: src/chat/thread.tsx
 msgid "Check or replace it in Settings › AI providers"
@@ -4535,6 +4541,7 @@ msgstr "Definición"
 msgid "Definition version"
 msgstr "Versión de la definición"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
@@ -4554,10 +4561,12 @@ msgstr "Eliminar"
 msgid "Delete “{title}”?"
 msgstr "¿Eliminar «{title}»?"
 
+#: src/agents/agent-page.tsx
 #: src/settings/event-sources.tsx
 msgid "Delete {name}"
 msgstr "Eliminar {name}"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
@@ -4568,6 +4577,7 @@ msgstr "¿Eliminar {name}?"
 msgid "Delete {projectName}?"
 msgstr "¿Eliminar {projectName}?"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 msgid "Delete for good"
 msgstr "Eliminar definitivamente"
@@ -5692,6 +5702,10 @@ msgstr "Resuelto: «{label}», preguntado {times} veces desde entonces"
 msgid "Fixing a problem…"
 msgstr "Solucionando un problema…"
 
+#: src/agents/agent-form.tsx
+msgid "Flow"
+msgstr "Flujo"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Flow"
@@ -5772,6 +5786,10 @@ msgstr "Por ejemplo Vender y cobrar"
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
 msgstr "Por ejemplo: leer las nuevas incorporaciones y preparar su primer día"
+
+#: src/agents/agent-page.tsx
+msgid "For good. To stop it answering for a while, turn it off instead."
+msgstr "Para siempre. Para que deje de responder un tiempo, desactívelo."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "For schedules and the times Grasp shows."
@@ -6271,6 +6289,10 @@ msgstr "No lo sabía"
 #: src/settings/stephen-card.tsx
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "Deja de responder en todas partes fuera de Grasp y lo dice una vez a quien escriba. El chat de Grasp sigue funcionando."
+
+#: src/agents/agent-form.tsx
+msgid "Head"
+msgstr "Cabeza"
 
 #: src/connections/http-connections.tsx
 msgid "Header name"
@@ -6847,6 +6869,10 @@ msgstr "No recibe nada hasta que un administrador le permita leer estos eventos 
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "Desaparece para siempre y no se puede recuperar. El registro de auditoría guarda que se eliminó y quién lo hizo, nunca lo que era."
 
+#: src/agents/agent-page.tsx
+msgid "It is gone for good: it answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs to read."
+msgstr "Desaparece para siempre: no responde a nadie, y se eliminan su horario y sus ajustes. Las personas conservan los chats que tuvieron con él."
+
 #: src/apps/app-remove.tsx
 msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
 msgstr "Desaparece para siempre: sus páginas, versiones y miembros, y lo que tenía permitido. Sus almacenes y sus registros se quedan, igual que los flujos de trabajo que no son suyos."
@@ -7092,8 +7118,8 @@ msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "Sus migraciones no se pueden leer: puede reescribir los registros de cualquier tabla"
 
 #: src/agents/new-agent.tsx
-msgid "Its name and job show where people pick an agent. Its instructions are for the agent alone."
-msgstr "El nombre y la tarea se muestran donde las personas eligen un agente. Las instrucciones son solo para el agente."
+msgid "Its name, job and picture show where people pick an agent. Its instructions are for the agent alone."
+msgstr "El nombre, la tarea y la imagen se muestran donde las personas eligen un agente. Las instrucciones son solo para el agente."
 
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
@@ -7502,6 +7528,10 @@ msgstr "Bombilla"
 msgid "Limits"
 msgstr "Límites"
 
+#: src/agents/agent-form.tsx
+msgid "Lines"
+msgstr "Líneas"
+
 #: src/apps/app-own-link.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
@@ -7887,6 +7917,8 @@ msgstr "Migraciones"
 msgid "Minutes saved a request"
 msgstr "Minutos ahorrados por solicitud"
 
+#: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 #: src/apps/resource-bindings.tsx
 #: src/onboarding/ai-step.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -7900,6 +7932,10 @@ msgstr "Llamada al modelo"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Coste del modelo"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, set for this agent"
+msgstr "Modelo: {name}, definido para este agente"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
@@ -8079,10 +8115,6 @@ msgstr "Nombre"
 msgid "Name a model this endpoint serves below and choose it, then test it."
 msgstr "Indica abajo un modelo que ofrezca este endpoint, elígelo y pruébalo."
 
-#: src/agents/agent-page.tsx
-msgid "Name and job"
-msgstr "Nombre y tarea"
-
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-workflows.tsx
 msgid "Name in the App's code"
@@ -8095,6 +8127,10 @@ msgstr "Nombre de la retención, como una referencia del caso"
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"
 msgstr "Nombre de tu plataforma de RR. HH."
+
+#: src/agents/agent-page.tsx
+msgid "Name, job and picture"
+msgstr "Nombre, tarea e imagen"
 
 #: src/brain/brain.ts
 msgid "Named by"
@@ -9915,6 +9951,10 @@ msgstr "PDF"
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint o texto"
 
+#: src/agents/agent-form.tsx
+msgid "Pen"
+msgstr "Bolígrafo"
+
 #: src/knowledge/uploads.tsx
 msgid "Pending"
 msgstr "Pendiente"
@@ -10041,6 +10081,10 @@ msgstr "Elige uno"
 #: src/apps/field-editor.tsx
 msgid "Picked up {name}, at place {place}."
 msgstr "{name} seleccionado, en el puesto {place}."
+
+#: src/agents/agent-form.tsx
+msgid "Picture"
+msgstr "Imagen"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -13468,6 +13512,10 @@ msgstr "Las cifras"
 msgid "The one before"
 msgstr "La anterior"
 
+#: src/agents/agent-form.tsx
+msgid "The one the person asking picks"
+msgstr "El que elija la persona que pregunta"
+
 #: src/knowledge/new-collection.tsx
 msgid "The organization has no teams yet."
 msgstr "La organización aún no tiene equipos."
@@ -15295,8 +15343,8 @@ msgid "What people ask"
 msgstr "Lo que la gente pregunta"
 
 #: src/agents/agent-page.tsx
-msgid "What people call it, and one line on what it is for. Both show where people pick an agent."
-msgstr "Cómo lo llaman las personas, y una línea sobre para qué sirve. Ambos se muestran donde las personas eligen un agente."
+msgid "What people call it, one line on what it is for, and its picture. All three show where people pick an agent."
+msgstr "Cómo lo llaman las personas, una línea sobre para qué sirve y su imagen. Los tres se muestran donde las personas eligen un agente."
 
 #: src/dashboard/report.ts
 msgid "What ran"
@@ -15635,6 +15683,10 @@ msgstr "¿Qué plataforma de RR. HH. usas?"
 msgid "Which language do you want to do this interview in?"
 msgstr "¿En qué idioma quieres hacer esta entrevista?"
 
+#: src/agents/agent-page.tsx
+msgid "Which model answers when {name} is asked."
+msgstr "Qué modelo responde cuando se le pregunta a {name}."
+
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "¿Qué herramientas usa realmente la gente?"
@@ -15777,6 +15829,10 @@ msgstr "Deseos"
 #: src/brain/brain.ts
 msgid "With {person}"
 msgstr "Con {person}"
+
+#: src/agents/agent-form.tsx
+msgid "With a model of its own, it answers with that one whatever the person picked. If your organization stops using that model, it answers with theirs again."
+msgstr "Con un modelo propio, responde con ese sea cual sea el que eligió la persona. Si su organización deja de usar ese modelo, vuelve a responder con el de la persona."
 
 #: src/apps/app-data.tsx
 msgctxt "a change's source: deleted with a record it pointed at"

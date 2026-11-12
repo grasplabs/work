@@ -22,12 +22,14 @@ const stephen: ChatAgent = {
   name: "Stephen",
   face: "stephen",
   job: "Answers from what the company told Grasp.",
+  model: null,
 };
 const claire: ChatAgent = {
   id: "agent-claire",
   name: "Claire",
   face: "claire",
   job: "Chases unpaid invoices.",
+  model: null,
 };
 
 let root: Root | undefined;

@@ -33,7 +33,7 @@ const AgentRoutePage = () => {
       />
     );
   }
-  const { managed, usable, people } = page.data;
+  const { managed, usable, people, models } = page.data;
   const agent = managed.agents.find(({ id }) => id === agentId);
   if (agent === undefined) {
     return (
@@ -53,6 +53,7 @@ const AgentRoutePage = () => {
         editable={isMemberAdmin(identity)}
         first={agent.id === managed.agents.at(0)?.id}
         key={agent.id}
+        models={models}
         onTab={(next) => {
           void navigate({
             search: next === "overview" ? {} : { tab: next },
@@ -89,6 +90,9 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         readManaged(session),
         session.chats.agents(),
       ]);
+      // The models an agent can be given: none when core won't say, and
+      // an agent then keeps the one it has.
+      const [chosen] = await Promise.allSettled([session.chats.models()]);
       // The people a wake-up can work for: none when core won't say, and
       // the page still shows the agent.
       const [listed] = await Promise.allSettled([session.members.list()]);
@@ -96,6 +100,7 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         managed,
         usable,
         people: listed.status === "fulfilled" ? listed.value : [],
+        models: chosen.status === "fulfilled" ? chosen.value : [],
       };
     }),
 });

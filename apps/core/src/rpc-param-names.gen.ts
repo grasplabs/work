@@ -167,6 +167,7 @@ export const rpcParamNames: ParamNames = {
     "changeTools": ["request"],
     "connectToolkit": ["request"],
     "createHttp": ["connection"],
+    "deleteAgent": ["agentId"],
     "deleteAgentWake": ["wakeId"],
     "disconnect": ["connectionId"],
     "list": [],

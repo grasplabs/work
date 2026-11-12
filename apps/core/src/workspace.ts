@@ -1737,6 +1737,10 @@ export class Workspace extends DurableObject<Env> {
         throw agentErrors.create("agent.busy");
       }
       await this.#mayTakeTurn(chat.id, personId);
+      // The chat's agent as the company has it now: a paused one takes no
+      // turn, nor one an admin deleted, and nothing is read for either.
+      // Before its reach is asked, so each is refused for what it is.
+      const agent = await turnAgent(this.env, chat.agentId);
       // Another of the company's agents answers only those an admin let
       // it answer, and in a chat app only where it works (agent-reach.ts).
       await requireAgentReaches(this.env, chat.agentId, personId, via);
@@ -1758,15 +1762,27 @@ export class Workspace extends DurableObject<Env> {
         throw permissionErrors.create("permission.context_invalid");
       }
       // Before the model is admitted: what memory reads is a source too.
-      const context = await this.#turnContext(scope, authority, work, shared);
+      const context = await this.#turnContext(
+        scope,
+        authority,
+        work,
+        shared,
+        agent
+      );
       // Refuses a model the deployment or its rules don't allow before
       // anything is kept or shown as started, and names the model the
       // turn's capture records. The chat's object admits it again for its
       // turn, as it sets up a turn a restart cut short on its own, with
       // nobody here to admit it; and every request by the rules then.
+      // The agent's own model, where an admin gave it one the organization
+      // still has: else the one the question names.
+      const asked = await this.#turnModel(
+        context.agentModel,
+        parsed.data.model
+      );
       const { model } = await models(this.env).agent(
         {
-          model: parsed.data.model,
+          model: asked,
           effort: parsed.data.effort,
           purpose: "chat.turn",
           trigger: delegateActorOf(authority, via),
@@ -1783,7 +1799,7 @@ export class Workspace extends DurableObject<Env> {
       if (onText !== undefined) {
         live.onText = throttled(onText);
       }
-      const { text, model: asked, effort } = parsed.data;
+      const { text, effort } = parsed.data;
       const end = await this.#runTurn({
         turnId: live.id,
         scope,
@@ -1998,6 +2014,22 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The model a turn asks: its agent's own (`agentModel`) while the
+   * organization still has it among the models it chose, else the one the
+   * question names. An agent whose model was taken away keeps answering.
+   */
+  async #turnModel(
+    agentModel: string | undefined,
+    named: string
+  ): Promise<string> {
+    if (agentModel === undefined || agentModel === named) {
+      return named;
+    }
+    const { models: chosen } = await modelSettings(this.env);
+    return chosen.includes(agentModel) ? agentModel : named;
+  }
+
+  /**
    * What the model reads this turn besides the question: the memory of the
    * person's own chat (the company's files and their USER.md, read now and
    * recorded as sources), the skills in the chat's Knowledge catalog, and
@@ -2007,11 +2039,9 @@ export class Workspace extends DurableObject<Env> {
     scope: Parameters<typeof auditAgentCall>[1],
     authority: Parameters<typeof forContext>[1],
     work: Extract<WorkContext, { type: "chat" }>,
-    shared: boolean
+    shared: boolean,
+    agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
-    // The chat's agent as the company has it now: a paused one takes no
-    // turn, and nothing is read for it.
-    const agent = await turnAgent(this.env, scope.agentId);
     // Never the person's own USER.md where others read the answer.
     const memory = await forContext(
       this.env,
@@ -2069,6 +2099,10 @@ export class Workspace extends DurableObject<Env> {
       ...(agent === undefined || agent.changedAt === null
         ? {}
         : { agent: { name: agent.name, instructions: agent.instructions } }),
+      // The model an admin gave the agent, for its turns.
+      ...(agent?.model === null || agent?.model === undefined
+        ? {}
+        : { agentModel: agent.model }),
       ...(app === null ? {} : { app }),
     };
   }

@@ -3139,6 +3139,7 @@ msgstr "Gekoppeld"
 msgid "Bound to"
 msgstr "Gekoppeld aan"
 
+#: src/agents/agent-form.tsx
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
@@ -3272,6 +3273,7 @@ msgstr "Niet leesbaar"
 msgid "Can't offer Start: {unread}"
 msgstr "Starten kan niet worden aangeboden: {unread}"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-remove.tsx
@@ -3648,6 +3650,10 @@ msgstr "Workflow controleren"
 #: src/workflows/workflow-flow.tsx
 msgid "Check and save"
 msgstr "Controleren en opslaan"
+
+#: src/agents/agent-form.tsx
+msgid "Check mark"
+msgstr "Vinkje"
 
 #: src/chat/thread.tsx
 msgid "Check or replace it in Settings › AI providers"
@@ -4535,6 +4541,7 @@ msgstr "Definitie"
 msgid "Definition version"
 msgstr "Versie van de definitie"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
@@ -4554,10 +4561,12 @@ msgstr "Verwijderen"
 msgid "Delete “{title}”?"
 msgstr "‘{title}’ verwijderen?"
 
+#: src/agents/agent-page.tsx
 #: src/settings/event-sources.tsx
 msgid "Delete {name}"
 msgstr "{name} verwijderen"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
@@ -4568,6 +4577,7 @@ msgstr "{name} verwijderen?"
 msgid "Delete {projectName}?"
 msgstr "{projectName} verwijderen?"
 
+#: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 msgid "Delete for good"
 msgstr "Definitief verwijderen"
@@ -5692,6 +5702,10 @@ msgstr "Opgelost: “{label}”, sindsdien {times} keer gevraagd"
 msgid "Fixing a problem…"
 msgstr "Een probleem wordt opgelost…"
 
+#: src/agents/agent-form.tsx
+msgid "Flow"
+msgstr "Stroom"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Flow"
@@ -5772,6 +5786,10 @@ msgstr "Bijvoorbeeld Verkopen & betaald krijgen"
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
 msgstr "Bijvoorbeeld: nieuwe medewerkers lezen en hun eerste dag voorbereiden"
+
+#: src/agents/agent-page.tsx
+msgid "For good. To stop it answering for a while, turn it off instead."
+msgstr "Voorgoed. Wilt u dat hij een tijdje niet antwoordt, zet hem dan uit."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "For schedules and the times Grasp shows."
@@ -6271,6 +6289,10 @@ msgstr "Hij wist het niet"
 #: src/settings/stephen-card.tsx
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "Hij stopt overal buiten Grasp met antwoorden en zegt dat één keer tegen wie schrijft. De chat van Grasp blijft werken."
+
+#: src/agents/agent-form.tsx
+msgid "Head"
+msgstr "Hoofd"
 
 #: src/connections/http-connections.tsx
 msgid "Header name"
@@ -6847,6 +6869,10 @@ msgstr "Hij hoort niets tot een beheerder hem deze gebeurtenissen op zijn koppel
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "Het is voorgoed weg en kan niet worden teruggehaald. Het auditlogboek houdt bij dat het is verwijderd en door wie, nooit wat het was."
 
+#: src/agents/agent-page.tsx
+msgid "It is gone for good: it answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs to read."
+msgstr "Hij is voorgoed weg: hij antwoordt niemand, en zijn schema en instellingen worden verwijderd. De chats die mensen met hem hadden, kunnen zij blijven lezen."
+
 #: src/apps/app-remove.tsx
 msgid "It is gone for good: its pages, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
 msgstr "Hij is definitief weg: zijn pagina’s, versies en leden, en wat hij mocht. De opslag en de records erin blijven, net als de workflows die hij niet bezit."
@@ -7092,8 +7118,8 @@ msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "De migraties zijn niet te lezen: het kan de records van elke tabel herschrijven"
 
 #: src/agents/new-agent.tsx
-msgid "Its name and job show where people pick an agent. Its instructions are for the agent alone."
-msgstr "Naam en taak staan waar mensen een agent kiezen. De instructies zijn alleen voor de agent."
+msgid "Its name, job and picture show where people pick an agent. Its instructions are for the agent alone."
+msgstr "Naam, taak en afbeelding staan waar mensen een agent kiezen. De instructies zijn alleen voor de agent."
 
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
@@ -7502,6 +7528,10 @@ msgstr "Gloeilamp"
 msgid "Limits"
 msgstr "Limieten"
 
+#: src/agents/agent-form.tsx
+msgid "Lines"
+msgstr "Lijnen"
+
 #: src/apps/app-own-link.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
@@ -7887,6 +7917,8 @@ msgstr "Migraties"
 msgid "Minutes saved a request"
 msgstr "Bespaarde minuten per verzoek"
 
+#: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 #: src/apps/resource-bindings.tsx
 #: src/onboarding/ai-step.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -7900,6 +7932,10 @@ msgstr "Modelaanroep"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Modelkosten"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, set for this agent"
+msgstr "Model: {name}, ingesteld voor deze agent"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
@@ -8079,10 +8115,6 @@ msgstr "Naam"
 msgid "Name a model this endpoint serves below and choose it, then test it."
 msgstr "Geef hieronder een model op dat dit endpoint aanbiedt, kies het en test het dan."
 
-#: src/agents/agent-page.tsx
-msgid "Name and job"
-msgstr "Naam en taak"
-
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-workflows.tsx
 msgid "Name in the App's code"
@@ -8095,6 +8127,10 @@ msgstr "Naam van de bewaarplicht, zoals een zaaknummer"
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"
 msgstr "Naam van je hr-platform"
+
+#: src/agents/agent-page.tsx
+msgid "Name, job and picture"
+msgstr "Naam, taak en afbeelding"
 
 #: src/brain/brain.ts
 msgid "Named by"
@@ -9915,6 +9951,10 @@ msgstr "PDF"
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint of tekst"
 
+#: src/agents/agent-form.tsx
+msgid "Pen"
+msgstr "Pen"
+
 #: src/knowledge/uploads.tsx
 msgid "Pending"
 msgstr "In afwachting"
@@ -10041,6 +10081,10 @@ msgstr "Kies er een"
 #: src/apps/field-editor.tsx
 msgid "Picked up {name}, at place {place}."
 msgstr "{name} opgepakt, op plek {place}."
+
+#: src/agents/agent-form.tsx
+msgid "Picture"
+msgstr "Afbeelding"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -13468,6 +13512,10 @@ msgstr "De cijfers"
 msgid "The one before"
 msgstr "De vorige"
 
+#: src/agents/agent-form.tsx
+msgid "The one the person asking picks"
+msgstr "Het model dat de vraagsteller kiest"
+
 #: src/knowledge/new-collection.tsx
 msgid "The organization has no teams yet."
 msgstr "De organisatie heeft nog geen teams."
@@ -15295,8 +15343,8 @@ msgid "What people ask"
 msgstr "Wat mensen vragen"
 
 #: src/agents/agent-page.tsx
-msgid "What people call it, and one line on what it is for. Both show where people pick an agent."
-msgstr "Hoe mensen hem noemen, en één regel over waarvoor hij is. Beide staan waar mensen een agent kiezen."
+msgid "What people call it, one line on what it is for, and its picture. All three show where people pick an agent."
+msgstr "Hoe mensen hem noemen, één regel over waarvoor hij is, en zijn afbeelding. Alle drie staan waar mensen een agent kiezen."
 
 #: src/dashboard/report.ts
 msgid "What ran"
@@ -15635,6 +15683,10 @@ msgstr "Welk hr-platform gebruik je?"
 msgid "Which language do you want to do this interview in?"
 msgstr "In welke taal wil je dit interview doen?"
 
+#: src/agents/agent-page.tsx
+msgid "Which model answers when {name} is asked."
+msgstr "Welk model antwoordt wanneer {name} iets gevraagd wordt."
+
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "Welke tools gebruiken mensen echt?"
@@ -15777,6 +15829,10 @@ msgstr "Wensen"
 #: src/brain/brain.ts
 msgid "With {person}"
 msgstr "Met {person}"
+
+#: src/agents/agent-form.tsx
+msgid "With a model of its own, it answers with that one whatever the person picked. If your organization stops using that model, it answers with theirs again."
+msgstr "Met een eigen model antwoordt hij daarmee, wat de persoon ook koos. Stopt uw organisatie met dat model, dan antwoordt hij weer met dat van de persoon."
 
 #: src/apps/app-data.tsx
 msgctxt "a change's source: deleted with a record it pointed at"
