@@ -127,5 +127,13 @@ CREATE INDEX `work_items_running_idx` ON `work_items` (`kind`,`key`,`connection`
 CREATE INDEX `work_items_waiting_idx` ON `work_items` (`connection`,`priority`,`id`) WHERE running = 0 AND parked_at IS NULL AND interrupted = 0;--> statement-breakpoint
 CREATE INDEX `work_items_interrupted_idx` ON `work_items` (`priority`,`id`) WHERE running = 0 AND parked_at IS NULL AND interrupted = 1;--> statement-breakpoint
 CREATE INDEX `work_items_parked_idx` ON `work_items` (`parked_at`,`id`) WHERE parked_at IS NOT NULL;--> statement-breakpoint
+-- Every vector table cleared before a mark names its chunk: no embedding
+-- model ships yet, and only tests and staging wrote codes, which the
+-- embedding queue writes again. So no mark is left that an erasure can't
+-- trace to its chunk, and no set of readers outlives a block it can't find.
+DELETE FROM `vector_removed`;--> statement-breakpoint
+DELETE FROM `vector_codes`;--> statement-breakpoint
+DELETE FROM `vector_blocks`;--> statement-breakpoint
+DELETE FROM `vector_models`;--> statement-breakpoint
 ALTER TABLE `vector_removed` ADD `chunk` integer;--> statement-breakpoint
 CREATE INDEX `vector_removed_chunk_idx` ON `vector_removed` (`chunk`);

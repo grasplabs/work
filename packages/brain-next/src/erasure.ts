@@ -116,6 +116,12 @@ export const eraseChunksPerBatch = 1000;
 const confirmPerTick = 100;
 
 /**
+ * How long a tick starts writing unconfirmed entries for: a slow bucket
+ * delays the tick's queue by this and one write's 10 s at most.
+ */
+const confirmTickMs = 30_000;
+
+/**
  * Most versions one part of a person's entry names: about 75 bytes each,
  * so a part is at most some 75 KB, far inside any limit of R2 or of a
  * value the store keeps, however many versions an erasure hides.
@@ -738,6 +744,8 @@ const confirm = async (
  * same). Throws once one fails, keeping the rest for the next tick.
  */
 export const confirmPending = async (store: ErasureStore): Promise<void> => {
+  // No write starts after `confirmTickMs`: the rest are the next tick's.
+  const stopAt = Date.now() + confirmTickMs;
   const pending = store.storage.sql
     .exec<Recorded>(
       `SELECT key, kind FROM erasures WHERE confirmed = 0
@@ -746,6 +754,9 @@ export const confirmPending = async (store: ErasureStore): Promise<void> => {
     )
     .toArray();
   for (const recorded of pending) {
+    if (Date.now() >= stopAt) {
+      return;
+    }
     // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
     await confirm(store, recorded);
   }
@@ -767,10 +778,12 @@ const nextAt = (sql: SqlStorage): number => {
  * recorded and hidden, `stop` told at once of the sources whose current
  * version it hid (their work under way is to stop, whatever happens
  * next), then the ledger entry, then one batch deleted. Returns only once
- * its entry is in the ledger. Repeated after a failure, it is the same
- * erasure: one recorded and not yet written is written now, from what it
- * recorded (`erased_versions`), however much the tick deleted meanwhile.
- * A source erased before answers at once.
+ * its entry is in the ledger. Repeated after a failure: a source's is the
+ * same erasure, written now; for a person, each erasure of them recorded
+ * and not yet written is written first, from what it recorded
+ * (`erased_versions`), however much the tick deleted meanwhile, and then
+ * the call erases as a first one does, as of now. A source erased before
+ * answers at once.
  */
 export const erase = async (
   store: ErasureStore,
@@ -782,19 +795,42 @@ export const erase = async (
   const { storage } = store;
   const { sql } = storage;
   const subject = await subjectOf(id);
-  // A source's erasure is one for good; a person's, one not yet written.
-  const before = sql
-    .exec<Recorded & { confirmed: number }>(
-      `SELECT key, kind, confirmed FROM erasures
-      WHERE kind = ?1 AND subject = ?2 AND (kind = 'source' OR confirmed = 0)
-      ORDER BY key LIMIT 1`,
-      kind,
-      subject
-    )
-    .toArray()
-    .at(0);
+  // A source's erasure recorded before is the same erasure: its key was
+  // closed then, so nothing was added to the source since.
+  const before =
+    kind === "source"
+      ? sql
+          .exec<Recorded & { confirmed: number }>(
+            `SELECT key, kind, confirmed FROM erasures
+            WHERE kind = 'source' AND subject = ? LIMIT 1`,
+            subject
+          )
+          .toArray()
+          .at(0)
+      : undefined;
   if (before?.confirmed === 1) {
     return;
+  }
+  // A person's erasures recorded and not yet written (a call that failed)
+  // are written first, from what they recorded, so none is left behind a
+  // call that answers; then this call records its own, as of now, so it
+  // covers what was added for them since, whatever the tick did meanwhile.
+  try {
+    for (const pending of kind === "person"
+      ? sql
+          .exec<Recorded>(
+            `SELECT key, kind FROM erasures
+            WHERE kind = 'person' AND subject = ? AND confirmed = 0
+            ORDER BY key`,
+            subject
+          )
+          .toArray()
+      : []) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      await confirm(store, pending);
+    }
+  } catch {
+    throw new Error(notRecorded);
   }
   let recorded: Recorded | undefined = before;
   if (recorded === undefined) {

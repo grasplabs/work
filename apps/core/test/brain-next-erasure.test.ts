@@ -2002,36 +2002,124 @@ describe(
       vi.useRealTimers();
     });
 
-    it("writes a person's first erasure when it is retried, though the tick deleted what it covered meanwhile, so a restore erases it again", async () => {
-      const leaver = await person();
-      const mark = newMark();
-      await add(newSource(), `Private ${wordOf(mark)}`, owner(leaver));
-      const backup = await copyOfStore();
-      const switched = await failLedgerWrites();
+    it.each([
+      ["no tick", "none"],
+      ["a tick that can't write the entry and deletes what it hid", "failing"],
+      ["a tick that writes the first entry", "writing"],
+    ] as const)(
+      "erases on a retry of a person's erasure what was added for them since the call that failed, with %s between, and a restore erases both again",
+      async (_between, tick) => {
+        const leaver = await person();
+        const [before, since] = [newMark(), newMark()];
+        await add(newSource(), `Before ${wordOf(before)}`, owner(leaver));
+        const backup = await copyOfStore();
+        const switched = await failLedgerWrites();
 
+        const first = await settled(
+          erasePerson(env, { personId: leaver, reason: "person_erased" })
+        );
+        // Added for them after the call that failed, before its retry.
+        await add(newSource(), `Since ${wordOf(since)}`, owner(leaver));
+        if (tick === "failing") {
+          await workBrain(env, new Date());
+        }
+        switched.failing = false;
+        if (tick === "writing") {
+          await workBrain(env, new Date());
+        }
+        const retried = await settled(
+          erasePerson(env, { personId: leaver, reason: "person_erased" })
+        );
+        await tickUntilErased();
+        const afterRetry = {
+          before: await recalledAs(leaver, wordOf(before)),
+          since: await recalledAs(leaver, wordOf(since)),
+        };
+        const entries = await ledgerOf(leaver);
+        await restoreStore(backup);
+        const restored = await recalledAs(leaver, wordOf(before));
+        await tickUntilErased();
+
+        expect({
+          first: "error" in first,
+          retried,
+          afterRetry,
+          entries: entries.length,
+          restored,
+          tables: await tablesHolding([before, since]),
+        }).toStrictEqual({
+          first: true,
+          retried: { value: undefined },
+          afterRetry: { before: [], since: [] },
+          entries: 2,
+          restored: [],
+          tables: [],
+        });
+      }
+    );
+
+    it("refuses an add to a source between its erasure that failed to be written and the retry", async () => {
+      const reader = await person();
+      const source = newSource();
+      await add(source, `Erased ${wordOf(newMark())}`, owner(reader));
+      const switched = await failLedgerWrites();
       const first = await settled(
-        erasePerson(env, { personId: leaver, reason: "person_erased" })
+        eraseSource(env, { source, reason: "deleted" })
       );
-      // The tick can't write the entry either, and deletes what it hid.
-      await workBrain(env, new Date());
+      const between = await settled(
+        add(source, "Added between", owner(reader))
+      );
       switched.failing = false;
       const retried = await settled(
-        erasePerson(env, { personId: leaver, reason: "person_erased" })
+        eraseSource(env, { source, reason: "deleted" })
       );
-      await restoreStore(backup);
-      const restored = await recalledAs(leaver, wordOf(mark));
-      await tickUntilErased();
 
-      expect({
-        first: "error" in first,
-        retried,
-        restored,
-        tables: await tablesHolding([mark]),
-      }).toStrictEqual({
+      expect({ first: "error" in first, between, retried }).toStrictEqual({
         first: true,
+        between: {
+          error: "Error: The Brain refused it: what this adds was erased",
+        },
         retried: { value: undefined },
-        restored: [],
-        tables: [],
+      });
+    });
+
+    it("writes the erasure's ledger entry though an abort listener of a handler under way throws", async () => {
+      const reader = await person();
+      const source = newSource();
+      await add(source, `Listened ${wordOf(newMark())}`, owner(reader));
+      const gate = { reached: false, released: false };
+      handling.set(keyOf(source), async (signal) => {
+        signal.addEventListener("abort", () => {
+          throw new Error("A listener that throws, by the test");
+        });
+        gate.reached = true;
+        while (!gate.released) {
+          // oxlint-disable-next-line no-await-in-loop -- until the test says
+          await scheduler.wait(10);
+        }
+      });
+      await queueRecorded(source);
+      const ticking = settled(workBrain(env, new Date()));
+      await vi.waitFor(() => {
+        expect(gate.reached).toBeTruthy();
+      });
+
+      const erased = await settled(
+        eraseSource(env, { source, reason: "deleted" })
+      );
+      gate.released = true;
+      await ticking;
+
+      const entries = await ledgerOf(keyOf(source));
+      const { ledgerReplay } = await brainWorkOverview(env);
+      expect({
+        erased,
+        entries: entries.length,
+        ledgerReplay,
+      }).toStrictEqual({
+        erased: { value: undefined },
+        entries: 1,
+        ledgerReplay: "through",
       });
     });
 

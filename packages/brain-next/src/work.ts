@@ -31,7 +31,9 @@ export { WorkError } from "./work-error.ts";
 // it; the store sets no alarm of its own.
 //
 // Items run in order of their class (`workPriorities`), oldest first,
-// 4 at once, at most 2 of one connection, never two of one kind and key; a
+// 4 at once, at most 2 of one connection, never two of one kind and key
+// (but for an item an erasure stopped, whose handler may still run on:
+// `stopWorkOn`); a
 // newer item of a kind and key replaces one waiting or parked. An item's
 // attempt is counted as it is claimed, before its work starts. Model calls
 // take turns, first come first served, from one bucket for the whole queue
@@ -373,12 +375,20 @@ export const newWorkState = (restart: () => void): WorkState => ({
  * signals abort, with `erased`. For an erasure, which deleted their rows
  * in the same step: what such a handler still writes goes through the
  * store's own checks that what it works on is current, which an erased
- * source no longer is, and nothing of it is settled or run again.
+ * source no longer is, and nothing of it is settled or run again. Its row
+ * gone, a new item of the same key (a source others still add to, after a
+ * person's erasure) may run beside a handler that ignores its signal: a
+ * handler can't assume it is alone on its key. A listener of a signal
+ * that throws is passed over, so the erasure goes on.
  */
 export const stopWorkOn = (state: WorkState, keys: readonly string[]): void => {
   for (const key of keys) {
     for (const controller of state.underWay.get(key) ?? []) {
-      controller.abort(new WorkError("erased"));
+      try {
+        controller.abort(new WorkError("erased"));
+      } catch {
+        // A handler's listener threw: its own failure, not the erasure's.
+      }
     }
   }
 };

@@ -260,8 +260,8 @@ export const vectorRemoved = sqliteTable(
     slot: integer().notNull(),
     /**
      * The chunk whose code it was, so an erasure of the chunk's version
-     * finds and repacks the block (erasure.ts): added by migration 0006,
-     * null on marks from before it.
+     * finds and repacks the block (erasure.ts). Added by migration 0006,
+     * which cleared every vector table first, so every mark names it.
      */
     chunk: integer(),
   },
