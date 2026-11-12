@@ -1,7 +1,7 @@
 // Embedding through the work queue (src/embedding.ts), driven as core's
 // clock drives the store (`work`, a tick at the clock's time), with the
 // embed package's bulk embedders running its tiny test models as the
-// host's embedders: each test in a store of its own. What a reader finds
+// host's embedders: each test in the shared store, from empty storage. What a reader finds
 // by meaning is asked through the store's vector search, with the
 // question embedded by the same model.
 import type {
@@ -15,7 +15,7 @@ import { questionEmbedder } from "@grasp-os/embed/embedder";
 import type { Embedder } from "@grasp-os/embed/embedder";
 import { modelIdentity } from "@grasp-os/embed/model-files";
 import { bulkEmbedders, embedWithPool } from "@grasp-os/embed/pool";
-import { runInDurableObject } from "cloudflare:test";
+import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
   beforeAll,
@@ -46,8 +46,7 @@ let int8: EmbedModel;
 let float: EmbedModel;
 
 /** This test's store: one of its own, so its counts are its own. */
-let storeName = "";
-const store = () => env.BRAIN_STORE.getByName(storeName);
+const store = () => env.BRAIN_STORE.getByName("brain");
 
 /** Every passage the host's embedders were asked to embed, in this test. */
 const asked: string[] = [];
@@ -287,18 +286,20 @@ const tickNoting = async (embedders: Embedders): Promise<string> => {
 
 describe("embedding through the queue", () => {
   beforeAll(async () => {
-    await Promise.all([
-      putTestModel(env.MODEL_FILES, int8Model),
-      putTestModel(env.MODEL_FILES, floatModel),
-    ]);
     [int8, float] = await Promise.all([
       modelIdentity(int8Model),
       modelIdentity(floatModel),
     ]);
   });
 
+  // Each test from empty storage: the shared store, the bucket and the
+  // embedders' model files.
   beforeEach(async () => {
-    storeName = crypto.randomUUID();
+    await reset();
+    await Promise.all([
+      putTestModel(env.MODEL_FILES, int8Model),
+      putTestModel(env.MODEL_FILES, floatModel),
+    ]);
     asked.length = 0;
     await breakBulk(null);
   });
