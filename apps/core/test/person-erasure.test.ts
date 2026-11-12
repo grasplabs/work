@@ -28,6 +28,7 @@ import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import {
@@ -90,6 +91,27 @@ const userRow = async (userId: string) =>
 const emailOf = async (userId: string): Promise<string | undefined> => {
   const row = await userRow(userId);
   return row?.email;
+};
+
+/** A note `who` keeps in a collection only they read. */
+const noteOf = async (who: Person, text: string) => {
+  const personal = await ownCollectionOf(who);
+  return await who.api.knowledge.saveDocument({
+    collectionId: personal,
+    path: `notes/${crypto.randomUUID().slice(0, 8)}.md`,
+    text,
+    ifVersion: 0,
+  });
+};
+
+/** Whether Knowledge still has document `documentId`. */
+const inKnowledge = async (documentId: string): Promise<number> => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT count(*) AS count FROM documents WHERE id = ?"
+  )
+    .bind(documentId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
 };
 
 /** How many of `table`'s rows hold `userId` in `column`. */
@@ -1001,6 +1023,22 @@ describe("erasing a person", () => {
       ],
       text: false,
     });
+  });
+
+  it("purges what the Brain and Knowledge hold of them, every collection only they read with it, and leaves everyone else's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "user");
+    const theirs = await noteOf(person, "# Mine\nWhat only I wrote down.");
+    const others = await noteOf(other, "# Theirs\nWhat someone else wrote.");
+    await admin.api.members.remove(person.userId);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    expect({
+      theirs: await inKnowledge(theirs.id),
+      others: await inKnowledge(others.id),
+    }).toStrictEqual({ theirs: 0, others: 1 });
   });
 
   it("stops what still runs for them, and takes their decision confirmations, and leaves everyone else's", async () => {

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, ownCollectionOf } from "./knowledge.ts";
 import {
   callAuth,
   letSessionRecheckPass,
@@ -458,6 +458,31 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       holds: false,
       found: 0,
     });
+  });
+
+  it("is gone with the collection only its owner reads once that person is purged", async () => {
+    const leaver = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const personal = await ownCollectionOf(leaver);
+    const upload = await uploaded(
+      { api: leaver.api, collectionId: personal },
+      "One to one.vtt",
+      meetingVtt(`Dirk${unique()}`)
+    );
+    const before = await openedOf(leaver.api, upload.documentId);
+    const input: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    };
+    const plan = await admin.api.knowledge.preparePurge(input);
+    await admin.api.knowledge.purge(input, plan.token);
+
+    expect({
+      before: before?.turns.length,
+      listed: await listedOf(leaver.api, upload.documentId),
+      opened: await openedOf(leaver.api, upload.documentId),
+    }).toStrictEqual({ before: 3, listed: undefined, opened: null });
   });
 
   it("is recorded in the audit log by counts and identifiers alone: no event of the upload, listing or opening holds a speaker or a word", async () => {

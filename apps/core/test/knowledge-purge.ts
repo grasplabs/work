@@ -1,10 +1,12 @@
 import { rebuildSearchIndex } from "@grasp-os/brain/search-erasure";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
-import type { signedInApi } from "./sign-in.ts";
-import { openRpc, unique } from "./sign-in.ts";
+import type { Idp } from "./idp.ts";
+import { ownCollectionOf } from "./knowledge.ts";
+import { openRpc, signedInApi, unique } from "./sign-in.ts";
 
 // What the tests of purging personal data from Knowledge share
 // (knowledge-purge*.test.ts). Each test file signs its people in through
@@ -319,6 +321,24 @@ export const rebuildFailingOnce = async (person: Person) => {
       }
     },
   });
+};
+
+/** The helpers that sign people in through `idp`. */
+export const purgesWith = (idp: Idp) => {
+  const personOf = async (role: Role) => await signedInApi(idp, role);
+
+  /** A person whose own collection (only they read it) holds `files`, by path. */
+  const leaverWith = async (files: Record<string, string>) => {
+    const leaver = await personOf("user");
+    const personal = await ownCollectionOf(leaver);
+    for (const [path, text] of Object.entries(files)) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(leaver, personal, path, text);
+    }
+    return { leaver, personal };
+  };
+
+  return { leaverWith };
 };
 
 /** The page directory's entry for `word` joined with さん, as hex. */

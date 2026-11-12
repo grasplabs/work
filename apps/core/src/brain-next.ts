@@ -767,8 +767,8 @@ export interface InstructionFileVersion {
  * Adds `text` as the next version of the instruction file `file`, after
  * its version `after` (0 for none) when given; the one before stays as
  * history.
- * Refused over `instructionsMaxLength` UTF-16 units, as written or as a
- * chat's prompt holds it (`promptTextOf`), with `instructions.too_large`, and with `instructions.changed` when `after`
+ * Refused over `instructionsMaxLength` UTF-16 units as a chat's prompt
+ * holds it (`promptTextOf`, never shorter than the text), with `instructions.too_large`, and with `instructions.changed` when `after`
  * is no longer the current version. Empty text empties the file: a
  * version of its own, which nothing loads. `change` is as `addSource`'s.
  *
@@ -779,12 +779,11 @@ export const addInstructionFile = async (
   env: BrainEnv,
   added: { file: InstructionFile; change: string; text: string; after?: number }
 ): Promise<{ file: InstructionFile; version: number }> => {
-  // Counted as the text and as a chat's prompt holds it, escaped, so the
-  // limit bounds what reaches a model too.
+  // Counted as a chat's prompt holds it, escaped, which is never shorter
+  // than the text: the limit bounds what reaches a model.
   if (
     typeof added.text === "string" &&
-    (isOverInstructionsLimit(added.text) ||
-      isOverInstructionsLimit(promptTextOf(added.text)))
+    isOverInstructionsLimit(promptTextOf(added.text))
   ) {
     throw instructionFileErrors.create("instructions.too_large", {
       maxLength: instructionsMaxLength,

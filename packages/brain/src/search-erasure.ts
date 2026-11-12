@@ -656,9 +656,13 @@ const loggedCapped = (counts: CheckCounts): CollectionPlan => {
 /** A version's (document, number) pair: a save to its document adds one. */
 const versionPair = sql`v.document_id || ':' || v.number`;
 
-/** Whether version `v` is of a document of `collectionId`. */
-const versionInCollection = (collectionId: string) => sql`v.document_id IN (
-  SELECT id FROM documents WHERE collection_id = ${collectionId}
+/** Whether version `v` is of a document of one of `collectionIds`. */
+const versionInCollection = (
+  collectionIds: readonly string[]
+) => sql`v.document_id IN (
+  SELECT id FROM documents WHERE collection_id IN (
+    SELECT value FROM json_each(${JSON.stringify(collectionIds)})
+  )
 )`;
 
 /**
@@ -674,7 +678,7 @@ type IndexedValues = (
 const readCollection = async <C>(
   brain: Brain<C>,
   db: DrizzleD1Database,
-  collectionId: string,
+  collectionIds: readonly string[],
   valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
   // How much there is, before any text is read: no more of the history
@@ -685,7 +689,7 @@ const readCollection = async <C>(
     FROM (
       SELECT p.bytes AS size FROM versions AS v
       JOIN brain_payloads AS p ON p.key = v.payload_key
-      WHERE ${versionInCollection(collectionId)}
+      WHERE ${versionInCollection(collectionIds)}
       LIMIT ${collectionCheckCaps.versions + 1}
     )
   `);
@@ -701,7 +705,7 @@ const readCollection = async <C>(
   }
   const listed = await db.all<{ documentId: string; number: number }>(sql`
     SELECT v.document_id AS documentId, v.number AS number FROM versions AS v
-    WHERE ${versionInCollection(collectionId)}
+    WHERE ${versionInCollection(collectionIds)}
     ORDER BY v.document_id, v.number
     LIMIT ${collectionCheckCaps.versions + 1}
   `);
@@ -765,7 +769,7 @@ const readCollection = async <C>(
 };
 
 /**
- * Reads every version of `collectionId`'s documents, each of which the
+ * Reads every version of the documents of `collectionIds`, each of which the
  * search index held once (a later save's secure deletes can leave a page
  * separator of it), a page of versions at a time, and gives the keys of
  * the tokens their values (`valuesOf`) gave the index (`CollectionPlan`).
@@ -777,11 +781,11 @@ const readCollection = async <C>(
 export const collectionPlan = async <C>(
   brain: Brain<C>,
   db: DrizzleD1Database,
-  collectionId: string,
+  collectionIds: readonly string[],
   valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
   try {
-    return await readCollection(brain, db, collectionId, valuesOf);
+    return await readCollection(brain, db, collectionIds, valuesOf);
   } catch (error) {
     // Not readable here (a platform that refuses it): rebuilt instead.
     log.warn("knowledge.purge.index_check_failed", {
@@ -792,7 +796,7 @@ export const collectionPlan = async <C>(
 };
 
 /**
- * The statement, for the batch that deletes `collectionId`, that records a
+ * The statement, for the batch that deletes `collectionIds`, that records a
  * rebuild as owed (`id`) when the collection's versions aren't `versions`,
  * those `collectionPlan` read: a save meanwhile, whose text the plan
  * didn't read. The same pairs, in any order, are as many, and none of them
@@ -802,7 +806,7 @@ export const collectionPlan = async <C>(
 export const rebuildOwedIfChanged = (
   db: DrizzleD1Database,
   id: string,
-  collectionId: string,
+  collectionIds: readonly string[],
   versions: readonly string[]
 ) => {
   const now = Date.now();
@@ -818,9 +822,9 @@ export const rebuildOwedIfChanged = (
       })
       .from(sql`(SELECT 1)`).where(sql`(
         SELECT count(*) FROM versions AS v
-        WHERE ${versionInCollection(collectionId)}
+        WHERE ${versionInCollection(collectionIds)}
       ) != ${versions.length} OR EXISTS (
-        SELECT 1 FROM versions AS v WHERE ${versionInCollection(collectionId)}
+        SELECT 1 FROM versions AS v WHERE ${versionInCollection(collectionIds)}
           AND ${versionPair} NOT IN (SELECT value FROM json_each(${read}))
       )`)
   );

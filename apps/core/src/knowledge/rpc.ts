@@ -119,7 +119,6 @@ import { coreExport } from "./brain-export.ts";
 import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
-import { personalCollectionId } from "./memory-files.ts";
 import { sharedChatsOf } from "./memory-publish.ts";
 import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
@@ -185,7 +184,6 @@ export const coreErasure = (env: Env): OnErase => {
     ]),
     ...uploadErasure(env),
     ...appsErasure(env),
-    personalCollection: personalCollectionId,
     forgetDocuments: readings.forgetDocuments,
   };
 };

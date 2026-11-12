@@ -334,8 +334,7 @@ const conflict = (existing: DocumentRow | undefined) =>
 /**
  * Reads `text` for the document at `path` in `collection`, refused as a
  * save would refuse it: as the host's `onWrite` port refuses it (core's:
- * the Grasp skills by anything but their sync, a memory file over its
- * size limit), over a document's limits, or frontmatter that doesn't fit
+ * the Grasp skills by anything but their sync), over a document's limits, or frontmatter that doesn't fit
  * its type. A purge's text (`purge`) is checked for the fields every type
  * has only (`parseBaseFields`), whatever its type says.
  */

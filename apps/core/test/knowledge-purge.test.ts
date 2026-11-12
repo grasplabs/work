@@ -20,7 +20,11 @@ import {
   setUpTime,
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
-import { storedVersionTexts as versionTexts } from "./knowledge.ts";
+import {
+  newTeam,
+  ownCollectionOf,
+  storedVersionTexts as versionTexts,
+} from "./knowledge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -62,6 +66,151 @@ const statementsOf = async (person: Person): Promise<string[]> => {
 /** Whether a statement of the purge's batch writes or deletes records. */
 const writesRecords = (query: string): boolean =>
   /^(?:update|delete from) "brain_memories"/iu.test(query);
+
+describe("a personal purge", setUpTime, () => {
+  it("erases every collection only the person reads, however many they made, with every version, from everywhere", async () => {
+    const admin = await personOf("admin");
+    const leaver = await personOf("user");
+    const secret = `vanderzwaluw${unique()}`;
+    const notes = await ownCollectionOf(leaver);
+    const { id: diary } = await leaver.api.knowledge.createCollection({
+      name: `Diary ${unique()}`,
+      access: "me",
+    });
+    await saveOver(leaver, notes, "about.md", `# About me\nI am ${secret}.`);
+    await saveOver(
+      leaver,
+      notes,
+      "about.md",
+      `# About me\nI am ${secret}, on leave.`,
+      `Learned ${secret} is on leave`
+    );
+    await saveOver(leaver, diary, "monday.md", `# Monday\n${secret} again.`);
+    const heldBefore = await holding(secret);
+
+    let outcomeOf: Awaited<ReturnType<typeof purged>> | undefined;
+    const input: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    };
+    const events = await auditedDuring(async () => {
+      outcomeOf = await purged(admin, input);
+    });
+    const listed = await leaver.api.knowledge.listCollections();
+
+    expect({
+      heldBefore: heldBefore.length > 0,
+      result: {
+        ...outcomeOf?.result,
+        purgeId: typeof outcomeOf?.result.purgeId,
+      },
+      collections: listed
+        .filter(({ id }) => id === notes || id === diary)
+        .map(({ id }) => id),
+      notes: await outcome(leaver.api.knowledge.listDocuments(notes)),
+      diary: await outcome(leaver.api.knowledge.listDocuments(diary)),
+      held: await holding(secret),
+      purged: events
+        .filter(({ action }) => action === "knowledge.purged")
+        .map(({ detail }) => ({
+          collections: detail.collections,
+          documents: detail.documents,
+          versions: detail.versions,
+        })),
+      carriesText: JSON.stringify(events).includes(secret),
+    }).toStrictEqual({
+      heldBefore: true,
+      result: { purgeId: "string", documents: 2, versions: 3 },
+      collections: [],
+      notes: "knowledge.not_found",
+      diary: "knowledge.not_found",
+      held: [],
+      purged: [{ collections: 2, documents: 2, versions: 3 }],
+      carriesText: false,
+    });
+  });
+
+  it("leaves another person's collection only they read, and a team's collection the person wrote in, as they were", async () => {
+    const admin = await personOf("admin");
+    const leaver = await personOf("user");
+    const stays = await personOf("user");
+    const team = await newTeam(admin, [leaver, stays]);
+    const secret = `brandsma${unique()}`;
+    const theirs = await ownCollectionOf(stays);
+    const kept = await saveOver(
+      stays,
+      theirs,
+      "notes.md",
+      `# Notes\nWorking with ${secret}.`
+    );
+    const { id: teamCollection } = await admin.api.knowledge.createCollection({
+      name: `Team ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    const shared = await saveOver(
+      leaver,
+      teamCollection,
+      "plan.md",
+      `# Plan\n${secret} leads it.`
+    );
+    await saveOver(
+      leaver,
+      await ownCollectionOf(leaver),
+      "mine.md",
+      `# Mine\n${secret}.`
+    );
+
+    const { result } = await purged(admin, {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    });
+
+    expect({
+      documents: result.documents,
+      theirs: await versionTexts(kept.id),
+      team: await versionTexts(shared.id),
+    }).toStrictEqual({
+      documents: 1,
+      theirs: [`# Notes\nWorking with ${secret}.`],
+      team: [`# Plan\n${secret} leads it.`],
+    });
+  });
+
+  it("leaves nothing of a person whose text was only theirs, and can run again", async () => {
+    const admin = await personOf("admin");
+    const leaver = await personOf("user");
+    const secret = `oudejans${unique()}`;
+    await saveOver(
+      leaver,
+      await ownCollectionOf(leaver),
+      "about.md",
+      `# ${secret}\nCall me ${secret}.`
+    );
+    const input: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "erasure_request",
+    };
+    const first = await purged(admin, input);
+    const again = await purged(admin, input);
+    expect({
+      first: first.result.documents,
+      again: { ...again.result, purgeId: typeof again.result.purgeId },
+      held: await holding(secret),
+    }).toStrictEqual({
+      first: 1,
+      again: {
+        purgeId: "string",
+        documents: 0,
+        versions: 0,
+      },
+      held: [],
+    });
+  });
+});
 
 describe("a purge of content's memory records", setUpTime, () => {
   it("redacts or deletes every record holding a term, whoever's, audited without the text", async () => {
@@ -552,6 +701,44 @@ describe("a purge whose index cleanup fails", setUpTime, () => {
       heldAfterFirst,
       // The same purge, gone on with (GRA-1122): what it removed in all.
       again: again.result.versions,
+      status: status.state,
+      heldAfterAgain: await holding(secret),
+    }).toStrictEqual({
+      first: "knowledge.purge_index_pending",
+      heldAfterFirst: ["search_words_data.block"],
+      again: 1,
+      status: "complete",
+      heldAfterAgain: [],
+    });
+  });
+
+  it("says the data is gone and a run again cleans up, for a person", async () => {
+    const admin = await personOf("admin");
+    const leaver = await personOf("user");
+    const secret = `brouwer${unique()}`;
+    await saveOver(
+      leaver,
+      await ownCollectionOf(leaver),
+      "about.md",
+      `# About me\nCall me ${secret}.`
+    );
+    const input: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    };
+    const failing = await rebuildFailingOnce(admin);
+    const { token } = await admin.api.knowledge.preparePurge(input);
+    const first = await outcome(failing.knowledge.purge(input, token));
+    const heldAfterFirst = await holding(secret);
+    // The collection is gone already, but the index is cleaned up.
+    const again = await purged(admin, input);
+    const status = await admin.api.knowledge.purgeStatus(again.result.purgeId);
+    expect({
+      first,
+      heldAfterFirst,
+      // The same purge, gone on with (GRA-1122): what it removed in all.
+      again: again.result.documents,
       status: status.state,
       heldAfterAgain: await holding(secret),
     }).toStrictEqual({
