@@ -932,6 +932,510 @@ export interface VectorsFound {
   chunks: FoundChunk[];
 }
 
+// Memories and entities (memories.ts, entities.ts).
+//
+// A memory is a small dated statement drawn from a source or written by
+// someone: what it is about (an entity, and an attribute from the fixed
+// list of that entity's kind, `entityAttributes`), its two clocks (when it
+// was true in the world: `validFrom`, `validUntil`; when the Brain
+// learned it: `learnedAt`, and stopped believing it: `endedAt`), the quote
+// it rests on and the source version it came from, whose word it is
+// (`Speaker`), and who may read it. An entity is a thing memories are
+// about: a person, a team, a customer and so on, with its names and exact
+// identifiers. A relation between two entities is a memory about both
+// (`object`).
+//
+// Never overwritten. Each memory has a lineage: the source it rests on
+// (every version of it), or else the writer who wrote it. A newer memory
+// of the same lineage about the same entity and one-value attribute ends
+// the one before, which stays as history; a memory of another lineage
+// that says something else makes the fact contested: both stay current
+// and are read together, each with its source. A memory with no listed
+// attribute never ends or contests another.
+//
+// Who may read a memory: those in the reader set its caller gives
+// (`access`, as a source's), and, when it rests on a source version, only
+// those among that version's readers and the source's current version's
+// now, as `readVersion`. So the store never widens what its caller gave,
+// and narrowing or erasing a source hides what was drawn from it. The
+// caller's set must already be no wider than everything its model saw
+// (extraction works in batches that share one set of readers): the store
+// can check only the version a memory names. Every statement that reads,
+// counts or ranks memories, entities or their names filters by the reader
+// inside itself: an entity, and each of its names and identifiers, is
+// visible only to a reader who can read a memory that mentions it with
+// them.
+
+/** The kinds of entity. */
+export const entityKinds = [
+  "person",
+  "team",
+  "customer",
+  "supplier",
+  "project",
+  "product",
+  "tool",
+  "routine",
+  "app",
+  "workflow",
+  "connection",
+  "term",
+] as const;
+export type EntityKind = (typeof entityKinds)[number];
+
+/**
+ * An attribute of a kind of entity: whether it holds one value (a newer
+ * memory of the same lineage ends the one before; another lineage's
+ * different value contests it) or many (each value stands beside the
+ * others; a newer memory of the same lineage with the same value ends the
+ * one before), and, for a relation, the kinds of entity its value is.
+ */
+export interface AttributeRule {
+  readonly values: "one" | "many";
+  readonly relation?: readonly EntityKind[];
+}
+
+/**
+ * Every attribute a memory may be filed under, per kind of entity: the
+ * fixed list. A memory about something not listed has no attribute
+ * (`attribute` left out): it is kept and found, and never ends or
+ * contests another.
+ */
+export const entityAttributes = {
+  person: {
+    role: { values: "one" },
+    team: { values: "many", relation: ["team"] },
+    employer: { values: "one", relation: ["customer", "supplier"] },
+    manager: { values: "one", relation: ["person"] },
+    location: { values: "one" },
+    language: { values: "many" },
+    availability: { values: "one" },
+    responsibility: { values: "many" },
+    expertise: { values: "many" },
+    owns: {
+      values: "many",
+      relation: [
+        "customer",
+        "supplier",
+        "project",
+        "product",
+        "tool",
+        "routine",
+        "app",
+        "workflow",
+        "connection",
+      ],
+    },
+    preference: { values: "many" },
+    instruction: { values: "many" },
+  },
+  team: {
+    purpose: { values: "one" },
+    lead: { values: "one", relation: ["person"] },
+    responsibility: { values: "many" },
+    location: { values: "one" },
+  },
+  customer: {
+    status: { values: "one" },
+    renewal_date: { values: "one" },
+    contract_value: { values: "one" },
+    account_owner: { values: "one", relation: ["person"] },
+    contact: { values: "many", relation: ["person"] },
+    location: { values: "one" },
+    industry: { values: "one" },
+    requirement: { values: "many" },
+    promise: { values: "many" },
+    complaint: { values: "many" },
+    next_step: { values: "many" },
+  },
+  supplier: {
+    status: { values: "one" },
+    contract_end: { values: "one" },
+    terms: { values: "one" },
+    account_owner: { values: "one", relation: ["person"] },
+    contact: { values: "many", relation: ["person"] },
+    supplies: { values: "many", relation: ["product", "tool"] },
+    location: { values: "one" },
+  },
+  project: {
+    status: { values: "one" },
+    goal: { values: "one" },
+    deadline: { values: "one" },
+    owner: { values: "one", relation: ["person"] },
+    member: { values: "many", relation: ["person", "team"] },
+    customer: { values: "one", relation: ["customer"] },
+    decision: { values: "many" },
+    next_step: { values: "many" },
+  },
+  product: {
+    description: { values: "one" },
+    price: { values: "one" },
+    status: { values: "one" },
+    owner: { values: "one", relation: ["person", "team"] },
+    feature: { values: "many" },
+  },
+  tool: {
+    purpose: { values: "one" },
+    owner: { values: "one", relation: ["person", "team"] },
+    used_by: { values: "many", relation: ["person", "team"] },
+    cost: { values: "one" },
+  },
+  routine: {
+    purpose: { values: "one" },
+    owner: { values: "one", relation: ["person", "team"] },
+    frequency: { values: "one" },
+    step: { values: "many" },
+    team: { values: "many", relation: ["team"] },
+    uses: { values: "many", relation: ["tool", "app", "workflow"] },
+  },
+  app: {
+    purpose: { values: "one" },
+    owner: { values: "one", relation: ["person", "team"] },
+    used_by: { values: "many", relation: ["person", "team"] },
+  },
+  workflow: {
+    purpose: { values: "one" },
+    owner: { values: "one", relation: ["person", "team"] },
+    trigger: { values: "one" },
+  },
+  connection: {
+    purpose: { values: "one" },
+    owner: { values: "one", relation: ["person", "team"] },
+  },
+  term: {
+    definition: { values: "one" },
+    synonym: { values: "many" },
+  },
+} as const satisfies Record<EntityKind, Record<string, AttributeRule>>;
+
+/** The attributes of the kind `K`. */
+export type AttributeOf<K extends EntityKind> =
+  keyof (typeof entityAttributes)[K] & string;
+
+/** The rule of `attribute` for an entity of `kind`, or none when it isn't listed. */
+export const attributeRuleOf = (
+  kind: EntityKind,
+  attribute: string
+): AttributeRule | undefined => {
+  const rules: Readonly<Record<string, AttributeRule>> = entityAttributes[kind];
+  return Object.hasOwn(rules, attribute) ? rules[attribute] : undefined;
+};
+
+/**
+ * What a memory says, as a kind: a fact, a decision, a preference or an
+ * instruction. A preference or an instruction is only ever an internal
+ * person's word (`Speaker`): text in a document or a mail never becomes
+ * one, which the store refuses.
+ */
+export const memoryTypes = [
+  "fact",
+  "decision",
+  "preference",
+  "instruction",
+] as const;
+export type MemoryType = (typeof memoryTypes)[number];
+
+/**
+ * Whose word a memory is: an internal person's (`person`, as the host
+ * names them: the one who said it, or who confirmed it), an outside
+ * party's (a customer's mail, a supplier's document), an agent's (`agent`,
+ * as the host names it) or the system's.
+ */
+export const speakerSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("internal"), person: principalSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agent: principalSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+export type Speaker = z.infer<typeof speakerSchema>;
+
+/** Most memories one add takes, and most entities. */
+export const memoriesPerAddMax = 100;
+
+/** Most names, and most identifiers, an entity of an add gives. */
+export const namesPerEntityMax = 20;
+
+/** Most characters of a memory's statement. */
+export const statementMaxLength = 1000;
+
+/** Most characters of a memory's quote. */
+export const quoteMaxLength = 2000;
+
+/** Most characters of a memory's value, and of an entity's name. */
+export const valueMaxLength = 500;
+
+/** Most memories, entities or contested facts one read answers. */
+export const memoriesReadMax = 100;
+
+/** An entity's id: the store's own, the same for every read. */
+export const entityIdSchema = z.uuid();
+export type EntityId = z.infer<typeof entityIdSchema>;
+
+/** A memory's id: the store's own, for citing it and retiring it. */
+export const memoryIdSchema = z.uuid();
+export type MemoryId = z.infer<typeof memoryIdSchema>;
+
+/**
+ * An exact identifier of an entity: an email address (compared without
+ * case), or a reference in some system (`ref`), written with that
+ * system's name, as `crm:ACME-1` or, for the host's own records,
+ * `grasp:app:<id>`, compared exactly. An identifier is evidence, never
+ * access: who may read anything is the host's to say, never an email in
+ * a memory.
+ */
+export const identifierSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("email"),
+    value: wellFormedString()
+      .min(3)
+      .max(320)
+      .regex(/^[^\s@]+@[^\s@]+$/u),
+  }),
+  z.strictObject({
+    type: z.literal("ref"),
+    value: wellFormedString()
+      .min(3)
+      .max(sourceIdMaxLength)
+      .regex(/^\S+:\S+$/u),
+  }),
+]);
+export type Identifier = z.infer<typeof identifierSchema>;
+
+/** A short text a memory holds: some text, at most `max` characters. */
+const someText = (max: number) =>
+  wellFormedString().regex(/\S/u, { message: "Holds no text" }).max(max);
+
+/**
+ * An entity an add names, by a key of its own within the add (`key`,
+ * which its memories use): the known entity `id`, or else one found by
+ * its exact identifiers, the first entity of its kind holding any of
+ * them (never by a name alone: linking on names and proposals are the
+ * linker's), or else a new one. Its names and identifiers are kept as
+ * given by each memory of the add that mentions it, so each is visible
+ * only to those who can read such a memory.
+ */
+export const newEntitySchema = z.strictObject({
+  key: wellFormedString().min(1).max(64),
+  id: entityIdSchema.optional(),
+  kind: z.enum(entityKinds),
+  names: z.array(someText(valueMaxLength)).max(namesPerEntityMax).default([]),
+  identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
+});
+export type NewEntity = z.input<typeof newEntitySchema>;
+
+/**
+ * What a memory rests on: a version of a source in the same store, and
+ * the quote of it the memory rests on (its lineage is the source); or a
+ * writer (the person, agent or App writing it, as the host names them),
+ * with what was said when there is a quote (its lineage is the writer).
+ */
+export const memoryBasisSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("source"),
+    source: sourceIdSchema,
+    version: versionSchema,
+    quote: someText(quoteMaxLength),
+  }),
+  z.strictObject({
+    kind: z.literal("writer"),
+    writer: principalSchema,
+    quote: someText(quoteMaxLength).optional(),
+  }),
+]);
+export type MemoryBasis = z.infer<typeof memoryBasisSchema>;
+
+/**
+ * A memory to add: what it is about (an entity's key in the add), filed
+ * under an attribute of that entity's kind, or none; for a relation, the
+ * entity it relates to (`object`, required for a relation attribute,
+ * allowed without an attribute); its value for an attribute that is not a
+ * relation (what one-value attributes are compared by, folded as search
+ * folds words); its type, statement, world clock (`validUntil` after
+ * `validFrom`), whose word it is, and what it rests on.
+ */
+export const newMemorySchema = z
+  .strictObject({
+    about: wellFormedString().min(1).max(64),
+    attribute: wellFormedString().min(1).max(64).optional(),
+    object: wellFormedString().min(1).max(64).optional(),
+    value: someText(valueMaxLength).optional(),
+    type: z.enum(memoryTypes),
+    statement: someText(statementMaxLength),
+    validFrom: z.date().optional(),
+    validUntil: z.date().optional(),
+    speaker: speakerSchema,
+    basis: memoryBasisSchema,
+  })
+  .refine(
+    ({ validFrom, validUntil }) =>
+      validFrom === undefined ||
+      validUntil === undefined ||
+      validUntil > validFrom,
+    { message: "Ends before it starts", path: ["validUntil"] }
+  )
+  .refine(
+    ({ type, speaker }) =>
+      (type !== "preference" && type !== "instruction") ||
+      speaker.kind === "internal",
+    {
+      message: "A preference or instruction is only an internal person's word",
+      path: ["type"],
+    }
+  );
+export type NewMemory = z.infer<typeof newMemorySchema>;
+
+/**
+ * Memories to add in one call, with the entities they name, all readable
+ * by the one set of readers `access` gives (no wider than everything the
+ * model that drew them saw), under a change key: the same key again
+ * answers what it added, whatever was added since, and is refused with
+ * other memories. Every entity is mentioned by at least one memory.
+ */
+export const newMemoriesSchema = z.strictObject({
+  change: changeKeySchema,
+  access: accessSchema,
+  entities: z.array(newEntitySchema).min(1).max(memoriesPerAddMax),
+  memories: z.array(newMemorySchema).min(1).max(memoriesPerAddMax),
+});
+export type NewMemories = z.input<typeof newMemoriesSchema>;
+
+/** What an add made: each memory's id in the order given, and each entity's id by its key. */
+export interface AddedMemories {
+  memories: MemoryId[];
+  entities: Record<string, EntityId>;
+}
+
+/**
+ * A memory as a reader reads it. `endedAt` is when it stopped being
+ * believed as this reader sees it: retired, or ended by a newer memory of
+ * its lineage that the reader may read; null while current. `confirmed`
+ * is a person's confirmation the reader may see: only one who can read
+ * the memory and every memory it was confirmed over. `contested`: another
+ * current memory the reader may read, of another lineage, says something
+ * else for the same entity and one-value attribute.
+ */
+export interface Memory {
+  id: MemoryId;
+  about: EntityId;
+  attribute: string | null;
+  object: EntityId | null;
+  value: string | null;
+  type: MemoryType;
+  statement: string;
+  quote: string | null;
+  /** The source version it rests on; null for a writer's. */
+  source: SourceVersionRef | null;
+  /** Who wrote it; null for one drawn from a source. */
+  writer: string | null;
+  speaker: Speaker;
+  validFrom: Date | null;
+  validUntil: Date | null;
+  learnedAt: Date;
+  endedAt: Date | null;
+  confirmed: { by: string; at: Date } | null;
+  contested: boolean;
+}
+
+/**
+ * Memories about an entity to read, for a reader: those current now, or
+ * as of a moment (believed then and true then, by both clocks); with
+ * `history`, the ended ones too. Of one attribute only, if given.
+ */
+export const memoriesRequestSchema = z.strictObject({
+  entity: entityIdSchema,
+  reader: readerSchema,
+  attribute: wellFormedString().min(1).max(64).optional(),
+  asOf: z.date().optional(),
+  history: z.boolean().optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type MemoriesRequest = z.input<typeof memoriesRequestSchema>;
+
+/**
+ * The memories about an entity the reader may read (above), by attribute
+ * (none last), then confirmed first, then the newest learned first.
+ */
+export interface MemoriesRead {
+  memories: Memory[];
+}
+
+/** Contested facts to list for a reader: about one entity, or any. */
+export const contestedRequestSchema = z.strictObject({
+  reader: readerSchema,
+  entity: entityIdSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type ContestedRequest = z.input<typeof contestedRequestSchema>;
+
+/**
+ * A contested fact: an entity's one-value attribute for which the reader
+ * may read current memories of more than one lineage saying different
+ * things; each with its source, confirmed first, then the newest.
+ */
+export interface ContestedFact {
+  about: EntityId;
+  attribute: string;
+  memories: Memory[];
+}
+
+/** One of a writer's own memories to retire. */
+export const retireRequestSchema = z.strictObject({
+  memory: memoryIdSchema,
+  writer: principalSchema,
+});
+export type RetireRequest = z.infer<typeof retireRequestSchema>;
+
+/** A memory the reader confirms, as their own word. */
+export const confirmRequestSchema = z.strictObject({
+  memory: memoryIdSchema,
+  reader: readerSchema,
+});
+export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
+
+/**
+ * Entities to find for a reader: of a kind, holding an exact identifier,
+ * or a name (compared folded, whole), any of them together; at least one.
+ */
+export const entitiesRequestSchema = z
+  .strictObject({
+    reader: readerSchema,
+    kind: z.enum(entityKinds).optional(),
+    identifier: identifierSchema.optional(),
+    name: someText(valueMaxLength).optional(),
+    limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+  })
+  .refine(
+    ({ kind, identifier, name }) =>
+      kind !== undefined || identifier !== undefined || name !== undefined,
+    { message: "Names no kind, identifier or name" }
+  );
+export type EntitiesRequest = z.input<typeof entitiesRequestSchema>;
+
+/** An entity to read, for a reader. */
+export const entityRequestSchema = z.strictObject({
+  entity: entityIdSchema,
+  reader: readerSchema,
+});
+export type EntityRequest = z.infer<typeof entityRequestSchema>;
+
+/**
+ * An entity as a reader sees it: its kind, and the names and identifiers
+ * given by memories the reader may read, each once, the earliest first.
+ */
+export interface Entity {
+  id: EntityId;
+  kind: EntityKind;
+  names: string[];
+  identifiers: Identifier[];
+}
+
+/**
+ * What a change of a memory did: `done`, or `nothing`, alike when there
+ * is no such memory, when the caller may not change it and when it was
+ * no longer current.
+ */
+export type MemoryChangeOutcome = "done" | "nothing";
+
 /** The Brain, as its host calls it. */
 export interface Brain {
   /**
@@ -1089,6 +1593,48 @@ export interface Brain {
    * Answers alike whatever they held, and is safe to repeat.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
+  /**
+   * Adds memories and the entities they name, in one transaction, all
+   * readable by `access` (above). Each entity is the known `id`, else the
+   * first of its kind holding one of its identifiers, else new. Each
+   * memory of a one-value attribute ends the current one of its lineage
+   * about the same entity and attribute (a source's: one from an earlier
+   * version, or the same; a writer's: one added before); one from an
+   * earlier version than a memory already there is kept, as history from
+   * the start. Refused, adding nothing, when an entity key is unknown or
+   * unmentioned, an attribute isn't its kind's, a relation lacks its
+   * object or names one of another kind, a value is missing or given to a
+   * relation, a source version isn't one this store holds (erased ones
+   * included), a person's own store is given anyone else's readers, or the
+   * change was added before with other memories. The same change again
+   * answers what it added.
+   */
+  addMemories: (memories: NewMemories) => Promise<AddedMemories>;
+  /** The memories about an entity the reader may read (`MemoriesRead`). */
+  readMemories: (request: MemoriesRequest) => Promise<MemoriesRead>;
+  /**
+   * The contested facts the reader may read, those of the entity given or
+   * any: never one only memories hidden from the reader would contest.
+   */
+  listContested: (request: ContestedRequest) => Promise<ContestedFact[]>;
+  /**
+   * Retires one of the writer's own memories (its lineage is that
+   * writer): it stops being current from now on, and stays as history.
+   * Nothing else changes: a memory it had ended stays ended.
+   */
+  retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
+  /**
+   * The reader confirms a current memory they may read, over the current
+   * memories of other lineages they may read that say something else of
+   * the same entity and attribute: recorded as the reader's own word,
+   * read first among them from then on, and seen only by readers who can
+   * read the memory and each one it was confirmed over.
+   */
+  confirmMemory: (request: ConfirmRequest) => Promise<MemoryChangeOutcome>;
+  /** The entities the reader may see that match, the earliest first. */
+  findEntities: (request: EntitiesRequest) => Promise<Entity[]>;
+  /** An entity, if the reader may see it; null alike when there is none. */
+  readEntity: (request: EntityRequest) => Promise<Entity | null>;
 }
 
 /** The shared store's name: everything readable by more than one person. */

@@ -1943,6 +1943,78 @@ const meaningProbes = async ({
   ].map((answered) => echoesHidden(answered, markers));
 };
 
+/** The probes of the store's memories and entities. */
+const memoryProbes = {
+  addMemories: async ({ markers }) => [
+    await answer(
+      "memories for someone else",
+      async () =>
+        await store().addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "owner", person: stranger() },
+          entities: [{ key: "e", kind: "customer", names: [...markers] }],
+          memories: [
+            {
+              about: "e",
+              type: "fact",
+              statement: markedText(markers),
+              speaker: { kind: "system" },
+              basis: { kind: "writer", writer: stranger() },
+            },
+          ],
+        })
+    ),
+  ],
+  readMemories: async ({ reader }) => [
+    await answer(
+      "an entity no one added",
+      async () =>
+        await store().readMemories({ entity: crypto.randomUUID(), reader }),
+      "nothing"
+    ),
+  ],
+  listContested: async ({ reader }) => [
+    await answer(
+      "contested facts",
+      async () => await store().listContested({ reader })
+    ),
+  ],
+  retireMemory: async ({ personId }) => [
+    await answer(
+      "a memory no one added",
+      async () =>
+        await store().retireMemory({
+          memory: crypto.randomUUID(),
+          writer: personId,
+        }),
+      "nothing"
+    ),
+  ],
+  confirmMemory: async ({ reader }) => [
+    await answer(
+      "a memory no one added",
+      async () =>
+        await store().confirmMemory({ memory: crypto.randomUUID(), reader }),
+      "nothing"
+    ),
+  ],
+  findEntities: async ({ reader, markers }) => [
+    await answer(
+      "a name only hidden memories give",
+      async () =>
+        await store().findEntities({ reader, name: markers.join(" ") })
+    ),
+  ],
+  readEntity: async ({ reader }) => [
+    await answer(
+      "an entity no one added",
+      async () =>
+        await store().readEntity({ entity: crypto.randomUUID(), reader }),
+      "nothing"
+    ),
+  ],
+} satisfies Record<string, Probe>;
+
 /** One probe per public method of the Brain's store. */
 export const storeProbes = {
   addSource: async ({ markers }) => {
@@ -2763,6 +2835,7 @@ export const storeProbes = {
       async () => await store().rebuildWords()
     ),
   ],
+  ...memoryProbes,
 } satisfies Record<StoreMember, Probe>;
 
 /** One way into the Brain: a module, or the store's class, and its probes. */
