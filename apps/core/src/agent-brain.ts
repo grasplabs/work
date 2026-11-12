@@ -90,7 +90,7 @@ interface AgentGap {
   about: string[];
 }
 
-/** What a skill call read, as `#delegated` records it, and what it hands over. */
+/** What a Brain read of the chat's code read, as `#delegated` records it, and what it hands over. */
 interface Delegated<T> {
   value: T;
   /** The collections it read from, and the documents it hands over. */

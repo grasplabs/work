@@ -41,7 +41,8 @@ const frontmatterBlock = /^---\r?\n(?<yaml>[\s\S]*?)\r?\n---(?:\r?\n|$)/u;
 /**
  * The card `text` declares in its frontmatter (YAML, read by a YAML
  * parser, never by hand), or null when it holds none, the YAML doesn't
- * parse, or its name or description isn't the format's.
+ * parse or expands past the parser's bound on aliases, or its name or
+ * description isn't the format's.
  */
 export const skillCardOf = (text: string): SkillCard | null => {
   const yaml = frontmatterBlock.exec(text)?.groups?.yaml;
@@ -52,7 +53,15 @@ export const skillCardOf = (text: string): SkillCard | null => {
   if (document.errors.length > 0) {
     return null;
   }
-  const parsed = frontmatterSchema.safeParse(document.toJS());
+  let value: unknown;
+  try {
+    // Throws past the parser's bound on aliases (`maxAliasCount`): a few
+    // lines of anchors and aliases can otherwise expand without end.
+    value = document.toJS();
+  } catch {
+    return null;
+  }
+  const parsed = frontmatterSchema.safeParse(value);
   return parsed.success
     ? { name: parsed.data.name, description: parsed.data.description }
     : null;

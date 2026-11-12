@@ -868,19 +868,33 @@ const skillOfKey = (key: SourceId): Skill | null => {
 const skillAccess: Access = { kind: "audience", group: companyGroup };
 
 /**
- * Adds `text` as the next version of `skill`, readable by every member;
- * the one before stays as history. `change` is as `addSource`'s. Refused
- * (`skills.invalid`) when the text isn't a skill named `skill.name` in
- * the Agent Skills format, or is over `instructionsMaxLength` UTF-16
- * units, an instruction file's limit.
+ * The release's own reader of skills, to compare what is stored with what
+ * it ships: the company's group, which every skill is readable by, and a
+ * person no member is (core's person principals are user IDs, which never
+ * hold ":"), so it reads nothing but what the company may.
+ */
+const releaseReader: Reader = {
+  person: "grasp:release",
+  groups: [companyGroup],
+};
+
+/**
+ * Adds `text` as the next version of `skill`, readable by every member,
+ * unless it is the skill's current text already (`changed` false, and
+ * nothing written); the one before stays as history. `change` is as
+ * `addSource`'s. Refused (`skills.invalid`) when the text isn't a skill
+ * named `skill.name` in the Agent Skills format, or is over
+ * `instructionsMaxLength` UTF-16 units, an instruction file's limit. Two
+ * adds at once may both say `changed`; the store still keeps one version
+ * per text in a row.
  *
  * For brain-skills.ts only, which adds Grasp's own from the release:
- * nothing here checks who adds.
+ * nothing here checks who adds, or audits it.
  */
 export const addSkill = async (
   env: BrainEnv,
   added: { skill: Skill; change: string; text: string }
-): Promise<SkillAt> => {
+): Promise<SkillAt & { changed: boolean }> => {
   const skill = skillErrors.parse("skills.invalid", skillSchema, added.skill);
   const { change, text } = skillErrors.parse(
     "skills.invalid",
@@ -890,20 +904,36 @@ export const addSkill = async (
   if (skillCardOf(text)?.name !== skill.name) {
     throw skillErrors.create("skills.invalid");
   }
+  const source = skillKeyOf(skill);
+  const [current] = await brain(env).readCurrent({
+    sources: [source],
+    reader: releaseReader,
+  });
+  if (current?.text === text) {
+    return { ...skill, version: current.version, changed: false };
+  }
   const { version } = await brain(env).addInstructions({
-    source: skillKeyOf(skill),
+    source,
     change,
     text,
     access: skillAccess,
   });
-  return { ...skill, version };
+  return { ...skill, version, changed: true };
 };
 
 /**
- * Most skills a listing reads: past them, the ones whose current version
- * is oldest are left out. Far more than a company writes.
+ * Most skills a listing answers, of those it keeps: past them, the ones
+ * whose current version is oldest are left out. Far more than a company
+ * writes.
  */
 const skillsListedMax = 10 * listPageMax;
+
+/**
+ * Most skills a listing walks through to find those it keeps: twice what
+ * it answers, so the ones it drops (Grasp's skills a release no longer
+ * ships, or that a company skill replaces) don't take their places.
+ */
+const skillsScannedMax = 2 * skillsListedMax;
 
 /**
  * Each skill version's card, by its key and version, which never change
@@ -936,17 +966,21 @@ const skillReaderOf = async (
 };
 
 /**
- * Every skill `personId` may read, at its current version, with its
- * description, newest first: Grasp's and the company's alike, those that
- * declare their own name only. Refused with `permission.person_inactive`
- * once they are no longer a member.
+ * The skills `personId` may use, at their current versions, with their
+ * descriptions, newest first: Grasp's only by the names in `shipped`
+ * (this release's), and the company's, a company skill in place of
+ * Grasp's of the same name; those that declare their own name only. Kept
+ * before capped, so a skill left out never takes a place. Refused with
+ * `permission.person_inactive` once they are no longer a member.
  */
 export const listSkillsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
-  personId: string
+  personId: string,
+  shipped: ReadonlySet<string>
 ): Promise<SkillCardAt[]> => {
   const reader = await skillReaderOf(env, personId);
-  const listed: { source: SourceId; version: number }[] = [];
+  const listed: { source: SourceId; version: number; skill: Skill }[] = [];
+  let scanned = 0;
   let after: { addedAt: Date; source: SourceId } | undefined;
   do {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, in order
@@ -956,14 +990,31 @@ export const listSkillsAs = async (
       after,
       limit: listPageMax,
     });
-    listed.push(...page.sources);
+    scanned += page.sources.length;
+    for (const { source, version } of page.sources) {
+      const skill = skillOfKey(source);
+      if (skill !== null) {
+        listed.push({ source, version, skill });
+      }
+    }
     const last = page.sources.at(-1);
     after =
       page.more && last !== undefined
         ? { addedAt: last.addedAt, source: last.source }
         : undefined;
-  } while (after !== undefined && listed.length < skillsListedMax);
-  const kept = listed.slice(0, skillsListedMax);
+  } while (after !== undefined && scanned < skillsScannedMax);
+  const company = new Set(
+    listed.flatMap(({ skill }) =>
+      skill.scope === "company" ? [skill.name] : []
+    )
+  );
+  const kept = listed
+    .filter(
+      ({ skill }) =>
+        skill.scope === "company" ||
+        (shipped.has(skill.name) && !company.has(skill.name))
+    )
+    .slice(0, skillsListedMax);
   // This listing's cards: those read before, then the rest read now.
   const known = new Map(
     kept.flatMap(({ source, version }) => {
@@ -997,12 +1048,11 @@ export const listSkillsAs = async (
       cards.set(key, declared);
     }
   }
-  return kept.flatMap(({ source, version }) => {
-    const skill = skillOfKey(source);
+  return kept.flatMap(({ source, version, skill }) => {
     // A version read a moment ago may have been replaced since: then it
     // is left out of this listing, as if listed a moment later.
     const card = known.get(cardKeyOf(source, version));
-    return skill === null || card === undefined || card === null
+    return card === undefined || card === null
       ? []
       : [{ ...skill, version, description: card.description }];
   });

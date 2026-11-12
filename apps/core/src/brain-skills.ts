@@ -7,8 +7,10 @@ import {
 } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { keepAuditEvent } from "./audit-outbox.ts";
 import { addSkill, listSkillsAs, readSkillAs } from "./brain-next.ts";
 import type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 import { shippedSkills } from "./shipped-skills.ts";
@@ -27,8 +29,9 @@ export type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 //   or code does after reading it is checked against its own grants.
 // - Which: Grasp's skills only by the names this release ships (one a
 //   release dropped stays in the Brain as history, never selected or
-//   read), and a company skill of the same name in its place, as the
-//   company's adapted copy.
+//   read), and a company skill of the same name in its place in what is
+//   listed and selected, as the company's adapted copy; Grasp's is still
+//   read when named by its scope, so a pin taken before keeps working.
 // - Selection: the skills whose name or description shares the task's
 //   telling words, as recall's words way matches them, best first, a
 //   few; none when none does. No model call.
@@ -40,29 +43,51 @@ export type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 
 /**
  * Puts each of `skills` (this release's, unless a test passes others) into
- * the Brain as Grasp's own, each change minted once for this install, so
- * a retry within it adds nothing twice, and a later install of the same
- * text adds nothing (the same text is the same version). A skill that
- * fails is logged, by its place in the list alone, and the others are
- * still added. Resolves whether every one is in. The release's install
- * on the first request runs it (builtins.ts).
+ * the Brain as Grasp's own: only those whose current text differs from
+ * the release's are written, as their next version, all with one change
+ * key minted for this install. A skill that fails is logged, by its place
+ * in the list alone, and the others are still written; the next install
+ * compares it again (builtins.ts stores the release's fingerprint only
+ * once every one is in). Audited once, as the system: which release
+ * (its version, when the Worker knows it), how many it wrote and how many
+ * failed, never a name or text. Resolves whether every one is in. The
+ * release's install on the first request runs it (builtins.ts).
  */
 export const installShippedSkills = async (
   env: Env,
   skills: readonly ShippedSkill[] = shippedSkills
 ): Promise<boolean> => {
   const change = crypto.randomUUID();
-  let complete = true;
+  let changed = 0;
+  let failed = 0;
   for (const [position, { name, text }] of skills.entries()) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few skills, one at a time
-      await addSkill(env, { skill: { scope: "grasp", name }, change, text });
+      const added = await addSkill(env, {
+        skill: { scope: "grasp", name },
+        change,
+        text,
+      });
+      changed += added.changed ? 1 : 0;
     } catch (error) {
-      complete = false;
+      failed += 1;
       log.error("skills.install_failed", { position, ...errorFields(error) });
     }
   }
-  return complete;
+  // A shared skill steers every agent: what the release changed is
+  // recorded, as Grasp's own act.
+  await keepAuditEvent(env, drizzle(env.DB), {
+    actor: { type: "system" },
+    action: "brain.skills.installed",
+    target: { type: "brain", id: "skills" },
+    detail: {
+      release: env.CF_VERSION_METADATA?.id ?? null,
+      shipped: skills.length,
+      changed,
+      failed,
+    },
+  });
+  return failed === 0;
 };
 
 /** The person `by` acts for, from an `Authority` checked whole. */
@@ -78,23 +103,16 @@ const shippedNames: ReadonlySet<string> = new Set(
 /**
  * The skills the code `by` acts with may use, by name: Grasp's this
  * release ships and the company's, a company skill in place of Grasp's of
- * the same name. Refused with `permission.person_inactive` once the person
- * it acts for is no longer a member.
+ * the same name (brain-next.ts `listSkillsAs`). Refused with
+ * `permission.person_inactive` once the person it acts for is no longer a
+ * member.
  */
 export const skillsFor = async (
   env: Env,
   by: Authority
 ): Promise<SkillCardAt[]> => {
-  const listed = await listSkillsAs(env, personOf(by));
-  const company = new Set(
-    listed.filter(({ scope }) => scope === "company").map(({ name }) => name)
-  );
-  return listed
-    .filter(
-      ({ scope, name }) =>
-        scope === "company" || (shippedNames.has(name) && !company.has(name))
-    )
-    .toSorted((a, b) => a.name.localeCompare(b.name));
+  const listed = await listSkillsAs(env, personOf(by), shippedNames);
+  return listed.toSorted((a, b) => a.name.localeCompare(b.name));
 };
 
 /** A task, in the asker's words, as a question to the Brain is. */
@@ -132,7 +150,10 @@ const skillAtSchema = z.strictObject({
  * pinned it: its text is guidance, never a grant. `skills.not_found`,
  * alike, for a skill or version there isn't, one the person may no longer
  * read, and one of Grasp's this release doesn't ship; `skills.invalid`
- * for input that isn't a skill at a version.
+ * for input that isn't a skill at a version. A Grasp skill that a company
+ * skill of the same name replaces is still read when named by its scope:
+ * the replacing decides what is listed and selected, so a task that
+ * pinned Grasp's before keeps reading what it pinned.
  */
 export const readSkillFor = async (
   env: Env,

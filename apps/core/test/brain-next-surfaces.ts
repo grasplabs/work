@@ -1447,11 +1447,17 @@ export const coreProbes = {
   listSkillsAs: async ({ personId }) => [
     await answer(
       "the reader's skills",
-      async () => await coreBrain.listSkillsAs(env, personId)
+      async () =>
+        await coreBrain.listSkillsAs(
+          env,
+          personId,
+          new Set(["draw-a-workflow"])
+        )
     ),
     await answer(
       "as someone who isn't a member",
-      async () => await coreBrain.listSkillsAs(env, stranger())
+      async () =>
+        await coreBrain.listSkillsAs(env, stranger(), new Set<string>())
     ),
   ],
   // A skill is read by its own key alone: no producer's source is under

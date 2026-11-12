@@ -5,7 +5,8 @@ import { selectSkills, skillCardOf, skillsSelectedMax } from "../src/skills.ts";
 // A skill's card, read from its SKILL.md by a YAML parser, and selection
 // by the task's words as recall's words way matches them. The ways they
 // could fail: text that isn't a skill reads as one (no frontmatter, YAML
-// that doesn't parse, a key twice, a name outside the format); a skill
+// that doesn't parse, a key twice, a name outside the format), or YAML
+// whose aliases expand without end is expanded; a skill
 // that shares no word with the task is picked; a word in another form
 // (a plural, an accent, a hyphenated name) is missed; more than a few
 // come back.
@@ -24,6 +25,20 @@ describe("a skill's card", () => {
       twice: skillCardOf("---\nname: a\nname: b\ndescription: Twice.\n---\n"),
       badName: skillCardOf("---\nname: Book Invoices\ndescription: X.\n---\n"),
       noDescription: skillCardOf("---\nname: book-invoices\n---\n"),
+      aliasBomb: skillCardOf(
+        [
+          "---",
+          "name: bomb",
+          'a: &a ["x","x","x","x","x","x","x","x","x"]',
+          ...Array.from(
+            { length: 8 },
+            (_, index) =>
+              `${String.fromCodePoint(98 + index)}: &${String.fromCodePoint(98 + index)} [${Array.from({ length: 9 }, () => `*${String.fromCodePoint(97 + index)}`).join(",")}]`
+          ),
+          "description: *i",
+          "---",
+        ].join("\n")
+      ),
     }).toStrictEqual({
       plain: { name: "book-invoices", description: "How we book invoices." },
       crlf: { name: "refunds", description: "Refunds: how, and when." },
@@ -32,6 +47,7 @@ describe("a skill's card", () => {
       twice: null,
       badName: null,
       noDescription: null,
+      aliasBomb: null,
     });
   });
 });

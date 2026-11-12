@@ -2,7 +2,7 @@ import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { skillsSelectedMax } from "@grasp-os/brain-next/skills";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { addSkill, addSource, recallAs } from "../src/brain-next.ts";
 import {
@@ -13,6 +13,7 @@ import {
 } from "../src/brain-skills.ts";
 import type { SkillAt, SkillCardAt } from "../src/brain-skills.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
+import { allEvents } from "./audit-events.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInWithRole, unique } from "./sign-in.ts";
@@ -120,7 +121,7 @@ describe("skills in the Brain", setUpTime, () => {
     });
   });
 
-  it("replaces a skill with the next release's text, keeps the version a task pinned, and writes nothing for an unchanged one", async () => {
+  it("replaces a skill with the next release's text, keeps the version a task pinned, writes nothing for an unchanged one, and audits each install by count", async () => {
     const { agent } = await memberAgent();
     const name = "interview-a-stakeholder";
     const before = await listedNamed(agent, name);
@@ -138,6 +139,19 @@ describe("skills in the Brain", setUpTime, () => {
     // The release rolled back: its text again, as a version of its own.
     await installShippedSkills(env, [{ name, text: shipped(name) }]);
     const rolledBack = await listedNamed(agent, name);
+    const installs = await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        const found = events.filter(
+          ({ action, actor }) =>
+            action === "brain.skills.installed" && actor.type === "system"
+        );
+        // The file's own install first (`beforeAll`), then these three.
+        expect(found.length).toBeGreaterThanOrEqual(4);
+        return found.slice(-3);
+      },
+      { timeout: 10_000, interval: 50 }
+    );
 
     expect({
       installed,
@@ -147,6 +161,12 @@ describe("skills in the Brain", setUpTime, () => {
       current:
         after === undefined ? null : (await textOf(agent, after)) === changed,
       rolledBack: rolledBack?.version,
+      installs: installs.map(({ detail }) => [
+        detail.shipped,
+        detail.changed,
+        detail.failed,
+      ]),
+      texts: JSON.stringify(installs).includes("Ask one more question"),
     }).toStrictEqual({
       installed: true,
       again: true,
@@ -154,6 +174,12 @@ describe("skills in the Brain", setUpTime, () => {
       pinned: true,
       current: true,
       rolledBack: before.version + 2,
+      installs: [
+        [1, 1, 0],
+        [1, 0, 0],
+        [1, 1, 0],
+      ],
+      texts: false,
     });
   });
 
