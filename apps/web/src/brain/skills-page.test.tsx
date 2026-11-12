@@ -58,7 +58,7 @@ const request: SkillShareRequest = {
   decidedAt: null,
   version: null,
   text: asked,
-  replaces: true,
+  replaces: "grasp",
 };
 
 const shareOf = (name: string): SkillShare => ({
@@ -211,7 +211,9 @@ describe("the skills page", () => {
     expect({
       text: before.includes("Steps."),
       asker: before.includes("Anna"),
-      replaces: before.includes("Replaces the company's skill of this name"),
+      replaces: before.includes(
+        "Approving it replaces Grasp's own skill close-the-month for everyone."
+      ),
       calls,
       after: document.body.textContent?.includes(
         "Nobody is waiting for you to decide a share."

@@ -136,7 +136,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.agent_places": { company: "settings an admin changed" },
   "core.agent_tool_classes": { company: "settings an admin changed" },
   "core.app_requests": { company: "Apps they asked Grasp for" },
-  // Their asks to share a skill: a waiting one holds their text.
+  // Their asks to share a skill (a waiting one holds their text) are
+  // deleted; on asks they decided as an admin, `decided_by` is cleared,
+  // and the decision stays.
   "core.skill_shares": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },
   "core.notifications": { erased: "channels" },

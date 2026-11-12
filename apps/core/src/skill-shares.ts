@@ -2,6 +2,7 @@ import { skillCardOf } from "@grasp-os/brain-next/skills";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { identifierSchema } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { skillErrors } from "@grasp-os/shared/skills";
@@ -12,13 +13,14 @@ import type {
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
   appendAuditEvent,
   auditedBatch,
+  outboxed,
   outboxedIfChanged,
 } from "./audit-outbox.ts";
 import {
@@ -32,6 +34,7 @@ import {
 } from "./brain-next.ts";
 import type { SkillCardAt } from "./brain-next.ts";
 import { skillShares, users } from "./db/core/schema.ts";
+import { shippedSkills } from "./shipped-skills.ts";
 
 // Writing skills, and sharing one with the company (GRA-1754). Threat
 // model on GRA-1754; what could go wrong, and what stops it:
@@ -49,14 +52,19 @@ import { skillShares, users } from "./db/core/schema.ts";
 //   they were shown, so an edit after asking needs a new share. Asking
 //   again replaces a waiting share under a new ID, so an approval of the
 //   one shown is refused, never applied to text nobody reviewed.
-// - A decision that reads as done when it isn't: approving records the
-//   decision (one conditional update from `pending`, with its audit
-//   event), then adds the text to the Brain under the share's ID as its
-//   change, then records the version (with its own event). When the add
-//   fails the call throws and the share shows approved without a version;
-//   approving it again finishes it, adding nothing twice (the Brain answers
-//   a change it has with the version it made). Nothing uses a company
-//   skill but from the Brain, so none is used before it is in.
+// - A decision that reads as done when it isn't, or one done unaudited:
+//   approving records the decision and its one `skill.share.approved`
+//   event in one batch (one conditional update from `pending`), before
+//   anything reaches the Brain; then adds the text to the Brain under the
+//   share's ID as its change; then records the version on the row. When
+//   the add fails the call throws, `skill.share.approve_failed` is
+//   audited, and the share shows approved without a version: approving it
+//   again finishes it, adding nothing twice (the Brain answers a change it
+//   has with the version it made) and auditing nothing twice. One a later
+//   approval of the same name overtook is refused as superseded, never
+//   written over the newer text. Retiring is audited before the Brain
+//   write too. Nothing uses a company skill but from the Brain, so none is
+//   used before it is in.
 // - A skill granting access: none does. Writing, sharing, approving or
 //   retiring one creates no permission, binding or grant.
 // - Audit: requests and decisions by the share's ID; a company skill's
@@ -65,6 +73,11 @@ import { skillShares, users } from "./db/core/schema.ts";
 //   their own instruction file isn't.
 
 const nameSchema = z.string().min(1).max(64);
+
+/** The names of Grasp's skills this release ships, which a company skill replaces. */
+const shippedNames: ReadonlySet<string> = new Set(
+  shippedSkills.map(({ name }) => name)
+);
 
 /** Grasp's skills aren't the page's: none of their names is asked for. */
 const noShipped: ReadonlySet<string> = new Set();
@@ -173,6 +186,13 @@ export const skillsOverview = async (
   ]);
   const company = listed.filter(({ scope }) => scope === "company");
   const companyNames = new Set(company.map(({ name }) => name));
+  /** What approving a share of `name` replaces for everyone, if anything. */
+  const replacedBy = (name: string): SkillShareRequest["replaces"] => {
+    if (companyNames.has(name)) {
+      return "company";
+    }
+    return shippedNames.has(name) ? "grasp" : null;
+  };
   const requests = isMemberAdmin(by)
     ? await db
         .select(shareColumns)
@@ -198,7 +218,7 @@ export const skillsOverview = async (
               {
                 ...shareOf(row),
                 text: row.text,
-                replaces: companyNames.has(row.name),
+                replaces: replacedBy(row.name),
               },
             ]
       ) ?? null,
@@ -319,16 +339,58 @@ export const shareOwnSkill = async (
     }),
     outboxedIfChanged(db, shareEntry(by, "requested", id)),
   ]);
+  // Their skill could have been deleted for good meanwhile
+  // (`removeOwnSkill` erases it, then drops what waits of it): asked
+  // again after the share is written, so whichever lands last, no share
+  // of a deleted skill is left waiting.
+  const still = await readSkillAs(env, by.userId, {
+    scope: "person",
+    ...wanted,
+  });
+  if (still === null) {
+    await db
+      .delete(skillShares)
+      .where(and(eq(skillShares.id, id), eq(skillShares.status, "pending")));
+    throw skillErrors.create("skills.not_found");
+  }
   return shareOf(await shareById(env, id));
 };
 
 /**
- * Approves the share `id` as the admin `by`: records the decision, adds
- * its text as the next version of the company's skill of its name, then
- * records that version, drops the text and audits the approval, one
- * event with the version (or `approve_failed` when the add fails). A share approved before whose
- * add didn't finish is finished. `skills.not_found` for a share there
- * isn't or that was declined or replaced.
+ * Whether a later approval of the same name than `share`'s overtook it:
+ * then finishing `share` now would write its older text over the newer.
+ */
+const overtaken = async (
+  env: Env,
+  share: Pick<ShareRow, "id" | "name" | "decidedAt">
+): Promise<boolean> => {
+  if (share.decidedAt === null) {
+    return false;
+  }
+  const [later] = await drizzle(env.DB)
+    .select({ id: skillShares.id })
+    .from(skillShares)
+    .where(
+      and(
+        eq(skillShares.name, share.name),
+        eq(skillShares.status, "approved"),
+        ne(skillShares.id, share.id),
+        gt(skillShares.decidedAt, share.decidedAt)
+      )
+    )
+    .limit(1);
+  return later !== undefined;
+};
+
+/**
+ * Approves the share `id` as the admin `by`: records the decision with
+ * its one audit event, adds its text as the next version of the company's
+ * skill of its name, then records that version and drops the text. A
+ * share approved before whose add didn't finish is finished, auditing
+ * nothing again; one a later approval of the same name overtook meanwhile
+ * is refused (`skills.superseded`) and its text dropped. A failed add is
+ * audited (`skill.share.approve_failed`) and thrown. `skills.not_found`
+ * for a share there isn't or that was declined or replaced.
  */
 export const approveShare = async (
   env: Env,
@@ -339,9 +401,9 @@ export const approveShare = async (
   const row = await shareById(env, id);
   const db = drizzle(env.DB);
   if (row.status === "pending") {
-    // The decision, before the Brain's add: its one event is written
-    // with the add's outcome, below.
-    await drizzle(env.DB).batch([
+    // The decision and its event, in one batch, before the Brain sees
+    // anything: an approval is never live unaudited.
+    await auditedBatch(env, db, [
       db
         .update(skillShares)
         .set({
@@ -352,6 +414,7 @@ export const approveShare = async (
         .where(
           and(eq(skillShares.id, row.id), eq(skillShares.status, "pending"))
         ),
+      outboxedIfChanged(db, shareEntry(by, "approved", row.id)),
     ]);
   }
   // As it is now: approved by this call or one before, or not at all.
@@ -362,6 +425,13 @@ export const approveShare = async (
     }
     throw skillErrors.create("skills.not_found");
   }
+  if (await overtaken(env, decided)) {
+    await db
+      .update(skillShares)
+      .set({ text: null })
+      .where(and(eq(skillShares.id, decided.id), isNull(skillShares.version)));
+    throw skillErrors.create("skills.superseded");
+  }
   let version: number;
   try {
     ({ version } = await addCompanySkill(env, by.userId, {
@@ -371,23 +441,25 @@ export const approveShare = async (
     }));
   } catch (error) {
     // The decision stands, and its outcome is said: not added yet.
-    // Approving it again finishes it, and says so then.
-    await appendAuditEvent(env, shareEntry(by, "approve_failed", decided.id));
+    // Approving it again finishes it. A failure to say so never hides
+    // the add's own error.
+    try {
+      await appendAuditEvent(env, shareEntry(by, "approve_failed", decided.id));
+    } catch (auditError) {
+      log.error("skills.approve_failed_unaudited", errorFields(auditError));
+    }
     throw error;
   }
-  await auditedBatch(env, db, [
-    db
-      .update(skillShares)
-      .set({ version, text: null })
-      .where(
-        and(
-          eq(skillShares.id, decided.id),
-          eq(skillShares.status, "approved"),
-          isNull(skillShares.version)
-        )
-      ),
-    outboxedIfChanged(db, shareEntry(by, "approved", decided.id, { version })),
-  ]);
+  await db
+    .update(skillShares)
+    .set({ version, text: null })
+    .where(
+      and(
+        eq(skillShares.id, decided.id),
+        eq(skillShares.status, "approved"),
+        isNull(skillShares.version)
+      )
+    );
   return shareOf(await shareById(env, decided.id));
 };
 
@@ -427,7 +499,10 @@ export const declineShare = async (
 /**
  * Retires the company's skill `name` as the admin `by`: nobody lists,
  * selects or reads it from then on, and its versions stay as history.
- * `skills.not_found` when the company has no such skill live.
+ * Audited (`skill.retired`) before the Brain write, so a retirement is
+ * never unaudited; one whose write then fails is audited
+ * `skill.retire_failed` and thrown. `skills.not_found` when the company
+ * has no such skill live.
  */
 export const retireSkill = async (
   env: Env,
@@ -436,18 +511,46 @@ export const retireSkill = async (
 ): Promise<void> => {
   requireAdmin(by);
   const named = skillErrors.parse("skills.invalid", nameSchema, name);
-  const retired = await retireCompanySkill(env, by.userId, {
+  const live = await readCurrentSkillAs(env, by.userId, {
+    scope: "company",
     name: named,
-    change: crypto.randomUUID(),
   });
-  if (!retired) {
+  if (live === null) {
     throw skillErrors.create("skills.not_found");
   }
-  await appendAuditEvent(env, {
-    actor: actorOf(by),
-    action: "skill.retired",
-    target: { type: "company_skill", id: named },
-  });
+  const target = { type: "company_skill", id: named };
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor: actorOf(by),
+      action: "skill.retired",
+      target,
+      detail: { version: live.version },
+    }),
+  ]);
+  let retired = false;
+  try {
+    retired = await retireCompanySkill(env, by.userId, {
+      name: named,
+      change: crypto.randomUUID(),
+    });
+  } finally {
+    if (!retired) {
+      try {
+        await appendAuditEvent(env, {
+          actor: actorOf(by),
+          action: "skill.retire_failed",
+          target,
+        });
+      } catch (auditError) {
+        log.error("skills.retire_failed_unaudited", errorFields(auditError));
+      }
+    }
+  }
+  if (!retired) {
+    // Retired by someone else between the read and the write.
+    throw skillErrors.create("skills.not_found");
+  }
 };
 
 /**

@@ -2748,6 +2748,14 @@ msgstr "Goedgekeurd: {who}."
 msgid "Approver for new tools named"
 msgstr "Goedkeurder voor nieuwe tools benoemd"
 
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces Grasp's own skill {name} for everyone."
+msgstr "Met goedkeuring vervangt hij Grasps eigen skill {name} voor iedereen."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the company's own skill {name} for everyone."
+msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het bedrijf voor iedereen."
+
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -11094,10 +11102,6 @@ msgstr "Versie {newerVersion} vervangen door de mijne"
 #: src/activity/audit-words.ts
 msgid "Replaced a request for packages"
 msgstr "Een pakketaanvraag vervangen"
-
-#: src/brain/skills-page.tsx
-msgid "Replaces the company's skill of this name"
-msgstr "Vervangt de skill van het bedrijf met deze naam"
 
 #: src/dashboard/report-dialog.tsx
 msgid "Report"

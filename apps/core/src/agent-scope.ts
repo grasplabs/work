@@ -58,6 +58,13 @@ export interface AgentScope {
    * side effect is refused (`admitEffect`).
    */
   unattended?: boolean;
+  /**
+   * A turn its person asked for, there and then, in their own chat (not a
+   * thread others share): the only scope their own skills steer
+   * (brain-skills.ts `skillsReachOf`). Set by that turn alone; any scope
+   * without it gets none of them.
+   */
+  ownChat?: boolean;
   /** The code run the stub was made for: it answers only while that runs. */
   runId: string;
 }

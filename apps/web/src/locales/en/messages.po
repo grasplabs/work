@@ -2748,6 +2748,14 @@ msgstr "Approved: {who}."
 msgid "Approver for new tools named"
 msgstr "Approver for new tools named"
 
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces Grasp's own skill {name} for everyone."
+msgstr "Approving it replaces Grasp's own skill {name} for everyone."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the company's own skill {name} for everyone."
+msgstr "Approving it replaces the company's own skill {name} for everyone."
+
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -11094,10 +11102,6 @@ msgstr "Replace version {newerVersion} with mine"
 #: src/activity/audit-words.ts
 msgid "Replaced a request for packages"
 msgstr "Replaced a request for packages"
-
-#: src/brain/skills-page.tsx
-msgid "Replaces the company's skill of this name"
-msgstr "Replaces the company's skill of this name"
 
 #: src/dashboard/report-dialog.tsx
 msgid "Report"

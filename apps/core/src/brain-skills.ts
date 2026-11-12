@@ -145,6 +145,16 @@ export interface SkillsReach {
 }
 
 /**
+ * What a chat's scope may read of skills: the person's own too only when
+ * the scope says it is their own attended turn (`ownChat`, set by that
+ * turn alone). Opt-in: a scope that doesn't say so, whatever made it,
+ * gets Grasp's and the company's alone.
+ */
+export const skillsReachOf = (scope: { ownChat?: boolean }): SkillsReach => ({
+  personal: scope.ownChat === true,
+});
+
+/**
  * The skills the code `by` acts with may use, by name: Grasp's this
  * release ships and the company's, a company skill in place of Grasp's of
  * the same name (brain-next.ts `listSkillsAs`), and, with `personal`, the

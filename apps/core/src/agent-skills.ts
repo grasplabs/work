@@ -3,7 +3,11 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { auditedCall, chatAuthority, requireOpenRun } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { forSandbox } from "./bindings.ts";
-import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
+import {
+  readSkillFor,
+  selectSkillsFor,
+  skillsReachOf,
+} from "./brain-skills.ts";
 import type { SkillCardAt, SkillsReach, SkillVersion } from "./brain-skills.ts";
 
 // Skills for a chat's code (GRA-1826, GRA-1754): `await
@@ -114,11 +118,9 @@ export const skillsApi: AgentApi = {
   summary,
   types: skillsTypes(true),
   declaration: skillsDeclaration(true),
-  // Not in a turn nobody asked for (`unattended`), as the turn's list.
+  // Their own skills only where the scope says so (`skillsReachOf`).
   stub: (scope) =>
-    exports.SkillsApi({
-      props: { ...scope, personal: scope.unattended !== true },
-    }),
+    exports.SkillsApi({ props: { ...scope, ...skillsReachOf(scope) } }),
 };
 
 /** `env.skills` in a chat others share: Grasp's and the company's alone. */

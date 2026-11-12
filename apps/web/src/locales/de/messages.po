@@ -2748,6 +2748,14 @@ msgstr "Genehmigt: {who}."
 msgid "Approver for new tools named"
 msgstr "Freigabe für neue Tools benannt"
 
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces Grasp's own skill {name} for everyone."
+msgstr "Mit der Freigabe ersetzt er Grasps eigenen Skill {name} für alle."
+
+#: src/brain/skills-page.tsx
+msgid "Approving it replaces the company's own skill {name} for everyone."
+msgstr "Mit der Freigabe ersetzt er den eigenen Skill {name} des Unternehmens für alle."
+
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -11094,10 +11102,6 @@ msgstr "Version {newerVersion} durch meine ersetzen"
 #: src/activity/audit-words.ts
 msgid "Replaced a request for packages"
 msgstr "Eine Paketanfrage ersetzt"
-
-#: src/brain/skills-page.tsx
-msgid "Replaces the company's skill of this name"
-msgstr "Ersetzt den Skill des Unternehmens mit diesem Namen"
 
 #: src/dashboard/report-dialog.tsx
 msgid "Report"

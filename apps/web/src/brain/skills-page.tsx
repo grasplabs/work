@@ -236,17 +236,28 @@ const ShareRequest = ({
       <CardContent>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{name}</span>
-          {request.replaces ? (
-            <Badge variant="attention">
-              <Trans>Replaces the company&apos;s skill of this name</Trans>
-            </Badge>
-          ) : null}
+
           {request.status === "approved" ? (
             <Badge variant="attention">
               <Trans>Approved, not added yet: approve it again</Trans>
             </Badge>
           ) : null}
         </div>
+        {request.replaces === "company" ? (
+          <p className="text-sm">
+            <Trans>
+              Approving it replaces the company&apos;s own skill {name} for
+              everyone.
+            </Trans>
+          </p>
+        ) : null}
+        {request.replaces === "grasp" ? (
+          <p className="text-sm">
+            <Trans>
+              Approving it replaces Grasp&apos;s own skill {name} for everyone.
+            </Trans>
+          </p>
+        ) : null}
         <p className="text-muted-foreground text-xs">
           <Trans>
             Asked by {asker} on {asked}

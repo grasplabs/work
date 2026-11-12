@@ -163,6 +163,7 @@ const typeRules: readonly {
   { action: "skill.share.approve_failed", type: "action" },
   { action: "skill.share", type: "decision" },
   { action: "skill.retired", type: "config" },
+  { action: "skill.retire_failed", type: "action" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
   { action: "knowledge.read", type: "read" },

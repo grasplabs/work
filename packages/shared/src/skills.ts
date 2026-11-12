@@ -9,6 +9,8 @@ import { defineErrorFamily } from "./errors.ts";
 export const skillErrors = defineErrorFamily({
   "skills.invalid": "That isn't a task or a skill.",
   "skills.not_found": "There's no such skill, or not at that version.",
+  "skills.superseded":
+    "A later approval of a skill of that name came first: this one isn't added.",
   "skills.name_erased":
     "You deleted a skill of that name for good: give this one another name.",
 });
@@ -50,8 +52,11 @@ export interface SkillShare {
 /** A share waiting for an admin, with the exact text an approval adds. */
 export interface SkillShareRequest extends SkillShare {
   text: string;
-  /** Whether the company has a live skill of its name, which approving replaces. */
-  replaces: boolean;
+  /**
+   * What approving it replaces for everyone: the company's live skill of
+   * its name, one of Grasp's own of its name, or nothing (null).
+   */
+  replaces: "company" | "grasp" | null;
 }
 
 /** What the skills page shows the signed-in person. */

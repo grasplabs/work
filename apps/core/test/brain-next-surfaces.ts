@@ -2193,6 +2193,19 @@ export const skillProbes = {
         })
     ),
   ],
+  // Pure: what a scope may read of skills, the person's own only when it
+  // says it is their own attended turn.
+  skillsReachOf: async () => [
+    await answer(
+      "a scope that says nothing",
+      async () => await Promise.resolve(brainSkills.skillsReachOf({}))
+    ),
+    await answer(
+      "their own attended turn",
+      async () =>
+        await Promise.resolve(brainSkills.skillsReachOf({ ownChat: true }))
+    ),
+  ],
   // A task of the markers finds what one of their twins does: nothing.
   selectSkillsFor: async ({ personId, personal, markers, sharedWord }) => {
     const select = async (

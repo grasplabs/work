@@ -270,8 +270,15 @@ const brain: ErasureStep = {
       reason: "erasure_request" as const,
     };
     // Their asks to share a skill, with the text a waiting one holds; a
-    // company skill an approval made stays the company's.
-    await db.delete(skillShares).where(eq(skillShares.requestedBy, userId));
+    // company skill an approval made stays the company's. Who decided
+    // another's ask goes too, if it was them: the decision stays, unnamed.
+    await db.batch([
+      db.delete(skillShares).where(eq(skillShares.requestedBy, userId)),
+      db
+        .update(skillShares)
+        .set({ decidedBy: null })
+        .where(eq(skillShares.decidedBy, userId)),
+    ]);
     const onErase = coreErasure(env);
     const plan = await preparePurge(brainOf(env), by, input, onErase);
     await purge(brainOf(env), by, input, plan.token, onErase);
