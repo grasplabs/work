@@ -5,6 +5,7 @@
 // store is hidden from it.
 import type {
   Access,
+  MemoriesCursor,
   NewEntity,
   NewMemory,
   Reader,
@@ -245,13 +246,18 @@ describe("a memory's lineage", () => {
       ]
     );
 
-    await expect(
-      statementsAbout(entity, readerOf(unique("reader"), group))
-    ).resolves.toStrictEqual([
-      "Acme still needs EU hosting",
-      "Acme needs SSO",
-      "Acme prefers mail",
-      "Acme likes short calls",
+    // Within one add, memories learned at once go in id order: compared
+    // as a set, the requirements first, those with no attribute after.
+    const read = await statementsAbout(
+      entity,
+      readerOf(unique("reader"), group)
+    );
+    expect([
+      read.slice(0, 2).toSorted(),
+      read.slice(2).toSorted(),
+    ]).toStrictEqual([
+      ["Acme needs SSO", "Acme still needs EU hosting"],
+      ["Acme likes short calls", "Acme prefers mail"],
     ]);
   });
 
@@ -368,7 +374,9 @@ describe("contested facts", () => {
     const { entity } = await disagree(group, group);
     const reader = readerOf(unique("reader"), group);
 
-    const [contested] = await shared().listContested({ reader, entity });
+    const {
+      facts: [contested],
+    } = await shared().listContested({ reader, entity });
     expect(contested?.memories.map(({ value }) => value)).toStrictEqual([
       "1 May",
       "1 March",
@@ -385,7 +393,9 @@ describe("contested facts", () => {
         reader,
       })
     ).resolves.toBe("done");
-    const [after] = await shared().listContested({ reader, entity });
+    const {
+      facts: [after],
+    } = await shared().listContested({ reader, entity });
     expect(after?.memories.map(({ value }) => value)).toStrictEqual([
       "1 March",
       "1 May",
@@ -419,7 +429,10 @@ describe("contested facts", () => {
           confirmed,
         ]
       ),
-    }).toStrictEqual({ contested: [], seen: [["1 March", false, null]] });
+    }).toStrictEqual({
+      contested: { facts: [], more: false },
+      seen: [["1 March", false, null]],
+    });
     const { may } = await disagree(left, right);
     await expect(
       shared().confirmMemory({ memory: may, reader: leftOnly })
@@ -550,24 +563,29 @@ describe("who may read a memory", () => {
         reader: leftReader,
         identifier: { type: "email", value: email.toUpperCase() },
       })
-    ).resolves.toStrictEqual([
-      {
-        id: first.entities.p,
-        kind: "person",
-        names: ["Anna"],
-        identifiers: [{ type: "email", value: email }],
-      },
-    ]);
+    ).resolves.toStrictEqual({
+      entities: [
+        {
+          id: first.entities.p,
+          kind: "person",
+          names: ["Anna"],
+          identifiers: [{ type: "email", value: email }],
+          nameCount: 1,
+          identifierCount: 1,
+        },
+      ],
+      more: false,
+    });
     await expect(
       shared().findEntities({ reader: leftReader, name: secret })
-    ).resolves.toStrictEqual([]);
+    ).resolves.toStrictEqual({ entities: [], more: false });
     await expect(
       shared().findEntities({
         reader: readerOf(unique("x")),
         kind: "person",
         identifier: { type: "email", value: email },
       })
-    ).resolves.toStrictEqual([]);
+    ).resolves.toStrictEqual({ entities: [], more: false });
     await expect(
       shared().readEntity({
         entity: first.entities.p ?? "",
@@ -608,7 +626,7 @@ describe("who may read a memory", () => {
       [say("s", "Second")]
     );
 
-    const found = await shared().findEntities({
+    const { entities: found } = await shared().findEntities({
       reader: readerOf(unique("reader"), group),
       kind: "supplier",
     });
@@ -816,18 +834,14 @@ describe("ending a memory", () => {
     );
     const [mine = "", sourced = ""] = memories;
 
-    const reader = readerOf(unique("reader"), group);
-    const outsider = readerOf(unique("outsider"));
+    const reader = readerOf(writer, group);
+    const other = readerOf(unique("other"), group);
     const outcomes = [
-      await shared().retireMemory({
-        memory: mine,
-        writer: unique("other"),
-        reader,
-      }),
-      await shared().retireMemory({ memory: sourced, writer, reader }),
-      await shared().retireMemory({ memory: mine, writer, reader: outsider }),
-      await shared().retireMemory({ memory: mine, writer, reader }),
-      await shared().retireMemory({ memory: mine, writer, reader }),
+      await shared().retireMemory({ memory: mine, reader: other }),
+      await shared().retireMemory({ memory: sourced, reader }),
+      await shared().retireMemory({ memory: mine, reader: readerOf(writer) }),
+      await shared().retireMemory({ memory: mine, reader }),
+      await shared().retireMemory({ memory: mine, reader }),
     ];
 
     // A retry of the same retire answers as the first did.
@@ -885,7 +899,7 @@ describe("erasure", () => {
     await restore(shared(), backup);
     await expect(
       shared().findEntities({ reader, name: secret })
-    ).resolves.toStrictEqual([]);
+    ).resolves.toStrictEqual({ entities: [], more: false });
     await tick();
     await expect(left()).resolves.toBe(0);
   });
@@ -1056,7 +1070,7 @@ describe("what hidden memories never decide, and when a fact ends", () => {
       names: ["X"],
     });
 
-    const facts = await shared().listContested({ reader });
+    const { facts } = await shared().listContested({ reader });
     expect(
       facts.map(({ about }) => about).filter((id) => id === x || id === y)
     ).toStrictEqual([y, x]);
@@ -1285,7 +1299,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
   it("retires what is current for the reader, whatever newer memory of its lineage is hidden from them", async () => {
     const group = unique("g");
     const writer = unique("app");
-    const reader = readerOf(unique("r"), group);
+    const reader = readerOf(writer, group);
     const outcome = async (withHidden: boolean): Promise<string> => {
       const made = await remember(
         audience(group),
@@ -1314,7 +1328,6 @@ describe("what a reader sees of a retire and of an extraction", () => {
       }
       return await shared().retireMemory({
         memory: made.memories[0] ?? "",
-        writer,
         reader,
       });
     };
@@ -1366,11 +1379,7 @@ describe("what a reader sees of a retire and of an extraction", () => {
     const empty = [
       await store.findEntities({ reader: readerOf(person), kind: "customer" }),
       await store.listContested({ reader: readerOf(person) }),
-      await store.retireMemory({
-        memory: id,
-        writer: person,
-        reader: readerOf(person),
-      }),
+      await store.retireMemory({ memory: id, reader: readerOf(person) }),
     ];
     const others = [
       await refused(
@@ -1388,17 +1397,16 @@ describe("what a reader sees of a retire and of an extraction", () => {
         async () => await store.confirmMemory({ memory: id, reader: other })
       ),
       await refused(
-        async () =>
-          await store.retireMemory({
-            memory: id,
-            writer: person,
-            reader: other,
-          })
+        async () => await store.retireMemory({ memory: id, reader: other })
       ),
     ];
 
     expect({ empty, others }).toStrictEqual({
-      empty: [[], [], "nothing"],
+      empty: [
+        { entities: [], more: false },
+        { facts: [], more: false },
+        "nothing",
+      ],
       others: Array.from({ length: 6 }, () => "refused"),
     });
   });
@@ -1477,8 +1485,7 @@ describe("an instruction, a retire's repeat, and an extraction mark's readers", 
     await expect(
       shared().retireMemory({
         memory: made.memories[0] ?? "",
-        writer,
-        reader: readerOf(unique("r"), group),
+        reader: readerOf(writer, group),
       })
     ).resolves.toBe("nothing");
   });
@@ -1557,5 +1564,346 @@ describe("an instruction, a retire's repeat, and an extraction mark's readers", 
       same: first.memories,
       count: 0,
     });
+  });
+});
+
+describe("what a rollback or an erased rival leaves", () => {
+  // Threat 1: a reader set or a version deleted by an older release, its id
+  // used again for another group and another version, never lets the new
+  // group read the memory.
+  it("never lets a group read a memory through a reader set or version id used again after a rollback", async () => {
+    const before = unique("before");
+    const after = unique("after");
+    const source = unique("doc");
+    const version = await addSource(
+      "Acme is in Delft",
+      audience(before),
+      source
+    );
+    const made = await remember(
+      audience(before),
+      [customer()],
+      [
+        fact(
+          { kind: "source", ...version, quote: "Acme is in Delft" },
+          { attribute: "location", value: "Delft", statement: "In Delft" }
+        ),
+      ]
+    );
+    // As a release before memories would: delete the set and the version
+    // it no longer knows of, then give their ids to another group and
+    // another source's version.
+    const other = unique("other-doc");
+    await runInDurableObject(shared(), (_instance, state) => {
+      const { sql } = state.storage;
+      state.storage.transactionSync(() => {
+        sql.exec("PRAGMA defer_foreign_keys = ON");
+        const { set, row } = sql
+          .exec<{ set: number; row: number }>(
+            `SELECT reader_set AS "set", row FROM source_versions
+            WHERE source = ? AND version = ?`,
+            source,
+            version.version
+          )
+          .one();
+        sql.exec("DELETE FROM current_versions WHERE source = ?", source);
+        sql.exec("DELETE FROM source_changes WHERE source = ?", source);
+        sql.exec("DELETE FROM source_versions WHERE row = ?", row);
+        sql.exec("DELETE FROM reader_set_members WHERE reader_set = ?", set);
+        sql.exec("DELETE FROM reader_sets WHERE id = ?", set);
+        sql.exec(
+          "INSERT INTO reader_sets (id, key) VALUES (?, ?)",
+          set,
+          JSON.stringify([["group", after]])
+        );
+        sql.exec(
+          "INSERT INTO reader_set_members (reader_set, kind, principal) VALUES (?, 'group', ?)",
+          set,
+          after
+        );
+        const file = sql
+          .exec<{ hash: string }>("SELECT hash FROM files LIMIT 1")
+          .one().hash;
+        sql.exec(
+          `INSERT INTO source_versions (row, source, version, file, reader_set, added_at)
+          VALUES (?, ?, 1, ?, ?, ?)`,
+          row,
+          other,
+          file,
+          set,
+          Date.now()
+        );
+        sql.exec(
+          "INSERT INTO current_versions (source, version_row) VALUES (?, ?)",
+          other,
+          row
+        );
+      });
+    });
+    const entity = made.entities.c ?? "";
+
+    expect({
+      newGroup: await statementsAbout(entity, readerOf(unique("n"), after), {
+        history: true,
+      }),
+      entity: await shared().readEntity({
+        entity,
+        reader: readerOf(unique("n"), after),
+      }),
+    }).toStrictEqual({ newGroup: [], entity: null });
+  });
+
+  // Threat 3: a confirmation made over a rival that is erased goes whole.
+  it("deletes a confirmation whole once a memory it was made over is erased", async () => {
+    const left = unique("left");
+    const right = unique("right");
+    const made = await remember(
+      audience(left),
+      [customer()],
+      [
+        fact(
+          { kind: "writer", writer: unique("w") },
+          { attribute: "status", value: "Active", statement: "Active" }
+        ),
+      ]
+    );
+    const entity = made.entities.c ?? "";
+    const restricted = await addSource("Acme churned", audience(right));
+    await remember(
+      audience(right),
+      [customer({ id: entity })],
+      [
+        fact(
+          { kind: "source", ...restricted, quote: "Acme churned" },
+          { attribute: "status", value: "Churned", statement: "Churned" }
+        ),
+      ],
+      shared(),
+      crypto.randomUUID(),
+      readerOf(unique("adder"), left, right)
+    );
+    await shared().confirmMemory({
+      memory: made.memories[0] ?? "",
+      reader: readerOf(unique("both"), left, right),
+    });
+    await shared().eraseSource({
+      source: restricted.source,
+      reason: "deleted",
+    });
+    await tick();
+    const confirmedFor = async (reader: Reader) => {
+      const { memories } = await shared().readMemories({ entity, reader });
+      return memories.map(({ confirmed }) => confirmed);
+    };
+
+    expect({
+      leftOnly: await confirmedFor(readerOf(unique("l"), left)),
+      both: await confirmedFor(readerOf(unique("b"), left, right)),
+    }).toStrictEqual({ leftOnly: [null], both: [null] });
+  });
+});
+
+describe("pages, attributes, and a retired newer memory", () => {
+  // A retired memory ends nothing: forgetting the newer value makes the one before current again.
+  it("makes the role before current again once the newer one is retired, for every reader", async () => {
+    const group = unique("g");
+    const writer = unique("w");
+    const made = await remember(
+      audience(group),
+      [{ key: "c", kind: "person" }],
+      [
+        fact(
+          { kind: "writer", writer },
+          { about: "c", attribute: "role", value: "A", statement: "Role A" }
+        ),
+      ]
+    );
+    const entity = made.entities.c ?? "";
+    const newer = await remember(
+      audience(group),
+      [{ key: "c", kind: "person", id: entity }],
+      [
+        fact(
+          { kind: "writer", writer },
+          { about: "c", attribute: "role", value: "B", statement: "Role B" }
+        ),
+      ]
+    );
+    const writerReader = readerOf(writer, group);
+    const beforeRetire = await statementsAbout(entity, writerReader);
+    await shared().retireMemory({
+      memory: newer.memories[0] ?? "",
+      reader: writerReader,
+    });
+
+    expect({
+      beforeRetire,
+      writer: await statementsAbout(entity, writerReader),
+      third: await statementsAbout(entity, readerOf(unique("third"), group)),
+    }).toStrictEqual({
+      beforeRetire: ["Role B"],
+      writer: ["Role A"],
+      third: ["Role A"],
+    });
+  });
+
+  it("pages memories, contested facts and entities on their own order, with nothing skipped or repeated", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const statements = Array.from({ length: 5 }, (_, index) => `Note ${index}`);
+    const made = await remember(
+      audience(group),
+      [customer({ names: [unique("Paged")] })],
+      statements.map((statement) =>
+        fact({ kind: "writer", writer: unique("w") }, { statement })
+      )
+    );
+    const entity = made.entities.c ?? "";
+    const pages: string[][] = [];
+    let after: MemoriesCursor | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another
+      const read = await shared().readMemories({
+        entity,
+        reader,
+        limit: 2,
+        ...(after === undefined ? {} : { after }),
+      });
+      pages.push(read.memories.map(({ statement }) => statement));
+      if (!read.more) {
+        break;
+      }
+      ({ next: after } = read);
+    }
+    const contestedGroup = unique("cg");
+    for (const name of ["One", "Two", "Three"]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await remember(
+        audience(contestedGroup),
+        [customer({ names: [name] })],
+        [
+          fact(
+            { kind: "writer", writer: unique("w1") },
+            { attribute: "status", value: "a", statement: `${name} a` }
+          ),
+          fact(
+            { kind: "writer", writer: unique("w2") },
+            { attribute: "status", value: "b", statement: `${name} b` }
+          ),
+        ]
+      );
+    }
+    const contestedReader = readerOf(unique("cr"), contestedGroup);
+    const first = await shared().listContested({
+      reader: contestedReader,
+      limit: 2,
+    });
+    const second = await shared().listContested({
+      reader: contestedReader,
+      limit: 2,
+      ...(first.next === undefined ? {} : { after: first.next }),
+    });
+    const firstEntities = await shared().findEntities({
+      reader: contestedReader,
+      kind: "customer",
+      limit: 2,
+    });
+    const restEntities = await shared().findEntities({
+      reader: contestedReader,
+      kind: "customer",
+      limit: 2,
+      ...(firstEntities.next === undefined
+        ? {}
+        : { after: firstEntities.next }),
+    });
+
+    expect({
+      memories: pages.flat().toSorted(),
+      pageSizes: pages.map((page) => page.length),
+      contested: [first, second].map(({ facts, more }) => [facts.length, more]),
+      sides: [...first.facts, ...second.facts].every(
+        ({ memories }) => memories.length === 2
+      ),
+      entities: [firstEntities, restEntities].map(({ entities, more }) => [
+        entities.length,
+        more,
+      ]),
+    }).toStrictEqual({
+      memories: statements,
+      pageSizes: [2, 2, 1],
+      contested: [
+        [2, true],
+        [1, false],
+      ],
+      sides: true,
+      entities: [
+        [2, true],
+        [1, false],
+      ],
+    });
+  });
+
+  it("gives at most twenty names of an entity, with how many there are", async () => {
+    const group = unique("g");
+    const names = Array.from(
+      { length: 25 },
+      (_, index) => `Name ${String(index).padStart(2, "0")}`
+    );
+    // At most `namesPerEntityMax` (20) an add: the rest in a second one.
+    const made = await remember(
+      audience(group),
+      [customer({ names: names.slice(0, 15) })],
+      [
+        fact(
+          { kind: "writer", writer: unique("w") },
+          { statement: "Many names" }
+        ),
+      ]
+    );
+    await remember(
+      audience(group),
+      [customer({ id: made.entities.c ?? "", names: names.slice(15) })],
+      [
+        fact(
+          { kind: "writer", writer: unique("w") },
+          { statement: "More names" }
+        ),
+      ]
+    );
+    const seen = await shared().readEntity({
+      entity: made.entities.c ?? "",
+      reader: readerOf(unique("r"), group),
+    });
+
+    expect({ shown: seen?.names.length, count: seen?.nameCount }).toStrictEqual(
+      {
+        shown: 20,
+        count: 25,
+      }
+    );
+  });
+
+  it("refuses a read under an attribute no kind lists, or the entity's kind lacks, and answers an unseen entity as an unknown one", async () => {
+    const group = unique("g");
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [fact({ kind: "writer", writer: unique("w") }, { statement: "Plain" })]
+    );
+    const entity = made.entities.c ?? "";
+    const read = async (attribute: string, reader: Reader) =>
+      await shared()
+        .readMemories({ entity, reader, attribute })
+        .then(
+          ({ memories }) => memories.length,
+          () => "refused"
+        );
+
+    expect([
+      await read("renewl_date", readerOf(unique("r"), group)),
+      await read("role", readerOf(unique("r"), group)),
+      await read("role", readerOf(unique("stranger"))),
+      await read("renewal_date", readerOf(unique("r"), group)),
+    ]).toStrictEqual(["refused", "refused", 0, 0]);
   });
 });

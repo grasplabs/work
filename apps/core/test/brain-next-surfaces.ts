@@ -2349,8 +2349,7 @@ const memoryProbes = {
         async () =>
           await store().retireMemory({
             memory,
-            writer,
-            reader: probing.reader,
+            reader: { ...probing.reader, person: writer },
           }),
         about
       );
