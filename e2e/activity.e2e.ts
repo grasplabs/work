@@ -65,7 +65,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     `${appName}: read on Collection ${collectionId}`
   );
   await expect(reading).toContainText("as BOARD_PACK");
-  await expect(reading).toContainText("Version to review: None current");
+  await expect(reading).toContainText("Version to review: None live");
   await reading.getByRole("button", { name: /^Approve /u }).click();
   await expect(
     page.getByRole("status").filter({

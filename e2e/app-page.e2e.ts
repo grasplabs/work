@@ -121,50 +121,30 @@ test("someone it is shared with uses the live App and moves between its pages; i
     page.getByRole("textbox", { name: "Ask for a change" })
   ).toHaveCount(0);
 
-  // Its builder, at the same address, has its workspace on their own
-  // working version: the chat beside the preview, which shows the App's
-  // latest version, under a bar with the page's path, and nothing to share
-  // yet.
+  // Its builder, at the same address, has its workspace: with nothing
+  // changed over the live version, the preview is the App as its team
+  // sees it, the chat beside it, and nothing to share yet.
   const workspace = await pageOf(builder);
   await workspace.goto(`/apps/${app}`);
   await expect(
     workspace.getByRole("heading", { level: 1, name })
   ).toBeAttached();
   const preview = workspace.getByRole("region", {
-    name: `${name}, your version`,
+    name: `${name}, as your team sees it`,
   });
   await expect(
     preview.frameLocator("iframe").getByRole("heading", { name: "The board" })
   ).toBeVisible({ timeout: 20_000 });
   await expect(
-    preview.getByRole("link", { name: "Open in a new tab" })
-  ).toHaveAttribute("href", `/apps/${app}/draft`);
-  await expect(
     workspace.getByRole("button", { name: "Share changes" })
   ).toHaveCount(0);
-
-  // What the team sees, from "…": the App's page as its people have it,
-  // as the person, its address saying so.
-  await workspace.getByRole("button", { name: "More" }).click();
-  await workspace
-    .getByRole("menuitem", { name: "See what your team sees" })
-    .click();
-  await expect(workspace).toHaveURL(
-    new RegExp(`/apps/${app}\\?env=live$`, "u")
-  );
-  const live = workspace.getByRole("region", { name: `${name}, live` });
-  await expect(
-    live.frameLocator("iframe").getByRole("heading", { name: "The board" })
-  ).toBeVisible({ timeout: 20_000 });
-  await workspace.goBack();
-  await expect(workspace).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
   const chat = workspace.getByRole("region", { name: "Chat" });
   await expect(
     chat.getByRole("textbox", { name: "Ask for a change" })
   ).toBeVisible();
 
   // Its settings are a view of the workspace, beside the chat.
-  await page
+  await workspace
     .getByRole("navigation", { name: "Workspace views" })
     .getByRole("link", { name: "Settings" })
     .click();
@@ -338,7 +318,7 @@ test("an archived App opens no page, and its builder restores it in its workspac
   await page.goto(`/apps/${app}?env=live`);
   await expect(
     page
-      .getByRole("region", { name: `${name}, live` })
+      .getByRole("region", { name: `${name}, as your team sees it` })
       .frameLocator("iframe")
       .getByRole("heading", { name: "The board" })
   ).toBeVisible({ timeout: 20_000 });

@@ -118,7 +118,10 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   await expect(
     page.getByRole("button", { name: "Share with your team" })
   ).toBeEnabled(read);
-  await page.getByRole("link", { name: "Preview" }).click();
+  await page
+    .getByRole("navigation", { name: "Workspace views" })
+    .getByRole("link", { name: "App" })
+    .click();
   await expect(
     page.getByRole("region", { name: /, your version$/u })
   ).toBeVisible(read);

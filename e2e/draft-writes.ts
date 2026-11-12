@@ -18,30 +18,34 @@ const sha256 = (text: string): string =>
  * in chat `chatId` writes it: the draft at its next revision (a publish
  * leaves a draft behind, empty over the version it made live) holding
  * only `files`, and its next undo point, naming the chat, as core's
- * app-drafts.ts keeps them.
+ * app-drafts.ts keeps them. With `definition` (its text, as
+ * `definitionText` writes it), the draft's own App definition too, as the
+ * agent's definition tools leave it; without, the base's.
  */
 export const writeDraft = async (
   userId: string,
   chatId: string,
   app: string,
   base: number,
-  files: Record<string, string>
+  files: Record<string, string>,
+  definition: string | null = null
 ): Promise<void> => {
   const hashes = Object.fromEntries(
     Object.entries(files).map(([path, content]) => [path, sha256(content)])
   );
   const now = Date.now();
   const id = quoted(app);
+  const defined = definition === null ? "NULL" : quoted(definition);
   const point = `(SELECT MAX(number) FROM app_draft_points WHERE app_id = ${id})`;
   await execute(
     [
-      `INSERT INTO app_drafts (app_id, base, revision, updated_at, updated_by) VALUES (${id}, ${base}, 1, ${now}, ${quoted(userId)}) ON CONFLICT(app_id) DO UPDATE SET base = excluded.base, revision = app_drafts.revision + 1, updated_at = excluded.updated_at, updated_by = excluded.updated_by;`,
+      `INSERT INTO app_drafts (app_id, base, revision, definition, updated_at, updated_by) VALUES (${id}, ${base}, 1, ${defined}, ${now}, ${quoted(userId)}) ON CONFLICT(app_id) DO UPDATE SET base = excluded.base, revision = app_drafts.revision + 1, definition = excluded.definition, updated_at = excluded.updated_at, updated_by = excluded.updated_by;`,
       `DELETE FROM app_draft_files WHERE app_id = ${id};`,
       ...Object.entries(files).map(
         ([path, content]) =>
           `INSERT INTO app_draft_files (app_id, path, content) VALUES (${id}, ${quoted(path)}, ${quoted(content)});`
       ),
-      `INSERT INTO app_draft_points (app_id, number, revision, base, content_hash, person_id, chat_id, created_at) SELECT ${id}, COALESCE(MAX(number), 0) + 1, (SELECT revision FROM app_drafts WHERE app_id = ${id}), ${base}, ${quoted(sha256(canonicalJson({ base, files: hashes, definition: null })))}, ${quoted(userId)}, ${quoted(chatId)}, ${now} FROM app_draft_points WHERE app_id = ${id};`,
+      `INSERT INTO app_draft_points (app_id, number, revision, base, definition, content_hash, person_id, chat_id, created_at) SELECT ${id}, COALESCE(MAX(number), 0) + 1, (SELECT revision FROM app_drafts WHERE app_id = ${id}), ${base}, ${defined}, ${quoted(sha256(canonicalJson({ base, files: hashes, definition: definition === null ? null : sha256(definition) })))}, ${quoted(userId)}, ${quoted(chatId)}, ${now} FROM app_draft_points WHERE app_id = ${id};`,
       ...Object.entries(files).map(
         ([path, content]) =>
           `INSERT OR IGNORE INTO app_draft_contents (app_id, sha256, content) VALUES (${id}, ${quoted(hashes[path] ?? "")}, ${quoted(content)});`

@@ -137,14 +137,11 @@ test("a chat building an App offers its workspace, whose preview changes none of
     });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
-    // The draft has changes only its builders see: Share changes is on.
+    // Shared with nobody yet: Share with your team is on.
     await expect(
-      page.getByRole("button", { name: "Share changes" })
+      page.getByRole("button", { name: "Share with your team" })
     ).toBeEnabled();
     const preview = page.getByRole("region", { name: `${name}, your version` });
-    await expect(
-      preview.getByRole("link", { name: "Open in a new tab" })
-    ).toHaveAttribute("href", `/apps/${app.id}/draft`);
     // Its own store: none of the App's tally, then only what it added,
     // its live query following each mutation.
     const frame = preview.frameLocator("iframe");
@@ -160,9 +157,8 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await views.getByRole("link", { name: "Code" }).click();
     await views.getByRole("link", { name: "App" }).click();
     await expect(chatName).toBeVisible();
-    // The draft has changes only its builders see: Share changes is on.
     await expect(
-      page.getByRole("button", { name: "Share changes" })
+      page.getByRole("button", { name: "Share with your team" })
     ).toBeEnabled();
     await expect(
       page.getByRole("heading", { level: 1, name, exact: true })
@@ -190,17 +186,19 @@ test("an App's own chat writes its page and server code, and its workspace previ
       page.getByRole("heading", { name: "What should this App do?" })
     ).toBeVisible();
 
-    // A version committed elsewhere, from another tab: the App shows.
-    await commitApp(
+    // A version published elsewhere, from another tab: the App shows, as
+    // the team sees it while nothing is changed over it.
+    const { version } = await commitApp(
       api.apps.files,
       app.id,
       tallyFiles("in the App"),
       "A tally"
     );
-    const committed = page
-      .getByRole("region", { name: `${name}, your version` })
+    await api.apps.versions.publish(app.id, version);
+    const published = page
+      .getByRole("region", { name: `${name}, as your team sees it` })
       .frameLocator("iframe");
-    await expect(committed.getByRole("status")).toHaveText("0 in the App", {
+    await expect(published.getByRole("status")).toHaveText("0 in the App", {
       timeout: 30_000,
     });
 
@@ -341,40 +339,43 @@ test("an App's workspace previews the App before its chat changes anything, then
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    await commitApp(
+    const { version } = await commitApp(
       api.apps.files,
       app.id,
       tallyFiles("in the App"),
       "A tally"
     );
+    await api.apps.versions.publish(app.id, version);
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
 
-    // No change asked for yet: the App's latest version, on a store of the
-    // preview's own.
-    const preview = page.getByRole("region", { name: `${name}, your version` });
-    const frame = preview.frameLocator("iframe");
-    await expect(frame.getByRole("status")).toHaveText("0 in the App", {
+    // No change asked for yet: the App's live version, as the team sees it.
+    const live = page
+      .getByRole("region", { name: `${name}, as your team sees it` })
+      .frameLocator("iframe");
+    await expect(live.getByRole("status")).toHaveText("0 in the App", {
       timeout: 30_000,
     });
-    // Nobody else sees it yet: Share with your team is on, for the App's
-    // latest version as it is.
+    // Shared with nobody yet: Share with your team is on, for the App's
+    // live version as it is.
     await expect(
       page.getByRole("button", { name: "Share with your team" })
     ).toBeEnabled();
 
-    // A version committed elsewhere comes into the open preview.
-    await commitApp(
+    // A version published elsewhere comes into the open preview.
+    const second = await commitApp(
       api.apps.files,
       app.id,
       tallyFiles("in version 2"),
       "Elsewhere"
     );
-    await expect(frame.getByRole("status")).toHaveText("0 in version 2", {
+    await api.apps.versions.publish(app.id, second.version);
+    await expect(live.getByRole("status")).toHaveText("0 in version 2", {
       timeout: 30_000,
     });
 
-    // Asked for one: the same preview shows it.
+    // Asked for one: the builder's own version shows it, on a store of the
+    // preview's own.
     const { opener } = modelScripts.buildsTally;
     const chat = page.getByRole("region", { name: "Chat" });
     await askOnceIdle(chat, opener);
@@ -386,6 +387,9 @@ test("an App's workspace previews the App before its chat changes anything, then
     await expect(
       page.getByRole("button", { name: "Share with your team" })
     ).toBeEnabled(afterTurnCheck);
+    const frame = page
+      .getByRole("region", { name: `${name}, your version` })
+      .frameLocator("iframe");
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
       timeout: 30_000,
     });
@@ -402,19 +406,23 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    await commitApp(
+    const { version } = await commitApp(
       api.apps.files,
       app.id,
       tallyFiles("in the App"),
       "A tally"
     );
+    await api.apps.versions.publish(app.id, version);
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
+    await expect(
+      page
+        .getByRole("region", { name: `${name}, as your team sees it` })
+        .frameLocator("iframe")
+        .getByRole("status")
+    ).toHaveText("0 in the App", { timeout: 30_000 });
     const preview = page.getByRole("region", { name: `${name}, your version` });
     const frame = preview.frameLocator("iframe");
-    await expect(frame.getByRole("status")).toHaveText("0 in the App", {
-      timeout: 30_000,
-    });
 
     const { opener } = modelScripts.fixesBrokenTally;
     const chat = page.getByRole("region", { name: "Chat" });

@@ -71,7 +71,9 @@ test("a builder makes an App from what they want done, shares it with their team
     agentTurn
   );
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
-  await expect(page.getByText("Only you see this")).toBeVisible();
+  // Where it stands, in the bar: beside the docked chat it gives way to
+  // the name and Share, so it is there, unseen.
+  await expect(page.getByText("Only you see this")).toBeAttached();
 
   // The preview is the draft's page, on a store of its own.
   const preview = page.getByRole("region", { name: /, your version$/u });
@@ -93,7 +95,7 @@ test("a builder makes an App from what they want done, shares it with their team
   const sharing = page.getByRole("dialog");
   await sharing
     .getByRole("checkbox", {
-      name: `Person (${user.userId.slice(-namesakeIdEnd)})`,
+      name: `Person (ID …${user.userId.slice(-namesakeIdEnd)})`,
     })
     .check();
   await sharing.getByRole("button", { name: "Share", exact: true }).click();
@@ -115,14 +117,13 @@ test("a builder makes an App from what they want done, shares it with their team
   await appPage.getByRole("button", { name: "Add contact" }).click();
   await expect(contacts).toHaveText(["Grace Hopper"], built);
 
-  // What the team sees shows its builder the contact they added, a row of
-  // its table's grid; their own working version shows the preview's.
+  // Shared, with nothing changed since, the workspace is what the team
+  // sees: its Data shows its builder the contact they added, a row of its
+  // table's grid, and none of the preview's.
   await page
     .getByRole("navigation", { name: "Workspace views" })
     .getByRole("link", { name: "Data" })
     .click();
-  await page.getByRole("button", { name: "More" }).click();
-  await page.getByRole("menuitem", { name: "See what your team sees" }).click();
   await expect(page.getByRole("cell", { name: "Grace Hopper" })).toBeVisible(
     built
   );

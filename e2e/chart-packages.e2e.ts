@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 
 import { execute, quoted } from "./connections-seed.ts";
 import { test } from "./csp.ts";
+import { chatAskingForPackages } from "./dependency-request.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 
 // A chart library, end to end: asked for in the chat, approved on its
@@ -34,7 +35,7 @@ test("a builder approves a chart library the agent asked for, a page draws with 
   try {
     const name = `Totals ${crypto.randomUUID().slice(0, 8)}`;
     const { id: app } = await api.apps.create({ name });
-    const chat = await api.chats.create(`Build ${name}`);
+    const chat = await chatAskingForPackages(api, `Build ${name}`);
     const { userId } = await api.whoami();
     // Asked for in the chat, as its agent asks (`build.resolveDependencies`):
     // resolved from the npm registry, then named as the chat's.

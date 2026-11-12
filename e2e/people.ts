@@ -373,7 +373,7 @@ const cast = {
   chat: { user: "user" },
   globalChat: { user: "user" },
   exports: { admin: "admin" },
-  chatBuilds: { builder: "builder" },
+  chatBuilds: { builder: "builder", user: "user" },
   chatPackages: { builder: "builder" },
   chartPackages: { builder: "builder" },
   dashboard: { admin: "admin" },

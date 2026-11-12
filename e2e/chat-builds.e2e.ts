@@ -1,3 +1,4 @@
+import { definitionText } from "@grasp-os/runtime/definition";
 import { expect } from "@playwright/test";
 
 import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
@@ -60,7 +61,7 @@ export const Route = createFileRoute("/")({ component: Desk });
 test("a builder publishes the draft a chat built from the App's workspace, which makes it the App's next version, live", async ({
   pageOf,
 }) => {
-  const { builder } = peopleIn("chatBuilds");
+  const { builder, user } = peopleIn("chatBuilds");
   const { core, api } = apiOf(builder);
   const tag = crypto.randomUUID().slice(0, 8);
   const name = `Invoice desk ${tag}`;
@@ -73,10 +74,23 @@ test("a builder publishes the draft a chat built from the App's workspace, which
       "An invoice desk"
     );
     await api.apps.versions.publish(app.id, version);
+    // Shared with a colleague, who uses the live version.
+    await api.apps.members.add(app.id, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
     // The chat's agent adds the desk's invoices, a table and a mutation, to
     // the draft.
     const chat = await api.chats.create(`Build ${tag}`);
-    await writeDraft(builder.userId, chat.id, app.id, version, invoices.files);
+    await writeDraft(
+      builder.userId,
+      chat.id,
+      app.id,
+      version,
+      invoices.files,
+      definitionText(invoices.definition)
+    );
 
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
@@ -88,6 +102,12 @@ test("a builder publishes the draft a chat built from the App's workspace, which
     await page
       .getByRole("button", { name: "Share changes" })
       .click({ timeout: 20_000 });
+    // Its sheet: Share, once the changes are checked.
+    await page
+      .getByRole("dialog", { name: `Share ${name}` })
+      .getByRole("button", { name: "Share", exact: true })
+      .click({ timeout: 20_000 });
+    await expect(page.getByText("Your changes are shared")).toBeVisible();
 
     // Live as the App's next version; the draft starts over from it.
     await expect
@@ -100,9 +120,6 @@ test("a builder publishes the draft a chat built from the App's workspace, which
       )
       .toBeGreaterThan(version);
     const live = await api.apps.get(app.id);
-    await expect(
-      page.getByText(`${live.liveLabel ?? ""} is live`, { exact: true })
-    ).toBeVisible();
     expect(await api.apps.drafts.get(app.id)).toMatchObject({
       base: live.currentVersion,
       changed: [],

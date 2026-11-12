@@ -409,7 +409,16 @@ test("loading a page again after a new version shows that version, and the App's
     `Swap ${crypto.randomUUID()}`,
     twoPages()
   );
-  const page = await pageOf(builder);
+  // Someone it is shared with has its page open: its builders have the
+  // App's workspace at its address instead.
+  await withApi(builder, async (api) => {
+    await api.apps.members.add(swapped, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+  });
+  const page = await pageOf(user);
   await page.goto(`/apps/${swapped}/pages/home`);
   await counterPage(page);
 

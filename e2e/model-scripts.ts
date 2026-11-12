@@ -133,6 +133,19 @@ export const modelScripts = {
     ],
   },
   /**
+   * The agent asks for an App's npm packages, on a card in its chat (the
+   * request itself is written as its resolve proposes it: a local stack
+   * reaches no registry, e2e/dependency-request.ts), and carries on once
+   * the builder approves them there.
+   */
+  asksPackages: {
+    opener: "Use an npm package for this App's page.",
+    replies: [
+      says("I asked for the packages it needs: approve them on the card."),
+      says("They are approved, so the page uses them now."),
+    ],
+  },
+  /**
    * Something new from Make something that runs on its own: the person
    * says what they want done, Grasp proposes a workflow, and once they say
    * Build it, asks on.

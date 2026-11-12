@@ -101,7 +101,7 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   const page = await pageOf(builder);
   const reads = await callGate(page, '["workflowResources","draft"]');
   await create(page, builder);
-  await expect(page.getByText("Not published")).toBeVisible();
+  await expect(page.getByText("Only you see this")).toBeVisible();
 
   // A key the format doesn't know: refused at its pointer.
   await save(page, definition("done", { unknown: true }));
@@ -123,7 +123,9 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   // Typed while it publishes: still there once the page shows version 1.
   const typed = definition("typed while publishing");
   await page.getByLabel("workflow.json").fill(typed);
-  await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+  // The bar's version: beside the docked chat it gives way to the name and
+  // the actions, so it is there, unseen.
+  await expect(page.getByText("Version 1", { exact: true })).toBeAttached();
   await expect(page.getByText("Published as version 1.")).toBeVisible();
   await expect(page.getByLabel("workflow.json")).toHaveValue(typed);
   await section(page, "Versions");
@@ -189,7 +191,7 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   await other.goto(page.url());
   await definitionOf(other);
   await other.getByRole("button", { name: "Publish revision 1" }).click();
-  await expect(other.getByText("Version 1", { exact: true })).toBeVisible();
+  await expect(other.getByText("Version 1", { exact: true })).toBeAttached();
 
   const next = definition("next");
   await page.getByLabel("workflow.json").fill(next);
@@ -200,10 +202,10 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
       exact: false,
     })
   ).toBeVisible();
-  await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Version 1", { exact: true })).toBeAttached();
   await expect(page.getByLabel("workflow.json")).toHaveValue(next);
   await page.getByRole("button", { name: "Publish revision 2" }).click();
-  await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("Version 2", { exact: true })).toBeAttached();
 });
 
 /** A step that waits a second, as `id`. */
@@ -260,13 +262,15 @@ test("a builder sees every declared branch of the checked definition, and a test
   // and no step to change on it.
   await save(page, "{ not yet");
   await view(page, "Flow");
-  await expect(page.getByText("Diagram of revision 1")).toBeVisible();
+  await expect(
+    page.getByText("The Flow shows revision 1.", { exact: false })
+  ).toBeVisible();
   await expect(
     diagram.getByRole("button", { name: "Change step route" })
   ).toHaveCount(0);
   await save(page, routing());
   await page.getByRole("button", { name: "Publish revision 3" }).click();
-  await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Version 1", { exact: true })).toBeAttached();
 
   // A run of the current version, started with Run in the bar.
   await page.getByRole("button", { name: "Run", exact: true }).click();
@@ -282,7 +286,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   // A second version, which goes live below.
   await save(page, definition("done"));
   await page.getByRole("button", { name: "Publish revision 4" }).click();
-  await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("Version 2", { exact: true })).toBeAttached();
 
   // Runs: the run of version 1, opened beside the page, with what it
   // returned to whoever started it, and each step its journal recorded
@@ -321,7 +325,9 @@ test("a builder sees every declared branch of the checked definition, and a test
   // newest version to go live, and its Settings then say that version
   // waits.
   await page
-    .getByRole("button", { name: `Testing. Change whether ${name} runs` })
+    .getByRole("button", {
+      name: `Only you see this. Change whether ${name} runs`,
+    })
     .click();
   await page
     .getByRole("menuitem", { name: "Ask to run version 2 for the team" })
@@ -343,7 +349,9 @@ test("a builder sees every declared branch of the checked definition, and a test
     .getByRole("button", { name: "Approve, and it runs for the team" })
     .click();
   await expect(
-    decides.getByRole("button", { name: /^Live since .*\. Change whether/u })
+    decides.getByRole("button", {
+      name: /^Runs for .+ since .+\. Change whether/u,
+    })
   ).toBeVisible(pageRead);
   await expect(
     decides.getByText("Version 2 waits for approval to run for the team")
@@ -378,7 +386,6 @@ test("a builder changes one step on the Flow, saved as the draft's next revision
     .fill(JSON.stringify({ type: "wait", for: "1 second", title: "hi ada" }));
   await step.getByRole("button", { name: "Check and save" }).click();
   await expect(step).toBeHidden();
-  await expect(page.getByText("Diagram of revision 2")).toBeVisible();
 
   await definitionOf(page);
   await expect(page.getByLabel("workflow.json")).toHaveValue(/hi ada/u);
@@ -447,7 +454,6 @@ test("a builder makes something that runs on its own by saying what they want do
     await expect(diagram.getByRole("listitem", { name: "finish" })).toBeVisible(
       pageRead
     );
-    await expect(page.getByText("Diagram of revision 1")).toBeVisible();
   } finally {
     core[Symbol.dispose]();
   }
