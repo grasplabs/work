@@ -253,6 +253,13 @@ export const keepMissingSubjects = async (
  * delete, their change keys gone, and, when the source's current version
  * is among them, the source no longer current and its queued work gone.
  * Answers whether it was.
+ *
+ * The versions it leaves are kept as they are, and no other becomes
+ * current: history never becomes recall. So a replay after a restore,
+ * where the older copy's current version was the erased person's own and
+ * a team's version came before it, leaves that team version stored with
+ * no current version, which no one can read; the overview counts such
+ * sources (`sourcesWithoutCurrent`), so they are never out of sight.
  */
 const hideVersions = (
   sql: SqlStorage,
@@ -509,6 +516,19 @@ export const erasuresUnfinished = (sql: SqlStorage): number =>
   sql
     .exec<{ count: number }>(
       "SELECT count(DISTINCT erasure) AS count FROM erasing_versions"
+    )
+    .one().count;
+
+/**
+ * How many sources keep versions no erasure hid but have no current
+ * version, so no one can read them (`hideVersions`): a count, never which.
+ */
+export const sourcesWithoutCurrent = (sql: SqlStorage): number =>
+  sql
+    .exec<{ count: number }>(
+      `SELECT count(DISTINCT source) AS count FROM source_versions
+      WHERE source NOT IN (SELECT source FROM current_versions)
+        AND row NOT IN (SELECT version_row FROM erasing_versions)`
     )
     .one().count;
 

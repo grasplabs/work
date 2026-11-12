@@ -346,6 +346,13 @@ export interface WorkOverview {
    */
   erasing: number;
   /**
+   * How many sources keep versions but have no current version, so no one
+   * can read them: what a replay of the ledger after a restore can leave
+   * when the older copy's current version was an erased person's own
+   * (erasure.ts). A count, never which.
+   */
+  sourcesWithoutCurrent: number;
+  /**
    * The tick's own steps before its queue, each with its last failure
    * since the store started: the erasure ledger, read as the store starts
    * and written for each erasure, cleared once it was read whole and every

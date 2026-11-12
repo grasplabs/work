@@ -1315,6 +1315,8 @@ describe(
       });
       await add(source, `Theirs ${wordOf(theirs)}`, owner(leaver));
       const backup = await copyOfStore();
+      // The copy's own count, as it comes back.
+      const { sourcesWithoutCurrent: inCopy } = await brainWorkOverview(env);
       // Shared again, then the leaver erased: only their own version goes.
       await add(source, `Team now ${wordOf(teamNow)}`, {
         kind: "team",
@@ -1327,16 +1329,22 @@ describe(
       await tickUntilErased();
 
       // The team's first version was not erased, and is still kept; the
-      // leaver's own is gone. (Without a current version, which the copy
-      // had as theirs, the source answers no one: the team's latest version
-      // came after the copy.)
+      // leaver's own is gone. Without a current version, which the copy
+      // had as theirs, the source answers no one (the team's latest
+      // version came after the copy): history never becomes recall. The
+      // overview counts it, so it is never out of sight.
       const teamFirstTables = await tablesHolding([teamFirst]);
+      const { sourcesWithoutCurrent } = await brainWorkOverview(env);
       expect({
         tables: await tablesHolding([theirs]),
         teamFirstKept: teamFirstTables.includes("chunks"),
+        teamFirstRead: await historyAs(colleague, source, 1),
+        counted: sourcesWithoutCurrent - inCopy,
       }).toStrictEqual({
         tables: [],
         teamFirstKept: true,
+        teamFirstRead: null,
+        counted: 1,
       });
     });
   }
@@ -1503,6 +1511,11 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
     const reader = await person();
     const source = newSource();
     await add(source, "Readable", owner(reader));
+    // An outage of R2 as the store starts: the store reads its bucket from
+    // the env it is constructed with, so only a bucket swapped on the
+    // shared env reaches a new instance (a swap on the running instance,
+    // as other tests here do, is gone with it). Put back in `finally`,
+    // before anything else of the file runs.
     const bucket = env.BRAIN_OBJECTS;
     const unreachable = {
       list: async () => {
@@ -1535,6 +1548,9 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
       });
     } finally {
       Reflect.set(env, "BRAIN_OBJECTS", bucket);
+      // And no instance that started during the outage serves the next
+      // test: the next call starts the store afresh, with its own bucket.
+      await killStore();
     }
   });
 });

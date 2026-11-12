@@ -39,6 +39,7 @@ import {
   erasuresUnfinished,
   keepMissingSubjects,
   replayLedger,
+  sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
 import { sweepFiles } from "./files.ts";
@@ -435,6 +436,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return {
       ...workOverview(this.ctx.storage, this.#work),
       erasing: erasuresUnfinished(this.ctx.storage.sql),
+      sourcesWithoutCurrent: sourcesWithoutCurrent(this.ctx.storage.sql),
       stepsFailed: { ...this.#stepsFailed },
     };
   }
