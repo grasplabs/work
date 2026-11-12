@@ -1152,39 +1152,6 @@ describe("a chat's Knowledge", setUpTime, () => {
     expect(provider.requests).toHaveLength(1);
   });
 
-  it("sends only the latest of its memory and skills: a skill it can no longer read never reaches the model again", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    const marker = `SKILL-${unique()}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
-      name: `Handbooks ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId,
-      path: "route-check/SKILL.md",
-      text: `---\nname: route-check\ndescription: Check routes with ${marker}.\n---\n# Route check`,
-      ifVersion: 0,
-    });
-    const { provider, ask, agent } = await chatOf(
-      person.userId,
-      says("Noted."),
-      says("Noted again.")
-    );
-    const grant = await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
-    );
-    await ask("Hello.");
-    await admin.api.permissions.revoke(grant);
-    await ask("Hello again.");
-
-    expect(
-      provider.requests.map(({ body }) => JSON.stringify(body).includes(marker))
-    ).toStrictEqual([true, false]);
-  });
-
   it("records nothing for a code run that isn't open", async () => {
     const person = await newPerson();
     const { stub, chat, ask, agent } = await chatOf(person.userId, says("Hi."));

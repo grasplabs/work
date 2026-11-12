@@ -1,3 +1,6 @@
+import { z } from "zod";
+
+import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
@@ -81,7 +84,7 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 /** The parts of the store an erasure works with. */
 export interface ErasureStore {
   readonly storage: DurableObjectStorage;
-  readonly bucket: R2Bucket;
+  readonly bucket: BrainBucket;
 }
 
 /** What is erased: a source, or what a person alone may read. */
@@ -101,7 +104,7 @@ interface LedgerEntry {
 }
 
 /** Where the ledger's entries are in the bucket. */
-const ledgerPrefix = "erasures/";
+export const ledgerPrefix = "erasures/";
 
 /** Digits of an entry's time in its key: so keys sort by time. */
 const timeDigits = 15;
@@ -682,6 +685,22 @@ export const eraseBatch = (storage: DurableObjectStorage): Erased => {
   }
 };
 
+/** A ledger entry recorded but not yet written (`confirmPending`). */
+const unconfirmed = "confirmed = 0";
+
+/**
+ * Whether the tick has an erasure's work to do: versions an erasure hid
+ * still to delete (`eraseBatch`), or a ledger entry still to write
+ * (`confirmPending`).
+ */
+export const erasureDue = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM erasing_versions)
+        OR EXISTS (SELECT 1 FROM erasures WHERE ${unconfirmed})`
+    )
+    .toArray().length > 0;
+
 /** How many erasures still hide versions the tick has to delete. */
 export const erasuresUnfinished = (sql: SqlStorage): number =>
   sql
@@ -804,7 +823,7 @@ export const confirmPending = async (store: ErasureStore): Promise<void> => {
   const stopAt = Date.now() + confirmTickMs;
   const pending = store.storage.sql
     .exec<Recorded>(
-      `SELECT key, kind FROM erasures WHERE confirmed = 0
+      `SELECT key, kind FROM erasures WHERE ${unconfirmed}
       ORDER BY key LIMIT ?`,
       confirmPerTick
     )
@@ -944,7 +963,7 @@ export interface Replayed {
  * ledger, so it is a fault to fix, and the store serves nothing it may
  * have erased meanwhile.
  */
-const textOf = async (bucket: R2Bucket, key: string): Promise<string> =>
+const textOf = async (bucket: BrainBucket, key: string): Promise<string> =>
   await inTime(
     (async () => {
       const object = await bucket.get(key);
@@ -967,7 +986,7 @@ const textOf = async (bucket: R2Bucket, key: string): Promise<string> =>
  * the reads it took.
  */
 const readPerson = async (
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   key: string,
   stopAt: number
 ): Promise<{ hidden: Hidden; reads: number }> => {
@@ -1067,4 +1086,100 @@ export const replayStep = async ({
     }
     startAfter = last;
   }
+};
+
+// A person's own store, erased whole (store.ts): when the person is
+// erased, their store is deleted, not searched for what is theirs, since
+// all of it is. The record of it is one object in the store's own part of
+// the bucket, `erased`, outside the ledger's listing and never deleted:
+// written before anything is deleted, so a store that comes back (a
+// restore of its storage, or a late add waking it afresh) finds it before
+// it answers anything, deletes all it holds again and refuses every call.
+// Its files, its vectors and its own ledger's entries (when each of its
+// sources was erased, by a hash of its key) are then deleted under their
+// prefixes, a bounded batch a call, until none is left: the record is all
+// that stays of it.
+
+/** The key of the record that a person's store was erased whole. */
+const storeErasedKey = "erased";
+
+/** Most objects one call lists and deletes, per prefix: one page of R2's listing. */
+const storeDeletePage = 1000;
+
+/** How long one call starts new listings and deletes for. */
+const storeDeleteMs = 10_000;
+
+/** Whether the store whose part of the bucket is `bucket` was erased whole. */
+export const isStoreErased = async (bucket: BrainBucket): Promise<boolean> =>
+  (await inTime(bucket.head(storeErasedKey))) !== null;
+
+/** The record of a store's erasure, as `recordStoreErased` writes it. */
+const storeErasedSchema = z.object({ at: z.number() });
+
+/**
+ * When the store whose part of the bucket is `bucket` was erased whole, in
+ * milliseconds, by its record: null when there is none. Throws when R2
+ * fails or doesn't answer in time, or the record can't be read.
+ */
+export const storeErasedAt = async (
+  bucket: BrainBucket
+): Promise<number | null> => {
+  const record = await inTime(bucket.get(storeErasedKey));
+  if (record === null) {
+    return null;
+  }
+  const text = await inTime(record.text());
+  return storeErasedSchema.parse(JSON.parse(text)).at;
+};
+
+/**
+ * Reads the first page of the ledger of the store whose part of the bucket
+ * is `bucket`, before a person's own store makes its schema, so a store
+ * whose ledger can't be read makes nothing: throws when R2 fails or
+ * doesn't answer in time.
+ */
+export const readLedgerStart = async (bucket: BrainBucket): Promise<void> => {
+  await inTime(bucket.list({ prefix: ledgerPrefix, limit: 1 }));
+};
+
+/**
+ * Records that the store whose part of the bucket is `bucket` is erased
+ * whole, and why: throws when R2 fails or doesn't answer in time, and
+ * then nothing is deleted. Written again, it says the same.
+ */
+export const recordStoreErased = async (
+  bucket: BrainBucket,
+  reason: ErasureReason,
+  at: number
+): Promise<void> => {
+  await inTime(bucket.put(storeErasedKey, JSON.stringify({ reason, at })));
+};
+
+/**
+ * Deletes a page of the objects under `prefixes` in `bucket`,
+ * for at most `storeDeleteMs`: true once none is left. Throws when R2
+ * fails or doesn't answer in time; what it deleted stays deleted.
+ */
+export const deleteStoreObjects = async (
+  bucket: BrainBucket,
+  prefixes: readonly string[]
+): Promise<boolean> => {
+  const stopAt = Date.now() + storeDeleteMs;
+  for (const prefix of prefixes) {
+    for (;;) {
+      if (Date.now() >= stopAt) {
+        return false;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a page after a page
+      const page = await inTime(
+        bucket.list({ prefix, limit: storeDeletePage })
+      );
+      if (page.objects.length === 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a page after a page
+      await inTime(bucket.delete(page.objects.map(({ key }) => key)));
+    }
+  }
+  return true;
 };

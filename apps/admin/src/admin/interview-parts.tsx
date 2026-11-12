@@ -1,13 +1,10 @@
-import type {
-  LinkState,
-  PersonView,
-} from "@grasp-os/shared/admin/onboarding-admin";
+import type { LinkState } from "@grasp-os/shared/admin/onboarding-admin";
 import { Progress } from "@grasp-os/ui/components/progress";
 /**
  * The marks the Interviews section draws its counts with, ported from the
  * prototype (grasplabs/prototype `components/admin/admin-parts.tsx` and
  * `components/settings.tsx`): a panel with a title, a figure with a ring
- * for a share, bars told apart by a word, and people as dots. Where the
+ * for a share, bars told apart by a word, and a person as a dot. Where the
  * prototype sizes a bar with an inline style, a bar here is the UI's
  * progress bar, which is also announced as the share it is.
  */
@@ -153,27 +150,4 @@ export const Dot = ({ mark }: { mark: DotMark }) => (
     aria-hidden
     className={cn("size-2 flex-none rounded-full", dotInk[mark])}
   />
-);
-
-const dotOrder: DotMark[] = ["talked", "started", "not", "none"];
-
-/** A team as dots, one a person: who talked, who started, who has not, who has no link yet. */
-export const PeopleDots = ({
-  people,
-  label,
-}: {
-  people: readonly PersonView[];
-  label: string;
-}) => (
-  <span className="flex flex-wrap gap-1">
-    <span className="sr-only">{label}</span>
-    {people
-      .toSorted(
-        (a, b) =>
-          dotOrder.indexOf(markOf(a.state)) - dotOrder.indexOf(markOf(b.state))
-      )
-      .map((each) => (
-        <Dot key={each.person.id} mark={markOf(each.state)} />
-      ))}
-  </span>
 );

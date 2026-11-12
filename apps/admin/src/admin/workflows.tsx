@@ -59,7 +59,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -76,10 +75,14 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { SlidersHorizontalIcon, WorkflowIcon } from "lucide-react";
 import { useId, useState } from "react";
 
-import { CommandButton, CommandFailure, useCommand } from "./commands.tsx";
+import { CommandMenu } from "./command-menu.tsx";
+import { CommandFailure, useCommand } from "./commands.tsx";
 import { EmptySection } from "./section.tsx";
 
 const all = "all";
+
+/** With more workflows than this, the list can be narrowed by standing and team. */
+const FILTER_FROM = 8;
 
 /** Each standing in words, as the list and its filter say it. */
 const standingWords: Record<Standing, string> = {
@@ -123,24 +126,6 @@ const lackingWords = ({ missing }: WorkflowRow): string =>
   missing === 0
     ? "Nothing missing"
     : `${missing} ${plural(missing, "thing", "things")} missing`;
-
-/** A large number over the words that say what it is, as on the platform's own list of workflows. */
-const Big = ({
-  value,
-  label,
-  tone,
-}: {
-  value: string;
-  label: string;
-  tone?: "done" | "attention";
-}) => (
-  <div className="flex min-w-0 flex-col-reverse justify-end gap-0.5">
-    <dt className="text-muted-foreground">{label}</dt>
-    <Stat render={<dd />} variant={tone ?? "default"}>
-      {value}
-    </Stat>
-  </div>
-);
 
 /** Where a workflow stands, as a dot and a word. */
 const StageLine = ({
@@ -388,7 +373,7 @@ const Rules = ({
   );
 };
 
-/** What Grasp can do for one workflow: count it as known by hand, or stop; draw it again. */
+/** What Grasp can do for one workflow, in its row's menu: count it as known by hand, or stop; draw it again. */
 const WorkActions = ({
   clientId,
   row,
@@ -398,31 +383,23 @@ const WorkActions = ({
 }) => {
   const { id, byHand, work } = row.work;
   return (
-    <span className="flex flex-wrap items-start justify-end gap-2">
-      <CommandButton
-        clientId={clientId}
-        command={{
-          type: "onboarding.count_as_known",
-          payload: { work: id, counted: !byHand },
-        }}
-        label={
-          byHand
-            ? `Stop counting ${work.name} as known`
-            : `Count ${work.name} as known`
-        }
-        variant="ghost"
-      >
-        {byHand ? "Stop counting" : "Count as known"}
-      </CommandButton>
-      <CommandButton
-        clientId={clientId}
-        command={{ type: "onboarding.draw_again", payload: { work: id } }}
-        label={`Draw ${work.name} again`}
-        variant="ghost"
-      >
-        Draw again
-      </CommandButton>
-    </span>
+    <CommandMenu
+      clientId={clientId}
+      items={[
+        {
+          words: byHand ? "Stop counting as known" : "Count as known",
+          command: {
+            type: "onboarding.count_as_known",
+            payload: { work: id, counted: !byHand },
+          },
+        },
+        {
+          words: "Draw again",
+          command: { type: "onboarding.draw_again", payload: { work: id } },
+        },
+      ]}
+      label={`What Grasp can do for ${work.name}`}
+    />
   );
 };
 
@@ -487,7 +464,7 @@ const WorkRow = ({
       <TableCell className="hidden @xl:table-cell" variant="roomy">
         <StageLine label={stage} standing={standing} />
       </TableCell>
-      <TableCell className="whitespace-normal" variant="roomy">
+      <TableCell variant="roomy">
         <WorkActions clientId={clientId} row={row} />
       </TableCell>
     </TableRow>
@@ -523,7 +500,8 @@ export const OrgWorkflows = ({
   }
 
   const list = workflowListOf(view);
-  const total = list.rows.length;
+  // A short list is read whole: its filters come once it is long.
+  const filtered = list.rows.length > FILTER_FROM;
   const teamNames = new Map(
     view.teams.map((each) => [each.team.id, each.team.name])
   );
@@ -546,67 +524,52 @@ export const OrgWorkflows = ({
   ];
 
   return (
-    <div className="@container flex flex-col gap-8">
-      {/* As the platform's own list of workflows: a few large numbers, then one table. */}
-      <dl className="grid grid-cols-3 gap-4 @xl:gap-x-8">
-        <Big
-          label="workflows known"
-          tone={list.known === total ? "done" : undefined}
-          value={of(list.known, total)}
-        />
-        <Big label="still being mapped" value={String(list.mapping)} />
-        <Big
-          label={plural(
-            list.missing,
-            "thing still missing",
-            "things still missing"
-          )}
-          tone={list.missing > 0 ? "attention" : undefined}
-          value={String(list.missing)}
-        />
-      </dl>
-
+    <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <ToggleGroup
-              aria-label="How far it is"
-              onValueChange={(value: string[]) => {
-                const [next] = value;
-                setStanding(STANDINGS.find((each) => each === next) ?? all);
-              }}
-              size="sm"
-              spacing={0}
-              value={[standing]}
-              variant="outline"
-            >
-              {filters.map((each) => (
-                <ToggleGroupItem key={each.value} value={each.value}>
-                  {each.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            {teams.length > 2 ? (
-              <Select
-                items={teams}
-                onValueChange={(value: string | null) => {
-                  setTeam(value ?? all);
-                }}
-                value={team}
-              >
-                <SelectTrigger aria-label="Team" className="w-48" size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {teams.map((each) => (
-                      <SelectItem key={each.value} value={each.value}>
-                        {each.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+            {filtered ? (
+              <>
+                <ToggleGroup
+                  aria-label="How far it is"
+                  onValueChange={(value: string[]) => {
+                    const [next] = value;
+                    setStanding(STANDINGS.find((each) => each === next) ?? all);
+                  }}
+                  size="sm"
+                  spacing={0}
+                  value={[standing]}
+                  variant="outline"
+                >
+                  {filters.map((each) => (
+                    <ToggleGroupItem key={each.value} value={each.value}>
+                      {each.label}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                {teams.length > 2 ? (
+                  <Select
+                    items={teams}
+                    onValueChange={(value: string | null) => {
+                      setTeam(value ?? all);
+                    }}
+                    value={team}
+                  >
+                    <SelectTrigger aria-label="Team" className="w-48" size="sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {teams.map((each) => (
+                          <SelectItem key={each.value} value={each.value}>
+                            {each.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                ) : null}
+              </>
             ) : null}
           </div>
           <Button
@@ -625,18 +588,21 @@ export const OrgWorkflows = ({
           <EmptySection>No workflow matches.</EmptySection>
         ) : (
           <div className="bg-card @container overflow-hidden rounded-xl border">
+            {/* Fixed widths for all but the first column, which takes the rest: the
+                others must leave it room at every width they show at, or the
+                workflow's name has none. */}
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
                   <TableHead variant="card">Workflow</TableHead>
                   <TableHead
-                    className="hidden w-48 @2xl:table-cell"
+                    className="hidden w-40 @2xl:table-cell"
                     variant="card"
                   >
                     Talked
                   </TableHead>
                   <TableHead
-                    className="hidden w-48 @3xl:table-cell"
+                    className="hidden w-40 @3xl:table-cell"
                     variant="card"
                   >
                     Steps described
@@ -648,12 +614,12 @@ export const OrgWorkflows = ({
                     Missing
                   </TableHead>
                   <TableHead
-                    className="hidden w-48 @xl:table-cell"
+                    className="hidden w-44 @xl:table-cell"
                     variant="card"
                   >
                     Stage
                   </TableHead>
-                  <TableHead className="w-60" variant="card">
+                  <TableHead className="w-14" variant="card">
                     <span className="sr-only">What Grasp can do</span>
                   </TableHead>
                 </TableRow>

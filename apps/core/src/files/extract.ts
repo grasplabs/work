@@ -1,11 +1,11 @@
-import { transcriptSchema } from "@grasp-os/brain/transcripts";
-import type { Transcript } from "@grasp-os/brain/transcripts";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateBase, withNode } from "@grasp-os/shared/runtime";
+import { transcriptSchema } from "@grasp-os/shared/transcripts";
+import type { Transcript } from "@grasp-os/shared/transcripts";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";

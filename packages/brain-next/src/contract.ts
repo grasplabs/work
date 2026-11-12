@@ -18,6 +18,25 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/** What a store has of a key (`Brain.keyState`). */
+export type KeyState = "free" | "held" | "erased";
+
+/**
+ * What an add says that an erasure closed: to an erased source, whose key
+ * is closed for good, or for a person alone that began before that
+ * person's erasure (erasure.ts). Said only to the producer that adds it,
+ * which never retries it: the message alone, so a producer tells it from
+ * any other failure by comparing it whole.
+ */
+export const erasedSource = "The Brain refused it: what this adds was erased";
+
+/**
+ * What a person's own store erased whole answers an add, or any call that
+ * would write: they were erased, for good, so the add is refused as
+ * `erasedSource` is, and never tried again.
+ */
+export const storeErased = "The Brain refused it: this store was erased";
+
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
 
@@ -123,6 +142,17 @@ export const accessSchema = z.discriminatedUnion("kind", [
 export type Access = z.infer<typeof accessSchema>;
 
 /**
+ * Whether `text` is within a source's bound (`sourceTextMaxBytes`), as
+ * given and as the word index takes it: folding can grow a text many
+ * times (a compatibility form such as "ﷺ" is 3 bytes, and 33 folded), so
+ * the bound holds for both. The one rule of it, which an add checks and a
+ * host fits a text to before it adds.
+ */
+export const fitsSourceText = (text: string): boolean =>
+  byteLengthOf(text) <= sourceTextMaxBytes &&
+  byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes;
+
+/**
  * A version of a source to add: which source, the change it is, its text,
  * and who may read this version.
  */
@@ -136,10 +166,7 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,
     })
-    // Folding can grow a text many times (a compatibility form such as
-    // "ﷺ" is 3 bytes, and 33 folded), so the bound holds for what the
-    // word index takes too.
-    .refine((text) => byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes, {
+    .refine((text) => fitsSourceText(text), {
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
@@ -339,6 +366,64 @@ export interface Pack {
   items: PackItem[];
   notFound: string[];
   truncated: boolean;
+}
+
+/**
+ * A passage one store found for a recall: its chunk's row in that store,
+ * its citation and its text.
+ */
+export interface FoundPassage extends SourceVersionRef {
+  row: number;
+  position: number;
+  text: string;
+}
+
+/**
+ * A passage with what the words and exact ways order by after their
+ * counts: its length in characters (as the store's SQL counts them) and
+ * when its version was added, in milliseconds.
+ */
+export interface OrderedPassage extends FoundPassage {
+  length: number;
+  addedAt: number;
+}
+
+/**
+ * What one store found for a recall, before any pack is made of it
+ * (`Brain.find`): each way's passages with what they are ordered by, so
+ * the lists of several stores merge into the lists one store holding all
+ * of them would have found (across.ts `packAcross`). Only what the reader
+ * may read, as for `recall`.
+ */
+export interface Finding {
+  /**
+   * The passages holding the question's telling words, best first, at
+   * most `recallLimit`, with how many of its telling words each holds in
+   * any form, how many of its stop words, and how many telling words as
+   * written.
+   */
+  words: (OrderedPassage & { words: number; stops: number; exact: number })[];
+  /**
+   * When the telling words found fewer than `recallLimit`: the passages
+   * only its stop words find, best first, as many as were missing, with
+   * how many of them each holds.
+   */
+  stopWords: (OrderedPassage & { stops: number })[];
+  /** The telling terms, by index, that any passage the reader may read holds. */
+  terms: number[];
+  /**
+   * The candidates for the question's exact parts: each passage among the
+   * first `exactCandidatesMax` of a part (`parts`, by index), and those of
+   * them whose word index holds it as a phrase (`nearParts`).
+   */
+  exact: (OrderedPassage & { parts: number[]; nearParts: number[] })[];
+  /** The exact parts, by index, more than `exactCandidatesMax` passages may hold. */
+  capped: number[];
+  /**
+   * The passages nearest the question's vector, nearest first, with their
+   * cosine and when their version was added, which ties are ordered by.
+   */
+  meaning: (FoundPassage & { score: number; addedAt: number })[];
 }
 
 /** An ASCII letter or the space: a third of a token each (`tokensOf`). */
@@ -844,6 +929,85 @@ export interface Embedders {
   embed: (request: EmbedRequest) => Promise<EmbedReply>;
 }
 
+// Hand-overs: what the host produces (a workflow run, say) reaches the
+// Brain through its work queue, never in a call that adds it at once. The
+// host puts a source's key on the queue (`handOver`); the item, as it
+// runs, asks the host to hand that source over (`HandOvers.handOver`): the
+// host reads it from its records then and adds it, through its own way
+// of adding, which picks the store its readers belong in. A hand-over
+// that fails is retried and, after too many failures, parked where staff
+// see it.
+
+/** The classes of work a hand-over may take (work.ts `workPriorities`). */
+export const handOverPriorities = ["conversation"] as const;
+export type HandOverPriority = (typeof handOverPriorities)[number];
+
+/** Most sources one `handOver` puts on the queue. */
+export const handOversMax = 100;
+
+/** Sources to put on the queue, each with its class of work. */
+export const handOverRequestSchema = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        source: sourceIdSchema,
+        priority: z.enum(handOverPriorities),
+      })
+    )
+    .min(1)
+    .max(handOversMax),
+});
+export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
+
+/**
+ * Why a hand-over was refused for good: what it adds was erased (its key
+ * is closed, or its one reader's erasure began), the host's answer can't
+ * be added (no readers, a text that isn't one), or its text is past a
+ * source's bound with nothing smaller to keep.
+ */
+export const handOverRefusals = ["erased", "invalid", "too_large"] as const;
+export type HandOverRefusal = (typeof handOverRefusals)[number];
+
+/**
+ * How a hand-over ended, as the host says it: added as `version`, nothing
+ * to add (the source is gone), or refused for good. Each settles the item
+ * as done; only a throw tries it again.
+ */
+export const handOverResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("added"), version: z.int().positive() }),
+  z.strictObject({ kind: z.literal("nothing") }),
+  z.strictObject({
+    kind: z.literal("refused"),
+    reason: z.enum(handOverRefusals),
+  }),
+]);
+export type HandOverResult = z.infer<typeof handOverResultSchema>;
+
+/** The host's side of hand-overs, as the shared store's work uses it. */
+export interface HandOvers {
+  /**
+   * Hands `source` over as the host's records hold it now, and says how
+   * it ended (`HandOverResult`). Throws only for a failure worth trying
+   * again (a store out of reach, an audit write that failed). Safe to
+   * repeat.
+   */
+  handOver: (source: SourceId) => Promise<HandOverResult>;
+}
+
+/**
+ * One tick of a store (`Brain.work`): its time, the host's model calls and
+ * embedders, and the host's side of hand-overs. Hand-overs are the shared
+ * store's alone: the shared store's tick hands them over with these, and
+ * a person's own store, which never queues one (`handOver` refuses), has
+ * none to hand over whatever it is given.
+ */
+export interface WorkRequest {
+  ask: AskModel;
+  at: Date;
+  embedders: Embedders;
+  handOvers: HandOvers;
+}
+
 /**
  * A step of the tick that didn't finish: when, and why, as a code of the
  * store's own (R2 didn't answer in time, or the step failed), never an
@@ -1010,6 +1174,13 @@ export interface Brain {
    */
   recall: (request: RecallRequest) => Promise<Pack>;
   /**
+   * What `recall` finds, before it is packed: each way's passages with
+   * what they are ordered by (`Finding`). A host recalling from several
+   * stores asks each, with the same request, and packs them together
+   * (across.ts `packAcross`): `recall` is that, over this store alone.
+   */
+  find: (request: RecallRequest) => Promise<Finding>;
+  /**
    * A version of a source, current or history, whole as it was added, for
    * a reader among that version's readers and the source's current
    * version's, with the groups the host counts them in now: `null` when
@@ -1023,6 +1194,15 @@ export interface Brain {
    * current version the reader may not read.
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
+  /**
+   * What this store has of the key `source`, whoever may read it: `erased`
+   * when an erasure closed it, `held` when a version of it is kept
+   * (current or history), `free` when it was never given it. For the host
+   * only, before it keeps a source in another store (one person's own):
+   * a key lives in one store. A person's own store erased whole holds
+   * nothing: `free`.
+   */
+  keyState: (source: SourceId) => Promise<KeyState>;
   /**
    * The sources whose current version the reader may read, among those
    * whose key starts with one of the prefixes asked: newest first by when
@@ -1058,11 +1238,20 @@ export interface Brain {
    * removed. Then it works the queue: runs what is due, a few at a time,
    * asking `ask` for the model calls it makes and `embedders` for vectors,
    * and returns once what it started has ended and nothing more is due,
-   * or its time to start more is up. `ask` and `embedders` are used only
-   * while this call is open. A second tick at the same time shares the same
-   * limits and claims nothing the first has under way.
+   * or its time to start more is up. `ask`, `embedders` and `handOvers`
+   * (the host's side of hand-overs) are used only while this call is open.
+   * A second tick at the same time shares the same limits and claims
+   * nothing the first has under way.
    */
-  work: (ask: AskModel, at: Date, embedders: Embedders) => Promise<void>;
+  work: (request: WorkRequest) => Promise<void>;
+  /**
+   * Puts each source on the work queue to be handed over (above), in
+   * place of one of its hand-overs still waiting or parked. What the item
+   * adds is whatever the host's `HandOvers.handOver` adds when it runs:
+   * so putting a source on twice, or late, adds nothing twice and nothing
+   * stale. The shared store's alone: a person's own store refuses it.
+   */
+  handOver: (request: HandOverRequest) => Promise<void>;
   /**
    * Starts the rebuild for the host's model again: every current version
    * with chunks it hasn't embedded goes on the queue again, those parked
@@ -1138,12 +1327,72 @@ export interface Brain {
   erasePerson: (request: PersonErasure) => Promise<void>;
 }
 
-/** The one store's name: the Brain holds everything in one store for now. */
+/** The shared store's name: everything readable by more than one person. */
 const storeName = "brain";
 
+/** What a person's own store's name starts with; the rest is their id. */
+const personalPrefix = "person:";
+
+/** Whose a store is, by its name: shared, one person's own, or unknown. */
+export type StoreKind =
+  | { kind: "shared" }
+  | { kind: "person"; person: string }
+  | { kind: "unknown" };
+
 /**
- * The Brain, in `store`, the host's namespace of `BrainStore`, in the
- * jurisdiction the host keeps its objects in.
+ * What erasing a person's own store whole answers while it is still
+ * deleting: its record written and its storage gone, its files waiting
+ * out the time an add under way has to write one. The expected answer
+ * for a while after every such erasure, not a failure: the host keeps the
+ * erasure pending and calls again (`isStillDeleting`).
+ */
+export const stillDeleting =
+  "The Brain erased this store and is still deleting its files: erase it again";
+
+/** Whether `error` is the answer `stillDeleting`, as it crosses RPC. */
+export const isStillDeleting = (error: unknown): boolean =>
+  error instanceof Error && error.message === stillDeleting;
+
+/**
+ * Whose the store named `name` is. A name is all a store knows of itself
+ * (store.ts), so this is the one rule of which store is whose, and it
+ * fails closed: exactly `brain` is the shared store; `person:` followed
+ * by a well-formed id is that person's own store; any other name (a
+ * different case, a space, another separator, an id that isn't one), or
+ * no name at all (an id not made from a name), is no one's, and refuses
+ * every call. So a mistyped name never makes a second shared store,
+ * sharing the shared store's part of the bucket, nor keeps private
+ * content where it isn't guarded.
+ */
+export const storeKindOf = (name: string | undefined): StoreKind => {
+  if (name === storeName) {
+    return { kind: "shared" };
+  }
+  if (name === undefined || !name.startsWith(personalPrefix)) {
+    return { kind: "unknown" };
+  }
+  const person = principalSchema.safeParse(name.slice(personalPrefix.length));
+  return person.success
+    ? { kind: "person", person: person.data }
+    : { kind: "unknown" };
+};
+
+/**
+ * The Brain's shared store, in `store`, the host's namespace of
+ * `BrainStore`, in the jurisdiction the host keeps its objects in: what
+ * more than one person may read.
  */
 export const brainOf = (store: DurableObjectNamespace<BrainStore>): Brain =>
   store.getByName(storeName);
+
+/**
+ * `person`'s own store, in `store` as `brainOf`'s: what only they may
+ * read. It answers them alone and keeps nothing anyone else may read
+ * (store.ts). For the host only, with the person it has just verified:
+ * whoever names it reaches that person's own content.
+ */
+export const personalBrainOf = (
+  store: DurableObjectNamespace<BrainStore>,
+  person: string
+): Brain =>
+  store.getByName(`${personalPrefix}${principalSchema.parse(person)}`);

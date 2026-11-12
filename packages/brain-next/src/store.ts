@@ -3,15 +3,24 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { z } from "zod";
 
+import { packAcross } from "./across.ts";
+import { bucketUnder } from "./bucket.ts";
+import type { BrainBucket } from "./bucket.ts";
 import {
   currentRequestSchema,
   readableRequestSchema,
   embedModelSchema,
+  handOverRequestSchema,
+  handOverResultSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
+  storeKindOf,
   recallRequestSchema,
   sourceErasureSchema,
+  sourceIdSchema,
+  stillDeleting,
+  storeErased as erasedWhole,
   sourceListRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
@@ -23,12 +32,22 @@ import type {
   CurrentRequest,
   ReadableRequest,
   Embedders,
+  ErasureReason,
+  KeyState,
+  Finding,
+  HandOverRequest,
+  HandOvers,
+  WorkRequest,
   NewInstructions,
+  Reader,
+  Access,
+  StoreKind,
   NewSource,
   PersonErasure,
   RecallRequest,
   Pack,
   SourceErasure,
+  SourceId,
   SourceList,
   SourceListRequest,
   SourceVersion,
@@ -43,19 +62,41 @@ import type {
   WorkOverview,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
-import { embeddingOverview, embeddingStep, reembed } from "./embedding.ts";
+import {
+  embeddingDue,
+  embeddingOverview,
+  embeddingStep,
+  reembed,
+} from "./embedding.ts";
 import {
   confirmPending,
+  deleteStoreObjects,
   erase,
   eraseBatch,
   erasuresOverview,
+  erasureDue,
   erasuresUnfinished,
+  isErased,
+  isStoreErased,
+  storeErasedAt,
+  subjectOf,
   keepMissingSubjects,
+  ledgerPrefix,
+  readLedgerStart,
+  recordStoreErased,
   replayStep,
   sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
-import { sweepFiles } from "./files.ts";
+import {
+  fileGraceMs,
+  filesPrefix,
+  hashOf,
+  sweepDueAt,
+  sweepFiles,
+  vectorsPrefix,
+} from "./files.ts";
+import { enqueueHandOvers } from "./handover.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   countingInto,
@@ -63,7 +104,7 @@ import {
   newRecallCounts,
   recallOverviewOf,
 } from "./recall-counts.ts";
-import { recall } from "./recall.ts";
+import { find, recall } from "./recall.ts";
 import {
   addVersion,
   readCurrent,
@@ -71,7 +112,12 @@ import {
   readableVersions,
 } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
-import { putVectors, repackVectors, searchVectors } from "./vectors.ts";
+import {
+  putVectors,
+  repackDue,
+  repackVectors,
+  searchVectors,
+} from "./vectors.ts";
 import {
   markWordsCurrentIfEmpty,
   reindexWords,
@@ -80,6 +126,7 @@ import {
 } from "./words.ts";
 import {
   newWorkState,
+  queueDueAt,
   releaseInterrupted,
   repackPerTick,
   requeueWork,
@@ -87,6 +134,12 @@ import {
   workOverview,
   workTick,
 } from "./work.ts";
+
+/** What a person's own store's alarm works with (`BrainStore.alarmHost`). */
+export interface AlarmHost {
+  ask: AskModel;
+  embedders: Embedders;
+}
 
 /** What the store needs of its host's Worker: the Brain's bucket. */
 export interface BrainStoreEnv {
@@ -127,11 +180,73 @@ const ledgerCatchingUp =
 /** How long after a failed read of the ledger a call reads it again. */
 const ledgerRetryMs = 30_000;
 
+/**
+ * The soonest a person's own store wakes itself again (`alarm`): a
+ * minute, as the host's clock ticks the shared store.
+ */
+const alarmWaitMs = 60_000;
+
 /** A tick's time: a valid date. */
 const tickAtSchema = z.date();
 
 /** An item of the queue, by its id. */
 const workIdSchema = z.int().positive();
+
+/** What a person's own store answers a reader who is not that person. */
+const notTheirs =
+  "The Brain refused it: this store answers only the person whose it is";
+
+/** What a person's own store answers a call only the shared store takes. */
+const sharedOnly = "The Brain refused it: only the shared store takes this";
+
+/** What a person's own store answers an add anyone else may read. */
+const notTheirsAlone =
+  "The Brain refused it: this store keeps only what its person alone may read";
+
+/** What a store whose name says no one's answers every call. */
+const noOnes =
+  "The Brain refused it: this store's name doesn't say whose it is";
+
+/**
+ * What a call that changed a person's own store answers when it could not
+ * set when the store wakes for what it left: done, but to repeat.
+ */
+const alarmUnset =
+  "The Brain did it but couldn't schedule what it left to finish: try again";
+
+/** What erasing a person's own store answers when its record couldn't be written. */
+const erasureUnrecorded =
+  "The Brain could not record the erasure: erase it again";
+
+/** What a store that holds nothing finds: nothing, by every way. */
+const nothingFound: Finding = {
+  words: [],
+  stopWords: [],
+  terms: [],
+  exact: [],
+  capped: [],
+  meaning: [],
+};
+
+const encoder = new TextEncoder();
+
+/**
+ * Where in the host's bucket the store of `kind` keeps its objects
+ * (bucket.ts): a shared store at the root, a person's own under the
+ * SHA-256 of their id.
+ */
+const prefixOf = async (kind: StoreKind): Promise<string> =>
+  kind.kind === "person"
+    ? `people/${await hashOf(encoder.encode(kind.person))}/`
+    : "";
+
+/** Whether the store's schema was ever made: a person's own store makes it at its first write. */
+const hasSchema = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'source_versions'"
+    )
+    .toArray().length > 0;
 
 /**
  * The Brain's store: its sources and their versions, who may read them
@@ -140,9 +255,59 @@ const workIdSchema = z.int().positive();
  * contract (contract.ts `Brain`), and they are all there is: nothing else
  * can read its storage. Each checks what it is given, so nothing
  * malformed is stored or asked; who the reader is, is the host's to say.
+ *
+ * One class, two kinds of store, told apart by the object's name alone
+ * (contract.ts `storeKindOf`):
+ *
+ * - The shared store (`brainOf`): what more than one person may read.
+ * - A person's own store (`personalBrainOf`, named by their id): what
+ *   only they may read. It keeps nothing anyone else may read, answers no
+ *   other reader, keeps its files under a prefix of its own (bucket.ts),
+ *   makes its schema only at its first write, and is erased whole: then
+ *   it deletes itself and refuses every call, also after a restore of
+ *   its storage (erasure.ts `isStoreErased`). Which person's store a
+ *   call reaches is the host's to say, from the person it verified: the
+ *   store checks every call against its own name, so a reader, an owner
+ *   or an erasure of anyone else is refused, never answered.
+ *
+ * A store whose id has no name refuses every call: it can't say whose it
+ * is.
  */
 export class BrainStore extends DurableObject<BrainStoreEnv> {
   readonly #db = drizzle(this.ctx.storage);
+
+  /**
+   * Whose the store is, by its name (contract.ts `storeKindOf`): shared,
+   * or one person's own, which keeps only what they alone may read,
+   * answers only them, and is erased whole; or no one's, refusing every
+   * call.
+   */
+  readonly #kind = storeKindOf(this.ctx.id.name);
+
+  /** Where the store's part of the host's bucket is (bucket.ts), once known. */
+  #prefix: string | undefined;
+
+  /**
+   * Whether the store's schema is made, as this instance's start found or
+   * made it (`#start`): false until then, so nothing reads a table that
+   * may not exist (a person's store that couldn't read whether it was
+   * erased stops before it looks). A person's own store makes it at its
+   * first write, so a person who never had anything kept costs no
+   * storage: until then every read answers that nothing is there.
+   */
+  #schema = false;
+
+  /** Whether this person's own store was erased whole: then it refuses every call. */
+  #erased = false;
+
+  /**
+   * The calls under way that may write to the store's part of the bucket:
+   * every call that can change it (`#changing`).
+   */
+  readonly #writes = new Set<Promise<unknown>>();
+
+  /** Whether this instance made its schema current (`#start`). */
+  #opened = false;
 
   /**
    * The tick's steps' last failures, cleared by a later success, and the
@@ -202,12 +367,122 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // but its overview, each call refused with why, until a later call
     // reads it (`#ready`).
     void ctx.blockConcurrencyWhile(async () => {
-      await migrate(this.#db, migrations);
-      releaseInterrupted(ctx.storage);
-      markWordsCurrentIfEmpty(ctx.storage.sql);
-      await keepMissingSubjects(ctx.storage);
-      await this.#readLedger();
+      if (this.#kind.kind === "unknown") {
+        return;
+      }
+      this.#prefix = await prefixOf(this.#kind);
+      await this.#start(false);
+      // What an earlier instance left (a write cut off by a reset, what
+      // this start's replay hid) wakes this one: nothing else would.
+      await this.#armQuietly();
     });
+  }
+
+  /**
+   * The store started, while it takes nothing else, and again by each call
+   * until it is (`#ledgerStep`): a person's own store first reads whether
+   * it was erased whole, and if so deletes whatever came back (a restore
+   * of its storage) before anything else, and answers nothing from then
+   * on. Then the schema made current, what an earlier instance had under
+   * way put back in the queue, and the ledger read (`#readLedger`). A
+   * person's own store whose schema was never made makes none unless
+   * `create` (its first write, `#readyToWrite`): until then it holds
+   * nothing and writes nothing. A failure to read whether it was erased
+   * is kept as the ledger's, never thrown.
+   */
+  async #start(create: boolean): Promise<void> {
+    if (this.#kind.kind === "person") {
+      try {
+        if (await isStoreErased(this.#bucket)) {
+          if (!this.#erased) {
+            await this.#forget();
+          }
+          this.#ledger = "through";
+          return;
+        }
+      } catch {
+        // Nothing of the error is kept.
+        this.#ledger = "unreadable";
+        return;
+      }
+    }
+    if (!this.#opened) {
+      if (this.#kind.kind === "person" && !hasSchema(this.ctx.storage.sql)) {
+        if (!create) {
+          this.#schema = false;
+          this.#ledger = "through";
+          return;
+        }
+        // Its ledger read before any table is made: a store that can't
+        // read it makes nothing.
+        try {
+          await readLedgerStart(this.#bucket);
+        } catch {
+          // Nothing of the error is kept.
+          this.#ledger = "unreadable";
+          return;
+        }
+      }
+      await migrate(this.#db, migrations);
+      releaseInterrupted(this.ctx.storage);
+      markWordsCurrentIfEmpty(this.ctx.storage.sql);
+      await keepMissingSubjects(this.ctx.storage);
+      this.#opened = true;
+      this.#schema = true;
+    }
+    await this.#readLedger();
+  }
+
+  /**
+   * The store's part of the host's bucket, as the env has it now: known
+   * before any call is taken.
+   */
+  get #bucket(): BrainBucket {
+    if (this.#prefix === undefined) {
+      throw new Error(noOnes);
+    }
+    return bucketUnder(this.env.BRAIN_OBJECTS, this.#prefix);
+  }
+
+  /**
+   * Everything the store holds deleted, as a person's store erased whole:
+   * it refuses every call from then on. Run while the store takes nothing
+   * else.
+   */
+  async #forget(): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    this.#erased = true;
+    this.#schema = false;
+  }
+
+  /**
+   * Refuses a call to a store whose name says no one's, and ends this
+   * instance: an id reached once without its name (`idFromString`) makes
+   * an instance that can't know whose it is, and the next call, by name,
+   * gets an instance of its own that can. The instance is ended before
+   * the refusal is thrown, which ends this call with the same words.
+   */
+  #refuseNoOnes(): never {
+    this.ctx.abort(noOnes);
+    throw new Error(noOnes);
+  }
+
+  /** Refuses `reader` on a person's own store unless they are that person. */
+  #mayRead(reader: Reader): void {
+    if (this.#kind.kind === "person" && reader.person !== this.#kind.person) {
+      throw new Error(notTheirs);
+    }
+  }
+
+  /** Refuses `access` on a person's own store unless it is that person's alone. */
+  #mayKeep(access: Access): void {
+    if (
+      this.#kind.kind === "person" &&
+      (access.kind !== "owner" || access.person !== this.#kind.person)
+    ) {
+      throw new Error(notTheirsAlone);
+    }
   }
 
   /**
@@ -236,8 +511,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * Every call but the overview waits for it.
    */
   async #ready(): Promise<void> {
+    if (this.#kind.kind === "unknown") {
+      this.#refuseNoOnes();
+    }
     // Read after the step, which may have changed it.
     const now = await this.#ledgerStep();
+    if (this.#erased) {
+      throw new Error(erasedWhole);
+    }
     if (now !== "through") {
       throw new Error(
         now === "replaying" ? ledgerCatchingUp : ledgerUnreadable
@@ -258,26 +539,73 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         if (this.#ledger === "through") {
           return;
         }
-        await this.#readLedger();
+        await this.#start(false);
         if (this.#ledger === "unreadable") {
           this.#ledgerRetryAfter = Date.now() + ledgerRetryMs;
         }
+        // A replay may have hidden versions to delete, from a read.
+        await this.#armQuietly();
       });
     }
     return this.#ledger;
   }
 
-  /** The parts erasure.ts works with, the bucket as the env has it now. */
-  get #erasures(): ErasureStore {
-    return { storage: this.ctx.storage, bucket: this.env.BRAIN_OBJECTS };
+  /**
+   * As `#ready`, for a read by a reader `#mayRead` let through: whether
+   * the store holds anything to read. A person's own store erased whole
+   * holds nothing, and answers as a store that never held anything does:
+   * its person reads after their erasure what nothing gives.
+   */
+  async #readable(): Promise<boolean> {
+    if (await this.#erasedWhole()) {
+      return false;
+    }
+    await this.#ready();
+    return this.#schema;
   }
 
-  /** The parts sources.ts works with, the bucket as the env has it now. */
+  /** Whether this is a person's own store erased whole, once its ledger step is taken. */
+  async #erasedWhole(): Promise<boolean> {
+    if (this.#kind.kind !== "person") {
+      return false;
+    }
+    await this.#ledgerStep();
+    return this.#erased;
+  }
+
+  /**
+   * As `#ready`, for a call that writes: a person's own store whose schema
+   * was never made makes it first, while it takes nothing else.
+   */
+  async #readyToWrite(): Promise<void> {
+    await this.#ready();
+    if (this.#schema) {
+      return;
+    }
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (!this.#schema && !this.#erased) {
+        await this.#start(true);
+      }
+    });
+    await this.#ready();
+    // Made only once its ledger was read (`#start`): until then, a store
+    // that holds nothing answers reads as such, and refuses a write.
+    if (!this.#schema) {
+      throw new Error(ledgerUnreadable);
+    }
+  }
+
+  /** The parts erasure.ts works with: the store's part of the bucket. */
+  get #erasures(): ErasureStore {
+    return { storage: this.ctx.storage, bucket: this.#bucket };
+  }
+
+  /** The parts sources.ts works with: the store's part of the bucket. */
   get #sources(): SourcesStore {
     return {
       storage: this.ctx.storage,
       db: this.#db,
-      bucket: this.env.BRAIN_OBJECTS,
+      bucket: this.#bucket,
     };
   }
 
@@ -287,9 +615,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * same text and readers as the current version answer with it.
    */
   async addSource(source: NewSource): Promise<SourceVersionRef> {
-    await this.#ready();
-    return await addVersion(this.#sources, checked(newSourceSchema, source), {
-      indexed: true,
+    const adding = checked(newSourceSchema, source);
+    this.#mayKeep(adding.access);
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: true })
+      );
     });
   }
 
@@ -298,98 +630,288 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * whole: no chunks, no words, so recall never finds it.
    */
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
-    await this.#ready();
-    return await addVersion(
-      this.#sources,
-      checked(newInstructionsSchema, source),
-      { indexed: false }
-    );
+    const adding = checked(newInstructionsSchema, source);
+    this.#mayKeep(adding.access);
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      return await this.#unlessErasedMeanwhile(
+        async () => await addVersion(this.#sources, adding, { indexed: false })
+      );
+    });
+  }
+
+  /**
+   * `add` run, refused as an erased store refuses (`erasedWhole`) when
+   * this person's own store was erased whole while it ran: its storage
+   * is gone under it, and what went wrong is never the database's words.
+   */
+  async #unlessErasedMeanwhile<T>(add: () => Promise<T>): Promise<T> {
+    try {
+      return await add();
+    } catch (error) {
+      if (this.#erased) {
+        // Nothing of the error is kept: it is the database's.
+        throw new Error(erasedWhole, { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * `change` run as a call that may change the store: counted among the
+   * calls under way, which may write to its part of the bucket
+   * (`#eraseWhole` waits for them), and, once it ends, done or failed, a
+   * person's own store's alarm set from what it then has to do
+   * (`#armAlarm`). Every method that can leave work for a tick runs
+   * through here, so none can leave it without the store waking for it:
+   * a person's store has no clock but its own alarm.
+   */
+  async #changing<T>(change: () => Promise<T>): Promise<T> {
+    const running = change();
+    this.#writes.add(running);
+    let outcome: { done: true; value: T } | { done: false; error: unknown };
+    try {
+      outcome = { done: true, value: await running };
+    } catch (error) {
+      outcome = { done: false, error };
+    } finally {
+      this.#writes.delete(running);
+    }
+    // The call's own answer stands: a failure to arm never replaces it,
+    // and never reaches the caller in its own words.
+    const armed = await this.#armQuietly();
+    if (!outcome.done) {
+      throw outcome.error;
+    }
+    if (!armed) {
+      throw new Error(alarmUnset);
+    }
+    return outcome.value;
+  }
+
+  /**
+   * `#armAlarm`, its failure kept from the caller: whether it armed (or
+   * had nothing to arm). Nothing of the error is kept: it may be the
+   * database's own words.
+   */
+  async #armQuietly(): Promise<boolean> {
+    try {
+      await this.#armAlarm();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** A pack of what the reader may read for the question, within its budget. */
   async recall(request: RecallRequest): Promise<Pack> {
-    await this.#ready();
     const asked = checked(recallRequestSchema, request);
-    if (asked.withoutMeaning !== undefined) {
-      countWithoutMeaning(this.#recallCounts, asked.withoutMeaning);
+    this.#mayRead(asked.reader);
+    const readable = await this.#readable();
+    this.#countWithoutMeaning(asked);
+    return readable
+      ? recall(this.ctx.storage.sql, asked, countingInto(this.#recallCounts))
+      : packAcross(asked.question, asked.budget.tokens, [nothingFound]);
+  }
+
+  /**
+   * What `recall` finds, before it is packed (across.ts `packAcross`),
+   * each way counted as `recall` counts it.
+   */
+  async find(request: RecallRequest): Promise<Finding> {
+    const asked = checked(recallRequestSchema, request);
+    this.#mayRead(asked.reader);
+    const readable = await this.#readable();
+    this.#countWithoutMeaning(asked);
+    return readable
+      ? find(this.ctx.storage.sql, asked, countingInto(this.#recallCounts))
+      : nothingFound;
+  }
+
+  /** A recall the host made without the question's vector, counted by why. */
+  #countWithoutMeaning({ withoutMeaning }: RecallRequest): void {
+    if (withoutMeaning !== undefined) {
+      countWithoutMeaning(this.#recallCounts, withoutMeaning);
     }
-    return recall(
-      this.ctx.storage.sql,
-      asked,
-      countingInto(this.#recallCounts)
-    );
   }
 
   /** A version, current or history, whole: if the reader may read it. */
   async readVersion(request: VersionRequest): Promise<SourceVersion | null> {
-    await this.#ready();
-    return await readVersion(
-      this.#sources,
-      checked(versionRequestSchema, request)
-    );
+    const asked = checked(versionRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? await readVersion(this.#sources, asked)
+      : null;
   }
 
   /** The current versions of sources, whole: those the reader may read. */
   async readCurrent(request: CurrentRequest): Promise<SourceVersion[]> {
-    await this.#ready();
-    return await readCurrent(
-      this.#sources,
-      checked(currentRequestSchema, request)
-    );
+    const asked = checked(currentRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? await readCurrent(this.#sources, asked)
+      : [];
   }
 
-  /** A page of the sources the reader may read, newest first. */
+  /**
+   * What this store has of the key `source` (contract.ts): `free` for a
+   * person's own store erased whole, which holds nothing.
+   */
+  async keyState(source: SourceId): Promise<KeyState> {
+    const key = checked(sourceIdSchema, source);
+    if (await this.#erasedWhole()) {
+      return "free";
+    }
+    await this.#ready();
+    if (!this.#schema) {
+      return "free";
+    }
+    if (isErased(this.ctx.storage.sql, await subjectOf(key))) {
+      return "erased";
+    }
+    const held =
+      this.ctx.storage.sql
+        .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
+        .toArray().length > 0;
+    return held ? "held" : "free";
+  }
+
+  /**
+   * A page of the sources the reader may read, newest first: none in a
+   * store that holds nothing (never written, or erased whole).
+   */
   async listSources(request: SourceListRequest): Promise<SourceList> {
-    await this.#ready();
-    return listSources(
-      this.ctx.storage.sql,
-      checked(sourceListRequestSchema, request)
-    );
+    const asked = checked(sourceListRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? listSources(this.ctx.storage.sql, asked)
+      : { sources: [], more: false };
   }
 
-  /** A page of the versions of a source the reader may read, newest first. */
+  /**
+   * A page of the versions of a source the reader may read, newest first:
+   * none in a store that holds nothing (never written, or erased whole).
+   */
   async listVersions(request: VersionListRequest): Promise<VersionList> {
-    await this.#ready();
-    return listVersions(
-      this.ctx.storage.sql,
-      checked(versionListRequestSchema, request)
-    );
+    const asked = checked(versionListRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? listVersions(this.ctx.storage.sql, asked)
+      : { versions: [], more: false };
   }
 
   /** Of some versions, those the reader may read now: no text read. */
   async readableVersions(
     request: ReadableRequest
   ): Promise<SourceVersionRef[]> {
-    await this.#ready();
-    return readableVersions(
-      this.#sources,
-      checked(readableRequestSchema, request)
-    );
+    const asked = checked(readableRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? readableVersions(this.#sources, asked)
+      : [];
   }
 
   /**
    * Erases a source for good (erasure.ts): recorded in the ledger and
    * hidden before it returns, deleted by its tick if not at once. Work
-   * under way on it is stopped (work.ts `stopWorkOn`).
+   * under way on it is stopped (work.ts `stopWorkOn`). A person's own
+   * store erased whole holds nothing to erase: done, so a caller erasing
+   * that person's sources after them isn't held pending for good.
    */
   async eraseSource(request: SourceErasure): Promise<void> {
-    await this.#ready();
     const { source, reason } = checked(sourceErasureSchema, request);
-    await erase(this.#erasures, "source", source, reason, (sources) => {
-      stopWorkOn(this.#work, sources);
+    if (await this.#erasedWhole()) {
+      return;
+    }
+    await this.#changing(async () => {
+      await this.#readyToWrite();
+      await erase(this.#erasures, "source", source, reason, (sources) => {
+        stopWorkOn(this.#work, sources);
+      });
     });
   }
 
   /**
    * Erases what only one person may read (erasure.ts), as `eraseSource`
-   * erases a source.
+   * erases a source. A person's own store erases itself whole, and only
+   * for that person (`#eraseWhole`).
    */
   async erasePerson(request: PersonErasure): Promise<void> {
-    await this.#ready();
     const { person, reason } = checked(personErasureSchema, request);
+    if (this.#kind.kind === "person") {
+      if (person !== this.#kind.person) {
+        throw new Error(notTheirs);
+      }
+      await this.#eraseWhole(reason);
+      return;
+    }
+    await this.#ready();
     await erase(this.#erasures, "person", person, reason, (sources) => {
       stopWorkOn(this.#work, sources);
     });
+  }
+
+  /**
+   * This person's own store erased whole (erasure.ts): the record of it
+   * written first, then all the store holds deleted, while it takes
+   * nothing else, so from then on it refuses every call, also after a
+   * restore of its storage or when a late add wakes it. Then its files
+   * and vectors, a bounded batch a call: until none is left it throws
+   * `stillDeleting`, so the caller keeps its erasure pending and calls
+   * again. Safe to repeat. Throws, deleting nothing, when the record
+   * couldn't be written.
+   */
+  async #eraseWhole(reason: ErasureReason): Promise<void> {
+    // Whether the store was never written when this call erased it: an
+    // add makes the schema before it writes a file, so no add of an
+    // earlier instance can still land under its prefix.
+    let neverWritten = false;
+    if (!this.#erased) {
+      const recorded = await this.ctx.blockConcurrencyWhile(async () => {
+        if (this.#erased) {
+          return true;
+        }
+        neverWritten = !hasSchema(this.ctx.storage.sql);
+        try {
+          await recordStoreErased(this.#bucket, reason, Date.now());
+        } catch {
+          // Nothing of the error is kept: nothing is deleted.
+          return false;
+        }
+        await this.#forget();
+        return true;
+      });
+      if (!recorded) {
+        throw new Error(erasureUnrecorded);
+      }
+    }
+    // An add, a source's erasure or a tick that started before this may
+    // still write a file, a vector or a ledger entry under the store's
+    // prefix after this deletes what it lists. While one is under way in
+    // this instance, the erasure isn't finished. Nor is it while one that
+    // an earlier instance started (reset meanwhile, so no longer seen
+    // here) may still land: until the grace an add has to write its file
+    // (files.ts `fileGraceMs`) has passed since the record, unless the
+    // store was never written. Both are read before the listing, so what
+    // lands after it is deleted by a later call: the caller calls again
+    // until one is done.
+    const quiet = this.#writes.size === 0;
+    let done = false;
+    try {
+      const at = await storeErasedAt(this.#bucket);
+      const settled = at !== null && Date.now() - at >= fileGraceMs;
+      const emptied = await deleteStoreObjects(this.#bucket, [
+        filesPrefix,
+        vectorsPrefix,
+        ledgerPrefix,
+      ]);
+      done = quiet && (settled || neverWritten) && emptied;
+    } catch {
+      // Nothing of the error is kept: it may name a key.
+    }
+    if (!done) {
+      throw new Error(stillDeleting);
+    }
   }
 
   /**
@@ -399,14 +921,53 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
    * a step of embedding (embedding.ts), then the queue, asking `ask` for
-   * its model calls and `embedders` for vectors (work.ts). Each step is
+   * its model calls, `embedders` for vectors and `handOvers` for what is
+   * handed over (work.ts, handover.ts). Each step is
    * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
+  async work({ ask, at, embedders, handOvers }: WorkRequest): Promise<void> {
+    await this.#changing(async () => {
+      await this.#workNow(ask, at, embedders, handOvers);
+    });
+  }
+
+  /** `work`, as one of the calls that may write to the bucket. */
+  async #workNow(
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    handOvers?: HandOvers
+  ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
     const model = checked(embedModelSchema.nullable(), embedders.model);
+    if (!this.#schema) {
+      // Nothing was ever kept: nothing to do.
+      return;
+    }
+    await this.#tick(
+      ask,
+      tickAt,
+      {
+        model,
+        embed: async (request) => await embedders.embed(request),
+      },
+      handOvers
+    );
+  }
+
+  /**
+   * The tick of `work` at `tickAt`, with the host's checked `embedders`,
+   * and its `handOvers` on the shared store only: hand-overs are queued
+   * there alone (`handOver`).
+   */
+  async #tick(
+    ask: AskModel,
+    tickAt: Date,
+    embedders: Embedders,
+    handOvers: HandOvers | undefined
+  ): Promise<void> {
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
       return;
@@ -416,20 +977,168 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.#sweep(tickAt);
     this.#repack(tickAt);
     this.#reindex(tickAt);
-    this.#embedding(tickAt, model);
+    this.#embedding(tickAt, embedders.model);
     await workTick(
       this.ctx.storage,
       this.#work,
       {
         ask,
-        embedders: {
-          model,
-          embed: async (request) => await embedders.embed(request),
-        },
-        bucket: this.env.BRAIN_OBJECTS,
+        embedders,
+        bucket: this.#bucket,
+        ...(handOvers === undefined || this.#kind.kind !== "shared"
+          ? {}
+          : {
+              handOvers: {
+                handOver: async (source) =>
+                  checked(
+                    handOverResultSchema,
+                    await handOvers.handOver(source)
+                  ),
+              },
+            }),
       },
       tickAt
     );
+  }
+
+  /**
+   * What the store's own alarm works with: the host's model calls and
+   * embedders, as its clock gives them to the shared store's tick. The
+   * host's subclass gives them; null, as here, works nothing on an alarm.
+   * A field, not a method: no caller reaches it over RPC, which exposes
+   * only the class's methods.
+   */
+  protected readonly alarmHost: (() => Promise<AlarmHost>) | null = null;
+
+  /**
+   * A person's own store's tick, on the alarm it set itself (`#armAlarm`):
+   * the host's clock ticks only the shared store, so each person's store
+   * wakes itself while it has work, and sleeps, costing nothing, once it
+   * has none. Its tick sets the next.
+   */
+  override async alarm(): Promise<void> {
+    if (this.#kind.kind === "unknown") {
+      // Ended as every call to it is (`#refuseNoOnes`): the runtime retries
+      // the alarm on an instance of its own.
+      this.ctx.abort(noOnes);
+      return;
+    }
+    if (this.#kind.kind !== "person") {
+      return;
+    }
+    try {
+      // An erased store wakes to nothing (`#ready` would refuse the tick).
+      await this.#ledgerStep();
+      if (this.#erased) {
+        return;
+      }
+      if (this.alarmHost !== null) {
+        const host = await this.alarmHost();
+        // No side of hand-overs: a person's own store never queues one
+        // (`handOver` refuses), so none is ever due here.
+        await this.#changing(async () => {
+          await this.#workNow(host.ask, new Date(), host.embedders);
+        });
+      }
+    } catch {
+      // Nothing of the error is kept. A tick that couldn't run (its ledger
+      // unreadable or still replaying, the host's model unreachable) wakes
+      // the store again in a minute, until it can: never only after the
+      // runtime's own retries, which give up.
+      await this.#armAgain();
+    }
+  }
+
+  /**
+   * A person's own store's alarm set a minute on, unless one is set
+   * sooner, whatever work it holds: after a tick that couldn't run.
+   */
+  async #armAgain(): Promise<void> {
+    if (this.#erased) {
+      return;
+    }
+    const at = Date.now() + alarmWaitMs;
+    const set = await this.ctx.storage.getAlarm();
+    if (set === null || set > at) {
+      await this.ctx.storage.setAlarm(at);
+    }
+  }
+
+  /**
+   * When a tick next has something to do, in milliseconds, or null when
+   * nothing is left: the one rule of whether this store has work, made of
+   * each step's own rule, beside the code that decides that step (`#tick`,
+   * in its order):
+   *
+   * - erasure.ts `erasureDue`: a ledger entry to write, hidden versions to
+   *   delete;
+   * - files.ts `sweepDueAt`: a file or a vector nothing holds, once its
+   *   grace is over, and the sweep's own wait after a failure;
+   * - vectors.ts `repackDue`: removed codes to repack;
+   * - words.ts `wordsRebuilding`: word indexes behind their rules;
+   * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
+   *   still to remove;
+   * - work.ts `queueDueAt`: an item of the queue, due or coming back from
+   *   parked, once the queue's pause is over.
+   *
+   * A step that keeps failing stays due, so the store keeps waking for it
+   * while staff see the failure in the overview.
+   */
+  #nextWorkAt(now: number): number | null {
+    const { storage } = this.ctx;
+    const { sql } = storage;
+    if (
+      erasureDue(sql) ||
+      repackDue(sql) ||
+      wordsRebuilding(sql) ||
+      embeddingDue(storage)
+    ) {
+      return now;
+    }
+    const sweep = sweepDueAt(sql);
+    const due = [
+      sweep === null ? null : Math.max(sweep, this.#sweepAfter),
+      queueDueAt(storage),
+    ].filter((at) => at !== null);
+    return due.length === 0 ? null : Math.min(...due);
+  }
+
+  /**
+   * A person's own store's alarm set for when a tick next has something
+   * to do (`#nextWorkAt`), a minute on at the soonest, unless one is set
+   * sooner; none when nothing is left, or the store holds nothing. Run
+   * after every call that can change the store (`#changing`).
+   */
+  async #armAlarm(): Promise<void> {
+    if (this.#kind.kind !== "person" || !this.#schema || this.#erased) {
+      return;
+    }
+    const now = Date.now();
+    const due = this.#nextWorkAt(now);
+    if (due === null) {
+      return;
+    }
+    const at = Math.max(due, now + alarmWaitMs);
+    const set = await this.ctx.storage.getAlarm();
+    if (set === null || set > at) {
+      await this.ctx.storage.setAlarm(at);
+    }
+  }
+  /**
+   * Puts sources on the queue to be handed over (handover.ts), each in
+   * place of one of its hand-overs still waiting or parked. The shared
+   * store's alone: the host's clock ticks it with its side of hand-overs
+   * (`work`), and a person's own store, which it never ticks, refuses.
+   */
+  async handOver(request: HandOverRequest): Promise<void> {
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    const checkedRequest = checked(handOverRequestSchema, request);
+    await this.#changing(async () => {
+      await this.#ready();
+      enqueueHandOvers(this.ctx.storage, checkedRequest);
+    });
   }
 
   /**
@@ -456,10 +1165,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * through.
    */
   async reembed(): Promise<StaffActionOutcome> {
-    if ((await this.#ledgerStep()) !== "through") {
-      return "unavailable";
-    }
-    return reembed(this.ctx.storage) ? "done" : "nothing";
+    return await this.#changing(async () => {
+      if (!(await this.#actionable())) {
+        return "unavailable";
+      }
+      return this.#schema && reembed(this.ctx.storage) ? "done" : "nothing";
+    });
   }
 
   /**
@@ -559,12 +1270,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     const outcome = await this.ctx.blockConcurrencyWhile(async () => {
       try {
-        return await sweepFiles(
-          this.ctx.storage,
-          this.#db,
-          this.env.BRAIN_OBJECTS,
-          at
-        );
+        return await sweepFiles(this.ctx.storage, this.#db, this.#bucket, at);
       } catch {
         return "failed" as const;
       }
@@ -582,8 +1288,31 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#sweepAfter = at.getTime() + sweepWaitMs;
   }
 
-  /** The queue, as staff see it. */
+  /**
+   * Whether a staff action may apply: the store is someone's, its ledger
+   * read through, and it wasn't erased whole.
+   */
+  async #actionable(): Promise<boolean> {
+    if (this.#kind.kind === "unknown") {
+      this.#refuseNoOnes();
+    }
+    return (await this.#ledgerStep()) === "through" && !this.#erased;
+  }
+
+  /** The queue, as staff see it: empty while nothing was ever kept. */
   workOverview(): WorkOverview {
+    if (this.#kind.kind === "unknown") {
+      this.#refuseNoOnes();
+    }
+    // A person's own store shows nothing of what it holds until its ledger
+    // is read through: a restored copy of an erased store, started while
+    // its record can't be read, would show its queue, sizes and counts.
+    const unread =
+      this.#kind.kind === "person" &&
+      (this.#ledger !== "through" || this.#erased);
+    if (!this.#schema || unread) {
+      return this.#emptyOverview();
+    }
     return {
       ...workOverview(this.ctx.storage, this.#work),
       erasing: erasuresUnfinished(this.ctx.storage.sql),
@@ -605,10 +1334,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async requeueWork(id: number): Promise<StaffActionOutcome> {
     const item = checked(workIdSchema, id);
-    if ((await this.#ledgerStep()) !== "through") {
-      return "unavailable";
-    }
-    return requeueWork(this.ctx.storage, item) ? "done" : "nothing";
+    return await this.#changing(async () => {
+      if (!(await this.#actionable())) {
+        return "unavailable";
+      }
+      return this.#schema && requeueWork(this.ctx.storage, item)
+        ? "done"
+        : "nothing";
+    });
   }
 
   /**
@@ -616,34 +1349,80 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * `unavailable`, changing nothing, until the ledger is read through.
    */
   async rebuildWords(): Promise<StaffActionOutcome> {
-    if ((await this.#ledgerStep()) !== "through") {
-      return "unavailable";
-    }
-    return startWordsRebuild(this.ctx.storage.sql) ? "done" : "nothing";
+    return await this.#changing(async () => {
+      if (!(await this.#actionable())) {
+        return "unavailable";
+      }
+      return this.#schema && startWordsRebuild(this.ctx.storage.sql)
+        ? "done"
+        : "nothing";
+    });
   }
 
-  /** Keeps vectors of current chunks as their codes, in one transaction. */
+  /** The overview of a store that never kept anything. */
+  #emptyOverview(): WorkOverview {
+    return {
+      waiting: [],
+      running: 0,
+      parked: [],
+      parkedCount: 0,
+      paused: null,
+      overdue: [],
+      erasing: 0,
+      sourcesWithoutCurrent: 0,
+      ledgerReplay: this.#ledger,
+      stepsFailed: { ...this.#stepsFailed },
+      embedding: {
+        model: null,
+        chunks: 0,
+        embedded: 0,
+        unembeddable: 0,
+        parked: 0,
+        rebuilt: true,
+      },
+      storeBytes: 0,
+      words: "current",
+      erasures: {
+        source: { written: 0, unwritten: 0 },
+        person: { written: 0, unwritten: 0 },
+        byReason: { deleted: 0, retention: 0, person_erased: 0, withdrawn: 0 },
+      },
+      recall: recallOverviewOf(this.#recallCounts),
+    };
+  }
+
+  /**
+   * Keeps vectors of current chunks as their codes, in one transaction;
+   * none in a store that never kept anything, which has no chunks.
+   */
   async putVectors(request: VectorsToPut): Promise<void> {
-    await this.#ready();
     const vectors = checked(vectorsToPutSchema, request);
-    this.ctx.storage.transactionSync(() => {
-      putVectors(this.ctx.storage.sql, vectors);
+    await this.#changing(async () => {
+      await this.#ready();
+      if (!this.#schema) {
+        return;
+      }
+      this.ctx.storage.transactionSync(() => {
+        putVectors(this.ctx.storage.sql, vectors);
+      });
     });
   }
 
   /** What the reader may read of current chunks, nearest the vector first. */
   async searchVectors(request: VectorSearch): Promise<VectorsFound> {
-    await this.#ready();
-    return searchVectors(
-      this.ctx.storage.sql,
-      checked(vectorSearchSchema, request)
-    );
+    const asked = checked(vectorSearchSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? searchVectors(this.ctx.storage.sql, asked)
+      : { chunks: [] };
   }
 
   /** Repacks one block holding removed codes: true when more are left. */
   async repackVectors(): Promise<boolean> {
-    await this.#ready();
-    return this.#repackOne();
+    return await this.#changing(async () => {
+      await this.#ready();
+      return this.#schema && this.#repackOne();
+    });
   }
 
   /** One block repacked, in its own transaction: true when more are left. */

@@ -1,11 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { OrgData } from "../../../admin/org-data.tsx";
-import { useOrganization } from "../../../admin/organization.tsx";
-
-const Data = () => <OrgData view={useOrganization().view} />;
-
-/** An organization's Data: what Grasp keeps of its interviews, and what the company sees (src/admin/org-data.tsx). */
+/** An organization's Data is a tab of its Brain now: its old address leads there. */
 export const Route = createFileRoute("/organizations/$clientId/data")({
-  component: Data,
+  beforeLoad: ({ params }) => {
+    // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+    throw redirect({
+      to: "/organizations/$clientId/brain",
+      params,
+      search: { tab: "data" },
+      replace: true,
+    });
+  },
 });

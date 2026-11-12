@@ -19,18 +19,13 @@ import {
   BrainIcon,
   Building2Icon,
   CoinsIcon,
-  DatabaseIcon,
-  FileSignatureIcon,
   HistoryIcon,
   HourglassIcon,
   LayoutDashboardIcon,
   ListChecksIcon,
-  ListOrderedIcon,
   MessagesSquareIcon,
-  NetworkIcon,
   PlugIcon,
   ServerIcon,
-  UsersIcon,
   WorkflowIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -39,11 +34,7 @@ import type { LucideIcon } from "lucide-react";
 export const orgSections = [
   "overview",
   "details",
-  "contract",
-  "members",
-  "flow",
   "steps",
-  "organization",
   "interviews",
   "workflows",
   "setup",
@@ -51,29 +42,24 @@ export const orgSections = [
   "usage",
   "value",
   "brain",
-  "data",
   "log",
 ] as const;
 export type OrgSection = (typeof orgSections)[number];
 
 /** The column's groups, in order. The overview stands above them, on its own. */
 export const sectionGroups = [
-  {
-    id: "company",
-    label: "Company",
-    sections: ["details", "contract", "members"],
-  },
+  { id: "company", label: "Company", sections: ["details"] },
   {
     id: "onboarding",
     label: "Onboarding",
-    sections: ["flow", "steps", "organization", "interviews", "workflows"],
+    sections: ["steps", "interviews", "workflows"],
   },
   {
     id: "platform",
     label: "Platform",
     sections: ["setup", "integrations", "usage", "value"],
   },
-  { id: "records", label: "Records", sections: ["brain", "data", "log"] },
+  { id: "records", label: "Records", sections: ["brain", "log"] },
 ] as const satisfies readonly {
   id: string;
   label: string;
@@ -87,11 +73,7 @@ export const sectionGroups = [
 export const sectionTo = {
   overview: "/organizations/$clientId",
   details: "/organizations/$clientId/details",
-  contract: "/organizations/$clientId/contract",
-  members: "/organizations/$clientId/members",
-  flow: "/organizations/$clientId/flow",
   steps: "/organizations/$clientId/steps",
-  organization: "/organizations/$clientId/organization",
   interviews: "/organizations/$clientId/interviews",
   workflows: "/organizations/$clientId/workflows",
   setup: "/organizations/$clientId/setup",
@@ -99,7 +81,6 @@ export const sectionTo = {
   usage: "/organizations/$clientId/ai-use",
   value: "/organizations/$clientId/hours",
   brain: "/organizations/$clientId/brain",
-  data: "/organizations/$clientId/data",
   log: "/organizations/$clientId/log",
 } as const satisfies Record<OrgSection, string>;
 
@@ -112,42 +93,19 @@ export const sectionWords: Record<
   details: {
     title: "Details",
     about:
-      "The company as its own papers have it, and who Grasp deals with there.",
+      "The company as its own papers have it, who Grasp deals with there, its contract and its members.",
     icon: Building2Icon,
-  },
-  contract: {
-    title: "Contract",
-    about: "The seats taken, the agreements, and what is billed.",
-    icon: FileSignatureIcon,
-  },
-  members: {
-    title: "Members",
-    about:
-      "Everyone invited into the company’s platform, and what each may do.",
-    icon: UsersIcon,
-  },
-  flow: {
-    title: "Flow",
-    about:
-      "How much onboarding this company goes through: which steps, in which order, or none at all.",
-    icon: ListOrderedIcon,
   },
   steps: {
     title: "Steps",
     about:
-      "From the first conversation until Grasp opens. Each step opens underneath, with everything that can be done there.",
+      "From the first conversation until Grasp opens, and how much of that onboarding this company goes through.",
     icon: ListChecksIcon,
-  },
-  organization: {
-    title: "Organization",
-    about:
-      "The company as Grasp knows it: its teams, who leads them, who is in them, and the work they do.",
-    icon: NetworkIcon,
   },
   interviews: {
     title: "Interviews",
     about:
-      "Where every team stands, everyone by name, what was said, and how Stephen and Claire did.",
+      "Where every team stands, everyone by name, and how Stephen and Claire did.",
     icon: MessagesSquareIcon,
   },
   workflows: {
@@ -181,14 +139,8 @@ export const sectionWords: Record<
   brain: {
     title: "Brain",
     about:
-      "What the company’s brain stands on, team by team, and what it still lacks; and the brain itself, as the company’s people see it, where the company shares it with Grasp’s staff.",
+      "What the company’s brain stands on and how it runs, and what Grasp keeps of the interviews.",
     icon: BrainIcon,
-  },
-  data: {
-    title: "Data",
-    about:
-      "What Grasp keeps of the interviews, what was deleted, and what the company itself gets to see.",
-    icon: DatabaseIcon,
   },
   log: {
     title: "Log",
@@ -215,15 +167,31 @@ const needSections: Record<Need["kind"], OrgSection> = {
   blocked: "workflows",
   split: "workflows",
   few: "workflows",
-  contract: "contract",
-  ending: "contract",
-  overdue: "contract",
+  contract: "details",
+  ending: "details",
+  overdue: "details",
   signin: "integrations",
   budget: "usage",
   read: "interviews",
 };
 
 export const needSection = (need: Need): OrgSection => needSections[need.kind];
+
+/**
+ * Where a need is settled: its section, and the tab of it where that isn't
+ * the section's first. The contract's are on Details' Contract.
+ */
+export const needWhere = (
+  need: Need
+): { section: OrgSection; search: { tab: "contract" } | undefined } => ({
+  section: needSection(need),
+  search:
+    need.kind === "contract" ||
+    need.kind === "ending" ||
+    need.kind === "overdue"
+      ? { tab: "contract" }
+      : undefined,
+});
 
 /** A system a section's figures come from. */
 export type OrgSource = "core" | "admin" | "attio" | "stripe" | "composio";
@@ -274,14 +242,9 @@ export const originsOf = (
         what: "The company, its people and its deals",
         read: attio,
       },
-    ],
-    contract: [
       { source: "stripe", what: "Its billing and invoices", read: stripe },
     ],
-    members: [fromCore],
-    flow: [fromCore],
     steps: [fromCore],
-    organization: [fromCore],
     interviews: [fromCore],
     workflows: [
       {
@@ -313,7 +276,6 @@ export const originsOf = (
       { source: "core", what: "The hours in the drawn work", read: works },
     ],
     brain: [fromCore],
-    data: [fromCore],
     log: [fromCore],
   };
 };

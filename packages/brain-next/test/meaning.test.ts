@@ -1,18 +1,18 @@
 // Recall by meaning (src/recall.ts, GRA-1769): the question's vector, as
 // the host gives it, searched beside words and exact parts and fused with
-// them by rank. Each test in a store of its own, with vectors put for its
-// chunks as the queue puts them, chosen so which is nearest is known.
-// Every source has a name of its own: the files bucket and the erasure
-// ledger are shared by every store in the isolate.
+// them by rank. Each test in the shared store, from empty storage, with
+// vectors put for its chunks as the queue puts them, chosen so which is
+// nearest is known.
 import type {
   Access,
   AskModel,
   EmbedModel,
+  HandOvers,
   Pack,
   Reader,
   RecallRequest,
 } from "@grasp-os/brain-next/contract";
-import { runInDurableObject } from "cloudflare:test";
+import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
@@ -29,6 +29,14 @@ const quietAsk: AskModel = async () => {
 };
 
 /** The host's embedders, while no model runs. */
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 const noEmbedders = {
   model: null,
   embed: async () => {
@@ -38,8 +46,7 @@ const noEmbedders = {
 };
 
 /** This test's store: one of its own. */
-let storeName = "";
-const store = () => env.BRAIN_STORE.getByName(storeName);
+const store = () => env.BRAIN_STORE.getByName("brain");
 
 /** The host's model, as its embedder names it. */
 const model: EmbedModel = { name: "meaning-test", build: "1" };
@@ -101,8 +108,9 @@ const cited = ({ items }: Pack) =>
   items.map(({ source, version, found }) => ({ source, version, found }));
 
 describe("recall by meaning", () => {
-  beforeEach(() => {
-    storeName = crypto.randomUUID();
+  // Each test from empty storage: the shared store and the bucket.
+  beforeEach(async () => {
+    await reset();
   });
 
   it("finds a passage that shares no word with the question, quotes its opening, and counts none of the question's words as found", async () => {
@@ -357,7 +365,12 @@ describe("recall by meaning", () => {
     switched.failing = false;
     await store().eraseSource({ source: crowd.source, reason: "deleted" });
     const erased = await found();
-    await store().work(quietAsk, new Date(), noEmbedders);
+    await store().work({
+      ask: quietAsk,
+      at: new Date(),
+      embedders: noEmbedders,
+      handOvers: noHandOvers,
+    });
     const ticked = await found();
 
     expect({ before, failed, hidden, erased, ticked }).toStrictEqual({

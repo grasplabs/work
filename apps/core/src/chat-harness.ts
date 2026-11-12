@@ -120,6 +120,12 @@ export interface TurnRequest {
   };
   /** A chat others share, which reads only what they all may. */
   shared: boolean;
+  /**
+   * Whether the answer reaches the person alone, so the recall before the
+   * question may hold what only they may read (their own store,
+   * turn-recall.ts): their own chat in Grasp, in a turn they started.
+   */
+  personal: boolean;
   /** Whether the chat's agent holds the brain permission. */
   readsBrain: boolean;
   context: TurnContext;
@@ -1022,7 +1028,7 @@ export class ChatHarness {
     // audited as the first was. Who reads the answer decides what it may
     // hand over (turn-recall.ts).
     const recall = request.readsBrain
-      ? await this.#recall(turn, request.question.text, request.shared)
+      ? await this.#recall(turn, request)
       : undefined;
     try {
       return await this.#conversation.submit(
@@ -1076,17 +1082,21 @@ export class ChatHarness {
    * The recall before `question` (turn-recall.ts), its analysis reading
    * the context as the model would, once rebased: nothing withheld.
    */
-  async #recall(turn: CodeTurn, question: string, shared: boolean) {
+  async #recall(
+    turn: CodeTurn,
+    { question: { text }, shared, personal }: TurnRequest
+  ) {
     const { messages } = await this.#conversation.context(context);
     return await recallForTurn(
       {
         env: this.#env,
         turn,
         conversation: shared ? "shared" : "own",
+        personal,
         history: messages,
         provenance: this.#sources,
       },
-      question
+      text
     );
   }
 

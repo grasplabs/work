@@ -184,12 +184,12 @@ describe("an organization's records", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("says in Data what is kept of the interviews, who had theirs deleted, and what the company sees, only for a team big enough", async () => {
+  it("says in the Brain's Data what is kept of the interviews, who had theirs deleted, and what the company sees, only for a team big enough", async () => {
     const bakery = await liveClient();
     bakery.core.admin = bakerySnapshot("Bakkerij");
 
     const { status, html } = await page(
-      `/organizations/${bakery.clientId}/data`
+      `/organizations/${bakery.clientId}/brain?tab=data`
     );
     const kept = panelOf(html, "What is kept");
     const deleted = panelOf(html, "Deleted because they asked");
@@ -199,12 +199,11 @@ describe("an organization's records", () => {
       status,
       toCome: html.includes("This section isn’t in the admin yet."),
       kept: [
-        "The first conversation With the sponsor, word for word. It is what the research and Stephen’s first questions start from. Read by Stephen",
-        "Interviews people agreed to Their words are kept, and what they said counts. 2",
-        "Interviews that stopped halfway Kept, so the link carries on where they stopped. Nothing in them counts. 1",
-        "Anyone’s voice What is said is written out, and the sound is gone. Never kept",
+        "The first conversation Read by Stephen",
+        "Interviews people agreed to 2",
+        "Interviews that stopped halfway 1",
         // Lisa's days to ask are over; Tom's aren't.
-        "Can still be deleted For 7 days after their interview, the person can ask. 1",
+        "Can still be deleted, for 7 days after the interview 1",
       ].map((line) => kept.includes(line)),
       deleted: deleted.includes("Piet Kok Sales"),
       nobodyElse: ["Lisa de Vries", "Tom Jansen", "Ann Bos"].some((name) =>
@@ -219,22 +218,24 @@ describe("an organization's records", () => {
     }).toStrictEqual({
       status: 200,
       toCome: false,
-      kept: [true, true, true, true, true],
+      kept: [true, true, true, true],
       deleted: true,
       nobodyElse: false,
       sees: [true, true, true],
     });
   });
 
-  it("says in Data that nothing is there yet for a company with no roster, no interviews and no first conversation", async () => {
+  it("says in the Brain's Data that nothing is there yet for a company with no roster, no interviews and no first conversation", async () => {
     const empty = await liveClient();
     empty.core.admin = emptyAdminSnapshot("Empty");
 
-    const { html } = await page(`/organizations/${empty.clientId}/data`);
+    const { html } = await page(
+      `/organizations/${empty.clientId}/brain?tab=data`
+    );
 
     expect({
       conversation: panelOf(html, "What is kept").includes(
-        "start from. Not brought in yet"
+        "The first conversation Not brought in yet"
       ),
       deleted: panelOf(html, "Deleted because they asked").includes(
         "Nobody asked."
@@ -255,19 +256,20 @@ describe("an organization's records", () => {
       `/organizations/${bakery.clientId}/log`
     );
     const text = textOf(html);
-    const added = `${headOf(bakery.added)} 1 ${bakery.added.toISOString().slice(11, 16)} Added this organization. Grasp, by hand`;
+    const added = `${headOf(bakery.added)} ${bakery.added.toISOString().slice(11, 16)} Added this organization. Grasp, by hand`;
     const lines = [
       added,
-      "29 Sep 2026 1 In place: The company’s look at the risks to its people. The company",
-      "25 Sep 2026 1 In place: Agreement on handling data. The company",
-      "23 Sep 2026 2 1 person made their account. The company 1 person was invited into the platform. The company",
-      "22 Sep 2026 2 1 person made their account. The company 1 person was invited into the platform. The company",
+      "29 Sep 2026 In place: The company’s look at the risks to its people. The company",
+      "25 Sep 2026 In place: Agreement on handling data. The company",
+      "23 Sep 2026 1 person made their account. The company 1 person was invited into the platform. The company",
+      "22 Sep 2026 1 person made their account. The company 1 person was invited into the platform. The company",
     ];
     const at = lines.map((line) => text.indexOf(line));
 
     expect({
       status,
       toCome: html.includes("This section isn’t in the admin yet."),
+      // A short log is read as it is: only a long one is charted.
       chart: html.includes(">What happened, by who did it</h2>"),
       found: at.map((index) => index !== -1),
       newestFirst: at.every(
@@ -282,7 +284,7 @@ describe("an organization's records", () => {
     }).toStrictEqual({
       status: 200,
       toCome: false,
-      chart: true,
+      chart: false,
       found: [true, true, true, true, true],
       newestFirst: true,
       added: 1,

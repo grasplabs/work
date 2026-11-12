@@ -47,7 +47,7 @@ describe("the admin's Platform page", () => {
     await db.delete(channels);
   });
 
-  it("shows the channels, and every company with the one whose deploy failed first", async () => {
+  it("shows the channels with every company under its own, and apart the one whose deploy failed", async () => {
     const older = await placedRelease("feat(core): the older");
     const newest = await placedRelease("feat(core): the newest");
     const first = await liveClient("Firstco", newest);
@@ -62,8 +62,9 @@ describe("the admin's Platform page", () => {
 
     const { status, html } = await page("/platform");
     const text = textOf(html);
-    // After the page's own line, which starts with the same words.
-    const companies = text.slice(text.lastIndexOf("Every company"));
+    const at = html.indexOf('aria-label="Needs a look"');
+    const needsALook =
+      at === -1 ? "" : textOf(html.slice(at, html.indexOf("</section>", at)));
 
     expect({
       status,
@@ -71,11 +72,12 @@ describe("the admin's Platform page", () => {
       stableWaits: text.includes(
         "No release yet. Promote a release to Stable first"
       ),
-      laggardFailed: companies.includes(`Its last deploy failed (${older}).`),
-      // The one that needs a look comes before the healthy ones.
-      laggardFirst:
-        companies.indexOf("Laggard") < companies.indexOf("Earlyco") &&
-        companies.indexOf("Laggard") < companies.indexOf("Firstco"),
+      laggardFailed: needsALook.includes(`Its last deploy failed (${older}).`),
+      // Only the one that needs a look is listed apart: the others stand under their channel.
+      onlyLaggard:
+        needsALook.includes("Laggard") &&
+        !needsALook.includes("Earlyco") &&
+        !needsALook.includes("Firstco"),
       opensSetup: html.includes(`href="/organizations/${first}/setup"`),
       // Its releases have a page of their own under it.
       releases: html.includes('href="/platform/releases"'),
@@ -84,7 +86,7 @@ describe("the admin's Platform page", () => {
       edge: true,
       stableWaits: true,
       laggardFailed: true,
-      laggardFirst: true,
+      onlyLaggard: true,
       opensSetup: true,
       releases: true,
     });
@@ -99,7 +101,7 @@ describe("the admin's Platform page", () => {
       .set({ status: "failed", error: "cloudflare_400_10000" })
       .where(eq(clientProvisions.clientId, failing));
 
-    const { html } = await page("/platform");
+    const { html } = await page("/platform/maintenance");
     const text = textOf(html);
 
     expect({

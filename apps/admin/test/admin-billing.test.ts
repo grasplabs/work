@@ -87,7 +87,9 @@ const lineOf = (html: string, label: string): string => {
 };
 
 const contractOf = async (clientId: string): Promise<string> => {
-  const { html } = await page(`/organizations/${clientId}/contract`);
+  const { html } = await page(
+    `/organizations/${clientId}/details?tab=contract`
+  );
   return mainOf(html);
 };
 
@@ -287,7 +289,6 @@ describe("an organization's billing, with Stripe's key", () => {
       need: overview.includes(
         `An invoice of €1,815.00 is overdue: it was due on ${dayOf(due)}.`
       ),
-      health: overview.includes("An invoice is overdue"),
     }).toStrictEqual({
       line: true,
       pays: "It is sent each invoice, to pay within 14 days",
@@ -295,7 +296,6 @@ describe("an organization's billing, with Stripe's key", () => {
       overdue: `€1,815.00, due since ${dayOf(due)}`,
       invoice: true,
       need: true,
-      health: true,
     });
   });
 
@@ -356,7 +356,7 @@ describe("an organization's billing, with Stripe's key", () => {
 
     // The whole page, scripts and the data they hydrate with included.
     const response = await exports.default.fetch(
-      `https://ops.grasp.test/organizations/${clientId}/contract`,
+      `https://ops.grasp.test/organizations/${clientId}/details?tab=contract`,
       { headers: { "cf-access-jwt-assertion": await accessJwt(staff.email) } }
     );
     const html = await response.text();

@@ -16,7 +16,13 @@ import {
   recallTimeoutReason,
   turnRecallMethod,
 } from "../src/turn-recall.ts";
-import { chatOf, says, setObjectEnv, toolResults } from "./agent-chat.ts";
+import {
+  chatOf,
+  model,
+  says,
+  setObjectEnv,
+  toolResults,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents, loggedEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -526,15 +532,16 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
     const fact = `Depot ${depot} opens at seven`;
     const chat = await recallingChat(says("I can't say."), says("Nor now."));
     await added(fact, owner(chat.personId));
-    /** What the model got, with the Brain's recall answering as `recall` does. */
+    /** What the model got, with the Brain's stores finding as `recall` does. */
     const askedWith = async (recall: Call) => {
       const before = chat.provider.requests.length;
       await withEnv(
         chat,
         {
+          // A person's own chat recalls from both stores (`find`).
           BRAIN_STORE: answering(
             env.BRAIN_STORE,
-            "recall",
+            "find",
             async () => await recall()
           ),
         },
@@ -685,6 +692,110 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
 });
 
 describe("what the recall before a question may reach", setUpTime, () => {
+  it("holds what only the person may read where the answer reaches them alone: their own chat in Grasp, in a turn they started", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const depot = word();
+    const ownMarker = word();
+    const teamMarker = word();
+    const teamId = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await db.insert(teams).values({
+      id: teamId,
+      name: `Team ${unique()}`,
+      organizationId,
+      createdAt: new Date(),
+    });
+    await db.insert(teamMembers).values({
+      id: crypto.randomUUID(),
+      teamId,
+      userId: person.userId,
+      createdAt: new Date(),
+    });
+    // The person's alone, in their own store; their team's, in the shared one.
+    await added(
+      `Depot ${depot} keeps the person's own note ${ownMarker}`,
+      owner(person.userId)
+    );
+    await added(`Depot ${depot} opens at ${teamMarker}`, {
+      kind: "team",
+      teamId,
+    });
+    const question = `What about depot ${depot}?`;
+    const granted = async (agentId: string) => {
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+    };
+    /** What the model was sent of each source, the turn asked through `ask`. */
+    const sent = async (
+      ask: (agentId: string) => Promise<unknown>,
+      agentId = crypto.randomUUID()
+    ) => {
+      await granted(agentId);
+      const provider = await fakeProvider(says("Noted."));
+      await ask(agentId);
+      const bodies = JSON.stringify(provider.requests.map(({ body }) => body));
+      return {
+        own: bodies.includes(ownMarker),
+        team: bodies.includes(teamMarker),
+      };
+    };
+    const through =
+      (platform: string, shared?: boolean) => async (agentId: string) =>
+        await workspace(env, personalWorkspaceId(person.userId)).askThrough(
+          person.userId,
+          agentId,
+          platform,
+          question,
+          undefined,
+          shared === true
+            ? {
+                thread: `C${unique()}`,
+                kind: "group",
+                audience: { members: [person.userId], outsiders: false },
+              }
+            : undefined
+        );
+
+    const ownChat = await recallingChatOf(person.userId, says("Noted."));
+    await ownChat.ask(question);
+    const web = JSON.stringify(
+      ownChat.provider.requests.map(({ body }) => body)
+    );
+    const woken = await recallingChatOf(person.userId, says("Noted."));
+    await woken.stub.askUnattended(woken.chat.id, { text: question, model });
+    const unattended = JSON.stringify(
+      woken.provider.requests.map(({ body }) => body)
+    );
+    const slack = await sent(through("slack"));
+    const teamsChat = await sent(through("teams"));
+    const thread = await sent(through("slack", true));
+
+    expect({
+      web: { own: web.includes(ownMarker), team: web.includes(teamMarker) },
+      unattended: {
+        own: unattended.includes(ownMarker),
+        team: unattended.includes(teamMarker),
+      },
+      slack,
+      teams: teamsChat,
+      thread,
+    }).toStrictEqual({
+      web: { own: true, team: true },
+      // Not started by them: their team's, never their own.
+      unattended: { own: false, team: true },
+      // Kept by the chat app too: their team's, never their own.
+      slack: { own: false, team: true },
+      teams: { own: false, team: true },
+      // Read by others too: nothing, not even their team's.
+      thread: { own: false, team: false },
+    });
+  });
+
   it("never hands the asker's own sources to a chat others read the answer of", async () => {
     const codeword = word();
     const marker = word();
@@ -799,7 +910,11 @@ describe("what the recall before a question may reach", setUpTime, () => {
     const kept = await recalled((personId) => owner(personId));
     const unchanged = await kept.next();
     const erased = await recalled((personId) => owner(personId));
-    await eraseSource(env, { source: erased.source, reason: "deleted" });
+    await eraseSource(env, {
+      source: erased.source,
+      readers: owner(erased.personId),
+      reason: "deleted",
+    });
     const afterErase = await erased.next();
     const revoked = await recalled((personId) => owner(personId));
     await revoked.revoke();

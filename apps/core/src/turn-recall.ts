@@ -153,6 +153,11 @@ interface Recalling {
    * answer must never hand over what only the asker may read.
    */
   conversation: "own" | "shared";
+  /**
+   * Whether the recall may hold what only the asker may read, from their
+   * own store: only where the answer reaches them alone (`TurnRequest`).
+   */
+  personal: boolean;
   /** The chat's messages before the question, as its model reads them. */
   history: readonly Message[];
   /** Everything the chat has read from: the analysis call's provenance. */
@@ -231,12 +236,13 @@ const recalled = async (
   question: string,
   analysed: Promise<string | null | undefined>
 ): Promise<RecalledPack> => {
-  const { env, turn } = recalling;
+  const { env, turn, personal } = recalling;
   const started = Date.now();
   const recall = async (query: string) =>
     await recallAs(env, turn.scope.personId, {
       question: query,
       budget: turnRecallBudget,
+      personal,
     });
   const first = await withinTime(
     async () => await recall(question),
@@ -313,11 +319,10 @@ export const recallForTurn = async (
   // Well-formed: half a pair, cut here or typed, is a string the Brain
   // refuses, and the recall would be lost for it.
   const query = question.trim().slice(0, queryMaxLength).toWellFormed();
-  // A shared conversation recalls nothing, and must keep recalling
-  // nothing once `recallAs` can leave a person's own store out (GRA-1762):
-  // `personal: false` still reads what the asker's teams may read, and the
-  // others in the conversation may not be in those teams. Only a recall as
-  // every reader at once could hand them anything.
+  // A shared conversation recalls nothing, not even without the asker's
+  // own store (`personal: false`): that still reads what the asker's teams
+  // may read, and the others in the conversation may not be in those
+  // teams. Only a recall as every reader at once could hand them anything.
   if (query === "" || recalling.conversation === "shared") {
     return undefined;
   }

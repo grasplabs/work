@@ -105,6 +105,7 @@ const sessionOf = (
     },
     question: { text, model: asked, files: [] },
     shared: false,
+    personal: true,
     readsBrain: false,
     context: { skills: [] },
     capture: { model: asked, audience: null },

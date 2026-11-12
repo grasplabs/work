@@ -30,6 +30,7 @@
 import {
   brainOf,
   currentReadMax,
+  handOversMax,
   instructionsMaxLength,
   listPageMax,
   listPrefixesMax,
@@ -50,6 +51,7 @@ import type {
   EmbedModel,
   ErasureReason,
   Embedders,
+  HandOvers,
   Reader,
   VectorModel,
   VectorsToPut,
@@ -74,10 +76,15 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import * as brainSkills from "../src/brain-skills.ts";
 import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
+import { producersOf } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
+import { shippedSkills } from "../src/shipped-skills.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
+import { noProducers } from "./no-producers.ts";
 
 /** The reader a probe calls as, and what they may not see. */
 export interface Probing {
@@ -89,6 +96,11 @@ export interface Probing {
    * brain-next.ts).
    */
   reader: Reader;
+  /**
+   * Whether core's recall reads the reader's own store too, as their own
+   * web chat does, or the shared store alone, as an App's does.
+   */
+  personal: boolean;
   /** A word in the reader's own source and in every marked one. */
   sharedWord: string;
   /**
@@ -751,6 +763,14 @@ const noEmbedders: Embedders = {
   },
 };
 
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 /**
  * The host's embedders, as a probe hands them: they run a model, and fail
  * every passage with the passages and the markers in their error, so
@@ -851,6 +871,20 @@ const pastAll = new Date(8.64e15);
 
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
+
+/**
+ * `personId`, once a first erasure of them settled and its time passed: a
+ * person's own store answers that it is still deleting until an add under
+ * way could have written its file, so each is compared after that, as if
+ * the time had passed.
+ */
+const erasedBefore = async (personId: string): Promise<string> => {
+  await Promise.allSettled([
+    coreBrain.erasePerson(env, { personId, reason: "withdrawn" }),
+  ]);
+  await ageOwnErasure(personId);
+  return personId;
+};
 
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
@@ -1125,7 +1159,7 @@ export const coreProbes = {
       ]),
     ];
   },
-  mergeRecalled: async ({ personId, markers, sharedWord }) => {
+  mergeRecalled: async ({ personId, personal, markers, sharedWord }) => {
     const whole = { tokens: recallBudgetMax };
     // The markers' pack joined by a pack of what the reader may read must
     // be their twins' pack joined by the same.
@@ -1133,10 +1167,12 @@ export const coreProbes = {
       const asked = await coreBrain.recallAs(env, personId, {
         question: words.join(" "),
         budget: whole,
+        personal,
       });
       const shared = await coreBrain.recallAs(env, personId, {
         question: sharedWord,
         budget: whole,
+        personal,
       });
       return coreBrain.mergeRecalled(asked, shared, whole);
     };
@@ -1151,7 +1187,10 @@ export const coreProbes = {
   },
   recallAs: async (probing) => {
     const recall = async (asking: PackAsk) =>
-      await coreBrain.recallAs(env, probing.personId, asking);
+      await coreBrain.recallAs(env, probing.personId, {
+        ...asking,
+        personal: probing.personal,
+      });
     const hidden = probing.markers.join(" ");
     const whole = { tokens: recallBudgetMax };
     return [
@@ -1190,6 +1229,7 @@ export const coreProbes = {
         "the markers, as someone who isn't a member",
         async () =>
           await coreBrain.recallAs(env, stranger(), {
+            personal: true,
             question: hidden,
             budget: whole,
           })
@@ -1301,7 +1341,7 @@ export const coreProbes = {
     const asked = await workMarked(
       markers,
       async (at) => {
-        await coreBrain.workBrain(env, at);
+        await coreBrain.workBrain(env, at, noProducers);
       },
       "a marked item worked through core's clock"
     );
@@ -1310,14 +1350,18 @@ export const coreProbes = {
       const answered = await answer(
         `a tick as of ${at.toISOString()}`,
         async () => {
-          await coreBrain.workBrain(env, at);
+          await coreBrain.workBrain(env, at, noProducers);
         }
       );
       asked.push(answered);
     }
     asked.push(
       await answer("a tick at no time", async () => {
-        await coreBrain.workBrain(env, unchecked(markers.join(" ")));
+        await coreBrain.workBrain(
+          env,
+          unchecked(markers.join(" ")),
+          noProducers
+        );
       })
     );
     return asked;
@@ -1327,6 +1371,9 @@ export const coreProbes = {
   // content of its own (someone else's), never the planted sources later
   // passes read.
   eraseSource: async ({ markers }) => {
+    // Someone else's own, in their own store: a source no one added is
+    // asked of in the same store.
+    const readers: SourceReaders = { kind: "owner", personId: stranger() };
     const erase = async (
       name: string,
       source: SourceRef,
@@ -1336,7 +1383,7 @@ export const coreProbes = {
       await answer(
         name,
         async () => {
-          await coreBrain.eraseSource(env, { source, reason });
+          await coreBrain.eraseSource(env, { source, readers, reason });
         },
         about
       );
@@ -1345,7 +1392,7 @@ export const coreProbes = {
       source: marked,
       change: crypto.randomUUID(),
       text: markedText(markers),
-      readers: { kind: "owner", personId: stranger() },
+      readers,
     });
     return [
       await erase(
@@ -1369,6 +1416,13 @@ export const coreProbes = {
         missingSource(),
         unchecked(markers.join(" "))
       ),
+      await answer("readers named by the markers", async () => {
+        await coreBrain.eraseSource(env, {
+          source: missingSource(),
+          readers: unchecked({ kind: "owner", personId: markers.join("\n") }),
+          reason: "deleted",
+        });
+      }),
     ];
   },
   erasePerson: async ({ markers }) => {
@@ -1393,8 +1447,18 @@ export const coreProbes = {
       readers: { kind: "owner", personId: holder },
     });
     return [
-      await erase("someone with nothing", stranger(), "withdrawn", "nothing"),
-      await erase("someone with marked sources", holder, "withdrawn", "hidden"),
+      await erase(
+        "someone with nothing",
+        await erasedBefore(stranger()),
+        "withdrawn",
+        "nothing"
+      ),
+      await erase(
+        "someone with marked sources",
+        await erasedBefore(holder),
+        "withdrawn",
+        "hidden"
+      ),
       await erase("the same erasure again", holder, "withdrawn", "hidden"),
       await erase("no person", ""),
       await erase(
@@ -1408,11 +1472,50 @@ export const coreProbes = {
       ),
     ];
   },
+  // Queuing hand-overs has no reader: whatever it is handed, it answers
+  // alike and says nothing of what it queues. What it puts on the queue
+  // is worked by the next tick, which reads core's records for it.
+  queueHandOvers: async ({ markers }) => {
+    const queue = async (
+      name: string,
+      sources: readonly SourceRef[],
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.queueHandOvers(env, sources);
+        },
+        about
+      );
+    return [
+      await queue("a run that never ran", [missingSource()], "nothing"),
+      await queue(
+        "a run named by the markers",
+        [{ producer: "run", id: markers.join("-") }],
+        "hidden"
+      ),
+      await queue("a run named by the markers and a control character", [
+        { producer: "run", id: `${markers.join("-")}\u0007` },
+      ]),
+      await queue("a source of a kind no one produces", [
+        unchecked({ producer: markers.join(""), id: "x" }),
+      ]),
+      await answer("a tick handing them over", async () => {
+        await coreBrain.workBrain(env, nextDay(), producersOf(env));
+      }),
+    ];
+  },
   brainWorkOverview: async ({ markers }) => [
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, noEmbedders);
+        await store().work({
+          ask: quietModel,
+          at,
+          embedders: noEmbedders,
+          handOvers: noHandOvers,
+        });
       },
       "a marked item worked to parking"
     )),
@@ -1460,11 +1563,118 @@ export const coreProbes = {
       markers,
       async (at) => {
         await coreBrain.actOnBrainForStaff(env, { type: "reembed" });
-        await coreBrain.workBrain(env, at);
+        await coreBrain.workBrain(env, at, noProducers);
       },
       "a marked item worked through core's clock after a re-embed"
     )),
   ],
+  // Adds Grasp's own skills only, by the names the release ships, a
+  // skill every member may read: the release's own text, which holds no
+  // marker, then refusals each holding the markers. A skill added with
+  // them would be the company's to read.
+  addShippedSkill: async ({ markers }) => {
+    const text = markedText(markers);
+    const add = async (name: string, added: unknown) =>
+      await answer(
+        name,
+        async () => await coreBrain.addShippedSkill(env, unchecked(added))
+      );
+    const drawing = shippedSkills.find(
+      ({ name }) => name === "draw-a-workflow"
+    );
+    const named = (name: string) =>
+      `---\nname: ${name}\ndescription: ${text}\n---\n${text}`;
+    return [
+      await add("the release's own", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text: drawing?.text,
+      }),
+      await add("text with no card", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text,
+      }),
+      await add("a card of another name", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text: named("run-a-baseline"),
+      }),
+      await add("a name the release doesn't ship", {
+        name: "unwritten",
+        change: crypto.randomUUID(),
+        text: named("unwritten"),
+      }),
+      await add("too much text", {
+        name: "draw-a-workflow",
+        change: crypto.randomUUID(),
+        text: named("draw-a-workflow").padEnd(instructionsMaxLength + 1, " x"),
+      }),
+      await add("a name of the markers", {
+        name: markers.join("\n"),
+        change: crypto.randomUUID(),
+        text: named("draw-a-workflow"),
+      }),
+      await add("a scope named by the markers", {
+        name: "draw-a-workflow",
+        scope: markers.join(""),
+        change: crypto.randomUUID(),
+        text: named("draw-a-workflow"),
+      }),
+    ];
+  },
+  listSkillsAs: async ({ personId }) => [
+    await answer(
+      "the reader's skills",
+      async () =>
+        await coreBrain.listSkillsAs(
+          env,
+          personId,
+          new Set(["draw-a-workflow"])
+        )
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await coreBrain.listSkillsAs(env, stranger(), new Set<string>())
+    ),
+  ],
+  // A skill is read by its own key alone: no producer's source is under
+  // the skills' kind, so no hidden source can be named as one.
+  readSkillAs: async ({ personId, markers }) => {
+    const read = async (name: string, wanted: unknown) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.readSkillAs(env, personId, unchecked(wanted))
+      );
+    return [
+      await read("a skill never written", {
+        scope: "company",
+        name: "unwritten",
+        version: 1,
+      }),
+      await read("a name of the markers", {
+        scope: "grasp",
+        name: markers.join(" "),
+        version: 1,
+      }),
+      await read("a producer's kind as its scope", {
+        scope: "upload",
+        name: "unwritten",
+        version: 1,
+      }),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await coreBrain.readSkillAs(env, stranger(), {
+            scope: "grasp",
+            name: "draw-a-workflow",
+            version: 1,
+          })
+      ),
+    ];
+  },
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */
@@ -1765,20 +1975,155 @@ export const instructionProbes = {
   },
 } satisfies Record<InstructionMember, Probe>;
 
+/** Each export of core's brain-skills.ts. */
+type SkillMember = keyof typeof brainSkills;
+
+/** One probe per export of core's brain-skills.ts. */
+export const skillProbes = {
+  // The release's own, then skills holding the markers that aren't one:
+  // each refused, logged by its place alone.
+  installShippedSkills: async ({ markers }) => {
+    const text = markedText(markers);
+    return [
+      await answer(
+        "the release's skills",
+        async () => await brainSkills.installShippedSkills(env)
+      ),
+      await answer(
+        "marked skills that aren't one",
+        async () =>
+          await brainSkills.installShippedSkills(env, [
+            { name: "unwritten", text },
+            { name: markers.join("-"), text },
+          ])
+      ),
+    ];
+  },
+  skillsFor: async ({ personId }) => [
+    await answer(
+      "the reader's agent",
+      async () => await brainSkills.skillsFor(env, readersAgent(personId))
+    ),
+    await answer(
+      "an agent of someone who isn't a member",
+      async () => await brainSkills.skillsFor(env, readersAgent(stranger()))
+    ),
+    await answer(
+      "no authority",
+      async () =>
+        await brainSkills.skillsFor(env, unchecked({ onBehalfOf: personId }))
+    ),
+  ],
+  // A task of the markers finds what one of their twins does: nothing.
+  selectSkillsFor: async ({ personId, markers, sharedWord }) => {
+    const select = async (
+      name: string,
+      task: unknown,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await brainSkills.selectSkillsFor(env, readersAgent(personId), task),
+        about,
+        like
+      );
+    return [
+      await select(
+        "the markers",
+        { task: markers.join(" ") },
+        "hidden",
+        "the markers"
+      ),
+      await select(
+        "the markers",
+        { task: markers.map(twinOf).join(" ") },
+        "nothing",
+        "the markers"
+      ),
+      await select(
+        "beside the shared word",
+        { task: `${sharedWord} ${markers.join(" ")}` },
+        "hidden",
+        "beside the shared word"
+      ),
+      await select(
+        "beside the shared word",
+        { task: `${sharedWord} ${markers.map(twinOf).join(" ")}` },
+        "nothing",
+        "beside the shared word"
+      ),
+      await select("a workflow, beside the markers", {
+        task: `draw a workflow ${markers.join(" ")}`,
+      }),
+      await select("not a task", { task: markers }),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await brainSkills.selectSkillsFor(env, readersAgent(stranger()), {
+            task: markers.join(" "),
+          })
+      ),
+    ];
+  },
+  readSkillFor: async ({ personId, markers }) => {
+    const read = async (name: string, skill: unknown) =>
+      await answer(
+        name,
+        async () =>
+          await brainSkills.readSkillFor(env, readersAgent(personId), { skill })
+      );
+    await brainSkills.installShippedSkills(env);
+    const [shipped] = await brainSkills.skillsFor(env, readersAgent(personId));
+    return [
+      await read("a skill the release ships", shipped),
+      await read("a skill never written", {
+        scope: "company",
+        name: "unwritten",
+        version: 1,
+      }),
+      await read("a name of the markers", {
+        scope: "company",
+        name: markers.join("-"),
+        version: 1,
+      }),
+      await read("a Grasp skill this release doesn't ship", {
+        scope: "grasp",
+        name: "unwritten",
+        version: 1,
+      }),
+      await read("a version past any", {
+        scope: "grasp",
+        name: "draw-a-workflow",
+        version: 1_000_000,
+      }),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await brainSkills.readSkillFor(env, readersAgent(stranger()), {
+            skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+          })
+      ),
+    ];
+  },
+} satisfies Record<SkillMember, Probe>;
+
+/** What no caller reaches over RPC: the runtime's own handlers, such as the alarm. */
+type Handler = keyof Rpc.DurableObjectBranded | "alarm";
+
 /**
  * Each public method of the Brain's store: what it defines, not the
- * handlers its base class only declares. The store implements `Brain`,
- * so the contract's members are among them.
+ * handlers its base class declares, which the runtime alone calls. The
+ * store implements `Brain`, so the contract's members are among them.
  */
 type StoreMember = {
-  [
-    Key in Exclude<keyof BrainStore, keyof Rpc.DurableObjectBranded>
-  ]-?: Key extends string
+  [Key in Exclude<keyof BrainStore, Handler>]-?: Key extends string
     ? Record<never, never> extends Pick<BrainStore, Key>
       ? never
       : Key
     : never;
-}[Exclude<keyof BrainStore, keyof Rpc.DurableObjectBranded>];
+}[Exclude<keyof BrainStore, Handler>];
 
 /** Dimensions of the vectors the vector probes put: few, so they're cheap. */
 const vectorDimensions = 64;
@@ -1928,7 +2273,12 @@ const queuedVectors = async ({
     const answered = await answer(
       `a tick embedding, ${round + 1}`,
       async () => {
-        await store().work(quietModel, nextDay(), embedders);
+        await store().work({
+          ask: quietModel,
+          at: nextDay(),
+          embedders,
+          handOvers: noHandOvers,
+        });
       }
     );
     ticked.push(answered);
@@ -2335,6 +2685,24 @@ export const storeProbes = {
           await store().readableVersions(
             unchecked({ versions: [], reader, extra: markers.join(" ") })
           )
+      ),
+    ];
+  },
+  // What recall finds before it is packed: the same questions, answered
+  // as lists with their order keys, must hold no marker either.
+  find: async (probing) => {
+    const find = async (asking: PackAsk) =>
+      await store().find({ ...asking, reader: probing.reader });
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), find)),
+      await answer(
+        "the shared word",
+        async () => await find({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "nothing",
+        async () => await find({ question: "", budget: whole })
       ),
     ];
   },
@@ -2770,6 +3138,25 @@ export const storeProbes = {
       ),
     ];
   },
+  // Whether the store holds a key, for core alone, whoever reads it: yes
+  // or no, and nothing of the key or what it holds.
+  keyState: async ({ markers, hiddenVersions }) => {
+    const holds = async (name: string, source: unknown) =>
+      await answer(name, async () => await store().keyState(unchecked(source)));
+    return [
+      await holds("a source no one added", keyOf(missingSource())),
+      await holds(
+        "a hidden source",
+        keyOf(hiddenVersions[0]?.source ?? missingSource())
+      ),
+      await holds("a key named by the markers", `upload:${markers.join(" ")}`),
+      await holds(
+        "a key of the markers and control characters",
+        `${markers.join("\n")}\u0000`
+      ),
+      await holds("no key", ""),
+    ];
+  },
   listSources: async ({ reader, hiddenVersions, markers }) => {
     const list = async (
       name: string,
@@ -2972,7 +3359,12 @@ export const storeProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, noEmbedders);
+        await store().work({
+          ask: quietModel,
+          at,
+          embedders: noEmbedders,
+          handOvers: noHandOvers,
+        });
       },
       "a marked item worked by the store"
     )),
@@ -2980,21 +3372,32 @@ export const storeProbes = {
       sweepTimes().map(
         async (at) =>
           await answer(`a tick as of ${at.toISOString()}`, async () => {
-            await store().work(quietModel, at, noEmbedders);
+            await store().work({
+              ask: quietModel,
+              at,
+              embedders: noEmbedders,
+              handOvers: noHandOvers,
+            });
           })
       )
     )),
     // One tick with embedders that fail with the passages and the markers
     // in their error: what embedding's items do with a failure.
     await answer("a tick whose embedders fail", async () => {
-      await store().work(quietModel, nextDay(), leakyEmbedders(markers));
+      await store().work({
+        ask: quietModel,
+        at: nextDay(),
+        embedders: leakyEmbedders(markers),
+        handOvers: noHandOvers,
+      });
     }),
     await answer("a tick at no time", async () => {
-      await store().work(
-        quietModel,
-        unchecked(markers.join(" ")),
-        leakyEmbedders(markers)
-      );
+      await store().work({
+        ask: quietModel,
+        at: unchecked(markers.join(" ")),
+        embedders: leakyEmbedders(markers),
+        handOvers: noHandOvers,
+      });
     }),
   ],
   // As core's (above), through the contract itself.
@@ -3046,6 +3449,72 @@ export const storeProbes = {
         source: keyOf(missingSource()),
         reason: "deleted",
         extra: markers.join(" "),
+      }),
+    ];
+  },
+  // Putting sources on the queue has no reader either: it answers alike
+  // whatever was added, and a tick asks the host for each.
+  handOver: async ({ markers }) => {
+    const over = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await store().handOver(unchecked(request));
+        },
+        about
+      );
+    const marked = keyOf(missingSource());
+    await store().addSource({
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      access: { kind: "owner", person: stranger() },
+    });
+    return [
+      await over(
+        "a source no one added",
+        {
+          items: [{ source: keyOf(missingSource()), priority: "conversation" }],
+        },
+        "nothing"
+      ),
+      await over(
+        "someone else's marked source",
+        { items: [{ source: marked, priority: "conversation" }] },
+        "hidden"
+      ),
+      await over("a source named by the markers, too long", {
+        items: [
+          { source: markers.join("").repeat(300), priority: "conversation" },
+        ],
+      }),
+      await over("a class named by the markers", {
+        items: [
+          { source: keyOf(missingSource()), priority: markers.join(" ") },
+        ],
+      }),
+      await over("more sources than one call takes", {
+        items: Array.from({ length: handOversMax + 1 }, () => ({
+          source: keyOf(missingSource()),
+          priority: "conversation",
+        })),
+      }),
+      await answer("a tick whose host fails with the markers", async () => {
+        await store().work({
+          ask: quietModel,
+          at: nextDay(),
+          embedders: noEmbedders,
+          handOvers: {
+            handOver: async () => {
+              await Promise.resolve();
+              throw new Error(`Could not hand over ${markers.join(" ")}`);
+            },
+          },
+        });
       }),
     ];
   },
@@ -3105,13 +3574,23 @@ export const storeProbes = {
     // What a re-embed puts back, worked by embedders that fail with the
     // passages and the markers in their error.
     await answer("a tick after a re-embed", async () => {
-      await store().work(quietModel, nextDay(), leakyEmbedders(markers));
+      await store().work({
+        ask: quietModel,
+        at: nextDay(),
+        embedders: leakyEmbedders(markers),
+        handOvers: noHandOvers,
+      });
     }),
     ...(await workMarked(
       markers,
       async (at) => {
         await store().reembed();
-        await store().work(quietModel, at, noEmbedders);
+        await store().work({
+          ask: quietModel,
+          at,
+          embedders: noEmbedders,
+          handOvers: noHandOvers,
+        });
       },
       "a marked item worked after a re-embed"
     )),
@@ -3120,7 +3599,12 @@ export const storeProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, noEmbedders);
+        await store().work({
+          ask: quietModel,
+          at,
+          embedders: noEmbedders,
+          handOvers: noHandOvers,
+        });
       },
       "a marked item worked to parking"
     )),
@@ -3331,6 +3815,7 @@ interface Surface {
 export const brainSurfaces = [
   { name: "core", module: coreBrain, probes: coreProbes },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
+  { name: "skills", module: brainSkills, probes: skillProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
   { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
 ] as const satisfies readonly Surface[];
@@ -3357,5 +3842,7 @@ export const membersOf = (module: object): string[] => {
     }
   }
   names.delete("constructor");
+  // The runtime's own handler, which no caller reaches over RPC.
+  names.delete("alarm");
   return [...names];
 };

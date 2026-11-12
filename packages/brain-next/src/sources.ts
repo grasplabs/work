@@ -2,7 +2,9 @@ import { log } from "@grasp-os/shared/log";
 import { and, eq, max } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
+import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
+import { erasedSource } from "./contract.ts";
 import type {
   CurrentRequest,
   NewSource,
@@ -66,7 +68,7 @@ import type { WordMemo } from "./words.ts";
 export interface SourcesStore {
   readonly storage: DurableObjectStorage;
   readonly db: DrizzleSqliteDODatabase;
-  readonly bucket: R2Bucket;
+  readonly bucket: BrainBucket;
 }
 
 const encoder = new TextEncoder();
@@ -92,13 +94,6 @@ interface Adding {
   /** Its chunks when it is indexed, each with its text's SHA-256: none when not. */
   readonly chunks: readonly { text: string; hash: string }[];
 }
-
-/**
- * What an add says that an erasure closed: to an erased source, whose key
- * is closed for good, or for a person alone that began before that
- * person's erasure (erasure.ts). Said only to the producer that adds it.
- */
-const erasedSource = "The Brain refused it: what this adds was erased";
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
 const versionFields = {
@@ -350,7 +345,7 @@ export const addVersion = async (
  * missing, never failing a read of others.
  */
 const textOf = async (
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   file: string
 ): Promise<string | null> => {
   const object = await bucket.get(fileKeyOf(file));

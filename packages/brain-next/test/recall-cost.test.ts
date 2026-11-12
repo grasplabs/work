@@ -4,7 +4,7 @@ import type {
   Reader,
   VectorModel,
 } from "@grasp-os/brain-next/contract";
-import { runInDurableObject } from "cloudflare:test";
+import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -47,9 +47,10 @@ interface Counter {
 /** The counters of the stores of this file, by their object's id. */
 const counters = new Map<string, Counter>();
 
-/** A store of its own, its SQL's reads counted. */
+/** The shared store, from empty storage, its SQL's reads counted. */
 const countedStore = async () => {
-  const stub = env.BRAIN_STORE.getByName(crypto.randomUUID());
+  await reset();
+  const stub = env.BRAIN_STORE.getByName("brain");
   // The store woken and its SQL wrapped once: every cursor its statements
   // open is kept, and their rows read summed when asked. The test runs in
   // the store's own isolate, so the counter is reached here.

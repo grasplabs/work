@@ -1,7 +1,7 @@
 // Embedding through the work queue (src/embedding.ts), driven as core's
 // clock drives the store (`work`, a tick at the clock's time), with the
 // embed package's bulk embedders running its tiny test models as the
-// host's embedders: each test in a store of its own. What a reader finds
+// host's embedders: each test in the shared store, from empty storage. What a reader finds
 // by meaning is asked through the store's vector search, with the
 // question embedded by the same model.
 import type {
@@ -10,12 +10,13 @@ import type {
   EmbedModel,
   Embedders,
   EmbeddingOverview,
+  HandOvers,
 } from "@grasp-os/brain-next/contract";
 import { questionEmbedder } from "@grasp-os/embed/embedder";
 import type { Embedder } from "@grasp-os/embed/embedder";
 import { modelIdentity } from "@grasp-os/embed/model-files";
 import { bulkEmbedders, embedWithPool } from "@grasp-os/embed/pool";
-import { runInDurableObject } from "cloudflare:test";
+import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
   beforeAll,
@@ -46,13 +47,20 @@ import {
 } from "../src/files.ts";
 import { workAttemptsMax } from "../src/work.ts";
 
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 /** The test models' identities, as their embedders give them. */
 let int8: EmbedModel;
 let float: EmbedModel;
 
 /** This test's store: one of its own, so its counts are its own. */
-let storeName = "";
-const store = () => env.BRAIN_STORE.getByName(storeName);
+const store = () => env.BRAIN_STORE.getByName("brain");
 
 /** Every passage the host's embedders were asked to embed, in this test. */
 const asked: string[] = [];
@@ -96,7 +104,12 @@ const embeddersOf = (
 const clock = { at: Date.now() };
 const tick = async (embedders: Embedders, aheadMs = 0): Promise<void> => {
   clock.at = Math.max(clock.at, Date.now()) + aheadMs;
-  await store().work(quietAsk, new Date(clock.at), embedders);
+  await store().work({
+    ask: quietAsk,
+    at: new Date(clock.at),
+    embedders,
+    handOvers: noHandOvers,
+  });
 };
 
 /** A paragraph of its own, about 800 characters: one chunk. */
@@ -330,18 +343,20 @@ const tickNoting = async (embedders: Embedders): Promise<string> => {
 
 describe("embedding through the queue", () => {
   beforeAll(async () => {
-    await Promise.all([
-      putTestModel(env.MODEL_FILES, int8Model),
-      putTestModel(env.MODEL_FILES, floatModel),
-    ]);
     [int8, float] = await Promise.all([
       modelIdentity(int8Model),
       modelIdentity(floatModel),
     ]);
   });
 
+  // Each test from empty storage: the shared store, the bucket and the
+  // embedders' model files.
   beforeEach(async () => {
-    storeName = crypto.randomUUID();
+    await reset();
+    await Promise.all([
+      putTestModel(env.MODEL_FILES, int8Model),
+      putTestModel(env.MODEL_FILES, floatModel),
+    ]);
     asked.length = 0;
     await breakBulk(null);
   });
