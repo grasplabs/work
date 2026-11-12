@@ -1,6 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { forgetFor, rememberFor } from "../src/brain-memories.ts";
 import type { MemoryCaller } from "../src/brain-memories.ts";
@@ -36,7 +36,7 @@ const foundBy = async (personId: string, name: string) => {
     personalBrainOf(ns, personId).findEntities({ reader, name }),
     brainOf(ns).findEntities({ reader, name }),
   ]);
-  return [...own, ...shared].map(({ id }) => id);
+  return [...own.entities, ...shared.entities].map(({ id }) => id);
 };
 
 /** The current memories about `entity` in `personId`'s own store. */
@@ -53,6 +53,10 @@ const currentOf = async (personId: string, entity: string) => {
   }));
 };
 
+/** Of current memories, only which and what value. */
+const values = (current: Awaited<ReturnType<typeof currentOf>>) =>
+  current.map(({ id, value }) => ({ id, value }));
+
 /** A customer's status, in the person's own words. */
 const status = (name: string, value: string) => ({
   change: crypto.randomUUID(),
@@ -63,6 +67,17 @@ const status = (name: string, value: string) => ({
   statement: `${name} is ${value}`,
   quote: `${name} is ${value}`,
 });
+
+/** Where an audit event of a save and its undo stands: each attempt before its outcome. */
+const orderOf = ({
+  action,
+  detail,
+}: {
+  action: string;
+  detail?: Record<string, unknown>;
+}): number =>
+  (action === "brain.memory.remembered" ? 0 : 2) +
+  (detail?.outcome === "attempted" ? 0 : 1);
 
 /** The person themselves, as a caller of brain-memories.ts. */
 const themselves = (personId: string): MemoryCaller => ({
@@ -150,6 +165,27 @@ describe("a person's memories", () => {
     });
   });
 
+  it("brings their earlier word back when they undo the word that replaced it", async () => {
+    const anna = await person();
+    const name = `Acme ${unique()}`;
+    const earlier = await rememberAs(env, anna, status(name, "Renewing"));
+    const later = await rememberAs(env, anna, {
+      ...status(name, "Churned"),
+      about: { id: earlier.entity, kind: "customer" },
+    });
+    const replaced = await currentOf(anna, earlier.entity);
+    const undone = await forgetAs(env, anna, later.memory);
+    expect({
+      replaced: values(replaced),
+      undone,
+      after: values(await currentOf(anna, earlier.entity)),
+    }).toStrictEqual({
+      replaced: [{ id: later.memory, value: "Churned" }],
+      undone: "done",
+      after: [{ id: earlier.memory, value: "Renewing" }],
+    });
+  });
+
   it("refuses someone who is no longer a member", async () => {
     await expect(
       rememberAs(env, `gone-${crypto.randomUUID()}`, status("Acme", "Renewing"))
@@ -165,9 +201,19 @@ describe("a person's memories, for a caller", () => {
     const remembered = status(name, "Renewing");
     const saved = await rememberFor(env, caller, remembered);
     await forgetFor(env, caller, saved.memory);
-    const events = await eventsOf(caller.actor);
+    // The outcomes come through core's outbox, after their attempts.
+    const events = await vi.waitFor(
+      async () => {
+        const kept = await eventsOf(caller.actor);
+        expect(kept).toHaveLength(4);
+        return kept;
+      },
+      { timeout: 10_000 }
+    );
     expect({
-      events: events.map(({ action, detail }) => ({ action, detail })),
+      events: events
+        .toSorted((a, b) => orderOf(a) - orderOf(b))
+        .map(({ action, detail }) => ({ action, detail })),
       named: JSON.stringify(events).includes("Secretname"),
     }).toStrictEqual({
       events: [

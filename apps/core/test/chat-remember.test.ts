@@ -63,7 +63,7 @@ const keptFor = async (personId: string, name?: string) => {
       : { reader, name }
   );
   return await Promise.all(
-    found.map(async ({ id }) => {
+    found.entities.map(async ({ id }) => {
       const { memories } = await store.readMemories({ entity: id, reader });
       return memories.map(({ statement }) => statement);
     })

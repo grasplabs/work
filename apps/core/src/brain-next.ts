@@ -1228,7 +1228,6 @@ export const forgetAs = async (
   const reader = await readerOf(env, personId);
   return await personsOwn(env, reader.person).retireMemory({
     memory: id,
-    writer: reader.person,
     reader,
   });
 };
