@@ -7,7 +7,9 @@ import { chunksOf } from "./chunks.ts";
 import {
   changeKeySchema,
   newSourceSchema,
+  refusalPrefix,
   sourceIdSchema,
+  storeBytesMax,
 } from "./contract.ts";
 import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
@@ -17,6 +19,8 @@ import {
   exportLineSchema,
   manifestFile,
   manifestSchema,
+  recordRestoredExport,
+  settleRestoredExport,
 } from "./exports.ts";
 import type { ExportLine, Manifest } from "./exports.ts";
 import {
@@ -34,39 +38,54 @@ import { WorkError, defineWork, enqueueWork } from "./work.ts";
 import type { WorkContext } from "./work.ts";
 
 // A restore: a company export (exports.ts), read back from the bucket into
-// a shared store that holds no version, a part a run of the queue, so it
-// goes on across restarts.
+// a shared store that holds no version, by the work queue a part a run, so
+// it goes on across restarts. In two passes:
 //
-// - Checked first: the manifest as written, each part's SHA-256 and count
-//   against it before anything of the part is written, and each line by
-//   the contract's own rules for a source, its text and its readers. A
-//   part that fails any of these fails the restore, writing nothing of it.
-// - Every version comes back as it was: its number, when it was added,
-//   its readers, its change keys, whether it was current, indexed as it
-//   was (an instruction file isn't).
-// - The erasure ledger, applied as it is written: each version is left
-//   out when the store's record of erasures names it (its source erased,
-//   so its key is closed; or this version, named by a person's erasure),
-//   asked again in the transaction that writes it. That record is the
-//   whole ledger: the store answers nothing until it has read the ledger
-//   through (store.ts), and an erasure that lands during the restore
-//   covers what was restored before it as it covers any content. So the
-//   ledger is replayed over all that comes back, and nothing erased does.
-// - A version already there is passed over, so a run repeated after a
-//   stop finds what the last one wrote and ends the same.
+// 1. Checking, before anything is written: each part's size, SHA-256 and
+//    count against the manifest, and each line by the contract's own rules
+//    for a source, its text and its readers, and by what a company export
+//    holds: readers a group names (never one person, never no one), no key
+//    of a skill, and an instruction file (`instructions:`, never indexed)
+//    only as itself, so a file can't make a document into one, nor one into
+//    a document. A part that fails any of these fails the restore, and
+//    nothing of the export is written.
+// 2. Writing: every version as it was (its number, when it was added, its
+//    readers, its change keys, whether it was current, indexed as it was).
+//
+// The erasure ledger is applied as each version is written: it is left out
+// when the store's record of erasures names it (its source erased, so its
+// key is closed; or this version, named by a person's erasure), asked again
+// in the transaction that writes it. That record is the whole ledger: the
+// store answers nothing until it has read the ledger through (store.ts),
+// and an erasure that lands during the restore covers what was restored
+// before it as it covers any content.
+//
+// While it runs, nothing is added to the store (restoring.ts): no add can
+// meet a version it brings back. It never moves a current pointer that is
+// there, and it counts only the versions it wrote. A version already there
+// (written by a run the store stopped part-way) is passed over, so a run
+// repeated finds what the last one wrote and ends the same, and a failed
+// restore can be started again. It fails rather than fill the store past
+// its quota (contract.ts `storeBytesMax`). Its export is recorded as one the
+// store has (exports.ts `recordRestoredExport`), so a later erasure deletes
+// its files; and when an erasure the store holds came after the export
+// started, its files are deleted as the restore ends.
 
-/** What a restore refuses to start, and why. */
+/** What a restore refuses to start, and why: each a refusal (contract.ts `refusalPrefix`). */
 const refusals = {
-  notEmpty:
-    "The Brain refused it: a restore goes only into a store that holds nothing",
-  running: "The Brain refused it: a restore is under way",
-  notFound: "The Brain refused it: no whole company export has that id",
+  notEmpty: `${refusalPrefix} a restore goes only into a store that holds nothing`,
+  running: `${refusalPrefix} a restore is under way`,
+  notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
 } as const;
+
+/** Room a part's versions leave in the store, at least, for what it writes beside their text. */
+const quotaFactor = 4;
 
 /** A restore's row, as the store keeps it. */
 interface RestoreRow extends Record<string, SqlStorageValue> {
   export: string;
   manifest: string;
+  checked: number;
   part: number;
   restored: number;
   state: RestoreStatus["state"];
@@ -93,13 +112,20 @@ export const restoreStatus = (
   return row === undefined ? null : statusOf(row);
 };
 
-/** Whether the store holds any version, or a restore is under way: refusals.*. */
-const refusalOf = (sql: SqlStorage): string | undefined => {
+/**
+ * Why a restore of `id` may not start now, if it may not: one is under
+ * way, or the store holds a version (but for a failed restore of `id`
+ * started again, which finds what it wrote).
+ */
+const refusalOf = (sql: SqlStorage, id: string): string | undefined => {
   if (
     sql.exec("SELECT 1 FROM restores WHERE state = 'running' LIMIT 1").toArray()
       .length > 0
   ) {
     return refusals.running;
+  }
+  if (rowOf(sql, id)?.state === "failed") {
+    return undefined;
   }
   return sql.exec("SELECT 1 FROM source_versions LIMIT 1").toArray().length > 0
     ? refusals.notEmpty
@@ -131,10 +157,11 @@ const unrestorable = (sql: SqlStorage, id: string): boolean => {
 /** The key of the restore of `id` on the queue. */
 const keyOf = (id: string): string => `restore:${id}`;
 
-/** `id`'s manifest from the bucket, if it is a whole company export's. */
+/** `id`'s manifest from the bucket, if it is a whole company export of `deployment`. */
 const manifestOf = async (
   bucket: BrainBucket,
-  id: string
+  id: string,
+  deployment: string
 ): Promise<Manifest | undefined> => {
   const object = await bucket.get(exportKeyOf(id, manifestFile));
   if (object === null) {
@@ -149,12 +176,16 @@ const manifestOf = async (
   const manifest = manifestSchema.safeParse(parsed);
   return manifest.success &&
     manifest.data.id === id &&
-    manifest.data.scope === "company"
+    manifest.data.scope === "company" &&
+    manifest.data.deployment === deployment
     ? manifest.data
     : undefined;
 };
 
-/** A line of a part, by the contract's own rules for what an add takes. */
+/**
+ * A line of a part: by the contract's own rules for what an add takes, and
+ * by what a company export holds (above).
+ */
 const lineSchema = exportLineSchema.superRefine((line, context) => {
   const asAdd = newSourceSchema.safeParse({
     source: line.source,
@@ -165,17 +196,30 @@ const lineSchema = exportLineSchema.superRefine((line, context) => {
   if (
     !asAdd.success ||
     !sourceIdSchema.safeParse(line.source).success ||
-    !z.array(changeKeySchema).safeParse(line.changes).success
+    !z.array(changeKeySchema).safeParse(line.changes).success ||
+    line.access.kind !== "audience" ||
+    line.source.startsWith("skill:") ||
+    line.source.startsWith("instructions:") === line.indexed
   ) {
     context.addIssue({ code: "custom", message: "Not a version to restore" });
   }
 });
 
-/** The lines of part `body`, if it is the part the manifest names, whole. */
-const linesOf = async (
-  body: ArrayBuffer,
+/**
+ * The lines of part `part` read from the bucket, if it is the part the
+ * manifest names, whole: its size first, from the bucket's own record,
+ * before its body is read; then its SHA-256, count and every line.
+ */
+const partLinesOf = async (
+  bucket: BrainBucket,
+  id: string,
   part: Manifest["parts"][number]
 ): Promise<ExportLine[] | undefined> => {
+  const object = await bucket.get(exportKeyOf(id, part.file));
+  if (object === null || object.size !== part.bytes) {
+    return undefined;
+  }
+  const body = await object.arrayBuffer();
   if ((await hashOf(new Uint8Array(body))) !== part.sha256) {
     return undefined;
   }
@@ -202,46 +246,36 @@ const linesOf = async (
 };
 
 /**
- * Why `line` is not to be written, if it isn't: the store's record of the
- * ledger names it (above), or it is there already (restored by a run
- * before this one, stopped part-way). Asked again in the transaction that
- * writes it.
+ * Whether `line` is to be left out: the store's record of the ledger names
+ * it (above), or it is there already (written by a run before this one,
+ * stopped part-way). Asked again in the transaction that writes it.
  */
 const passedOver = (
   sql: SqlStorage,
   line: ExportLine,
   subject: string
-): "erased" | "there" | undefined => {
-  if (
-    isErased(sql, subject) ||
-    sql
-      .exec(
-        "SELECT 1 FROM erased_versions WHERE subject = ? AND version = ? LIMIT 1",
-        subject,
-        line.version
-      )
-      .toArray().length > 0
-  ) {
-    return "erased";
-  }
-  return sql
+): boolean =>
+  isErased(sql, subject) ||
+  sql
     .exec(
-      "SELECT 1 FROM source_versions WHERE source = ? AND version = ? LIMIT 1",
+      `SELECT 1 FROM erased_versions WHERE subject = ? AND version = ?
+      UNION ALL
+      SELECT 1 FROM source_versions WHERE source = ? AND version = ?
+      LIMIT 1`,
+      subject,
+      line.version,
       line.source,
       line.version
     )
-    .toArray().length > 0
-    ? "there"
-    : undefined;
-};
+    .toArray().length > 0;
 
 /** What a restore of a version that must be made again says. */
 const restoreAgain = "The restore lost a file while writing it: run it again";
 
 /**
  * Writes `line` back as the version it was (above): its file first, then
- * the version whole, in one transaction, unless it is passed over.
- * Answers whether it is restored now: written, or there already.
+ * the version whole, in one transaction, unless it is passed over. Answers
+ * whether it wrote it.
  */
 const restoreVersion = async (
   storage: DurableObjectStorage,
@@ -251,9 +285,8 @@ const restoreVersion = async (
 ): Promise<boolean> => {
   const encoder = new TextEncoder();
   const subject = await subjectOf(line.source);
-  const before = passedOver(storage.sql, line, subject);
-  if (before !== undefined) {
-    return before === "there";
+  if (passedOver(storage.sql, line, subject)) {
+    return false;
   }
   const body = encoder.encode(line.text);
   const hash = await hashOf(body);
@@ -275,9 +308,8 @@ const restoreVersion = async (
   }
   return storage.transactionSync(() => {
     const { sql } = storage;
-    const now = passedOver(sql, line, subject);
-    if (now !== undefined) {
-      return now === "there";
+    if (passedOver(sql, line, subject)) {
+      return false;
     }
     if (isInDoubt(db, hash)) {
       throw new WorkError("failed");
@@ -322,59 +354,96 @@ const restoreVersion = async (
       );
     }
     keepSubject(sql, line.source, subject);
-    if (line.current) {
-      sql.exec(
-        `INSERT INTO current_versions (source, version_row) VALUES (?, ?)
-        ON CONFLICT (source) DO UPDATE SET version_row = excluded.version_row`,
-        line.source,
-        row
-      );
-      if (chunks.length > 0) {
-        enqueueEmbedding(storage, line.source, line.version);
-      }
+    // Never moves a pointer that is there.
+    const pointed =
+      line.current &&
+      sql
+        .exec(
+          `INSERT INTO current_versions (source, version_row) VALUES (?, ?)
+          ON CONFLICT (source) DO NOTHING RETURNING source`,
+          line.source,
+          row
+        )
+        .toArray().length > 0;
+    if (pointed && chunks.length > 0) {
+      enqueueEmbedding(storage, line.source, line.version);
     }
     return true;
   });
 };
 
-/** The restore's state set to `state`, once it is still running. */
+/**
+ * The restore's state set to `state`, once it is still running, and its
+ * export's record settled (exports.ts `settleRestoredExport`). In the
+ * caller's transaction.
+ */
 const settle = (
-  storage: DurableObjectStorage,
+  sql: SqlStorage,
   id: string,
   state: "done" | "failed"
 ): void => {
-  storage.sql.exec(
+  sql.exec(
     `UPDATE restores SET state = ?, finished_at = ?
     WHERE export = ? AND state = 'running'`,
     state,
     Date.now(),
     id
   );
+  settleRestoredExport(sql, id);
 };
 
-/** One run of a restore: the next part, checked, then written back. */
+/** The restore's state settled in a transaction of its own. */
+const settleNow = (
+  storage: DurableObjectStorage,
+  id: string,
+  state: "done" | "failed"
+): void => {
+  storage.transactionSync(() => {
+    settle(storage.sql, id, state);
+  });
+};
+
+/**
+ * One run of a restore: the next part checked, while any is unchecked;
+ * then the next part written back.
+ */
 const restorePart = async (
   id: string,
   { storage, bucket, again }: WorkContext,
   db: DrizzleSqliteDODatabase
 ): Promise<void> => {
-  const row = rowOf(storage.sql, id);
+  const { sql } = storage;
+  const row = rowOf(sql, id);
   if (row?.state !== "running") {
     return;
   }
   const manifest = manifestSchema.parse(JSON.parse(row.manifest));
-  const part = manifest.parts[row.part];
+  const checking = row.checked < manifest.parts.length;
+  const index = checking ? row.checked : row.part;
+  const part = manifest.parts[index];
   if (part === undefined) {
-    settle(storage, id, "done");
+    settleNow(storage, id, "done");
     return;
   }
-  const object = await bucket.get(exportKeyOf(id, part.file));
-  const lines =
-    object === null
-      ? undefined
-      : await linesOf(await object.arrayBuffer(), part);
+  const lines = await partLinesOf(bucket, id, part);
   if (lines === undefined) {
-    settle(storage, id, "failed");
+    settleNow(storage, id, "failed");
+    return;
+  }
+  if (checking) {
+    storage.transactionSync(() => {
+      sql.exec(
+        `UPDATE restores SET checked = checked + 1
+        WHERE export = ? AND checked = ? AND state = 'running'`,
+        id,
+        index
+      );
+    });
+    again(1);
+    return;
+  }
+  if (sql.databaseSize + quotaFactor * part.bytes > storeBytesMax) {
+    settleNow(storage, id, "failed");
     return;
   }
   let restored = 0;
@@ -384,19 +453,20 @@ const restorePart = async (
       restored += 1;
     }
   }
+  const last = index + 1 >= manifest.parts.length;
   storage.transactionSync(() => {
-    storage.sql.exec(
+    sql.exec(
       `UPDATE restores SET part = part + 1, restored = restored + ?
       WHERE export = ? AND part = ? AND state = 'running'`,
       restored,
       id,
-      row.part
+      index
     );
-    if (row.part + 1 >= manifest.parts.length) {
-      settle(storage, id, "done");
+    if (last) {
+      settle(sql, id, "done");
     }
   });
-  if (row.part + 1 < manifest.parts.length) {
+  if (!last) {
     again(lines.length);
   }
 };
@@ -411,39 +481,41 @@ const restoreWork = defineWork({
 });
 
 /**
- * Starts restoring the company export `id` (above), or answers with the
- * restore of it started before. Throws, starting nothing, when the store
- * holds a version, a restore is under way, or the export isn't a whole
- * company export in the bucket. Asked again in the transaction that
+ * Starts restoring the company export `id` of `deployment` (above), or
+ * answers with the restore of it under way or done; a failed one starts
+ * again. Throws, starting nothing, when the store holds a version, a
+ * restore is under way, or the export isn't a whole company export of
+ * this deployment in the bucket. Asked again in the transaction that
  * records it, after the manifest was read.
  */
 export const startRestore = async (
   storage: DurableObjectStorage,
   bucket: BrainBucket,
-  id: string
+  id: string,
+  deployment: string
 ): Promise<RestoreStatus> => {
   const { sql } = storage;
   const before = rowOf(sql, id);
-  if (before !== undefined) {
+  if (before !== undefined && before.state !== "failed") {
     return statusOf(before);
   }
-  const refused = refusalOf(sql);
+  const refused = refusalOf(sql, id);
   if (refused !== undefined) {
     throw new Error(refused);
   }
   if (unrestorable(sql, id)) {
     throw new Error(refusals.notFound);
   }
-  const manifest = await manifestOf(bucket, id);
+  const manifest = await manifestOf(bucket, id, deployment);
   if (manifest === undefined) {
     throw new Error(refusals.notFound);
   }
   return storage.transactionSync(() => {
     const started = rowOf(sql, id);
-    if (started !== undefined) {
+    if (started !== undefined && started.state !== "failed") {
       return statusOf(started);
     }
-    const now = refusalOf(sql);
+    const now = refusalOf(sql, id);
     if (now !== undefined) {
       throw new Error(now);
     }
@@ -451,12 +523,16 @@ export const startRestore = async (
       throw new Error(refusals.notFound);
     }
     sql.exec(
-      `INSERT INTO restores (export, manifest, part, restored, state, started_at)
-      VALUES (?, ?, 0, 0, 'running', ?)`,
+      `INSERT INTO restores (export, manifest, checked, part, restored, state, started_at)
+      VALUES (?, ?, 0, 0, 0, 'running', ?)
+      ON CONFLICT (export) DO UPDATE SET manifest = excluded.manifest,
+        checked = 0, part = 0, restored = 0, state = 'running',
+        started_at = excluded.started_at, finished_at = NULL`,
       id,
       JSON.stringify(manifest),
       Date.now()
     );
+    recordRestoredExport(sql, manifest);
     enqueueWork(storage, restoreWork, {
       key: keyOf(id),
       payload: { id },

@@ -1,4 +1,5 @@
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
+import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -53,7 +54,7 @@ const startSchema = z.strictObject({ scope: scopeSchema });
 
 const readSchema = z.strictObject({
   scope: scopeSchema,
-  store: z.enum(["shared", "own"]),
+  store: z.literal("shared"),
   id: z.uuid(),
   file: z
     .string()
@@ -200,7 +201,16 @@ const startExport = async (
       }),
     async () => await startBrainExport(env, asker)
   );
-  return answer({ exports });
+  return answer(
+    asked.scope === "own"
+      ? {
+          exports,
+          // Said plainly, as the export holds it (core's brain-next.ts).
+          holds:
+            "What the company's Brain holds that only you may read. What your own space in the Brain holds is not in this export yet.",
+        }
+      : { exports }
+  );
 };
 
 /** Where an export of the signed-in person's is, or one of its files. */
@@ -299,14 +309,27 @@ export const brainRestoreResponse = async (
   if (asked === undefined) {
     return notFound(requestId);
   }
-  const status = await audited(
-    env,
-    (step, outcome) =>
-      entryOf(person, `brain.restore.${step}`, requestId, {
-        exportId: asked.exportId,
-        ...(outcome === undefined ? {} : { outcome }),
-      }),
-    async () => await startBrainRestore(env, asked.exportId)
-  );
-  return answer(status);
+  try {
+    const status = await audited(
+      env,
+      (step, outcome) =>
+        entryOf(person, `brain.restore.${step}`, requestId, {
+          exportId: asked.exportId,
+          ...(outcome === undefined ? {} : { outcome }),
+        }),
+      async () => await startBrainRestore(env, asked.exportId)
+    );
+    return answer(status);
+  } catch (error) {
+    // Refused for the state the Brain is in, not for the request: a
+    // conflict, its answer in the audit log as failed.
+    if (brainExportErrors.codeOf(error) === "brain.restore_refused") {
+      return errorResponse(
+        409,
+        brainExportErrors.create("brain.restore_refused"),
+        requestId
+      );
+    }
+    throw error;
+  }
 };

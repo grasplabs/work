@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bb24a22d-6def-4c88-ba46-e87d749be531",
+  "id": "5bfefe7a-1069-4e36-aca6-476677841373",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -418,6 +418,13 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -448,6 +455,42 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "export_sweep": {
+      "name": "export_sweep",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "through": {
+          "name": "through",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cursor": {
+          "name": "cursor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "export_sweep_one": {
+          "name": "export_sweep_one",
+          "value": "id = 1"
+        }
+      }
+    },
     "exports": {
       "name": "exports",
       "columns": {
@@ -470,6 +513,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "deployment": {
+          "name": "deployment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "reader_set": {
@@ -722,6 +772,13 @@
         "manifest": {
           "name": "manifest",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "checked": {
+          "name": "checked",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false

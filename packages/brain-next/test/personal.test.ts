@@ -1250,7 +1250,7 @@ const leavingWork: Record<string, () => Promise<void>> = {
   },
   // The export is written by the queue (exports.ts).
   startExport: async () => {
-    await own().startExport({ kind: "person", person });
+    await own().startExport({ kind: "person", person }, "test");
   },
   requeueWork: async () => {
     await add(own(), "Parked for good", theirs());

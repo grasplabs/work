@@ -12,7 +12,7 @@ import {
   sourceIdMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
-  personalBrainOf,
+  refusalPrefix,
   storeBytesMax,
 } from "@grasp-os/brain-next/contract";
 import type {
@@ -34,6 +34,7 @@ import type {
   WayCounts,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
+import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import {
   brainReportSchema,
   brainSearchWays,
@@ -629,11 +630,14 @@ export const erasePerson = async (
 // company's Brain, for an admin, and a person's own, for that person
 // alone. Who asks is core's to say, from the session it verified
 // (brain-next-exports.ts): an admin for the company, or a person for
-// their own, never one person for another. A person's export is two, one
-// in each store: what the shared store holds that they alone may read,
-// and their own store. The Brain serves each export only to an ask of its
-// own scope, so an export of another scope answers as one that doesn't
-// exist.
+// their own, never one person for another. The Brain serves each export
+// only to an ask of its own scope, so an export of another scope answers
+// as one that doesn't exist.
+//
+// A person's export is, for now, the shared store's half alone: what the
+// shared store holds that they alone may read. Their own store's half
+// needs that store to wake itself for its queue, which core doesn't wire
+// yet (GRA-1762): it would wait without a word. Core's route says so.
 
 /** Who asks for an export: an admin for the company, or a person for their own. */
 export type ExportAsker =
@@ -645,8 +649,8 @@ const exportAskerSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("person"), personId: idSchema }),
 ]);
 
-/** Which store an export is in: the shared one, or the asking person's own. */
-const exportStores = ["shared", "own"] as const;
+/** Which store an export is in: the shared one, for now the only one. */
+const exportStores = ["shared"] as const;
 export type ExportStore = (typeof exportStores)[number];
 
 const exportRefSchema = z.strictObject({
@@ -666,8 +670,16 @@ export type ExportFileRef = z.infer<typeof exportFileRefSchema>;
 
 type ExportEnv = Pick<
   Env,
-  "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION" | "DB"
+  "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION" | "DB" | "CLIENT_ID"
 >;
+
+/**
+ * The deployment an export is of, as its manifest names it: the client
+ * the admin deployed, or `local` where none is set (local development and
+ * on-prem, a deployment of its own). A restore refuses another's.
+ */
+const deploymentOf = (env: Pick<Env, "CLIENT_ID">): string =>
+  env.CLIENT_ID ?? "local";
 
 /** `asker` as the Brain's scope. */
 const scopeOf = (asker: ExportAsker): ExportScope =>
@@ -676,51 +688,23 @@ const scopeOf = (asker: ExportAsker): ExportScope =>
     : { kind: "person", person: asker.personId };
 
 /**
- * The store `store` names for `asker`: a person's own for a person, none
- * for the company, whose exports are in the shared store alone.
- */
-const exportStoreOf = (
-  env: ExportEnv,
-  asker: ExportAsker,
-  store: ExportStore
-): Brain | undefined => {
-  if (store === "shared") {
-    return brain(env);
-  }
-  return asker.kind === "person"
-    ? personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), asker.personId)
-    : undefined;
-};
-
-/**
  * Starts an export for `asker` (above), or answers with the one of theirs
- * being written: the company's in the shared store, a person's in each
- * store. A person is refused once they have no current membership.
+ * being written: the company's, or a person's, in the shared store. A
+ * person is refused once they have no current membership.
  */
 export const startBrainExport = async (
   env: ExportEnv,
   asker: ExportAsker
 ): Promise<{ store: ExportStore; id: string }[]> => {
   const asking = checked(exportAskerSchema, asker);
-  const scope = scopeOf(asking);
-  if (asking.kind === "company") {
-    const { id } = await brain(env).startExport(scope);
-    return [{ store: "shared", id }];
+  if (asking.kind === "person") {
+    await readerOf(env, asking.personId);
   }
-  await readerOf(env, asking.personId);
-  const [shared, own] = await Promise.all(
-    exportStores.map(
-      async (store) =>
-        await exportStoreOf(env, asking, store)?.startExport(scope)
-    )
+  const { id } = await brain(env).startExport(
+    scopeOf(asking),
+    deploymentOf(env)
   );
-  if (shared === undefined || own === undefined) {
-    throw new Error("Refused: an export was not started");
-  }
-  return [
-    { store: "shared", id: shared.id },
-    { store: "own", id: own.id },
-  ];
+  return [{ store: "shared", id }];
 };
 
 /** Where `asker`'s export `ref` is: null for any other, alike. */
@@ -730,13 +714,8 @@ export const brainExportStatus = async (
   ref: ExportRef
 ): Promise<ExportStatus | null> => {
   const asking = checked(exportAskerSchema, asker);
-  const { store, id } = checked(exportRefSchema, ref);
-  return (
-    (await exportStoreOf(env, asking, store)?.exportStatus({
-      id,
-      scope: scopeOf(asking),
-    })) ?? null
-  );
+  const { id } = checked(exportRefSchema, ref);
+  return await brain(env).exportStatus({ id, scope: scopeOf(asking) });
 };
 
 /**
@@ -749,26 +728,32 @@ export const brainExportFile = async (
   ref: ExportFileRef
 ): Promise<string | null> => {
   const asking = checked(exportAskerSchema, asker);
-  const { store, id, file } = checked(exportFileRefSchema, ref);
-  return (
-    (await exportStoreOf(env, asking, store)?.exportFile({
-      id,
-      file,
-      scope: scopeOf(asking),
-    })) ?? null
-  );
+  const { id, file } = checked(exportFileRefSchema, ref);
+  return await brain(env).exportFile({ id, file, scope: scopeOf(asking) });
 };
 
 /**
  * Starts restoring the company's export `exportId` into the shared store,
  * which must hold nothing, the erasure ledger applied over all it brings
- * back. For an admin only: core's route checks.
+ * back; nothing is added to the store while it runs. A restore the Brain
+ * won't start (the store holds something, one is under way, or no whole
+ * export of this deployment's company has that id) is refused as
+ * `brain.restore_refused`. For an admin only: core's route checks.
  */
 export const startBrainRestore = async (
-  env: BrainEnv,
+  env: ExportEnv,
   exportId: string
-): Promise<RestoreStatus> =>
-  await brain(env).startRestore(checked(exportIdSchema, exportId));
+): Promise<RestoreStatus> => {
+  const id = checked(exportIdSchema, exportId);
+  try {
+    return await brain(env).startRestore(id, deploymentOf(env));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(refusalPrefix)) {
+      throw brainExportErrors.create("brain.restore_refused");
+    }
+    throw error;
+  }
+};
 
 /** Where the restore of the company's export `exportId` is: null when none was started. */
 export const brainRestoreStatus = async (

@@ -1,5 +1,3 @@
-import { personalBrainOf } from "@grasp-os/brain-next/contract";
-import type { Embedders } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -9,7 +7,6 @@ import {
   brainRestorePath,
 } from "../src/brain-next-exports.ts";
 import { addSource, workBrain } from "../src/brain-next.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -25,19 +22,6 @@ import {
 // rest: history, erasure, restore. The threat model is on GRA-1755.
 
 const idp = mockIdp();
-
-const quietModel = async () => {
-  await Promise.resolve();
-  return { kind: "answer" as const, text: "" };
-};
-
-const noEmbedders: Embedders = {
-  model: null,
-  embed: async () => {
-    await Promise.resolve();
-    return { kind: "unavailable" };
-  },
-};
 
 /** A request of core's own page, signed in on `cookie`. */
 const request = async (
@@ -58,9 +42,8 @@ const request = async (
   });
 
 const startedSchema = z.object({
-  exports: z.array(
-    z.object({ store: z.enum(["shared", "own"]), id: z.uuid() })
-  ),
+  exports: z.array(z.object({ store: z.literal("shared"), id: z.uuid() })),
+  holds: z.string().optional(),
 });
 
 const statusSchema = z.object({
@@ -68,17 +51,20 @@ const statusSchema = z.object({
   files: z.array(z.string()),
 });
 
-/** Starts an export of `scope` on `cookie`: its exports by store. */
+/** Starts an export of `scope` on `cookie`: its exports by store, and what it says it holds. */
 const start = async (
   cookie: string,
   scope: "company" | "own"
-): Promise<Record<string, string>> => {
+): Promise<{ exports: Record<string, string>; holds?: string }> => {
   const response = await request(cookie, brainExportsPath, {
     method: "POST",
     body: { scope },
   });
-  const { exports } = startedSchema.parse(await response.json());
-  return Object.fromEntries(exports.map(({ store, id }) => [store, id]));
+  const { exports, holds } = startedSchema.parse(await response.json());
+  return {
+    exports: Object.fromEntries(exports.map(({ store, id }) => [store, id])),
+    ...(holds === undefined ? {} : { holds }),
+  };
 };
 
 /** The query of an export of `scope` in `store`. */
@@ -96,20 +82,15 @@ const queryOf = (
   }).toString()}`;
 
 /**
- * Ticks the shared store, and `person`'s own, until each export in
- * `exports` is written, then reads every file of each on `cookie`.
+ * Ticks the shared store until each export in `exports` is written, then
+ * reads every file of each on `cookie`.
  */
 const writtenFiles = async (
   cookie: string,
   scope: "company" | "own",
-  exports: Record<string, string>,
-  person: string
+  exports: Record<string, string>
 ): Promise<string[]> => {
-  const own = personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), person);
   await workBrain(env, new Date());
-  if (exports.own !== undefined) {
-    await own.work(quietModel, new Date(), noEmbedders);
-  }
   const bodies: string[] = [];
   for (const [store, id] of Object.entries(exports)) {
     // oxlint-disable-next-line no-await-in-loop -- one export at a time
@@ -160,14 +141,17 @@ describe(
           member.session,
           `${brainRestorePath}?id=${crypto.randomUUID()}`
         ),
+        // The admin's restore of an export no one made: refused, as a
+        // conflict with what the Brain holds, not an error of core's.
+        request(admin.session, brainRestorePath, restore),
       ]);
 
       expect(statuses.map(({ status }) => status)).toStrictEqual([
-        403, 401, 401, 403, 403, 401, 403,
+        403, 401, 401, 403, 403, 401, 403, 409,
       ]);
     });
 
-    it("gives a person their own export, from both stores, with only what they alone may read, which no admin can read (threats 2, 5, 12)", async () => {
+    it("gives a person their own export, with only what they alone may read and a plain word of what it holds, which no admin can read (threats 2, 5, 12)", async () => {
       const admin = await signedInWithRole(idp, "admin");
       const member = await signedInWithRole(idp, "user");
       const theirs = `theirs${crypto.randomUUID().replaceAll("-", "")}`;
@@ -187,22 +171,25 @@ describe(
 
       let exports: Record<string, string> = {};
       let bodies: string[] = [];
+      let holds: string | undefined;
       const events = await auditedDuring(async () => {
-        exports = await start(member.session, "own");
-        bodies = await writtenFiles(
-          member.session,
-          "own",
-          exports,
-          member.userId
-        );
+        ({ exports, holds } = await start(member.session, "own"));
+        bodies = await writtenFiles(member.session, "own", exports);
       });
 
-      expect(Object.keys(exports).toSorted()).toStrictEqual(["own", "shared"]);
       const all = bodies.join("\n");
       expect({
+        stores: Object.keys(exports),
+        // Said plainly: their own space's content is not in it yet.
+        saysOwnLeftOut: holds?.includes("not in this export yet"),
         theirs: all.includes(theirs),
         others: all.includes(others),
-      }).toStrictEqual({ theirs: true, others: false });
+      }).toStrictEqual({
+        stores: ["shared"],
+        saysOwnLeftOut: true,
+        theirs: true,
+        others: false,
+      });
       // On record, naming no content.
       const exportEvents = events.filter(({ action }) =>
         action.startsWith("brain.export.")
@@ -219,7 +206,6 @@ describe(
         [
           queryOf("company", "shared", exports.shared ?? ""),
           queryOf("own", "shared", exports.shared ?? ""),
-          queryOf("own", "own", exports.own ?? ""),
           queryOf("company", "shared", exports.shared ?? "", "manifest.json"),
           queryOf("own", "shared", exports.shared ?? "", "manifest.json"),
         ].map(async (path) => {
@@ -227,7 +213,7 @@ describe(
           return status;
         })
       );
-      expect(asAdmin).toStrictEqual([404, 404, 404, 404, 404]);
+      expect(asAdmin).toStrictEqual([404, 404, 404, 404]);
     });
 
     it("gives an admin the company's export, without anything one person alone may read (threat 4)", async () => {
@@ -248,13 +234,8 @@ describe(
         readers: { kind: "owner", personId: member.userId },
       });
 
-      const exports = await start(admin.session, "company");
-      const bodies = await writtenFiles(
-        admin.session,
-        "company",
-        exports,
-        admin.userId
-      );
+      const { exports } = await start(admin.session, "company");
+      const bodies = await writtenFiles(admin.session, "company", exports);
       const all = bodies.join("\n");
 
       expect(Object.keys(exports)).toStrictEqual(["shared"]);

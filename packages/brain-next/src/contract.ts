@@ -939,6 +939,19 @@ export const exportScopeSchema = z.discriminatedUnion("kind", [
 ]);
 export type ExportScope = z.infer<typeof exportScopeSchema>;
 
+/**
+ * What every refusal of the store starts with: a call refused for what it
+ * asked, never a fault. A host answers one as such (a conflict), not as an
+ * error of its own.
+ */
+export const refusalPrefix = "The Brain refused it:";
+
+/**
+ * The deployment an export is of, as the host names it: its manifest says
+ * so, and a restore refuses another deployment's export.
+ */
+export const deploymentSchema = wellFormedString().min(1).max(256);
+
 /** An export, by its id: random, made by the store. */
 export const exportIdSchema = z.uuid();
 
@@ -1244,7 +1257,10 @@ export interface Brain {
    * person's. While one of the same scope is being written, it answers
    * with that one.
    */
-  startExport: (scope: ExportScope) => Promise<{ id: string }>;
+  startExport: (
+    scope: ExportScope,
+    deployment: string
+  ) => Promise<{ id: string }>;
   /** Where an export of the request's scope is: null for any other, alike. */
   exportStatus: (request: ExportRequest) => Promise<ExportStatus | null>;
   /**
@@ -1253,13 +1269,15 @@ export interface Brain {
    */
   exportFile: (request: ExportFileRequest) => Promise<string | null>;
   /**
-   * Starts restoring the company export `id` from the bucket into this
-   * shared store, which must hold no version: a part a run of the queue,
-   * each part checked against the manifest first, and each version left
-   * out when the erasure ledger names it. Answers with the restore of
-   * that export when one was started already.
+   * Starts restoring the company export `id` of `deployment` from the
+   * bucket into this shared store, which must hold no version: a part a
+   * run of the queue, every part checked against the manifest before any
+   * is written, and each version left out when the erasure ledger names
+   * it. Nothing is added to the store while it runs. Answers with the
+   * restore of that export when one was started already; a failed one
+   * starts again.
    */
-  startRestore: (id: string) => Promise<RestoreStatus>;
+  startRestore: (id: string, deployment: string) => Promise<RestoreStatus>;
   /** Where the restore of export `id` is: null when none was started. */
   restoreStatus: (id: string) => Promise<RestoreStatus | null>;
 }

@@ -16,6 +16,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { exportPartBytes } from "../src/exports.ts";
 import type { BrainStore } from "../src/store.ts";
 
 type Store = DurableObjectStub<BrainStore>;
@@ -90,7 +91,12 @@ const sha256 = async (text: string): Promise<string> =>
 const manifestSchema = z.object({
   versions: z.number(),
   parts: z.array(
-    z.object({ file: z.string(), sha256: z.string(), versions: z.number() })
+    z.object({
+      file: z.string(),
+      sha256: z.string(),
+      versions: z.number(),
+      bytes: z.number(),
+    })
   ),
 });
 
@@ -254,12 +260,12 @@ describe("exports and restores", () => {
   });
 
   describe("a company's export", { timeout: 60_000 }, () => {
-    it("holds every version others may read, with its readers and history, and nothing one person alone may read (threats 4, 5)", async () => {
+    it("holds every version a group may read, with its readers and history, and nothing one person alone, or no one known, may read (threats 4, 5)", async () => {
       const teamSource = `test:${unique()}`;
       const nobodys = `test:${unique()}`;
       const theirs = `test:${unique()}`;
       const wasTeams = `test:${unique()}`;
-      const instructions = `test:${unique()}`;
+      const instructions = `instructions:${unique()}`;
       const person = unique();
       const group = `team:${unique()}`;
       await add(shared(), teamSource, "first words", team(group));
@@ -275,7 +281,7 @@ describe("exports and restores", () => {
         access: team(group),
       });
 
-      const { id } = await shared().startExport(company);
+      const { id } = await shared().startExport(company, "test");
       await expect(settled(shared(), id, company)).resolves.toMatchObject({
         state: "done",
       });
@@ -304,15 +310,6 @@ describe("exports and restores", () => {
             changes: ["2"],
           },
           {
-            source: nobodys,
-            version: 1,
-            current: true,
-            text: "nobody's words",
-            access: { kind: "none" },
-            indexed: true,
-            changes: ["1"],
-          },
-          {
             source: instructions,
             version: 1,
             current: true,
@@ -337,7 +334,7 @@ describe("exports and restores", () => {
         "words",
         team(`team:${unique()}`)
       );
-      const { id } = await shared().startExport(company);
+      const { id } = await shared().startExport(company, "test");
       await settled(shared(), id, company);
       const asPerson: ExportScope = { kind: "person", person };
 
@@ -356,9 +353,9 @@ describe("exports and restores", () => {
           file: "manifest.json",
         }),
       });
-      await expect(called(own(person).startExport(company))).rejects.toThrow(
-        "this store answers only the person whose it is"
-      );
+      await expect(
+        called(own(person).startExport(company, "test"))
+      ).rejects.toThrow("this store answers only the person whose it is");
     });
 
     it("is never served once an erasure lands after it started, and its files are deleted (threats 6, 11)", async () => {
@@ -367,10 +364,10 @@ describe("exports and restores", () => {
       const group = `team:${unique()}`;
       await add(shared(), kept, "kept words", team(group));
       await add(shared(), erased, "erased words", team(group));
-      const { id: done } = await shared().startExport(company);
+      const { id: done } = await shared().startExport(company, "test");
       await settled(shared(), done, company);
       // Started, not yet written: the erasure lands before its first part.
-      const { id: writing } = await shared().startExport(company);
+      const { id: writing } = await shared().startExport(company, "test");
 
       await shared().eraseSource({ source: erased, reason: "deleted" });
 
@@ -391,7 +388,7 @@ describe("exports and restores", () => {
         ...(await keysUnder(`exports/${writing}/`)),
       ]).toStrictEqual([]);
       // The next export holds what is left, without what was erased.
-      const { id: next } = await shared().startExport(company);
+      const { id: next } = await shared().startExport(company, "test");
       await settled(shared(), next, company);
       expect(
         of(await linesOf(shared(), next, company), [kept, erased]).map(
@@ -403,7 +400,7 @@ describe("exports and restores", () => {
     it("goes on after the store restarts", async () => {
       const source = `test:${unique()}`;
       await add(shared(), source, "words to keep", team(`team:${unique()}`));
-      const { id } = await shared().startExport(company);
+      const { id } = await shared().startExport(company, "test");
       try {
         await runInDurableObject(shared(), (_instance, state) => {
           state.abort("Killed by the test");
@@ -437,8 +434,8 @@ describe("exports and restores", () => {
       await add(own(person), inOwn, "words in my own store", alone(person));
       const scope: ExportScope = { kind: "person", person };
 
-      const { id: fromShared } = await shared().startExport(scope);
-      const { id: fromOwn } = await own(person).startExport(scope);
+      const { id: fromShared } = await shared().startExport(scope, "test");
+      const { id: fromOwn } = await own(person).startExport(scope, "test");
       // The own store wakes itself for the export (`#nextWorkAt`).
       await expect(
         runInDurableObject(
@@ -489,7 +486,7 @@ describe("exports and restores", () => {
       const person = unique();
       await add(own(person), `test:${unique()}`, "mine alone", alone(person));
       const scope: ExportScope = { kind: "person", person };
-      const { id } = await own(person).startExport(scope);
+      const { id } = await own(person).startExport(scope, "test");
       await settled(own(person), id, scope);
       const prefix = `people/${await sha256(person)}/exports/${id}/`;
       await expect(keysUnder(prefix)).resolves.not.toStrictEqual([]);
@@ -513,14 +510,14 @@ describe("exports and restores", () => {
       await add(shared(), kept, "kept, second", team(group), "2");
       await add(shared(), erased, "erased words", team(group));
       await add(shared(), nobodys, "nobody's words", { kind: "none" });
-      const { id } = await shared().startExport(company);
+      const { id } = await shared().startExport(company, "test");
       await settled(shared(), id, company);
 
       // The store's storage lost, its bucket kept: its export's record gone.
       // A source is erased after the export was made, by the ledger alone.
       await putBack(shared(), emptyShared);
       await shared().eraseSource({ source: erased, reason: "deleted" });
-      await expect(shared().startRestore(id)).resolves.toMatchObject({
+      await expect(shared().startRestore(id, "test")).resolves.toMatchObject({
         state: "running",
       });
       // Killed before it ran: it goes on as the store starts again.
@@ -588,9 +585,9 @@ describe("exports and restores", () => {
         })
       ).resolves.toStrictEqual({ source: kept, version: 1 });
       // A restore goes only into a store that holds nothing.
-      await expect(called(shared().startRestore(unique()))).rejects.toThrow(
-        "a store that holds nothing"
-      );
+      await expect(
+        called(shared().startRestore(unique(), "test"))
+      ).rejects.toThrow("a store that holds nothing");
     });
 
     it("fails on a damaged part and writes nothing of it (threat 8)", async () => {
@@ -600,7 +597,7 @@ describe("exports and restores", () => {
         "words",
         team(`team:${unique()}`)
       );
-      const { id } = await shared().startExport(company);
+      const { id } = await shared().startExport(company, "test");
       await settled(shared(), id, company);
       const part = `exports/${id}/part-0000.jsonl`;
       const object = await env.BRAIN_OBJECTS.get(part);
@@ -608,7 +605,7 @@ describe("exports and restores", () => {
       await env.BRAIN_OBJECTS.put(part, body.replace("words", "wordz"));
 
       await putBack(shared(), emptyShared);
-      await shared().startRestore(id);
+      await shared().startRestore(id, "test");
       await tick(shared());
 
       await expect(shared().restoreStatus(id)).resolves.toMatchObject({
@@ -628,20 +625,210 @@ describe("exports and restores", () => {
       ).resolves.toBe(0);
     });
 
+    it("refuses every add while it runs, never moves a current pointer back, and counts only what it wrote (review round 1, High 1)", async () => {
+      const group = `team:${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, "wide, first", team(group));
+      await add(shared(), source, "wide, second", team(group), "2");
+      const { id } = await shared().startExport(company, "test");
+      await settled(shared(), id, company);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+
+      // An add lands while the restore runs: it narrows the source.
+      await expect(
+        called(
+          shared().addSource({
+            source,
+            change: "3",
+            text: "narrowed",
+            access: alone(unique()),
+          })
+        )
+      ).rejects.toThrow("restoring an export");
+      await tick(shared());
+
+      const restored = await shared().restoreStatus(id);
+      const current = await shared().readCurrent({
+        sources: [source],
+        reader: readerOf(unique(), [group]),
+      });
+      expect({
+        state: restored?.state,
+        current: current.map(({ text }) => text),
+      }).toStrictEqual({ state: "done", current: ["wide, second"] });
+      // Once it is done, adds are taken again.
+      await expect(
+        shared().addSource({
+          source,
+          change: "3",
+          text: "narrowed",
+          access: team(group),
+        })
+      ).resolves.toStrictEqual({ source, version: 3 });
+    });
+
+    it("deletes the files of an export the store lost its record of, once an erasure lands after it (review round 1, High 2)", async () => {
+      const source = `test:${unique()}`;
+      await add(shared(), source, "to be erased", team(`team:${unique()}`));
+      const { id } = await shared().startExport(company, "test");
+      await settled(shared(), id, company);
+      await expect(keysUnder(`exports/${id}/`)).resolves.not.toStrictEqual([]);
+
+      await putBack(shared(), emptyShared);
+      await shared().eraseSource({ source, reason: "deleted" });
+      await tick(shared());
+      await tick(shared());
+
+      await expect(keysUnder(`exports/${id}/`)).resolves.toStrictEqual([]);
+    });
+
+    it("checks every part before it writes any, and starts again once failed (review round 1, Mediums 4 and 6)", async () => {
+      const group = `team:${unique()}`;
+      // Five versions of some 0.9 MB of text in three bytes a character:
+      // more than a part's budget of encoded bytes.
+      const large = Array.from({ length: 5 }, () => `test:${unique()}`);
+      for (const [index, source] of large.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one large add at a time
+        await add(
+          shared(),
+          source,
+          `${index} ${"漢字 ".repeat(130_000)}`,
+          team(group)
+        );
+      }
+      const { id } = await shared().startExport(company, "test");
+      await settled(shared(), id, company);
+      const manifestText = await shared().exportFile({
+        id,
+        scope: company,
+        file: "manifest.json",
+      });
+      const manifest = manifestSchema.parse(JSON.parse(manifestText ?? "{}"));
+      expect({
+        several: manifest.parts.length > 1,
+        withinBudget: manifest.parts.every(
+          ({ bytes }) => bytes <= exportPartBytes
+        ),
+      }).toStrictEqual({ several: true, withinBudget: true });
+
+      // The last part damaged: the check finds it before anything is written.
+      const lastPart = `exports/${id}/${manifest.parts.at(-1)?.file ?? ""}`;
+      const object = await env.BRAIN_OBJECTS.get(lastPart);
+      const body = (await object?.text()) ?? "";
+      await env.BRAIN_OBJECTS.put(lastPart, body.replace("字", "子"));
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      for (let ticks = 0; ticks < 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const versionsHeld = async () =>
+        await runInDurableObject(
+          shared(),
+          (_instance, state) =>
+            state.storage.sql
+              .exec<{ count: number }>(
+                "SELECT count(*) AS count FROM source_versions"
+              )
+              .one().count
+        );
+      expect({
+        status: await shared().restoreStatus(id),
+        held: await versionsHeld(),
+      }).toStrictEqual({
+        status: { export: id, state: "failed", restored: 0 },
+        held: 0,
+      });
+
+      // Mended, it starts again and goes through.
+      await env.BRAIN_OBJECTS.put(lastPart, body);
+      await shared().startRestore(id, "test");
+      for (let ticks = 0; ticks < 5; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const current = await shared().readCurrent({
+        sources: large,
+        reader: readerOf(unique(), [group]),
+      });
+      const status = await shared().restoreStatus(id);
+      expect({
+        state: status?.state,
+        current: current.map(({ text }) => text.slice(0, 1)),
+      }).toStrictEqual({ state: "done", current: ["0", "1", "2", "3", "4"] });
+    });
+
+    it("settles an export whose item of the queue is gone as failed, and deletes its files (review round 1, Medium 4)", async () => {
+      await add(
+        shared(),
+        `test:${unique()}`,
+        "words",
+        team(`team:${unique()}`)
+      );
+      const { id } = await shared().startExport(company, "test");
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec(
+          "DELETE FROM work_items WHERE kind = 'brain.export' AND key = ?",
+          `export:${id}`
+        );
+      });
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        status: await shared().exportStatus({ id, scope: company }),
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({
+        status: { id, state: "failed", versions: 0, files: [] },
+        files: [],
+      });
+      // The next one is not held up.
+      const { id: next } = await shared().startExport(company, "test");
+      expect(next).not.toBe(id);
+      await settled(shared(), next, company);
+    });
+
+    it("refuses another deployment's export, and fails on a file that names a skill (review round 1, Lows)", async () => {
+      await add(
+        shared(),
+        `skill:${unique()}`,
+        "a skill",
+        team(`team:${unique()}`)
+      );
+      const { id } = await shared().startExport(company, "test");
+      await settled(shared(), id, company);
+      await putBack(shared(), emptyShared);
+
+      await expect(
+        called(shared().startRestore(id, "elsewhere"))
+      ).rejects.toThrow("no whole company export of this deployment");
+      await shared().startRestore(id, "test");
+      for (let ticks = 0; ticks < 5; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      await expect(shared().restoreStatus(id)).resolves.toStrictEqual({
+        export: id,
+        state: "failed",
+        restored: 0,
+      });
+    });
+
     it("refuses a person's export, and a person's own store refuses any (threat 4)", async () => {
       const person = unique();
       await add(shared(), `test:${unique()}`, "mine", alone(person));
       const scope: ExportScope = { kind: "person", person };
-      const { id } = await shared().startExport(scope);
+      const { id } = await shared().startExport(scope, "test");
       await settled(shared(), id, scope);
       await putBack(shared(), emptyShared);
 
-      await expect(called(shared().startRestore(id))).rejects.toThrow(
-        "no whole company export has that id"
+      await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
+        "no whole company export of this deployment has that id"
       );
-      await expect(called(own(person).startRestore(id))).rejects.toThrow(
-        "a restore goes only into the shared store"
-      );
+      await expect(
+        called(own(person).startRestore(id, "test"))
+      ).rejects.toThrow("a restore goes only into the shared store");
     });
   });
 });

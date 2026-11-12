@@ -589,6 +589,8 @@ export const exportsTable = sqliteTable(
     scope: text({ enum: ["company", "person"] }).notNull(),
     /** The SHA-256 of the person's id, in hex: for a person's export only. */
     subject: text(),
+    /** The deployment it is of, as the host names it: its manifest says so. */
+    deployment: text().notNull(),
     /** The person's set of readers when it started: null when they had none. */
     readerSet: integer("reader_set"),
     /** The last version's row it takes: what was there when it started. */
@@ -620,6 +622,8 @@ export const exportParts = sqliteTable(
     part: integer().notNull(),
     hash: text().notNull(),
     versions: integer().notNull(),
+    /** Its size in bytes, as written. */
+    bytes: integer().notNull(),
   },
   (table) => [primaryKey({ columns: [table.export, table.part] })]
 );
@@ -632,9 +636,29 @@ export const exportParts = sqliteTable(
 export const restores = sqliteTable("restores", {
   export: text().primaryKey(),
   manifest: text().notNull(),
+  /** Parts checked so far, in a first pass before anything is written. */
+  checked: integer().notNull(),
+  /** The next part to write, once every part is checked. */
   part: integer().notNull(),
   restored: integer().notNull(),
   state: text({ enum: ["running", "done", "failed"] }).notNull(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
 });
+
+/**
+ * The sweep of export files the store has no record of (exports.ts
+ * `sweepWork`): the last erasure (`erasures.rowid`) it was started for, and
+ * where its listing of `exports/` goes on (null once it is through). One
+ * row at most. A store whose rows were lost, or rolled back, replays its
+ * ledger into `erasures` past it, so the sweep is due again.
+ */
+export const exportSweep = sqliteTable(
+  "export_sweep",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+    cursor: text(),
+  },
+  () => [check("export_sweep_one", sql.raw("id = 1"))]
+);
