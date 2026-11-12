@@ -148,6 +148,13 @@ const actionsOf = async (uploadId: string): Promise<string[]> => {
 /** The store that holds what more than one person may read. */
 const sharedStore = () => env.BRAIN_STORE.getByName("brain");
 
+/** The rows core keeps of the upload `uploadId`. */
+const rowsWith = async (uploadId: string) =>
+  await drizzle(env.DB)
+    .select()
+    .from(brainUploads)
+    .where(eq(brainUploads.id, uploadId));
+
 /** Has the shared store's next write to its bucket fail. */
 const failNextBucketPut = async (): Promise<void> => {
   await runInDurableObject(sharedStore(), (instance) => {
@@ -799,43 +806,209 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
-    "forgets a first upload whose add failed, and takes it again when retried",
+    "keeps a landed first upload when its id is sent again with another file: refused as such, nothing changed, and still deletable",
+    slow,
+    async () => {
+      const [uploader, admin, mate] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const teamId = await teamOf(uploader, mate);
+      const once = word();
+      const uploadId = crypto.randomUUID();
+      const first = await uploader.api.brainSources.upload(
+        fileOf(`First ${once}`, "Same.vtt"),
+        teamReaders(teamId),
+        uploadId
+      );
+
+      const retried = await outcome(
+        async () =>
+          await uploader.api.brainSources.upload(
+            fileOf(`Changed ${word()}`, "Same.vtt"),
+            teamReaders(teamId),
+            uploadId
+          )
+      );
+      const rows = await rowsWith(uploadId);
+      const mateBefore = await found(mate, once);
+      const uploaderSees = await uploader.api.brainSources.uploadOf(uploadId);
+      await admin.api.brainSources.deleteUpload(uploadId);
+
+      expect({
+        retried,
+        rows: rows.length,
+        mateBefore,
+        versions: uploaderSees === null ? 0 : 1,
+        mayDelete: uploaderSees?.mayDelete,
+        mateAfter: [await found(mate, once), await readAs(mate, first.source)],
+        actions: await actionsOf(uploadId),
+      }).toStrictEqual({
+        retried: { refused: "brain.upload_other_file" },
+        rows: 1,
+        mateBefore: [uploadId],
+        versions: 1,
+        mayDelete: true,
+        mateAfter: [[], null],
+        actions: [
+          "brain.upload.added",
+          "brain.upload.refused",
+          "brain.upload.deleted",
+        ],
+      });
+    }
+  );
+
+  it(
+    "keeps the row of a first upload whose add's outcome isn't known, so it can be deleted or sent again",
     slow,
     async () => {
       const uploader = await signedInApi(idp, "user");
       const uploadId = crypto.randomUUID();
-      const file = fileOf(`Failed once ${word()}`);
+      const file = fileOf(`Unknown ${word()}`);
+      // The store's write fails part-way: core can't tell whether it landed.
       await failNextBucketPut();
 
       const failed = await outcome(
         async () =>
           await uploader.api.brainSources.upload(file, everyone, uploadId)
       );
-      const rowsOf = async () =>
-        await drizzle(env.DB)
-          .select()
-          .from(brainUploads)
-          .where(eq(brainUploads.id, uploadId));
-      const afterFailure = await rowsOf();
+      const kept = await rowsWith(uploadId);
+      const shown = await uploader.api.brainSources.uploadOf(uploadId);
       const retried = await uploader.api.brainSources.upload(
         file,
         everyone,
         uploadId
       );
-      const afterRetry = await rowsOf();
+      await uploader.api.brainSources.deleteUpload(uploadId);
 
       expect({
         failed,
-        afterFailure,
+        kept: kept.length,
+        mayDelete: shown?.mayDelete,
         retried,
-        rows: afterRetry.length,
+        afterDelete: await rowsWith(uploadId),
         actions: await actionsOf(uploadId),
       }).toStrictEqual({
         failed: { refused: "internal.unexpected" },
-        afterFailure: [],
+        kept: 1,
+        mayDelete: true,
         retried: { source: { producer: "upload", id: uploadId }, version: 1 },
+        afterDelete: [],
+        actions: [
+          "brain.upload.failed",
+          "brain.upload.added",
+          "brain.upload.deleted",
+        ],
+      });
+    }
+  );
+
+  it(
+    "forgets a first upload the Brain refused on the call that wrote its row",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const uploadId = crypto.randomUUID();
+      // "ﷺ" is 3 bytes as given and 33 as the word index folds it: some
+      // 40,000 of them are under the extractor's limit, past the Brain's.
+      const cue = "ﷺ".repeat(19_000);
+      const cues = [0, 1, 2]
+        .map((index) => `00:00:0${index}.000 --> 00:00:0${index}.500\n${cue}`)
+        .join("\n\n");
+      const bytes = new TextEncoder().encode(`WEBVTT\n\n${cues}\n`);
+
+      expect({
+        refused: await outcome(
+          async () =>
+            await uploader.api.brainSources.upload(
+              { name: "Folded.vtt", bytes },
+              everyone,
+              uploadId
+            )
+        ),
+        rows: await rowsWith(uploadId),
+        actions: await actionsOf(uploadId),
+      }).toStrictEqual({
+        refused: { refused: "brain.upload_text_too_long" },
+        rows: [],
+        actions: ["brain.upload.refused"],
+      });
+    }
+  );
+
+  it(
+    "keeps two uploads of one id sent at once one source, one version and one row",
+    slow,
+    async () => {
+      const uploader = await signedInApi(idp, "user");
+      const uploadId = crypto.randomUUID();
+      const file = fileOf(`At once ${word()}`);
+
+      const both = await Promise.all([
+        uploader.api.brainSources.upload(file, everyone, uploadId),
+        uploader.api.brainSources.upload(file, everyone, uploadId),
+      ]);
+      const { versions } = await uploader.api.brainSources.versions({
+        producer: "upload",
+        id: uploadId,
+      });
+      const rows = await rowsWith(uploadId);
+
+      expect({
+        both,
+        versions: versions.length,
+        rows: rows.length,
+      }).toStrictEqual({
+        both: [
+          { source: { producer: "upload", id: uploadId }, version: 1 },
+          { source: { producer: "upload", id: uploadId }, version: 1 },
+        ],
+        versions: 1,
         rows: 1,
-        actions: ["brain.upload.failed", "brain.upload.added"],
+      });
+    }
+  );
+
+  it(
+    "refuses a deleted upload's id on a new upload, whoever sends it, keeping nothing",
+    slow,
+    async () => {
+      const [uploader, other] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const uploadId = crypto.randomUUID();
+      await uploader.api.brainSources.upload(
+        fileOf(`Gone ${word()}`),
+        everyone,
+        uploadId
+      );
+      await uploader.api.brainSources.deleteUpload(uploadId);
+
+      expect({
+        byUploader: await outcome(
+          async () =>
+            await uploader.api.brainSources.upload(
+              fileOf(`Again ${word()}`),
+              everyone,
+              uploadId
+            )
+        ),
+        byOther: await outcome(
+          async () =>
+            await other.api.brainSources.upload(
+              fileOf(`Other ${word()}`),
+              me,
+              uploadId
+            )
+        ),
+        rows: await rowsWith(uploadId),
+      }).toStrictEqual({
+        byUploader: { refused: "brain.upload_retry_refused" },
+        byOther: { refused: "brain.upload_retry_refused" },
+        rows: [],
       });
     }
   );

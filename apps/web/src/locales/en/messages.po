@@ -14499,6 +14499,10 @@ msgstr "This page was stopped"
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 
+#: src/brain/sources-page.tsx
+msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
+msgstr "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
+
 #: src/pages/frame-failure.tsx
 msgid "This version can't open"
 msgstr "This version can't open"

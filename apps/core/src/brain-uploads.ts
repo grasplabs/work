@@ -266,30 +266,60 @@ const detailOf = (
   bytes: file.bytes.byteLength,
 });
 
-/** A hand-over's reason for a refusal, as the contract names it. */
-type RefusalReason = "erased" | "invalid" | "too_large";
+/**
+ * Why the Brain refused an add: as a hand-over is refused (`erased`,
+ * `invalid`, `too_large`), or, for a retried first upload, that its id
+ * was already added with another file (`other_file`).
+ */
+type RefusalReason = "erased" | "invalid" | "too_large" | "other_file";
 
 /**
  * Each of the Brain's refusals of an add, which certainly didn't land:
- * why, as a hand-over is refused, and what the person is told.
+ * why, whose row it frees, and what the person is told (`first` when the
+ * add was an upload's first version).
+ *
+ * - `erased`: the key is closed, so its row names nothing the Brain
+ *   holds, whoever wrote it: it always goes.
+ * - `invalid`, `too_large`: nothing of this add is in the Brain; the row
+ *   goes when the call wrote it, never one another call wrote, whose
+ *   version may be there.
+ * - `other_file`: the first version made under this id stands, so its row
+ *   stays; nothing changed.
  */
 const refusals: Readonly<
   Record<
     NonNullable<ReturnType<typeof brainSourceErrors.codeOf>>,
-    { reason: RefusalReason; error: () => Error }
+    {
+      reason: RefusalReason;
+      frees: "always" | "if_written" | "never";
+      error: (first: boolean) => Error;
+    }
   >
 > = {
   "brain.source_erased": {
     reason: "erased",
-    error: () => brainUploadErrors.create("brain.upload_deleted"),
+    frees: "always",
+    // A first upload's id was used before and deleted: a fresh one is the
+    // way on, which the page mints for the next file chosen.
+    error: (first) =>
+      first
+        ? brainUploadErrors.create("brain.upload_retry_refused")
+        : brainUploadErrors.create("brain.upload_deleted"),
   },
   "brain.source_no_text": {
     reason: "invalid",
+    frees: "if_written",
     error: () => uploadErrors.create("upload.no_text"),
   },
   "brain.source_too_large": {
     reason: "too_large",
+    frees: "if_written",
     error: () => brainUploadErrors.create("brain.upload_text_too_long"),
+  },
+  "brain.source_change_taken": {
+    reason: "other_file",
+    frees: "never",
+    error: () => brainUploadErrors.create("brain.upload_other_file"),
   },
 };
 
@@ -305,22 +335,17 @@ const refusalOf = (error: unknown) => {
  * with it, written before the person is answered. `first` when it is the
  * upload's first: its change is then the upload's own id, so a retry of
  * it (the page's, after a lost answer) is the same version, never a
- * second one.
+ * second one. `written` when this call wrote the row.
  *
  * - `brain.upload.added`, with its version.
- * - `brain.upload.refused`, with why, as a hand-over is refused
- *   (`erased`, `invalid`, `too_large`), when the Brain refused it: it
- *   certainly didn't land. The row goes with the event when it names
- *   nothing the Brain holds: always for `erased` (the key is closed), and
- *   for a first upload. The person is told why, in their words.
- * - `brain.upload.failed` for any other failure. A later version's row
- *   stays: it names what the Brain holds of it. A first upload's goes with
- *   the event, so no row is left that the page can't show. What remains
- *   possible: a store that added it and whose answer was lost holds a
- *   version no row names until the page retries with the same id, which
- *   writes the row again and answers that same version; were it never
- *   retried, it is erased with its person (only me), or stays readable to
- *   its team or everyone with no delete on the page.
+ * - `brain.upload.refused`, with why (`refusals`), when the Brain refused
+ *   it: it certainly didn't land. The row goes with the event only when
+ *   it names nothing the Brain holds (`frees`). The person is told why,
+ *   in their words.
+ * - `brain.upload.failed` for any other failure, whose outcome isn't
+ *   known: the add may have landed (an answer lost), so the row always
+ *   stays, naming the key: the upload can be deleted, and the same id
+ *   tried again, which the Brain answers with the version it made.
  */
 const addVersion = async (
   env: Env,
@@ -328,7 +353,11 @@ const addVersion = async (
   row: UploadRow,
   file: BrainUploadFile & { type: keyof typeof uploadTypes },
   text: string,
-  { first, change }: { first: boolean; change: string }
+  {
+    first,
+    written,
+    change,
+  }: { first: boolean; written: boolean; change: string }
 ): Promise<SourceVersionRef> => {
   const db = drizzle(env.DB);
   const event = (action: string, detail: Record<string, unknown>) =>
@@ -350,17 +379,16 @@ const addVersion = async (
   } catch (error) {
     const refusal = refusalOf(error);
     if (refusal === undefined) {
-      const failed = event("brain.upload.failed", {});
-      await (first
-        ? auditedBatch(env, db, [forgotten, failed])
-        : auditedBatch(env, db, [failed]));
+      await auditedBatch(env, db, [event("brain.upload.failed", {})]);
       throw error;
     }
     const refused = event("brain.upload.refused", { reason: refusal.reason });
-    await (first || refusal.reason === "erased"
+    const frees =
+      refusal.frees === "always" || (refusal.frees === "if_written" && written);
+    await (frees
       ? auditedBatch(env, db, [forgotten, refused])
       : auditedBatch(env, db, [refused]));
-    throw refusal.error();
+    throw refusal.error(first);
   }
   await auditedBatch(env, db, [
     event("brain.upload.added", { version: added.version }),
@@ -379,8 +407,10 @@ const addVersion = async (
  * A retry is the same upload: an id that is already this person's upload,
  * for the same readers, adds its first version again, which the Brain
  * answers with the version it made. An id anyone else's upload holds, or
- * theirs for other readers, is refused (`brain.upload_retry_refused`),
- * never their upload: the page mints a fresh one for the next file.
+ * theirs for other readers, is refused (`brain.upload_retry_refused`,
+ * audited), never their upload: the page mints a fresh one for the next
+ * file. The same id sent again with another file is refused as
+ * `brain.upload_other_file`: the first file stays as it was.
  */
 export const uploadToBrain = async (
   env: Env,
@@ -413,7 +443,7 @@ export const uploadToBrain = async (
   // Before the Brain is given anything under its key, so every key it
   // holds is named here for its deletion; kept as it is when the id is
   // already an upload's, which is then read back whoever made it.
-  await db
+  const insert = await db
     .insert(brainUploads)
     .values({
       id: id.data,
@@ -434,10 +464,28 @@ export const uploadToBrain = async (
     row.readers === readers.kind &&
     row.teamId === (readers.kind === "team" ? readers.teamId : null);
   if (!theirs) {
+    // Audited as every refusal is: by the person and the id they sent,
+    // with nothing of the upload that holds it.
+    await auditedBatch(env, db, [
+      outboxed(db, {
+        actor: actorOf(person),
+        target: { type: "brain_upload", id: id.data },
+        action: "brain.upload.refused",
+        detail: {
+          reason: "id_taken",
+          readers: readers.kind,
+          mediaType: uploadTypes[file.type],
+          bytes: file.bytes.byteLength,
+        },
+      }),
+    ]);
     throw brainUploadErrors.create("brain.upload_retry_refused");
   }
   return await addVersion(env, person, row, file, text, {
     first: true,
+    // Only the call that wrote the row may forget it: another's (a retry
+    // running beside it, or the one before) may have landed its version.
+    written: insert.meta.changes > 0,
     change: row.id,
   });
 };
@@ -473,6 +521,7 @@ export const uploadVersionToBrain = async (
     .where(eq(brainUploads.id, row.id));
   return await addVersion(env, person, row, file, text, {
     first: false,
+    written: false,
     // One change per upload request, minted before its one try.
     change: crypto.randomUUID(),
   });

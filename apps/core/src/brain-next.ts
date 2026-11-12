@@ -2,6 +2,7 @@ import { packAcross, sourcesAcross } from "@grasp-os/brain-next/across";
 import {
   brainOf,
   currentReadMax,
+  changeTaken,
   fitsSourceText,
   isSourceText,
   erasedSource,
@@ -461,7 +462,9 @@ const readerOf = async (
  * a producer checks that whoever asks for the change may change that
  * source before it calls this; the Brain can't tell. Refused, final and
  * never to be retried: with `brain.source_erased` when an erasure closed
- * what it adds, `brain.source_no_text` for a text of whitespace alone,
+ * what it adds, `brain.source_change_taken` when `change` was added
+ * before with other text or readers (nothing changed),
+ * `brain.source_no_text` for a text of whitespace alone,
  * `brain.source_too_large` past a source's bound (`fitsSourceText`).
  */
 export const addSource = async (
@@ -502,6 +505,9 @@ export const addSource = async (
       (error.message === erasedSource || error.message === storeErased)
     ) {
       throw brainSourceErrors.create("brain.source_erased");
+    }
+    if (error instanceof Error && error.message === changeTaken) {
+      throw brainSourceErrors.create("brain.source_change_taken");
     }
     throw error;
   }

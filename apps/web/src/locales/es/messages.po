@@ -14499,6 +14499,10 @@ msgstr "Esta página se detuvo"
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "El código guardado de esta página ya no coincide con el código publicado, así que no se abrió. Avisa a un administrador."
 
+#: src/brain/sources-page.tsx
+msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
+msgstr "Esta subida ya se hizo con otro archivo, que se mantiene como estaba. Vuelve a elegir el archivo para subirlo como una subida nueva, o añádelo como una nueva versión."
+
 #: src/pages/frame-failure.tsx
 msgid "This version can't open"
 msgstr "Esta versión no se puede abrir"

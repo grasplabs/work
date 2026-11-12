@@ -183,6 +183,8 @@ export interface BrainSourcesApi {
 export const brainSourceErrors = defineErrorFamily({
   "brain.source_erased":
     "What this adds was erased: it stays erased, and isn't added.",
+  "brain.source_change_taken":
+    "This change was added before with other text or readers; nothing changed.",
   "brain.source_no_text": "There's no text in this to keep.",
   "brain.source_too_large": "This text is too large for the Brain to keep.",
 });
@@ -197,6 +199,8 @@ export const brainUploadErrors = defineErrorFamily({
     "This upload was deleted, so it takes no new version.",
   "brain.upload_text_too_long":
     "This file's text is too long to keep. Split it into smaller files and upload those.",
+  "brain.upload_other_file":
+    "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version.",
   "brain.upload_retry_refused":
     "This upload can't go on. Choose the file again to upload it.",
   "brain.upload_busy":

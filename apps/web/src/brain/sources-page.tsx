@@ -104,8 +104,7 @@ const readFrom = async <T,>(
 };
 
 /**
- * Why an upload was refused, as the person reads it: core's own words,
- * but for a file whose text is too long, said in their language.
+ * Why an upload was refused, as the person reads it.
  */
 const UploadRefusal = ({
   refused,
@@ -113,11 +112,16 @@ const UploadRefusal = ({
   refused: { message: string; code?: string };
 }) => {
   const { t } = useLingui();
+  // Core's refusals the page says in the person's own language; every
+  // other is core's own words.
+  const said: Record<string, string> = {
+    "brain.upload_text_too_long": t`This file's text is too long for the Brain to keep. Split it into smaller files and upload those.`,
+    "brain.upload_other_file": t`This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version.`,
+  };
   return (
     <ErrorText>
-      {refused.code === "brain.upload_text_too_long"
-        ? t`This file's text is too long for the Brain to keep. Split it into smaller files and upload those.`
-        : refused.message}
+      {(refused.code === undefined ? undefined : said[refused.code]) ??
+        refused.message}
     </ErrorText>
   );
 };

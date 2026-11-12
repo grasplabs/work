@@ -31,6 +31,14 @@ export type KeyState = "free" | "held" | "erased";
 export const erasedSource = "The Brain refused it: what this adds was erased";
 
 /**
+ * What an add says whose change was added before with other text or
+ * readers: nothing changed, and the version that change made stays. Said
+ * only to the producer that adds it, which compares it whole.
+ */
+export const changeTaken =
+  "The Brain refused it: this change was added before with other text or readers";
+
+/**
  * What a person's own store erased whole answers an add, or any call that
  * would write: they were erased, for good, so the add is refused as
  * `erasedSource` is, and never tried again.
