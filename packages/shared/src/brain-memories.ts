@@ -12,6 +12,8 @@ import { z } from "zod";
 export const chatSavedMemorySchema = z.strictObject({
   memory: z.uuid(),
   statement: z.string().min(1),
+  /** Who or what it is about, by name, when it isn't the person themselves. */
+  about: z.string().min(1).optional(),
 });
 export type ChatSavedMemory = z.infer<typeof chatSavedMemorySchema>;
 

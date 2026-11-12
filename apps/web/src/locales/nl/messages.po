@@ -6343,6 +6343,10 @@ msgid "Grasp was updated while this page was open. Try again to load the new ver
 msgstr "Grasp is bijgewerkt terwijl deze pagina open stond. Probeer het opnieuw om de nieuwe versie te laden."
 
 #: src/chat/saved-memory.tsx
+msgid "Grasp will remember about {about}: {statement}"
+msgstr "Grasp onthoudt over {about}: {statement}"
+
+#: src/chat/saved-memory.tsx
 msgid "Grasp will remember: {statement}"
 msgstr "Grasp onthoudt: {statement}"
 

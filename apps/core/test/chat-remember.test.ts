@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { keepAudience } from "../src/knowledge/access.ts";
 import {
   codeStep,
   model,
@@ -107,6 +108,17 @@ const savesPreference = () =>
     quote: "always want answers in Dutch",
   });
 
+/** The model saves a status of the customer of `id`, naming it otherwise. */
+const savesById = (id: string) =>
+  toolStep("remember", {
+    about: { kind: "customer", name: "Someone else entirely", id },
+    attribute: "status",
+    value: "Churned",
+    type: "fact",
+    statement: "It has churned",
+    quote: "it has churned",
+  });
+
 /** The model saves an instruction from the person. */
 const savesInstruction = (statement: string, quote: string) =>
   toolStep("remember", {
@@ -165,8 +177,9 @@ describe("the agent remembering in a person's own chat", () => {
         undone,
         after: await keptFor(member.userId, customer),
         checkedTheirMessage: check?.includes(said) === true,
+        checkedTheSubject: check?.includes(customer) === true,
       }).toStrictEqual({
-        shown: [{ memory, statement }],
+        shown: [{ memory, statement, about: customer }],
         kept: [[statement]],
         theirs: [],
         undoneByOther: "nothing",
@@ -174,6 +187,7 @@ describe("the agent remembering in a person's own chat", () => {
         undone: ["done", "done"],
         after: [[]],
         checkedTheirMessage: true,
+        checkedTheSubject: true,
       });
     }
   );
@@ -253,6 +267,142 @@ describe("the agent remembering in a person's own chat", () => {
       }).toStrictEqual({ refused: [true], kept: [], shown: [] });
     }
   );
+
+  it(
+    "never files the person's own words about someone else when the check says they aren't about them",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const colleague = `Bob ${unique()}`;
+      const chats = await personalChatsOf(
+        member.userId,
+        toolStep("remember", {
+          about: { kind: "person", name: colleague },
+          attribute: "preference",
+          value: "mail",
+          type: "preference",
+          statement: "Prefers answers by mail",
+          quote: "I prefer answers by mail",
+        }),
+        checked(false),
+        says("Noted.")
+      );
+      const { chat, ask } = await chats.newChat();
+      await ask("I prefer answers by mail.");
+      const [check] = checksSent(chats.provider);
+
+      expect({
+        checkedTheSubject: check?.includes(colleague) === true,
+        kept: await keptFor(member.userId, colleague),
+        shown: await savedShown(member, chat.id),
+      }).toStrictEqual({ checkedTheSubject: true, kept: [], shown: [] });
+    }
+  );
+
+  it(
+    "names an entity of theirs to the check as their store holds it, and saves nothing about one they can't read",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const customer = `Acme ${unique()}`;
+      const first = await personalChatsOf(
+        member.userId,
+        toolStep("remember", {
+          about: { kind: "customer", name: customer },
+          attribute: "status",
+          value: "Renewing",
+          type: "fact",
+          statement: `${customer} is renewing`,
+          quote: `${customer} is renewing`,
+        }),
+        checked(true),
+        says("Noted.")
+      );
+      const { chat, ask } = await first.newChat();
+      await ask(`${customer} is renewing.`);
+      const [saved] = await savedShown(member, chat.id);
+      const store = personalBrainOf(
+        inJurisdiction(env, env.BRAIN_STORE),
+        member.userId
+      );
+      const { entities } = await store.findEntities({
+        reader: { person: member.userId, groups: [] },
+        name: customer,
+      });
+      const entity = entities[0]?.id ?? "";
+      const second = await personalChatsOf(
+        member.userId,
+        savesById(entity),
+        checked(true),
+        says("Noted."),
+        savesById(crypto.randomUUID()),
+        says("I couldn't.")
+      );
+      const later = await second.newChat();
+      await later.ask("Actually it has churned.");
+      const other = await second.newChat();
+      await other.ask("Actually it has churned.");
+      const checks = checksSent(second.provider);
+      const notices = await savedShown(member, later.chat.id);
+      const results = await toolResults(second.stub, other.chat.id);
+
+      expect({
+        first: saved?.about,
+        checks: checks.length,
+        namedAsHeld: checks[0]?.includes(customer) === true,
+        namedAsTheModelSaid:
+          checks[0]?.includes("Someone else entirely") === true,
+        unknownRefused: results.map(({ isError, text }) => ({
+          isError,
+          told: text.includes("no entity of theirs"),
+        })),
+        notices: notices.map(({ about }) => about),
+      }).toStrictEqual({
+        first: customer,
+        // The unknown id is refused before any check is asked.
+        checks: 1,
+        namedAsHeld: true,
+        namedAsTheModelSaid: false,
+        unknownRefused: [{ isError: true, told: true }],
+        notices: [customer],
+      });
+    }
+  );
+
+  it("keeps nothing in a chat others share in Grasp's app", slow, async () => {
+    const [member, colleague] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const stub = workspace(env, personalWorkspaceId(member.userId));
+    const provider = await fakeProvider(savesPreference(), says("Shared."));
+    const chat = await stub.createChat(
+      "Shared",
+      member.userId,
+      crypto.randomUUID(),
+      undefined,
+      "web",
+      `T${unique()}`
+    );
+    await keepAudience(
+      env,
+      { workspaceId: personalWorkspaceId(member.userId), chatId: chat.id },
+      member.userId,
+      { members: [member.userId, colleague.userId], outsiders: false }
+    );
+    await stub.ask(chat.id, { text: "I always want answers in Dutch.", model });
+    const results = await toolResults(stub, chat.id);
+
+    expect({
+      outcomes: results.map(({ tool, isError }) => ({ tool, isError })),
+      kept: await keptFor(member.userId),
+      checks: checksSent(provider).length,
+    }).toStrictEqual({
+      outcomes: [{ tool: "remember", isError: true }],
+      kept: [],
+      checks: 0,
+    });
+  });
 
   it(
     "keeps nothing where nobody sees a notice: a shared thread, a direct message on a chat platform, a turn nobody started",

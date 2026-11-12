@@ -163,6 +163,47 @@ describe(ChatThread, () => {
     forgotten.length = 0;
   });
 
+  it("says under a call of remember who or what it is about, when it isn't the person", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Prefers answers by mail" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          statement: "Prefers answers by mail",
+          about: "Bob",
+        },
+      },
+    ]);
+
+    expect(document.body.textContent).toContain(
+      "Grasp will remember about Bob: Prefers answers by mail"
+    );
+  });
+
   it("says under a call of remember what Grasp will remember, in the person's words, and undoes it there", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const memory = "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f";

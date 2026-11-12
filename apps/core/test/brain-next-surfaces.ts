@@ -858,7 +858,11 @@ const pastAll = new Date(8.64e15);
 type CoreMember = keyof typeof coreBrain;
 
 /** The exports of core's brain-next.ts for a person's memories, probed after the store's memories (`corePersonMemories`). */
-type CorePersonMember = "rememberAs" | "forgetAs" | "memoryChoices";
+type CorePersonMember =
+  | "rememberAs"
+  | "forgetAs"
+  | "memoryChoices"
+  | "ownEntityAs";
 
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
@@ -2721,6 +2725,39 @@ const corePersonProbes = personMemoryProbes({
 const corePersonMemories = {
   rememberAs: corePersonProbes.remember,
   forgetAs: corePersonProbes.forget,
+  // An entity of the reader's own store: one in the shared store, one in
+  // someone else's own store and one no one added answer alike.
+  ownEntityAs: async (probing) => {
+    const { personId, markers } = probing;
+    const [fixture, others] = await Promise.all([
+      memoryFixture(probing),
+      othersOwnMemory(markers),
+    ]);
+    const read = async (
+      name: string,
+      entity: string,
+      about?: Answer["about"],
+      as = personId
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.ownEntityAs(env, as, entity),
+        about
+      );
+    return [
+      await read("an entity no one added", crypto.randomUUID(), "nothing"),
+      await read("one only hidden memories name", fixture.hidden, "hidden"),
+      await read("one drawn from a hidden source", fixture.drawn, "hidden"),
+      await read("one in someone else's own store", others.entity, "hidden"),
+      await read(
+        "as someone who isn't a member",
+        others.entity,
+        undefined,
+        stranger()
+      ),
+      await read("an id of the markers", markers.join("")),
+    ];
+  },
   // The Brain's own lists and bounds, the same for every reader: no reader
   // asks, and no marker can be in them.
   memoryChoices: async () => [

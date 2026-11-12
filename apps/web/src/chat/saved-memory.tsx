@@ -14,14 +14,15 @@ import { useCoreAction } from "../use-core-action.ts";
 
 /**
  * Under a call of `remember`: what Grasp saved of what the person said,
- * in their own words, and a way to undo it, which retires the memory
+ * in their own words, and who or what it is about when it isn't them,
+ * and a way to undo it, which retires the memory
  * (core's `session.brainMemories.forget`). One that was undone already,
  * here or elsewhere, is undone as well.
  */
 export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
   const { busy, failure, run } = useCoreAction();
   const [undone, setUndone] = useState(false);
-  const { statement } = saved;
+  const { statement, about } = saved;
   const undo = async () => {
     const outcome = await run(
       async (session) => await session.brainMemories.forget(saved.memory)
@@ -40,7 +41,13 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
           <Trans>Grasp no longer remembers this.</Trans>
         ) : (
           <>
-            <Trans>Grasp will remember: {statement}</Trans>{" "}
+            {about === undefined ? (
+              <Trans>Grasp will remember: {statement}</Trans>
+            ) : (
+              <Trans>
+                Grasp will remember about {about}: {statement}
+              </Trans>
+            )}{" "}
             <Button
               disabled={busy}
               onClick={() => {
