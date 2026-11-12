@@ -359,6 +359,29 @@ export const holdsTerm = (words: readonly Word[], term: Word): boolean => {
 export const sequenceOf = (text: string): string[] =>
   writtenOf(text).flatMap(foldedOf);
 
+/** A word of a text, folded, and where it is written: `[start, end)`. */
+export interface PlacedWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * `text`'s words in order, folded, each with where it is written in
+ * `text` itself, so a part of the text can be cut around them. Cut word
+ * by word as written (without `sequenceOf`'s compatibility folding of the
+ * whole text first), so for the rare text whose compatibility forms join
+ * or part words, it may differ from `sequenceOf`; a caller falls back then.
+ */
+export const placedOf = (text: string): PlacedWord[] =>
+  [...text.matchAll(wordPattern)].flatMap((match) =>
+    foldedOf(match[0].normalize("NFKC").toLowerCase()).map((word) => ({
+      word,
+      start: match.index,
+      end: match.index + match[0].length,
+    }))
+  );
+
 /** `words` as one FTS5 query: all of them, each a quoted word. */
 export const allOf = (words: readonly string[]): string =>
   [...new Set(words)].map((word) => `"${word}"`).join(" AND ");

@@ -269,9 +269,9 @@ const vocabulary = (seed: number) => {
   const hex = Math.floor(seededRandom(seed)() * 2 ** 32)
     .toString(16)
     .padStart(8, "0");
-  // Roots a and b with a digit, so their words are IDs (the exact way);
+  // Roots a and b with two digits, so their words are IDs (the exact way);
   // c and d of letters alone, each digit a consonant, so they are words.
-  const idPrefix = `r1${hex.slice(1)}`;
+  const idPrefix = `r11${hex.slice(2)}`;
   const wordPrefix = `r${hex.replaceAll(/\d/gu, (digit) => "ghjklmnpst".charAt(Number(digit)))}`;
   return (token: Token): string =>
     isStop(token)

@@ -7,7 +7,10 @@ import { allOf, sequenceOf } from "./words.ts";
 //
 // 1. Quoted phrases: text between double quotes of any kind ("…", “…”,
 //    „…“, «…»).
-// 2. IDs: a word, separators inside it allowed, holding a letter and at
+// 2. IDs: a word, with - / . or _ inside it allowed and nothing else
+//    (whitespace, a comma, a semicolon, a colon, brackets, quotes, or a
+//    dot or other punctuation at its end ends it: "INV-123,INV-456" is
+//    two, "See PO-17." and "(PO-17)" are PO-17), holding a letter and at
 //    least two digits (PO-17, A12, INV-2024-0042, TK-5531, CN-2026-118),
 //    or a run of five digits or more (12345, 06-12345678): a reference.
 //    Everything else is words, which the words way finds: dates and times
@@ -17,8 +20,8 @@ import { allOf, sequenceOf } from "./words.ts";
 //    IDs, each would get a list of its own and crowd out the passage that
 //    writes it otherwise ("14 maart 2026", "tweede kwartaal"). Known and
 //    accepted, the rule unchanged: v2.1, 4x4 and COVID-19 are IDs (names
-//    of a kind), and so are a timestamp (2026-03-14T09:00:00Z: its T and
-//    Z are letters), a compact date (20260314) and an amount with five
+//    of a kind), and so are the parts of a timestamp its colons part
+//    (2026-03-14T09 and 00Z of 2026-03-14T09:00:00Z: T and Z are letters), a compact date (20260314) and an amount with five
 //    digits in a row (€1250000). Such a token is found only as written,
 //    and is reported in `notFound` when no passage the reader may read
 //    writes it that way. #4521 is not an ID (four digits: found as a
@@ -72,8 +75,11 @@ const idDigits = 2;
 /** A pair of double quotes of any kind, and what they hold. */
 const quoted = /["“”„«»](?<inner>[^"“”„«»]+)["“”„«»]/gu;
 
-/** What surrounds a word that isn't part of it: punctuation and symbols. */
-const aroundWord = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+/**
+ * A word that may be an ID: letters and digits, with - / . or _ between
+ * them, one at a time. Anything else around or between ends it.
+ */
+const idWord = /[\p{L}\p{N}]+(?:[-/._][\p{L}\p{N}]+)*/gu;
 
 const digits = /\p{N}/gu;
 const letter = /\p{L}/u;
@@ -102,8 +108,7 @@ const isId = (word: string): boolean =>
 
 /** The IDs among `text`'s words, in order (rule 2). */
 const idsOf = (text: string): Exact[] =>
-  text.split(/\s+/u).flatMap((written) => {
-    const word = written.replaceAll(aroundWord, "");
+  (text.match(idWord) ?? []).flatMap((word) => {
     const exact = isId(word)
       ? exactOf(word, sequenceOf(word), "id")
       : undefined;

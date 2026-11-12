@@ -143,6 +143,10 @@ const spent = (pack: RecalledPack): number => {
   return tokens;
 };
 
+/** `pack`'s item citing `source`, if any. */
+const quoted = (pack: RecalledPack, source: SourceRef) =>
+  pack.items.find((item) => item.source.id === source.id);
+
 describe("the cited pack", () => {
   it("finds an exact ID and a quoted phrase that word search ranks past its limit", async () => {
     const reader = await person();
@@ -271,6 +275,82 @@ describe("the cited pack", () => {
         )
       )
     ).toStrictEqual([]);
+  });
+
+  it("reads IDs a question lists with commas, semicolons or sentence punctuation one by one", async () => {
+    const reader = await person();
+    const [first, second, third] = [id(), id(), id()];
+    const byFirst = await add(`Booked: ${first}.`, owner(reader));
+    const bySecond = await add(`Paid: ${second}.`, owner(reader));
+    const byThird = await add(`Sent: ${third}.`, owner(reader));
+
+    const packs = await Promise.all(
+      [
+        `${first},${second}`,
+        `${first}; ${second}`,
+        `Where is ${third}.`,
+        `Where is (${third})?`,
+      ].map(async (question) => await packFor(reader, question))
+    );
+
+    expect(
+      packs.map(({ items, notFound }) => ({
+        exact: items
+          .filter(({ found }) => found === "exact")
+          .map(({ source }) => source.id)
+          .toSorted(),
+        notFound,
+      }))
+    ).toStrictEqual([
+      { exact: [byFirst.id, bySecond.id].toSorted(), notFound: [] },
+      { exact: [byFirst.id, bySecond.id].toSorted(), notFound: [] },
+      { exact: [byThird.id], notFound: [] },
+      { exact: [byThird.id], notFound: [] },
+    ]);
+  });
+
+  it("quotes a phrase or an ID a long sentence holds across where it would be cut, within the budget", async () => {
+    const reader = await person();
+    const [topic, other] = [word(), word()];
+    const invoice = id();
+    // One sentence of 1,500 characters, no punctuation, the phrase and
+    // the ID across character 400, where a long sentence is cut.
+    const sentence = (held: string): string => {
+      const before = `${topic} `.repeat(Math.ceil(395 / (topic.length + 1)));
+      return `${before.slice(0, 395 - 1)} ${held} ${`${other} `.repeat(200)}`
+        .slice(0, 1500)
+        .trim();
+    };
+    const phrased = sentence("night shift rota");
+    const ided = sentence(invoice);
+    const [byPhrase, byId] = [
+      await add(phrased, owner(reader)),
+      await add(ided, owner(reader)),
+    ];
+    const tokens = 200;
+
+    const [phrasePack, idPack] = await Promise.all([
+      packFor(reader, `"night shift rota" ${topic}`, { tokens }),
+      packFor(reader, `${invoice} ${topic}`, { tokens }),
+    ]);
+
+    expect({
+      phrase: quoted(phrasePack, byPhrase)?.text.includes("night shift rota"),
+      phraseIn: phrased.includes(quoted(phrasePack, byPhrase)?.text ?? "-"),
+      id: quoted(idPack, byId)?.text.includes(invoice),
+      idIn: ided.includes(quoted(idPack, byId)?.text ?? "-"),
+      found: [quoted(phrasePack, byPhrase)?.found, quoted(idPack, byId)?.found],
+      whole: [quoted(phrasePack, byPhrase)?.whole, quoted(idPack, byId)?.whole],
+      spent: [spent(phrasePack) <= tokens, spent(idPack) <= tokens],
+    }).toStrictEqual({
+      phrase: true,
+      phraseIn: true,
+      id: true,
+      idIn: true,
+      found: ["exact", "exact"],
+      whole: [false, false],
+      spent: [true, true],
+    });
   });
 
   it("finds a phrase held in a row in a longer chunk past more chunks than the cap that hold its words apart", async () => {

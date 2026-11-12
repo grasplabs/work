@@ -28,52 +28,58 @@ describe("the exact parts of a question", () => {
   });
 
   it("takes a word with a letter and two digits, or five digits in a row, as an ID, and nothing else", () => {
-    const ids = [
-      "PO-17",
-      "A12",
-      "INV-2024-0042",
-      "TK-5531",
-      "CN-2026-118",
-      "12345",
-      "06-12345678",
-      // Known and accepted: names of a kind, a timestamp, a compact date,
-      // an amount with five digits in a row.
-      "v2.1",
-      "4x4",
-      "COVID-19",
-      "2026-03-14T09:00:00Z",
-      "20260314",
-      "€1250000",
-    ];
-    const words = [
-      "2026-03-14",
-      "09:30",
-      "14:00-15:00",
-      "1.250,00",
-      "12.5",
-      "1/2",
-      "2026",
-      "4400",
-      "2024/0042",
-      "2e",
-      "3rd",
-      "9am",
-      "A4",
-      "Q3",
-      "MP3",
-      "v2",
+    // What a question writes, and the IDs read from it, as written.
+    const table: [string, string[]][] = [
+      ["PO-17", ["PO-17"]],
+      ["A12", ["A12"]],
+      ["INV-2024-0042", ["INV-2024-0042"]],
+      ["TK-5531", ["TK-5531"]],
+      ["CN-2026-118", ["CN-2026-118"]],
+      ["12345", ["12345"]],
+      ["06-12345678", ["06-12345678"]],
+      ["inv_2024/0042.b", ["inv_2024/0042.b"]],
+      // Only - / . _ sit inside an ID; anything else ends it.
+      ["INV-123,INV-456", ["INV-123", "INV-456"]],
+      ["INV-123; INV-456", ["INV-123", "INV-456"]],
+      ["See PO-17.", ["PO-17"]],
+      ["(PO-17)", ["PO-17"]],
+      ['"PO-17', ["PO-17"]],
+      ["PO-17:", ["PO-17"]],
+      ["PO-17?", ["PO-17"]],
+      // Known and accepted: names of a kind, a timestamp (its colons end
+      // an ID), a compact date, an amount with five digits in a row.
+      ["v2.1", ["v2.1"]],
+      ["4x4", ["4x4"]],
+      ["COVID-19", ["COVID-19"]],
+      ["2026-03-14T09:00:00Z", ["2026-03-14T09", "00Z"]],
+      ["20260314", ["20260314"]],
+      ["€1250000", ["1250000"]],
+      // Words.
+      ["2026-03-14", []],
+      ["09:30", []],
+      ["14:00-15:00", []],
+      ["1.250,00", []],
+      ["12.5", []],
+      ["1/2", []],
+      ["2026", []],
+      ["4400", []],
+      ["2024/0042", []],
+      ["2e", []],
+      ["3rd", []],
+      ["9am", []],
+      ["A4", []],
+      ["Q3", []],
+      ["MP3", []],
+      ["v2", []],
       // Four digits: found as a word.
-      "#4521",
+      ["#4521", []],
     ];
     expect(
-      [...ids, ...words].map((written) => ({
+      table.map(([written]) => [
         written,
-        id: partsOf(`about ${written} please`).length === 1,
-      }))
-    ).toStrictEqual([
-      ...ids.map((written) => ({ written, id: true })),
-      ...words.map((written) => ({ written, id: false })),
-    ]);
+        partsOf(`about ${written} please`).map(({ asked }) => asked),
+      ])
+    ).toStrictEqual(table);
   });
 
   it("finds a phrase's words only in a row and in order, whatever their case and accents", () => {

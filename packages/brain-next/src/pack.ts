@@ -2,7 +2,7 @@ import { packItemTokens } from "./contract.ts";
 import type { Pack, PackItem } from "./contract.ts";
 import { foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
-import { holdsTerm, sequenceOf, wordsOf } from "./words.ts";
+import { holdsTerm, placedOf, sequenceOf, wordsOf } from "./words.ts";
 import type { Word, WordMemo } from "./words.ts";
 
 // How what recall found becomes a pack: fused by rank, then fitted to the
@@ -101,10 +101,63 @@ export interface Asked {
 }
 
 /**
+ * Where in `text` the first of `exacts` it holds is written, `[start,
+ * end)`, or none.
+ */
+const placeOfExact = (
+  text: string,
+  exacts: readonly Exact[]
+): [number, number] | undefined => {
+  const placed = placedOf(text);
+  for (const { words } of exacts) {
+    for (let start = 0; start + words.length <= placed.length; start += 1) {
+      if (words.every((word, at) => placed[start + at]?.word === word)) {
+        return [
+          placed[start]?.start ?? 0,
+          placed[start + words.length - 1]?.end ?? 0,
+        ];
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * A part of `text` of at most `quoteMaxLength` around `[start, end)`,
+ * cut at whitespace on both sides (so never inside a word or a surrogate
+ * pair), or the span itself when it is longer.
+ */
+const windowOf = (text: string, start: number, end: number): string => {
+  const room = quoteMaxLength - (end - start);
+  if (room <= 0) {
+    return text.slice(start, end);
+  }
+  const to = Math.min(
+    text.length,
+    Math.max(0, start - Math.floor(room / 2)) + quoteMaxLength
+  );
+  let from = Math.max(0, to - quoteMaxLength);
+  let cut = to;
+  // Whole words only: start just past whitespace, end just before it,
+  // never into the span.
+  while (from < start && !whitespace.test(text.charAt(from - 1)) && from > 0) {
+    from += 1;
+  }
+  while (cut > end && cut < text.length && !whitespace.test(text.charAt(cut))) {
+    cut -= 1;
+  }
+  return text.slice(from, cut).trim();
+};
+
+/**
  * The part of `text` that best answers `asked`: its sentence (or, for a
  * sentence over `quoteMaxLength`, its piece) holding the most of the
  * question's exact parts, then the most of its telling words in any form;
- * the first on a tie. The text itself when it is one such part.
+ * the first on a tie. The text itself when it is one such part. When the
+ * text holds an exact part that no piece holds whole (it crosses where a
+ * long sentence is cut), a window of at most `quoteMaxLength` around it
+ * instead, so a quote of a chunk found as exact always holds what it was
+ * found by.
  */
 export const quoteOf = (
   text: string,
@@ -117,17 +170,24 @@ export const quoteOf = (
   const every = exacts.map((_, index) => index);
   let best = parts[0] ?? text;
   let bestScore = -1;
+  let bestExact = 0;
   for (const part of parts) {
     const words = wordsOf(part, memo);
+    const exact = foundIn(sequenceOf(part), exacts, every).length;
     const score =
-      foundIn(sequenceOf(part), exacts, every).length * (terms.length + 1) +
+      exact * (terms.length + 1) +
       terms.filter((term) => holdsTerm(words, term)).length;
     if (score > bestScore) {
       best = part;
       bestScore = score;
+      bestExact = exact;
     }
   }
-  return best;
+  if (bestExact > 0) {
+    return best;
+  }
+  const place = placeOfExact(text, exacts);
+  return place === undefined ? best : windowOf(text, place[0], place[1]);
 };
 
 /** `found` as an item of the pack, given `text`. */
