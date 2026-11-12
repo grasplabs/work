@@ -1,6 +1,7 @@
 import type { AiProvidersApi } from "./ai-providers.ts";
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
+import type { BrainSourcesApi } from "./brain-sources.ts";
 import type { BrainApi } from "./brain.ts";
 import type { ChannelAccountsApi } from "./channel-accounts.ts";
 import type { ChatsApi } from "./chat.ts";
@@ -104,6 +105,11 @@ export interface SessionApi {
    * read it.
    */
   readonly brain: BrainApi;
+  /**
+   * The Brain's sources the person may read, their versions and text, and
+   * search, which is recall as that person.
+   */
+  readonly brainSources: BrainSourcesApi;
   /**
    * Knowledge usage signals, computed daily: what's missing or stale in the
    * collections the person owns.

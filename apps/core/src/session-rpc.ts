@@ -4,6 +4,7 @@ import { AiProvidersRpc } from "./ai-providers.ts";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
+import { BrainSourcesRpc } from "./brain-sources-rpc.ts";
 import { ChannelAccountsRpc } from "./channels/accounts.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
@@ -56,6 +57,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #apps: AppsRpc;
   readonly #knowledge: KnowledgeRpc;
   readonly #brain: BrainRpc;
+  readonly #brainSources: BrainSourcesRpc;
   readonly #knowledgeSignals: KnowledgeSignalsRpc;
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
@@ -101,6 +103,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#apps = new AppsRpc(env, full);
     this.#knowledge = new KnowledgeRpc(env, full);
     this.#brain = new BrainRpc(env, full);
+    this.#brainSources = new BrainSourcesRpc(env, full);
     this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
@@ -200,6 +203,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get brain(): BrainRpc {
     return this.#brain;
+  }
+
+  get brainSources(): BrainSourcesRpc {
+    return this.#brainSources;
   }
 
   get knowledgeSignals(): KnowledgeSignalsRpc {

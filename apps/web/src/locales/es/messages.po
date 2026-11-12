@@ -904,6 +904,10 @@ msgstr "{name}: {hours, plural, one {# hora a la semana} other {# horas a la sem
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name}: {started} iniciados, {completed} completados, {failed} fallidos"
 
+#: src/brain/sources-page.tsx
+msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
+msgstr "{name}: los agentes lo buscan en directo cuando preguntas. El cerebro no guarda nada de ello."
+
 #: src/apps/app-status.tsx
 msgid "{names} use it"
 msgstr "{names} lo usan"
@@ -1309,6 +1313,10 @@ msgstr "{versions, plural, one {# versión depurada} other {# versiones depurada
 #: src/knowledge/purge.tsx
 msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
 msgstr "{versions, plural, one {# versión reescrita} other {# versiones reescritas}}"
+
+#: src/brain/sources-page.tsx
+msgid "{versions, plural, one {# version} other {# versions}}"
+msgstr "{versions, plural, one {# versión} other {# versiones}}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
@@ -2896,6 +2904,10 @@ msgstr "A quién preguntar: {role}"
 msgid "Ask to run version {askable} for the team"
 msgstr "Pedir que la versión {askable} funcione para el equipo"
 
+#: src/brain/sources-page.tsx
+msgid "Ask what you're looking for"
+msgstr "Pregunta lo que buscas"
+
 #: src/frame/connect-ai-provider.tsx
 msgid "Ask your admin to connect an AI provider."
 msgstr "Pide a tu administrador que conecte un proveedor de IA."
@@ -3281,6 +3293,11 @@ msgctxt "a change's source"
 msgid "by an import"
 msgstr "por una importación"
 
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "By common words only"
+msgstr "Solo por palabras comunes"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "By hand now"
 msgstr "A mano ahora"
@@ -3288,6 +3305,16 @@ msgstr "A mano ahora"
 #: src/dashboard/standard-widgets.tsx
 msgid "by hand, a month"
 msgstr "a mano, al mes"
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "By its words"
+msgstr "Por sus palabras"
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "By meaning"
+msgstr "Por el significado"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "By team"
@@ -3647,6 +3674,11 @@ msgstr "Gráfico"
 #: src/chat/chat-panel.tsx
 #: src/chat/chat-start.tsx
 #: src/frame/app-sidebar.tsx
+msgid "Chat"
+msgstr "Chat"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
 msgid "Chat"
 msgstr "Chat"
 
@@ -4876,6 +4908,10 @@ msgstr "Documento no encontrado"
 msgid "Documents"
 msgstr "Documentos"
 
+#: src/brain/sources-page.tsx
+msgid "Documents and workflow runs show here once they reach the Brain."
+msgstr "Los documentos y las ejecuciones de flujos de trabajo aparecen aquí cuando llegan al cerebro."
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Los documentos escritos aquí y los archivos que se suban aparecen aquí para que Grasp y sus agentes los lean."
@@ -5433,6 +5469,11 @@ msgstr "Todo lo que leo y cada conversación que mantengo funciona con un modelo
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Todo lo que me has contado se elimina para siempre y no se puede recuperar. ¿Solo hay algo mal? Corrígelo mejor con «Añadir algo»."
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "Exact match"
+msgstr "Coincidencia exacta"
 
 #: src/apps/app-reset.tsx
 #: src/settings/erasures.tsx
@@ -6590,6 +6631,10 @@ msgstr "Cómo apareces en Grasp: en los flujos de trabajo de los que eres respon
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "Cómo entras en Grasp. Las contraseñas y la verificación en dos pasos las gestiona la cuenta de tu organización."
+
+#: src/brain/sources-page.tsx
+msgid "How your connections feed the Brain"
+msgstr "Cómo tus conexiones alimentan el cerebro"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "How your organization is named in Grasp."
@@ -8150,6 +8195,10 @@ msgstr "Más equipos"
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Más de {about} aplicaciones en las que pueden trabajar tus flujos de trabajo. Grasp solo hace lo que permites en cada aplicación."
 
+#: src/brain/sources-page.tsx
+msgid "More was found than fits: these are the best of it."
+msgstr "Se encontró más de lo que cabe: esto es lo mejor."
+
 #: src/dashboard/outcome-card.tsx
 msgid "More was sent than is shown above. Read exactly what was sent."
 msgstr "Se envió más de lo que se muestra arriba. Lee exactamente lo que se envió."
@@ -8561,6 +8610,10 @@ msgstr "Ningún evento coincide."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No files yet."
 msgstr "Todavía no hay archivos."
+
+#: src/brain/sources-page.tsx
+msgid "No first line"
+msgstr "Sin primera línea"
 
 #: src/brain/goals-editor.tsx
 #: src/dashboard/standard-widgets.tsx
@@ -9140,6 +9193,10 @@ msgstr "Aquí aún no hay nada."
 msgid "Nothing in it that you can open."
 msgstr "No hay nada en él que puedas abrir."
 
+#: src/brain/sources-page.tsx
+msgid "Nothing in the Brain you may read yet"
+msgstr "Aún no hay nada en el cerebro que puedas leer"
+
 #: src/workflows/workflow-flow.tsx
 msgid "Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here."
 msgstr "Aún no hay nada dibujado. Cuéntale a Grasp en el chat cómo funciona este trabajo y sus pasos aparecerán aquí."
@@ -9246,6 +9303,14 @@ msgstr "No se ha añadido nada. Corrige estas filas e inténtalo de nuevo."
 msgid "Nothing yet"
 msgstr "Nada aún"
 
+#: src/brain/sources-page.tsx
+msgid "Nothing you may read holds {missing}."
+msgstr "Nada de lo que puedes leer contiene {missing}."
+
+#: src/brain/sources-page.tsx
+msgid "Nothing you may read matched."
+msgstr "Nada de lo que puedes leer coincide."
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Noticed in"
@@ -9322,6 +9387,10 @@ msgstr "Corregido a menudo"
 #: src/apps/app-data.tsx
 msgid "Older changes"
 msgstr "Cambios anteriores"
+
+#: src/brain/sources-page.tsx
+msgid "Older versions"
+msgstr "Versiones anteriores"
 
 #: src/inbox/inbox-page.tsx
 msgid "Older workflows that failed are on the <0>dashboard</0>."
@@ -9549,6 +9618,11 @@ msgstr "Solo los creadores del flujo de trabajo pueden cambiarlos."
 #: src/agents/agents-overview.tsx
 msgid "Only when asked"
 msgstr "Solo cuando se le pregunta"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source nobody else may read"
+msgid "Only you"
+msgstr "Solo tú"
 
 #: src/brain/remember-dialog.tsx
 msgid "Only you and your agents read it, until you share it."
@@ -11125,6 +11199,7 @@ msgstr "Resultado"
 msgid "Result: not measured yet"
 msgstr "Resultado: aún sin medir"
 
+#: src/brain/sources-page.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Results"
 msgstr "Resultados"
@@ -11742,6 +11817,7 @@ msgstr "Disparador programado"
 
 #: src/agents/agents-overview.tsx
 #: src/apps/apps-overview.tsx
+#: src/brain/sources-page.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Buscar"
@@ -11813,6 +11889,10 @@ msgstr "Buscar en las aplicaciones"
 #: src/settings/audit-archive.tsx
 msgid "Search the archive"
 msgstr "Buscar en el archivo"
+
+#: src/brain/sources-page.tsx
+msgid "Search the Brain"
+msgstr "Buscar en el cerebro"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -12235,6 +12315,7 @@ msgid "Show less"
 msgstr "Mostrar menos"
 
 #: src/brain/since-last-look.tsx
+#: src/brain/sources-page.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -12577,6 +12658,17 @@ msgstr "Fuente {number}: {title}"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Fuentes"
+
+#: src/brain/brain-nav.tsx
+#: src/brain/sources-page.tsx
+#: src/routes/_shell.brain.tsx
+msgctxt "the Brain's sources page"
+msgid "Sources"
+msgstr "Fuentes"
+
+#: src/brain/sources-page.tsx
+msgid "Sources you may read"
+msgstr "Fuentes que puedes leer"
 
 #: src/projects/project-dialog.tsx
 msgid "Sparkles"
@@ -13440,6 +13532,10 @@ msgstr "El registro de auditoría"
 #: src/settings/audit-chain.tsx
 msgid "The audit trail has no entries yet: there is nothing to verify."
 msgstr "El registro de auditoría aún no tiene entradas: no hay nada que comprobar."
+
+#: src/brain/sources-page.tsx
+msgid "The best part of its passage"
+msgstr "La mejor parte de su pasaje"
 
 #: src/brain/brain-atlas.ts
 msgid "The board"
@@ -14382,6 +14478,10 @@ msgstr "Esta versión se revocó"
 msgid "This version, read-only"
 msgstr "Esta versión, solo lectura"
 
+#: src/brain/sources-page.tsx
+msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
+msgstr "Lo marcado con Solo tú es solo tuyo: nadie más lo ve, ni siquiera los administradores."
+
 #: src/chat/thread.tsx
 msgid "Thought for {time}"
 msgstr "Pensó durante {time}"
@@ -14831,6 +14931,11 @@ msgstr "Actualizando {name}…"
 msgid "Upload"
 msgstr "Subir"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Upload"
+msgstr "Archivo subido"
+
 #: src/knowledge/uploads.tsx
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Sube un archivo PDF, Word o Excel, o subtítulos (.vtt)"
@@ -15005,6 +15110,7 @@ msgstr "Versión {number}, actual"
 
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
+#: src/brain/sources-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -15023,6 +15129,10 @@ msgstr "Se ha pedido que la versión {version} de {name} pase a producción. Una
 #: src/inbox/items.ts
 msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
 msgstr "La versión {version} de {name} está en producción, pero nada la inicia hasta que un administrador apruebe a qué accede: cada modelo, conexión, almacén o colección que llama."
+
+#: src/brain/sources-page.tsx
+msgid "Version {version}, added {added}"
+msgstr "Versión {version}, añadida el {added}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version}, not live yet"
@@ -15046,6 +15156,7 @@ msgid "Version to review: {version}"
 msgstr "Versión para revisar: {version}"
 
 #: src/apps/app-history.tsx
+#: src/brain/sources-page.tsx
 msgid "Versions"
 msgstr "Versiones"
 
@@ -15613,6 +15724,10 @@ msgstr "Qué puede hacer la aplicación con ella"
 msgid "What the board wants from the sprint: its goals and the rules of the road."
 msgstr "Lo que la dirección quiere del sprint: sus objetivos y las reglas del juego."
 
+#: src/brain/sources-page.tsx
+msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
+msgstr "Lo que el cerebro guarda y puedes leer, y la búsqueda en ello tal como lo recuerdan tus agentes."
+
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Lo que el cerebro guardó"
@@ -16141,6 +16256,11 @@ msgstr "Flujo de trabajo {workflow}"
 msgid "Workflow not found"
 msgstr "Flujo de trabajo no encontrado"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Workflow run"
+msgstr "Ejecución de flujo de trabajo"
+
 #: src/settings/audit-archive.tsx
 msgid "Workflow run details"
 msgstr "Detalles de las ejecuciones de flujos de trabajo"
@@ -16396,6 +16516,14 @@ msgstr "No puedes abrir esta App"
 msgid "You can't open this App's pages: your role doesn't allow it, or the App has read data you can't read."
 msgstr "No puedes abrir las páginas de esta aplicación: tu rol no lo permite, o la aplicación ha leído datos que tú no puedes leer."
 
+#: src/brain/sources-page.tsx
+msgid "You can't read this source."
+msgstr "No puedes leer esta fuente."
+
+#: src/brain/sources-page.tsx
+msgid "You can't read this version."
+msgstr "No puedes leer esta versión."
+
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."
 msgstr "Vuelves aquí a la página de {app}."
@@ -16411,6 +16539,10 @@ msgstr "No tienes acceso a esta organización. Pregunta a un administrador."
 #: src/routes/guest.tsx
 msgid "You finished this chat. Thank you for your time."
 msgstr "Has terminado este chat. Gracias por tu tiempo."
+
+#: src/brain/sources-page.tsx
+msgid "You have no connections yet."
+msgstr "Aún no tienes conexiones."
 
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."

@@ -11,8 +11,10 @@ import {
   personErasureSchema,
   recallRequestSchema,
   sourceErasureSchema,
+  sourceListRequestSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
+  versionListRequestSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
@@ -25,12 +27,16 @@ import type {
   RecallRequest,
   Pack,
   SourceErasure,
+  SourceList,
+  SourceListRequest,
   SourceVersion,
   SourceVersionRef,
   StaffActionOutcome,
   VectorSearch,
   VectorsFound,
   VectorsToPut,
+  VersionList,
+  VersionListRequest,
   VersionRequest,
   WorkOverview,
 } from "./contract.ts";
@@ -48,6 +54,7 @@ import {
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
 import { sweepFiles } from "./files.ts";
+import { listSources, listVersions } from "./listing.ts";
 import {
   countingInto,
   countWithoutMeaning,
@@ -321,6 +328,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return await readCurrent(
       this.#sources,
       checked(currentRequestSchema, request)
+    );
+  }
+
+  /** A page of the sources the reader may read, newest first. */
+  async listSources(request: SourceListRequest): Promise<SourceList> {
+    await this.#ready();
+    return listSources(
+      this.ctx.storage.sql,
+      checked(sourceListRequestSchema, request)
+    );
+  }
+
+  /** A page of the versions of a source the reader may read, newest first. */
+  async listVersions(request: VersionListRequest): Promise<VersionList> {
+    await this.#ready();
+    return listVersions(
+      this.ctx.storage.sql,
+      checked(versionListRequestSchema, request)
     );
   }
 

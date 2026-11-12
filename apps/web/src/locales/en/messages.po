@@ -904,6 +904,10 @@ msgstr "{name}: {hours, plural, one {# hour a week} other {# hours a week}}"
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name}: {started} started, {completed} completed, {failed} failed"
 
+#: src/brain/sources-page.tsx
+msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
+msgstr "{name}: agents search it live when you ask. The Brain keeps nothing from it."
+
 #: src/apps/app-status.tsx
 msgid "{names} use it"
 msgstr "{names} use it"
@@ -1309,6 +1313,10 @@ msgstr "{versions, plural, one {# version purged} other {# versions purged}}"
 #: src/knowledge/purge.tsx
 msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
 msgstr "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
+
+#: src/brain/sources-page.tsx
+msgid "{versions, plural, one {# version} other {# versions}}"
+msgstr "{versions, plural, one {# version} other {# versions}}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
@@ -2896,6 +2904,10 @@ msgstr "Ask the {role}"
 msgid "Ask to run version {askable} for the team"
 msgstr "Ask to run version {askable} for the team"
 
+#: src/brain/sources-page.tsx
+msgid "Ask what you're looking for"
+msgstr "Ask what you're looking for"
+
 #: src/frame/connect-ai-provider.tsx
 msgid "Ask your admin to connect an AI provider."
 msgstr "Ask your admin to connect an AI provider."
@@ -3281,6 +3293,11 @@ msgctxt "a change's source"
 msgid "by an import"
 msgstr "by an import"
 
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "By common words only"
+msgstr "By common words only"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "By hand now"
 msgstr "By hand now"
@@ -3288,6 +3305,16 @@ msgstr "By hand now"
 #: src/dashboard/standard-widgets.tsx
 msgid "by hand, a month"
 msgstr "by hand, a month"
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "By its words"
+msgstr "By its words"
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "By meaning"
+msgstr "By meaning"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "By team"
@@ -3647,6 +3674,11 @@ msgstr "Chart"
 #: src/chat/chat-panel.tsx
 #: src/chat/chat-start.tsx
 #: src/frame/app-sidebar.tsx
+msgid "Chat"
+msgstr "Chat"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
 msgid "Chat"
 msgstr "Chat"
 
@@ -4876,6 +4908,10 @@ msgstr "Document not found"
 msgid "Documents"
 msgstr "Documents"
 
+#: src/brain/sources-page.tsx
+msgid "Documents and workflow runs show here once they reach the Brain."
+msgstr "Documents and workflow runs show here once they reach the Brain."
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
@@ -5433,6 +5469,11 @@ msgstr "Everything I read and every conversation I have runs on an AI model. You
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
+
+#: src/brain/sources-page.tsx
+msgctxt "how search found a passage"
+msgid "Exact match"
+msgstr "Exact match"
 
 #: src/apps/app-reset.tsx
 #: src/settings/erasures.tsx
@@ -6590,6 +6631,10 @@ msgstr "How you appear in Grasp: on workflows you own, and in the audit trail."
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
+
+#: src/brain/sources-page.tsx
+msgid "How your connections feed the Brain"
+msgstr "How your connections feed the Brain"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "How your organization is named in Grasp."
@@ -8150,6 +8195,10 @@ msgstr "More teams"
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 
+#: src/brain/sources-page.tsx
+msgid "More was found than fits: these are the best of it."
+msgstr "More was found than fits: these are the best of it."
+
 #: src/dashboard/outcome-card.tsx
 msgid "More was sent than is shown above. Read exactly what was sent."
 msgstr "More was sent than is shown above. Read exactly what was sent."
@@ -8561,6 +8610,10 @@ msgstr "No events match."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No files yet."
 msgstr "No files yet."
+
+#: src/brain/sources-page.tsx
+msgid "No first line"
+msgstr "No first line"
 
 #: src/brain/goals-editor.tsx
 #: src/dashboard/standard-widgets.tsx
@@ -9140,6 +9193,10 @@ msgstr "Nothing here yet."
 msgid "Nothing in it that you can open."
 msgstr "Nothing in it that you can open."
 
+#: src/brain/sources-page.tsx
+msgid "Nothing in the Brain you may read yet"
+msgstr "Nothing in the Brain you may read yet"
+
 #: src/workflows/workflow-flow.tsx
 msgid "Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here."
 msgstr "Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here."
@@ -9246,6 +9303,14 @@ msgstr "Nothing was added. Fix these rows and try again."
 msgid "Nothing yet"
 msgstr "Nothing yet"
 
+#: src/brain/sources-page.tsx
+msgid "Nothing you may read holds {missing}."
+msgstr "Nothing you may read holds {missing}."
+
+#: src/brain/sources-page.tsx
+msgid "Nothing you may read matched."
+msgstr "Nothing you may read matched."
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Noticed in"
@@ -9322,6 +9387,10 @@ msgstr "Often corrected"
 #: src/apps/app-data.tsx
 msgid "Older changes"
 msgstr "Older changes"
+
+#: src/brain/sources-page.tsx
+msgid "Older versions"
+msgstr "Older versions"
 
 #: src/inbox/inbox-page.tsx
 msgid "Older workflows that failed are on the <0>dashboard</0>."
@@ -9549,6 +9618,11 @@ msgstr "Only the workflow's builders can change these."
 #: src/agents/agents-overview.tsx
 msgid "Only when asked"
 msgstr "Only when asked"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source nobody else may read"
+msgid "Only you"
+msgstr "Only you"
 
 #: src/brain/remember-dialog.tsx
 msgid "Only you and your agents read it, until you share it."
@@ -11125,6 +11199,7 @@ msgstr "Result"
 msgid "Result: not measured yet"
 msgstr "Result: not measured yet"
 
+#: src/brain/sources-page.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Results"
 msgstr "Results"
@@ -11742,6 +11817,7 @@ msgstr "Schedule trigger"
 
 #: src/agents/agents-overview.tsx
 #: src/apps/apps-overview.tsx
+#: src/brain/sources-page.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Search"
@@ -11813,6 +11889,10 @@ msgstr "Search the Apps"
 #: src/settings/audit-archive.tsx
 msgid "Search the archive"
 msgstr "Search the archive"
+
+#: src/brain/sources-page.tsx
+msgid "Search the Brain"
+msgstr "Search the Brain"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -12235,6 +12315,7 @@ msgid "Show less"
 msgstr "Show less"
 
 #: src/brain/since-last-look.tsx
+#: src/brain/sources-page.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -12577,6 +12658,17 @@ msgstr "Source {number}: {title}"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Sources"
+
+#: src/brain/brain-nav.tsx
+#: src/brain/sources-page.tsx
+#: src/routes/_shell.brain.tsx
+msgctxt "the Brain's sources page"
+msgid "Sources"
+msgstr "Sources"
+
+#: src/brain/sources-page.tsx
+msgid "Sources you may read"
+msgstr "Sources you may read"
 
 #: src/projects/project-dialog.tsx
 msgid "Sparkles"
@@ -13440,6 +13532,10 @@ msgstr "The audit trail"
 #: src/settings/audit-chain.tsx
 msgid "The audit trail has no entries yet: there is nothing to verify."
 msgstr "The audit trail has no entries yet: there is nothing to verify."
+
+#: src/brain/sources-page.tsx
+msgid "The best part of its passage"
+msgstr "The best part of its passage"
 
 #: src/brain/brain-atlas.ts
 msgid "The board"
@@ -14382,6 +14478,10 @@ msgstr "This version was revoked"
 msgid "This version, read-only"
 msgstr "This version, read-only"
 
+#: src/brain/sources-page.tsx
+msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
+msgstr "Those marked Only you are yours alone: nobody else sees them, admins included."
+
 #: src/chat/thread.tsx
 msgid "Thought for {time}"
 msgstr "Thought for {time}"
@@ -14831,6 +14931,11 @@ msgstr "Updating {name}…"
 msgid "Upload"
 msgstr "Upload"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Upload"
+msgstr "Upload"
+
 #: src/knowledge/uploads.tsx
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Upload a PDF, Word or Excel file, or captions (.vtt)"
@@ -15005,6 +15110,7 @@ msgstr "Version {number}, current"
 
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
+#: src/brain/sources-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -15023,6 +15129,10 @@ msgstr "Version {version} of {name} is asked to go live. Once it is, nothing sta
 #: src/inbox/items.ts
 msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
 msgstr "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+
+#: src/brain/sources-page.tsx
+msgid "Version {version}, added {added}"
+msgstr "Version {version}, added {added}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version}, not live yet"
@@ -15046,6 +15156,7 @@ msgid "Version to review: {version}"
 msgstr "Version to review: {version}"
 
 #: src/apps/app-history.tsx
+#: src/brain/sources-page.tsx
 msgid "Versions"
 msgstr "Versions"
 
@@ -15613,6 +15724,10 @@ msgstr "What the App may do with it"
 msgid "What the board wants from the sprint: its goals and the rules of the road."
 msgstr "What the board wants from the sprint: its goals and the rules of the road."
 
+#: src/brain/sources-page.tsx
+msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
+msgstr "What the Brain keeps that you may read, and search through it as your agents recall it."
+
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "What the brain kept of it"
@@ -16141,6 +16256,11 @@ msgstr "Workflow {workflow}"
 msgid "Workflow not found"
 msgstr "Workflow not found"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Workflow run"
+msgstr "Workflow run"
+
 #: src/settings/audit-archive.tsx
 msgid "Workflow run details"
 msgstr "Workflow run details"
@@ -16396,6 +16516,14 @@ msgstr "You can't open this App"
 msgid "You can't open this App's pages: your role doesn't allow it, or the App has read data you can't read."
 msgstr "You can't open this App's pages: your role doesn't allow it, or the App has read data you can't read."
 
+#: src/brain/sources-page.tsx
+msgid "You can't read this source."
+msgstr "You can't read this source."
+
+#: src/brain/sources-page.tsx
+msgid "You can't read this version."
+msgstr "You can't read this version."
+
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."
 msgstr "You come back to {app}’s page here."
@@ -16411,6 +16539,10 @@ msgstr "You don't have access to this organization. Ask an admin."
 #: src/routes/guest.tsx
 msgid "You finished this chat. Thank you for your time."
 msgstr "You finished this chat. Thank you for your time."
+
+#: src/brain/sources-page.tsx
+msgid "You have no connections yet."
+msgstr "You have no connections yet."
 
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
