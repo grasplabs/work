@@ -23,9 +23,9 @@ import { StartIndependentRun } from "./start-run.tsx";
 // page reaches it, faked: an independent workflow starts at the version
 // core named, with exactly the input its form makes and one key per try;
 // a field it can't send stops the start before core is asked; one core
-// gives no version for has no Start. An App's workflow starts with the
+// gives no version for has no Run. An App's workflow starts with the
 // JSON typed, or none, and links to its run. A start form core can't give
-// says why there is no Start; a start refused for an unapproved binding
+// says why there is no Run; a start refused for an unapproved binding
 // says what to do and leads to where it is approved.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -203,7 +203,7 @@ describe("starting a workflow by hand", () => {
       () => <StartIndependentRun workflow="workflow-1" />,
       form
     );
-    await press("Start");
+    await press("Run");
     await type("who", "Ada");
     await type("times", "two");
     await press("Start the run");
@@ -251,7 +251,7 @@ describe("starting a workflow by hand", () => {
         },
       }
     );
-    await press("Start");
+    await press("Run");
     const typed = document.querySelector("input");
     await press("Start the run");
     const unpicked = {
@@ -314,33 +314,33 @@ describe("starting a workflow by hand", () => {
         teams: [],
       },
     });
-    await press("Start");
+    await press("Run");
     await click(button("Choose…"));
     await choose("ID …222222");
 
     expect(button("Ada Lovelace (ID …222222)")).toBeDefined();
   });
 
-  it("offers no Start for a workflow core gives no version to start", async () => {
+  it("offers no Run for a workflow core gives no version to start", async () => {
     await shown(() => <StartIndependentRun workflow="workflow-1" />, {
       version: null,
       args: null,
       people: null,
     });
 
-    expect(button("Start")).toBeUndefined();
+    expect(button("Run")).toBeUndefined();
   });
 
-  it("says why it can't offer Start when core can't say how the workflow starts", async () => {
+  it("says why it can't offer Run when core can't say how the workflow starts", async () => {
     await shown(
       () => <StartIndependentRun workflow="workflow-1" />,
       workflowResourceErrors.create("workflow.resource_unavailable")
     );
 
     expect({
-      start: button("Start"),
+      start: button("Run"),
       said: said().includes(
-        "Can't offer Start: This workflow doesn't exist or was deleted."
+        "Can't offer Run: This workflow doesn't exist or was deleted."
       ),
     }).toStrictEqual({ start: undefined, said: true });
   });
@@ -359,7 +359,7 @@ describe("starting a workflow by hand", () => {
       form,
       workflowResourceErrors.create("workflow.binding_unapproved")
     );
-    await press("Start");
+    await press("Run");
     await type("who", "Ada");
     await type("times", "2");
     await press("Start the run");

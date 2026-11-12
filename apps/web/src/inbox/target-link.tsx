@@ -16,7 +16,11 @@ export const TargetLink = ({
     return (
       <Link
         params={{ workflow: destination.workflow }}
-        search={destination.tab === undefined ? {} : { tab: destination.tab }}
+        search={
+          destination.section === undefined
+            ? {}
+            : { view: "settings", section: destination.section }
+        }
         to="/workflows/$workflow"
         {...props}
       />

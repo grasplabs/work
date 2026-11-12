@@ -32,9 +32,9 @@ const core = new CoreConnection({
 const router = createRouter({
   routeTree,
   context: { core },
-  // The page panel scrolls on its own (frame/app-frame.tsx), so a new
+  // The page's card scrolls on its own (frame/app-frame.tsx), so a new
   // page starts at the top of it, not only of the window.
-  scrollToTopSelectors: ['[data-slot="sidebar-inset"]'],
+  scrollToTopSelectors: ['[data-slot="app-shell-content"]'],
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: () => <NotFound />,
 });

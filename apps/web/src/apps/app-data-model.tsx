@@ -1,4 +1,4 @@
-import type { AppDataAccess, AppDataTables } from "@grasp-os/shared/app-data";
+import type { AppDataAccess, AppDataTable } from "@grasp-os/shared/app-data";
 import { fieldCode } from "@grasp-os/shared/data-model";
 import type {
   DataModel,
@@ -71,6 +71,7 @@ import {
   TrashIcon,
 } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatCompact } from "../format.ts";
@@ -84,30 +85,36 @@ import { FieldsView } from "./field-editor.tsx";
 import { KindIcon } from "./field-kinds.tsx";
 import { identifierOf } from "./identifier.ts";
 import { IndexesView } from "./indexes-view.tsx";
-import { readTables, useAppRead } from "./use-app-read.ts";
+import { ResetTestData } from "./reset-test-data.tsx";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's data model in its workspace's Data view, as a database studio
 // shows one: the tables in a column, each with how many records it holds,
 // and the open one as a grid whose column headers are its fields and
-// whose rows are the live App's records, loaded as people scroll. Its
+// whose rows are the test records of the draft's preview, which its
+// builders share, loaded as people scroll; Reset test data clears them
+// for everyone (reset-test-data.tsx). Its
 // Fields view lists the fields, each changed in place with room for all
 // it takes, and adds new ones; who reaches the records and the orders
 // they're read in sit behind the bar's two quieter buttons. Whoever builds the App changes it
 // here as the chat's agent does, through the definition's own operations,
-// into the chat's draft (`chats.defineDraft`): nothing changes for the
+// into the App's draft (`apps.drafts.define`): nothing changes for the
 // App's people until the draft is published, and a change that removes,
 // retypes, changes access or needs a value for records is reviewed first
 // (data-model-changes.tsx). While the chat's agent works on the App, the
 // model is read only: two writers would only refuse each other.
 
 /**
- * The live App's tables, by name, and its version: where records are
- * read. Read again as the page is (an import, Reload), so counts follow.
+ * The tables of the draft preview's test data, with their counts: read
+ * again at each revision of the draft (`revision`) and each reset
+ * (`resets`).
  */
-const useLiveTables = (app: string) => {
-  const live = useAppRead(app, readTables);
-  return live?.state === "ready" ? live.data : undefined;
+const useTestTables = (app: string, revision: number, resets: number) => {
+  const read = useCoreRead(
+    `${app}/${revision}/${resets}`,
+    async (session) => await session.apps.drafts.testTables(app)
+  );
+  return read?.state === "ready" ? read.data : undefined;
 };
 
 /** What a table's bar shows: its records, fields, access or indexes. */
@@ -118,21 +125,24 @@ type Showing = (typeof showings)[number];
 /** The table open: its fields as the grid's columns, its records as rows. */
 const TableView = ({
   app,
-  live,
+  held,
   table,
   tables,
   uses,
   disabled,
   onChange,
+  reset,
 }: {
   app: string;
-  /** The live App's tables and their version; none while read. */
-  live: AppDataTables | undefined;
+  /** The test data's tables; none while read. */
+  held: AppDataTable[] | undefined;
   table: DataModelTable;
   tables: string[];
   uses: IndexUse[];
   disabled: boolean;
   onChange: (change: ModelChange) => Promise<boolean>;
+  /** Reset test data, at the bar's end. */
+  reset: ReactNode;
 }) => {
   const { t } = useLingui();
   const [showing, setShowing] = useState<Showing>("records");
@@ -182,10 +192,11 @@ const TableView = ({
           ),
         }[showing]
       }
-      // The live App's records of this table, once the App has it.
-      key={`${table.id}/${live?.version ?? ""}`}
+      end={reset}
       label={name}
-      table={live?.tables.find((held) => held.name === name)}
+      source={{ kind: "test" }}
+      // The test data's records of this table, once its store has it.
+      table={held?.find((each) => each.name === name)}
       toolbar={
         <>
           <ToggleGroup
@@ -244,7 +255,6 @@ const TableView = ({
           </DropdownMenu>
         </>
       }
-      version={live?.version ?? null}
     />
   );
 };
@@ -425,35 +435,41 @@ const PublishPlan = ({
 };
 
 /**
- * The data model of the chat's draft of `app` at its `revision`, changed
- * here; read only while the chat's agent is `running`.
+ * The data model of the App's draft of `app` at its `revision`, changed
+ * here (`onChanged` after each change); read only while the chat's agent
+ * is `running`. `onTestDataReset` once its test data was reset here, so
+ * the preview starts afresh on it.
  */
 export const AppDataModel = ({
   app,
-  chatId,
   revision,
   running,
+  onChanged,
+  onTestDataReset,
 }: {
   app: string;
-  chatId: string;
   revision: number;
   running: boolean;
+  onChanged?: () => void;
+  onTestDataReset?: () => void;
 }) => {
   const { t } = useLingui();
   const read = useCoreRead(
-    `${chatId}/${app}/${revision}`,
-    async (session) => await session.chats.dataModel(chatId, app)
+    `${app}/${revision}`,
+    async (session) => await session.apps.drafts.dataModel(app)
   );
   // What a change made here answered, at the revision it was made over:
   // shown until the draft's next revision is read.
   const [made, setMade] = useState<DraftDataModel & { revision: number }>();
-  const live = useLiveTables(app);
+  // Each reset of the test data reads it afresh.
+  const [resets, setResets] = useState(0);
+  const held = useTestTables(app, revision, resets);
   const [picked, setPicked] = useState<string>();
   const [creating, setCreating] = useState(false);
   const changes = useModelChanges({
     app,
-    chatId,
     onMade: (next) => {
+      onChanged?.();
       // What uses the indexes comes with the next read of the draft.
       setMade({
         ...next,
@@ -519,7 +535,7 @@ export const AppDataModel = ({
             setCreating(true);
           }}
           size="sm"
-          variant="highlight"
+          variant="outline"
         >
           {running ? (
             <Spinner data-icon="inline-start" />
@@ -530,7 +546,7 @@ export const AppDataModel = ({
         </Button>
         <ModelTableList>
           {model.tables.map((each) => {
-            const records = live?.tables.find(
+            const records = held?.find(
               ({ name }) => name === each.name
             )?.records;
             return (
@@ -538,9 +554,9 @@ export const AppDataModel = ({
                 active={each.id === table?.id}
                 icon={<Table2Icon />}
                 key={each.id}
-                // How many records the live App holds; none for a table it
-                // doesn't have yet, or whose records each person sees only
-                // some of.
+                // How many test records it holds; none for a table the
+                // test data doesn't have yet, or whose records each person
+                // sees only some of.
                 {...(records === undefined || records === null
                   ? {}
                   : { meta: formatCompact(records) })}
@@ -580,11 +596,21 @@ export const AppDataModel = ({
         ) : (
           <TableView
             app={app}
-            live={live}
             disabled={disabled}
-            // Each table its own grid, popovers and sheets.
-            key={table.id}
+            held={held}
+            // Each table its own grid, popovers and sheets, read afresh
+            // once the test data was reset.
+            key={`${table.id}/${resets}`}
             onChange={change}
+            reset={
+              <ResetTestData
+                app={app}
+                onReset={() => {
+                  setResets((before) => before + 1);
+                  onTestDataReset?.();
+                }}
+              />
+            }
             table={table}
             tables={tables}
             uses={shown.uses}

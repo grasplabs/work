@@ -537,7 +537,7 @@ export const AppWorkflows = ({
     <BindingsView
       app={app.id}
       bindings={read.data.bindings}
-      changes={app.status !== "archived"}
+      changes={!app.archived}
       onChanged={() => {
         setChanged((count) => count + 1);
       }}

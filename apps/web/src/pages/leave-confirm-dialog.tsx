@@ -10,9 +10,6 @@ import {
 } from "@grasp-os/ui/components/alert-dialog";
 import { Trans } from "@lingui/react/macro";
 
-// Apart from page-frame.tsx: the shell's panel asks it before its page
-// has loaded (app-panel-context.tsx), and the frame comes with the panel.
-
 /**
  * Asks whether to leave a page whose forms hold unsaved edits, or a
  * change whose outcome isn't known yet: once per leave, in Grasp's own

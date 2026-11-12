@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import type { Organization } from "@grasp-os/shared/organization";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
 import {
   RouterContextProvider,
   createMemoryHistory,
@@ -14,9 +16,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { organizationRenamed, SidebarBrandOf } from "./sidebar-brand.tsx";
 
 // The sidebar's header against core's answer to its read of the
-// organization, faked: the organization's name over "Grasp" once core
-// says it, as the prototype's; "Grasp" alone when it has none or core
-// can't say.
+// organization, faked: the organization's name once core says it;
+// "Grasp" when it has none or core can't say.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -53,19 +54,23 @@ const textWith = async (
   const root = createRoot(host);
   await act(async () => {
     root.render(
-      <RouterContextProvider router={router}>
-        <SidebarProvider>
-          <SidebarBrandOf organization={organization} />
-        </SidebarProvider>
-      </RouterContextProvider>
+      <I18nProvider i18n={i18n}>
+        <RouterContextProvider router={router}>
+          <SidebarProvider>
+            <SidebarBrandOf organization={organization} />
+          </SidebarProvider>
+        </RouterContextProvider>
+      </I18nProvider>
     );
     await settled();
   });
   if (then !== undefined) {
     act(then);
   }
-  // Each line of the header on its own: its name, then "Grasp".
-  const text = [...host.querySelectorAll("span")]
+  // The header's name, without its fold button's.
+  const text = [
+    ...host.querySelectorAll('[data-slot="brand-header"] > div span'),
+  ]
     .filter((span) => span.children.length === 0)
     .map((span) => span.textContent.trim())
     .filter((line) => line !== "")
@@ -78,7 +83,7 @@ const textWith = async (
 };
 
 describe("the sidebar's header", () => {
-  it("names the organization over Grasp once core says it, and its new name once renamed, and says Grasp alone when it has none or core can't say", async () => {
+  it("names the organization once core says it, and its new name once renamed, and says Grasp alone when it has none or core can't say", async () => {
     expect({
       named: await textWith(async () => {
         await settled();
@@ -113,11 +118,11 @@ describe("the sidebar's header", () => {
         async () => await Promise.withResolvers<Organization>().promise
       ),
     }).toStrictEqual({
-      named: "Noordkade Finance Grasp",
+      named: "Noordkade Finance",
       unnamed: "Grasp",
       unanswered: "Grasp",
-      renamed: "Noordkade Group Grasp",
-      renamedFirst: "Noordkade Group Grasp",
+      renamed: "Noordkade Group",
+      renamedFirst: "Noordkade Group",
       mountedAgain: "Grasp",
     });
   });

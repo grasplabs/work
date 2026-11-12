@@ -13,6 +13,11 @@
  * Beside Apps asked for, how many apps the companies asked for
  * (`askedApps`).
  */
+import {
+  AppShell,
+  AppShellContent,
+  AppShellMain,
+} from "@grasp-os/ui/components/app-shell";
 import { BrandHeader } from "@grasp-os/ui/components/brand-header";
 import {
   Sidebar,
@@ -21,7 +26,6 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarInset,
   SidebarMenu,
   SidebarMenuBadge,
   SidebarMenuButton,
@@ -29,7 +33,6 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  SidebarProvider,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
 import {
@@ -364,10 +367,9 @@ const AdminSidebar = ({
     <Sidebar collapsible="icon" label="Admin" variant="inset">
       <SidebarHeader>
         <BrandHeader
-          render={<Link to="/" />}
           subtitle="Admin"
           title="Grasp"
-          tooltip="Grasp admin"
+          toggleLabel="Show or hide the sidebar"
         />
       </SidebarHeader>
       <SidebarContent>
@@ -398,11 +400,13 @@ export const AdminFrame = ({
   platform: PlatformCounts;
 }) => (
   <TooltipProvider>
-    <SidebarProvider className="h-svh">
+    <AppShell>
       <AdminSidebar admins={admins} clients={clients} platform={platform} />
-      <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
-        <Outlet />
-      </SidebarInset>
-    </SidebarProvider>
+      <AppShellMain>
+        <AppShellContent>
+          <Outlet />
+        </AppShellContent>
+      </AppShellMain>
+    </AppShell>
   </TooltipProvider>
 );

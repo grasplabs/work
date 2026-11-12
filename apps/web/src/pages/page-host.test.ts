@@ -312,7 +312,14 @@ describe("a running page whose App's version core refuses the person", () => {
     for (const cleanup of cleanups) {
       cleanup();
     }
-    expect(states).toStrictEqual(ended === undefined ? [] : [ended]);
+    // How it ended, without what core said of it (`detail`).
+    expect(
+      states.map((state) =>
+        state.status === "failed"
+          ? { status: state.status, reason: state.reason }
+          : state
+      )
+    ).toStrictEqual(ended === undefined ? [] : [ended]);
   });
 });
 
@@ -321,7 +328,7 @@ describe("a running page as its App's version changes", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows a new version made current once, and nothing for the version it runs", async () => {
+  it("shows a new version gone live once, and nothing for the version it runs", async () => {
     const states: PageState[] = [];
     const { cleanups, pushed } = await runningPage(
       async () => await Promise.resolve("open"),
@@ -660,16 +667,17 @@ const previewOver = (answer: unknown, lease: string | null = "lease") => {
     },
   };
   const session = {
-    chats: {
-      previewReport: async (
-        _chat: string,
-        _app: string,
-        revision: number,
-        _page: string,
-        problem: { kind: string }
-      ) => {
-        asked.reports.push(`${problem.kind} at ${revision}`);
-        await Promise.resolve();
+    apps: {
+      drafts: {
+        previewReport: async (
+          _app: string,
+          revision: number,
+          _page: string,
+          problem: { kind: string }
+        ) => {
+          asked.reports.push(`${problem.kind} at ${revision}`);
+          await Promise.resolve();
+        },
       },
     },
     pages: { frame: async () => await Promise.resolve(frameApi) },
@@ -679,21 +687,24 @@ const previewOver = (answer: unknown, lease: string | null = "lease") => {
     person: async () => await Promise.resolve("ada"),
   };
   let problems = 0;
+  let stale = 0;
   // The revision the frame's reports are of, as its updates say.
   const reporting = { at: 1 };
   // SAFETY: a preview's calls, reports and live queries reach only these
-  // of `chats` and `pages`, which the stand-in has.
+  // of `apps.drafts` and `pages`, which the stand-in has.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
   const asLink = link as unknown as FrameLink;
   const { lease: _bundleLease, ...unleased } = bundle;
   const target = previewTarget(
     asLink,
-    "chat",
     { ...unleased, revision: 1, ...(lease === null ? {} : { lease }) },
     atRoot,
     {
       problem: () => {
         problems += 1;
+      },
+      testDataStale: () => {
+        stale += 1;
       },
       followUpdates: () => {
         // The frame's receiver isn't handed over here.
@@ -701,7 +712,14 @@ const previewOver = (answer: unknown, lease: string | null = "lease") => {
       runningAt: () => reporting.at,
     }
   );
-  return { target, asked, relays, reporting, problems: () => problems };
+  return {
+    target,
+    asked,
+    relays,
+    reporting,
+    problems: () => problems,
+    stale: () => stale,
+  };
 };
 
 describe("a preview's frame as its draft changes", () => {
@@ -764,6 +782,31 @@ describe("a preview's frame as its draft changes", () => {
     });
     await refused.target.callFunction("{}");
     expect([failed.problems(), refused.problems()]).toStrictEqual([1, 0]);
+  });
+
+  it("says the test data doesn't fit once a call or a live query is refused for it, and not for any other refusal", async () => {
+    const misfit = previewOver({
+      result: { ok: false, error: { code: "migration.required" } },
+    });
+    await misfit.target.callFunction("{}");
+    const other = previewOver({
+      result: { ok: false, error: { code: "contract.invalid_output" } },
+    });
+    await other.target.callFunction("{}");
+    const watched = previewOver({ result: { ok: true } });
+    await watched.target.watchQuery(
+      "{}",
+      new RpcStub(async () => {
+        await Promise.resolve();
+      })
+    );
+    await watched.relays[0]?.({
+      revision: 1,
+      result: { ok: false, error: { code: "migration.backfill_failed" } },
+    });
+    expect([misfit.stale(), other.stale(), watched.stale()]).toStrictEqual([
+      1, 0, 1,
+    ]);
   });
 
   it("hands the frame every data change of a live query across page writes, each numbered past the last it was handed", async () => {

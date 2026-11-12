@@ -38,8 +38,8 @@ export interface ChatView {
   stopped: string | null;
   /** Changes whenever the agent had a write held: read them again. */
   held: number;
-  /** Changes whenever the agent writes or drops a draft: read them again. */
-  drafts: number;
+  /** Changes whenever the agent writes an App's draft: read what it worked on again. */
+  worked: number;
   /** Whether the turn checks the drafts it wrote now, past its answer. */
   checking: boolean;
   /** Whether the first update has come. */
@@ -55,7 +55,7 @@ export const emptyView: ChatView = {
   provenance: { sources: [], restricted: false },
   stopped: null,
   held: 0,
-  drafts: 0,
+  worked: 0,
   checking: false,
   loaded: false,
 };
@@ -93,7 +93,7 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     provenance: update.provenance ?? view.provenance,
     stopped: update.stopped,
     held: update.held,
-    drafts: update.drafts,
+    worked: update.worked,
     checking: update.checking ?? false,
     loaded: true,
   };

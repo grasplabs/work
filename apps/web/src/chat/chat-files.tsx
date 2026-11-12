@@ -9,15 +9,14 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@grasp-os/ui/components/attachment";
-import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
 import { useLingui } from "@lingui/react/macro";
-import { FileTextIcon, PaperclipIcon, XIcon } from "lucide-react";
-import { useRef } from "react";
+import { FileTextIcon, XIcon } from "lucide-react";
+import type { Ref } from "react";
 
 import { formatBytes } from "../format.ts";
 
 // Files attached to a question (grasplabs/prototype's chat attachments):
-// the button that picks them, each one's card in the box before it is
+// the picker the composer's add menu opens, each one's card in the box before it is
 // sent, and under the question once it is. Core takes the types
 // `chatFileTypes` names; the box checks the rest (use-ask.ts).
 
@@ -83,41 +82,29 @@ export const FileCards = ({
   </AttachmentGroup>
 );
 
-/** Picks files to attach to the question being written. */
-export const AttachFiles = ({
+/**
+ * The picker for the files core takes, hidden: whatever opens it calls
+ * `click()` on it through `ref` (the composer's add menu).
+ */
+export const FilePicker = ({
   onAttach,
-  disabled,
+  ref,
 }: {
   onAttach: (files: readonly File[]) => void;
-  disabled: boolean;
-}) => {
-  const { t } = useLingui();
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <>
-      <input
-        accept={accepted}
-        aria-hidden="true"
-        className="hidden"
-        multiple
-        onChange={(event) => {
-          onAttach([...(event.target.files ?? [])]);
-          // The same file can be picked again once it was taken off.
-          event.target.value = "";
-        }}
-        ref={input}
-        tabIndex={-1}
-        type="file"
-      />
-      <PromptInputButton
-        disabled={disabled}
-        onClick={() => {
-          input.current?.click();
-        }}
-        tooltip={t`Attach files`}
-      >
-        <PaperclipIcon />
-      </PromptInputButton>
-    </>
-  );
-};
+  ref: Ref<HTMLInputElement>;
+}) => (
+  <input
+    accept={accepted}
+    aria-hidden="true"
+    className="hidden"
+    multiple
+    onChange={(event) => {
+      onAttach([...(event.target.files ?? [])]);
+      // The same file can be picked again once it was taken off.
+      event.target.value = "";
+    }}
+    ref={ref}
+    tabIndex={-1}
+    type="file"
+  />
+);

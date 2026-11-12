@@ -1,7 +1,6 @@
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
-  SteeredWrite,
   WorkflowActivity,
   WorkflowDraft,
   WorkflowParams,
@@ -10,313 +9,100 @@ import type {
   WorkflowResourceVersion,
   WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Separator } from "@grasp-os/ui/components/separator";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { EllipsisIcon, WorkflowIcon } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
+import { HistoryIcon, SettingsIcon, WorkflowIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import { dockDrawerRoom, useDockMode } from "../chat/dock-mode.ts";
+import { chatPresence } from "../chat/chat-presence.ts";
+import { slotOf } from "../chat/chat-subject.ts";
+import { useGlobalChat } from "../chat/global-chat.tsx";
 import { readPeople } from "../directory.ts";
-import { formatDateTime, formatList } from "../format.ts";
+import {
+  backCrumb,
+  ItemBar,
+  ItemShell,
+  ItemSwitch,
+  ItemSwitchLink,
+  projectSearchOf,
+  readItemProject,
+} from "../frame/item-shell.tsx";
 import {
   NotLoadedState,
   PageLoading,
   PageNotLoaded,
 } from "../frame/page-states.tsx";
-import { SiteHeader } from "../frame/site-header.tsx";
+import { SettingUp, SettingUpBar } from "../frame/setting-up.tsx";
+import type { SetUp } from "../frame/setting-up.tsx";
+import type { Crumb } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
 import type { Names } from "../workflows/activity-bar.tsx";
-import { AskStephen } from "../workflows/ask-stephen.tsx";
-import { ProcessBadge, ProcessPicker } from "../workflows/business-process.tsx";
-import { DefinitionEditor } from "../workflows/definition-editor.tsx";
-import { DeleteWorkflow } from "../workflows/delete-workflow.tsx";
-import { useDraftFromChat } from "../workflows/draw-in-chat.ts";
-import { FilesAndApps } from "../workflows/files-and-apps.tsx";
-import { KeptState } from "../workflows/kept-state.tsx";
+import { useWorkflowChat } from "../workflows/draw-in-chat.ts";
 import { ListedCount } from "../workflows/listed-count.tsx";
-import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
-import { SavedAgo } from "../workflows/saved-ago.tsx";
-import { ShareWorkflow } from "../workflows/share-workflow.tsx";
+import {
+  ShareWorkflow,
+  useWorkflowUsers,
+} from "../workflows/share-workflow.tsx";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
-import { TracedRun } from "../workflows/traced-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
-import { VersionSource } from "../workflows/version-source.tsx";
 import { WorkflowFlow } from "../workflows/workflow-flow.tsx";
 import {
+  workflowSettingsSectionOf,
+  WorkflowSettings,
+} from "../workflows/workflow-settings.tsx";
+import type { WorkflowSettingsSection } from "../workflows/workflow-settings.tsx";
+import {
   GoLiveDecision,
+  goLiveChoiceOf,
   WorkflowStatus,
 } from "../workflows/workflow-status.tsx";
-import {
-  TriggersTabContent,
-  TriggersTabTrigger,
-} from "../workflows/workflow-triggers-tab.tsx";
 
-// One independent workflow (platform specification 13): for its builders,
-// its definition as a draft they edit, check and publish; for everyone
-// with a role, its published versions. Core decides who sees what: the
-// draft is read only for builders, as it can hold a sensitive default.
-// Each version shows, for one that asks a model, the writes its answers
-// may steer (GRA-718), which no reviewer should have to piece together. Its
-// parameters, which its builders set, and its runs, as core lists them for
-// the reader (GRA-674), each opened beside the page with what it returned
-// or why it failed. Beside its name, whether it runs, with Pause and
-// Resume (`workflow-status.tsx`); under it, the business process it
-// serves (its builders set it), who owns it and, for its builders, when
-// its draft was saved; beside them, for whoever may decide it, the
-// version waiting to go live, approved or sent back. For its builders,
-// it opens on its Flow, the definition drawn (`workflow-flow.tsx`), with
-// the JSON behind it on Definition; and Traces: each run's steps over its
-// diagram, and a test of the draft on recent real items; for everyone,
-// the files its runs wrote, the Knowledge it reads and the apps it works
-// in; and under the page, what happened to it lately. As the prototype's
-// workflow page (GRA-1402), the title stands alone with where it stands
-// at its right; what is set about it sits in its "…" menu, and what it is
-// (its version, its owner, its process) in one quiet line beside the tabs.
-// Its builders draw it with Grasp in its own chat, docked beside it
-// (`workflows/draw-in-chat.ts`): the Flow follows the draft as the chat
-// edits it.
+// One independent workflow (platform specification 13), in the same shell
+// as an App (frame/item-shell.tsx): one bar, with the way back to the
+// Workflows (or the project it was started from), its name and its
+// version; then its views (Flow, Runs, Settings), Run, Share and, where an
+// App has Share with your team, whether it runs (`workflow-status.tsx`). Core decides
+// who sees what: the draft is read only for builders, as it can hold a
+// sensitive default.
+//
+// - Flow, for its builders, who read its draft: the definition drawn
+//   (`workflow-flow.tsx`), filling the page, with Grasp's chat about it
+//   docked beside (chat/chat-subject.ts), which draws it: the Flow follows
+//   the draft as the chat edits it (`workflows/draw-in-chat.ts`).
+// - Runs: its runs as core lists them for the reader (GRA-674), each
+//   opened beside the page with what it did, returned or why it failed;
+//   for its builders with a test of the draft on recent real items and
+//   what happened to it lately.
+// - Settings (`workflow-settings.tsx`): everything else, a section at a
+//   time, as an App's are.
+//
+// Run, in the bar, starts its current version by hand, in a dialog; for
+// whoever may decide it, the version waiting to go live is approved or
+// sent back over the page.
 
-/**
- * What a version's model tasks may steer (GRA-718, GRA-727), which no
- * reviewer should have to piece together: each connector's alias and the
- * operations that may write.
- */
-const SteeredWrites = ({ writes }: { writes: readonly SteeredWrite[] }) => {
-  if (writes.length === 0) {
-    return (
-      <span className="text-muted-foreground">
-        <Trans>None</Trans>
-      </span>
-    );
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {writes.map((write) => (
-        <Badge key={write.alias} variant="attention">
-          {`${write.alias}: ${formatList(write.operations)}`}
-        </Badge>
-      ))}
-    </div>
-  );
-};
+/** What the main area shows. */
+type WorkflowView = "flow" | "runs" | "settings";
 
-/**
- * Whether whoever asked for the live version approved it themselves, as
- * nobody else could (GRA-1227). Which version is live, and since when, is
- * the status beside the name.
- */
-const SelfApprovedBadge = ({ lifecycle }: { lifecycle: WorkflowLifecycle }) =>
-  lifecycle.live?.selfApproved === true ? (
-    <Badge variant="outline">
-      <Trans>Self-approved: nobody else could approve it</Trans>
-    </Badge>
-  ) : null;
-
-/**
- * The published versions, each with the writes its model tasks may steer.
- * A version an earlier platform release published, in a format this one
- * doesn't read (`refused`), never runs: it says so, and to publish it
- * again, in place of a review of a build it doesn't have.
- */
-const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
-  const { t } = useLingui();
-  const captionId = useId();
-  if (versions.length === 0) {
-    return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>Nothing is published yet.</Trans>
-      </p>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table aria-describedby={captionId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Version`}</TableHead>
-              <TableHead variant="card">{t`Definition version`}</TableHead>
-              <TableHead variant="card">{t`Published`}</TableHead>
-              <TableHead variant="card">
-                {t`Writes a model may steer`}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {versions.map((version) => (
-              <TableRow key={version.version}>
-                <TableCell variant="roomy">{version.version}</TableCell>
-                <TableCell variant="roomy">
-                  {version.definitionVersion}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {formatDateTime(version.createdAt)}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {version.refused === undefined ? (
-                    <SteeredWrites writes={version.modelSteeredWrites} />
-                  ) : (
-                    <Badge variant="attention">
-                      <Trans>
-                        Made by an earlier platform release: publish it again
-                      </Trans>
-                    </Badge>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <p className="text-muted-foreground" id={captionId}>
-        <Trans>
-          Each of the workflow&apos;s model tasks is taken to reach every call
-          the workflow makes.
-        </Trans>
-      </p>
-    </div>
-  );
-};
-
-/**
- * Whom the workflow belongs to: you, or its owner by name; someone else
- * while their name isn't known (not listed, or not read yet), never an ID.
- */
-const OwnedBy = ({ owner, names }: { owner: string; names: Names }) => {
-  const { t } = useLingui();
-  if (owner === names.me) {
-    return t`Owned by you`;
-  }
-  const name = names.people.get(owner);
-  return name === undefined ? t`Owned by someone else` : t`Owned by ${name}`;
-};
-
-/**
- * What its builders and owner set about it, behind "…" at the end of the
- * title's line: the process it serves, whom it is shared
- * with, and whether people may ask Stephen to start it.
- */
-const WorkflowSettings = ({
-  resource,
-  askable,
-  me,
-}: {
-  resource: WorkflowResource;
-  askable: Loaded<boolean>;
-  me: string;
-}) => {
-  const { t } = useLingui();
-  const router = useRouter();
-  const builder = resource.role === "builder";
-  const owner = resource.owner === me && askable.state === "ready";
-  const { name } = resource;
-  if (!builder && !owner) {
-    return null;
-  }
-  return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            aria-label={t`Settings of ${name}`}
-            size="icon-sm"
-            variant="ghost"
-          />
-        }
-      >
-        <EllipsisIcon aria-hidden="true" />
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-96">
-        {builder ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <ProcessPicker
-              name={resource.name}
-              onChange={() => {
-                void router.invalidate();
-              }}
-              process={resource.process}
-              workflow={resource.id}
-            />
-            <ShareWorkflow resource={resource} />
-          </div>
-        ) : null}
-        {builder && owner ? <Separator /> : null}
-        {owner ? (
-          <AskStephen askable={askable.data} workflow={resource.id} />
-        ) : null}
-      </PopoverContent>
-    </Popover>
-  );
-};
-
-/**
- * What it is, in one quiet line beside the tabs: the process it serves
- * (set in its settings by its builders), its version, its owner, and, for
- * its builders, when its draft was saved.
- */
-const WorkflowFacts = ({
-  resource,
-  status,
-  names,
-  savedAt,
-}: {
-  resource: WorkflowResource;
-  status: WorkflowLifecycle | undefined;
-  names: Names;
-  savedAt: string | null;
-}) => {
-  const { currentVersion } = resource;
-  return (
-    <div className="text-muted-foreground flex flex-wrap items-center gap-2 pb-2 text-xs">
-      {resource.process === null ? null : (
-        <ProcessBadge process={resource.process} />
-      )}
-      <Badge variant="outline">
-        {currentVersion === null ? (
-          <Trans>Not published</Trans>
-        ) : (
-          <Trans>Version {currentVersion}</Trans>
-        )}
-      </Badge>
-      {status === undefined ? null : <SelfApprovedBadge lifecycle={status} />}
-      <span>
-        <OwnedBy names={names} owner={resource.owner} />
-      </span>
-      {savedAt === null ? null : (
-        <span>
-          <SavedAgo at={savedAt} />
-        </span>
-      )}
-    </div>
-  );
-};
+/** A view named in an address, or none for anything else. */
+const viewOf = (value: unknown): WorkflowView | undefined =>
+  value === "flow" || value === "runs" || value === "settings"
+    ? value
+    : undefined;
 
 /**
  * Where it stands as core answered the last change made on the page, or
@@ -339,116 +125,6 @@ const useStatus = (lifecycle: Loaded<WorkflowLifecycle>) => {
       : changed;
   return { status, onChange };
 };
-
-/**
- * Its title alone on its line, with where it stands, a run to start and
- * its settings at the line's end; and, for whoever may decide it, the
- * version waiting to go live.
- */
-const WorkflowHeader = ({
-  resource,
-  title,
-  status,
-  onChange,
-  onFiles,
-  askable,
-  me,
-}: {
-  resource: WorkflowResource;
-  /** What it is headed with: its definition's title, or its name. */
-  title: string;
-  status: WorkflowLifecycle | undefined;
-  onChange: (next: WorkflowLifecycle) => void;
-  /** Shows its Files and apps, where its bindings are approved. */
-  onFiles: () => void;
-  askable: Loaded<boolean>;
-  me: string;
-}) => (
-  <div className="flex flex-col gap-3">
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <PageHeaderTitle className="min-w-0 grow">{title}</PageHeaderTitle>
-      <div className="flex flex-wrap items-center gap-2">
-        {status === undefined ? null : (
-          <WorkflowStatus
-            lifecycle={status}
-            name={resource.name}
-            onChange={onChange}
-            workflow={resource.id}
-          />
-        )}
-        <StartIndependentRun onFiles={onFiles} workflow={resource.id} />
-        <WorkflowSettings askable={askable} me={me} resource={resource} />
-      </div>
-    </div>
-    {status === undefined ? null : (
-      <GoLiveDecision
-        lifecycle={status}
-        me={me}
-        name={resource.name}
-        onChange={onChange}
-        workflow={resource.id}
-      />
-    )}
-  </div>
-);
-
-/** The tabs of a workflow's page. */
-type WorkflowTab =
-  | "flow"
-  | "definition"
-  | "traces"
-  | "runs"
-  | "files"
-  | "parameters"
-  | "versions"
-  | "triggers";
-
-/** The tabs of a workflow's page, as the reader has them. */
-const WorkflowTabs = ({
-  definition,
-  builder,
-  runs,
-}: {
-  /** Whether the reader has its draft: its Flow, and the JSON behind it. */
-  definition: boolean;
-  builder: boolean;
-  /** How many runs it has, beside their tab once read. */
-  runs: number | undefined;
-}) => (
-  <TabsList variant="line">
-    {definition ? (
-      <TabsTrigger value="flow">
-        <Trans context="tab of a workflow">Flow</Trans>
-      </TabsTrigger>
-    ) : null}
-    {builder ? (
-      <TabsTrigger value="traces">
-        <Trans context="tab of a workflow">Traces</Trans>
-        <ListedCount count={runs} of="runs" />
-      </TabsTrigger>
-    ) : (
-      <TabsTrigger value="runs">
-        <Trans context="tab listing the runs of workflows">Runs</Trans>
-        <ListedCount count={runs} of="runs" />
-      </TabsTrigger>
-    )}
-    <TriggersTabTrigger />
-    <TabsTrigger value="files">
-      <Trans context="tab of a workflow">Files and apps</Trans>
-    </TabsTrigger>
-    {definition ? (
-      <TabsTrigger value="definition">
-        <Trans context="tab of a workflow">Definition</Trans>
-      </TabsTrigger>
-    ) : null}
-    <TabsTrigger value="parameters">
-      <Trans context="tab of a workflow">Parameters</Trans>
-    </TabsTrigger>
-    <TabsTrigger value="versions">
-      <Trans context="tab of a workflow">Versions</Trans>
-    </TabsTrigger>
-  </TabsList>
-);
 
 /**
  * The draft the page goes by: its editor's last save or read (`edited`),
@@ -476,87 +152,6 @@ const checkpointOf = (draft: WorkflowDraft | undefined): number | null => {
   return revision > 0 ? revision : null;
 };
 
-/**
- * For its builders, who read its draft: its Flow, the draft drawn, with a
- * real run of its current version to start and follow under it; and Definition, the JSON
- * behind it. `onDraft` takes what a save on either left; `onTab` shows
- * another tab.
- */
-const DraftTabs = ({
-  workflow,
-  draft,
-  latest,
-  currentVersion,
-  onDraft,
-  onTab,
-}: {
-  workflow: string;
-  draft: Loaded<WorkflowDraft>;
-  /** The draft the page goes by (`latestDraftOf`). */
-  latest: WorkflowDraft | undefined;
-  currentVersion: number | null;
-  onDraft: (next: WorkflowDraft) => void;
-  onTab: (tab: WorkflowTab) => void;
-}) => {
-  const router = useRouter();
-  return (
-    <>
-      {/* Kept while another tab shows: its zoom and layout stay. */}
-      <TabsContent keepMounted value="flow">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pt-6 pb-8">
-          {draft.state === "ready" ? (
-            <WorkflowFlow
-              draft={latest ?? draft.data}
-              onDefinition={() => {
-                onTab("definition");
-              }}
-              onDraft={onDraft}
-              onTriggers={() => {
-                onTab("triggers");
-              }}
-              workflow={workflow}
-            />
-          ) : (
-            <NotLoadedState page={draft} />
-          )}
-          {currentVersion === null ? null : (
-            <TracedRun
-              onFiles={() => {
-                onTab("files");
-              }}
-              version={currentVersion}
-              workflow={workflow}
-            />
-          )}
-        </div>
-      </TabsContent>
-      {/* Kept while another tab shows: what was typed stays. */}
-      <TabsContent keepMounted value="definition">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pt-6 pb-8">
-          {draft.state === "ready" ? (
-            <DefinitionEditor
-              currentVersion={currentVersion}
-              loaded={latest ?? draft.data}
-              onDraft={onDraft}
-              onVersionMoved={() => {
-                void router.invalidate();
-              }}
-              onPublished={() => {
-                // The new current version, and its place among the
-                // versions, as core has them now.
-                void router.invalidate();
-              }}
-              workflow={workflow}
-            />
-          ) : (
-            <NotLoadedState page={draft} />
-          )}
-        </div>
-      </TabsContent>
-    </>
-  );
-};
-
 /** The later of two ISO times, either of which may be missing. */
 const laterOf = (a: string | null, b: string | null): string | null => {
   if (a === null || (b !== null && b > a)) {
@@ -565,21 +160,238 @@ const laterOf = (a: string | null, b: string | null): string | null => {
   return a;
 };
 
-const WorkflowResourceView = ({
+/**
+ * Where a new workflow Build it made stands, for its builders: being set
+ * up while Grasp's agent draws its first draft in the chat beside it,
+ * until a draft passes (its checkpoint); not set up once the agent's turn
+ * ended here without one. Any other workflow, one with a version or a
+ * draft that passed, is ready.
+ */
+const useSetUp = (
+  resource: WorkflowResource,
+  latest: WorkflowDraft | undefined
+): { setUp: SetUp; called: string } => {
+  const chat = useGlobalChat();
+  const ours = chat.slot === slotOf({ kind: "workflow", id: resource.id });
+  const busy = ours && (chat.view.running || chat.view.checking);
+  // What the person calls it: its chat's title, which the plan named, as
+  // its own name is one for good, in core's letters.
+  const called = (ours ? chat.summary?.title : undefined) ?? resource.name;
+  // The workflow whose agent was seen at work on this page.
+  const [worked, setWorked] = useState<string>();
+  if (busy && worked !== resource.id) {
+    setWorked(resource.id);
+  }
+  if (
+    resource.role !== "builder" ||
+    resource.currentVersion !== null ||
+    checkpointOf(latest) !== null
+  ) {
+    return { setUp: "ready", called };
+  }
+  if (busy) {
+    return { setUp: "setting-up", called };
+  }
+  return { setUp: worked === resource.id ? "failed" : "ready", called };
+};
+
+/** Its builders' chat about it, docked beside the page, which draws its Flow. */
+const DrawnInChat = ({
   resource,
-  draft,
-  versions,
-  params,
-  state,
+  onDraft,
+}: {
+  resource: WorkflowResource;
+  onDraft: (draft: WorkflowDraft) => void;
+}) => {
+  useWorkflowChat(resource, onDraft);
+  return null;
+};
+
+/** Flow | Runs | Settings: links, so each is an address of its own. */
+const ViewSwitch = ({
+  workflow,
+  view,
+  flow,
   runs,
-  askable,
-  lifecycle,
+}: {
+  workflow: string;
+  view: WorkflowView;
+  /** Whether the reader has its Flow: its draft. */
+  flow: boolean;
+  /** How many runs it has, beside their view once read. */
+  runs: number | undefined;
+}) => {
+  const { t } = useLingui();
+  const views = [
+    ...(flow
+      ? [
+          {
+            view: "flow",
+            icon: WorkflowIcon,
+            label: t({ message: "Flow", context: "a workflow's view" }),
+          } as const,
+        ]
+      : []),
+    {
+      view: "runs",
+      icon: HistoryIcon,
+      label: t({ message: "Runs", context: "a workflow's view" }),
+    },
+    {
+      view: "settings",
+      icon: SettingsIcon,
+      label: t({ message: "Settings", context: "a workflow's view" }),
+    },
+  ] as const;
+  return (
+    <ItemSwitch label={t`Workflow views`}>
+      {views.map(({ view: each, icon: Icon, label }) => (
+        <ItemSwitchLink
+          current={each === view}
+          icon={<Icon data-icon="inline-start" />}
+          key={each}
+          label={label}
+          render={
+            <Link
+              params={{ workflow }}
+              replace
+              search={(held) => ({ project: held.project, view: each })}
+              to="/workflows/$workflow"
+            />
+          }
+        >
+          {each === "runs" ? <ListedCount count={runs} of="runs" /> : null}
+        </ItemSwitchLink>
+      ))}
+    </ItemSwitch>
+  );
+};
+
+/** Its version, as the bar has it beside its name. */
+/** Its version, once one was published; nothing before. */
+const VersionBadge = ({ version }: { version: number | null }) =>
+  version === null ? null : (
+    <Badge variant="outline">
+      <Trans>Version {version}</Trans>
+    </Badge>
+  );
+
+/** The version waiting to go live, over the page, for whoever decides it. */
+const GoLiveWaiting = ({
+  status,
+  resource,
+  me,
+  onChange,
+}: {
+  status: WorkflowLifecycle;
+  resource: WorkflowResource;
+  me: string;
+  onChange: (next: WorkflowLifecycle) => void;
+}) => {
+  const choice = goLiveChoiceOf(status, me);
+  if (choice === null) {
+    return null;
+  }
+  const { version: waiting } = choice;
+  return (
+    <div className="flex-none border-b p-3">
+      <Alert variant="attention">
+        <AlertTitle>
+          <Trans>
+            Version {waiting} waits for approval to run for the team
+          </Trans>
+        </AlertTitle>
+        <AlertDescription>
+          <GoLiveDecision
+            lifecycle={status}
+            me={me}
+            name={resource.name}
+            onChange={onChange}
+            workflow={resource.id}
+          />
+        </AlertDescription>
+      </Alert>
+    </div>
+  );
+};
+
+/**
+ * Its runs: for its builders, with a test of the draft on recent items
+ * and what happened to it lately (`Traces`); for anyone else, the runs
+ * core lists them, and what happened lately under them.
+ */
+const RunsView = ({
+  workflow,
+  builder,
+  runs,
   activity,
   names,
   admin,
-  approves,
-  opens,
+  checkpoint,
 }: {
+  workflow: string;
+  builder: boolean;
+  runs: Loaded<WorkflowResourceRun[]>;
+  activity: Loaded<WorkflowActivity[]>;
+  names: Names;
+  admin: boolean;
+  /** The draft's checkpoint revision, if it has one: what a test runs. */
+  checkpoint: number | null;
+}) => {
+  const [part, setPart] = useState<TracesPart>("runs");
+  if (builder) {
+    return (
+      <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
+        <Traces
+          activity={activity}
+          admin={admin}
+          checkpoint={checkpoint}
+          names={names}
+          onPartChange={setPart}
+          part={part}
+          runs={runs}
+          workflow={workflow}
+        />
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
+        {runs.state === "ready" ? (
+          <ResourceRuns
+            admin={admin}
+            names={names}
+            runs={runs.data}
+            workflow={workflow}
+          />
+        ) : (
+          <NotLoadedState page={runs} />
+        )}
+      </div>
+      <div className="mt-auto">
+        <ActivityBar activity={activity} names={names} onAll={undefined} />
+      </div>
+    </>
+  );
+};
+
+/**
+ * The view the page shows: the one asked for, but Flow only for who reads
+ * its draft (`flow`), its builders; anyone else opens on Runs.
+ */
+const shownView = (
+  asked: WorkflowView | undefined,
+  flow: boolean
+): WorkflowView => {
+  if (asked === undefined || (asked === "flow" && !flow)) {
+    return flow ? "flow" : "runs";
+  }
+  return asked;
+};
+
+/** What the workflow's page read. */
+interface WorkflowPageRead {
   resource: WorkflowResource;
   draft: Loaded<WorkflowDraft> | undefined;
   versions: Loaded<WorkflowResourceVersion[]>;
@@ -595,14 +407,23 @@ const WorkflowResourceView = ({
   admin: boolean;
   /** Whether they approve its bindings: an admin of its own, not Grasp staff. */
   approves: boolean;
-  /**
-   * The tab it opens on, if a link asked for one (a run count's: `runs`;
-   * an inbox item's: `triggers`; a start refused for its bindings: `files`).
-   */
-  opens: WorkflowSearch["tab"];
+}
+
+const WorkflowResourceView = ({
+  back,
+  view: asked,
+  section,
+  ...read
+}: WorkflowPageRead & {
+  back: Crumb;
+  /** The view the address asks for, if any. */
+  view: WorkflowView | undefined;
+  section: WorkflowSettingsSection | undefined;
 }) => {
-  const { currentVersion } = resource;
+  const { resource, draft, runs, activity, names, admin } = read;
+  const navigate = useNavigate();
   const builder = resource.role === "builder";
+  const view = shownView(asked, draft !== undefined);
   // When its draft was saved: as loaded, or as a save here answered,
   // whichever is later.
   const [savedHere, setSavedHere] = useState<string | null>(null);
@@ -610,176 +431,148 @@ const WorkflowResourceView = ({
     draft?.state === "ready" ? draft.data.editedAt : null,
     savedHere
   );
-  const start: WorkflowTab = draft === undefined ? "versions" : "flow";
-  // A builder reads runs on Traces (its runs part), so a link asking for
-  // runs opens there.
-  const opened = opens === "runs" && builder ? "traces" : opens;
-  const [tab, setTab] = useState<WorkflowTab>(opened ?? start);
-  const [part, setPart] = useState<TracesPart>("runs");
   // The draft as its editor last saved or read it, beside the page's read:
   // whichever is at the later revision is the draft the page goes by.
   const [edited, setEdited] = useState<WorkflowDraft>();
   const latest = latestDraftOf(draft, edited);
-  const checkpoint = checkpointOf(latest);
   const took = (next: WorkflowDraft): void => {
     setEdited(next);
     setSavedHere(next.editedAt);
   };
-  // As Grasp draws it in its chat, beside the page.
-  useDraftFromChat(resource.id, took);
-  const { status, onChange } = useStatus(lifecycle);
+  const { status, onChange } = useStatus(read.lifecycle);
+  const settingsAt = (at: WorkflowSettingsSection): void => {
+    void navigate({
+      to: "/workflows/$workflow",
+      params: { workflow: resource.id },
+      search: (held) => ({
+        project: held.project,
+        view: "settings",
+        section: at,
+      }),
+    });
+  };
+  const deciding =
+    status !== undefined && goLiveChoiceOf(status, names.me) !== null;
+  const users = useWorkflowUsers(resource.id, builder);
+  const { setUp, called } = useSetUp(resource, latest);
+  if (setUp !== "ready") {
+    return (
+      <ItemShell bar={<SettingUpBar back={back} name={resource.name} />}>
+        <DrawnInChat onDraft={took} resource={resource} />
+        <SettingUp failed={setUp === "failed"} name={called} />
+      </ItemShell>
+    );
+  }
   return (
-    <>
-      <Tabs
-        onValueChange={(value: WorkflowTab) => {
-          setTab(value);
-        }}
-        spacing="none"
-        value={tab}
-      >
-        <div className="flex flex-col gap-3 border-b px-6 pt-5">
-          <WorkflowHeader
-            askable={askable}
-            me={names.me}
-            onChange={onChange}
-            onFiles={() => {
-              setTab("files");
-            }}
-            resource={resource}
-            status={status}
-            title={resource.name}
-          />
-          <div className="flex flex-wrap items-end justify-between gap-x-4">
-            <WorkflowTabs
-              builder={builder}
-              definition={draft !== undefined}
-              runs={runs.state === "ready" ? runs.data.length : undefined}
-            />
-            <WorkflowFacts
-              names={names}
-              resource={resource}
-              savedAt={savedAt}
-              status={status}
-            />
-          </div>
-        </div>
-        {draft === undefined ? null : (
-          <DraftTabs
-            currentVersion={currentVersion}
-            draft={draft}
-            latest={latest}
-            onDraft={took}
-            onTab={setTab}
-            workflow={resource.id}
-          />
-        )}
-        {builder ? (
-          // Kept while another tab shows: a test going on stays followed.
-          <TabsContent keepMounted value="traces">
-            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
-              <Traces
-                activity={activity}
-                admin={admin}
-                checkpoint={checkpoint}
-                names={names}
-                onPartChange={setPart}
-                part={part}
-                runs={runs}
+    <ItemShell
+      bar={
+        <ItemBar
+          actions={
+            <>
+              <ViewSwitch
+                flow={draft !== undefined}
+                runs={runs.state === "ready" ? runs.data.length : undefined}
+                view={view}
                 workflow={resource.id}
               />
-            </div>
-          </TabsContent>
-        ) : (
-          <TabsContent value="runs">
-            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
-              {runs.state === "ready" ? (
-                <ResourceRuns
-                  admin={admin}
-                  names={names}
-                  runs={runs.data}
+              <StartIndependentRun
+                onFiles={() => {
+                  settingsAt("files");
+                }}
+                workflow={resource.id}
+              />
+              {builder ? <ShareWorkflow resource={resource} /> : null}
+              {status === undefined ? null : (
+                <WorkflowStatus
+                  // Approving the version waiting is the page's one lime
+                  // action while there is one.
+                  highlight={!deciding}
+                  lifecycle={status}
+                  name={resource.name}
+                  onChange={onChange}
+                  who={users}
                   workflow={resource.id}
                 />
-              ) : (
-                <NotLoadedState page={runs} />
               )}
-            </div>
-          </TabsContent>
-        )}
-        <TriggersTabContent
-          builder={builder}
+            </>
+          }
+          back={back}
+          name={resource.name}
+          state={<VersionBadge version={resource.currentVersion} />}
+        />
+      }
+    >
+      {builder ? <DrawnInChat onDraft={took} resource={resource} /> : null}
+      {status === undefined ? null : (
+        <GoLiveWaiting
           me={names.me}
+          onChange={onChange}
+          resource={resource}
+          status={status}
+        />
+      )}
+      {/* Kept while another view shows: its zoom and layout stay. */}
+      {draft === undefined ? null : (
+        <div
+          className={
+            view === "flow"
+              ? "animate-in fade-in-0 flex min-h-0 flex-1 flex-col duration-300 motion-reduce:animate-none"
+              : "hidden"
+          }
+        >
+          {draft.state === "ready" ? (
+            <WorkflowFlow
+              draft={latest ?? draft.data}
+              onDefinition={() => {
+                settingsAt("definition");
+              }}
+              onDraft={took}
+              onTriggers={() => {
+                settingsAt("triggers");
+              }}
+              workflow={resource.id}
+            />
+          ) : (
+            <NotLoadedState page={draft} />
+          )}
+        </div>
+      )}
+      {/* Kept while another view shows: a test going on stays followed. */}
+      <div
+        className={
+          view === "runs"
+            ? "flex min-h-0 flex-1 flex-col overflow-y-auto"
+            : "hidden"
+        }
+      >
+        <RunsView
+          activity={activity}
+          admin={admin}
+          builder={builder}
+          checkpoint={checkpointOf(latest)}
+          names={names}
+          runs={runs}
           workflow={resource.id}
         />
-        {/* Files and apps reads what no other tab needs: only while it
-            shows, afresh each time it is opened. */}
-        <TabsContent value="files">
-          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
-            <FilesAndApps
-              approves={approves}
-              currentVersion={currentVersion}
-              // As the header has it: a change made here before the page
-              // reads it again.
-              lifecycle={
-                status === undefined
-                  ? lifecycle
-                  : { state: "ready", data: status }
-              }
-              names={names}
-              versions={versions}
-              workflow={resource.id}
-            />
-          </div>
-        </TabsContent>
-        {/* Kept while another tab shows: what was typed stays. */}
-        <TabsContent keepMounted value="parameters">
-          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
-            {params.state === "ready" ? (
-              <ResourceParams
-                editable={builder}
-                loaded={params.data}
-                workflow={resource.id}
-              />
-            ) : (
-              <NotLoadedState page={params} />
-            )}
-            <KeptState
-              editable={builder || approves}
-              read={state}
-              workflow={resource.id}
-            />
-          </div>
-        </TabsContent>
-        <TabsContent value="versions">
-          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
-            {versions.state === "ready" ? (
-              <Versions versions={versions.data} />
-            ) : (
-              <NotLoadedState page={versions} />
-            )}
-            <VersionSource
-              builder={builder}
-              versions={versions}
-              workflow={resource.id}
-            />
-            <DeleteWorkflow admin={admin} resource={resource} />
-          </div>
-        </TabsContent>
-      </Tabs>
-      <div className="pb-chat mt-auto">
-        <ActivityBar
-          activity={activity}
-          names={names}
-          onAll={
-            builder
-              ? () => {
-                  setPart("activity");
-                  setTab("traces");
-                }
-              : undefined
-          }
-        />
       </div>
-    </>
+      {view === "settings" ? (
+        <WorkflowSettings
+          read={{
+            ...read,
+            latest,
+            onDraft: took,
+            savedAt,
+            // As the bar has it: a change made there before the page
+            // reads it again.
+            lifecycle:
+              status === undefined
+                ? read.lifecycle
+                : { state: "ready", data: status },
+          }}
+          section={section}
+        />
+      ) : null}
+    </ItemShell>
   );
 };
 
@@ -812,31 +605,19 @@ const usePeople = (
 const WorkflowResourcePage = () => {
   const {
     resource,
-    draft,
-    versions,
-    params,
-    state,
-    runs,
-    askable,
-    lifecycle,
-    activity,
     people: peopleRead,
+    project,
+    ...read
   } = Route.useLoaderData();
   const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
-  const { tab } = Route.useSearch();
+  const { view, section } = Route.useSearch();
   const { t } = useLingui();
-  // Its builders' chat as a drawer down the right takes its room from the page.
-  const drawer = useDockMode() === "drawer";
-  const name = resource.state === "ready" ? resource.data.name : undefined;
-  const crumbs = [
-    { label: t`Workflows`, to: "/workflows" },
-    { label: name ?? t`Workflow` },
-  ] as const;
+  const back = backCrumb({ label: t`Workflows`, to: "/workflows" }, project);
   if (resource.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={crumbs}
+        crumbs={[back, { label: t`Workflow` }]}
         icon={WorkflowIcon}
         notFound={t`Workflow not found`}
         page={resource}
@@ -844,50 +625,53 @@ const WorkflowResourcePage = () => {
     );
   }
   return (
-    <>
-      <SiteHeader crumbs={crumbs} />
-      <div
-        className={
-          drawer && resource.data.role === "builder"
-            ? `flex min-h-full flex-col text-sm ${dockDrawerRoom}`
-            : "flex min-h-full flex-col text-sm"
-        }
-      >
-        <WorkflowResourceView
-          // Another workflow starts afresh; a new current version of this
-          // one keeps what is typed in its editor.
-          key={resource.data.id}
-          activity={activity}
-          admin={isAdmin(identity.role)}
-          approves={isMemberAdmin(identity)}
-          askable={askable}
-          draft={draft}
-          lifecycle={lifecycle}
-          names={{ people, me: identity.userId }}
-          params={params}
-          resource={resource.data}
-          state={state}
-          opens={tab}
-          runs={runs}
-          versions={versions}
-        />
-      </div>
-    </>
+    <WorkflowResourceView
+      // Another workflow starts afresh; a new current version of this
+      // one keeps what is typed in its editor.
+      key={resource.data.id}
+      {...read}
+      admin={isAdmin(identity.role)}
+      approves={isMemberAdmin(identity)}
+      back={back}
+      names={{ people, me: identity.userId }}
+      resource={resource.data}
+      section={section}
+      view={view}
+    />
   );
 };
 
-/** What a link to a workflow's page may ask of it: the tab it opens on. */
+/** What a link to a workflow's page may ask of it. */
 interface WorkflowSearch {
-  tab?: "runs" | "triggers" | "files";
+  /** The view it opens on: Flow for its builders, Runs for anyone else, by default. */
+  view?: WorkflowView;
+  /** In Settings, the section open: General by default. */
+  section?: WorkflowSettingsSection;
+  /** The project it was started or opened from: the way back. */
+  project?: string;
 }
 
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
-  validateSearch: (search: Record<string, unknown>): WorkflowSearch =>
-    search.tab === "runs" || search.tab === "triggers" || search.tab === "files"
-      ? { tab: search.tab }
-      : {},
+  // Grasp's chat has no place here but its builders', about the workflow,
+  // docked beside it (chat/chat-subject.ts).
+  staticData: { chat: chatPresence.hidden },
+  validateSearch: (search: Record<string, unknown>): WorkflowSearch => {
+    const view = viewOf(search.view);
+    const section = workflowSettingsSectionOf(search.section);
+    const project = projectSearchOf(search);
+    return {
+      ...(view === undefined ? {} : { view }),
+      ...(section === undefined ? {} : { section }),
+      ...(project === undefined ? {} : { project }),
+    };
+  },
   pendingComponent: PageLoading,
-  loader: async ({ context: { core, identity }, params: { workflow } }) => {
+  loaderDeps: ({ search: { project } }) => ({ project }),
+  loader: async ({
+    context: { core, identity },
+    params: { workflow },
+    deps: { project },
+  }) => {
     // Names only, and not waited for: IDs stand in until they come.
     const people = loadFromCore(core, readPeople);
     const resourceRead = loadFromCore(
@@ -927,6 +711,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       askable,
       lifecycle,
       activity,
+      inProject,
     ] = await Promise.all([
       resourceRead,
       draftRead(),
@@ -956,6 +741,11 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         core,
         async (session) => await session.workflowResources.activity(workflow)
       ),
+      // The project it was started or opened from, for the way back.
+      loadFromCore(
+        core,
+        async (session) => await readItemProject(session, project)
+      ),
     ]);
     return {
       resource,
@@ -968,6 +758,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       lifecycle,
       activity,
       people,
+      project: inProject.state === "ready" ? inProject.data : undefined,
     };
   },
   component: WorkflowResourcePage,

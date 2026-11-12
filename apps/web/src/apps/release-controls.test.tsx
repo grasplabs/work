@@ -15,10 +15,10 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AppVersions } from "./app-versions.tsx";
+import { AppHistory } from "./app-history.tsx";
 
 // Revoking an App's release and placing or lifting a legal hold on it,
-// on its Versions tab, against core's `apps.versions` as the page reaches
+// in its History, against core's `apps.versions` as the page reaches
 // it over RPC (the boundary from the web app), faked: it keeps each
 // sealed release's revocation and holds, answers each change with the
 // release as it then is, and refuses a reason or hold name core would.
@@ -30,13 +30,13 @@ const appId = appIdSchema.parse("app-1");
 const version = (number: number): AppVersion => ({
   app: appId,
   version: number,
+  label: `26.10.${number}`,
   parent: number === 1 ? null : number - 1,
   tree: `tree-${number}`,
   files: 3,
   author: "user-owner",
   message: `Change ${number}`,
   createdAt: `2026-10-0${number}T09:00:00.000Z`,
-  proposedBy: null,
 });
 
 const desk: ViewedApp = {
@@ -48,8 +48,8 @@ const desk: ViewedApp = {
   audience: null,
   blueprint: null,
   currentVersion: 2,
-  pendingVersion: 3,
-  status: "published",
+  liveLabel: "26.11.2",
+  archived: false,
   process: null,
   createdAt: "2026-10-01T09:00:00.000Z",
   role: "builder",
@@ -164,7 +164,28 @@ const fakeVersions = () => {
       return lifted;
     },
   };
-  return { session: { apps: { versions } }, asked };
+  // The draft changes nothing: History lists the published versions alone.
+  const drafts = {
+    get: async () =>
+      await Promise.resolve({
+        app: appId,
+        base: 2,
+        changed: [],
+        deleted: [],
+        revision: 4,
+        updatedAt: null,
+        updatedBy: null,
+      }),
+    watch: async () =>
+      await Promise.resolve({
+        release: async () => {
+          await Promise.resolve();
+        },
+        [Symbol.dispose]: () => {},
+      }),
+  };
+  const members = { list: async () => await Promise.resolve([]) };
+  return { session: { apps: { versions, drafts }, members }, asked };
 };
 
 let root: Root | undefined;
@@ -189,7 +210,7 @@ const shown = async (
     ): Promise<T> => await run(session),
   };
   const rootRoute = createRootRoute({
-    component: () => <AppVersions app={desk} identity={viewer} />,
+    component: () => <AppHistory app={desk} identity={viewer} />,
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -230,7 +251,7 @@ const button = (name: string) =>
 
 /** The menu of `number`'s actions, opened: what it offers. */
 const menuOf = async (number: number): Promise<string[] | null> => {
-  const actions = button(`Actions for version ${number}`);
+  const actions = button(`Actions for 26.10.${number}`);
   if (actions === undefined) {
     return null;
   }
@@ -269,10 +290,10 @@ const type = async (label: string, text: string): Promise<void> => {
   });
 };
 
-/** Each version listed, and what it is marked. */
+/** Each version listed, by the number in its label, and what it is marked. */
 const listed = (): string[] =>
-  [...document.querySelectorAll("tbody tr td:first-child")].map(
-    (cell) => cell.textContent?.trim() ?? ""
+  [...document.querySelectorAll('li [data-slot="item-title"]')].map(
+    (title) => title.textContent?.trim().replace("26.10.", "") ?? ""
   );
 
 const disabled = (name: string): boolean | undefined => button(name)?.disabled;
@@ -324,15 +345,23 @@ describe("An App's releases, revoked or held, for its admins", () => {
       asked,
       listed: listed(),
     }).toStrictEqual({
-      unsealed: ["Make current"],
+      unsealed: [
+        "View changes",
+        "See this version",
+        "Give your team this version",
+      ],
       withoutReason: true,
       asked: [
         ["releases"],
         ["revoke", 2, "It sends invoices to the wrong customer."],
       ],
-      listed: ["3Up for review", "2CurrentRevoked", "1"],
+      listed: ["3", "2Your team has this oneRevoked", "1"],
     });
-    await expect(menuOf(2)).resolves.toStrictEqual(["Place a legal hold"]);
+    await expect(menuOf(2)).resolves.toStrictEqual([
+      "View changes",
+      "See this version",
+      "Place a legal hold",
+    ]);
   });
 
   it("places a named legal hold with why, then lifts it", async () => {
@@ -352,13 +381,13 @@ describe("An App's releases, revoked or held, for its admins", () => {
 
     expect({ withoutReason, held, asked, lifted: listed() }).toStrictEqual({
       withoutReason: true,
-      held: ["3Up for review", "2Current", "1Legal hold: CASE-17"],
+      held: ["3", "2Your team has this one", "1Legal hold: CASE-17"],
       asked: [
         ["releases"],
         ["placeHold", 1, "CASE-17", "Litigation over the March invoices."],
         ["releaseHold", 1, "CASE-17"],
       ],
-      lifted: ["3Up for review", "2Current", "1"],
+      lifted: ["3", "2Your team has this one", "1"],
     });
   });
 
@@ -373,11 +402,12 @@ describe("An App's releases, revoked or held, for its admins", () => {
 
     expect({ before, after: await menuOf(1) }).toStrictEqual({
       before: [
-        "Roll back to this version",
+        "See this version",
+        "Go back to this version",
         "Revoke this version",
         "Place a legal hold",
       ],
-      after: ["Place a legal hold"],
+      after: ["See this version", "Place a legal hold"],
     });
   });
 
@@ -391,7 +421,7 @@ describe("An App's releases, revoked or held, for its admins", () => {
 
     expect({
       listed: listed(),
-      actions: button("Actions for version 1"),
+      actions: button("Actions for 26.10.1"),
     }).toStrictEqual({ listed: [], actions: undefined });
   });
 
@@ -402,7 +432,10 @@ describe("An App's releases, revoked or held, for its admins", () => {
     };
 
     expect(seen).toStrictEqual({
-      builder: { asked: [], menu: ["Roll back to this version"] },
+      builder: {
+        asked: [],
+        menu: ["See this version", "Go back to this version"],
+      },
       staff: { asked: [], menu: null },
     });
   });

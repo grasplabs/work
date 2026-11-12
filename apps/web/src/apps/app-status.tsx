@@ -1,4 +1,4 @@
-import type { App, AppStatus } from "@grasp-os/shared/apps";
+import type { App, AppMember } from "@grasp-os/shared/apps";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,45 +10,92 @@ import {
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { i18n } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
+import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Where an App (core's App) is in its life, and its builders moving it,
-// as in the prototype (`components/apps/app-settings.tsx`,
-// `publish-dialog.tsx`): its status as a badge, Publish on its bar, and
-// Archive or Restore to put it away or take it back. A new App is a
-// draft: only its builders open it, and its triggers don't fire, until it
-// is published. Core decides who may move it (app-status.ts); a refusal
-// shows under the buttons.
+// in plain words: "Only you see this" until it is shared with the team
+// (its first version live, and someone to use it), then who uses it; and
+// Archive or Restore to put it away or take it back. A new App opens only
+// for its builders, and its triggers don't fire, until it is shared. Core decides who may move
+// it (app-status.ts); a refusal shows under the buttons.
 
-const statusNames = {
-  draft: msg({ message: "Draft", context: "an App still being made" }),
-  published: msg({
-    message: "Published",
-    context: "an App open to the people it is shared with",
-  }),
-  archived: msg({ message: "Archived", context: "an App put away" }),
-} as const satisfies Record<AppStatus, unknown>;
+/** Where an App is: core keeps only `archived` and its live version. */
+export type AppStatus = "draft" | "live" | "archived";
 
-/** An App's status, as people read it. */
-export const statusLabel = (status: AppStatus): string =>
-  i18n._(statusNames[status]);
+/** The status of `app`, from whether it is archived and has a live version. */
+export const statusOf = (
+  app: Pick<App, "archived" | "currentVersion">
+): AppStatus => {
+  if (app.archived) {
+    return "archived";
+  }
+  return app.currentVersion === null ? "draft" : "live";
+};
 
-/** An App's status as a badge: filled once published, as in the prototype. */
-export const StatusBadge = ({ status }: { status: AppStatus }) => (
-  <Badge variant={status === "published" ? "default" : "outline"}>
-    {statusLabel(status)}
-  </Badge>
-);
+/**
+ * Who uses the App by name, as its state says it: the teams, people and
+ * projects it is shared with, those with a name the person may read.
+ */
+export const userNames = (members: readonly AppMember[]): string[] =>
+  members.flatMap(({ name }) => (name === null ? [] : [name]));
+
+/** Who uses it, as a whole sentence: one name, several, or the team. */
+const UsedBy = ({ who }: { who: readonly string[] | undefined }) => {
+  const [only] = who ?? [];
+  if (who === undefined || only === undefined) {
+    return <Trans>Your team uses it</Trans>;
+  }
+  if (who.length === 1) {
+    return <Trans>{only} uses it</Trans>;
+  }
+  const names = formatList(who);
+  return <Trans>{names} use it</Trans>;
+};
+
+/**
+ * Where an App stands, in words anyone reads: "Only you see this" until a
+ * version is live and shared with someone; then who uses it, by name
+ * (`who`), or "Your team" where the page doesn't read whom it is shared
+ * with (a card on the Apps page).
+ */
+export const StatusBadge = ({
+  app,
+  who,
+}: {
+  app: Pick<App, "archived" | "currentVersion">;
+  /** Whom it is shared with, by name; none where the page doesn't read it. */
+  who?: readonly string[];
+}) => {
+  const status = statusOf(app);
+  if (status === "archived") {
+    return (
+      <Badge variant="outline">
+        <Trans context="an App put away">Archived</Trans>
+      </Badge>
+    );
+  }
+  if (status === "draft" || who?.length === 0) {
+    return (
+      <Badge variant="attention">
+        <Trans>Only you see this</Trans>
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="passed">
+      <UsedBy who={who} />
+    </Badge>
+  );
+};
 
 /** What a builder can move an App along, as core's `apps` names it. */
-export type Transition = "publish" | "unpublish" | "archive" | "restore";
+export type Transition = "archive" | "restore";
 
 const moveOf = async (
   session: Session,
@@ -81,7 +128,7 @@ export const ArchiveDialog = ({
           <Trans>
             An archived App is kept as it is and goes offline: nobody opens its
             pages, its triggers stop and its unfinished runs are cancelled. A
-            builder can restore it later, as a draft.
+            builder can restore it later.
           </Trans>
         </AlertDialogDescription>
       </AlertDialogHeader>
@@ -118,13 +165,18 @@ export const useStatusMove = (app: string) => {
   return { busy, failure, move };
 };
 
-/** What the page says under the name of an App that isn't published. */
-export const StatusNote = ({ status }: { status: AppStatus }) => {
+/** What the page says under the name of an App that isn't live. */
+export const StatusNote = ({
+  app,
+}: {
+  app: Pick<App, "archived" | "currentVersion">;
+}) => {
   const { t } = useLingui();
+  const status = statusOf(app);
   if (status === "draft") {
     return (
       <p className="text-muted-foreground">
-        {t`A draft: only its builders open it, and its triggers don't fire, until it is published.`}
+        {t`Only its builders open it, and its triggers don't fire, until it is shared with the team.`}
       </p>
     );
   }

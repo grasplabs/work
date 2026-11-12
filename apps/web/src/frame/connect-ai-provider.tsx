@@ -65,3 +65,33 @@ export const ConnectAiProvider = ({
     </Empty>
   );
 };
+
+/**
+ * Over a box to ask in, while there is no AI provider: what is missing, in
+ * a line, with the way to Settings › AI providers for whoever can connect
+ * one, and who to ask for anyone else.
+ */
+export const ConnectAiProviderCover = () => {
+  const canConnect = useMemberAdmin();
+  return (
+    <>
+      <p className="flex items-center gap-2 font-medium">
+        <KeyRoundIcon aria-hidden="true" className="size-4" />
+        <Trans>Connect an AI provider to start asking</Trans>
+      </p>
+      {canConnect ? (
+        <Button
+          nativeButton={false}
+          render={<Link to="/settings/ai-providers" />}
+          size="sm"
+        >
+          <Trans>Go to AI providers</Trans>
+        </Button>
+      ) : (
+        <p className="text-muted-foreground">
+          <Trans>Ask your admin to connect one.</Trans>
+        </p>
+      )}
+    </>
+  );
+};

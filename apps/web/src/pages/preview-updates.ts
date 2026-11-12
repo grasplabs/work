@@ -8,10 +8,10 @@ import type {
 import { draftSealFailures } from "@grasp-os/shared/functions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 
-// The page's side of a chat's preview taking its draft's writes in the
-// frame it has open (spec 19.2.1): each time the chat says the draft is
+// The page's side of the App's preview taking its draft's writes in the
+// frame it has open (spec 19.2.1): each time core says the draft is
 // at a newer revision, the page asks core for the previewed page at
-// that revision (`chats.previewUpdate`, which builds each revision once,
+// that revision (`apps.drafts.previewUpdate`, which builds each revision once,
 // for every preview that asks for it, and stages its modules) and hands
 // the frame the address of the page's module over the frame's own
 // bridge; the frame imports it, loading from core only the modules the
@@ -58,8 +58,6 @@ export interface PreviewUpdatesHost {
   reset: () => void;
   /** The frame shows the build `at` names now: what its calls name. */
   moved: (at: PreviewAt) => void;
-  /** The frame shows the App's `appVersion` now, or the draft's own changes. */
-  shows: (appVersion: number | undefined) => void;
 }
 
 /**
@@ -174,8 +172,6 @@ export class PreviewUpdates {
       return;
     }
     this.#toFrame = toFrame;
-    // The frame runs what it opened on.
-    this.#host.shows(this.#applied.appVersion);
     void this.#run();
   }
 
@@ -347,7 +343,6 @@ export class PreviewUpdates {
       return !this.#closed;
     }
     this.#applied = update;
-    this.#host.shows(update.appVersion);
     if (update.revision !== this.#shown) {
       this.#shown = update.revision;
       this.#host.moved(shownAt(update));

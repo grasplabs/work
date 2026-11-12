@@ -54,6 +54,7 @@ import {
 import { useCoreAction } from "../use-core-action.ts";
 import { AppAccessRequests } from "./app-access-requests.tsx";
 import { ExportDefinition } from "./app-definition.tsx";
+import { AppHistory } from "./app-history.tsx";
 import { AppIntegrations } from "./app-integrations.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
@@ -67,7 +68,6 @@ import {
   StatusNote,
   useStatusMove,
 } from "./app-status.tsx";
-import { AppVersions } from "./app-versions.tsx";
 import { AppWebhooks, WebhookList } from "./app-webhooks.tsx";
 import { AppWorkflows } from "./app-workflows.tsx";
 import { SaveAsBlueprint } from "./blueprints.tsx";
@@ -78,12 +78,12 @@ import type { AppRead } from "./use-app-read.ts";
 
 // Everything about an App besides the App itself, in one place, grouped
 // plainly, a section at a time: what it is called and where it stands
-// (General), whom it is shared with (Sharing), its versions, its
-// connections (with the workflows it binds), webhooks, and the settings
-// page the App
+// (General), whom it is shared with (Sharing), its History (unpublished
+// changes and published versions), its connections (with the workflows it
+// binds), webhooks, and the settings page the App
 // declares itself (Options). Its builders reach it beside the chat in
 // the App's workspace (app-workspace.tsx); anyone else who opens the
-// App, from the App's own bar (_shell.apps.$app_.settings.tsx). Each
+// App, from the live App's bar (_shell.apps.$app_.settings.tsx). Each
 // section reads what it shows as it opens (use-app-read.ts), so one
 // that is slow or refused leaves the others; core checks every change.
 
@@ -91,7 +91,7 @@ import type { AppRead } from "./use-app-read.ts";
 const appSettingsSections = [
   "general",
   "sharing",
-  "versions",
+  "history",
   "connections",
   "webhooks",
   "options",
@@ -108,7 +108,7 @@ export const settingsSectionOf = (
 const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
   general: msg({ message: "General", context: "an app's settings section" }),
   sharing: msg({ message: "Sharing", context: "an app's settings section" }),
-  versions: msg({ message: "Versions", context: "an app's settings section" }),
+  history: msg({ message: "History", context: "an app's settings section" }),
   connections: msg({
     message: "Connections",
     context: "an app's settings section",
@@ -281,7 +281,7 @@ const SavedText = ({
 const PuttingAway = ({ app }: { app: App }) => {
   const { busy, failure, move } = useStatusMove(app.id);
   const [archiving, setArchiving] = useState(false);
-  const archived = app.status === "archived";
+  const { archived } = app;
   return (
     <div className="flex flex-col items-start gap-2 border-t px-5 py-4 sm:items-end">
       {archived ? (
@@ -303,10 +303,10 @@ const PuttingAway = ({ app }: { app: App }) => {
           variant="outline"
         >
           <ArchiveIcon data-icon="inline-start" />
-          {app.status === "published" ? (
-            <Trans>Archive and take offline</Trans>
-          ) : (
+          {app.currentVersion === null ? (
             <Trans>Archive</Trans>
+          ) : (
+            <Trans>Archive and take offline</Trans>
           )}
         </Button>
       )}
@@ -419,9 +419,7 @@ const ForBuilders = ({
           </div>
         </SettingsBody>
       </SettingsSection>
-      {app.status === "archived" ||
-      identity.staff ||
-      !isAdmin(identity.role) ? null : (
+      {app.archived || identity.staff || !isAdmin(identity.role) ? null : (
         <SettingsSection
           description={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
           title={t`Its data`}
@@ -561,8 +559,8 @@ const GeneralForm = ({
         </SettingsRow>
         <SettingsRow label={t`Status`}>
           <div className="flex flex-col items-start gap-1">
-            <StatusBadge status={app.status} />
-            <StatusNote status={app.status} />
+            <StatusBadge app={app} />
+            <StatusNote app={app} />
           </div>
         </SettingsRow>
         <SettingsRow
@@ -601,9 +599,9 @@ const GeneralForm = ({
             </SelectContent>
           </Select>
         </SettingsRow>
-        {builds && app.status !== "archived" ? (
+        {builds && !app.archived ? (
           <SettingsRow
-            description={t`Its own address, for whoever may use it while it is published.`}
+            description={t`Its own address, for whoever may use it while it is live.`}
             label={t`Link`}
           >
             <OwnLink app={app} />
@@ -915,7 +913,7 @@ const shownSections = (
     general: true,
     sharing: true,
     // Core lists versions and webhooks to its builders alone.
-    versions: builder,
+    history: builder,
     connections: canBuild(identity.role),
     webhooks: builder,
     options,
@@ -965,8 +963,8 @@ const SectionBody = ({
   if (section === "sharing") {
     return <Sharing app={app} identity={identity} />;
   }
-  if (section === "versions") {
-    return <AppVersions app={app} identity={identity} />;
+  if (section === "history") {
+    return <AppHistory app={app} identity={identity} />;
   }
   if (section === "connections") {
     return <Connections app={app} builds={builds} identity={identity} />;
@@ -979,7 +977,7 @@ const SectionBody = ({
 
 const sectionDescriptions = {
   sharing: msg`Who opens the App besides you, and as what.`,
-  versions: msg`Every version of the App, which one runs, and going back to one.`,
+  history: msg`What changed, unpublished and published, which version is live, and going back to one.`,
   connections: msg`The integrations, connections and resources the App uses, and asking for more.`,
   webhooks: msg`Where Grasp sends the App's events.`,
   options: msg`The settings the App offers itself.`,
@@ -1010,8 +1008,14 @@ const SectionLink = ({
       className={className}
       params={{ app }}
       replace
-      search={(held) => ({ chat: held.chat, view: "settings", section })}
-      to="/apps/$app/edit"
+      search={(held) => ({
+        chat: held.chat,
+        env: held.env,
+        project: held.project,
+        view: "settings",
+        section,
+      })}
+      to="/apps/$app"
     >
       {children}
     </Link>
