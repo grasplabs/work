@@ -40,9 +40,9 @@ export const purgeAttemptLeaseMs = 10 * 60 * 1000;
 
 /**
  * Step rows one insert writes: D1 binds at most 100 values a statement,
- * and drizzle binds every column of a row, defaults too (seven).
+ * and drizzle binds every column of a row, defaults too (eight).
  */
-const stepRowsPerStatement = 14;
+const stepRowsPerStatement = 12;
 
 /** How a content purge's step for one document it names begins (purge.ts). */
 export const documentStepPrefix = "document:";
@@ -429,7 +429,13 @@ export const runStep = async <C>(
   run: (
     save: (changedSoFar: StepCounts) => BatchItem<"sqlite">,
     stored: StepCounts
-  ) => Promise<unknown>
+  ) => Promise<unknown>,
+  /**
+   * A document's step: the version `run` left the document at, read once
+   * it is done, kept with the step as it completes (null for none: a
+   * document gone). Any other step keeps none.
+   */
+  leftAt: () => number | null = () => null
 ): Promise<StepCounts> => {
   const { db } = brain;
   const mine = and(
@@ -468,7 +474,12 @@ export const runStep = async <C>(
     ]);
     return written[0];
   };
-  const started = await underHold({ state: "running", reason: null });
+  // What the step proved of its document no longer holds while it runs.
+  const started = await underHold({
+    state: "running",
+    reason: null,
+    version: null,
+  });
   if (started === undefined) {
     throw knowledgeErrors.create("knowledge.conflict");
   }
@@ -497,6 +508,7 @@ export const runStep = async <C>(
   const ended = await underHold({
     state: "complete",
     counts: JSON.stringify(counts),
+    version: leftAt(),
   });
   // Taken over, lapsed, or finished meanwhile: this attempt says nothing.
   if (ended === undefined) {
@@ -584,6 +596,15 @@ export const purgeStatus = async <C>(
 export interface UnfinishedPurge {
   /** The steps not complete, in order. */
   owed: string[];
+  /**
+   * Each document it names, by its step: whether that completed, and the
+   * version it left the document at then (null when it can't say).
+   */
+  documents: {
+    documentId: string;
+    complete: boolean;
+    version: number | null;
+  }[];
 }
 
 /**
@@ -611,7 +632,11 @@ export const unfinishedPurge = async <C>(
     throw knowledgeErrors.create("knowledge.not_found");
   }
   const steps = await db
-    .select({ step: brainPurgeSteps.step, state: brainPurgeSteps.state })
+    .select({
+      step: brainPurgeSteps.step,
+      state: brainPurgeSteps.state,
+      version: brainPurgeSteps.version,
+    })
     .from(brainPurgeSteps)
     .where(eq(brainPurgeSteps.purgeId, purgeId))
     .orderBy(asc(brainPurgeSteps.position));
@@ -619,7 +644,34 @@ export const unfinishedPurge = async <C>(
     owed: steps
       .filter(({ state }) => state !== "complete")
       .map(({ step }) => step),
+    documents: steps
+      .filter(({ step }) => step.startsWith(documentStepPrefix))
+      .map(({ step, state, version }) => ({
+        documentId: step.slice(documentStepPrefix.length),
+        complete: state === "complete",
+        version,
+      })),
   };
+};
+
+/**
+ * Lets the purge `held` holds go, unfinished, so another run may take it
+ * at once: only under that attempt's hold.
+ */
+export const releasePurge = async <C>(
+  brain: Brain<C>,
+  held: PurgeAttempt
+): Promise<void> => {
+  const now = brain.ports.clock();
+  await brain.db
+    .update(brainPurges)
+    .set({ attempt: null, attemptAt: null, updatedAt: now })
+    .where(
+      and(
+        eq(brainPurges.id, held.purgeId),
+        eq(brainPurges.attempt, held.attempt)
+      )
+    );
 };
 
 /**

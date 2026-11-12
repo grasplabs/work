@@ -67,12 +67,13 @@ import {
   openPurge,
   purgeStatus,
   purgeUnfinished,
+  releasePurge,
   runStep,
   takePurge,
   unfinishedPurge,
   whileHeld,
 } from "./purge-ledger.ts";
-import type { StepCounts } from "./purge-ledger.ts";
+import type { StepCounts, UnfinishedPurge } from "./purge-ledger.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -1681,7 +1682,11 @@ const purgeDocument = async <C>(
   save: (soFar: Counts) => BatchItem<"sqlite">,
   /** The purge's hold: each of its changes is made only while it holds. */
   holds: () => SQL
-): Promise<Counts> => {
+): Promise<{
+  counts: Counts;
+  /** The version it left the document at: what it saved, or it read. */
+  leftAt: number;
+}> => {
   const { document, collection } = named;
   // Before anything of it changes: one the host is saving now refuses, and
   // the purge fails here.
@@ -1744,7 +1749,7 @@ const purgeDocument = async <C>(
     // its current version waits for indexing (a purge that failed to
     // publish, say): published now, or the purge fails.
     await requireCurrentIndexed(brain, db, document.id, by.actor);
-    return counts;
+    return { counts, leftAt: at };
   }
   const text = changed?.text ?? current.text;
   const holding = holds();
@@ -1792,7 +1797,7 @@ const purgeDocument = async <C>(
         ];
   // The version it saves carries the document's count, in all.
   pointCurrent.push(save(counts));
-  await writeVersion(brain, by, {
+  const saved = await writeVersion(brain, by, {
     collection,
     path: document.path,
     text,
@@ -1812,7 +1817,7 @@ const purgeDocument = async <C>(
       ? { purgedTranscript: transcript.redacted, transcriptRead: transcript.at }
       : {}),
   });
-  return counts;
+  return { counts, leftAt: saved.currentVersion };
 };
 
 /**
@@ -2040,6 +2045,8 @@ const purgeContent = async <C>(
     });
     for (const documentId of input.documentIds) {
       const one = named.find(({ document }) => document.id === documentId);
+      // The version the step leaves the document at, kept with it.
+      let leftAt: number | null = null;
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       const counts = await runStep(
         brain,
@@ -2056,23 +2063,24 @@ const purgeContent = async <C>(
             ...made,
             documents: (stored.documents ?? 0) > 0 ? 0 : made.documents,
           });
-          return once(
-            await purgeDocument(
-              brain,
-              db,
-              by,
-              one,
-              matcher,
-              onErase,
-              purgeId,
-              async () => {
-                await keepHold(brain, held);
-              },
-              (soFar) => save({ ...once(soFar) }),
-              () => heldNow(brain, held)
-            )
+          const purgedOne = await purgeDocument(
+            brain,
+            db,
+            by,
+            one,
+            matcher,
+            onErase,
+            purgeId,
+            async () => {
+              await keepHold(brain, held);
+            },
+            (soFar) => save({ ...once(soFar) }),
+            () => heldNow(brain, held)
           );
-        }
+          ({ leftAt } = purgedOne);
+          return once(purgedOne.counts);
+        },
+        () => leftAt
       );
       done.push(counts);
     }
@@ -2254,6 +2262,37 @@ export const purge = async <C>(
 const termFreeSteps: ReadonlySet<string> = new Set(["payloads", "search"]);
 
 /**
+ * Whether every document a purge names that is still there is provably as
+ * the purge left it: its step complete, at the version the step kept, the
+ * one it is at now. Not one saved again since, which may hold a term
+ * again (with its transcript, payload and files: each comes with a
+ * version), one whose step is owed, or one whose step kept no version.
+ */
+const provenLeft = async (
+  db: DrizzleD1Database,
+  named: UnfinishedPurge["documents"]
+): Promise<boolean> => {
+  if (named.length === 0) {
+    return true;
+  }
+  const rows = await db
+    .select({ id: documents.id, version: documents.currentVersion })
+    .from(documents)
+    .where(
+      inList(
+        documents.id,
+        named.map(({ documentId }) => documentId)
+      )
+    );
+  const existing = new Map(rows.map(({ id, version }) => [id, version]));
+  return named.every(
+    ({ documentId, complete, version }) =>
+      !existing.has(documentId) ||
+      (complete && version !== null && version === existing.get(documentId))
+  );
+};
+
+/**
  * Finishes the unfinished content purge `purgeId`, by any admin (the host
  * checks who), with neither its documents nor its terms as input, so it
  * tells nothing of them: what the purge still owes that needs none of its
@@ -2278,23 +2317,17 @@ export const finishPurgeById = async <C>(
   purgeId: string
 ): Promise<PurgeStatus> => {
   const { db } = brain;
-  const { owed } = await unfinishedPurge(brain, purgeId);
-  const documentIds = owed
-    .filter((step) => step.startsWith(documentStepPrefix))
-    .map((step) => step.slice(documentStepPrefix.length));
-  const remaining =
-    documentIds.length === 0
-      ? []
-      : await db
-          .select({ id: documents.id })
-          .from(documents)
-          .where(inList(documents.id, documentIds));
+  const { owed, documents: named } = await unfinishedPurge(brain, purgeId);
   const needsTerms = owed.some(
     (step) => !step.startsWith(documentStepPrefix) && !termFreeSteps.has(step)
   );
-  if (remaining.length > 0 || needsTerms) {
+  if (needsTerms || !(await provenLeft(db, named))) {
     throw knowledgeErrors.create("knowledge.purge_needs_input");
   }
+  // The steps of documents gone since: nothing of them is left to erase.
+  const documentIds = named
+    .filter(({ complete }) => !complete)
+    .map(({ documentId }) => documentId);
   // Each attempt owes its own rebuild, as running the purge again does.
   const held = await takePurge(brain, purgeId, (taken, at) => [
     rebuildOwedWhile(db, taken.purgeId, attemptHolds(taken, at)),
@@ -2335,6 +2368,11 @@ export const finishPurgeById = async <C>(
       await rebuildSearchIndex(db);
     });
   });
+  // Saved again while it ran: not proven any more, left open, let go.
+  if (!(await provenLeft(db, named))) {
+    await releasePurge(brain, held);
+    throw knowledgeErrors.create("knowledge.purge_needs_input");
+  }
   await finishPurge(brain, held);
   const status = await purgeStatus(brain, purgeId);
   // Where it stands, and nothing of what it removed nor where: no counts,

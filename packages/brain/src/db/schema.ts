@@ -407,6 +407,14 @@ export const brainPurgeSteps = sqliteTable(
     reason: text(),
     /** What it changed, as JSON counts; null before it completed. */
     counts: text(),
+    /**
+     * A document's step: the version the document was left at when the
+     * step last completed, so finishing the purge by its ID can tell the
+     * document wasn't saved again since. Never a term or text. Null for any
+     * other step, a document gone, or a step completed before it was kept:
+     * nothing proves then.
+     */
+    version: integer(),
     updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.purgeId, table.step] })]

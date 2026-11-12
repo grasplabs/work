@@ -149,6 +149,37 @@ const refusedToFinish = async (owner: Person, other: Person) => {
   };
 };
 
+/**
+ * A purge of a shared document by one admin, left unfinished at its last
+ * step, the index rebuild, with its document already rewritten; another
+ * admin to finish it.
+ */
+const leftAtTheRebuild = async () => {
+  const owner = await personOf("admin");
+  const other = await personOf("admin");
+  const secret = `Bonus${unique()}`;
+  const handbook = await other.api.knowledge.createCollection({
+    name: `Handbook ${unique()}`,
+    access: "everyone",
+  });
+  const shared = await saveOver(
+    other,
+    handbook.id,
+    "pay.md",
+    `# Pay\nAsk ${secret}.`
+  );
+  const input: PurgeInput = {
+    type: "content",
+    documentIds: [shared.id],
+    terms: [secret],
+    reason: "erasure_request",
+  };
+  const failing = await rebuildFailingOnce(owner);
+  const first = await owner.api.knowledge.preparePurge(input);
+  await refusal(failing.knowledge.purge(input, first.token));
+  return { owner, other, shared, secret, input };
+};
+
 /** `owner`'s own memory statements, sorted. */
 const statementsOf = async (owner: Person): Promise<string[]> => {
   const { records } = await owner.api.knowledge.memoriesList();
@@ -850,6 +881,65 @@ describe(
         personal: answers.unknown,
         unknown: { code: "knowledge.not_found", message: notFound },
       });
+    });
+
+    it("is not finished by its ID once a document it purged was saved again since", async () => {
+      const { owner, other, shared, secret, input } = await leftAtTheRebuild();
+      // Someone saves the term back into the document meanwhile.
+      await saveOver(
+        other,
+        shared.collectionId,
+        shared.path,
+        `# Pay\nAsk ${secret} again.`
+      );
+      const told = await refusedToFinish(owner, other);
+      // Its starter runs it again: the term goes from the new version too.
+      const again = await purged(owner, input);
+      const texts = await versionTexts(shared.id);
+      const latest = texts.at(-1);
+      expect({ ...told, again: again.result.stillFound, latest }).toStrictEqual(
+        {
+          answer: "knowledge.purge_needs_input",
+          sameSteps: true,
+          events: [],
+          exportOpen: "knowledge.export_purge_open",
+          again: 0,
+          latest: "# Pay\nAsk (removed) again.",
+        }
+      );
+    });
+
+    it("is not finished by its ID when its record can't prove how it left a document", async () => {
+      const { owner, other, input } = await leftAtTheRebuild();
+      // A step completed before the version was kept with it.
+      await env.KNOWLEDGE.prepare(
+        "UPDATE brain_purge_steps SET version = NULL WHERE step LIKE 'document:%' AND purge_id IN (SELECT id FROM brain_purges WHERE by = ? AND completed_at IS NULL)"
+      )
+        .bind(owner.userId)
+        .run();
+      const told = await refusedToFinish(owner, other);
+      await purged(owner, input);
+      expect(told).toStrictEqual({
+        answer: "knowledge.purge_needs_input",
+        sameSteps: true,
+        events: [],
+        exportOpen: "knowledge.export_purge_open",
+      });
+    });
+
+    it("is finished by its ID when every document it purged is as it left it", async () => {
+      const { owner, other, shared, secret } = await leftAtTheRebuild();
+      const open = await env.KNOWLEDGE.prepare(
+        "SELECT id FROM brain_purges WHERE by = ? AND completed_at IS NULL"
+      )
+        .bind(owner.userId)
+        .first<{ id: string }>();
+      const finished = await other.api.knowledge.finishPurge(open?.id ?? "");
+      const texts = await versionTexts(shared.id);
+      expect({
+        state: finished.state,
+        holds: texts.some((text) => text.includes(secret)),
+      }).toStrictEqual({ state: "complete", holds: false });
     });
   }
 );
