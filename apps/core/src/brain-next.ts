@@ -740,8 +740,12 @@ export const brainExportStatus = async (
 export const brainExportFile = async (
   env: ExportEnv,
   ref: ExportFileRef
-): Promise<string | null> =>
-  await brain(env).exportFile(checked(exportFileRefSchema, ref));
+): Promise<string | null> => {
+  // A name the Brain's one rule of an export's files doesn't take names
+  // no file: answered as such.
+  const asked = exportFileRefSchema.safeParse(ref);
+  return asked.success ? await brain(env).exportFile(asked.data) : null;
+};
 
 /**
  * Starts restoring the company's export `exportId` into the shared store,

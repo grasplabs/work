@@ -1,7 +1,13 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import { accessSchema, restoringNow, shippedSkillsPrefix } from "./contract.ts";
+import {
+  accessSchema,
+  exportPartNameOf,
+  exportPartOf,
+  restoringNow,
+  shippedSkillsPrefix,
+} from "./contract.ts";
 import type {
   Access,
   ExportFileRequest,
@@ -121,8 +127,7 @@ export const exportKeyOf = (id: string, file: string): string =>
   `${exportPrefixOf(id)}${file}`;
 
 /** The name of part `index`. */
-const partFileOf = (index: number): string =>
-  `part-${String(index).padStart(4, "0")}.jsonl`;
+const partFileOf = (index: number): string => exportPartNameOf(index, "jsonl");
 
 /** The manifest's file. */
 export const manifestFile = "manifest.json";
@@ -134,13 +139,7 @@ export const manifestFile = "manifest.json";
  * of by them (above); never served.
  */
 const partHoldsFileOf = (index: number): string =>
-  `part-${String(index).padStart(4, "0")}.holds.json`;
-
-/** A part's file name, with its number. */
-const partFilePattern = /^part-(?<index>\d{4})\.jsonl$/u;
-
-/** A part's holdings' file name. */
-const partHoldsPattern = /^part-\d{4}\.holds\.json$/u;
+  exportPartNameOf(index, "holds.json");
 
 const holdsSchema = z.array(
   z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().positive()])
@@ -199,7 +198,9 @@ export const manifestSchema = z.strictObject({
   versions: z.int().nonnegative(),
   parts: z.array(
     z.strictObject({
-      file: z.string().regex(/^part-\d{4}\.jsonl$/u),
+      file: z.string().refine((name) => exportPartOf(name)?.holds === false, {
+        message: "Not a part's file",
+      }),
       sha256: z.string().regex(/^[0-9a-f]{64}$/u),
       versions: z.int().positive(),
       bytes: z.int().positive(),
@@ -214,7 +215,7 @@ interface ExportRow extends Record<string, SqlStorageValue> {
   deployment: string;
   up_to: number;
   cursor: number;
-  state: "writing" | "done" | "failed" | "erased" | "expired";
+  state: "writing" | "restoring" | "done" | "failed" | "erased" | "expired";
   parts: number;
   versions: number;
   started_at: number;
@@ -619,15 +620,15 @@ const orphanFileDrops = async (
     }
   }
   // A part without its holdings beside it can't be judged: it goes.
-  const part = partFilePattern.exec(file)?.groups?.index;
-  if (part !== undefined) {
+  const part = exportPartOf(file);
+  if (part === undefined) {
+    return { drop: false, reads: 0 };
+  }
+  if (!part.holds) {
     const holds = await bucket.head(
-      exportKeyOf(id, partHoldsFileOf(Number(part)))
+      exportKeyOf(id, partHoldsFileOf(part.index))
     );
     return { drop: holds === null, reads: 1 };
-  }
-  if (!partHoldsPattern.test(file)) {
-    return { drop: false, reads: 0 };
   }
   const [manifest, holds] = await Promise.all([
     bucket.head(exportKeyOf(id, manifestFile)),
@@ -768,6 +769,14 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
     )
     .toArray();
   for (const restore of given) {
+    // Adopted and never wholly checked: what its files hold is not all on
+    // record, so they go.
+    retire(
+      storage,
+      "failed",
+      "exports.id = ?2 AND exports.state = 'restoring'",
+      restore.export
+    );
     retireIfStale(storage, restore.export);
   }
 };
@@ -947,9 +956,6 @@ const fail = (storage: DurableObjectStorage, id: string): void => {
   });
 };
 
-/** A part's file or its holdings', by the part's number. */
-const partKeyPattern = /^part-(?<index>\d{4})\./u;
-
 /**
  * Deletes every part file, and its holdings, numbered `parts` or past:
  * what a run wrote before the store stopped and a later run, finding other
@@ -972,9 +978,8 @@ const dropPartsBeyond = async (
     const beyond = page.objects
       .map(({ key }) => key)
       .filter((key) => {
-        const index = partKeyPattern.exec(key.slice(exportPrefixOf(id).length))
-          ?.groups?.index;
-        return index !== undefined && Number(index) >= parts;
+        const part = exportPartOf(key.slice(exportPrefixOf(id).length));
+        return part !== undefined && part.index >= parts;
       });
     if (beyond.length > 0) {
       // oxlint-disable-next-line no-await-in-loop -- a page after a page
@@ -1265,10 +1270,14 @@ export const startExport = (
   });
 
 /**
- * Records `manifest`'s export as one the store has, done as of now (its
- * time is kept from then), as a restore of it starts (restore.ts): the
- * sources it holds are recorded as the restore checks each part, so an
- * erasure of one of them makes it stale, as any export's. In the caller's
+ * Records `manifest`'s export as one the store has, as a restore of it
+ * starts (restore.ts): `restoring` until the restore has checked every part
+ * and recorded what each holds, then `done` (restore.ts `checkPart`). Until
+ * then nothing could tell whether the ledger names what its files hold, so
+ * it is neither served (`exportFile`) nor restored again by another
+ * restore; it stays held while its restore runs or failed, and its files go
+ * if that restore is given up before its check ends. The sweep no longer
+ * looks at it, as at any export the store has a row of. In the caller's
  * transaction.
  */
 export const recordRestoredExport = (
@@ -1278,7 +1287,7 @@ export const recordRestoredExport = (
   sql.exec(
     `INSERT OR IGNORE INTO exports (id, deployment, up_to, cursor, state,
       parts, versions, started_at, finished_at)
-    VALUES (?, ?, 0, 0, 'done', ?, ?, ?, ?)`,
+    VALUES (?, ?, 0, 0, 'restoring', ?, ?, ?, ?)`,
     manifest.id,
     manifest.deployment,
     manifest.parts.length,

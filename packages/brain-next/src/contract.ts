@@ -1072,10 +1072,46 @@ export const exportRequestSchema = z.strictObject({
 });
 export type ExportRequest = z.infer<typeof exportRequestSchema>;
 
-/** An export's file: its manifest, or one of its parts. */
+/**
+ * The name of part `index`'s file of an export (`jsonl`), or of what it
+ * holds (`holds.json`): its number in four digits at least, more past
+ * 9,999. The one rule of a part's name, for its writer and every reader
+ * (`exportPartOf`): nothing sorts parts by their names.
+ */
+export const exportPartNameOf = (
+  index: number,
+  kind: "jsonl" | "holds.json"
+): string => `part-${String(index).padStart(4, "0")}.${kind}`;
+
+const exportPartPattern =
+  /^part-(?<index>\d{4,})\.(?<kind>jsonl|holds\.json)$/u;
+
+/**
+ * The part a file's name says, and whether it is what the part holds:
+ * only for a name in the writer's own form (`exportPartNameOf`), so no two
+ * names are one part.
+ */
+export const exportPartOf = (
+  name: string
+): { index: number; holds: boolean } | undefined => {
+  const groups = exportPartPattern.exec(name)?.groups;
+  const kind = groups?.kind === "holds.json" ? "holds.json" : "jsonl";
+  const index = Number(groups?.index);
+  return groups !== undefined &&
+    Number.isSafeInteger(index) &&
+    exportPartNameOf(index, kind) === name
+    ? { index, holds: kind === "holds.json" }
+    : undefined;
+};
+
+/** An export's file a download asks for: its manifest, or one of its parts. */
 export const exportFileNameSchema = z
   .string()
-  .regex(/^(?:manifest\.json|part-\d{4}\.jsonl)$/u);
+  .max(64)
+  .refine(
+    (name) => name === "manifest.json" || exportPartOf(name)?.holds === false,
+    { message: "Not a file of an export" }
+  );
 
 /** A file of an export to read. */
 export const exportFileRequestSchema = exportRequestSchema.extend({
@@ -1084,7 +1120,8 @@ export const exportFileRequestSchema = exportRequestSchema.extend({
 export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
 
 /**
- * Where an export is: being written; done, with its files (the manifest
+ * Where an export is: being written; adopted by a restore that hasn't yet
+ * checked every part (`restoring`: served to no one); done, with its files (the manifest
  * first); failed (a file it was to read was gone: its files deleted);
  * erased, as the erasure ledger names a version it holds, and its files
  * are deleted; or expired, replaced by a newer one of its scope, its files
@@ -1092,7 +1129,7 @@ export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
  */
 export interface ExportStatus {
   id: string;
-  state: "writing" | "done" | "failed" | "erased" | "expired";
+  state: "writing" | "restoring" | "done" | "failed" | "erased" | "expired";
   /** Versions written so far. */
   versions: number;
   /** Its files, once done: none before. */

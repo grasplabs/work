@@ -16,7 +16,11 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { exportPartBytes } from "../src/exports.ts";
+import { exportFileNameSchema } from "../src/contract.ts";
+import {
+  exportPartBytes,
+  manifestSchema as storeManifestSchema,
+} from "../src/exports.ts";
 import type { BrainStore } from "../src/store.ts";
 
 type Store = DurableObjectStub<BrainStore>;
@@ -1357,6 +1361,73 @@ describe("exports and restores", () => {
         place: place?.slice(0, 44) ?? null,
         left,
       }).toStrictEqual({ place: heldKey.slice(0, 44), left: [] });
+    });
+
+    it("serves no file of an export a restore adopted until it has checked what every part holds, and drops it once the ledger names any (threats 6, 7)", async () => {
+      await putBack(shared(), emptyShared);
+      const marker = `marker${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, marker, team(`team:${unique()}`));
+      await add(shared(), `test:${unique()}`, "kept", team(`team:${unique()}`));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // The store's storage lost; a source the export holds erased; the
+      // restore adopts the export, and the store stops before it checks.
+      await putBack(shared(), emptyShared);
+      await shared().eraseSource({ source, reason: "deleted" });
+      await shared().startRestore(id, "test");
+      await stop(shared());
+      const served = await Promise.all(
+        ["manifest.json", "part-0000.jsonl"].map(
+          async (file) => await shared().exportFile({ id, file })
+        )
+      );
+      const status = await shared().exportStatus({ id });
+      await restoreSettled(id);
+      await tick(shared());
+      await tick(shared());
+      expect({
+        served,
+        state: status?.state,
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ served: [null, null], state: "restoring", files: [] });
+    });
+
+    it("names parts past 9,999 as the writer does, and every rule that reads a part's name takes them (threat 8)", async () => {
+      const part = {
+        file: "part-10000.jsonl",
+        sha256: "0".repeat(64),
+        versions: 1,
+        bytes: 1,
+      };
+      const manifest = storeManifestSchema.safeParse({
+        format: 1,
+        id: crypto.randomUUID(),
+        deployment: "test",
+        scope: "company",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        versions: 1,
+        parts: [part],
+      });
+      expect({
+        name: exportFileNameSchema.safeParse("part-10000.jsonl").success,
+        // Only the writer's own form: no other spelling of the same part.
+        padded: exportFileNameSchema.safeParse("part-00001.jsonl").success,
+        short: exportFileNameSchema.safeParse("part-1.jsonl").success,
+        manifest: manifest.success,
+        // Asked of the store, a five-digit name is a file it may serve.
+        served: await shared().exportFile({
+          id: crypto.randomUUID(),
+          file: "part-10000.jsonl",
+        }),
+      }).toStrictEqual({
+        name: true,
+        padded: false,
+        short: false,
+        manifest: true,
+        served: null,
+      });
     });
 
     it("goes on with a sweep pass whose item went before it ended, from its saved place (threat 6)", async () => {

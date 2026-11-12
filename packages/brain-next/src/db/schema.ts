@@ -591,7 +591,7 @@ export const exportsTable = sqliteTable(
     /** The last version's row written to a part. */
     cursor: integer().notNull(),
     state: text({
-      enum: ["writing", "done", "failed", "erased", "expired"],
+      enum: ["writing", "restoring", "done", "failed", "erased", "expired"],
     }).notNull(),
     /** Parts written, and the versions in them. */
     parts: integer().notNull(),

@@ -48,10 +48,9 @@ const bodyMaxBytes = 1024;
 
 const readSchema = z.strictObject({
   id: z.uuid(),
-  file: z
-    .string()
-    .regex(/^(?:manifest\.json|part-\d{4}\.jsonl)$/u)
-    .optional(),
+  // Checked by the Brain's one rule of an export's file names
+  // (brain-next.ts `brainExportFile`): a name it doesn't take is not found.
+  file: z.string().min(1).max(64).optional(),
 });
 
 const restoreSchema = z.strictObject({ exportId: z.uuid() });
@@ -296,12 +295,14 @@ export const brainRestoreResponse = async (
       // writes them (no export holds them) and adds nothing while it runs,
       // so what is installed now is there when it is done, also in a store
       // whose storage was lost after the release installed them.
+      // An install that didn't write every skill fails the preparation:
+      // the restore doesn't start, and the admin is told to try again.
       async () =>
-        await startBrainRestore(
-          env,
-          asked.exportId,
-          async () => await installShippedSkills(env)
-        )
+        await startBrainRestore(env, asked.exportId, async () => {
+          if (!(await installShippedSkills(env))) {
+            throw brainExportErrors.create("brain.restore_unprepared");
+          }
+        })
     );
     return answer(status);
   } catch (error) {
@@ -311,6 +312,10 @@ export const brainRestoreResponse = async (
     const code = brainExportErrors.codeOf(error);
     if (code === "brain.restore_refused" || code === "brain.restoring") {
       return errorResponse(409, brainExportErrors.create(code), requestId);
+    }
+    // Grasp's own skills not all installed: nothing started, to try again.
+    if (code === "brain.restore_unprepared") {
+      return errorResponse(503, brainExportErrors.create(code), requestId);
     }
     throw error;
   }

@@ -9,6 +9,8 @@ import { defineErrorFamily } from "./errors.ts";
 export const brainExportErrors = defineErrorFamily({
   "brain.export_refused":
     "The Brain can't start an export now: it is restoring one. Try again once the restore is done.",
+  "brain.restore_unprepared":
+    "The Brain couldn't install Grasp's own skills before the restore, so it didn't start it: try again shortly.",
   "brain.restoring":
     "The Brain is restoring an export and adds nothing until it is done: add it again shortly.",
   "brain.restore_refused":

@@ -31,19 +31,79 @@ const idp = mockIdp();
 const request = async (
   cookie: string,
   path: string,
-  init: { method?: string; body?: unknown; site?: string } = {}
+  init: { method?: string; body?: unknown; site?: string } = {},
+  coreEnv: Env = env
 ): Promise<Response> =>
-  await routed(path, {
-    method: init.method ?? "GET",
-    headers: {
-      cookie,
-      "sec-fetch-site": init.site ?? "same-origin",
-      ...(init.body === undefined
-        ? {}
-        : { "content-type": "application/json" }),
+  await routed(
+    path,
+    {
+      method: init.method ?? "GET",
+      headers: {
+        cookie,
+        "sec-fetch-site": init.site ?? "same-origin",
+        ...(init.body === undefined
+          ? {}
+          : { "content-type": "application/json" }),
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     },
-    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    coreEnv
+  );
+
+/**
+ * Core's env with its Brain's store standing in as one that takes no
+ * write of a skill (out of reach for it) and would start a restore: what
+ * an incomplete install of Grasp's own skills meets. Every other call goes
+ * to the real store. Records whether a restore was started.
+ */
+const brainRefusingSkills = (): { env: Env; restoresStarted: string[] } => {
+  const restoresStarted: string[] = [];
+  const wrapStub = (stub: object): object =>
+    new Proxy(stub, {
+      get: (target, name) => {
+        if (name === "readCurrent") {
+          return async () => {
+            await Promise.resolve();
+            return [];
+          };
+        }
+        if (name === "addInstructions") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("The Brain is out of reach");
+          };
+        }
+        if (name === "checkRestore") {
+          return async () => {
+            await Promise.resolve();
+          };
+        }
+        if (name === "startRestore") {
+          return async (id: string) => {
+            await Promise.resolve();
+            restoresStarted.push(id);
+            return { export: id, state: "running", restored: 0 };
+          };
+        }
+        const value: unknown = Reflect.get(target, name);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return (...args: unknown[]): unknown =>
+          Reflect.apply(value, target, args);
+      },
+    });
+  const wrapNamespace = (namespace: DurableObjectNamespace): object => ({
+    jurisdiction: () => wrapNamespace(namespace.jurisdiction("eu")),
+    getByName: (name: string) => wrapStub(namespace.getByName(name)),
   });
+  return {
+    // SAFETY: the stand-in answers every call the restore route makes.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    env: { ...env, BRAIN_STORE: wrapNamespace(env.BRAIN_STORE) } as Env,
+    restoresStarted,
+  };
+};
 
 const startedSchema = z.object({ id: z.uuid() });
 
@@ -176,6 +236,29 @@ describe(
         ],
         answeredWith: { outcome: "started", exportId: id },
         named: false,
+      });
+    });
+
+    it("starts no restore when Grasp's own skills could not be installed first, and answers so to try again (threat 9)", async () => {
+      const admin = await signedInWithRole(idp, "admin");
+      const brain = brainRefusingSkills();
+      const response = await request(
+        admin.session,
+        brainRestorePath,
+        { method: "POST", body: { exportId: crypto.randomUUID() } },
+        brain.env
+      );
+      const { code } = z
+        .object({ code: z.string() })
+        .parse(await response.json());
+      expect({
+        status: response.status,
+        code,
+        started: brain.restoresStarted,
+      }).toStrictEqual({
+        status: 503,
+        code: "brain.restore_unprepared",
+        started: [],
       });
     });
 

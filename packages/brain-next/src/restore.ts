@@ -474,7 +474,8 @@ const checkPart = async (
   bucket: BrainBucket,
   id: string,
   index: number,
-  part: Manifest["parts"][number]
+  part: Manifest["parts"][number],
+  parts: number
 ): Promise<void> => {
   const [lines, holdings] = await Promise.all([
     partLinesOf(bucket, id, part),
@@ -496,6 +497,16 @@ const checkPart = async (
       index,
       lines === undefined ? 1 : 0
     );
+    // Every part's holdings on record: only now may the export be served
+    // or restored again (exports.ts `recordRestoredExport`).
+    if (index + 1 >= parts) {
+      sql.exec(
+        `UPDATE exports SET state = 'done', finished_at = ?
+        WHERE id = ? AND state = 'restoring'`,
+        Date.now(),
+        id
+      );
+    }
   });
 };
 
@@ -522,7 +533,7 @@ const restorePart = async (
     return;
   }
   if (checking) {
-    await checkPart(storage, bucket, id, index, part);
+    await checkPart(storage, bucket, id, index, part, manifest.parts.length);
     again(1);
     return;
   }
