@@ -86,10 +86,20 @@ const brainContractImports = {
  * them.
  */
 const brainModuleImports = {
-  group: ["**/brain-next.ts"],
+  // Every spelling that resolves to it: bare, .ts and .js.
+  group: ["**/brain-next", "**/brain-next.ts", "**/brain-next.js"],
   message:
     "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to apps/core/test/brain-next-modules.ts, with its surface in brainSurfaces (test/brain-next-surfaces.ts).",
 };
+
+// Test through real interfaces; mock only outside systems, at their
+// boundary. (anti-slop/no-module-mocking only knows `vitest` imports.)
+const noModuleMocks = ["mock", "doMock", "hoisted"].map((property) => ({
+  object: "vi",
+  property,
+  message:
+    "Don't mock modules. Pass the dependency through a real interface instead.",
+}));
 
 export default defineConfig({
   lint: {
@@ -157,17 +167,7 @@ export default defineConfig({
           ],
         },
       ],
-      // Test through real interfaces; mock only outside systems, at their
-      // boundary. (anti-slop/no-module-mocking only knows `vitest` imports.)
-      "no-restricted-properties": [
-        "error",
-        ...["mock", "doMock", "hoisted"].map((property) => ({
-          object: "vi",
-          property,
-          message:
-            "Don't mock modules. Pass the dependency through a real interface instead.",
-        })),
-      ],
+      "no-restricted-properties": ["error", ...noModuleMocks],
     },
     settings: {
       shadcn: {
@@ -313,6 +313,27 @@ export default defineConfig({
             {
               paths: unboundedTargetPaths,
               patterns: [brainStoreImports, brainContractImports],
+            },
+          ],
+        },
+      },
+      {
+        // Core reaches the Brain's store binding only through
+        // src/brain-next.ts (and the provisioning probe, which lists every
+        // binding), so no module skips the reader brain-next.ts makes.
+        files: ["apps/core/src/**"],
+        excludeFiles: [
+          "apps/core/src/brain-next.ts",
+          "apps/core/src/provision-probe.ts",
+        ],
+        rules: {
+          "no-restricted-properties": [
+            "error",
+            ...noModuleMocks,
+            {
+              property: "BRAIN_STORE",
+              message:
+                "Reach the Brain through src/brain-next.ts, never its store binding.",
             },
           ],
         },

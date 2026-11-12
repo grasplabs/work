@@ -10,6 +10,9 @@
  * A module whose exports are a way into the Brain of their own names its
  * own surface. One that only runs core's members, and hands on nothing
  * they return beyond what their probes already hold, names `core`.
+ * Nothing checks that claim: a module mapped to an existing surface has
+ * its own exports probed by no one, so its reviewer checks that it hands
+ * on nothing new.
  */
 export const brainModules = {
   "apps/core/src/instruction-files.ts": "instructions",
