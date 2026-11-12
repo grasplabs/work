@@ -34,6 +34,7 @@ import { Route as ShellBrainIndexRouteImport } from './routes/_shell.brain.index
 import { Route as ShellBrainNoteIdRouteImport } from './routes/_shell.brain.$noteId'
 import { Route as ShellBrainActivityRouteImport } from './routes/_shell.brain.activity'
 import { Route as ShellBrainMemoryRouteImport } from './routes/_shell.brain.memory'
+import { Route as ShellBrainSkillsRouteImport } from './routes/_shell.brain.skills'
 import { Route as ShellBrainSourcesRouteImport } from './routes/_shell.brain.sources'
 import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.integrations.index'
 import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
@@ -192,6 +193,11 @@ const ShellBrainActivityRoute = ShellBrainActivityRouteImport.update({
 const ShellBrainMemoryRoute = ShellBrainMemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
+  getParentRoute: () => ShellBrainRoute,
+} as any)
+const ShellBrainSkillsRoute = ShellBrainSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => ShellBrainRoute,
 } as any)
 const ShellBrainSourcesRoute = ShellBrainSourcesRouteImport.update({
@@ -396,6 +402,7 @@ export interface FileRoutesByFullPath {
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/activity': typeof ShellBrainActivityRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
+  '/brain/skills': typeof ShellBrainSkillsRoute
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -455,6 +462,7 @@ export interface FileRoutesByTo {
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/activity': typeof ShellBrainActivityRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
+  '/brain/skills': typeof ShellBrainSkillsRoute
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -518,6 +526,7 @@ export interface FileRoutesById {
   '/_shell/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/_shell/brain/activity': typeof ShellBrainActivityRoute
   '/_shell/brain/memory': typeof ShellBrainMemoryRoute
+  '/_shell/brain/skills': typeof ShellBrainSkillsRoute
   '/_shell/brain/sources': typeof ShellBrainSourcesRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -581,6 +590,7 @@ export interface FileRouteTypes {
     | '/brain/$noteId'
     | '/brain/activity'
     | '/brain/memory'
+    | '/brain/skills'
     | '/brain/sources'
     | '/integrations/$integration'
     | '/knowledge/$collection'
@@ -640,6 +650,7 @@ export interface FileRouteTypes {
     | '/brain/$noteId'
     | '/brain/activity'
     | '/brain/memory'
+    | '/brain/skills'
     | '/brain/sources'
     | '/integrations/$integration'
     | '/knowledge/$collection'
@@ -702,6 +713,7 @@ export interface FileRouteTypes {
     | '/_shell/brain/$noteId'
     | '/_shell/brain/activity'
     | '/_shell/brain/memory'
+    | '/_shell/brain/skills'
     | '/_shell/brain/sources'
     | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
@@ -933,6 +945,13 @@ declare module '@tanstack/react-router' {
       path: '/memory'
       fullPath: '/brain/memory'
       preLoaderRoute: typeof ShellBrainMemoryRouteImport
+      parentRoute: typeof ShellBrainRoute
+    }
+    '/_shell/brain/skills': {
+      id: '/_shell/brain/skills'
+      path: '/skills'
+      fullPath: '/brain/skills'
+      preLoaderRoute: typeof ShellBrainSkillsRouteImport
       parentRoute: typeof ShellBrainRoute
     }
     '/_shell/brain/sources': {
@@ -1187,6 +1206,7 @@ interface ShellBrainRouteChildren {
   ShellBrainNoteIdRoute: typeof ShellBrainNoteIdRoute
   ShellBrainActivityRoute: typeof ShellBrainActivityRoute
   ShellBrainMemoryRoute: typeof ShellBrainMemoryRoute
+  ShellBrainSkillsRoute: typeof ShellBrainSkillsRoute
   ShellBrainSourcesRoute: typeof ShellBrainSourcesRoute
   ShellBrainIndexRoute: typeof ShellBrainIndexRoute
   ShellBrainSectionsSectionIdRoute: typeof ShellBrainSectionsSectionIdRoute
@@ -1196,6 +1216,7 @@ const ShellBrainRouteChildren: ShellBrainRouteChildren = {
   ShellBrainNoteIdRoute: ShellBrainNoteIdRoute,
   ShellBrainActivityRoute: ShellBrainActivityRoute,
   ShellBrainMemoryRoute: ShellBrainMemoryRoute,
+  ShellBrainSkillsRoute: ShellBrainSkillsRoute,
   ShellBrainSourcesRoute: ShellBrainSourcesRoute,
   ShellBrainIndexRoute: ShellBrainIndexRoute,
   ShellBrainSectionsSectionIdRoute: ShellBrainSectionsSectionIdRoute,

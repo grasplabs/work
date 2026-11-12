@@ -180,6 +180,10 @@ msgstr "{asked} of {reach} asked him this week"
 msgid "{asker} already asked for it on {askedOn}."
 msgstr "{asker} already asked for it on {askedOn}."
 
+#: src/inbox/items.ts
+msgid "{asker} asked to share their skill {name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide."
+msgstr "{asker} asked to share their skill {name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide."
+
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -771,6 +775,10 @@ msgstr "{name} (optional)"
 #: src/projects/project-people.tsx
 msgid "{name} (team)"
 msgstr "{name} (team)"
+
+#: src/brain/skills-page.tsx
+msgid "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
+msgstr "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
 
 #: src/agents/agent-page.tsx
 msgid "{name} answers"
@@ -1731,6 +1739,10 @@ msgstr "A shared chat with {people}"
 msgid "A shared chat with only you in it"
 msgstr "A shared chat with only you in it"
 
+#: src/brain/skills-page.tsx
+msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
+msgstr "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
@@ -2630,6 +2642,7 @@ msgid "Approval"
 msgstr "Approval"
 
 #: src/apps/app-webhooks.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
@@ -2709,6 +2722,10 @@ msgstr "Approved in {left} s"
 #: src/activity/audit-words.ts
 msgid "Approved packages"
 msgstr "Approved packages"
+
+#: src/brain/skills-page.tsx
+msgid "Approved, not added yet: approve it again"
+msgstr "Approved, not added yet: approve it again"
 
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
@@ -2942,6 +2959,10 @@ msgstr "Asked by"
 #: src/connections/requested-apps.tsx
 msgid "Asked by {asker}"
 msgstr "Asked by {asker}"
+
+#: src/brain/skills-page.tsx
+msgid "Asked by {asker} on {asked}"
+msgstr "Asked by {asker} on {asked}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
@@ -3391,6 +3412,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/brain/goals-editor.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/confirmed.tsx
@@ -4597,6 +4619,7 @@ msgstr "Decision not found"
 msgid "Decisions"
 msgstr "Decisions"
 
+#: src/brain/skills-page.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
 msgstr "Decline"
@@ -4604,6 +4627,10 @@ msgstr "Decline"
 #: src/inbox/item-detail.tsx
 msgid "Decline starting {name}"
 msgstr "Decline starting {name}"
+
+#: src/brain/skills-page.tsx
+msgid "Declined"
+msgstr "Declined"
 
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
@@ -4628,6 +4655,7 @@ msgstr "Definition version"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4653,6 +4681,7 @@ msgstr "Delete {name}"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
 msgid "Delete {name}?"
@@ -4664,6 +4693,7 @@ msgstr "Delete {projectName}?"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 msgid "Delete for good"
 msgstr "Delete for good"
 
@@ -5132,6 +5162,7 @@ msgctxt "older chats"
 msgid "Earlier"
 msgstr "Earlier"
 
+#: src/brain/skills-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
@@ -6611,6 +6642,10 @@ msgstr "How they would notice: {notice}."
 #: src/brain/brain.ts
 msgid "How they would notice: not said yet."
 msgstr "How they would notice: not said yet."
+
+#: src/brain/skills-page.tsx
+msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company waits for an admin, and from then on everyone's agents use it. A skill is guidance: it never grants access."
+msgstr "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company waits for an admin, and from then on everyone's agents use it. A skill is guidance: it never grants access."
 
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
@@ -8872,6 +8907,10 @@ msgstr "Nobody is in this team yet."
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Nobody is named yet to approve a new tool."
 
+#: src/brain/skills-page.tsx
+msgid "Nobody is waiting for you to decide a share."
+msgstr "Nobody is waiting for you to decide a share."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Nobody matches."
@@ -8904,6 +8943,10 @@ msgstr "Nobody yet"
 #: src/agents/agent-page.tsx
 msgid "Nobody yet, until you choose."
 msgstr "Nobody yet, until you choose."
+
+#: src/brain/skills-page.tsx
+msgid "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
+msgstr "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
 
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-settings.tsx
@@ -11052,6 +11095,10 @@ msgstr "Replace version {newerVersion} with mine"
 msgid "Replaced a request for packages"
 msgstr "Replaced a request for packages"
 
+#: src/brain/skills-page.tsx
+msgid "Replaces the company's skill of this name"
+msgstr "Replaces the company's skill of this name"
+
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Report"
@@ -11211,6 +11258,14 @@ msgstr "Resume"
 #: src/settings/audit-archive.tsx
 msgid "Retention"
 msgstr "Retention"
+
+#: src/brain/skills-page.tsx
+msgid "Retire"
+msgstr "Retire"
+
+#: src/brain/skills-page.tsx
+msgid "Retire {name}?"
+msgstr "Retire {name}?"
 
 #: src/brain/memory-page.tsx
 msgid "Retire it"
@@ -11701,6 +11756,7 @@ msgstr "Sam, like everyone who uses the App, sees every record in {table}."
 #: src/agents/agent-page.tsx
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
+#: src/brain/skills-page.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
 #: src/workflows/resource-params.tsx
@@ -12199,6 +12255,10 @@ msgstr "Share"
 msgid "Share {name}"
 msgstr "Share {name}"
 
+#: src/inbox/items.ts
+msgid "Share {name} with the company?"
+msgstr "Share {name} with the company?"
+
 #: src/apps/app-sharing.tsx
 msgid "Share as"
 msgstr "Share as"
@@ -12227,6 +12287,10 @@ msgstr "Share this record"
 #: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Share with"
+
+#: src/brain/skills-page.tsx
+msgid "Share with the company"
+msgstr "Share with the company"
 
 #: src/apps/publish.tsx
 #: src/frame/setting-up.tsx
@@ -12259,10 +12323,18 @@ msgstr "Shared with"
 msgid "Shared with {who}"
 msgstr "Shared with {who}"
 
+#: src/brain/skills-page.tsx
+msgid "Shared with the company"
+msgstr "Shared with the company"
+
 #: src/brain/memory-page.tsx
 msgctxt "memory records: others' that you read"
 msgid "Shared with you"
 msgstr "Shared with you"
+
+#: src/brain/skills-page.tsx
+msgid "Shares waiting for you"
+msgstr "Shares waiting for you"
 
 #: src/apps/app-settings.tsx
 msgctxt "an app's settings section"
@@ -12530,6 +12602,17 @@ msgstr "Size changed to unknown"
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: a skill someone asked to share with the company"
+msgid "Skill"
+msgstr "Skill"
+
+#: src/brain/brain-nav.tsx
+#: src/brain/skills-page.tsx
+msgctxt "the Brain's skills page"
+msgid "Skills"
+msgstr "Skills"
 
 #: src/dashboard/todo-pile.tsx
 msgctxt "put a to-do card at the back of the pile"
@@ -13606,9 +13689,17 @@ msgstr "The checks, reviews and records the regulator expects from you."
 msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
 msgstr "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
 
+#: src/brain/skills-page.tsx
+msgid "The company has no skills of its own yet."
+msgstr "The company has no skills of its own yet."
+
 #: src/agents/agent-page.tsx
 msgid "The company's first agent"
 msgstr "The company's first agent"
+
+#: src/brain/skills-page.tsx
+msgid "The company's skills"
+msgstr "The company's skills"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -15110,6 +15201,7 @@ msgstr "Version {number}, current"
 
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
+#: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
@@ -15266,6 +15358,7 @@ msgid "Waiting for a person"
 msgstr "Waiting for a person"
 
 #: src/apps/app-webhooks.tsx
+#: src/brain/skills-page.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Waiting for an admin"
 msgstr "Waiting for an admin"
@@ -15837,6 +15930,10 @@ msgstr "What you agreed to is kept. Forgot something? This link works until {clo
 msgid "What you and your agents remember, and what others share with you, shows here."
 msgstr "What you and your agents remember, and what others share with you, shows here."
 
+#: src/brain/skills-page.tsx
+msgid "What you asked to share"
+msgstr "What you asked to share"
+
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "What you chose"
@@ -16394,6 +16491,10 @@ msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Write"
 
+#: src/brain/skills-page.tsx
+msgid "Write a skill"
+msgstr "Write a skill"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Write your answer"
@@ -16547,6 +16648,10 @@ msgstr "You have no connections yet."
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
 msgstr "You have no recent runs whose input is still kept, so there was nothing to test on."
+
+#: src/brain/skills-page.tsx
+msgid "You have no skills of your own yet."
+msgstr "You have no skills of your own yet."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."
@@ -16762,6 +16867,10 @@ msgstr "Your run of version {version} ended: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Your session has ended"
+
+#: src/brain/skills-page.tsx
+msgid "Your skills"
+msgstr "Your skills"
 
 #: src/interview/words.ts
 msgid "Your story"

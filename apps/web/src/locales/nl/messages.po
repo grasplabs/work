@@ -180,6 +180,10 @@ msgstr "{asked} van {reach} vroegen hem deze week iets"
 msgid "{asker} already asked for it on {askedOn}."
 msgstr "{asker} heeft er op {askedOn} al om gevraagd."
 
+#: src/inbox/items.ts
+msgid "{asker} asked to share their skill {name} with the company. Approved, every member's agents use it. Read it on the skills page before you decide."
+msgstr "{asker} vraagt om de skill {name} met het bedrijf te delen. Na goedkeuring gebruiken de agents van alle leden hem. Lees hem op de skillspagina voordat je beslist."
+
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -771,6 +775,10 @@ msgstr "{name} (optioneel)"
 #: src/projects/project-people.tsx
 msgid "{name} (team)"
 msgstr "{name} (team)"
+
+#: src/brain/skills-page.tsx
+msgid "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
+msgstr "{name} en alle versies ervan worden definitief verwijderd, net als een openstaand deelverzoek ervoor. Je kunt de naam niet opnieuw gebruiken."
 
 #: src/agents/agent-page.tsx
 msgid "{name} answers"
@@ -1731,6 +1739,10 @@ msgstr "Een gedeelde chat met {people}"
 msgid "A shared chat with only you in it"
 msgstr "Een gedeelde chat met alleen jou erin"
 
+#: src/brain/skills-page.tsx
+msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
+msgstr "Een SKILL.md: een naam van kleine letters, cijfers en koppeltekens, en een beschrijving van wanneer je hem gebruikt, dan de stappen. Sla je een skill op met een naam die je al hebt, dan wordt dat de volgende versie."
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Een personeelslijst is de snelste weg: namen, e-mailadressen, teams en functies, als CSV- of Excelbestand. Ik gebruik hem alleen om te weten met wie ik moet praten."
@@ -2630,6 +2642,7 @@ msgid "Approval"
 msgstr "Goedkeuring"
 
 #: src/apps/app-webhooks.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
@@ -2709,6 +2722,10 @@ msgstr "Goedgekeurd over {left} s"
 #: src/activity/audit-words.ts
 msgid "Approved packages"
 msgstr "Pakketten goedgekeurd"
+
+#: src/brain/skills-page.tsx
+msgid "Approved, not added yet: approve it again"
+msgstr "Goedgekeurd, nog niet toegevoegd: keur hem opnieuw goed"
 
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
@@ -2942,6 +2959,10 @@ msgstr "Gevraagd door"
 #: src/connections/requested-apps.tsx
 msgid "Asked by {asker}"
 msgstr "Aangevraagd door {asker}"
+
+#: src/brain/skills-page.tsx
+msgid "Asked by {asker} on {asked}"
+msgstr "Gevraagd door {asker} op {asked}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
@@ -3391,6 +3412,7 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/brain/goals-editor.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/confirmed.tsx
@@ -4597,6 +4619,7 @@ msgstr "Beslissing niet gevonden"
 msgid "Decisions"
 msgstr "Beslissingen"
 
+#: src/brain/skills-page.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
 msgstr "Weigeren"
@@ -4604,6 +4627,10 @@ msgstr "Weigeren"
 #: src/inbox/item-detail.tsx
 msgid "Decline starting {name}"
 msgstr "Starten van {name} weigeren"
+
+#: src/brain/skills-page.tsx
+msgid "Declined"
+msgstr "Afgewezen"
 
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
@@ -4628,6 +4655,7 @@ msgstr "Versie van de definitie"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
@@ -4653,6 +4681,7 @@ msgstr "{name} verwijderen"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
 msgid "Delete {name}?"
@@ -4664,6 +4693,7 @@ msgstr "{projectName} verwijderen?"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
+#: src/brain/skills-page.tsx
 msgid "Delete for good"
 msgstr "Definitief verwijderen"
 
@@ -5132,6 +5162,7 @@ msgctxt "older chats"
 msgid "Earlier"
 msgstr "Eerder"
 
+#: src/brain/skills-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
@@ -6611,6 +6642,10 @@ msgstr "Hoe ze het zouden merken: {notice}."
 #: src/brain/brain.ts
 msgid "How they would notice: not said yet."
 msgstr "Hoe ze het zouden merken: nog niet gezegd."
+
+#: src/brain/skills-page.tsx
+msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company waits for an admin, and from then on everyone's agents use it. A skill is guidance: it never grants access."
+msgstr "Hoe het hier gaat. Je eigen skills worden alleen in je eigen chats gebruikt. Deel je er een met het bedrijf, dan wacht dat op een admin, en daarna gebruiken de agents van iedereen hem. Een skill is een handleiding: hij geeft nooit toegang."
 
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
@@ -8872,6 +8907,10 @@ msgstr "Er zit nog niemand in dit team."
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Er is nog niemand genoemd die een nieuwe tool goedkeurt."
 
+#: src/brain/skills-page.tsx
+msgid "Nobody is waiting for you to decide a share."
+msgstr "Niemand wacht op jouw beslissing over een deelverzoek."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Niemand komt overeen."
@@ -8904,6 +8943,10 @@ msgstr "Nog niemand"
 #: src/agents/agent-page.tsx
 msgid "Nobody yet, until you choose."
 msgstr "Nog niemand, tot u kiest."
+
+#: src/brain/skills-page.tsx
+msgid "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
+msgstr "Daarna gebruikt geen enkele agent {name} meer. De versies blijven als geschiedenis bewaard, en een nieuw goedgekeurd deelverzoek met deze naam brengt hem terug."
 
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-settings.tsx
@@ -11052,6 +11095,10 @@ msgstr "Versie {newerVersion} vervangen door de mijne"
 msgid "Replaced a request for packages"
 msgstr "Een pakketaanvraag vervangen"
 
+#: src/brain/skills-page.tsx
+msgid "Replaces the company's skill of this name"
+msgstr "Vervangt de skill van het bedrijf met deze naam"
+
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Rapport"
@@ -11211,6 +11258,14 @@ msgstr "Hervatten"
 #: src/settings/audit-archive.tsx
 msgid "Retention"
 msgstr "Bewaartermijn"
+
+#: src/brain/skills-page.tsx
+msgid "Retire"
+msgstr "Buiten gebruik stellen"
+
+#: src/brain/skills-page.tsx
+msgid "Retire {name}?"
+msgstr "{name} buiten gebruik stellen?"
 
 #: src/brain/memory-page.tsx
 msgid "Retire it"
@@ -11701,6 +11756,7 @@ msgstr "Sam ziet, net als iedereen die de App gebruikt, elk record in {table}."
 #: src/agents/agent-page.tsx
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
+#: src/brain/skills-page.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
 #: src/workflows/resource-params.tsx
@@ -12199,6 +12255,10 @@ msgstr "Delen"
 msgid "Share {name}"
 msgstr "{name} delen"
 
+#: src/inbox/items.ts
+msgid "Share {name} with the company?"
+msgstr "{name} met het bedrijf delen?"
+
 #: src/apps/app-sharing.tsx
 msgid "Share as"
 msgstr "Delen als"
@@ -12227,6 +12287,10 @@ msgstr "Deze herinnering delen"
 #: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Delen met"
+
+#: src/brain/skills-page.tsx
+msgid "Share with the company"
+msgstr "Met het bedrijf delen"
 
 #: src/apps/publish.tsx
 #: src/frame/setting-up.tsx
@@ -12259,10 +12323,18 @@ msgstr "Gedeeld met"
 msgid "Shared with {who}"
 msgstr "Gedeeld met {who}"
 
+#: src/brain/skills-page.tsx
+msgid "Shared with the company"
+msgstr "Gedeeld met het bedrijf"
+
 #: src/brain/memory-page.tsx
 msgctxt "memory records: others' that you read"
 msgid "Shared with you"
 msgstr "Met jou gedeeld"
+
+#: src/brain/skills-page.tsx
+msgid "Shares waiting for you"
+msgstr "Deelverzoeken die op jou wachten"
 
 #: src/apps/app-settings.tsx
 msgctxt "an app's settings section"
@@ -12530,6 +12602,17 @@ msgstr "Omvang gewijzigd naar onbekend"
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: a skill someone asked to share with the company"
+msgid "Skill"
+msgstr "Skill"
+
+#: src/brain/brain-nav.tsx
+#: src/brain/skills-page.tsx
+msgctxt "the Brain's skills page"
+msgid "Skills"
+msgstr "Skills"
 
 #: src/dashboard/todo-pile.tsx
 msgctxt "put a to-do card at the back of the pile"
@@ -13606,9 +13689,17 @@ msgstr "De controles, beoordelingen en vastleggingen die de toezichthouder van j
 msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
 msgstr "Het Brain van het bedrijf: {percent}% bekend. Donkere stippen zijn wat ik weet, grijze wat ik nog moet leren."
 
+#: src/brain/skills-page.tsx
+msgid "The company has no skills of its own yet."
+msgstr "Het bedrijf heeft nog geen eigen skills."
+
 #: src/agents/agent-page.tsx
 msgid "The company's first agent"
 msgstr "De eerste agent van het bedrijf"
+
+#: src/brain/skills-page.tsx
+msgid "The company's skills"
+msgstr "Skills van het bedrijf"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -15110,6 +15201,7 @@ msgstr "Versie {number}, huidig"
 
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
+#: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
@@ -15266,6 +15358,7 @@ msgid "Waiting for a person"
 msgstr "Wacht op een persoon"
 
 #: src/apps/app-webhooks.tsx
+#: src/brain/skills-page.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Waiting for an admin"
 msgstr "Wacht op een beheerder"
@@ -15837,6 +15930,10 @@ msgstr "Wat je hebt bevestigd, blijft bewaard. Iets vergeten? Deze link werkt to
 msgid "What you and your agents remember, and what others share with you, shows here."
 msgstr "Wat jij en je agents onthouden, en wat anderen met je delen, staat hier."
 
+#: src/brain/skills-page.tsx
+msgid "What you asked to share"
+msgstr "Wat je wilde delen"
+
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "Wat je hebt gekozen"
@@ -16394,6 +16491,10 @@ msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Schrijven"
 
+#: src/brain/skills-page.tsx
+msgid "Write a skill"
+msgstr "Skill schrijven"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Schrijf je antwoord"
@@ -16547,6 +16648,10 @@ msgstr "Je hebt nog geen koppelingen."
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
 msgstr "Je hebt geen recente runs waarvan de invoer nog bewaard is, dus er was niets om op te testen."
+
+#: src/brain/skills-page.tsx
+msgid "You have no skills of your own yet."
+msgstr "Je hebt nog geen eigen skills."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."
@@ -16762,6 +16867,10 @@ msgstr "Je run van versie {version} is afgelopen: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Je sessie is beëindigd"
+
+#: src/brain/skills-page.tsx
+msgid "Your skills"
+msgstr "Je skills"
 
 #: src/interview/words.ts
 msgid "Your story"

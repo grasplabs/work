@@ -1021,6 +1021,20 @@ describe(
         hiddenInstructionFiles,
         instructionGroups: ["company"],
       });
+      // Their own store was erased whole, and takes nothing from then on:
+      // the surfaces that write a skill of theirs (and decide a share of
+      // one) can only be refused for them, and are probed as the
+      // team-mate.
+      const holderWritesOwn = new Set([
+        "instructions saveInstructionFile",
+        "core addOwnSkill",
+        "shares readSkill",
+        "shares saveOwnSkill",
+        "shares shareOwnSkill",
+        "shares approveShare",
+        "shares declineShare",
+        "shares retireSkill",
+      ]);
       const findings = [
         // Their own file is theirs to write again, and what they write
         // after an erasure is new: saving it is probed as the team-mate
@@ -1031,9 +1045,7 @@ describe(
           asReader(holder, []),
           markers,
           {
-            among: surfaces.filter(
-              ([name]) => name !== "instructions saveInstructionFile"
-            ),
+            among: surfaces.filter(([name]) => !holderWritesOwn.has(name)),
           }
         )),
         ...(await findingsOf(
