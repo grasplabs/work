@@ -49,30 +49,6 @@ export const readerSetMembers = sqliteTable(
 );
 
 /**
- * The first slice's sources (GRA-1720), from before versions: no longer
- * written or read. A later migration drops it and its words (expand, then
- * contract: a rolled-back core still finds its own tables).
- *
- * A source, whole as given, with its set of readers. Its folded words are
- * indexed in `source_words`, an FTS5 table the store writes with it
- * (words.ts `indexWords`, migration 0001).
- */
-export const sources = sqliteTable(
-  "sources",
-  {
-    /** The row the word index points at. */
-    row: integer().primaryKey(),
-    id: text().notNull().unique(),
-    readerSet: integer("reader_set")
-      .notNull()
-      .references(() => readerSets.id),
-    text: text().notNull(),
-    addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => [index("sources_reader_set_idx").on(table.readerSet)]
-);
-
-/**
  * An original file in R2 (files.ts), under the SHA-256 of its bytes:
  * stored once however many source versions hold the same content, and
  * counted (`refs`) by how many do. A row is written before its file, so
@@ -282,8 +258,17 @@ export const vectorRemoved = sqliteTable(
       .notNull()
       .references(() => vectorBlocks.id),
     slot: integer().notNull(),
+    /**
+     * The chunk whose code it was, so an erasure of the chunk's version
+     * finds and repacks the block (erasure.ts). Added by migration 0006,
+     * which cleared every vector table first, so every mark names it.
+     */
+    chunk: integer(),
   },
-  (table) => [primaryKey({ columns: [table.block, table.slot] })]
+  (table) => [
+    primaryKey({ columns: [table.block, table.slot] }),
+    index("vector_removed_chunk_idx").on(table.chunk),
+  ]
 );
 
 /**
@@ -295,7 +280,12 @@ export const vectorRemoved = sqliteTable(
 export const workItems = sqliteTable(
   "work_items",
   {
-    id: integer().primaryKey(),
+    /**
+     * Never used twice, an item deleted included (migration 0006): an
+     * erasure deletes the row of an item under way, and its handler's
+     * settling, by this id, must never reach an item added after it.
+     */
+    id: integer().primaryKey({ autoIncrement: true }),
     /** Which work it is: the kind its handler is defined for. */
     kind: text().notNull(),
     /** What it is about, such as a source. */
@@ -398,4 +388,108 @@ export const wordIndex = sqliteTable(
     cursor: integer().notNull(),
   },
   () => [check("word_index_one", sql.raw("id = 1"))]
+);
+
+// Erasure (erasure.ts). `erasures` keeps each erasure the store applied,
+// by its key in the ledger in the Brain's bucket, and is how an erased
+// source's key stays closed; `erasing_versions` the versions an erasure
+// hid and the tick has still to delete; `erased_versions` what a person's
+// erasure hid, kept for good; `source_subjects` each source's key as the
+// ledger names it, so a replay finds a source by SQL.
+
+/**
+ * An erasure the store applied, as its ledger entry names it: no content
+ * and no plain id. Recorded before its ledger entry is written, then
+ * confirmed once the entry is in the bucket. Never deleted: it closes an
+ * erased source's key, and the last one is where a replay of the ledger
+ * starts.
+ */
+export const erasures = sqliteTable(
+  "erasures",
+  {
+    /** Its key in the ledger (erasure.ts `ledgerKeyOf`). */
+    key: text().primaryKey(),
+    kind: text({ enum: ["source", "person"] }).notNull(),
+    /** The SHA-256 of the source's key or the person's id, in hex. */
+    subject: text().notNull(),
+    /** Why (contract.ts `erasureReasons`). */
+    reason: text().notNull(),
+    erasedAt: integer("erased_at", { mode: "timestamp_ms" }).notNull(),
+    /** Whether its ledger entry is known to be in the bucket, every part. */
+    confirmed: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    // An add looks up whether its source, or its one reader, was erased.
+    index("erasures_subject_idx").on(table.kind, table.subject),
+    // The tick confirms what isn't yet.
+    index("erasures_unconfirmed_idx")
+      .on(table.key)
+      .where(sql.raw("confirmed = 0")),
+    check("erasures_kind", sql`${table.kind} IN ('source', 'person')`),
+  ]
+);
+
+/**
+ * A version an erasure hid, still to delete: found by nothing (recall,
+ * history and current reads leave it out), deleted with everything it
+ * holds by the tick (erasure.ts `eraseBatch`). One that failed to delete
+ * goes behind the others, and is tried again.
+ */
+export const erasingVersions = sqliteTable(
+  "erasing_versions",
+  {
+    versionRow: integer("version_row")
+      .primaryKey()
+      .references(() => sourceVersions.row),
+    erasure: text()
+      .notNull()
+      .references(() => erasures.key),
+    /** How often deleting it failed. */
+    failures: integer().notNull().default(0),
+  },
+  (table) => [
+    index("erasing_versions_erasure_idx").on(table.erasure),
+    // A batch takes the next by failures, then by row.
+    index("erasing_versions_next_idx").on(table.failures, table.versionRow),
+  ]
+);
+
+/**
+ * A source's key as the erasure ledger names it: its SHA-256, written
+ * with the source's first version, so a replay finds the source the
+ * ledger names in SQL, and a person's erasure names the sources it hid.
+ */
+export const sourceSubjects = sqliteTable(
+  "source_subjects",
+  {
+    source: text().primaryKey(),
+    subject: text().notNull(),
+  },
+  (table) => [index("source_subjects_subject_idx").on(table.subject)]
+);
+
+/**
+ * What a person's erasure hid, a row a version: by number under the
+ * SHA-256 of its source's key, as its ledger entry holds it (erasure.ts),
+ * kept after the version is deleted, so the entry can be written again
+ * whole, part by part, however many versions it names. A source's erasure
+ * has none: it hides every version of its source. Kept for good, as the
+ * erasure's own record, costing storage only: they hold nothing but
+ * hashes and version numbers.
+ */
+export const erasedVersions = sqliteTable(
+  "erased_versions",
+  {
+    erasure: text()
+      .notNull()
+      .references(() => erasures.key),
+    /** The SHA-256 of the source's key, in hex. */
+    subject: text().notNull(),
+    version: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.erasure, table.subject, table.version] }),
+    // An add numbers a source's next version past every one erased.
+    index("erased_versions_subject_idx").on(table.subject, table.version),
+  ]
 );

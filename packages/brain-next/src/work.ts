@@ -31,7 +31,9 @@ export { WorkError } from "./work-error.ts";
 // it; the store sets no alarm of its own.
 //
 // Items run in order of their class (`workPriorities`), oldest first,
-// 4 at once, at most 2 of one connection, never two of one kind and key; a
+// 4 at once, at most 2 of one connection, never two of one kind and key
+// (but for an item an erasure stopped, whose handler may still run on:
+// `stopWorkOn`); a
 // newer item of a kind and key replaces one waiting or parked. An item's
 // attempt is counted as it is claimed, before its work starts. Model calls
 // take turns, first come first served, from one bucket for the whole queue
@@ -348,6 +350,8 @@ export interface WorkState {
   turns: Promise<unknown>;
   /** By kind and key (`zombieOf`). */
   zombies: Map<string, OverdueWork & { connection: string | null }>;
+  /** The signals of the attempts under way, by their items' keys. */
+  underWay: Map<string, Set<AbortController>>;
   /**
    * Restarts the store once what it wrote is on disk: what ends handlers
    * no signal stops. Called through `restartStore` only.
@@ -361,9 +365,33 @@ export interface WorkState {
 export const newWorkState = (restart: () => void): WorkState => ({
   turns: Promise.resolve(),
   zombies: new Map(),
+  underWay: new Map(),
   restart,
   restarting: false,
 });
+
+/**
+ * Stops the attempts under way of items keyed by any of `keys`: their
+ * signals abort, with `erased`. For an erasure, which deleted their rows
+ * in the same step: what such a handler still writes goes through the
+ * store's own checks that what it works on is current, which an erased
+ * source no longer is, and nothing of it is settled or run again. Its row
+ * gone, a new item of the same key (a source others still add to, after a
+ * person's erasure) may run beside a handler that ignores its signal: a
+ * handler can't assume it is alone on its key. A listener of a signal
+ * that throws is passed over, so the erasure goes on.
+ */
+export const stopWorkOn = (state: WorkState, keys: readonly string[]): void => {
+  for (const key of keys) {
+    for (const controller of state.underWay.get(key) ?? []) {
+      try {
+        controller.abort(new WorkError("erased"));
+      } catch {
+        // A handler's listener threw: its own failure, not the erasure's.
+      }
+    }
+  }
+};
 
 /** Restarts the store (rule 6), once however often asked. */
 const restartStore = (state: WorkState): void => {
@@ -913,6 +941,9 @@ const runItem = async (
   }
   const controller = new AbortController();
   const { signal } = controller;
+  const ofKey = state.underWay.get(item.key) ?? new Set<AbortController>();
+  ofKey.add(controller);
+  state.underWay.set(item.key, ofKey);
   const limit = setTimeout(() => {
     controller.abort(new WorkError("timed_out"));
   }, runner.timeLimitMs);
@@ -935,6 +966,10 @@ const runItem = async (
       return { done: false, error, timedOut: signal.aborted };
     } finally {
       clearTimeout(limit);
+      ofKey.delete(controller);
+      if (ofKey.size === 0 && state.underWay.get(item.key) === ofKey) {
+        state.underWay.delete(item.key);
+      }
       // Nothing of it asks the model once it ended: not an `ask` it left behind.
       controller.abort(new WorkError("timed_out"));
     }
@@ -1036,7 +1071,10 @@ const errorCodeOf = (kept: string | null): WorkErrorCode =>
 export const workOverview = (
   storage: DurableObjectStorage,
   state: WorkState
-): Omit<WorkOverview, "stepsFailed"> => {
+): Omit<
+  WorkOverview,
+  "stepsFailed" | "erasing" | "sourcesWithoutCurrent" | "ledgerReplay"
+> => {
   const db = drizzle(storage);
   const waiting = db
     .select({

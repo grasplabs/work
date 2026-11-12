@@ -1,3 +1,4 @@
+import { log } from "@grasp-os/shared/log";
 import { and, eq, max } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
@@ -16,6 +17,14 @@ import {
   sourceChanges,
   sourceVersions,
 } from "./db/schema.ts";
+import {
+  erasuresSoFar,
+  isErased,
+  lastErasedVersion,
+  isPersonErasedSince,
+  keepSubject,
+  subjectOf,
+} from "./erasure.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -66,10 +75,26 @@ const encoder = new TextEncoder();
  */
 interface Adding {
   readonly added: NewSource;
+  /** The source's key as the erasure ledger names it (erasure.ts). */
+  readonly subject: string;
+  /**
+   * When readable by one person alone: that person as the erasure ledger
+   * names them, and where the record of erasures was as the add began,
+   * before its file was written: an erasure of them since may have missed
+   * it (`record`).
+   */
+  readonly onlyFor?: { subject: string; soFar: number };
   readonly hash: string;
   readonly readers: string;
   readonly indexed: boolean;
 }
+
+/**
+ * What an add says that an erasure closed: to an erased source, whose key
+ * is closed for good, or for a person alone that began before that
+ * person's erasure (erasure.ts). Said only to the producer that adds it.
+ */
+const erasedSource = "The Brain refused it: what this adds was erased";
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
 const versionFields = {
@@ -151,6 +176,18 @@ const record = (
   storage: DurableObjectStorage,
   adding: Adding
 ): SourceVersionRef | undefined => {
+  // Erased while this add wrote its file: closed for good. Or for one
+  // person alone, whose erasure came after it began and before this: it
+  // may have missed it, so it is refused, writing nothing (its file is
+  // left to the sweep). An add that begins after it is new, and kept.
+  const { onlyFor } = adding;
+  if (
+    isErased(storage.sql, adding.subject) ||
+    (onlyFor !== undefined &&
+      isPersonErasedSince(storage.sql, onlyFor.subject, onlyFor.soFar))
+  ) {
+    throw new Error(erasedSource);
+  }
   // The same change, or the same text and readers, added meanwhile.
   const before = madeBefore(db, adding);
   if (before !== undefined) {
@@ -169,7 +206,14 @@ const record = (
     .from(sourceVersions)
     .where(eq(sourceVersions.source, added.source))
     .get();
-  const version = (last?.version ?? 0) + 1;
+  // Past every version erased too (erasure.ts): a number names one
+  // version for good, so nothing that holds an old one (a late vector put,
+  // a citation) ever meets new text under it.
+  const version =
+    Math.max(
+      last?.version ?? 0,
+      lastErasedVersion(storage.sql, adding.subject)
+    ) + 1;
   const { row } = db
     .insert(sourceVersions)
     .values({
@@ -195,6 +239,7 @@ const record = (
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })
     .run();
+  keepSubject(storage.sql, added.source, adding.subject);
   // The version before stops being found by meaning as it stops being
   // current: its chunks' vector codes go with the pointer.
   const replaced = db
@@ -230,13 +275,21 @@ export const addVersion = async (
   added: NewSource,
   { indexed }: { indexed: boolean }
 ): Promise<SourceVersionRef> => {
+  const soFar = erasuresSoFar(storage.sql);
   const body = encoder.encode(added.text);
   const adding: Adding = {
     added,
+    subject: await subjectOf(added.source),
+    ...(added.access.kind === "owner"
+      ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
+      : {}),
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     indexed,
   };
+  if (isErased(storage.sql, adding.subject)) {
+    throw new Error(erasedSource);
+  }
   const before = madeBefore(db, adding);
   if (before !== undefined) {
     return before;
@@ -261,19 +314,31 @@ export const addVersion = async (
   return recorded;
 };
 
-/** The text of a version's file, under its hash `file`. */
-const textOf = async (bucket: R2Bucket, file: string): Promise<string> => {
+/**
+ * The text of a version's file, under its hash `file`: null when the file
+ * is gone. Only a restore of the store brings back a version whose file
+ * the sweep deleted (erasure.ts replays the ledger then): it reads as
+ * missing, never failing a read of others.
+ */
+const textOf = async (
+  bucket: R2Bucket,
+  file: string
+): Promise<string | null> => {
   const object = await bucket.get(fileKeyOf(file));
   if (object === null) {
-    throw new Error("The Brain's file of a version is missing");
+    // One fixed event and no ids, so a file deleted by mistake is noticed
+    // and nothing of what it held is told.
+    log.warn("brain.version_file_missing", {});
+    return null;
   }
   return await object.text();
 };
 
 /**
  * `?1` the source, `?2` the reader's person, `?3` their groups (JSON), `?4`
- * the version: its file and when it was added, if the reader is among
- * that version's readers and the source's current version's. So
+ * the version: its file and when it was added, if no erasure hid it and
+ * the reader is among that version's readers and the source's current
+ * version's. So
  * narrowing a source's readers hides its history from those taken off,
  * and a person or group added as a reader in a later version never sees
  * the versions before. Both are matched against the groups the host
@@ -285,6 +350,7 @@ const versionSql = `
 WITH ${readableSql}
 SELECT file, added_at FROM source_versions
 WHERE source = ?1 AND version = ?4
+  AND row NOT IN (SELECT version_row FROM erasing_versions)
   AND reader_set IN (SELECT reader_set FROM readable)
   AND EXISTS (
     SELECT 1 FROM current_versions
@@ -301,25 +367,27 @@ export const readVersion = async (
   { storage, bucket }: SourcesStore,
   { source, version, reader }: VersionRequest
 ): Promise<SourceVersion | null> => {
-  const found = storage.sql
-    .exec<{ file: string; added_at: number }>(
-      versionSql,
-      source,
-      reader.person,
-      JSON.stringify(reader.groups),
-      version
-    )
-    .toArray()
-    .at(0);
+  const stillReadable = () =>
+    storage.sql
+      .exec<{ file: string; added_at: number }>(
+        versionSql,
+        source,
+        reader.person,
+        JSON.stringify(reader.groups),
+        version
+      )
+      .toArray()
+      .at(0);
+  const found = stillReadable();
   if (found === undefined) {
     return null;
   }
-  return {
-    source,
-    version,
-    text: await textOf(bucket, found.file),
-    addedAt: new Date(found.added_at),
-  };
+  const text = await textOf(bucket, found.file);
+  // Asked again once the file is read: an erasure or a narrowing of the
+  // source may have landed while it was.
+  return text === null || !stillReadable()
+    ? null
+    : { source, version, text, addedAt: new Date(found.added_at) };
 };
 
 /**
@@ -339,8 +407,8 @@ ORDER BY asked.key`;
 
 /**
  * The current version of each of `sources`, whole from its file, in the
- * order given: leaving out each that doesn't exist and each `reader` may
- * not read, alike.
+ * order given: leaving out each that doesn't exist, each `reader` may
+ * not read and each whose file is gone, alike.
  */
 export const readCurrent = async (
   { storage, bucket }: SourcesStore,
@@ -354,12 +422,31 @@ export const readCurrent = async (
       JSON.stringify(reader.groups)
     )
     .toArray();
-  return await Promise.all(
-    found.map(async ({ source, version, file, added_at: addedAt }) => ({
-      source,
-      version,
-      text: await textOf(bucket, file),
-      addedAt: new Date(addedAt),
-    }))
+  const read = await Promise.all(
+    found.map(async ({ source, version, file, added_at: addedAt }) => {
+      const text = await textOf(bucket, file);
+      return text === null
+        ? []
+        : [{ source, version, text, addedAt: new Date(addedAt) }];
+    })
   );
+  // Asked again once every file is read: only versions still current and
+  // readable now are answered, so an erasure or a new version that landed
+  // meanwhile is never read past.
+  const now = new Set(
+    storage.sql
+      .exec<{ source: string; version: number }>(
+        currentSql,
+        JSON.stringify(sources),
+        reader.person,
+        JSON.stringify(reader.groups)
+      )
+      .toArray()
+      .map(({ source, version }) => JSON.stringify([source, version]))
+  );
+  return read
+    .flat()
+    .filter(({ source, version }) =>
+      now.has(JSON.stringify([source, version]))
+    );
 };

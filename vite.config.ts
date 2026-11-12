@@ -234,12 +234,14 @@ export default defineConfig({
         },
       },
       {
-        // The work queue's tests (its own, and the leak harness's probes)
-        // define kinds of work whose handlers they control, and add items.
+        // The work queue's tests (its own, the leak harness's probes, and
+        // erasure's, which erases queued work) define kinds of work whose
+        // handlers they control, and add items.
         files: [
           "apps/core/test/brain-next-work.test.ts",
           "apps/core/test/brain-next-surfaces.ts",
           "apps/core/test/brain-next-vectors.test.ts",
+          "apps/core/test/brain-next-erasure.test.ts",
         ],
         rules: {
           "no-restricted-imports": [

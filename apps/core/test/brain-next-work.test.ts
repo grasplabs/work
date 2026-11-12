@@ -2051,7 +2051,13 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
         fileThere: false,
         // A sweep that finished clears the last one's failure; the repack
         // of the same tick finished too.
-        stepsFailed: { sweep: null, repack: null, reindex: null },
+        stepsFailed: {
+          ledger: null,
+          erase: null,
+          sweep: null,
+          repack: null,
+          reindex: null,
+        },
       });
     });
   });

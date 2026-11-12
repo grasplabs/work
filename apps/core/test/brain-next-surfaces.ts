@@ -35,6 +35,7 @@ import type {
   Access,
   Brain,
   ChunkRef,
+  ErasureReason,
   Reader,
   VectorModel,
   VectorsToPut,
@@ -354,10 +355,13 @@ const refusedChange = async (markers: readonly string[]): Promise<Answer[]> => {
   ];
 };
 
-/** Adds as the chat producer under `id`: the version it answers with. */
-const addAsChat = async (id: string): Promise<number> => {
+/** Adds as `producer` under `id`: the version it answers with. */
+const addAs = async (
+  producer: SourceRef["producer"],
+  id: string
+): Promise<number> => {
   const { version } = await coreBrain.addSource(env, {
-    source: { producer: "chat", id },
+    source: { producer, id },
     change: crypto.randomUUID(),
     // The same text and readers every pass: a later pass's add is the
     // version the first made, so every pass answers alike.
@@ -370,24 +374,31 @@ const addAsChat = async (id: string): Promise<number> => {
 /**
  * Adds as another producer kind, with a hidden source's id and with one no
  * one added: the version each answers with must be the same (a first), so
- * no producer learns what another kind holds under that id.
+ * no producer learns what another kind holds under that id. Never as the
+ * hidden source's own kind, which would add to the source itself (one an
+ * erasure closed refuses that, as it should).
  */
 const otherKindOf = async (
   hiddenVersions: Probing["hiddenVersions"]
 ): Promise<Answer[]> => {
-  const hidden = [...new Set(hiddenVersions.map(({ source }) => source.id))];
+  const hidden = [
+    ...new Map(
+      hiddenVersions.map(({ source }) => [keyOf(source), source])
+    ).values(),
+  ];
   return [
     await answer(
       "another kind, an id no one added",
-      async () => await addAsChat(crypto.randomUUID()),
+      async () => await addAs("chat", crypto.randomUUID()),
       "nothing"
     ),
     ...(await Promise.all(
       hidden.map(
-        async (id, index) =>
+        async ({ producer, id }, index) =>
           await answer(
             `another kind, hidden source ${index}'s id`,
-            async () => await addAsChat(id),
+            async () =>
+              await addAs(producer === "chat" ? "upload" : "chat", id),
             "hidden"
           )
       )
@@ -840,6 +851,92 @@ export const coreProbes = {
       })
     );
     return asked;
+  },
+  // Erasure has no reader: what it answers must be alike whether there
+  // was anything to erase, and hold no marker. Each probe erases marked
+  // content of its own (someone else's), never the planted sources later
+  // passes read.
+  eraseSource: async ({ markers }) => {
+    const erase = async (
+      name: string,
+      source: SourceRef,
+      reason: ErasureReason = "deleted",
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.eraseSource(env, { source, reason });
+        },
+        about
+      );
+    const marked = missingSource();
+    await coreBrain.addSource(env, {
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: { kind: "owner", personId: stranger() },
+    });
+    return [
+      await erase(
+        "a source no one added",
+        missingSource(),
+        "deleted",
+        "nothing"
+      ),
+      await erase("someone else's marked source", marked, "deleted", "hidden"),
+      await erase("the same erasure again", marked, "deleted", "hidden"),
+      await erase(
+        "an unknown producer named by the markers",
+        unchecked({ producer: markers.join(""), id: crypto.randomUUID() })
+      ),
+      await erase("an id of the markers and control characters", {
+        producer: "upload",
+        id: `${markers.join("\n")}\u0000`,
+      }),
+      await erase(
+        "a reason named by the markers",
+        missingSource(),
+        unchecked(markers.join(" "))
+      ),
+    ];
+  },
+  erasePerson: async ({ markers }) => {
+    const erase = async (
+      name: string,
+      personId: string,
+      reason: ErasureReason = "person_erased",
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.erasePerson(env, { personId, reason });
+        },
+        about
+      );
+    const holder = stranger();
+    await coreBrain.addSource(env, {
+      source: missingSource(),
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: { kind: "owner", personId: holder },
+    });
+    return [
+      await erase("someone with nothing", stranger(), "withdrawn", "nothing"),
+      await erase("someone with marked sources", holder, "withdrawn", "hidden"),
+      await erase("the same erasure again", holder, "withdrawn", "hidden"),
+      await erase("no person", ""),
+      await erase(
+        "a person named by the markers, too long",
+        markers.join("").repeat(300)
+      ),
+      await erase(
+        "a reason named by the markers",
+        stranger(),
+        unchecked(markers.join(" "))
+      ),
+    ];
   },
   brainWorkOverview: async ({ markers }) => [
     ...(await workMarked(
@@ -1854,6 +1951,109 @@ export const storeProbes = {
       await store().work(quietModel, unchecked(markers.join(" ")));
     }),
   ],
+  // As core's (above), through the contract itself.
+  eraseSource: async ({ markers }) => {
+    const erase = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await store().eraseSource(unchecked(request));
+        },
+        about
+      );
+    const marked = keyOf(missingSource());
+    await store().addSource({
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      access: { kind: "owner", person: stranger() },
+    });
+    return [
+      await erase(
+        "a source no one added",
+        { source: keyOf(missingSource()), reason: "deleted" },
+        "nothing"
+      ),
+      await erase(
+        "someone else's marked source",
+        { source: marked, reason: "deleted" },
+        "hidden"
+      ),
+      await erase(
+        "the same erasure again",
+        { source: marked, reason: "deleted" },
+        "hidden"
+      ),
+      await erase("a source named by the markers, too long", {
+        source: markers.join("").repeat(300),
+        reason: "deleted",
+      }),
+      await erase("a reason named by the markers", {
+        source: keyOf(missingSource()),
+        reason: markers.join(" "),
+      }),
+      await erase("an unknown field", {
+        source: keyOf(missingSource()),
+        reason: "deleted",
+        extra: markers.join(" "),
+      }),
+    ];
+  },
+  erasePerson: async ({ markers }) => {
+    const erase = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await store().erasePerson(unchecked(request));
+        },
+        about
+      );
+    const holder = stranger();
+    await store().addSource({
+      source: keyOf(missingSource()),
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      access: { kind: "owner", person: holder },
+    });
+    return [
+      await erase(
+        "someone with nothing",
+        { person: stranger(), reason: "withdrawn" },
+        "nothing"
+      ),
+      await erase(
+        "someone with marked sources",
+        { person: holder, reason: "withdrawn" },
+        "hidden"
+      ),
+      await erase(
+        "the same erasure again",
+        { person: holder, reason: "withdrawn" },
+        "hidden"
+      ),
+      await erase("a person named by the markers, too long", {
+        person: markers.join("").repeat(300),
+        reason: "withdrawn",
+      }),
+      await erase("a reason named by the markers", {
+        person: stranger(),
+        reason: markers.join(" "),
+      }),
+      await erase("an unknown field", {
+        person: stranger(),
+        reason: "withdrawn",
+        extra: markers.join(" "),
+      }),
+    ];
+  },
   workOverview: async ({ markers }) => [
     ...(await workMarked(
       markers,

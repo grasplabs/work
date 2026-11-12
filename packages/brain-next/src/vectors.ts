@@ -39,7 +39,9 @@ import { readableSql } from "./reader-sets.ts";
 // A code is removed when its version stops being current: a tail code is
 // deleted, and a packed one is deleted from `vector_codes` and its slot
 // marked in `vector_removed`, which the scan skips before scoring. A
-// repack rewrites one marked block at a time without them.
+// repack rewrites one marked block at a time without them. An erasure
+// removes a version's codes the same way and repacks each block it marked
+// at once (erasure.ts), so no block keeps an erased chunk's row or code.
 //
 // Everything runs in TypeScript over typed arrays: measured in workerd,
 // it scans far beyond what one store holds within the spike's numbers
@@ -302,9 +304,14 @@ export const putVectors = (
  * every model: a packed one is marked removed in its block, until a
  * repack drops it, and a block left with no code is deleted at once, so
  * no scan reads it again. Run it in the transaction that makes the
- * version no longer current, or that erases it.
+ * version no longer current, or that erases it. Answers every block left
+ * that holds a removed code of the version, marked now or before, for an
+ * erasure to repack at once.
  */
-export const removeVectorsOf = (sql: SqlStorage, versionRow: number): void => {
+export const removeVectorsOf = (
+  sql: SqlStorage,
+  versionRow: number
+): number[] => {
   const blocks = JSON.stringify(
     sql
       .exec<{ block: number }>(
@@ -317,8 +324,8 @@ export const removeVectorsOf = (sql: SqlStorage, versionRow: number): void => {
       .map(({ block }) => block)
   );
   sql.exec(
-    `INSERT OR IGNORE INTO vector_removed (block, slot)
-    SELECT block, slot FROM vector_codes
+    `INSERT OR IGNORE INTO vector_removed (block, slot, chunk)
+    SELECT block, slot, chunk FROM vector_codes
     WHERE block IS NOT NULL
       AND chunk IN (SELECT row FROM chunks WHERE version_row = ?)`,
     versionRow
@@ -331,7 +338,24 @@ export const removeVectorsOf = (sql: SqlStorage, versionRow: number): void => {
     SELECT 1 FROM vector_codes WHERE vector_codes.block = json_each.value)`;
   sql.exec(`DELETE FROM vector_removed WHERE block IN (${emptied})`, blocks);
   sql.exec(`DELETE FROM vector_blocks WHERE id IN (${emptied})`, blocks);
+  // Every block still holding a removed code of these chunks: marked now,
+  // or when the version stopped being current, waiting for its repack.
+  return sql
+    .exec<{ block: number }>(
+      `SELECT DISTINCT block FROM vector_removed
+      WHERE chunk IN (SELECT row FROM chunks WHERE version_row = ?)`,
+      versionRow
+    )
+    .toArray()
+    .map(({ block }) => block);
 };
+
+/** A block holding removed codes: its id, model and set of readers. */
+interface MarkedBlock extends Record<string, SqlStorageValue> {
+  block: number;
+  model: number;
+  reader_set: number;
+}
 
 /**
  * The marked block a repack takes: the first by id, in the marks' own
@@ -345,19 +369,11 @@ SELECT id AS block, model, reader_set FROM vector_blocks
 WHERE id = (SELECT block FROM vector_removed ORDER BY block LIMIT 1)`;
 
 /**
- * Repacks one block holding removed codes: its other codes go back to
- * their group's tail, which packs again, and the block and its marks are
- * deleted. Run it in one transaction. True when another block holds
- * removed codes.
+ * Repacks `marked`: its other codes go back to their group's tail, which
+ * packs again, and the block and its marks are deleted, and with the
+ * block the rows and 1-bit codes of the codes removed from it.
  */
-export const repackVectors = (sql: SqlStorage): boolean => {
-  const marked = sql
-    .exec<{ block: number; model: number; reader_set: number }>(nextMarkedSql)
-    .toArray()
-    .at(0);
-  if (marked === undefined) {
-    return false;
-  }
+const repack = (sql: SqlStorage, marked: MarkedBlock): void => {
   sql.exec(
     "UPDATE vector_codes SET block = NULL, slot = NULL WHERE block = ?",
     marked.block
@@ -365,7 +381,41 @@ export const repackVectors = (sql: SqlStorage): boolean => {
   sql.exec("DELETE FROM vector_removed WHERE block = ?", marked.block);
   sql.exec("DELETE FROM vector_blocks WHERE id = ?", marked.block);
   packTail(sql, marked.model, marked.reader_set);
+};
+
+/**
+ * Repacks one block holding removed codes. Run it in one transaction.
+ * True when another block holds removed codes.
+ */
+export const repackVectors = (sql: SqlStorage): boolean => {
+  const marked = sql.exec<MarkedBlock>(nextMarkedSql).toArray().at(0);
+  if (marked === undefined) {
+    return false;
+  }
+  repack(sql, marked);
   return sql.exec("SELECT 1 FROM vector_removed LIMIT 1").toArray().length > 0;
+};
+
+/**
+ * Repacks each of `blocks` that is left, in the caller's transaction (an
+ * erasure's), so no block keeps an erased chunk's row or 1-bit code.
+ */
+export const repackBlocks = (
+  sql: SqlStorage,
+  blocks: readonly number[]
+): void => {
+  for (const block of blocks) {
+    const marked = sql
+      .exec<MarkedBlock>(
+        "SELECT id AS block, model, reader_set FROM vector_blocks WHERE id = ?",
+        block
+      )
+      .toArray()
+      .at(0);
+    if (marked !== undefined) {
+      repack(sql, marked);
+    }
+  }
 };
 
 /** A 32-bit word's set bits. */

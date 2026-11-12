@@ -274,6 +274,7 @@ export const workErrors = {
   invalid_request: "Its call to the model couldn't be sent as it was.",
   too_many_calls: "It asked the model more often than one attempt may.",
   unreadable: "What it works on can't be read.",
+  erased: "What it works on was erased.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
 
@@ -339,8 +340,35 @@ export interface WorkOverview {
   /** Handlers still running past their time, holding their key and a slot. */
   overdue: OverdueWork[];
   /**
+   * How many erasures are recorded and hidden but not yet erased to the
+   * last row: the tick finishes them a batch at a time. A count of
+   * erasures, never of what they hold.
+   */
+  erasing: number;
+  /**
+   * How many sources keep versions but have no current version, so no one
+   * can read them: what a replay of the ledger after a restore can leave
+   * when the older copy's current version was an erased person's own
+   * (erasure.ts). A count, never which.
+   */
+  sourcesWithoutCurrent: number;
+  /**
+   * Whether the store answers: `through` once it has read its erasure
+   * ledger through; otherwise it answers nothing but this overview, each
+   * call refused with why, while a replay after a restore is under way
+   * (`replaying`: each call applies one more step) or while the ledger
+   * can't be read (`unreadable`: read again at most every 30 s).
+   */
+  ledgerReplay: "through" | "replaying" | "unreadable";
+  /**
    * The tick's own steps before its queue, each with its last failure
-   * since the store started: the sweep of leftover files, cleared once a
+   * since the store started: the writing of erasures' ledger entries,
+   * cleared once a tick wrote every one (reading the ledger is
+   * `ledgerReplay`'s); the erasure of what erasures
+   * still hold, set when a version failed to delete, which goes behind the
+   * others and is tried again, cleared once a batch deletes all it takes;
+   * the sweep
+   * of leftover files, cleared once a
    * later sweep reached R2 and had its answer (one with nothing due
    * clears nothing; sweeping waits a quarter of an hour after a failure),
    * the repack of vector codes, cleared once a later tick's repack
@@ -348,6 +376,8 @@ export interface WorkOverview {
    * after their rules changed, cleared once a later batch finishes.
    */
   stepsFailed: {
+    ledger: StepFailure | null;
+    erase: StepFailure | null;
     sweep: StepFailure | null;
     repack: StepFailure | null;
     reindex: StepFailure | null;
@@ -363,6 +393,34 @@ export interface StepFailure {
   at: Date;
   reason: "timed_out" | "failed";
 }
+
+/**
+ * Why something is erased, as the ledger keeps it: deleted for good by a
+ * person or an admin (`deleted`), its retention over (`retention`), the
+ * person erased by an admin (`person_erased`), or the person withdrew
+ * (`withdrawn`, an interview, say).
+ */
+export const erasureReasons = [
+  "deleted",
+  "retention",
+  "person_erased",
+  "withdrawn",
+] as const;
+export type ErasureReason = (typeof erasureReasons)[number];
+
+/** A source to erase, every version of it, and why. */
+export const sourceErasureSchema = z.strictObject({
+  source: sourceIdSchema,
+  reason: z.enum(erasureReasons),
+});
+export type SourceErasure = z.infer<typeof sourceErasureSchema>;
+
+/** A person whose own content to erase, and why. */
+export const personErasureSchema = z.strictObject({
+  person: principalSchema,
+  reason: z.enum(erasureReasons),
+});
+export type PersonErasure = z.infer<typeof personErasureSchema>;
 
 /** Most dimensions of a vector. */
 export const vectorDimensionsMax = 4096;
@@ -486,7 +544,8 @@ export interface Brain {
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
    * One tick of the host's clock, at `at`, the host's time now. First it
-   * removes one batch of what adds that never finished left (files no
+   * deletes one batch of what erasures hid and haven't deleted yet. Then
+   * it removes one batch of what adds that never finished left (files no
    * version holds, once past the time an add takes). Then it repacks a few
    * blocks of vector codes that hold removed ones. Then it works the
    * queue: runs what is due, a few at a time, asking `ask` for the model
@@ -522,10 +581,28 @@ export interface Brain {
   /**
    * Repacks one block of codes that holds removed ones, dropping them for
    * good: true when more are left. Harmless to run at any time or twice;
-   * the store's own tick repacks a few blocks each time (`work`), and
-   * erasure (GRA-1729) may run it too.
+   * the store's own tick repacks a few blocks each time (`work`), and an
+   * erasure repacks each block it removed codes from.
    */
   repackVectors: () => Promise<boolean>;
+  /**
+   * Erases a source for good: every version, its chunks and their words,
+   * vector codes, change keys and queued work, and its files once no
+   * version holds them (the sweep). Returns once the erasure is in the
+   * ledger and nothing of the source is found or read any more; what is
+   * left to delete, the store's tick finishes. The source's key is closed:
+   * an add to it is refused from then on. It answers alike whether the
+   * source held anything, and is safe to repeat.
+   */
+  eraseSource: (request: SourceErasure) => Promise<void>;
+  /**
+   * Erases what only `person` may read, as `eraseSource` erases a source:
+   * every version readable by them alone, added up to now, and whole each
+   * source whose current version is such. A source others read now keeps
+   * their versions. Content added for them afterwards is new and kept.
+   * Answers alike whatever they held, and is safe to repeat.
+   */
+  erasePerson: (request: PersonErasure) => Promise<void>;
 }
 
 /** The one store's name: the Brain holds everything in one store for now. */
