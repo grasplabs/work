@@ -26,7 +26,6 @@ import {
   CreditCardIcon,
   HistoryIcon,
   KeyRoundIcon,
-  UsersRoundIcon,
   MessagesSquareIcon,
   PlugIcon,
   RocketIcon,
@@ -56,7 +55,6 @@ type SettingsPath =
   | "/settings/models"
   | "/settings/spend"
   | "/settings/stephen"
-  | "/settings/agents"
   | "/settings/onboarding"
   | "/settings/brain"
   | "/settings/audit"
@@ -118,8 +116,6 @@ const groupsFor = ({
           to: "/settings/stephen",
           icon: MessagesSquareIcon,
         },
-        // The company's agents, Stephen the first of them.
-        { label: msg`Agents`, to: "/settings/agents", icon: UsersRoundIcon },
         {
           label: msg`Onboarding`,
           to: "/settings/onboarding",

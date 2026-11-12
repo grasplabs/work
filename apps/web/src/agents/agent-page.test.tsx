@@ -21,17 +21,24 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AgentsSettings } from "./agents-settings.tsx";
+import { AgentPage } from "./agent-page.tsx";
+import type { AgentTab } from "./agent-page.tsx";
+import { NewAgent } from "./new-agent.tsx";
 
-// Settings › Agents against core's connections API as the page reaches it
-// over RPC (the boundary from the web app), faked: it keeps what an admin
-// makes and changes and answers the page's next read with it, so what the
-// page shows after a change is what core holds.
+// One agent's page and the new agent's page against core's connections
+// API as they reach it over RPC (the boundary from the web app), faked:
+// it keeps what an admin makes and changes and answers the page's next
+// read with it, so what a page shows after a change is what core holds.
+// These start from the ways the pages can fail: a change that never
+// reaches core, or reaches it as something else; what is typed and not
+// yet saved lost to a refresh, a refusal or a look at another tab; a
+// refusal not said where it was made; someone who isn't the company's
+// admin given a way to change an agent.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -68,7 +75,7 @@ const fakeConnections = () => {
   const changed = (id: string, change: Partial<Agent>): void => {
     agents = agents.map((agent) =>
       agent.id === id
-        ? { ...agent, ...change, changedAt: `${asked.length}` }
+        ? { ...agent, ...change, changedAt: "2026-11-12T10:00:00.000Z" }
         : agent
     );
   };
@@ -97,7 +104,7 @@ const fakeConnections = () => {
         ...input,
         state: "on",
         changedBy: "admin",
-        changedAt: "made",
+        changedAt: "2026-11-12T09:00:00.000Z",
       };
       agents = [...agents, made];
       // As core makes it: reaching nobody, every class for nobody.
@@ -208,20 +215,47 @@ interface Shown {
   wakes: Record<string, AgentWake[]>;
 }
 
-/** The page on the agents its route read. */
-const Page = ({ data, editable }: { data: Shown; editable: boolean }) => (
-  <AgentsSettings
-    agents={data.agents}
-    editable={editable}
-    people={people}
-    settings={data.settings}
-    teams={teams}
-    wakes={data.wakes}
-  />
-);
+/** What is shown: one agent's page, by its name, or the new agent's. */
+type Open = { agent: string; tab?: AgentTab } | "new";
 
-/** The page on what `connections` holds, for the company's admin when `editable`. */
-const shown = async (connections: Connections, editable = true) => {
+/** The page for `open` on the agents its route read, its tab kept as its route would. */
+const Page = ({
+  data,
+  editable,
+  open,
+}: {
+  data: Shown;
+  editable: boolean;
+  open: Open;
+}) => {
+  const [tab, setTab] = useState<AgentTab>(
+    open === "new" ? "overview" : (open.tab ?? "overview")
+  );
+  if (open === "new") {
+    return <NewAgent />;
+  }
+  const agent = data.agents.find(({ name }) => name === open.agent);
+  if (agent === undefined) {
+    return <p>No such agent</p>;
+  }
+  return (
+    <AgentPage
+      agent={agent}
+      editable={editable}
+      first={agent.id === data.agents.at(0)?.id}
+      onTab={setTab}
+      people={people}
+      settings={data.settings[agent.id]}
+      tab={tab}
+      teams={teams}
+      usable
+      wakes={data.wakes[agent.id] ?? []}
+    />
+  );
+};
+
+/** `open` on what `connections` holds, for the company's admin when `editable`. */
+const shown = async (connections: Connections, open: Open, editable = true) => {
   const core = {
     withSession: async <T,>(
       action: (session: { connections: Connections }) => Promise<T>
@@ -252,8 +286,10 @@ const shown = async (connections: Connections, editable = true) => {
   const rootRoute = createRootRoute({
     loader: load,
     component: () => (
-      <Page data={rootRoute.useLoaderData()} editable={editable} />
+      <Page data={rootRoute.useLoaderData()} editable={editable} open={open} />
     ),
+    // Where the new agent's page leads: an address this router has no page for.
+    notFoundComponent: () => <p>Elsewhere</p>,
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -271,6 +307,7 @@ const shown = async (connections: Connections, editable = true) => {
     );
     await router.load();
   });
+  return router;
 };
 
 /** Lets every pending promise and render settle. */
@@ -292,12 +329,17 @@ const press = async (element: HTMLElement) => {
   await settled();
 };
 
-/** The button named `name`, or one whose words start with it. */
+/** Whether `element` is on the open tab, or outside the tabs. */
+const inView = (element: Element): boolean =>
+  element.closest("[role='tabpanel'][hidden]") === null;
+
+/** The button in view named `name`, or one whose words start with it. */
 const button = (name: string): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
     (each) =>
-      each.getAttribute("aria-label") === name ||
-      each.textContent?.trim().startsWith(name)
+      inView(each) &&
+      (each.getAttribute("aria-label") === name ||
+        each.textContent?.trim().startsWith(name))
   );
   if (!(found instanceof HTMLButtonElement)) {
     throw new TypeError(`No button ${name}`);
@@ -305,7 +347,18 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
-/** The field labelled `label`. */
+/** Opens the tab named `name`. */
+const openTab = async (name: string) => {
+  const tab = [...document.querySelectorAll("[role='tab']")].find((each) =>
+    each.textContent?.trim().startsWith(name)
+  );
+  if (!(tab instanceof HTMLElement)) {
+    throw new TypeError(`No tab ${name}`);
+  }
+  await press(tab);
+};
+
+/** The field labelled `label`, on whichever tab it is. */
 const field = (label: string): HTMLInputElement | HTMLTextAreaElement => {
   const named = [...document.querySelectorAll("label")].find(
     (each) => each.textContent?.trim() === label
@@ -352,16 +405,32 @@ const toggle = (name: string): HTMLElement => {
   return found;
 };
 
-/** Makes an agent named Claire through the page, and leaves it open. */
-const madeClaire = async () => {
-  await press(button("New agent"));
-  await set(field("Name"), " Claire ", "input");
-  await set(field("What it is for"), "Chases unpaid invoices.", "input");
-  await set(field("Instructions"), "Answer only about invoices.", "input");
-  await press(button("Make agent"));
+/** The switch in the page's heading, which turns the agent off and on. */
+const onSwitch = (): HTMLElement => {
+  const found = document.querySelector("label [role='switch']");
+  if (!(found instanceof HTMLElement)) {
+    throw new TypeError("No on switch");
+  }
+  return found;
 };
 
-describe("Settings › Agents", () => {
+const claire = {
+  name: "Claire",
+  job: "Chases unpaid invoices.",
+  instructions: "Answer only about invoices.",
+  face: "stephen",
+  modelRole: null,
+};
+
+/** Core with an agent named Claire an admin made earlier, and nothing asked since. */
+const withClaire = async () => {
+  const fake = fakeConnections();
+  await fake.connections.makeAgent(claire);
+  fake.asked.length = 0;
+  return fake;
+};
+
+describe("an agent's page", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -370,51 +439,39 @@ describe("Settings › Agents", () => {
     document.body.replaceChildren();
   });
 
-  it("lists the agents, and leads to Settings › Stephen for the first one's reach", async () => {
+  it("leads to Settings › Stephen for the first agent's reach, with nothing to choose here", async () => {
     const { connections } = fakeConnections();
-    await shown(connections);
-    expect(document.body.textContent).toContain("Stephen");
-    expect(document.body.textContent).toContain(
-      "Answers from what the company told Grasp."
-    );
-    await press(button("Stephen"));
-    // Its own reach and classes aren't set here.
+    await shown(connections, { agent: "Stephen", tab: "access" });
     expect(choice("Who may use Stephen")).toBeNull();
-    expect(document.body.textContent).toContain("Open its settings");
+    expect(
+      document.querySelector("a[href='/settings/stephen']")?.textContent
+    ).toBe("Open Settings › Stephen");
   });
 
-  it("makes an agent from what an admin types, and opens it reaching nobody", async () => {
+  it("makes an agent from what an admin types, and leads to its access", async () => {
     const { connections, asked } = fakeConnections();
-    await shown(connections);
-    await madeClaire();
-    expect(asked).toStrictEqual([
-      [
-        "make",
-        {
-          name: "Claire",
-          job: "Chases unpaid invoices.",
-          instructions: "Answer only about invoices.",
-          face: "stephen",
-          modelRole: null,
-        },
-      ],
-    ]);
-    expect(choice("Who may use Claire")?.value).toBe("nobody");
-    expect(choice("Read their own, for Claire")?.value).toBe("nobody");
+    const router = await shown(connections, "new");
+    await set(field("Name"), " Claire ", "input");
+    await set(field("What it is for"), "Chases unpaid invoices.", "input");
+    await set(field("Instructions"), "Answer only about invoices.", "input");
+    await press(button("Make agent"));
+    expect(asked).toStrictEqual([["make", claire]]);
+    expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
   });
 
-  it("saves whom an agent answers and what it may do as an admin chooses them", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections);
-    await madeClaire();
+  it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire", tab: "access" });
     const who = choice("Who may use Claire");
     const readOwn = choice("Read their own, for Claire");
     if (who === null || readOwn === null) {
       throw new TypeError("Expected Claire's choices");
     }
+    const before = [who.value, readOwn.value];
     await set(who, "everyone", "change");
     await set(readOwn, "same", "change");
-    expect(asked.slice(1)).toStrictEqual([
+    expect(before).toStrictEqual(["nobody", "nobody"]);
+    expect(asked).toStrictEqual([
       ["reach", "agent-1", true, { who: "everyone" }],
       ["class", "agent-1", "read-own", { who: "asClass" }],
     ]);
@@ -423,72 +480,83 @@ describe("Settings › Agents", () => {
     expect(choice("Read their own, for Claire")?.value).toBe("same");
   });
 
-  it("changes an agent's name and pauses it, and says so in the list", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections);
-    await madeClaire();
+  it("saves a new name with the rest of the agent as it was", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire" });
     await set(field("Name"), "Clara", "input");
     await press(button("Save"));
-    await press(toggle("Clara is on"));
-    expect(asked.slice(1)).toStrictEqual([
-      [
-        "change",
-        "agent-1",
-        {
-          name: "Clara",
-          job: "Chases unpaid invoices.",
-          instructions: "Answer only about invoices.",
-          face: "stephen",
-          modelRole: null,
-        },
-      ],
-      ["paused", "agent-1", true],
+    expect(asked).toStrictEqual([
+      ["change", "agent-1", { ...claire, name: "Clara" }],
     ]);
-    expect(document.body.textContent).toContain("Paused · answers nobody");
+  });
+
+  it("pauses an agent from its heading, and says it is paused", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire" });
+    await press(onSwitch());
+    expect(asked).toStrictEqual([["paused", "agent-1", true]]);
+    expect(document.querySelector("h1")?.parentElement?.textContent).toContain(
+      "Paused"
+    );
+    expect(document.body.textContent).toContain("Claire is paused");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections, false);
-    expect(
-      [...document.querySelectorAll("button")].some(
-        (each) => each.textContent?.trim() === "New agent"
-      )
-    ).toBeFalsy();
-    await press(button("Stephen"));
-    expect(field("Name").disabled).toBeTruthy();
-    expect(button("Save").disabled).toBeTruthy();
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire" }, false);
+    expect({
+      name: field("Name").disabled,
+      save: button("Save").disabled,
+      on:
+        Object.hasOwn(onSwitch().dataset, "disabled") ||
+        onSwitch().getAttribute("aria-disabled") === "true",
+    }).toStrictEqual({ name: true, save: true, on: true });
+    await openTab("Schedule");
+    expect(document.body.textContent).toContain(
+      "Claire never works on its own."
+    );
+    expect(document.body.textContent).not.toContain("Add a time");
     expect(asked).toStrictEqual([]);
   });
 
-  it("says why an agent wasn't made in the sheet it was typed in", async () => {
+  it("says why an agent wasn't made on the page it was typed on, and keeps what was typed", async () => {
     const { connections } = fakeConnections();
-    await shown(connections);
-    await press(button("New agent"));
+    const router = await shown(connections, "new");
     await set(field("Name"), "Stephen", "input");
     await press(button("Make agent"));
-    const sheet = document.querySelector('[role="dialog"]');
-    expect(sheet?.textContent).toContain(
+    expect(document.body.textContent).toContain(
       "Another agent already has that name."
     );
-    // Still open, with what was typed.
     expect(field("Name").value).toBe("Stephen");
+    expect(router.state.location.href).toBe("/");
   });
 
-  it("keeps what is typed and not yet saved while the agent is paused", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections);
-    await madeClaire();
+  it("keeps what is typed and not yet saved while the agent is paused, and while another tab is looked at", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire", tab: "instructions" });
     await set(field("Instructions"), "A draft, not saved.", "input");
-    await press(toggle("Claire is on"));
+    // Paused: core is asked and the page read again.
+    await press(onSwitch());
+    const afterPause = field("Instructions").value;
+    await openTab("Access");
+    await openTab("Instructions");
     expect(asked.at(-1)).toStrictEqual(["paused", "agent-1", true]);
-    expect(field("Instructions").value).toBe("A draft, not saved.");
+    expect([afterPause, field("Instructions").value]).toStrictEqual([
+      "A draft, not saved.",
+      "A draft, not saved.",
+    ]);
+    // And it is the draft that is saved.
+    await press(button("Save"));
+    expect(asked.at(-1)).toStrictEqual([
+      "change",
+      "agent-1",
+      { ...claire, instructions: "A draft, not saved." },
+    ]);
   });
 
   it("adds a time an agent works on its own, as a schedule core keeps, and pauses and removes it", async () => {
     const { connections, asked } = fakeConnections();
-    await shown(connections);
-    await press(button("Stephen"));
+    await shown(connections, { agent: "Stephen", tab: "schedule" });
     await set(field("At, in the company's time zone"), "07:30", "input");
     await set(
       field("What to ask it each time"),
@@ -522,23 +590,12 @@ describe("Settings › Agents", () => {
     expect(document.body.textContent).not.toContain("Every weekday at 07:30");
   });
 
-  it("offers a member no way to add a time", async () => {
-    const { connections } = fakeConnections();
-    await shown(connections, false);
-    await press(button("Stephen"));
-    expect(document.body.textContent).toContain(
-      "Stephen never works on its own."
-    );
-    expect(document.body.textContent).not.toContain("Add a time");
-  });
-
   it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
     const { connections, asked } = fakeConnections();
-    await shown(connections);
-    await press(button("Stephen"));
+    await shown(connections, { agent: "Stephen", tab: "schedule" });
     await set(field("What to ask it each time"), "refuse this", "input");
-    // Another change on the panel saves and the page is read again.
-    await press(toggle("Stephen is on"));
+    // Another change on the page saves and the page is read again.
+    await press(onSwitch());
     expect(field("What to ask it each time").value).toBe("refuse this");
     // Core refuses it: still there to be corrected, and said why.
     await press(button("Add a time"));
@@ -549,8 +606,7 @@ describe("Settings › Agents", () => {
 
   it("shows the time zone a wake-up was made in", async () => {
     const { connections } = fakeConnections();
-    await shown(connections);
-    await press(button("Stephen"));
+    await shown(connections, { agent: "Stephen", tab: "schedule" });
     await set(field("What to ask it each time"), "Check the inbox.", "input");
     await press(button("Add a time"));
     expect(document.body.textContent).toContain(

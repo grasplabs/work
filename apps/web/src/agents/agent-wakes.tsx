@@ -13,16 +13,16 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 
 import type { Session } from "../core.ts";
-import { Row } from "./stephen-settings.tsx";
+import { Row } from "../settings/stephen-settings.tsx";
 
-// An agent's wake-ups, in its panel in Settings › Agents: when it takes a
+// An agent's wake-ups, on its page's Schedule tab (agent-page.tsx): when it takes a
 // turn nobody asked for, for whom, and what it is asked. An admin picks
 // how often and at what time, in the company's time zone, never a cron
 // expression; core keeps the schedule as one (agent-wakes.ts) and refuses
 // anything more often than hourly. A woken turn only reads: what the
 // agent wants to change waits for the person it works for, in their chat.
-// Each wake-up says how its last one went. A first version, on Settings ›
-// Stephen's parts.
+// Each wake-up says how its last one went. Its rows are Settings ›
+// Stephen's (`Row`), on a card of the agent's page.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -65,7 +65,7 @@ export const readCron = (
 };
 
 /** When a wake-up fires, in words. */
-const useWhen = () => {
+export const useWhen = () => {
   const { t } = useLingui();
   return (wake: Pick<AgentWake, "cron">): string => {
     const read = readCron(wake.cron);
@@ -272,7 +272,7 @@ export const AgentWakes = ({
   };
   return (
     <>
-      <li className="flex flex-col gap-0.5 border-t px-5 pt-4">
+      <li className="flex flex-col gap-0.5 border-t px-5 py-4">
         <span className="font-medium">
           <Trans>When it works on its own</Trans>
         </span>

@@ -507,6 +507,14 @@
   --icon-x: 1.5px;
 }
 
+/* The agent gives a nod. */
+.lucide-bot {
+  --icon-move: icon-swing;
+  --icon-turn: -10deg;
+  --icon-origin: 50% 90%;
+  --icon-time: 0.6s;
+}
+
 /* The line down its middle and its fold are drawn, and both sides swell. */
 .lucide-brain > :nth-child(1) {
   --icon-move: icon-draw;

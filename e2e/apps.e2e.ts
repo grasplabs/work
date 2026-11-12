@@ -258,6 +258,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     "Projects",
     "Apps",
     "Workflows",
+    // The company's agents: the ones a person may ask, and for admins all of them.
+    "Agents",
     "Integrations",
   ];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
@@ -335,8 +337,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Brain",
         // Who can reach Stephen and what he may do for whom.
         "Stephen",
-        // The company's agents: who each answers and what it may do.
-        "Agents",
         // The company admin's view of the onboarding interviews.
         "Onboarding",
         "Audit trail",

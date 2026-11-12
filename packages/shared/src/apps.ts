@@ -156,6 +156,7 @@ export const appLinkMaxLength = 48;
  */
 export const reservedAppLinks: ReadonlySet<string> = new Set([
   "activity",
+  "agents",
   "api",
   "apps",
   "assets",

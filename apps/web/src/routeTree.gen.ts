@@ -25,6 +25,9 @@ import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
+import { Route as ShellAgentsIndexRouteImport } from './routes/_shell.agents.index'
+import { Route as ShellAgentsAgentRouteImport } from './routes/_shell.agents.$agent'
+import { Route as ShellAgentsNewRouteImport } from './routes/_shell.agents.new'
 import { Route as ShellAppsIndexRouteImport } from './routes/_shell.apps.index'
 import { Route as ShellAppsAppRouteImport } from './routes/_shell.apps.$app'
 import { Route as ShellAppsNewRouteImport } from './routes/_shell.apps.new'
@@ -144,6 +147,21 @@ const DecisionsDecisionRoute = DecisionsDecisionRouteImport.update({
   id: '/decisions/$decision',
   path: '/decisions/$decision',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ShellAgentsIndexRoute = ShellAgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellAgentsAgentRoute = ShellAgentsAgentRouteImport.update({
+  id: '/agents/$agent',
+  path: '/agents/$agent',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellAgentsNewRoute = ShellAgentsNewRouteImport.update({
+  id: '/agents/new',
+  path: '/agents/new',
+  getParentRoute: () => ShellRoute,
 } as any)
 const ShellAppsIndexRoute = ShellAppsIndexRouteImport.update({
   id: '/apps/',
@@ -366,6 +384,8 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof ShellInboxRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
+  '/agents/$agent': typeof ShellAgentsAgentRoute
+  '/agents/new': typeof ShellAgentsNewRoute
   '/apps/$app': typeof ShellAppsAppRouteWithChildren
   '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
@@ -394,6 +414,7 @@ export interface FileRoutesByFullPath {
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
+  '/agents/': typeof ShellAgentsIndexRoute
   '/apps/': typeof ShellAppsIndexRoute
   '/brain/': typeof ShellBrainIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
@@ -421,6 +442,8 @@ export interface FileRoutesByTo {
   '/inbox': typeof ShellInboxRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
+  '/agents/$agent': typeof ShellAgentsAgentRoute
+  '/agents/new': typeof ShellAgentsNewRoute
   '/apps/$app': typeof ShellAppsAppRouteWithChildren
   '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
@@ -449,6 +472,7 @@ export interface FileRoutesByTo {
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
+  '/agents': typeof ShellAgentsIndexRoute
   '/apps': typeof ShellAppsIndexRoute
   '/brain': typeof ShellBrainIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
@@ -480,6 +504,8 @@ export interface FileRoutesById {
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
+  '/_shell/agents/$agent': typeof ShellAgentsAgentRoute
+  '/_shell/agents/new': typeof ShellAgentsNewRoute
   '/_shell/apps/$app': typeof ShellAppsAppRouteWithChildren
   '/_shell/apps/new': typeof ShellAppsNewRoute
   '/_shell/brain/$noteId': typeof ShellBrainNoteIdRoute
@@ -508,6 +534,7 @@ export interface FileRoutesById {
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit_/components/$name': typeof KitComponentsNameRoute
   '/kit_/examples/$name': typeof KitExamplesNameRoute
+  '/_shell/agents/': typeof ShellAgentsIndexRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
   '/_shell/brain/': typeof ShellBrainIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
@@ -539,6 +566,8 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/settings'
     | '/decisions/$decision'
+    | '/agents/$agent'
+    | '/agents/new'
     | '/apps/$app'
     | '/apps/new'
     | '/brain/$noteId'
@@ -567,6 +596,7 @@ export interface FileRouteTypes {
     | '/apps/$app/full'
     | '/kit/components/$name'
     | '/kit/examples/$name'
+    | '/agents/'
     | '/apps/'
     | '/brain/'
     | '/integrations/'
@@ -594,6 +624,8 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/decisions/$decision'
     | '/'
+    | '/agents/$agent'
+    | '/agents/new'
     | '/apps/$app'
     | '/apps/new'
     | '/brain/$noteId'
@@ -622,6 +654,7 @@ export interface FileRouteTypes {
     | '/apps/$app/full'
     | '/kit/components/$name'
     | '/kit/examples/$name'
+    | '/agents'
     | '/apps'
     | '/brain'
     | '/integrations'
@@ -652,6 +685,8 @@ export interface FileRouteTypes {
     | '/_shell/settings'
     | '/decisions/$decision'
     | '/_shell/'
+    | '/_shell/agents/$agent'
+    | '/_shell/agents/new'
     | '/_shell/apps/$app'
     | '/_shell/apps/new'
     | '/_shell/brain/$noteId'
@@ -680,6 +715,7 @@ export interface FileRouteTypes {
     | '/apps/$app/full'
     | '/kit_/components/$name'
     | '/kit_/examples/$name'
+    | '/_shell/agents/'
     | '/_shell/apps/'
     | '/_shell/brain/'
     | '/_shell/integrations/'
@@ -822,6 +858,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/decisions/$decision'
       preLoaderRoute: typeof DecisionsDecisionRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_shell/agents/': {
+      id: '/_shell/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof ShellAgentsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/agents/$agent': {
+      id: '/_shell/agents/$agent'
+      path: '/agents/$agent'
+      fullPath: '/agents/$agent'
+      preLoaderRoute: typeof ShellAgentsAgentRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/agents/new': {
+      id: '/_shell/agents/new'
+      path: '/agents/new'
+      fullPath: '/agents/new'
+      preLoaderRoute: typeof ShellAgentsNewRouteImport
+      parentRoute: typeof ShellRoute
     }
     '/_shell/apps/': {
       id: '/_shell/apps/'
@@ -1188,6 +1245,8 @@ interface ShellRouteChildren {
   ShellInboxRoute: typeof ShellInboxRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
+  ShellAgentsAgentRoute: typeof ShellAgentsAgentRoute
+  ShellAgentsNewRoute: typeof ShellAgentsNewRoute
   ShellAppsAppRoute: typeof ShellAppsAppRouteWithChildren
   ShellAppsNewRoute: typeof ShellAppsNewRoute
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
@@ -1195,6 +1254,7 @@ interface ShellRouteChildren {
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
   ShellWorkflowsRequestsRoute: typeof ShellWorkflowsRequestsRoute
+  ShellAgentsIndexRoute: typeof ShellAgentsIndexRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
@@ -1212,6 +1272,8 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellInboxRoute: ShellInboxRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
+  ShellAgentsAgentRoute: ShellAgentsAgentRoute,
+  ShellAgentsNewRoute: ShellAgentsNewRoute,
   ShellAppsAppRoute: ShellAppsAppRouteWithChildren,
   ShellAppsNewRoute: ShellAppsNewRoute,
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
@@ -1219,6 +1281,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
   ShellWorkflowsRequestsRoute: ShellWorkflowsRequestsRoute,
+  ShellAgentsIndexRoute: ShellAgentsIndexRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
