@@ -27,6 +27,7 @@ import {
   addSource,
   brainWorkOverview,
   eraseSource,
+  recallAs,
   workBrain,
 } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -441,6 +442,104 @@ describe("the Brain's report", () => {
     const after = await reported(bytesOf);
 
     expect(after).toBeGreaterThan(before);
+  });
+});
+
+/** Recall's counts as a report says them: each way's recalls and failures, and those without meaning. */
+const recallCountsOf = (report: BrainReport | null) =>
+  report === null
+    ? null
+    : {
+        words: [
+          report.recall.ways.words.recalls,
+          report.recall.ways.words.failed,
+        ],
+        exact: [
+          report.recall.ways.exact.recalls,
+          report.recall.ways.exact.failed,
+        ],
+        meaning: [
+          report.recall.ways.meaning.recalls,
+          report.recall.ways.meaning.failed,
+        ],
+        without: Object.values(report.recall.withoutMeaning).reduce(
+          (sum, count) => sum + count,
+          0
+        ),
+      };
+
+describe("recall, as staff see it", () => {
+  it("counts recalls by each way, with nothing of the question, and none without meaning while no model ships", async () => {
+    const marked = marker();
+    const { userId } = await signedInWithRole(idp, "user");
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `${marked} invoice INV-2026-17 waits in the warehouse.`,
+      readers: { kind: "owner", personId: userId },
+    });
+    const before = await reported(recallCountsOf);
+
+    const whole = { tokens: 4000 };
+    // Words alone (a marker is an ID, so it would be an exact part too).
+    await recallAs(env, userId, {
+      question: "warehouse invoice",
+      budget: whole,
+    });
+    await recallAs(env, userId, {
+      question: `INV-2026-17 ${marked}`,
+      budget: whole,
+    });
+    await recallAs(env, userId, { question: "", budget: whole });
+    const { text, report } = await readReport();
+    const after = recallCountsOf(report);
+    const ways = report?.recall.ways;
+
+    expect({
+      after,
+      // Words and exact took some time, by the store's clock: never less
+      // than none.
+      timed: ways === undefined ? null : ways.words.totalMs >= 0,
+      content: [marked, userId, "INV-2026-17", "warehouse"].filter((each) =>
+        text.includes(each)
+      ),
+    }).toStrictEqual({
+      after:
+        before === null
+          ? null
+          : {
+              words: [(before.words[0] ?? 0) + 2, before.words[1]],
+              exact: [(before.exact[0] ?? 0) + 1, before.exact[1]],
+              meaning: before.meaning,
+              without: before.without,
+            },
+      timed: true,
+      content: [],
+    });
+  });
+
+  it("starts counting from nothing again, with a later start, once the store restarted", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    await recallAs(env, userId, {
+      question: "warehouse",
+      budget: { tokens: 4000 },
+    });
+    const { report: before } = await readReport();
+    await scheduler.wait(5);
+    await killStore();
+    const { report: after } = await readReport();
+
+    expect({
+      counted: (before?.recall.ways.words.recalls ?? 0) > 0,
+      later:
+        Date.parse(after?.recall.since ?? "") >
+        Date.parse(before?.recall.since ?? ""),
+      after: recallCountsOf(after),
+    }).toStrictEqual({
+      counted: true,
+      later: true,
+      after: { words: [0, 0], exact: [0, 0], meaning: [0, 0], without: 0 },
+    });
   });
 });
 

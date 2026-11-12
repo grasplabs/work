@@ -48,6 +48,12 @@ import {
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
 import { sweepFiles } from "./files.ts";
+import {
+  countingInto,
+  countWithoutMeaning,
+  newRecallCounts,
+  recallOverviewOf,
+} from "./recall-counts.ts";
 import { recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
@@ -138,6 +144,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     embedding: null,
   };
   #sweepAfter = 0;
+
+  /**
+   * Recall by each way and without meaning, since this instance started:
+   * in memory, gone with it, as `#stepsFailed` (recall-counts.ts).
+   */
+  readonly #recallCounts = newRecallCounts();
 
   /**
    * Where this instance is with its erasure ledger: read through, a replay
@@ -283,7 +295,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /** A pack of what the reader may read for the question, within its budget. */
   async recall(request: RecallRequest): Promise<Pack> {
     await this.#ready();
-    return recall(this.ctx.storage.sql, checked(recallRequestSchema, request));
+    const asked = checked(recallRequestSchema, request);
+    if (asked.withoutMeaning !== undefined) {
+      countWithoutMeaning(this.#recallCounts, asked.withoutMeaning);
+    }
+    return recall(
+      this.ctx.storage.sql,
+      asked,
+      countingInto(this.#recallCounts)
+    );
   }
 
   /** A version, current or history, whole: if the reader may read it. */
@@ -531,6 +551,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       storeBytes: this.ctx.storage.sql.databaseSize,
       words: wordsRebuilding(this.ctx.storage.sql) ? "rebuilding" : "current",
       erasures: erasuresOverview(this.ctx.storage.sql),
+      recall: recallOverviewOf(this.#recallCounts),
     };
   }
 

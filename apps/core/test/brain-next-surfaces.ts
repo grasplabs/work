@@ -2081,6 +2081,15 @@ export const storeProbes = {
       [],
       async (asking) => await recall(asking, withInstructionGroups)
     );
+    // As the host asks when its model gave no vector: counted for staff,
+    // and answered as any recall by words and exact parts.
+    const without = "without meaning, as the host says why";
+    const withoutMeaning = await askedOfMarkers(
+      probing,
+      [],
+      async (asking) =>
+        await store().recall({ ...asking, reader, withoutMeaning: "timed_out" })
+    );
     return [
       ...(await askedOfMarkers(probing, momentsOf(probing), recall)),
       ...withGroups.map((answered) => ({
@@ -2088,6 +2097,36 @@ export const storeProbes = {
         call: `${like}: ${answered.call}`,
         like: `${like}: ${answered.like ?? ""}`,
       })),
+      ...withoutMeaning.map((answered) => ({
+        ...answered,
+        call: `${without}: ${answered.call}`,
+        like: `${without}: ${answered.like ?? ""}`,
+      })),
+      await answer(
+        "a reason without meaning named by the markers",
+        async () =>
+          await recall(
+            unchecked({
+              question: hidden,
+              budget: whole,
+              withoutMeaning: hidden,
+            })
+          )
+      ),
+      await answer(
+        "a vector and a reason without meaning",
+        async () =>
+          await store().recall({
+            question: hidden,
+            reader,
+            budget: whole,
+            meaning: {
+              model: { name: "probe-model", build: "0" },
+              vector: [1, 0, 0, 0],
+            },
+            withoutMeaning: "failed",
+          })
+      ),
       await answer(
         "the shared word",
         async () =>
@@ -2672,6 +2711,20 @@ export const storeProbes = {
     await answer(
       "the store's overview, the marked item parked",
       async () => await store().workOverview()
+    ),
+    // Recall's counts, after a recall of the markers that went without
+    // meaning: numbers alone.
+    await answer(
+      "the store's overview after the markers were asked",
+      async () => {
+        await store().recall({
+          question: markers.join(" "),
+          reader: { person: stranger(), groups: [] },
+          budget: { tokens: recallBudgetMax },
+          withoutMeaning: "refused",
+        });
+        return await store().workOverview();
+      }
     ),
   ],
   requeueWork: async ({ markers }) =>

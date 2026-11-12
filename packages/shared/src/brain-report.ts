@@ -5,7 +5,8 @@ import { identifierMaxLength } from "./identifier.ts";
 // How a client's Brain is doing, as Grasp's admin reads it from the
 // client's core (core's brain-report.ts), for Grasp's staff alone: its
 // work queue, its store's size against its limit, its embedding's
-// progress, its erasure ledger, and the steps of its tick that failed;
+// progress, its erasure ledger, the steps of its tick that failed, and
+// how its recall does by each way (counts and times);
 // and the three things staff may do to it: put a parked item back in the
 // queue, rebuild the word indexes, and re-embed. The admin asks as it asks for the snapshot: through the
 // router's route with the router secret, signed with a key both derive
@@ -110,6 +111,27 @@ export const brainSteps = [
 ] as const;
 export type BrainStep = (typeof brainSteps)[number];
 
+/**
+ * The ways recall searches by, in the order staff read them: every one
+ * the store's overview names (core's brain-next.ts holds the two to the
+ * same keys, as the steps).
+ */
+export const brainSearchWays = ["words", "exact", "meaning"] as const;
+export type BrainSearchWay = (typeof brainSearchWays)[number];
+
+/**
+ * Why a recall went without the question's vector though a model runs:
+ * every reason the store counts (held to its keys as the ways are).
+ */
+export const brainWithoutMeaningReasons = [
+  "timed_out",
+  "failed",
+  "refused",
+  "unusable",
+] as const;
+export type BrainWithoutMeaningReason =
+  (typeof brainWithoutMeaningReasons)[number];
+
 /** A step of the store's tick that last failed: when, and the store's own code for why. */
 const stepFailureSchema = z
   .object({ at: isoTime, reason: z.enum(["timed_out", "failed"]) })
@@ -198,6 +220,22 @@ export const brainReportSchema = z.object({
   }),
   /** The tick's own steps, each with its last failure since the store started. */
   stepsFailed: z.record(z.enum(brainSteps), stepFailureSchema),
+  /**
+   * Recall since the store started (`since`), counts and times alone:
+   * per way, how many recalls searched by it, how many it failed and the
+   * milliseconds it took in all (by the store's own clock); and how many
+   * recalls went without the question's vector, by why. Totals only:
+   * keyed by way and reason, never by a person or a store, so the figures
+   * of several stores add field by field (a mean is taken after the sum).
+   */
+  recall: z.object({
+    since: isoTime,
+    ways: z.record(
+      z.enum(brainSearchWays),
+      z.object({ recalls: count, failed: count, totalMs: z.number().min(0) })
+    ),
+    withoutMeaning: z.record(z.enum(brainWithoutMeaningReasons), count),
+  }),
 });
 export type BrainReport = z.infer<typeof brainReportSchema>;
 

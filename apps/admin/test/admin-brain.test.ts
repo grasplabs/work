@@ -299,6 +299,15 @@ const brainReport = (bytes: number): BrainReport => ({
     reindex: null,
     embedding: null,
   },
+  recall: {
+    since: "2026-11-12T08:00:00.000Z",
+    ways: {
+      words: { recalls: 40, failed: 0, totalMs: 120 },
+      exact: { recalls: 8, failed: 0, totalMs: 20 },
+      meaning: { recalls: 0, failed: 0, totalMs: 0 },
+    },
+    withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
+  },
 });
 
 /** A read of a client's Brain from its core, as the section's server function makes it. */
@@ -311,6 +320,10 @@ const textOf = (html: string): string =>
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll(/\s+/gu, " ")
     .replaceAll("&#x27;", "'");
+
+/** The Recall section of a page's HTML: from its title to the next section's. */
+const recallPartOf = (html: string): string =>
+  html.slice(html.indexOf(">Recall<"), html.indexOf(">Erasures<"));
 
 describe("how an organization's Brain is doing", () => {
   useStoreSecrets({ deployer: token });
@@ -650,5 +663,58 @@ describe("how an organization's Brain is doing", () => {
       shown: textOf(row).includes(`${label} Failed 5 min ago`),
       amber: row.includes("text-status-attention"),
     }).toStrictEqual({ shown: true, amber: true });
+  });
+
+  it("shows recall by each way since the store started, a way that failed in amber, and recalls without meaning by reason", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    const report = brainReport(1_000_000);
+    const calm = await liveClient();
+    calm.core.admin = heardSnapshot("Calm");
+    calm.core.brain = report;
+    acme.core.brain = {
+      ...report,
+      recall: {
+        since: "2026-11-12T08:00:00.000Z",
+        ways: {
+          words: { recalls: 40, failed: 0, totalMs: 120 },
+          exact: { recalls: 8, failed: 0, totalMs: 20 },
+          meaning: { recalls: 30, failed: 2, totalMs: 450 },
+        },
+        withoutMeaning: { timed_out: 3, failed: 0, refused: 1, unusable: 0 },
+      },
+    };
+
+    const { html: acmeHtml } = await page(
+      `/organizations/${acme.clientId}/brain`
+    );
+    const { html: calmHtml } = await page(
+      `/organizations/${calm.clientId}/brain`
+    );
+    const failing = recallPartOf(acmeHtml);
+    const fine = recallPartOf(calmHtml);
+    const text = textOf(failing);
+
+    expect({
+      since: text.includes("Since the store last started, 2 hours ago."),
+      ways: [
+        text.includes("Words 40 0 3.0 ms"),
+        text.includes("Exact parts 8 0 2.5 ms"),
+        text.includes("Meaning 30 2 15.0 ms"),
+      ],
+      without: text.includes(
+        "3 timed out, 0 failed, 1 refused, and 0 unusable"
+      ),
+      amber: failing.includes("text-status-attention"),
+      notYet: textOf(fine).includes("Meaning 0 0 –"),
+      calm: fine.includes("text-status-attention"),
+    }).toStrictEqual({
+      since: true,
+      ways: [true, true, true],
+      without: true,
+      amber: true,
+      notYet: true,
+      calm: false,
+    });
   });
 });
