@@ -107,7 +107,7 @@ interface Copy {
 }
 
 /** Tables a table of the store makes itself (the word indexes' pages). */
-const madeByAnother = /^(?:sqlite_|chunk_(?:words|stems)_)/u;
+const madeByAnother = /^(?:sqlite_|(?:chunk|memory)_(?:words|stems)_)/u;
 
 /** A copy of all `store` holds, as a backup taken now. */
 const copyOf = async (store: Store): Promise<Copy> =>
@@ -1245,12 +1245,21 @@ const leavingWork: Record<string, () => Promise<void>> = {
 
 /** The methods that only read, or take work away (`erasePerson` erases it all). */
 const leavingNone = [
+  // Memories and entities are written and read whole in their call, and
+  // erased with what they rest on: none of their methods leaves work.
+  "addMemories",
+  "confirmMemory",
   "erasePerson",
   "find",
+  "findEntities",
+  "listContested",
   "readCurrent",
+  "readEntity",
+  "readMemories",
   "readVersion",
   "recall",
   "repackVectors",
+  "retireMemory",
   "searchVectors",
   "workOverview",
 ];
