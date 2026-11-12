@@ -469,9 +469,9 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     expect(JSON.stringify(events)).not.toContain(word);
   });
 
-  it("reads as the person the call is for: the same App answers two people what each may read", async () => {
+  it("reads as the person the call is for: its owner and an admin each get what they may read, and nobody it is shared with gets anything", async () => {
     const { word, admin, ada, uma } = await company();
-    const app = await askOf(ada, [uma]);
+    const app = await askOf(ada, []);
     const permissionId = await granted(
       ada,
       admin,
@@ -484,13 +484,22 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       target: { kind: "brain", permissionId },
       reviewed: { version: 1 },
     });
+    // Uma is someone it is shared with all the same, as a share that
+    // raced the grant leaves her.
+    await env.DB.prepare(
+      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+    )
+      .bind(app.app, uma.userId, ada.userId, Date.now())
+      .run();
     const asks = { question: word, tokens: 800 };
     expect({
       ada: textsOf(await askedOf(app, ada, asks)),
-      uma: textsOf(await askedOf(app, uma, asks)),
+      admin: textsOf(await askedOf(app, admin, asks)),
+      uma: await askedOf(app, uma, asks),
     }).toStrictEqual({
       ada: [`Ada's team: ${word} is planned in March.`],
-      uma: [`Uma's team: ${word} is planned in June.`],
+      admin: [`Payroll only: ${word} is paid at the usual rate.`],
+      uma: { failed: "app.unreadable" },
     });
   });
 
@@ -883,20 +892,50 @@ const calledOf = async (
   return result.ok ? result.value : { failed: result.error.code };
 };
 
+/** The Keep App of `owner`'s, sealed and current. */
+const keepOf = async (owner: Member) => {
+  const fixture: Fixture = await appWith(keepApp(), "Keep", owner);
+  const release: Release = await seal(fixture);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
+  return { ...fixture, release };
+};
+
+/** The code `run` was refused with, or "done". */
+const doneOr = async (run: () => Promise<unknown>): Promise<string> => {
+  try {
+    await run();
+    return "done";
+  } catch (error) {
+    return z.object({ code: z.string() }).parse(error).code;
+  }
+};
+
+/** Shares `app` of `owner`'s with `member`, as its owner does: "done", or the refusal's code. */
+const sharedWith = async (
+  app: string,
+  owner: Member,
+  member: Member
+): Promise<string> =>
+  await doneOr(
+    async () =>
+      await addMember(env, owner, app, {
+        type: "person",
+        id: member.userId,
+        role: "user",
+      })
+  );
+
 describe("what an App recalls and keeps", setUpTime, () => {
-  it("never reaches someone it is shared with who can't read where it came from", async () => {
+  it("is its owner's alone: shared with nobody, so nobody outside a team reads what it kept of that team's", async () => {
     const { word, admin, ada, uma } = await company();
     // Ben is in none of the teams whose notes hold the word.
     const ben = await person("user");
-    const fixture: Fixture = await appWith(keepApp(), "Keep", ada);
-    const release: Release = await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
-    const app = { ...fixture, release };
+    const app = await keepOf(ada);
     const permissionId = await granted(
       ada,
       admin,
       brainGrant({ type: "app", appId: app.app }),
-      release.manifest.resourceVersion
+      app.release.manifest.resourceVersion
     );
     await approveResourceBinding(env, admin, {
       app: app.app,
@@ -904,30 +943,58 @@ describe("what an App recalls and keeps", setUpTime, () => {
       target: { kind: "brain", permissionId },
       reviewed: { version: 1 },
     });
-    // Shared with Uma and Ben, as the App's owner shares it.
-    const shared = await Promise.all(
-      [uma, ben].map(async (member) => {
-        try {
-          await addMember(env, ada, app.app, {
-            type: "person",
-            id: member.userId,
-            role: "user",
-          });
-          return "shared";
-        } catch (error) {
-          return z.object({ code: z.string() }).parse(error).code;
-        }
-      })
-    );
-    // Uma recalls her team's note, and the App keeps it.
-    const kept = await calledOf(app, uma, "notes.keep", { question: word });
-    const seen = await calledOf(app, ben, "notes.list", {});
-    // However the App is held to it (sharing refused, the call refused,
-    // or the note withheld), Ben never reads her team's note.
+    // Its owner shares it with Uma and Ben, as she would any App.
+    const shared = [
+      await sharedWith(app.app, ada, uma),
+      await sharedWith(app.app, ada, ben),
+    ];
+    // Ada keeps what she recalls: her own team's note.
+    const keptByAda = await calledOf(app, ada, "notes.keep", {
+      question: word,
+    });
+    const keptByUma = await calledOf(app, uma, "notes.keep", {
+      question: word,
+    });
+    const seenByBen = await calledOf(app, ben, "notes.list", {});
     expect({
       shared,
-      kept,
-      benReadsUmasTeam: JSON.stringify(seen).includes(`Uma's team: ${word}`),
-    }).toMatchObject({ benReadsUmasTeam: false });
+      keptByAda,
+      keptByUma,
+      seenByBen,
+      seenByAda: await calledOf(app, ada, "notes.list", {}),
+    }).toStrictEqual({
+      shared: ["app.share_unreadable", "app.share_unreadable"],
+      keptByAda: 1,
+      keptByUma: { failed: "app.not_found" },
+      seenByBen: { failed: "app.not_found" },
+      seenByAda: [`Ada's team: ${word} is planned in March.`],
+    });
+  });
+
+  it("leaves an App without the Brain to share as before, and refuses the Brain to one that is shared", async () => {
+    const { admin, ada, uma } = await company();
+    const app = await keepOf(ada);
+    const shared = await sharedWith(app.app, ada, uma);
+    const asked = await requestPermission(
+      env,
+      ada,
+      brainGrant({ type: "app", appId: app.app }),
+      rolesOf(ada)
+    );
+    const grant = await doneOr(
+      async () =>
+        await grantPermission(env, admin, asked.id, {
+          version: app.release.manifest.resourceVersion,
+        })
+    );
+    expect({
+      shared,
+      grant,
+      umaReads: await calledOf(app, uma, "notes.list", {}),
+    }).toStrictEqual({
+      shared: "done",
+      grant: "permission.invalid",
+      umaReads: [],
+    });
   });
 });

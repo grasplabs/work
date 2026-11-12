@@ -45,7 +45,12 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // Apps collection: it is open to everyone, but Knowledge shows each entry
 // only to whoever may open its App, so its access says nothing of what
 // the App read there. No App is given it now (permissions.ts
-// `requireCollection`); one granted it before counts it unresolved.
+// `requireCollection`); one granted it before counts it unresolved. And so
+// does the platform's `brain` (`platform:brain`): an App or workflow that
+// recalls the Brain reads as whoever it acts for, any team's text, so what
+// it keeps can't be placed. An App that recalls the Brain is its owner's
+// alone for now; a grant of it to an App already shared is refused
+// (permissions.ts `requireUnsharedForBrain`).
 //
 // An App's code is treated as free of provenance, but for its AGENTS.md:
 // that is written from what the App's agents read, and is read only by
@@ -72,7 +77,7 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 
 /** A source as the audit log and refusals name it. */
 const sourceId = (
-  type: "connection" | "collection" | "app",
+  type: "connection" | "collection" | "app" | "platform",
   id: string
 ): string => `${type}:${id}`;
 
@@ -443,7 +448,7 @@ export const sourcesOfApps = async (
   );
   const sourceGrant = and(
     isNotNull(permissions.grantedAt),
-    inArray(permissions.objectType, ["connection", "collection"])
+    inArray(permissions.objectType, ["connection", "collection", "platform"])
   );
   const rows =
     all.length === 0
@@ -475,16 +480,27 @@ export const sourcesOfApps = async (
   const own = new Map(
     all.map((node) => [
       node,
-      { connected: new Set<string>(), read: new Set<string>() },
+      {
+        connected: new Set<string>(),
+        read: new Set<string>(),
+        recalls: false,
+      },
     ])
   );
   const add = (
-    of: { connected: Set<string>; read: Set<string> } | undefined,
+    of:
+      | { connected: Set<string>; read: Set<string>; recalls: boolean }
+      | undefined,
     { object, id, actions }: { object: string; id: string; actions: string }
   ): void => {
+    const granted = actionsSchema.parse(JSON.parse(actions));
     if (object === "connection") {
       of?.connected.add(id);
-    } else if (actionsSchema.parse(JSON.parse(actions)).includes("read")) {
+    } else if (object === "platform") {
+      if (of !== undefined && granted.includes("brain")) {
+        of.recalls = true;
+      }
+    } else if (granted.includes("read")) {
       of?.read.add(id);
     }
   };
@@ -504,6 +520,7 @@ export const sourcesOfApps = async (
             reached.flatMap((of) => [...(of?.connected ?? [])])
           ),
           read: new Set(reached.flatMap((of) => [...(of?.read ?? [])])),
+          recalls: reached.some((of) => of?.recalls === true),
         },
       ];
     })
@@ -523,11 +540,14 @@ export const sourcesOfApps = async (
   const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
   const accessById = new Map(readable.map((access) => [access.id, access]));
   return new Map(
-    [...granted].map(([app, { connected, read }]) => {
+    [...granted].map(([app, { connected, read, recalls }]) => {
       const sources: AppSources = {
         connections: [],
         collections: [],
-        unresolved: [...(reach.get(app)?.unresolved ?? [])],
+        unresolved: [
+          ...(reach.get(app)?.unresolved ?? []),
+          ...(recalls ? [sourceId("platform", "brain")] : []),
+        ],
       };
       for (const id of connected) {
         const owner = ownerOf.get(id);

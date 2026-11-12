@@ -1785,7 +1785,9 @@ build: {
    * name the App's code reaches it by, such as \`MAIL\`. To recall the
    * Brain (\`ctx.brain.recall\`, declared as \`permission.brain({ operations:
    * ["recall"] })\`), it asks for \`{ type: "platform" }\` with actions
-   * \`["brain"]\`.
+   * \`["brain"]\`. An App that recalls the Brain is its owner's alone for
+   * now: it can't be shared, and an App already shared isn't granted it.
+   * Tell the person so before you ask for it.
    */
   requestPermission(app: string, request: {
     object:

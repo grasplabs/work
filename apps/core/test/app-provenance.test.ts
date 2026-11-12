@@ -600,7 +600,7 @@ describe("sharing an App", () => {
 
 /** A permission row's subject and object types, as permissions.ts names them. */
 type SubjectType = "app" | "workflow";
-type ObjectType = "connection" | "workflow";
+type ObjectType = "connection" | "workflow" | "platform";
 
 /** The statement inserting a permission row, as an admin's grant writes it. */
 const grantStatement = (
@@ -949,6 +949,61 @@ describe("sharing an App granted an independent workflow", () => {
         )
       )
     ).resolves.toStrictEqual(["ok", "app.unreadable", "ok", "ok"]);
+  });
+});
+
+describe("an App that recalls the Brain", () => {
+  it("is its owner's alone, however the Brain reached it after it was shared", async () => {
+    const [owner, anna, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    const team = await newTeam(admin, [anna]);
+    const [recalling, starter] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    // Both shared with the team while they reach nothing: Anna opens them.
+    for (const app of [recalling, starter]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await owner.api.apps.members.add(app, {
+        type: "team",
+        id: team,
+        role: "user",
+      });
+    }
+    const before = await outcome(anna.api.apps.get(recalling));
+    // Then the Brain reaches one directly (a grant that landed as it was
+    // shared: the grant's own check and the share race), and the other
+    // through a workflow it starts.
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await grantRow("app", recalling, "platform", "platform", ["brain"]);
+    await grantRow("workflow", workflow, "platform", "platform", ["brain"]);
+    await grantRow("app", starter, "workflow", workflow, ["start"]);
+
+    expect({
+      before,
+      anna: await Promise.all(
+        [recalling, starter].map(
+          async (app) => await outcome(anna.api.apps.get(app))
+        )
+      ),
+      ownerAndAdmin: await Promise.all(
+        [owner, admin].map(
+          async (person) => await outcome(person.api.apps.get(recalling))
+        )
+      ),
+      shareAgain: await shareRefusal(owner, starter, {
+        type: "person",
+        id: anna.userId,
+      }),
+    }).toStrictEqual({
+      before: "ok",
+      anna: ["app.unreadable", "app.unreadable"],
+      ownerAndAdmin: ["ok", "ok"],
+      shareAgain: { sources: ["platform:brain"], people: [anna.userId] },
+    });
   });
 });
 

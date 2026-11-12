@@ -493,7 +493,8 @@ const workflowBuildDeclaration = `/**
  * within the App's roles and row rules. Each alias is used once across every kind. A files permission is
  * the run's own files, and a brain permission the Brain, read as the run's person's teams may (never
  * what only they may read), served by the workflow's own grant of the platform's \`brain\`
- * (\`requestPermission\` below): a \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
+ * (\`requestPermission\` below); an App that starts or follows a workflow that recalls the Brain can't be
+ * shared, for now: a \`call\` step reaches each (below). A file is handed on by its reference \`{ file, name, type, size,
  * sha256 }\`, never its content, and found by its \`file\` ID in its own run alone.
  * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <descriptor> }\`, at
  * most 64 KB in all.

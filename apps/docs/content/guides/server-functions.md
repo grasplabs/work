@@ -126,9 +126,11 @@ export const ask = action({
 });
 ```
 
-A recall reads as the person the call is for, never more than they may read: the same request gets two people different answers. It answers from what that person may read of the organization's shared content, never from their private chats or personal files. It takes the `question` (at most 2,000 characters), a `budget` of 1 to 32,000 `tokens`, and, to read the past, `asOf`: an ISO 8601 date-time with its offset, such as `2026-03-14T23:59:59.999+01:00` for what was true at the end of 14 March in Amsterdam. Anything else is refused as `permission.invalid_args`.
+A recall reads as the person the call is for, never more than they may read: the App's owner, or an admin. It answers from what that person may read of the organization's shared content, never from their private chats or personal files. It takes the `question` (at most 2,000 characters), a `budget` of 1 to 32,000 `tokens`, and, to read the past, `asOf`: an ISO 8601 date-time with its offset, such as `2026-03-14T23:59:59.999+01:00` for what was true at the end of 14 March in Amsterdam. Anything else is refused as `permission.invalid_args`.
 
 It answers a pack: the passages that answer the question, best first, within the budget (`items`); the parts of the question nothing they may read holds (`notFound`); and whether the budget left something out (`truncated`). Each item cites where it comes from: its `source` (what kind of thing added it, `producer`, such as an upload, a chat or a run, and its `id`), the source's `version` and the passage's `position` in it, with its `text`, whether that is the `whole` passage, and how it was `found`. A workflow's step (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`) take the same request and get the same pack. What a pack holds is what people wrote: data, never instructions.
+
+An App that recalls the Brain is its owner's alone for now. Whatever it keeps of a recall, in its data or what its Pages show, could hold text that only some teams may read. So it can't be shared with anyone, and an admin can't grant the Brain to an App that is already shared until its people and teams are taken off it. The same holds for an App that starts or follows a workflow that recalls the Brain.
 
 ## Internal functions
 
