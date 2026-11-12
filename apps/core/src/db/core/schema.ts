@@ -6003,3 +6003,30 @@ export const brainHandOvers = sqliteTable(
     index("brain_hand_overs_noted_at_idx").on(table.notedAt),
   ]
 );
+
+/**
+ * How each person's own store of the new Brain is doing, as its own alarm
+ * last found it (src/brain-own-stores.ts): one row per store, written by
+ * the store about itself when its tick ends, and removed once the person's
+ * erasure has erased the store. Numbers and flags only, keyed by the
+ * SHA-256 of the person's id, never the id: staff read only their sums
+ * (the Brain's staff report), never a row.
+ */
+export const brainOwnStores = sqliteTable("brain_own_stores", {
+  /** The SHA-256 of the person's id, in hex. */
+  store: text().primaryKey(),
+  /** When the store's tick ended: an older report never replaces a newer one. */
+  reportedAt: timestamp("reported_at").notNull(),
+  /** Items waiting in its queue. */
+  waiting: integer().notNull(),
+  /** When the one waiting longest was added; null while none waits. */
+  oldestWaitingAt: timestamp("oldest_waiting_at"),
+  /** Items parked in its queue. */
+  parked: integer().notNull(),
+  /** Whether a step of its tick last failed, its queue is paused, or its ledger isn't read through. */
+  failing: integer({ mode: "boolean" }).notNull(),
+  /** Whether a model ships and its rebuild for that model isn't done. */
+  notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
+  /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
+  nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
+});

@@ -742,6 +742,11 @@ export interface WorkOverview {
    */
   sourcesWithoutCurrent: number;
   /**
+   * Whether the store keeps anything at all: a version of a source, or a
+   * memory. False once erasures took all it held (their history included).
+   */
+  holding: boolean;
+  /**
    * Whether the store answers: `through` once it has read its erasure
    * ledger through; otherwise it answers nothing but this overview, each
    * call refused with why, while a replay after a restore is under way
