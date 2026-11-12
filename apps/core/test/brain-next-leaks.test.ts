@@ -678,8 +678,9 @@ describe(
 
     it("gives no surface anything erased, once the store is restored from a copy taken before the erasure", async () => {
       await answeringProvider(() => {});
-      // The holder's own sources, through core's producers too, their
-      // instruction file, and a team's source: each erased, then a copy of
+      // The holder's own sources, under each producer's kind (an upload, a
+      // chat, a run), their instruction file, and a team's source: each
+      // erased, then a copy of
       // the store from before the erasures comes back. Every surface is
       // then probed as those who could read them before.
       const [{ userId: holder }, { userId: teamMate }] = await Promise.all([
@@ -715,32 +716,10 @@ describe(
       const upload: SourceRef = { producer: "upload", id: crypto.randomUUID() };
       const chat: SourceRef = { producer: "chat", id: crypto.randomUUID() };
       const run: SourceRef = { producer: "run", id: crypto.randomUUID() };
-      await handOverUpload(env, {
-        uploadId: crypto.randomUUID(),
-        documentId: upload.id,
-        uploadedBy: holder,
-        sensitive: false,
-        text: `Contract ${sharedWord} ${uploadMarker}`,
-        stillCurrent: async () => await Promise.resolve(true),
-      });
-      await handOverChatTurn(env, {
-        chatId: chat.id,
-        answerId: 1,
-        personId: holder,
-        restricted: false,
-        said: [
-          { role: "user", text: `Asked ${sharedWord} ${chatMarker}` },
-          { role: "assistant", text: "Answered" },
-        ],
-      });
-      await handOverRun(env, {
-        runId: run.id,
-        principalId: holder,
-        restricted: false,
-        status: "completed",
-        readEnd: async () =>
-          await Promise.resolve({ result: { note: runMarker } }),
-      });
+      const holders: SourceReaders = { kind: "owner", personId: holder };
+      await add(`Contract ${sharedWord} ${uploadMarker}`, holders, upload);
+      await add(`Asked ${sharedWord} ${chatMarker}`, holders, chat);
+      await add(`Run note ${sharedWord} ${runMarker}`, holders, run);
       const holderFile: InstructionFile = { scope: "person", personId: holder };
       await addInstructionFile(env, {
         file: holderFile,
