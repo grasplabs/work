@@ -1,7 +1,7 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
-import { files } from "./db/schema.ts";
+import { files, vectorFiles } from "./db/schema.ts";
 
 // The original files of source versions, in the host's Brain bucket (R2,
 // in the EU: a bucket's jurisdiction is set when it's created). A file's
@@ -29,6 +29,21 @@ import { files } from "./db/schema.ts";
 // `blockConcurrencyWhile`), and only past the grace, so an add between 1
 // and 3 never loses its file. An add that finds its row gone at 3 notes
 // it again and fails, to be retried.
+//
+// The full vectors of passages (embedding.ts) are kept the same way, by
+// their model and their text's SHA-256 (`vectorFiles`), and swept by the
+// same sweep, past the same grace and doubt: a row is noted before its
+// object is written (`noteVectorWrite`), and an object is deleted only
+// with its row, once no current chunk holds its text, or its model is no
+// longer the host's. Rows that may be such are marked `unheld` (as a
+// version is replaced or erased, as a run writes, as a build is
+// replaced), and the sweep checks each again before it deletes, so one
+// that is held again is kept. A run whose write races the sweep is safe
+// as an add is: a row noted within the grace is never swept, and a row in
+// doubt is never written. When ticks overlap, a sweep can delete an
+// object a run has just written again: its row stays, held, the object is
+// gone, and the next run that needs that text runs the model again. No
+// wrong data, only a model call.
 
 /** How long an add may take between noting a file and recording its version. */
 export const fileGraceMs = 15 * 60 * 1000;
@@ -43,8 +58,206 @@ const sweepBatch = 100;
  */
 export const sweepDeleteMs = 10_000;
 
+/** Vector objects swept at once: with a batch of files, one R2 call. */
+const vectorSweepBatch = 400;
+
 /** The file of `hash`'s key in the bucket. */
 export const fileKeyOf = (hash: string): string => `sources/${hash}`;
+
+/** Where `model`'s vectors are kept in the bucket. */
+export const vectorPrefixOf = (model: string): string =>
+  `vectors/${encodeURIComponent(model)}/`;
+
+/** The key of the vector of a passage of `hash` by `model`. */
+export const vectorKeyOf = (model: string, hash: string): string =>
+  `${vectorPrefixOf(model)}${hash}`;
+
+/** A vector object, as its row names it. */
+export interface VectorObject {
+  model: string;
+  hash: string;
+}
+
+/**
+ * Notes that the vector of `hash` by `model` is about to be written, now,
+ * unless a delete of it may still land: false then, and it must not be
+ * written. A row new to the store is unheld until the run that wrote it
+ * says otherwise (`settleVectorWrites`).
+ */
+export const noteVectorWrite = (
+  db: DrizzleSqliteDODatabase,
+  { model, hash }: VectorObject
+): boolean => {
+  const kept = db
+    .select({ until: vectorFiles.inDoubtUntil })
+    .from(vectorFiles)
+    .where(and(eq(vectorFiles.model, model), eq(vectorFiles.hash, hash)))
+    .get();
+  const until = kept?.until ?? null;
+  if (until !== null && until.getTime() > Date.now()) {
+    return false;
+  }
+  const writtenAt = new Date();
+  db.insert(vectorFiles)
+    .values({ model, hash, writtenAt, unheld: true })
+    .onConflictDoUpdate({
+      target: [vectorFiles.model, vectorFiles.hash],
+      set: { writtenAt, inDoubtUntil: null },
+    })
+    .run();
+  return true;
+};
+
+/**
+ * Of `hashes`, those whose vector by `model` a delete may still land on:
+ * a sweep gave up waiting for R2 within the grace. Such an object is
+ * neither read nor written meanwhile: what it holds may be gone any time.
+ */
+export const vectorsInDoubt = (
+  store: SqlStorage,
+  model: string,
+  hashes: readonly string[]
+): Set<string> =>
+  new Set(
+    store
+      .exec<{ hash: string }>(
+        `SELECT hash FROM vector_files
+        WHERE model = ? AND in_doubt_until > ?
+          AND hash IN (SELECT value FROM json_each(?))`,
+        model,
+        Date.now(),
+        JSON.stringify(hashes)
+      )
+      .toArray()
+      .map(({ hash }) => hash)
+  );
+
+/**
+ * A write of `object` the run stopped waiting for, which may still land:
+ * its row stays, unheld, its grace from now, so the sweep deletes it only
+ * after the write would have landed (a write that hasn't within the grace
+ * is taken as never landing, as a delete is).
+ */
+export const leftVectorWrite = (
+  store: SqlStorage,
+  { model, hash }: VectorObject
+): void => {
+  store.exec(
+    "UPDATE vector_files SET written_at = ?, unheld = 1 WHERE model = ? AND hash = ?",
+    Date.now(),
+    model,
+    hash
+  );
+};
+
+/**
+ * After a run wrote the vectors of `rows`: each is held while a current
+ * chunk holds its text, and otherwise left for the sweep. Run it in the
+ * transaction that writes their codes.
+ */
+export const settleVectorWrites = (
+  store: SqlStorage,
+  rows: readonly VectorObject[]
+): void => {
+  store.exec(
+    `UPDATE vector_files SET unheld = NOT EXISTS (
+      SELECT 1 FROM chunks
+      JOIN current_versions ON current_versions.version_row = chunks.version_row
+      WHERE chunks.hash = vector_files.hash)
+    WHERE (model, hash) IN (
+      SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+      FROM json_each(?))`,
+    JSON.stringify(rows.map(({ model, hash }) => [model, hash]))
+  );
+};
+
+/**
+ * Lets go of what is kept of the texts of `hashes` (JSON), in every
+ * model, once they may have left the current chunks: their vectors are
+ * marked for the sweep to check, and the passages a model couldn't embed
+ * are forgotten where no current chunk holds that text any more. Run it in
+ * the transaction that makes a version no longer current, or erases it,
+ * after its chunks are gone or no longer current: one rule for both.
+ */
+export const releaseVectors = (store: SqlStorage, hashes: string): void => {
+  store.exec(
+    `UPDATE vector_files SET unheld = 1
+    WHERE unheld = 0 AND hash IN (SELECT value FROM json_each(?))`,
+    hashes
+  );
+  store.exec(
+    `DELETE FROM unembeddable
+    WHERE hash IN (SELECT value FROM json_each(?1))
+      AND NOT EXISTS (
+        SELECT 1 FROM chunks
+        JOIN current_versions ON current_versions.version_row = chunks.version_row
+        WHERE chunks.hash = unembeddable.hash)`,
+    hashes
+  );
+};
+
+/**
+ * `?1` the cut-off: rows noted before it, `?2` how many. The oldest
+ * unheld vector rows past the grace and not in doubt.
+ */
+const vectorsDueSql = `
+SELECT model, hash FROM vector_files INDEXED BY vector_files_unheld_idx
+WHERE unheld = 1 AND written_at <= ?1
+ORDER BY written_at
+LIMIT ?2`;
+
+/**
+ * `?1` the rows (JSON, [model, hash] each): those still held, by a current
+ * chunk of their text, in the host's model (or any while it runs none).
+ */
+const vectorsHeldSql = `
+SELECT json_extract(due.value, '$[0]') AS model,
+  json_extract(due.value, '$[1]') AS hash
+FROM json_each(?1) AS due
+WHERE coalesce((SELECT model FROM embedding_state), json_extract(due.value, '$[0]'))
+    = json_extract(due.value, '$[0]')
+  AND EXISTS (
+    SELECT 1 FROM chunks
+    JOIN current_versions ON current_versions.version_row = chunks.version_row
+    WHERE chunks.hash = json_extract(due.value, '$[1]'))`;
+
+/** Rows as JSON, [model, hash] each, for the queries above. */
+const rowsJson = (rows: readonly VectorObject[]): string =>
+  JSON.stringify(rows.map(({ model, hash }) => [model, hash]));
+
+/**
+ * The vector rows due for the sweep at `cutoff`: unheld, past the grace,
+ * and not held again. Those held again are marked held.
+ */
+const vectorsDue = (store: SqlStorage, cutoff: number): VectorObject[] => {
+  const candidates = store
+    .exec<{ model: string; hash: string }>(
+      vectorsDueSql,
+      cutoff,
+      vectorSweepBatch
+    )
+    .toArray();
+  if (candidates.length === 0) {
+    return [];
+  }
+  const held = store
+    .exec<{ model: string; hash: string }>(vectorsHeldSql, rowsJson(candidates))
+    .toArray();
+  const heldKeys = new Set(
+    held.map(({ model, hash }) => vectorKeyOf(model, hash))
+  );
+  if (held.length > 0) {
+    store.exec(
+      `UPDATE vector_files SET unheld = 0 WHERE (model, hash) IN (
+        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+        FROM json_each(?))`,
+      rowsJson(held)
+    );
+  }
+  return candidates.filter(
+    ({ model, hash }) => !heldKeys.has(vectorKeyOf(model, hash))
+  );
+};
 
 /** The SHA-256 of `bytes`, in hex. */
 export const hashOf = async (bytes: Uint8Array): Promise<string> => {
@@ -107,22 +320,22 @@ export const holdFile = (db: DrizzleSqliteDODatabase, hash: string): boolean =>
     .get() !== undefined;
 
 /**
- * Deletes `hashes`' files from R2, answering those it deleted: all at once,
- * or, when that fails, one by one, so a file R2 won't delete never holds
- * back the others.
+ * Deletes the objects of `keys` from R2, answering those it deleted: all
+ * at once, or, when that fails, one by one, so an object R2 won't delete
+ * never holds back the others.
  */
-const deleteFiles = async (
+const deleteObjects = async (
   bucket: R2Bucket,
-  hashes: readonly string[]
+  keys: readonly string[]
 ): Promise<string[]> => {
   try {
-    await bucket.delete(hashes.map(fileKeyOf));
-    return [...hashes];
+    await bucket.delete([...keys]);
+    return [...keys];
   } catch {
     const results = await Promise.allSettled(
-      hashes.map(async (hash) => {
-        await bucket.delete(fileKeyOf(hash));
-        return hash;
+      keys.map(async (key) => {
+        await bucket.delete(key);
+        return key;
       })
     );
     return results.flatMap((result) =>
@@ -132,9 +345,48 @@ const deleteFiles = async (
 };
 
 /**
+ * After a sweep's R2 call: the vector rows whose objects it deleted go,
+ * if still due; the rest are noted afresh, so they go to the back and are
+ * tried again a grace later, in doubt for that grace when R2 hung.
+ */
+const settleVectorSweep = (
+  store: SqlStorage,
+  due: readonly VectorObject[],
+  deletedKeys: ReadonlySet<string>,
+  cutoff: number,
+  { timedOut }: { timedOut: boolean }
+): void => {
+  const isDeleted = ({ model, hash }: VectorObject): boolean =>
+    deletedKeys.has(vectorKeyOf(model, hash));
+  const gone = due.filter(isDeleted);
+  const kept = due.filter((row) => !isDeleted(row));
+  const rowsOf = `(model, hash) IN (
+    SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+    FROM json_each(?))`;
+  if (gone.length > 0) {
+    store.exec(
+      `DELETE FROM vector_files WHERE ${rowsOf} AND unheld = 1 AND written_at <= ?`,
+      rowsJson(gone),
+      cutoff
+    );
+  }
+  if (kept.length > 0) {
+    const now = Date.now();
+    store.exec(
+      `UPDATE vector_files SET written_at = ?, in_doubt_until = ?
+      WHERE ${rowsOf} AND unheld = 1`,
+      now,
+      timedOut ? now + fileGraceMs : null,
+      rowsJson(kept)
+    );
+  }
+};
+
+/**
  * Deletes the oldest batch of files no version points at that were noted
  * more than `fileGraceMs` before `at` (never later than now, so no caller's
- * clock shortens the grace): each from R2, then its row. A file R2 won't
+ * clock shortens the grace), and of vector objects no current chunk holds
+ * (above), in one R2 call: each from R2, then its row. A file R2 won't
  * delete is noted afresh, so it goes to the back and is tried again a
  * grace later, and never holds back the files behind it.
  *
@@ -150,6 +402,7 @@ const deleteFiles = async (
  * whose first step was more than `fileGraceMs` before its last.
  */
 export const sweepFiles = async (
+  storage: DurableObjectStorage,
   db: DrizzleSqliteDODatabase,
   bucket: R2Bucket,
   at: Date
@@ -167,7 +420,9 @@ export const sweepFiles = async (
     .limit(sweepBatch)
     .all()
     .map(({ hash }) => hash);
-  if (due.length === 0) {
+  const cutoff = asOf - fileGraceMs;
+  const dueVectors = vectorsDue(storage.sql, cutoff);
+  if (due.length === 0 && dueVectors.length === 0) {
     return "idle";
   }
   // R2 that hangs: the batch is kept, as if R2 refused it, and tried again
@@ -188,9 +443,19 @@ export const sweepFiles = async (
   const timer = setTimeout(() => {
     giveUp("timed_out");
   }, sweepDeleteMs);
-  const answered = await Promise.race([deleteFiles(bucket, due), timedOut]);
+  const answered = await Promise.race([
+    deleteObjects(bucket, [
+      ...due.map(fileKeyOf),
+      ...dueVectors.map(({ model, hash }) => vectorKeyOf(model, hash)),
+    ]),
+    timedOut,
+  ]);
   clearTimeout(timer);
-  const deleted = answered === "timed_out" ? [] : answered;
+  const deletedKeys = new Set(answered === "timed_out" ? [] : answered);
+  const deleted = due.filter((hash) => deletedKeys.has(fileKeyOf(hash)));
+  settleVectorSweep(storage.sql, dueVectors, deletedKeys, cutoff, {
+    timedOut: answered === "timed_out",
+  });
   if (deleted.length > 0) {
     db.delete(files)
       .where(and(unreferenced, inArray(files.hash, deleted)))

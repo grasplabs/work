@@ -29,6 +29,7 @@ import {
   readerGroupsMax,
   recallBudgetMax,
   sourceTextMaxBytes,
+  vectorModelNameOf,
   vectorSearchLimitMax,
   vectorsPerPutMax,
 } from "@grasp-os/brain-next/contract";
@@ -37,6 +38,7 @@ import type {
   Brain,
   ChunkRef,
   ErasureReason,
+  Embedders,
   Reader,
   VectorModel,
   VectorsToPut,
@@ -53,6 +55,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
 import * as coreBrain from "../src/brain-next.ts";
 import type {
   InstructionFile,
@@ -719,6 +722,19 @@ const quietModel = async () => {
   return { kind: "answer" as const, text: "" };
 };
 
+/**
+ * The host's embedders, as a probe hands them: they run a model, and fail
+ * every passage with the passages and the markers in their error, so
+ * anything of an error that gets out shows.
+ */
+const leakyEmbedders = (markers: readonly string[]): Embedders => ({
+  model: { name: "probe-model", build: "0" },
+  embed: async ({ texts }) => {
+    await Promise.resolve();
+    throw new Error(`Could not embed ${[...texts, ...markers].join(" ")}`);
+  },
+});
+
 /** Each export of core's brain-next.ts. */
 type CoreMember = keyof typeof coreBrain;
 
@@ -1092,11 +1108,24 @@ export const coreProbes = {
       ),
     ];
   },
+  reembedBrain: async ({ markers }) => [
+    await answer("a re-embed", async () => {
+      await coreBrain.reembedBrain(env);
+    }),
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await coreBrain.reembedBrain(env);
+        await coreBrain.workBrain(env, at);
+      },
+      "a marked item worked through core's clock after a re-embed"
+    )),
+  ],
   brainWorkOverview: async ({ markers }) => [
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at);
+        await store().work(quietModel, at, leakyEmbedders(markers));
       },
       "a marked item worked to parking"
     )),
@@ -1498,6 +1527,115 @@ const chunkedSource = async (
 /** `chunks`, each at `vector`. */
 const placedAt = (chunks: readonly ChunkRef[], vector: number[]): Coded[] =>
   chunks.map((chunk) => ({ chunk, vector }));
+
+/**
+ * The embedders a probe hands the store to have its queue write vectors:
+ * the embed package's int8 test model, run in the test's isolate.
+ */
+const testModelEmbedders = async (): Promise<Embedders> => {
+  const { model } = await embedInProcess([]);
+  return {
+    model,
+    embed: async ({ texts }) => {
+      const embedded = await embedInProcess(texts);
+      return {
+        kind: "vectors",
+        model: embedded.model,
+        results: embedded.vectors,
+      };
+    },
+  };
+};
+
+/**
+ * Vectors the queue wrote itself, by the test model, of every source the
+ * store holds, the marked ones too, each readable as its version is: the
+ * reader searches them by the markers' own text and by a word nothing
+ * holds, and what either finds of the hidden versions must be what it
+ * finds of a source no one added: nothing.
+ */
+const queuedVectors = async ({
+  reader,
+  markers,
+  hiddenVersions,
+}: Pick<Probing, "reader" | "markers" | "hiddenVersions">): Promise<
+  Answer[]
+> => {
+  const embedders = await testModelEmbedders();
+  const ticked: Answer[] = [];
+  /** Whether every current chunk has the test model's vectors or was passed over. */
+  const allEmbedded = async (): Promise<boolean> => {
+    const { embedding } = await store().workOverview();
+    return (
+      embedding.chunks > 0 &&
+      embedding.embedded + embedding.unembeddable === embedding.chunks
+    );
+  };
+  // The rebuild's walk and the queue's batches, until every chunk is in.
+  // oxlint-disable-next-line no-await-in-loop -- one tick, then look again
+  for (let round = 0; round < 10 && !(await allEmbedded()); round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+    const answered = await answer(
+      `a tick embedding, ${round + 1}`,
+      async () => {
+        await store().work(quietModel, nextDay(), embedders);
+      }
+    );
+    ticked.push(answered);
+  }
+  // What the searches below read is the queue's own vectors, all of them.
+  if (!(await allEmbedded())) {
+    throw new Error("The queue didn't embed every chunk with the test model");
+  }
+  const model =
+    embedders.model === null ? "" : vectorModelNameOf(embedders.model);
+  const hidden = new Set(
+    hiddenVersions.map(({ source, version }) => `${keyOf(source)}@${version}`)
+  );
+  const missing = keyOf(missingSource());
+  const findOf = async (text: string, of: (chunk: ChunkRef) => boolean) => {
+    const { vectors } = await embedInProcess([text]);
+    const { chunks } = await store().searchVectors({
+      model,
+      vector: vectors[0] ?? [],
+      reader,
+      limit: vectorSearchLimitMax,
+    });
+    return chunks.filter(of);
+  };
+  const isHidden = ({ source, version }: ChunkRef) =>
+    hidden.has(`${source}@${version}`);
+  const isMissing = ({ source }: ChunkRef) => source === missing;
+  const asked: Answer[] = [];
+  for (const [name, text] of [
+    ["the markers' text", markedText(markers)],
+    ["a word nothing holds", "unheardofword"],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one search at a time
+    const nothing = await answer(
+      `vectors the queue wrote, by ${name}: of a source no one added`,
+      async () => await findOf(text, isMissing),
+      "nothing",
+      `queued ${name}`
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one search at a time
+    const found = await answer(
+      `vectors the queue wrote, by ${name}: of the hidden versions`,
+      async () => await findOf(text, isHidden),
+      "hidden",
+      `queued ${name}`
+    );
+    asked.push(nothing, found);
+  }
+  return [
+    ...ticked,
+    ...asked,
+    await answer(
+      "the overview, the queue's vectors written",
+      async () => await store().workOverview()
+    ),
+  ];
+};
 
 /** The first chunk of each of `versions`, as the contract names it. */
 const firstChunksOf = (versions: Probing["hiddenVersions"]): ChunkRef[] =>
@@ -1975,6 +2113,7 @@ export const storeProbes = {
         ...request,
         extra: words,
       }),
+      ...(await queuedVectors({ reader, markers, hiddenVersions })),
     ];
   },
   // A step with no reader, for the work queue and erasure: one that has
@@ -2125,7 +2264,7 @@ export const storeProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at);
+        await store().work(quietModel, at, leakyEmbedders(markers));
       },
       "a marked item worked by the store"
     )),
@@ -2133,12 +2272,16 @@ export const storeProbes = {
       sweepTimes().map(
         async (at) =>
           await answer(`a tick as of ${at.toISOString()}`, async () => {
-            await store().work(quietModel, at);
+            await store().work(quietModel, at, leakyEmbedders(markers));
           })
       )
     )),
     await answer("a tick at no time", async () => {
-      await store().work(quietModel, unchecked(markers.join(" ")));
+      await store().work(
+        quietModel,
+        unchecked(markers.join(" ")),
+        leakyEmbedders(markers)
+      );
     }),
   ],
   // As core's (above), through the contract itself.
@@ -2244,11 +2387,24 @@ export const storeProbes = {
       }),
     ];
   },
+  reembed: async ({ markers }) => [
+    await answer("a re-embed", async () => {
+      await store().reembed();
+    }),
+    ...(await workMarked(
+      markers,
+      async (at) => {
+        await store().reembed();
+        await store().work(quietModel, at, leakyEmbedders(markers));
+      },
+      "a marked item worked after a re-embed"
+    )),
+  ],
   workOverview: async ({ markers }) => [
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at);
+        await store().work(quietModel, at, leakyEmbedders(markers));
       },
       "a marked item worked to parking"
     )),

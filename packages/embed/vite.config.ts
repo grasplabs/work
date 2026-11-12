@@ -25,6 +25,7 @@ export default defineProject({
           PAIRS: { className: "PairsEmbedder", useSQLite: true },
           CUSTOM: { className: "CustomEmbedder", useSQLite: true },
           TRAPPING: { className: "TrappingEmbedder", useSQLite: true },
+          BREAKABLE: { className: "BreakableEmbedder", useSQLite: true },
         },
       },
     }),

@@ -71,3 +71,47 @@ export const whenAborted = async (signal: AbortSignal): Promise<never> => {
     signal.removeEventListener("abort", abort);
   }
 };
+
+/**
+ * What `work` answers, or, once `ms` are over or `caller` aborts, a
+ * rejection: a `TimeoutError` for the time, the caller's reason for its
+ * abort. Work that loses the race goes on, unheard: its answer or its
+ * failure is dropped, never left unhandled. Every timer and listener is
+ * gone once it settles.
+ */
+export const withinTime = async <T>(
+  work: () => Promise<T>,
+  ms: number,
+  caller?: AbortSignal
+): Promise<T> => {
+  const limit = deadline(ms, caller);
+  const stop = Promise.withResolvers<never>();
+  const onAbort = () => {
+    stop.reject(
+      limit.stopped() === "timeout" && caller?.aborted !== true
+        ? new DOMException("The work took too long", "TimeoutError")
+        : limit.signal.reason
+    );
+  };
+  limit.signal.addEventListener("abort", onAbort, { once: true });
+  if (limit.signal.aborted) {
+    onAbort();
+  }
+  const settled = (async () => {
+    try {
+      return { value: await work() };
+    } catch (error) {
+      return { error };
+    }
+  })();
+  try {
+    const outcome = await Promise.race([settled, stop.promise]);
+    if ("error" in outcome) {
+      throw outcome.error;
+    }
+    return outcome.value;
+  } finally {
+    limit.clear();
+    limit.signal.removeEventListener("abort", onAbort);
+  }
+};

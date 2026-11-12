@@ -1,6 +1,6 @@
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason } from "./contract.ts";
-import { hashOf } from "./files.ts";
+import { hashOf, releaseVectors } from "./files.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
@@ -594,8 +594,20 @@ const eraseVersion = (sql: SqlStorage, version: Erasing): void => {
   // Codes first: they point at the chunks. Each block that held one is
   // repacked, so none keeps the chunk's row or 1-bit code.
   repackBlocks(sql, removeVectorsOf(sql, version.row));
+  const hashes = JSON.stringify(
+    sql
+      .exec<{ hash: string }>(
+        "SELECT hash FROM chunks WHERE version_row = ? AND hash IS NOT NULL",
+        version.row
+      )
+      .toArray()
+      .map((chunk) => chunk.hash)
+  );
   // Its words and stems go with each chunk (migration 0006's triggers).
   sql.exec("DELETE FROM chunks WHERE version_row = ?", version.row);
+  // Its full vectors, in every build, go with the sweep once no current
+  // chunk holds their text; what its model couldn't embed is forgotten.
+  releaseVectors(sql, hashes);
   sql.exec(
     "DELETE FROM source_changes WHERE source = ? AND version_row = ?",
     version.source,

@@ -19,7 +19,11 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
-    "drizzle-kit": "catalog:"
+    "@grasp-os/embed": "workspace:*",
+    "drizzle-kit": "catalog:",
+    "workerd": "catalog:",
+    "wrangler": "catalog:"
   }
 }

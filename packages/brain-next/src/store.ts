@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import {
   currentRequestSchema,
+  embedModelSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -17,6 +18,7 @@ import {
 import type {
   AskModel,
   CurrentRequest,
+  Embedders,
   NewInstructions,
   NewSource,
   PersonErasure,
@@ -32,6 +34,7 @@ import type {
   WorkOverview,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
+import { embeddingOverview, embeddingStep, reembed } from "./embedding.ts";
 import {
   confirmPending,
   erase,
@@ -121,6 +124,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     sweep: null,
     repack: null,
     reindex: null,
+    embedding: null,
   };
   #sweepAfter = 0;
 
@@ -312,13 +316,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * deleted, then one batch of the sweep, then up
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
-   * the queue,
-   * asking `ask` for its model calls (work.ts). Each step is bounded, so
+   * a step of embedding (embedding.ts), then the queue, asking `ask` for
+   * its model calls and `embedders` for vectors (work.ts). Each step is
+   * bounded, so
    * none starves the next, and the queue runs whatever the others did.
    */
-  async work(ask: AskModel, at: Date): Promise<void> {
+  async work(ask: AskModel, at: Date, embedders: Embedders): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
+    const model = checked(embedModelSchema.nullable(), embedders.model);
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
       return;
@@ -328,7 +334,44 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.#sweep(tickAt);
     this.#repack(tickAt);
     this.#reindex(tickAt);
-    await workTick(this.ctx.storage, this.#work, ask, tickAt);
+    this.#embedding(tickAt, model);
+    await workTick(
+      this.ctx.storage,
+      this.#work,
+      {
+        ask,
+        embedders: {
+          model,
+          embed: async (request) => await embedders.embed(request),
+        },
+        bucket: this.env.BRAIN_OBJECTS,
+      },
+      tickAt
+    );
+  }
+
+  /**
+   * The tick's step of embedding (embedding.ts): a failure ends it and
+   * never reaches the queue; it is tried again next tick, and the overview
+   * shows when it last failed until a later step runs through, as the
+   * repack's and the reindex's.
+   */
+  #embedding(at: Date, model: Embedders["model"]): void {
+    try {
+      embeddingStep(this.ctx.storage, model);
+      this.#stepsFailed.embedding = null;
+    } catch {
+      // Nothing of the error is kept.
+      this.#stepsFailed.embedding = { at, reason: "failed" };
+    }
+  }
+
+  /**
+   * Puts every current version whose chunks lack vectors of the host's
+   * model on the queue again, over the next ticks (embedding.ts).
+   */
+  reembed(): void {
+    reembed(this.ctx.storage);
   }
 
   /**
@@ -428,7 +471,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     const outcome = await this.ctx.blockConcurrencyWhile(async () => {
       try {
-        return await sweepFiles(this.#db, this.env.BRAIN_OBJECTS, at);
+        return await sweepFiles(
+          this.ctx.storage,
+          this.#db,
+          this.env.BRAIN_OBJECTS,
+          at
+        );
       } catch {
         return "failed" as const;
       }
@@ -454,6 +502,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       ledgerReplay: this.#ledger,
       sourcesWithoutCurrent: sourcesWithoutCurrent(this.ctx.storage.sql),
       stepsFailed: { ...this.#stepsFailed },
+      embedding: embeddingOverview(this.ctx.storage),
     };
   }
 

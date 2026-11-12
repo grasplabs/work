@@ -1,6 +1,6 @@
 import { takeToken } from "@grasp-os/shared/token-bucket";
 import type { BucketRate } from "@grasp-os/shared/token-bucket";
-import { count, eq, min, sql } from "drizzle-orm";
+import { and, count, eq, min, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import type { z } from "zod";
@@ -15,6 +15,9 @@ import {
 } from "./contract.ts";
 import type {
   AskModel,
+  EmbedModel,
+  EmbedReply,
+  Embedders,
   ModelTrouble,
   OverdueWork,
   WorkErrorCode,
@@ -89,6 +92,23 @@ export { WorkError } from "./work-error.ts";
 //    never half; nothing acknowledged is lost. Errors are kept as the
 //    queue's own codes (`workErrors`), never as text a handler or a
 //    provider wrote.
+// 7. A kind whose work is too much for one attempt does it in pieces: a
+//    run that wrote a piece of its work says so and that more is left
+//    (`WorkContext.again`, with how much it wrote). It ends well, so the
+//    item goes back to the queue due at once, its attempts at 0 and no
+//    error, as a new item
+//    would (a piece done shows the item isn't the trouble; each piece gets
+//    the attempts a whole item gets), and its run-alone mark gone (it
+//    settled). It goes to the back of its class, behind every item of the
+//    class already waiting, so a large piece of work never starves the
+//    rest of its class; the classes keep their order. A newer item of its
+//    kind and key, added while it ran, replaces it, as rule 4's put-back
+//    does. A run may say more is left only after it wrote some of its work:
+//    one that says so having written nothing fails its attempt
+//    (`no_progress`), as rule 3's failures do, so no kind can go round for
+//    free. The store stopping after a piece was written and before the
+//    item went back is rule 4's stop: the next run finds what the piece
+//    wrote, as any run must.
 //
 // Time: the queue's own time is the tick's (`at`, core's clock's time
 // now) with the real time since the tick began added. Backoffs, pauses,
@@ -200,8 +220,34 @@ export interface WorkContext {
    * queue is paused: let both through.
    */
   ask: (request: { system: string; input: string }) => Promise<string>;
+  /**
+   * The host's embedders: the model they run now (null while none ships),
+   * and `embed`, which embeds passages with it in what is left of the
+   * item's time. A host that throws answers `unavailable`.
+   */
+  embedders: {
+    model: EmbedModel | null;
+    embed: (texts: string[]) => Promise<EmbedReply>;
+  };
+  /** The host's Brain bucket, where the store keeps what it keeps in R2. */
+  bucket: R2Bucket;
+  /**
+   * Says more is left once this run returns (rule 7), having written
+   * `progress` pieces of the work (more than 0, or the attempt fails): the
+   * item is put back, due at once with its attempts reset, unless a newer
+   * item of its kind and key replaced it meanwhile. Nothing when the run
+   * throws.
+   */
+  again: (progress: number) => void;
   /** Aborted once the item's time is up: end then, by throwing. */
   signal: AbortSignal;
+}
+
+/** What a tick works with of its host: its model, its embedders and its bucket. */
+export interface WorkHost {
+  ask: AskModel;
+  embedders: Embedders;
+  bucket: R2Bucket;
 }
 
 /** A kind of work, and how one item of it is done. */
@@ -231,6 +277,9 @@ export interface WorkDefinition<Payload> {
    * 20 calls of 10 to 20 s each don't fit in 4 minutes. Write it to finish
    * well inside its limit, with a handful of calls. When what it was to
    * work on is gone, or replaced by a newer version, it returns: done.
+   *
+   * A kind whose work is too much for one attempt does a bounded piece
+   * and, while more is left, calls `again` before it returns.
    */
   run: (payload: Payload, context: WorkContext) => Promise<void>;
 }
@@ -322,11 +371,17 @@ export const enqueueWork = <Payload>(
   const { payload, priority } = item;
   const json = JSON.stringify(definition.payload.parse(payload));
   storage.transactionSync(() => {
-    storage.sql.exec(
-      "DELETE FROM work_items WHERE kind = ? AND key = ? AND running = 0",
-      definition.kind,
-      key
-    );
+    // An interrupted item it replaces passes on its mark: the newer one
+    // runs alone in its place (rule 4).
+    const replaced = storage.sql
+      .exec<{ interrupted: number }>(
+        `DELETE FROM work_items WHERE kind = ? AND key = ? AND running = 0
+        RETURNING interrupted`,
+        definition.kind,
+        key
+      )
+      .toArray()
+      .at(0);
     drizzle(storage)
       .insert(workItems)
       .values({
@@ -337,6 +392,7 @@ export const enqueueWork = <Payload>(
         connection: connection ?? null,
         addedAt: new Date(),
         notBefore: 0,
+        interrupted: replaced?.interrupted === 1,
       })
       .run();
   });
@@ -427,6 +483,18 @@ type Db = DrizzleSqliteDODatabase;
  * Takes `item` off the running, with `changes`; or deletes it when a newer
  * item of its kind and key waits meanwhile, which replaces it.
  */
+/**
+ * The row of `item` as this run claimed it: its id, running, at the
+ * attempt the claim counted. A row an erasure deleted meanwhile is gone,
+ * and whatever was added since is another row, never touched.
+ */
+const claimedRow = (item: Claimed) =>
+  and(
+    eq(workItems.id, item.id),
+    eq(workItems.running, true),
+    eq(workItems.attempts, item.attempts)
+  );
+
 const putBack = (
   storage: DurableObjectStorage,
   item: Claimed,
@@ -444,10 +512,10 @@ const putBack = (
   if (newer === undefined) {
     db.update(workItems)
       .set({ ...changes, running: false })
-      .where(eq(workItems.id, item.id))
+      .where(claimedRow(item))
       .run();
   } else {
-    db.delete(workItems).where(eq(workItems.id, item.id)).run();
+    db.delete(workItems).where(claimedRow(item)).run();
   }
 };
 
@@ -887,9 +955,42 @@ const askWithin = async (
   return parsed.data.text;
 };
 
+/**
+ * `texts` embedded by the host's embedders in what is left of the item's
+ * time: `unavailable` when the host throws, never its error, which could
+ * carry a passage.
+ */
+const embedWithin = async (
+  embedders: Embedders,
+  texts: string[],
+  { signal, deadline }: Attempt
+): Promise<EmbedReply> => {
+  signal.throwIfAborted();
+  const stop = abortion(signal);
+  try {
+    return await Promise.race([
+      (async (): Promise<EmbedReply> => {
+        try {
+          return await embedders.embed({
+            texts,
+            timeoutMs: Math.max(1, deadline - Date.now()),
+          });
+        } catch {
+          return { kind: "unavailable" };
+        }
+      })(),
+      stop.promise,
+    ]);
+  } finally {
+    stop.release();
+  }
+};
+
 /** How an attempt's handler ended: done, or failed with `error`. */
 interface Outcome {
   error?: unknown;
+  /** Done with a piece, and more is left (`WorkContext.again`): how much it wrote. */
+  again?: { progress: number };
   /** Whether its time was up as it ended. */
   timedOut: boolean;
 }
@@ -898,13 +999,54 @@ interface Outcome {
 const settle = (
   storage: DurableObjectStorage,
   item: Claimed,
-  { error, timedOut }: Outcome,
+  { error, timedOut, again }: Outcome,
   now: number,
   done: boolean
 ): void => {
+  if (done && again !== undefined && again.progress <= 0) {
+    // More is left, and nothing of it was written (rule 7).
+    fail(storage, item, "no_progress", now, { interrupted: false });
+    return;
+  }
+  if (done && again !== undefined) {
+    // A piece done (rule 7): the rest is due at once, its attempts its own
+    // again, at the back of its class: the row is added again, so the
+    // table gives it a new id, past every other (never one used before).
+    // One transaction: an insert that fails leaves the row as claimed,
+    // never lost.
+    storage.transactionSync(() => {
+      const db = drizzle(storage);
+      const claimed = db.select().from(workItems).where(claimedRow(item)).get();
+      if (claimed === undefined) {
+        return;
+      }
+      db.delete(workItems).where(claimedRow(item)).run();
+      const [newer] = storage.sql
+        .exec(
+          "SELECT id FROM work_items WHERE kind = ? AND key = ? AND running = 0",
+          item.kind,
+          item.key
+        )
+        .toArray();
+      if (newer === undefined) {
+        const { id: _id, ...rest } = claimed;
+        db.insert(workItems)
+          .values({
+            ...rest,
+            running: false,
+            attempts: 0,
+            notBefore: 0,
+            lastError: null,
+            interrupted: false,
+          })
+          .run();
+      }
+    });
+    return;
+  }
   if (done) {
     // Its work is done, in time or not.
-    drizzle(storage).delete(workItems).where(eq(workItems.id, item.id)).run();
+    drizzle(storage).delete(workItems).where(claimedRow(item)).run();
     return;
   }
   if (error instanceof WorkWaitsError) {
@@ -931,7 +1073,7 @@ const runItem = async (
   storage: DurableObjectStorage,
   state: WorkState,
   item: Claimed,
-  ask: AskModel,
+  host: WorkHost,
   now: () => number
 ): Promise<void> => {
   const runner = runners.get(item.kind);
@@ -955,13 +1097,34 @@ const runItem = async (
   };
   const handled = (async (): Promise<Outcome & { done: boolean }> => {
     try {
+      let again: Outcome["again"] = undefined;
       await runner.run(JSON.parse(item.payload), {
         storage,
         signal,
+        bucket: host.bucket,
+        again: (progress) => {
+          again = { progress };
+        },
         ask: async (request) =>
-          await askWithin(storage, state, ask, item.kind, request, attempt),
+          await askWithin(
+            storage,
+            state,
+            host.ask,
+            item.kind,
+            request,
+            attempt
+          ),
+        embedders: {
+          model: host.embedders.model,
+          embed: async (texts) =>
+            await embedWithin(host.embedders, texts, attempt),
+        },
       });
-      return { done: true, timedOut: signal.aborted };
+      return {
+        done: true,
+        again,
+        timedOut: signal.aborted,
+      };
     } catch (error) {
       return { done: false, error, timedOut: signal.aborted };
     } finally {
@@ -1017,12 +1180,13 @@ const runItem = async (
  * Works the queue in `storage` for one tick at `at`: claims what may start
  * as items end and as items are added, until nothing more is due or the
  * tick's claiming time is over, and returns once what it started has
- * settled. Model calls go to `ask`, which is used only while this runs.
+ * settled. Model calls go to `host.ask` and passages to embed to
+ * `host.embedders`, which are used only while this runs.
  */
 export const workTick = async (
   storage: DurableObjectStorage,
   state: WorkState,
-  ask: AskModel,
+  host: WorkHost,
   at: Date
 ): Promise<void> => {
   const began = Date.now();
@@ -1036,7 +1200,7 @@ export const workTick = async (
         underWay.set(
           item.id,
           (async () => {
-            await runItem(storage, state, item, ask, now);
+            await runItem(storage, state, item, host, now);
             underWay.delete(item.id);
           })()
         );
@@ -1073,7 +1237,11 @@ export const workOverview = (
   state: WorkState
 ): Omit<
   WorkOverview,
-  "stepsFailed" | "erasing" | "sourcesWithoutCurrent" | "ledgerReplay"
+  | "stepsFailed"
+  | "erasing"
+  | "sourcesWithoutCurrent"
+  | "ledgerReplay"
+  | "embedding"
 > => {
   const db = drizzle(storage);
   const waiting = db

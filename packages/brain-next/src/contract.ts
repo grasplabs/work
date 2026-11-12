@@ -397,6 +397,8 @@ export const workErrors = {
   too_many_calls: "It asked the model more often than one attempt may.",
   unreadable: "What it works on can't be read.",
   erased: "What it works on was erased.",
+  embedder_unavailable: "The embedder gave no vectors for it.",
+  no_progress: "It asked to go on without having done any of its work.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
 
@@ -503,7 +505,119 @@ export interface WorkOverview {
     sweep: StepFailure | null;
     repack: StepFailure | null;
     reindex: StepFailure | null;
+    /**
+     * The tick's step of embedding (embedding.ts): the walk onto the
+     * queue, and removing a replaced build's codes. Cleared once a later
+     * tick's step runs through.
+     */
+    embedding: StepFailure | null;
   };
+  /** How far the host's embedding model has come over the current chunks. */
+  embedding: EmbeddingOverview;
+}
+
+/**
+ * The embedding of the current versions' chunks, by the host's model as
+ * the store last saw it at a tick: counts only, never a passage.
+ *
+ * A replaced build goes in the background once the rebuild's walk is
+ * over: its codes 16 blocks a tick (16,384 codes), its full vectors in the
+ * bucket by the file sweep, at most 400 a tick (files.ts). So about
+ * 300,000 vectors of a replaced build clear in roughly half a day at a
+ * tick a minute; meanwhile they are never searched.
+ */
+export interface EmbeddingOverview {
+  /** The model and its build (`vectorModelNameOf`); null while the host runs none, so nothing is embedded. */
+  model: string | null;
+  /** Chunks of current versions. */
+  chunks: number;
+  /** Of those, the ones with vectors of `model`. */
+  embedded: number;
+  /**
+   * Of those, the ones `model` can't embed: the embedder's own answer for
+   * the text (its module failed on it twice, it is too long, or not text).
+   * Passed over until a re-embed or another build.
+   */
+  unembeddable: number;
+  /** Items of embedding parked after too many failures. */
+  parked: number;
+  /**
+   * Whether the rebuild for `model` is done: since the model last changed
+   * or staff last asked for a re-embed, every current version was put on
+   * the queue, and every item that put there has settled, none parked.
+   * Then every chunk current when the rebuild began, and not replaced
+   * since, has vectors of `model` or is counted in `unembeddable`; what
+   * was added since may still wait, as `embedded` and `chunks` show. False
+   * while the host runs no model. What recall may rely on (GRA-1769).
+   */
+  rebuilt: boolean;
+}
+
+/** Which model and build made a vector, as the host's embedder says. */
+export const embedModelSchema = z.strictObject({
+  name: wellFormedString().min(1).max(128),
+  build: z.string().regex(/^[0-9a-f]{1,64}$/u),
+});
+export type EmbedModel = z.infer<typeof embedModelSchema>;
+
+/**
+ * The name the store keeps a model's vectors under: the model and its
+ * build, so vectors of two builds are never compared.
+ */
+export const vectorModelNameOf = ({ name, build }: EmbedModel): string =>
+  `${name}@${build}`;
+
+/**
+ * Most passages one embed request names: one batch of an item
+ * (embedding.ts `embedBatch`), one call of the embedder.
+ */
+export const embedTextsMax = 16;
+
+/**
+ * Passages to embed, and how long the host may take for all of them:
+ * what is left of the item's time.
+ */
+export interface EmbedRequest {
+  texts: string[];
+  timeoutMs: number;
+}
+
+/**
+ * What the host's embedders answered, per passage, in order:
+ * - its vector;
+ * - `unembeddable`: the embedder's own answer that it can't embed that
+ *   text (its module failed on it twice, or it is too long, or not text);
+ * - null: not embedded this time (its call broke, or the time was up),
+ *   which says nothing about the passage.
+ * With the model and build that answered, vectors and verdicts alike
+ * (null when none came): a verdict of another build than the host's is
+ * not its own, and is kept no more than its vectors.
+ * Or that the embedders gave nothing at all (`unavailable`), which fails
+ * the item: they are the host's own objects, not a provider, so nothing
+ * pauses.
+ */
+export const embedReplySchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("vectors"),
+    model: embedModelSchema.nullable(),
+    results: z
+      .array(
+        z.union([z.array(z.number()), z.literal("unembeddable"), z.null()])
+      )
+      .max(embedTextsMax),
+  }),
+  z.strictObject({ kind: z.literal("unavailable") }),
+]);
+export type EmbedReply = z.infer<typeof embedReplySchema>;
+
+/**
+ * The host's embedders, as the Brain's work uses them: the model they run
+ * now (null while none ships: nothing is embedded, and the overview says
+ * so), and a way to embed passages with it.
+ */
+export interface Embedders {
+  model: EmbedModel | null;
+  embed: (request: EmbedRequest) => Promise<EmbedReply>;
 }
 
 /**
@@ -593,7 +707,20 @@ export const vectorsToPutSchema = z
   .strictObject({
     model: vectorModelSchema,
     vectors: z
-      .array(z.strictObject({ chunk: chunkRefSchema, vector: vectorSchema }))
+      .array(
+        z.strictObject({
+          chunk: chunkRefSchema,
+          vector: vectorSchema,
+          /**
+           * The SHA-256 of the text the vector was made of: kept only if
+           * the chunk still holds that text.
+           */
+          hash: z
+            .string()
+            .regex(/^[0-9a-f]{64}$/u)
+            .optional(),
+        })
+      )
       .min(1)
       .max(vectorsPerPutMax),
   })
@@ -682,14 +809,25 @@ export interface Brain {
    * deletes one batch of what erasures hid and haven't deleted yet. Then
    * it removes one batch of what adds that never finished left (files no
    * version holds, once past the time an add takes). Then it repacks a few
-   * blocks of vector codes that hold removed ones. Then it works the
-   * queue: runs what is due, a few at a time, asking `ask` for the model
-   * calls it makes, and returns once what it started has ended and nothing
-   * more is due, or its time to start more is up. `ask` is used only while
-   * this call is open. A second tick at the same time shares the same
+   * blocks of vector codes that hold removed ones, and takes a step of
+   * keeping the vectors to the host's embedding model (`embedders.model`):
+   * versions still to embed onto the queue, a replaced build's vectors
+   * removed. Then it works the queue: runs what is due, a few at a time,
+   * asking `ask` for the model calls it makes and `embedders` for vectors,
+   * and returns once what it started has ended and nothing more is due,
+   * or its time to start more is up. `ask` and `embedders` are used only
+   * while this call is open. A second tick at the same time shares the same
    * limits and claims nothing the first has under way.
    */
-  work: (ask: AskModel, at: Date) => Promise<void>;
+  work: (ask: AskModel, at: Date, embedders: Embedders) => Promise<void>;
+  /**
+   * Starts the rebuild for the host's model again: every current version
+   * with chunks it hasn't embedded goes on the queue again, those parked
+   * for good among them, over the next ticks, and the passages it couldn't
+   * embed are tried again. For staff: after the embedders were broken long
+   * enough for items to park. Codes already there stay.
+   */
+  reembed: () => Promise<void>;
   /** The queue, as staff see it. */
   workOverview: () => Promise<WorkOverview>;
   /**

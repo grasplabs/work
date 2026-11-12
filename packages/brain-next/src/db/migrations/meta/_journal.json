@@ -50,6 +50,13 @@
       "when": 1794447798153,
       "tag": "0006_erasure",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794450706838,
+      "tag": "0007_embedding",
+      "breakpoints": true
     }
   ]
 }

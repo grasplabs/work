@@ -158,12 +158,20 @@ export const chunks = sqliteTable(
     /** The chunk's place in its version, from 0. */
     position: integer().notNull(),
     text: text().notNull(),
+    /**
+     * The SHA-256 of its text, in hex: the key of its vectors in the
+     * bucket (embedding.ts). Written with every chunk; a chunk without
+     * one is never embedded.
+     */
+    hash: text(),
   },
   (table) => [
     unique("chunks_version_position_unique").on(
       table.versionRow,
       table.position
     ),
+    // Whether a current chunk still holds a vector's text.
+    index("chunks_hash_idx").on(table.hash),
   ]
 );
 
@@ -430,6 +438,59 @@ export const erasures = sqliteTable(
 );
 
 /**
+ * How far the store has come putting the current versions on the queue
+ * for the host's embedding model (embedding.ts): the model as last seen
+ * at a tick (`vectorModelNameOf`), null while the host ran none; the
+ * last current version's row put on the queue for it; and whether every
+ * one was. A change of model, or a re-embed staff start, begins again
+ * from the first. One row at most.
+ */
+export const embeddingState = sqliteTable(
+  "embedding_state",
+  {
+    id: integer().primaryKey(),
+    model: text(),
+    walkedTo: integer("walked_to").notNull(),
+    walked: integer({ mode: "boolean" }).notNull(),
+    /**
+     * Whether the walk is over and every item it put on the queue has
+     * settled: the rebuild for `model` is done (embedding.ts).
+     */
+    rebuilt: integer({ mode: "boolean" }).notNull(),
+  },
+  () => [check("embedding_state_one", sql.raw("id = 1"))]
+);
+
+/**
+ * A passage's full vector in the bucket (embedding.ts), by its model and
+ * its text's SHA-256, kept as `files` keeps original files: a row is
+ * written before its object, so no object is ever in the bucket without
+ * one, and the object is deleted only with its row, by the same sweep
+ * (files.ts), past the same grace and doubt. `unheld` marks a row whose
+ * text may no longer be in any current chunk, or whose object may not
+ * have been wanted: the sweep checks again before it deletes.
+ */
+export const vectorFiles = sqliteTable(
+  "vector_files",
+  {
+    model: text().notNull(),
+    hash: text().notNull(),
+    writtenAt: integer("written_at", { mode: "timestamp_ms" }).notNull(),
+    inDoubtUntil: integer("in_doubt_until", { mode: "timestamp_ms" }),
+    unheld: integer({ mode: "boolean" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.model, table.hash] }),
+    // The rows of a text, whatever their model.
+    index("vector_files_hash_idx").on(table.hash),
+    // The sweep's candidates, the oldest first.
+    index("vector_files_unheld_idx")
+      .on(table.writtenAt)
+      .where(sql.raw("unheld = 1")),
+  ]
+);
+
+/**
  * A version an erasure hid, still to delete: found by nothing (recall,
  * history and current reads leave it out), deleted with everything it
  * holds by the tick (erasure.ts `eraseBatch`). One that failed to delete
@@ -492,4 +553,19 @@ export const erasedVersions = sqliteTable(
     // An add numbers a source's next version past every one erased.
     index("erased_versions_subject_idx").on(table.subject, table.version),
   ]
+);
+
+/**
+ * A passage the host's model can't embed (embedding.ts), by its model and
+ * its text's SHA-256: the embedder's own answer for that text. Passed
+ * over for that model, so the rest of its source goes on; cleared by a
+ * re-embed, and every other build tries it afresh.
+ */
+export const unembeddable = sqliteTable(
+  "unembeddable",
+  {
+    model: text().notNull(),
+    hash: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.model, table.hash] })]
 );
