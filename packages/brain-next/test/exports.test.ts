@@ -190,7 +190,10 @@ type Row = Record<string, SqlStorageValue>;
 type Copy = { name: string; rows: Row[] }[];
 
 /** Tables a table of the store makes itself (the word indexes' pages). */
-const madeByAnother = /^(?:sqlite_|_cf_|chunk_(?:words|stems)_)/u;
+// Every full-text index's own pages, whichever index: its table writes
+// them.
+const madeByAnother =
+  /^(?:sqlite_|_cf_|(?:chunk|memory|source)_(?:words|stems)_)/u;
 
 const copyOf = async (store: Store): Promise<Copy> =>
   await runInDurableObject(store, (_instance, state) =>

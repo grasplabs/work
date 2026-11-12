@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fe9c0904-d76c-4d21-bc02-82cfa8eb9bfb",
+  "id": "0d9f30bc-7c7e-4a6d-a949-058a76137f64",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -174,6 +174,152 @@
           "value": "id = 1"
         }
       }
+    },
+    "entities": {
+      "name": "entities",
+      "columns": {
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "entities_id_unique": {
+          "name": "entities_id_unique",
+          "columns": [
+            "id"
+          ],
+          "isUnique": true
+        },
+        "entities_kind_idx": {
+          "name": "entities_kind_idx",
+          "columns": [
+            "kind",
+            "row"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "entity_names": {
+      "name": "entity_names",
+      "columns": {
+        "entity": {
+          "name": "entity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory": {
+          "name": "memory",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "folded": {
+          "name": "folded",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "entity_names_folded_idx": {
+          "name": "entity_names_folded_idx",
+          "columns": [
+            "type",
+            "folded",
+            "entity"
+          ],
+          "isUnique": false
+        },
+        "entity_names_memory_idx": {
+          "name": "entity_names_memory_idx",
+          "columns": [
+            "memory"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "entity_names_entity_entities_row_fk": {
+          "name": "entity_names_entity_entities_row_fk",
+          "tableFrom": "entity_names",
+          "tableTo": "entities",
+          "columnsFrom": [
+            "entity"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entity_names_memory_memories_row_fk": {
+          "name": "entity_names_memory_memories_row_fk",
+          "tableFrom": "entity_names",
+          "tableTo": "memories",
+          "columnsFrom": [
+            "memory"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "entity_names_entity_memory_type_folded_pk": {
+          "columns": [
+            "entity",
+            "memory",
+            "type",
+            "folded"
+          ],
+          "name": "entity_names_entity_memory_type_folded_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "erased_versions": {
       "name": "erased_versions",
@@ -388,262 +534,6 @@
         }
       }
     },
-    "export_parts": {
-      "name": "export_parts",
-      "columns": {
-        "export": {
-          "name": "export",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "part": {
-          "name": "part",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "hash": {
-          "name": "hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "versions": {
-          "name": "versions",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "bytes": {
-          "name": "bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "export_parts_export_exports_id_fk": {
-          "name": "export_parts_export_exports_id_fk",
-          "tableFrom": "export_parts",
-          "tableTo": "exports",
-          "columnsFrom": [
-            "export"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "export_parts_export_part_pk": {
-          "columns": [
-            "export",
-            "part"
-          ],
-          "name": "export_parts_export_part_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "export_sources": {
-      "name": "export_sources",
-      "columns": {
-        "export": {
-          "name": "export",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "export_sources_subject_idx": {
-          "name": "export_sources_subject_idx",
-          "columns": [
-            "subject",
-            "version"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "export_sources_export_exports_id_fk": {
-          "name": "export_sources_export_exports_id_fk",
-          "tableFrom": "export_sources",
-          "tableTo": "exports",
-          "columnsFrom": [
-            "export"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "export_sources_export_subject_version_pk": {
-          "columns": [
-            "export",
-            "subject",
-            "version"
-          ],
-          "name": "export_sources_export_subject_version_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "export_sweep": {
-      "name": "export_sweep",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "through": {
-          "name": "through",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "checked": {
-          "name": "checked",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "cursor": {
-          "name": "cursor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "export_sweep_one": {
-          "name": "export_sweep_one",
-          "value": "id = 1"
-        }
-      }
-    },
-    "exports": {
-      "name": "exports",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "deployment": {
-          "name": "deployment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "up_to": {
-          "name": "up_to",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cursor": {
-          "name": "cursor",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "parts": {
-          "name": "parts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "versions": {
-          "name": "versions",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "exports_state_idx": {
-          "name": "exports_state_idx",
-          "columns": [
-            "state",
-            "finished_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "files": {
       "name": "files",
       "columns": {
@@ -693,6 +583,552 @@
         "files_refs": {
           "name": "files_refs",
           "value": "\"files\".\"refs\" >= 0"
+        }
+      }
+    },
+    "memories": {
+      "name": "memories",
+      "columns": {
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity": {
+          "name": "entity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attribute": {
+          "name": "attribute",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "object": {
+          "name": "object",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "value_key": {
+          "name": "value_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "one_value": {
+          "name": "one_value",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "statement": {
+          "name": "statement",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "quote": {
+          "name": "quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "writer": {
+          "name": "writer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lineage": {
+          "name": "lineage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lineage_order": {
+          "name": "lineage_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "speaker": {
+          "name": "speaker",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "valid_from": {
+          "name": "valid_from",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "valid_until": {
+          "name": "valid_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "learned_at": {
+          "name": "learned_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "readers": {
+          "name": "readers",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "memories_id_unique": {
+          "name": "memories_id_unique",
+          "columns": [
+            "id"
+          ],
+          "isUnique": true
+        },
+        "memories_entity_idx": {
+          "name": "memories_entity_idx",
+          "columns": [
+            "entity",
+            "attribute",
+            "lineage"
+          ],
+          "isUnique": false
+        },
+        "memories_object_idx": {
+          "name": "memories_object_idx",
+          "columns": [
+            "object"
+          ],
+          "isUnique": false
+        },
+        "memories_version_idx": {
+          "name": "memories_version_idx",
+          "columns": [
+            "source",
+            "version"
+          ],
+          "isUnique": false
+        },
+        "memories_subject_idx": {
+          "name": "memories_subject_idx",
+          "columns": [
+            "subject",
+            "version"
+          ],
+          "isUnique": false
+        },
+        "memories_readers_idx": {
+          "name": "memories_readers_idx",
+          "columns": [
+            "readers"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "memories_entity_entities_row_fk": {
+          "name": "memories_entity_entities_row_fk",
+          "tableFrom": "memories",
+          "tableTo": "entities",
+          "columnsFrom": [
+            "entity"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "memories_object_entities_row_fk": {
+          "name": "memories_object_entities_row_fk",
+          "tableFrom": "memories",
+          "tableTo": "entities",
+          "columnsFrom": [
+            "object"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_changes": {
+      "name": "memory_changes",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "answer": {
+          "name": "answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_confirmations": {
+      "name": "memory_confirmations",
+      "columns": {
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "memory": {
+          "name": "memory",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "memory_confirmations_memory_idx": {
+          "name": "memory_confirmations_memory_idx",
+          "columns": [
+            "memory"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "memory_confirmations_memory_memories_row_fk": {
+          "name": "memory_confirmations_memory_memories_row_fk",
+          "tableFrom": "memory_confirmations",
+          "tableTo": "memories",
+          "columnsFrom": [
+            "memory"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_confirmed_over": {
+      "name": "memory_confirmed_over",
+      "columns": {
+        "confirmation": {
+          "name": "confirmation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory": {
+          "name": "memory",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "memory_confirmed_over_memory_idx": {
+          "name": "memory_confirmed_over_memory_idx",
+          "columns": [
+            "memory"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "memory_confirmed_over_confirmation_memory_confirmations_row_fk": {
+          "name": "memory_confirmed_over_confirmation_memory_confirmations_row_fk",
+          "tableFrom": "memory_confirmed_over",
+          "tableTo": "memory_confirmations",
+          "columnsFrom": [
+            "confirmation"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "memory_confirmed_over_memory_memories_row_fk": {
+          "name": "memory_confirmed_over_memory_memories_row_fk",
+          "tableFrom": "memory_confirmed_over",
+          "tableTo": "memories",
+          "columnsFrom": [
+            "memory"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "memory_confirmed_over_confirmation_memory_pk": {
+          "columns": [
+            "confirmation",
+            "memory"
+          ],
+          "name": "memory_confirmed_over_confirmation_memory_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_erasure_replay": {
+      "name": "memory_erasure_replay",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "through": {
+          "name": "through",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "memory_erasure_replay_one": {
+          "name": "memory_erasure_replay_one",
+          "value": "id = 1"
+        }
+      }
+    },
+    "memory_extractions": {
+      "name": "memory_extractions",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lineage": {
+          "name": "lineage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "readers": {
+          "name": "readers",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "memory_extractions_lineage_idx": {
+          "name": "memory_extractions_lineage_idx",
+          "columns": [
+            "lineage",
+            "version"
+          ],
+          "isUnique": false
+        },
+        "memory_extractions_readers_idx": {
+          "name": "memory_extractions_readers_idx",
+          "columns": [
+            "readers"
+          ],
+          "isUnique": false
+        },
+        "memory_extractions_subject_idx": {
+          "name": "memory_extractions_subject_idx",
+          "columns": [
+            "subject",
+            "version"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "memory_extractions_source_version_readers_pk": {
+          "columns": [
+            "source",
+            "version",
+            "readers"
+          ],
+          "name": "memory_extractions_source_version_readers_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_stamps": {
+      "name": "memory_stamps",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "latest": {
+          "name": "latest",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "memory_stamps_one": {
+          "name": "memory_stamps_one",
+          "value": "id = 1"
         }
       }
     },
@@ -792,80 +1228,6 @@
           "isUnique": true
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "restores": {
-      "name": "restores",
-      "columns": {
-        "export": {
-          "name": "export",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "checked": {
-          "name": "checked",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "damaged": {
-          "name": "damaged",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "held_to": {
-          "name": "held_to",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "part": {
-          "name": "part",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "restored": {
-          "name": "restored",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -1515,6 +1877,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "memory_cursor": {
+          "name": "memory_cursor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         }
       },
       "indexes": {},
