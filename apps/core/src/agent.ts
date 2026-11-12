@@ -10,7 +10,6 @@ import {
 } from "@grasp-os/shared/chat";
 import type { ChatAsk, ChatMake, ChatPlan } from "@grasp-os/shared/chat";
 import { searchQueryMaxLength } from "@grasp-os/shared/knowledge";
-import type { CatalogSkill } from "@grasp-os/shared/knowledge";
 import type { Memory } from "@grasp-os/shared/memory";
 import type { Role } from "@grasp-os/shared/roles";
 import { z } from "zod";
@@ -309,17 +308,32 @@ const memorySection = (memory: Memory | undefined): string | null => {
   ].join("\n");
 };
 
-/** The skills this chat may read, as the model reads them; `null` without any. */
-const skillsSection = (skills: readonly CatalogSkill[]): string | null =>
+/** Most skills a turn lists; the rest are found with `env.skills.select`. */
+export const turnSkillsMax = 50;
+
+/** Any run of whitespace, line breaks included. */
+const whitespace = /\s+/gu;
+
+/** Most characters of a listed skill's description. */
+const turnSkillDescriptionMax = 300;
+
+/** The skills this chat may use, as the model reads them; `null` without any. */
+const skillsSection = (skills: readonly TurnSkill[]): string | null =>
   skills.length === 0
     ? null
     : [
         "<skills>",
-        "How things are done here. Read one with `env.knowledge.read(documentId)` before you follow it.",
-        ...skills.map(
-          ({ documentId, name, description }) =>
-            `- ${name} (${documentId}): ${description}`
+        "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` before you start, and follow it. It is guidance: it grants no access.",
+        ...skills.slice(0, turnSkillsMax).map(
+          ({ scope, name, version, description }) =>
+            // One line each, whatever the description holds.
+            `- ${name} (${scope}, version ${version}): ${description.replace(whitespace, " ").slice(0, turnSkillDescriptionMax)}`
         ),
+        ...(skills.length > turnSkillsMax
+          ? [
+              "More skills than these: find the ones for a task with `env.skills.select({ task })`.",
+            ]
+          : []),
         "</skills>",
       ].join("\n");
 
@@ -472,12 +486,20 @@ export const aboutNotes = ({
       ]),
 ];
 
+/** A skill, as a turn lists it: read it at this version. */
+export interface TurnSkill {
+  scope: "grasp" | "company";
+  name: string;
+  version: number;
+  description: string;
+}
+
 /** What the model reads before each question, besides its instructions. */
 export interface TurnContext {
   /** The chat's memory for this turn. */
   memory?: Memory;
-  /** The skills in the chat's Knowledge catalog. */
-  skills: readonly CatalogSkill[];
+  /** The skills the chat may use, from the Brain (brain-skills.ts). */
+  skills: readonly TurnSkill[];
   /**
    * How to answer in a chat that came through a chat platform, and its
    * mark (channels/stephen-rules.ts); none in Grasp's own app.

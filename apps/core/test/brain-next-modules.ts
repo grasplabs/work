@@ -16,6 +16,8 @@
  */
 export const brainModules = {
   "apps/core/src/instruction-files.ts": "instructions",
+  // The skills' rules (GRA-1826): its own surface, each export probed.
+  "apps/core/src/brain-skills.ts": "skills",
   // Runs core's workBrain on the clock, and hands nothing of it on.
   "apps/core/src/clock.ts": "core",
   // Answers the staff with core's brainStaffReport and actOnBrainForStaff,
