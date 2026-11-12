@@ -269,21 +269,28 @@ describe("a personal purge outside an erasure", setUpTime, () => {
       reason: "erasure_request",
     };
 
+    const member = await personOf("builder");
+
     let prepared: unknown;
     let ran: unknown;
+    let byMember: unknown;
     const events = await auditedDuring(async () => {
       prepared = await outcome(admin.api.knowledge.preparePurge(input));
       ran = await outcome(admin.api.knowledge.purge(input, "1.token"));
+      // Not an admin: refused as one, whoever they name.
+      byMember = await outcome(member.api.knowledge.preparePurge(input));
     });
 
     expect({
       prepared,
       ran,
+      byMember,
       events: events.map(({ action }) => action),
       note: await versionTexts(note.id),
     }).toStrictEqual({
       prepared: "knowledge.purge_not_erasing",
       ran: "knowledge.purge_not_erasing",
+      byMember: "role.forbidden",
       events: [],
       note: ["# Private\nOnly mine."],
     });

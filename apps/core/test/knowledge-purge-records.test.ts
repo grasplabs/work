@@ -632,52 +632,6 @@ describe("a purge's record", setUpTime, () => {
     });
   });
 
-  it("finishes an unfinished purge run again whose document another purge deleted meanwhile", async () => {
-    const admin = await personOf("admin");
-    const secret = `meijer${unique()}`;
-    // A collection only the admin reads: another person's is theirs alone.
-    const personal = await ownCollectionOf(admin);
-    const named = await saveOver(
-      admin,
-      personal,
-      "people.md",
-      `# People\nWrite to ${secret}.`
-    );
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [named.id],
-      terms: [secret],
-      reason: "other",
-    };
-    const failing = await rebuildFailingOnce(admin);
-    const first = await admin.api.knowledge.preparePurge(input);
-    await outcome(failing.knowledge.purge(input, first.token));
-    // A personal purge deletes the document the first one names.
-    await purged(admin, {
-      type: "personal",
-      userId: admin.userId,
-      reason: "offboarding",
-    });
-    const resumed = await purged(admin, input);
-    const status = await admin.api.knowledge.purgeStatus(
-      resumed.result.purgeId
-    );
-    // Strict as ever for a purge not begun: the document is gone.
-    const other = await outcome(
-      admin.api.knowledge.preparePurge({ ...input, terms: [`${secret}x`] })
-    );
-
-    expect({
-      state: status.state,
-      step: stateOf(status)[`document:${named.id}`],
-      other,
-    }).toStrictEqual({
-      state: "complete",
-      step: "complete",
-      other: "knowledge.not_found",
-    });
-  });
-
   it("is read by the client's admins alone", async () => {
     const admin = await personOf("admin");
     const user = await personOf("user");

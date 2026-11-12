@@ -917,4 +917,55 @@ describe("instruction files, edited from a page", setUpTime, () => {
       read: await read(admin.api, nobody),
     }).toStrictEqual({ save: "agent.unknown", read: "agent.unknown" });
   });
+
+  it("saves only from a version the client names: refused without one, refused from a stale one, and a first save from none", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = { scope: "person", personId: person.userId } as const;
+    const sent = async (asked: Record<string, unknown>) =>
+      await outcome(
+        person.api.instructions.save(
+          // SAFETY: as a client may send it: Cap'n Web checks no types.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          asked as never
+        )
+      );
+
+    const withoutAfter = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "No version named.",
+    });
+    const first = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "First.",
+      after: 0,
+    });
+    const second = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "Second.",
+      after: 1,
+    });
+    const stale = await sent({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "From the first.",
+      after: 1,
+    });
+
+    expect({
+      withoutAfter,
+      first,
+      second,
+      stale,
+      now: await person.api.instructions.read(own),
+    }).toStrictEqual({
+      withoutAfter: "permission.invalid",
+      first: "ok",
+      second: "ok",
+      stale: "instructions.changed",
+      now: { version: 2, text: "Second." },
+    });
+  });
 });

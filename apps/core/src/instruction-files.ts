@@ -279,6 +279,12 @@ const requireWriter = async (
   }
 };
 
+/**
+ * The version a save was edited from, which every save names: 0 for a
+ * file never written.
+ */
+const afterSchema = z.int().min(0);
+
 /** The file's own ID in the audit log: its scope and whose it is. */
 const instructionFileId = (file: InstructionFile): string => {
   switch (file.scope) {
@@ -311,7 +317,7 @@ const instructionFileId = (file: InstructionFile): string => {
  * `instructions.too_large` over `instructionsMaxLength` UTF-16 units;
  * `instructions.changed` once `after`, the version it was edited from
  * (0 for none), is no longer the current one; `permission.invalid` for an
- * `Identity` or file that isn't one. Empty text empties the file, which
+ * `Identity` or file that isn't one, or a save that names no `after`. Empty text empties the file, which
  * then loads nowhere. `change` names this save, minted before its first
  * try, so a retry saves it once.
  *
@@ -325,9 +331,16 @@ export const saveInstructionFile = async (
   saved: { file: InstructionFile; change: string; text: string; after: number }
 ): Promise<{ file: InstructionFile; version: number }> => {
   const file = instructionFileOf(saved.file);
+  // Required here, whatever the caller's types said: a client's save
+  // without it would skip the store's check and overwrite a newer save.
+  const after = permissionErrors.parse(
+    "permission.invalid",
+    afterSchema,
+    Reflect.get(saved, "after")
+  );
   const member = await signedInMember(env, by, "write");
   await requireWriter(env, member, file);
-  const added = await addInstructionFile(env, { ...saved, file });
+  const added = await addInstructionFile(env, { ...saved, file, after });
   // Recorded once the version is there, so an entry never reads as a
   // save that wasn't made. One the log can't take fails the call, and the
   // version it saved stays unrecorded unless the same save (the same
