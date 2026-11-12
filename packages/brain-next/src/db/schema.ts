@@ -569,3 +569,151 @@ export const unembeddable = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.model, table.hash] })]
 );
+
+// Memories and entities (memories.ts, entities.ts). A memory is written
+// once and never changed but for the moment it is retired: what ends it
+// otherwise is a newer memory of its lineage, read as such per reader, so
+// nothing about an older memory is written over. Its readers are its set
+// (`reader_set`, as the caller gave it) and, when it rests on a source
+// version, that version's and the source's current version's: checked in
+// every statement that reads it.
+
+/** A thing memories are about, with the store's own id for it. */
+export const entities = sqliteTable(
+  "entities",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    /** Its id, as readers and callers name it. */
+    id: text().notNull().unique(),
+    kind: text().notNull(),
+  },
+  (table) => [index("entities_kind_idx").on(table.kind, table.row)]
+);
+
+/**
+ * A memory (contract.ts `Memory`). Its lineage is the source it rests on
+ * (`source:` and the source's key) or its writer (`writer:` and their
+ * id); `lineage_order` orders a lineage's memories, the version number
+ * for a source's, 0 for a writer's, then `row`. `value_key` is what
+ * one-value attributes compare: the value folded, or the related entity's
+ * id. `only_for` is the SHA-256 of the one person who alone may read it,
+ * as the erasure ledger names them, so a person's erasure finds it, also
+ * when replayed after a restore.
+ */
+export const memories = sqliteTable(
+  "memories",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    id: text().notNull().unique(),
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+    attribute: text(),
+    object: integer().references(() => entities.row),
+    value: text(),
+    valueKey: text("value_key"),
+    oneValue: integer("one_value", { mode: "boolean" }).notNull(),
+    type: text().notNull(),
+    statement: text().notNull(),
+    quote: text(),
+    versionRow: integer("version_row").references(() => sourceVersions.row),
+    writer: text(),
+    lineage: text().notNull(),
+    lineageOrder: integer("lineage_order").notNull(),
+    /** Whose word it is, as JSON (contract.ts `Speaker`). */
+    speaker: text().notNull(),
+    validFrom: integer("valid_from"),
+    validUntil: integer("valid_until"),
+    learnedAt: integer("learned_at").notNull(),
+    retiredAt: integer("retired_at"),
+    readerSet: integer("reader_set")
+      .notNull()
+      .references(() => readerSets.id),
+    onlyFor: text("only_for"),
+  },
+  (table) => [
+    index("memories_entity_idx").on(
+      table.entity,
+      table.attribute,
+      table.lineage
+    ),
+    index("memories_object_idx").on(table.object),
+    index("memories_version_idx").on(table.versionRow),
+    index("memories_reader_set_idx").on(table.readerSet),
+    index("memories_only_for_idx").on(table.onlyFor),
+  ]
+);
+
+/**
+ * A name or an exact identifier of an entity, as one memory gave it:
+ * visible only to those who may read that memory, and gone with it.
+ * `folded` is what a find compares: the name folded as search folds
+ * words, an email lowercased, a reference as written.
+ */
+export const entityNames = sqliteTable(
+  "entity_names",
+  {
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+    memory: integer()
+      .notNull()
+      .references(() => memories.row),
+    type: text({ enum: ["name", "email", "ref"] }).notNull(),
+    value: text().notNull(),
+    folded: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.entity, table.memory, table.type, table.folded],
+    }),
+    index("entity_names_folded_idx").on(table.type, table.folded, table.entity),
+    index("entity_names_memory_idx").on(table.memory),
+  ]
+);
+
+/**
+ * A person's confirmation of a memory, as their own word, over the
+ * memories (`memory_confirmed_over`) that said something else then: seen
+ * only by readers who may read the memory and each of those.
+ */
+export const memoryConfirmations = sqliteTable(
+  "memory_confirmations",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    memory: integer()
+      .notNull()
+      .references(() => memories.row),
+    person: text().notNull(),
+    at: integer().notNull(),
+  },
+  (table) => [index("memory_confirmations_memory_idx").on(table.memory)]
+);
+
+/** A memory a confirmation was made over. */
+export const memoryConfirmedOver = sqliteTable(
+  "memory_confirmed_over",
+  {
+    confirmation: integer()
+      .notNull()
+      .references(() => memoryConfirmations.row),
+    memory: integer()
+      .notNull()
+      .references(() => memories.row),
+  },
+  (table) => [
+    primaryKey({ columns: [table.confirmation, table.memory] }),
+    index("memory_confirmed_over_memory_idx").on(table.memory),
+  ]
+);
+
+/**
+ * An add of memories, by the SHA-256 of its change key (no plain key is
+ * kept), with the SHA-256 of what it added and what it answered (ids
+ * only): the same change again answers the same.
+ */
+export const memoryChanges = sqliteTable("memory_changes", {
+  key: text().primaryKey(),
+  hash: text().notNull(),
+  answer: text().notNull(),
+});

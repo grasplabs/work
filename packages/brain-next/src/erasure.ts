@@ -4,6 +4,7 @@ import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
+import { eraseMemoriesOf, eraseMemoriesOn } from "./forget.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
@@ -496,6 +497,31 @@ const coveredFor = (sql: SqlStorage, person: string): Hidden =>
     .map(({ subject, version }) => [subject, version] as const);
 
 /**
+ * Deletes the set of readers `readerSet` once nothing points at it: an
+ * erased person's id goes with their last version.
+ */
+const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
+  const [used] = sql
+    .exec<{ used: number }>(
+      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE reader_set = ?1)
+        OR EXISTS (SELECT 1 FROM vector_models
+          JOIN vector_codes ON vector_codes.model = vector_models.id
+            AND vector_codes.reader_set = ?1)
+        OR EXISTS (SELECT 1 FROM vector_models
+          JOIN vector_blocks ON vector_blocks.model = vector_models.id
+            AND vector_blocks.reader_set = ?1)
+        OR EXISTS (SELECT 1 FROM memories WHERE reader_set = ?1) AS used`,
+      readerSet
+    )
+    .toArray();
+  if (used?.used === 1) {
+    return;
+  }
+  sql.exec("DELETE FROM reader_set_members WHERE reader_set = ?", readerSet);
+  sql.exec("DELETE FROM reader_sets WHERE id = ?", readerSet);
+};
+
+/**
  * Applies the erasure `key` (`entry`, and for a person what it hid): the
  * store's record of it, and everything it covers hidden. Run it in one
  * transaction. Safe to repeat. Answers the sources whose current version
@@ -542,6 +568,15 @@ const apply = (
       }
     }
   }
+  // The memories only the person may read, learned up to the erasure,
+  // go at once, with names no other memory gives (forget.ts): worked out
+  // again on a replay, from what each memory holds of who alone may read
+  // it, never from what the older copy's readers were.
+  if (entry.kind === "person") {
+    for (const readerSet of eraseMemoriesOf(sql, entry.subject, entry.at)) {
+      dropUnusedReaderSet(sql, readerSet);
+    }
+  }
   const stopped: string[] = [];
   for (const [subject, versions] of bySubject) {
     for (const source of sourcesOf(sql, subject)) {
@@ -551,30 +586,6 @@ const apply = (
     }
   }
   return stopped;
-};
-
-/**
- * Deletes the set of readers `readerSet` once nothing points at it: an
- * erased person's id goes with their last version.
- */
-const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
-  const [used] = sql
-    .exec<{ used: number }>(
-      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE reader_set = ?1)
-        OR EXISTS (SELECT 1 FROM vector_models
-          JOIN vector_codes ON vector_codes.model = vector_models.id
-            AND vector_codes.reader_set = ?1)
-        OR EXISTS (SELECT 1 FROM vector_models
-          JOIN vector_blocks ON vector_blocks.model = vector_models.id
-            AND vector_blocks.reader_set = ?1) AS used`,
-      readerSet
-    )
-    .toArray();
-  if (used?.used === 1) {
-    return;
-  }
-  sql.exec("DELETE FROM reader_set_members WHERE reader_set = ?", readerSet);
-  sql.exec("DELETE FROM reader_sets WHERE id = ?", readerSet);
 };
 
 /** A version still to erase, as a batch takes it. */
@@ -625,6 +636,9 @@ const eraseVersion = (sql: SqlStorage, version: Erasing): void => {
     version.source,
     version.row
   );
+  // The memories drawn from it, with names no other memory gives
+  // (forget.ts); hidden since the erasure, as their version is.
+  const memorySets = eraseMemoriesOn(sql, version.row);
   sql.exec("DELETE FROM current_versions WHERE version_row = ?", version.row);
   sql.exec("DELETE FROM erasing_versions WHERE version_row = ?", version.row);
   sql.exec("DELETE FROM source_versions WHERE row = ?", version.row);
@@ -638,7 +652,9 @@ const eraseVersion = (sql: SqlStorage, version: Erasing): void => {
   );
   // The sweep deletes the file once no version holds it (files.ts).
   sql.exec("UPDATE files SET refs = refs - 1 WHERE hash = ?", version.file);
-  dropUnusedReaderSet(sql, version.reader_set);
+  for (const readerSet of new Set([version.reader_set, ...memorySets])) {
+    dropUnusedReaderSet(sql, readerSet);
+  }
 };
 
 /** How a batch went: whether more are left, and whether any failed. */

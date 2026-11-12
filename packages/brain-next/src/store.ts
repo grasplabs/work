@@ -69,6 +69,7 @@ import {
   embeddingStep,
   reembed,
 } from "./embedding.ts";
+import { findEntities, readEntity } from "./entities.ts";
 import {
   confirmPending,
   deleteStoreObjects,
@@ -96,12 +97,19 @@ import {
   vectorsPrefix,
 } from "./files.ts";
 import {
+  confirmMemory,
+  listContested,
+  readMemories,
+  retireMemory,
+} from "./memories.ts";
+import {
   countingInto,
   countWithoutMeaning,
   newRecallCounts,
   recallOverviewOf,
 } from "./recall-counts.ts";
 import { find, recall } from "./recall.ts";
+import { addMemories } from "./remember.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import {
@@ -177,9 +185,6 @@ const ledgerRetryMs = 30_000;
  * minute, as the host's clock ticks the shared store.
  */
 const alarmWaitMs = 60_000;
-
-/** What a method of the contract not built yet answers. */
-const notBuilt = "The Brain can't do this yet";
 
 /** A tick's time: a valid date. */
 const tickAtSchema = z.date();
@@ -1288,13 +1293,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     });
   }
 
-  /** Adds memories and the entities they name (memories.ts). */
+  /** Adds memories and the entities they name (remember.ts). */
   async addMemories(memories: NewMemories): Promise<AddedMemories> {
     const adding = checked(newMemoriesSchema, memories);
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      throw new Error(notBuilt);
+      return await addMemories(
+        { storage: this.ctx.storage, db: this.#db },
+        adding
+      );
     });
   }
 
@@ -1302,34 +1310,68 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async readMemories(request: MemoriesRequest): Promise<MemoriesRead> {
     const asked = checked(memoriesRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#readable();
-    throw new Error(notBuilt);
+    if (!(await this.#readable())) {
+      return { memories: [] };
+    }
+    return {
+      memories: readMemories(this.ctx.storage.sql, {
+        entity: asked.entity,
+        reader: asked.reader,
+        ...(asked.attribute === undefined
+          ? {}
+          : { attribute: asked.attribute }),
+        at: (asked.asOf ?? new Date()).getTime(),
+        history: asked.history ?? false,
+        limit: asked.limit,
+      }),
+    };
   }
 
   /** The contested facts the reader may read (memories.ts). */
   async listContested(request: ContestedRequest): Promise<ContestedFact[]> {
     const asked = checked(contestedRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#readable();
-    throw new Error(notBuilt);
+    if (!(await this.#readable())) {
+      return [];
+    }
+    return listContested(this.ctx.storage.sql, {
+      ...(asked.entity === undefined ? {} : { entity: asked.entity }),
+      reader: asked.reader,
+      at: Date.now(),
+      limit: asked.limit,
+    });
   }
 
   /** Retires one of the writer's own memories (memories.ts). */
   async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
-    checked(retireRequestSchema, request);
+    const { memory, writer } = checked(retireRequestSchema, request);
     return await this.#changing(async () => {
-      await this.#ready();
-      throw new Error(notBuilt);
+      if (!(await this.#readable())) {
+        return "nothing";
+      }
+      return retireMemory(this.ctx.storage.sql, {
+        id: memory,
+        writer,
+        at: Date.now(),
+      });
     });
   }
 
   /** The reader confirms a memory as their own word (memories.ts). */
   async confirmMemory(request: ConfirmRequest): Promise<MemoryChangeOutcome> {
-    const asked = checked(confirmRequestSchema, request);
-    this.#mayRead(asked.reader);
+    const { memory, reader } = checked(confirmRequestSchema, request);
+    this.#mayRead(reader);
     return await this.#changing(async () => {
-      await this.#ready();
-      throw new Error(notBuilt);
+      if (!(await this.#readable())) {
+        return "nothing";
+      }
+      return this.ctx.storage.transactionSync(() =>
+        confirmMemory(this.ctx.storage.sql, {
+          id: memory,
+          reader,
+          at: Date.now(),
+        })
+      );
     });
   }
 
@@ -1337,16 +1379,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async findEntities(request: EntitiesRequest): Promise<Entity[]> {
     const asked = checked(entitiesRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#readable();
-    throw new Error(notBuilt);
+    if (!(await this.#readable())) {
+      return [];
+    }
+    return findEntities(this.ctx.storage.sql, {
+      reader: asked.reader,
+      ...(asked.kind === undefined ? {} : { kind: asked.kind }),
+      ...(asked.identifier === undefined
+        ? {}
+        : { identifier: asked.identifier }),
+      ...(asked.name === undefined ? {} : { name: asked.name }),
+      limit: asked.limit,
+    });
   }
 
   /** An entity, if the reader may see it (entities.ts). */
   async readEntity(request: EntityRequest): Promise<Entity | null> {
     const asked = checked(entityRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#readable();
-    throw new Error(notBuilt);
+    return (await this.#readable())
+      ? readEntity(this.ctx.storage.sql, asked)
+      : null;
   }
 
   /** One block repacked, in its own transaction: true when more are left. */
