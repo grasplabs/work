@@ -19,7 +19,7 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "en-date-portal",
     language: "en",
     readers: { team: "everyone" },
-    text: "Release notes: the new ordering portal went live on June 3, 2027 after a two-week pilot with the Duisburg site.",
+    text: "Release notes: the new ordering portal went live on June 3, 2027 after a two-week pilot with the Duisburg site and Arnhem.",
   },
   {
     key: "en-date-pallets",
@@ -31,7 +31,7 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "nl-date-inventaris",
     language: "nl",
     readers: { team: "everyone" },
-    text: "Het magazijn in Tilburg is dicht op 9 februari 2027 vanwege de jaarlijkse inventarisatie van alle locaties.",
+    text: "Het magazijn in Tilburg is dicht op 9 februari 2027 vanwege de jaarlijkse inventarisatie van alle opslaglocaties.",
   },
   {
     key: "nl-date-kantine",
@@ -97,7 +97,7 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "es-date-horario",
     language: "es",
     readers: { team: "everyone" },
-    text: "El horario de verano de la nave entra en vigor el 1 de junio de 2027 y termina en septiembre.",
+    text: "El horario de verano de la nave entra en vigor el 1 de junio de 2027 y termina a finales de septiembre.",
   },
   {
     key: "es-date-extintores",
