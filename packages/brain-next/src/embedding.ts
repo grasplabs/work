@@ -29,6 +29,7 @@ import {
   dropVectorsStep,
   forgetModel,
   putVectors,
+  replacedModels,
 } from "./vectors.ts";
 import { defineWork, enqueueWork, WorkError } from "./work.ts";
 import type { WorkContext } from "./work.ts";
@@ -531,6 +532,14 @@ const walkStep = (
   });
 
 /**
+ * What of a build other than `?1` (the host's) the drop (`dropStep`)
+ * still has to take: vector rows not yet let go, and passages it couldn't
+ * embed. Its codes are vectors.ts `replacedModels`'.
+ */
+const replacedVectorFiles = "model <> ?1 AND unheld = 0";
+const replacedUnembeddable = "model <> ?1";
+
+/**
  * Removes a few blocks of the codes of a build other than `model`, lets
  * the sweep have a batch of its vectors (files.ts) and forgets the
  * passages it couldn't embed, then, once no code of it is left, its row.
@@ -541,13 +550,13 @@ const dropStep = (storage: DurableObjectStorage, model: string): void => {
     const { sql } = storage;
     sql.exec(
       `UPDATE vector_files SET unheld = 1 WHERE rowid IN (
-        SELECT rowid FROM vector_files WHERE model <> ? AND unheld = 0 LIMIT ?)`,
+        SELECT rowid FROM vector_files WHERE ${replacedVectorFiles} LIMIT ?2)`,
       model,
       dropRowsPerTick
     );
     sql.exec(
       `DELETE FROM unembeddable WHERE rowid IN (
-        SELECT rowid FROM unembeddable WHERE model <> ? LIMIT ?)`,
+        SELECT rowid FROM unembeddable WHERE ${replacedUnembeddable} LIMIT ?2)`,
       model,
       dropRowsPerTick
     );
@@ -560,10 +569,13 @@ const dropStep = (storage: DurableObjectStorage, model: string): void => {
 
 /**
  * Whether the tick's step of embedding (`embeddingStep`) has work for the
- * model it last saw: its walk not over (`walkStep`), or, once it is,
- * something of a build it replaced still to remove (`dropStep`: codes,
- * vectors not yet let go, passages it couldn't embed). None while it has
- * seen no model: then the step does nothing.
+ * model it last saw, by the step's own conditions: its walk not over
+ * (`walkStep`); over, every item it put on the queue settled, and the
+ * rebuild not yet marked done; or, once the walk is over, something of a
+ * build it replaced still to remove (`dropStep`). Not while an item of
+ * the walk is still on the queue, parked for good included: the queue's
+ * own rule says when that wakes it. None while it has seen no model: then
+ * the step does nothing.
  */
 export const embeddingDue = (storage: DurableObjectStorage): boolean => {
   const { sql } = storage;
@@ -571,13 +583,21 @@ export const embeddingDue = (storage: DurableObjectStorage): boolean => {
   if (state === undefined || state.model === null) {
     return false;
   }
+  if (state.walked === 0) {
+    return true;
+  }
+  if (
+    state.rebuilt === 0 &&
+    sql.exec(rebuildPendingSql).toArray().length === 0
+  ) {
+    return true;
+  }
   return (
-    state.walked === 0 ||
     sql
       .exec(
-        `SELECT 1 WHERE EXISTS (SELECT 1 FROM vector_models WHERE name <> ?1)
-          OR EXISTS (SELECT 1 FROM vector_files WHERE model <> ?1 AND unheld = 0)
-          OR EXISTS (SELECT 1 FROM unembeddable WHERE model <> ?1)`,
+        `SELECT 1 WHERE EXISTS (SELECT 1 FROM vector_models WHERE ${replacedModels})
+          OR EXISTS (SELECT 1 FROM vector_files WHERE ${replacedVectorFiles})
+          OR EXISTS (SELECT 1 FROM unembeddable WHERE ${replacedUnembeddable})`,
         state.model
       )
       .toArray().length > 0

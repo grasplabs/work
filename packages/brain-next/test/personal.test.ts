@@ -145,12 +145,13 @@ const copyOf = async (store: Store): Promise<Copy> =>
   });
 
 /**
- * `copy` put back as all `store` holds, as a restore of its storage
- * would, the bucket untouched, and the store killed, as a restore
+ * `copy` put back in place of all `store` holds, as a restore of its
+ * storage would, the bucket untouched, and the store killed, as a restore
  * restarts it.
  */
 const restore = async (store: Store, copy: Copy): Promise<void> => {
-  await runInDurableObject(store, (_instance, state) => {
+  await runInDurableObject(store, async (_instance, state) => {
+    await state.storage.deleteAll();
     const { sql } = state.storage;
     state.storage.transactionSync(() => {
       // Rows go back table by table: their references hold at the end.
@@ -690,7 +691,11 @@ describe("a person's own store", () => {
             vectors: [
               {
                 chunk: { source, version, position: 0 },
-                vector: vectorOf(`${index}:${change}`),
+                // Some share one vector: passages tied by meaning, in
+                // both stores.
+                vector: vectorOf(
+                  index % 4 <= 1 ? "tied" : `${index}:${change}`
+                ),
               },
             ],
           });
@@ -826,14 +831,32 @@ describe("a person's own store", () => {
   });
 
   // Threat 6: an erased store comes back by a late add.
-  it("once erased whole, refuses every call, a late add after a restart included, and makes nothing", async () => {
-    await add(own(), "Before the erasure", theirs());
+  it("once erased whole, answers its person as a store holding nothing does, refuses every add, a late add after a restart included, and makes nothing", async () => {
+    const kept = await add(own(), "Before the erasure", theirs());
     await eraseWhole();
     const erased = /this store was erased/u;
+    const reader = me();
 
-    await expect(
-      called(own().recall({ question: "Before", reader: me(), budget: whole }))
-    ).rejects.toThrow(erased);
+    expect({
+      found: await called(
+        own().find({ question: "Before", reader, budget: whole })
+      ),
+      version: await called(
+        own().readVersion({ source: kept.source, version: 1, reader })
+      ),
+      current: await called(
+        own().readCurrent({ sources: [kept.source], reader })
+      ),
+      // Erasing one of its sources after it: nothing is left to erase.
+      sourceErased: await called(
+        own().eraseSource({ source: kept.source, reason: "deleted" })
+      ).then(() => "erased"),
+    }).toStrictEqual({
+      found: nothingFound,
+      version: null,
+      current: [],
+      sourceErased: "erased",
+    });
     await expect(add(own(), "A late add", theirs())).rejects.toThrow(erased);
     await kill(own());
     await expect(add(own(), "A later add", theirs())).rejects.toThrow(erased);
@@ -848,8 +871,8 @@ describe("a person's own store", () => {
 
     await restore(own(), backup);
     await expect(
-      called(own().recall({ question: "Before", reader: me(), budget: whole }))
-    ).rejects.toThrow(/this store was erased/u);
+      called(own().find({ question: "Before", reader: me(), budget: whole }))
+    ).resolves.toStrictEqual(nothingFound);
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
 
     // Erasing again is safe, and keeps only the record of it.
@@ -899,10 +922,10 @@ describe("a person's own store", () => {
     await expect(
       keysUnder(`${await ownPrefix()}sources/`)
     ).resolves.toHaveLength(1);
-    // Erased already: it answers nothing meanwhile.
+    // Erased already: it finds nothing meanwhile.
     await expect(
-      called(own().recall({ question: "Theirs", reader: me(), budget: whole }))
-    ).rejects.toThrow(/this store was erased/u);
+      called(own().find({ question: "Theirs", reader: me(), budget: whole }))
+    ).resolves.toStrictEqual(nothingFound);
     await heal();
 
     await eraseWhole();
@@ -997,8 +1020,8 @@ describe("a person's own store", () => {
       `${await ownPrefix()}erased`,
     ]);
     await expect(
-      called(own().recall({ question: "Erased", reader: me(), budget: whole }))
-    ).rejects.toThrow(/this store was erased/u);
+      called(own().find({ question: "Erased", reader: me(), budget: whole }))
+    ).resolves.toStrictEqual(nothingFound);
   });
 
   // Threat 6: a first add reads the ledger before anything is made.
@@ -1285,5 +1308,141 @@ describe("a person's own store's alarm", () => {
       modelDone: null,
       paused: null,
     });
+  });
+
+  // A store that can't read whether it was erased answers as it would,
+  // never with what its database says.
+  it("answers each call as it would while it can't read whether it was erased, never with a database error", async () => {
+    const bucket = env.BRAIN_OBJECTS;
+    Reflect.set(env, "BRAIN_OBJECTS", failingHeads(bucket));
+    try {
+      const calls: (() => Promise<unknown>)[] = [
+        async () => await own().rebuildWords(),
+        async () => await own().reembed(),
+        async () => await own().requeueWork(1),
+        async () =>
+          await own().addSource({
+            source: "test:refused",
+            change: "1",
+            text: "Not yet",
+            access: theirs(),
+          }),
+        async () =>
+          await own().recall({
+            question: "Not yet",
+            reader: me(),
+            budget: whole,
+          }),
+      ];
+      const outcomes: string[] = [];
+      for (const call of calls) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one call at a time
+          outcomes.push(JSON.stringify(await call()));
+        } catch (error) {
+          outcomes.push(String(error));
+        }
+      }
+      expect(
+        outcomes.map((outcome) => outcome.replace(/^Error: /u, ""))
+      ).toStrictEqual([
+        '"unavailable"',
+        '"unavailable"',
+        '"unavailable"',
+        expect.stringContaining("can't read its erasure ledger"),
+        expect.stringContaining("can't read its erasure ledger"),
+      ]);
+    } finally {
+      Reflect.set(env, "BRAIN_OBJECTS", bucket);
+    }
+  });
+
+  // An add whose instance was reset after its file was noted (`refs = 0`,
+  // the write not yet answered): the next instance wakes for the file
+  // nothing holds, at its start.
+  it("is armed when an instance starts after an add was cut off mid-write", async () => {
+    await settled();
+    await inStore((sql) => {
+      sql.exec(
+        "INSERT INTO files (hash, refs, written_at) VALUES ('cut-off', 0, ?)",
+        Date.now()
+      );
+    });
+    await kill(own());
+
+    await own().find({ question: "Cut off", reader: me(), budget: whole });
+    await expect(alarmOf(own())).resolves.not.toBeNull();
+  });
+
+  // A restore from before an erasure: the start replays it, and wakes for
+  // the versions it hid.
+  it("is armed when an instance starts and replays an erasure its storage lacks", async () => {
+    const kept = await settled();
+    const backup = await copyOf(own());
+    await own().eraseSource({ source: kept.source, reason: "deleted" });
+    await tick();
+    await noAlarm();
+
+    await restore(own(), backup);
+    await own().find({ question: "Settled", reader: me(), budget: whole });
+    await expect(alarmOf(own())).resolves.not.toBeNull();
+  });
+
+  it("is not armed when an instance starts with nothing left to do", async () => {
+    await settled();
+    await kill(own());
+
+    await own().find({ question: "Settled", reader: me(), budget: whole });
+    await expect(alarmOf(own())).resolves.toBeNull();
+  });
+
+  // The walk's last step: once its items are all settled, a tick marks the
+  // rebuild done. Not while one it put there is parked for good.
+  it("is armed to mark a walk's rebuild done, but not while a rebuild item is parked for good", async () => {
+    await settled();
+    await sawModel("m@1");
+    await inStore((sql) => {
+      sql.exec("UPDATE embedding_state SET rebuilt = 0");
+    });
+    await own().repackVectors();
+    const marking = await alarmOf(own());
+
+    person = `person-${crypto.randomUUID()}`;
+    await add(own(), "Rebuilt, then parked for good", theirs());
+    await inStore((sql) => {
+      sql.exec(
+        `UPDATE work_items SET payload = json_set(payload, '$.rebuild', json('true')),
+          parked_at = ?, parks = 3`,
+        Date.now()
+      );
+    });
+    await sawModel("m@1");
+    await inStore((sql) => {
+      sql.exec("UPDATE embedding_state SET rebuilt = 0");
+    });
+    await noAlarm();
+    await own().repackVectors();
+    expect({
+      marking: marking !== null,
+      parked: await alarmOf(own()),
+    }).toStrictEqual({
+      marking: true,
+      parked: null,
+    });
+  });
+
+  // An old model's drop is over and its vectors are let go: the sweep's.
+  it("is armed for vectors a dropped model let go", async () => {
+    await settled();
+    await sawModel("m@1");
+    await inStore((sql) => {
+      sql.exec(
+        `INSERT INTO vector_files (model, hash, written_at, in_doubt_until, unheld)
+        VALUES ('old@1', 'let-go', ?, NULL, 1)`,
+        Date.now()
+      );
+    });
+    await own().repackVectors();
+    await expect(alarmOf(own())).resolves.not.toBeNull();
   });
 });
