@@ -50,7 +50,8 @@ import type { Took } from "./store.ts";
 //   origin, or none). The URL carries nothing secret.
 // - The page's first frame, within `startWaitMs`, is text: `{"type":
 //   "start", "language", "sampleRate", "previousText"?, "link"?: {"secret",
-//   "key"}}` (`transcriptionStartSchema`). With `link`, someone's own
+//   "key"}}` (`transcriptionStartSchema`; `previousText` is taken and of
+//   no effect). With `link`, someone's own
 //   interview link, on the device it opened on; without, an admin signed
 //   in, by the session cookie the upgrade carried.
 // - Core answers `{"type": "ready", "session", "maxSeconds"}` once the
@@ -435,9 +436,6 @@ class Relay {
         language: start.language,
         keyterms,
         sampleRate: start.sampleRate,
-        ...(start.previousText === undefined
-          ? {}
-          : { previousText: start.previousText }),
       });
     } catch (error) {
       const code = transcriptionErrors.codeOf(error) ?? "transcription.failed";

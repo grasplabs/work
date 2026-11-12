@@ -832,7 +832,7 @@ describe("AI providers in connect", () => {
       ).resolves.toBe("ai_key.invalid");
     });
 
-    it("sends a line to say and a recording to write down to Mistral, and nothing else of its audio; none of OpenAI's", async () => {
+    it("sends a line to say and a recording to write down to Mistral, and nothing else of its audio; of OpenAI's, a recording alone, for a release more", async () => {
       const mistral = connect({ MISTRAL_API_KEY: platformKey });
       const grant = async (provider: "mistral" | "openai", host: string) =>
         await grantFor({ provider, host, credential: "platform" });
@@ -877,9 +877,13 @@ describe("AI providers in connect", () => {
           voices: "path",
           files: "path",
           openaiSpeech: "path",
-          openaiTranscription: "path",
+          openaiTranscription: "sent",
         },
-        paths: ["/v1/audio/speech", "/v1/audio/transcriptions"],
+        paths: [
+          "/v1/audio/speech",
+          "/v1/audio/transcriptions",
+          "/v1/audio/transcriptions",
+        ],
       });
     });
   });

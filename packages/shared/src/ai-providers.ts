@@ -78,8 +78,8 @@ export interface AiProviderSpec {
   queries: readonly string[];
   /**
    * The paths below its host a realtime WebSocket may open, with the one
-   * query each takes, and nothing else: Mistral's realtime transcription,
-   * for Grasp's live listening (platform features only, never an
+   * query each takes, and nothing else: Mistral's realtime transcription
+   * (and OpenAI's, for a release more), for Grasp's live listening (platform features only, never an
    * organization's key). Empty for a provider with none.
    */
   realtime: readonly { path: string; query: string }[];
@@ -141,9 +141,17 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "openai-responses": "https://api.openai.com/v1",
       "openai-completions": "https://api.openai.com/v1",
     },
-    paths: ["/v1/responses", "/v1/chat/completions"],
+    // Its transcription too, a recording's and the live socket's, which
+    // Grasp's listening went to until it went to Mistral: still allowed
+    // for this release, as connect goes live before core and a core of the
+    // release before still asks for them. Taken out in the next.
+    paths: [
+      "/v1/responses",
+      "/v1/chat/completions",
+      "/v1/audio/transcriptions",
+    ],
     queries: [""],
-    realtime: [],
+    realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
     region: "us",

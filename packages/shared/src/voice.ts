@@ -73,8 +73,6 @@ export interface TranscriptionOptions {
   keyterms: readonly string[];
   /** Samples a second of the audio `send` is given (16-bit PCM, mono). */
   sampleRate: number;
-  /** What was said just before, so the first words are heard in context. */
-  previousText?: string;
 }
 
 /** What a live transcription hears, as it hears it. */
@@ -196,7 +194,11 @@ export const transcriptionFrameMaxBytes = 32 * 1024;
 /** The most a text frame from the page may hold: a start, or a commit. */
 export const transcriptionTextMaxBytes = 4 * 1024;
 
-/** The longest `previousText` the page may send. */
+/**
+ * The longest `previousText` the page may send: what was said just
+ * before. Still taken, as pages open before this release send it, and of
+ * no effect: the live session takes terms to listen out for, no free text.
+ */
 export const transcriptionPreviousTextMaxChars = 1000;
 
 /** The first frame: the language, the audio's rate, and whose interview. */

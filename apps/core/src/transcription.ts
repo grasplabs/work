@@ -45,9 +45,9 @@ import { Resampler } from "./resampler.ts";
 // that come later than that open the next stretch, so none are lost. A
 // commit with nothing said settles as an empty final.
 //
-// Not passed on: what was said just before (`previousText`), as the
-// realtime session takes names and terms to listen out for
-// (`context_bias`) and no free text.
+// The realtime session takes names and terms to listen out for
+// (`context_bias`) and no free text, so what was said just before, which
+// the page may still send (`previousText`), goes nowhere.
 
 /** The sample rate the realtime session is sent PCM at: Mistral's own. */
 export const sessionSampleRate = 16_000;
