@@ -442,6 +442,14 @@ const stateOf = (sql: SqlStorage): State | undefined =>
     .at(0);
 
 /**
+ * The model the store's tick last embedded for (`vectorModelNameOf`), or
+ * null while it saw none: what a recall by meaning naming another tells
+ * a person's own store to wake for (store.ts).
+ */
+export const embeddedFor = (sql: SqlStorage): string | null =>
+  stateOf(sql)?.model ?? null;
+
+/**
  * `?1` the last row walked, `?2` the model's name, `?3` how many: the
  * next current versions, by row, and whether any chunk of each lacks codes
  * of the model and isn't passed over by it.
