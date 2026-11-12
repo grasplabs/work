@@ -379,15 +379,16 @@ export const wordIndex = sqliteTable(
 // Erasure (erasure.ts). `erasures` keeps each erasure the store applied,
 // by its key in the ledger in the Brain's bucket, and is how an erased
 // source's key stays closed; `erasing_versions` the versions an erasure
-// hid and the tick has still to delete; `source_subjects` each source's
-// key as the ledger names it, so a replay finds a source by SQL.
+// hid and the tick has still to delete; `erased_versions` what a person's
+// erasure hid, kept for good; `source_subjects` each source's key as the
+// ledger names it, so a replay finds a source by SQL.
 
 /**
  * An erasure the store applied, as its ledger entry names it: no content
  * and no plain id. Recorded before its ledger entry is written, then
  * confirmed once the entry is in the bucket. Never deleted: it closes an
- * erased source's key, and the confirmed ones are where a replay of the
- * ledger starts.
+ * erased source's key, and the last one is where a replay of the ledger
+ * starts.
  */
 export const erasures = sqliteTable(
   "erasures",
@@ -400,13 +401,7 @@ export const erasures = sqliteTable(
     /** Why (contract.ts `erasureReasons`). */
     reason: text().notNull(),
     erasedAt: integer("erased_at", { mode: "timestamp_ms" }).notNull(),
-    /**
-     * A person's erasure: what it hid, as its ledger entry holds it, the
-     * versions by number under each source's subject (erasure.ts). Null
-     * for a source's, which hides every version.
-     */
-    hidden: text(),
-    /** Whether its ledger entry is known to be in the bucket. */
+    /** Whether its ledger entry is known to be in the bucket, every part. */
     confirmed: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
@@ -457,4 +452,26 @@ export const sourceSubjects = sqliteTable(
     subject: text().notNull(),
   },
   (table) => [index("source_subjects_subject_idx").on(table.subject)]
+);
+
+/**
+ * What a person's erasure hid, a row a version: by number under the
+ * SHA-256 of its source's key, as its ledger entry holds it (erasure.ts),
+ * kept after the version is deleted, so the entry can be written again
+ * whole, part by part, however many versions it names. A source's erasure
+ * has none: it hides every version of its source.
+ */
+export const erasedVersions = sqliteTable(
+  "erased_versions",
+  {
+    erasure: text()
+      .notNull()
+      .references(() => erasures.key),
+    /** The SHA-256 of the source's key, in hex. */
+    subject: text().notNull(),
+    version: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.erasure, table.subject, table.version] }),
+  ]
 );

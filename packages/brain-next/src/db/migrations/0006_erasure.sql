@@ -1,3 +1,11 @@
+CREATE TABLE `erased_versions` (
+	`erasure` text NOT NULL,
+	`subject` text NOT NULL,
+	`version` integer NOT NULL,
+	PRIMARY KEY(`erasure`, `subject`, `version`),
+	FOREIGN KEY (`erasure`) REFERENCES `erasures`(`key`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `erasing_versions` (
 	`version_row` integer PRIMARY KEY NOT NULL,
 	`erasure` text NOT NULL,
@@ -14,7 +22,6 @@ CREATE TABLE `erasures` (
 	`subject` text NOT NULL,
 	`reason` text NOT NULL,
 	`erased_at` integer NOT NULL,
-	`hidden` text,
 	`confirmed` integer DEFAULT false NOT NULL,
 	CONSTRAINT "erasures_kind" CHECK("erasures"."kind" IN ('source', 'person'))
 );
@@ -71,10 +78,20 @@ UPDATE `word_index` SET `version` = 0, `target` = 0, `cursor` = 0 WHERE `id` = 1
 -- An erasure is recorded once and never changed, only confirmed once its
 -- ledger entry is in the bucket; never deleted, as it closes a source's
 -- key.
-CREATE TRIGGER `erasures_no_update` BEFORE UPDATE OF `key`, `kind`, `subject`, `reason`, `erased_at`, `hidden` ON `erasures` BEGIN
+CREATE TRIGGER `erasures_no_update` BEFORE UPDATE OF `key`, `kind`, `subject`, `reason`, `erased_at` ON `erasures` BEGIN
 	SELECT RAISE(ABORT, 'erasures are recorded, never changed but confirmed');
 END;
 --> statement-breakpoint
 CREATE TRIGGER `erasures_no_delete` BEFORE DELETE ON `erasures` BEGIN
 	SELECT RAISE(ABORT, 'erasures are recorded, never deleted');
+END;
+--> statement-breakpoint
+-- What a person's erasure hid is its ledger entry: never changed or
+-- deleted.
+CREATE TRIGGER `erased_versions_no_update` BEFORE UPDATE ON `erased_versions` BEGIN
+	SELECT RAISE(ABORT, 'erased versions are recorded, never changed');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `erased_versions_no_delete` BEFORE DELETE ON `erased_versions` BEGIN
+	SELECT RAISE(ABORT, 'erased versions are recorded, never deleted');
 END;

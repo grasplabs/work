@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5ea74e6a-b975-4b2c-b8bc-cce00d6076ab",
+  "id": "b9a51e41-bc2a-410a-bf65-89df2feab0dd",
   "prevId": "ae2f8dfe-f3f5-4204-81da-42c642cbbf79",
   "tables": {
     "chunks": {
@@ -108,6 +108,60 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "erased_versions": {
+      "name": "erased_versions",
+      "columns": {
+        "erasure": {
+          "name": "erasure",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "erased_versions_erasure_erasures_key_fk": {
+          "name": "erased_versions_erasure_erasures_key_fk",
+          "tableFrom": "erased_versions",
+          "tableTo": "erasures",
+          "columnsFrom": [
+            "erasure"
+          ],
+          "columnsTo": [
+            "key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "erased_versions_erasure_subject_version_pk": {
+          "columns": [
+            "erasure",
+            "subject",
+            "version"
+          ],
+          "name": "erased_versions_erasure_subject_version_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -222,13 +276,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "hidden": {
-          "name": "hidden",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "confirmed": {

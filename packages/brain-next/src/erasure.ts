@@ -16,12 +16,15 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // One ledger records every erasure: an object per erasure in the Brain's
 // bucket (`erasures/`), whose key says when, the kind, the reason, and
 // the SHA-256 of the source's key or the person's id. A person's erasure
-// holds, as the object's body, exactly what it hid: the versions by
-// number under each source's SHA-256. No content, no plain id. Entries
-// are never deleted: a copy of the store of any age can come back.
+// names exactly what it hid, the versions by number under each source's
+// SHA-256, in parts of at most `ledgerPartVersions` (objects of their own
+// under the entry's key, `<key>/0000` on), written before the entry
+// itself, whose body says how many parts there are: an entry in the
+// bucket is whole. No content, no plain id. Entries are never deleted: a
+// copy of the store of any age can come back.
 //
-// The order, so a crash at any point serves nothing erased and loses no
-// erasure:
+// The order, so a crash serves nothing erased, and an erasure that
+// returned is never lost:
 //
 // 1. In one transaction: the erasure recorded in the store, unconfirmed,
 //    and everything it covers hidden: listed in `erasing_versions`, which
@@ -29,10 +32,15 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 //    current version is among them, its current pointer and queued work.
 //    A person's erasure works out what it covers here, in the same
 //    transaction, so nothing added meanwhile slips between.
-// 2. The ledger entry is written, and the erasure confirmed. If R2 fails
-//    or doesn't answer, the erasure fails to its caller, who tries again
-//    (the same entry is written again, nothing new); and every tick tries
-//    to write each unconfirmed entry until it is in (`confirmPending`).
+// 2. The ledger entry is written, its parts first, and the erasure
+//    confirmed: only then does the erasure return. If R2 fails or doesn't
+//    answer, the erasure fails to its caller, who must try again until it
+//    returns (the same entry is written again, nothing new); and every
+//    tick tries to write each unconfirmed entry until it is in
+//    (`confirmPending`). An erasure that failed is not yet safe: if the
+//    store stops before its entry is written and an older copy of it comes
+//    back, the erasure is gone with the record of it. Only an erasure that
+//    returned is in the ledger.
 // 3. The versions are deleted, a version a transaction (`eraseBatch`): a
 //    batch by the erasure itself, the rest by the tick. Vector codes first
 //    (they point at chunks), each block that held one repacked, then the
@@ -42,11 +50,14 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 //
 // After a restore (an older copy of the store coming back, its record of
 // erasures with it) the store, as it starts and before it answers
-// anything, reads the ledger from the last entry its copy confirmed and
+// anything, reads the ledger after the last entry its copy holds and
 // applies what it lacks, literally: a source's entry hides every version
 // of that source and closes its key; a person's hides the versions it
-// names, nothing worked out again from the older copy's readers. A store
-// that can't read its ledger answers nothing but its overview (store.ts).
+// names, nothing worked out again from the older copy's readers. It does
+// so a bounded step at a time (`replayStep`), each entry in its own
+// transaction, so a long replay goes on where the last step stopped. Until
+// it is through, and while it can't read the ledger, the store answers
+// nothing but its overview (store.ts).
 //
 // An erased source's key stays closed: an add to it is refused, checked
 // again in the transaction that would record it (sources.ts). So is an
@@ -66,8 +77,8 @@ export interface ErasureStore {
 /** What is erased: a source, or what a person alone may read. */
 type ErasureKind = "source" | "person";
 
-/** A person's erasure's versions, by number, under each source's subject. */
-type Hidden = Record<string, number[]>;
+/** What a person's erasure hid: each version by number, under its source's subject. */
+type Hidden = (readonly [subject: string, version: number])[];
 
 /** An erasure, as the ledger holds it. */
 interface LedgerEntry {
@@ -94,6 +105,23 @@ export const eraseChunksPerBatch = 1000;
 
 /** Most unconfirmed entries a tick writes to the ledger. */
 const confirmPerTick = 100;
+
+/**
+ * Most versions one part of a person's entry names: about 75 bytes each,
+ * so a part is at most some 75 KB, far inside any limit of R2 or of a
+ * value the store keeps, however many versions an erasure hides.
+ */
+export const ledgerPartVersions = 1000;
+
+/**
+ * Most objects of the ledger one step of a replay reads (`replayStep`):
+ * an entry and each of its parts. A first guess, well inside the 30 s a
+ * step may hold the store at a few R2 reads at once.
+ */
+export const replayReadsPerStep = 200;
+
+/** How many reads of the ledger run at once. */
+const readsAtOnce = 6;
 
 const timeOf = (at: number): string => String(at).padStart(timeDigits, "0");
 
@@ -129,29 +157,60 @@ const entryOf = (key: string): LedgerEntry | undefined => {
 
 const subjectPattern = /^[0-9a-f]{64}$/u;
 
-/** A person's entry's body as the ledger holds it: none when it isn't one. */
-const hiddenOf = (body: string | null): Hidden | undefined => {
-  let parsed: unknown = undefined;
-  try {
-    parsed = JSON.parse(body ?? "");
-  } catch {
-    return undefined;
+/** A part of a person's entry, as the ledger holds it. */
+const partOf = (body: string): Hidden => {
+  const parsed: unknown = JSON.parse(body);
+  if (!Array.isArray(parsed)) {
+    throw new TypeError("Not a part of an erasure");
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return undefined;
-  }
-  const hidden: Hidden = {};
-  for (const [subject, versions] of Object.entries(parsed)) {
+  return parsed.map((pair: unknown) => {
     if (
-      !subjectPattern.test(subject) ||
-      !Array.isArray(versions) ||
-      !versions.every((version) => Number.isSafeInteger(version))
+      !Array.isArray(pair) ||
+      pair.length !== 2 ||
+      typeof pair[0] !== "string" ||
+      !subjectPattern.test(pair[0]) ||
+      !Number.isSafeInteger(pair[1])
     ) {
-      return undefined;
+      throw new TypeError("Not a part of an erasure");
     }
-    hidden[subject] = versions.map(Number);
+    return [pair[0], Number(pair[1])] as const;
+  });
+};
+
+/** How many parts a person's entry's body says it has. */
+const partsOf = (body: string): number => {
+  const parsed: unknown = JSON.parse(body);
+  const parts: unknown =
+    typeof parsed === "object" && parsed !== null
+      ? Reflect.get(parsed, "parts")
+      : undefined;
+  if (typeof parts !== "number" || !Number.isSafeInteger(parts) || parts < 0) {
+    throw new TypeError("Not an erasure");
   }
-  return hidden;
+  return parts;
+};
+
+/** The key of part `index` of the entry `key`. */
+const partKeyOf = (key: string, index: number): string =>
+  `${key}/${String(index).padStart(4, "0")}`;
+
+/** `items` in slices of at most `size`. */
+const slicesOf = <T>(items: readonly T[], size: number): T[][] =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
+    items.slice(index * size, (index + 1) * size)
+  );
+
+/** `run` over `items`, `readsAtOnce` at a time, in order. */
+const fewAtATime = async <T, R>(
+  items: readonly T[],
+  run: (item: T) => Promise<R>
+): Promise<R[]> => {
+  const done: R[] = [];
+  for (const slice of slicesOf(items, readsAtOnce)) {
+    // oxlint-disable-next-line no-await-in-loop -- a few at a time
+    done.push(...(await Promise.all(slice.map(run))));
+  }
+  return done;
 };
 
 const encoder = new TextEncoder();
@@ -326,13 +385,13 @@ const sourcesOf = (sql: SqlStorage, subject: string): string[] =>
     .map(({ source }) => source);
 
 /**
- * What a person's erasure at `at` covers, as it will hide it: every
- * version only `person` may read added by then, and every version of each
- * source whose current version is such. Versions by number under each
- * source's subject.
+ * What a person's erasure covers, as it will hide it: every version only
+ * `person` may read, and every version of each source whose current
+ * version is such. Run in the transaction that records the erasure, so
+ * nothing recorded before it escapes and nothing recorded after it is in.
  */
-const coveredFor = (sql: SqlStorage, person: string, at: number): Hidden => {
-  const rows = sql
+const coveredFor = (sql: SqlStorage, person: string): Hidden =>
+  sql
     .exec<{ subject: string; version: number }>(
       `WITH theirs AS (
         SELECT id FROM reader_sets WHERE key = ?1
@@ -341,25 +400,17 @@ const coveredFor = (sql: SqlStorage, person: string, at: number): Hidden => {
         SELECT source_versions.source AS source FROM source_versions
         JOIN current_versions ON current_versions.version_row = source_versions.row
         WHERE source_versions.reader_set IN (SELECT id FROM theirs)
-          AND source_versions.added_at <= ?2
       )
       SELECT source_subjects.subject AS subject, source_versions.version AS version
       FROM source_versions
       JOIN source_subjects ON source_subjects.source = source_versions.source
       WHERE source_versions.source IN (SELECT source FROM whole)
-        OR (source_versions.reader_set IN (SELECT id FROM theirs)
-          AND source_versions.added_at <= ?2)
+        OR source_versions.reader_set IN (SELECT id FROM theirs)
       ORDER BY subject, version`,
-      readerSetKeyOf({ kind: "owner", person }),
-      at
+      readerSetKeyOf({ kind: "owner", person })
     )
-    .toArray();
-  const covered: Hidden = {};
-  for (const { subject, version } of rows) {
-    covered[subject] = [...(covered[subject] ?? []), version];
-  }
-  return covered;
-};
+    .toArray()
+    .map(({ subject, version }) => [subject, version] as const);
 
 /**
  * Applies the erasure `key` (`entry`, and for a person what it hid): the
@@ -376,20 +427,35 @@ const apply = (
 ): string[] => {
   sql.exec(
     `INSERT OR IGNORE INTO erasures
-      (key, kind, subject, reason, erased_at, hidden, confirmed)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      (key, kind, subject, reason, erased_at, confirmed)
+    VALUES (?, ?, ?, ?, ?, ?)`,
     key,
     entry.kind,
     entry.subject,
     entry.reason,
     entry.at,
-    hidden === null ? null : JSON.stringify(hidden),
     confirmed ? 1 : 0
   );
+  // What it hid, kept a row a version, a slice a statement, so no value
+  // grows with how much it hid.
+  for (const slice of slicesOf(hidden ?? [], ledgerPartVersions)) {
+    sql.exec(
+      `INSERT OR IGNORE INTO erased_versions (erasure, subject, version)
+      SELECT ?, value ->> 0, value ->> 1 FROM json_each(?)`,
+      key,
+      JSON.stringify(slice)
+    );
+  }
+  const bySubject = new Map<string, number[] | undefined>();
+  if (hidden === null) {
+    bySubject.set(entry.subject, undefined);
+  } else {
+    for (const [subject, version] of hidden) {
+      bySubject.set(subject, [...(bySubject.get(subject) ?? []), version]);
+    }
+  }
   const stopped: string[] = [];
-  const named: [string, number[] | undefined][] =
-    hidden === null ? [[entry.subject, undefined]] : Object.entries(hidden);
-  for (const [subject, versions] of named) {
+  for (const [subject, versions] of bySubject) {
     for (const source of sourcesOf(sql, subject)) {
       if (hideVersions(sql, source, rowsOf(sql, source, versions), key)) {
         stopped.push(source);
@@ -554,15 +620,36 @@ const inTime = async <T>(promise: Promise<T>): Promise<T> => {
 /** An erasure the store recorded, as its ledger entry is written. */
 interface Recorded extends Record<string, SqlStorageValue> {
   key: string;
-  hidden: string | null;
+  kind: string;
 }
 
-/** Writes `recorded`'s ledger entry and confirms it: throws if R2 fails. */
+/**
+ * Writes `recorded`'s ledger entry, a person's parts first and then the
+ * entry, each write within `ledgerWaitMs`, and confirms it: throws if R2
+ * fails. Written again, it is the same.
+ */
 const confirm = async (
   { storage, bucket }: ErasureStore,
-  { key, hidden }: Recorded
+  { key, kind }: Recorded
 ): Promise<void> => {
-  await inTime(bucket.put(key, hidden ?? ""));
+  let body = "";
+  if (kind === "person") {
+    const hidden = storage.sql
+      .exec<{ subject: string; version: number }>(
+        `SELECT subject, version FROM erased_versions WHERE erasure = ?
+        ORDER BY subject, version`,
+        key
+      )
+      .toArray()
+      .map(({ subject, version }) => [subject, version] as const);
+    const parts = slicesOf(hidden, ledgerPartVersions);
+    for (const [index, part] of parts.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, each in its time
+      await inTime(bucket.put(partKeyOf(key, index), JSON.stringify(part)));
+    }
+    body = JSON.stringify({ parts: parts.length });
+  }
+  await inTime(bucket.put(key, body));
   storage.sql.exec("UPDATE erasures SET confirmed = 1 WHERE key = ?", key);
 };
 
@@ -575,7 +662,7 @@ const confirm = async (
 export const confirmPending = async (store: ErasureStore): Promise<void> => {
   const pending = store.storage.sql
     .exec<Recorded>(
-      `SELECT key, hidden FROM erasures WHERE confirmed = 0
+      `SELECT key, kind FROM erasures WHERE confirmed = 0
       ORDER BY key LIMIT ?`,
       confirmPerTick
     )
@@ -616,7 +703,7 @@ export const erase = async (
     kind === "source"
       ? sql
           .exec<Recorded & { confirmed: number }>(
-            `SELECT key, hidden, confirmed FROM erasures
+            `SELECT key, kind, confirmed FROM erasures
             WHERE kind = 'source' AND subject = ? LIMIT 1`,
             subject
           )
@@ -634,12 +721,9 @@ export const erase = async (
       const at = nextAt(sql);
       const entry: LedgerEntry = { kind, subject, reason, at };
       const key = ledgerKeyOf(entry);
-      const hidden = kind === "person" ? coveredFor(sql, id, at) : null;
+      const hidden = kind === "person" ? coveredFor(sql, id) : null;
       return {
-        recorded: {
-          key,
-          hidden: hidden === null ? null : JSON.stringify(hidden),
-        },
+        recorded: { key, kind },
         stopped: apply(sql, key, entry, hidden, false),
       };
     }));
@@ -647,7 +731,7 @@ export const erase = async (
     return [];
   }
   try {
-    await confirm(store, recorded ?? { key: "", hidden: null });
+    await confirm(store, recorded ?? { key: "", kind: "source" });
   } catch {
     // Recorded and hidden: the tick writes its entry; the caller, told,
     // tries again. Nothing of R2's error: it may name the key.
@@ -686,40 +770,81 @@ const ledgerKeysAfter = async (
 };
 
 /**
- * Where a replay reads the ledger from: after the last entry of this copy
- * of the store that is confirmed with every entry before it. That mark is
- * part of the store, so it is exactly what this copy has applied: on an
- * ordinary start it is the last entry, and the listing finds nothing new;
+ * Where a replay reads the ledger from: after the last entry this copy of
+ * the store holds. That is part of the store, so it is exactly what this
+ * copy has applied: on an ordinary start the listing finds nothing new;
  * after a restore the copy's mark is as old as the copy, and the listing
- * finds everything erased since. An entry the store recorded and whose
- * write may still land is never passed: the mark stays before it.
+ * finds everything erased since. Keys only grow (`nextAt`), so every
+ * entry a copy lacks sorts after all of its own.
  */
 const replayMark = (sql: SqlStorage): string | null =>
-  sql
-    .exec<{ key: string | null }>(
-      `SELECT max(key) AS key FROM erasures WHERE confirmed = 1
-      AND key < coalesce((SELECT min(key) FROM erasures WHERE confirmed = 0), '~')`
-    )
-    .one().key;
+  sql.exec<{ key: string | null }>("SELECT max(key) AS key FROM erasures").one()
+    .key;
+
+/** What one step of a replay did, and how many entries are left. */
+export interface Replayed {
+  /** The sources whose current version it hid. */
+  stopped: string[];
+  /** Entries of the ledger still to apply after it. */
+  left: number;
+}
+
+/** A missing entry, read whole: what it hid, and how many objects that took. */
+interface Read {
+  key: string;
+  entry: LedgerEntry;
+  hidden: Hidden | null;
+  reads: number;
+}
 
 /**
- * Applies every entry of the ledger the store hasn't, in order, literally
- * (above), each confirmed as read. Run it as the store starts, before it
- * answers anything. Throws when R2 fails or doesn't answer in time, so
- * the store answers nothing it would need it for (store.ts). Answers the
- * sources whose current version it hid.
- *
- * Measured in local workerd on a laptop, with 100,000 entries in the
- * ledger, each start timed with the first tick it served: an ordinary
- * start, nothing new past its mark, 9 ms; a store with none of them
- * applied (an export restored into an empty store, the worst case),
- * listing and applying all 100,000, 1.7 s, well inside the 30 s a start
- * may hold the store. Not measured on Cloudflare.
+ * Reads the entry `key` whole: a person's body, then its parts, a few at
+ * a time, each read within `ledgerWaitMs`. An entry or a part that can't
+ * be read throws: only the store writes the ledger, so it is a fault to
+ * fix, and the store serves nothing it may have erased meanwhile.
  */
-export const replayLedger = async ({
+const readEntry = async (
+  bucket: R2Bucket,
+  key: string,
+  entry: LedgerEntry
+): Promise<Read> => {
+  if (entry.kind === "source") {
+    return { key, entry, hidden: null, reads: 1 };
+  }
+  const textOf = async (objectKey: string): Promise<string> => {
+    const object = await inTime(bucket.get(objectKey));
+    if (object === null) {
+      throw new Error("An entry of the erasure ledger can't be read");
+    }
+    return await object.text();
+  };
+  const parts = partsOf(await textOf(key));
+  const read = await fewAtATime(
+    Array.from({ length: parts }, (_, index) => partKeyOf(key, index)),
+    async (partKey) => partOf(await textOf(partKey))
+  );
+  return { key, entry, hidden: read.flat(), reads: 1 + parts };
+};
+
+/**
+ * One step of a replay: applies, in order, the entries of the ledger the
+ * store lacks, literally (above), each in its own transaction and recorded
+ * as confirmed, until it has read `replayReadsPerStep` objects. The next
+ * step goes on after the last entry it applied. Run it while the store
+ * takes nothing else. Throws when R2 fails or doesn't answer in time,
+ * keeping what it applied.
+ *
+ * Measured in local workerd on a laptop, with 100,000 entries of erased
+ * sources in the ledger, each start timed with the first tick it served:
+ * an ordinary start, nothing new past its mark, 9 ms; a store with none
+ * of them applied, listing and applying all 100,000 at once, 1.7 s (before
+ * steps were bounded: a step now applies at most 200). Not measured on
+ * Cloudflare.
+ */
+export const replayStep = async ({
   storage,
   bucket,
-}: ErasureStore): Promise<string[]> => {
+}: ErasureStore): Promise<Replayed> => {
   const { sql } = storage;
   const mark = replayMark(sql);
   const listed = await ledgerKeysAfter(bucket, mark ?? undefined);
@@ -730,25 +855,24 @@ export const replayLedger = async ({
       0;
     return entry === undefined || applied ? [] : [{ key, entry }];
   });
-  const read = await Promise.all(
-    missing.map(async ({ key, entry }) => {
-      if (entry.kind === "source") {
-        return { key, entry, hidden: null };
-      }
-      const object = await inTime(bucket.get(key));
-      const body = object === null ? null : await object.text();
-      const hidden = hiddenOf(body);
-      if (hidden === undefined) {
-        // Only the store writes the ledger: an entry it can't read is a
-        // fault to fix, and the store serves nothing it may have erased.
-        throw new Error("An entry of the erasure ledger can't be read");
-      }
-      return { key, entry, hidden };
-    })
-  );
-  return storage.transactionSync(() =>
-    read.flatMap(({ key, entry, hidden }) =>
-      apply(sql, key, entry, hidden, true)
-    )
-  );
+  const stopped: string[] = [];
+  let reads = 0;
+  let applied = 0;
+  for (const slice of slicesOf(missing, readsAtOnce)) {
+    if (reads >= replayReadsPerStep) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a few at a time, in order
+    const read = await Promise.all(
+      slice.map(async ({ key, entry }) => await readEntry(bucket, key, entry))
+    );
+    for (const { key, entry, hidden, reads: took } of read) {
+      stopped.push(
+        ...storage.transactionSync(() => apply(sql, key, entry, hidden, true))
+      );
+      reads += took;
+      applied += 1;
+    }
+  }
+  return { stopped, left: missing.length - applied };
 };

@@ -1554,3 +1554,159 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
     }
   });
 });
+
+/** Most versions one part of a person's ledger entry names (erasure.ts). */
+const ledgerPartVersions = 1000;
+
+/** The ledger's objects under the entry naming `id`: its parts. */
+const ledgerPartsOf = async (id: string): Promise<string[]> => {
+  const [entry] = await ledgerOf(id);
+  if (entry === undefined) {
+    return [];
+  }
+  const listed = await env.BRAIN_OBJECTS.list({ prefix: `${entry}/` });
+  return listed.objects.map(({ key }) => key);
+};
+
+/**
+ * Has the store's next bucket writes go through, and the store crash as
+ * the `crashAt`-th begins, before it writes: as a restart between two
+ * writes of one ledger entry would.
+ */
+const crashAtBucketPut = async (crashAt: number): Promise<void> => {
+  await runInDurableObject(store(), (instance, state) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    const bucket = env.BRAIN_OBJECTS;
+    let puts = 0;
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_OBJECTS: {
+        get: async (key: string) => await bucket.get(key),
+        list: async (options: R2ListOptions) => await bucket.list(options),
+        put: async (key: string, value: string) => {
+          puts += 1;
+          if (puts === crashAt) {
+            state.abort("Crashed by the test, between two writes");
+          }
+          return await bucket.put(key, value);
+        },
+      },
+    });
+  });
+};
+
+describe(
+  "a ledger entry of any size, and a replay of any length",
+  { timeout: 300_000 },
+  () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("writes a person's erasure in parts of a bounded size, goes on after a crash between parts, and erases it all again after a restore", async () => {
+      const leaver = await person();
+      const mark = newMark();
+      const access: Access = { kind: "owner", person: leaver };
+      // More versions than one part names, each a source of its own.
+      const count = ledgerPartVersions + 50;
+      for (let start = 0; start < count; start += 25) {
+        // oxlint-disable-next-line no-await-in-loop -- a few adds at a time
+        await Promise.all(
+          Array.from(
+            { length: Math.min(25, count - start) },
+            async (_, index) => {
+              await brain().addSource({
+                source: keyOf(newSource()),
+                change: crypto.randomUUID(),
+                text: `Run ${start + index} ${wordOf(mark)}`,
+                access,
+              });
+            }
+          )
+        );
+      }
+      const backup = await copyOfStore();
+      // The first part is written; the store crashes as the second begins.
+      await crashAtBucketPut(2);
+
+      const erased = await settled(
+        erasePerson(env, { personId: leaver, reason: "person_erased" })
+      );
+      const afterCrash = {
+        recalled: await recalledAs(leaver, wordOf(mark)),
+        // Its parts so far, and no entry: not yet in the ledger.
+        entries: await ledgerOf(leaver),
+      };
+      await workBrain(env, new Date());
+      const parts = await ledgerPartsOf(leaver);
+      const entries = await ledgerOf(leaver);
+      await tickUntilErased(5);
+      await restoreStore(backup);
+      const restored = await recalledAs(leaver, wordOf(mark));
+      await tickUntilErased(5);
+
+      expect({
+        crashed: "error" in erased,
+        afterCrash,
+        entries: entries.length,
+        parts: parts.length,
+        restored,
+        tables: await tablesHolding([mark]),
+      }).toStrictEqual({
+        crashed: true,
+        afterCrash: { recalled: [], entries: [] },
+        entries: 1,
+        parts: 2,
+        restored: [],
+        tables: [],
+      });
+    });
+
+    it("applies a replay too long for one step a step a call, answering nothing but its overview until it is through", async () => {
+      const reader = await person();
+      const mark = newMark();
+      const source = newSource();
+      await add(source, `Restored late ${wordOf(mark)}`, owner(reader));
+      const backup = await copyOfStore();
+      // More entries than two steps apply (200 reads a step): one as the
+      // store starts, one by the first call.
+      for (let start = 0; start < 420; start += 20) {
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await Promise.all(
+          Array.from({ length: 20 }, async () => {
+            await eraseSource(env, { source: newSource(), reason: "deleted" });
+          })
+        );
+      }
+      await eraseSource(env, { source, reason: "deleted" });
+
+      await restoreStore(backup);
+      const first = await settled(historyAs(reader, source, 1));
+      const overview = await brainWorkOverview(env);
+      const second = await settled(historyAs(reader, source, 1));
+      const through = await brainWorkOverview(env);
+
+      expect({
+        first,
+        left: overview.ledgerLeft > 0,
+        ledgerFailed: overview.stepsFailed.ledger,
+        second,
+        leftAfter: through.ledgerLeft,
+        recalled: await recalledAs(reader, wordOf(mark)),
+      }).toStrictEqual({
+        first: {
+          error:
+            "Error: The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly",
+        },
+        left: true,
+        ledgerFailed: null,
+        second: { value: null },
+        leftAfter: 0,
+        recalled: [],
+      });
+    });
+  }
+);

@@ -352,6 +352,10 @@ const personErasureSchema = z.strictObject({
  * Its key is closed: a later add of it is refused, so a producer's late
  * retry never brings it back. Safe to repeat. For a producer's deletion
  * for good, or the end of its retention.
+ *
+ * Only a call that returned is in the Brain's ledger. A call that fails
+ * or throws must be retried until it succeeds: until then, a restore of
+ * the Brain's store can bring the source back.
  */
 export const eraseSource = async (
   env: BrainEnv,
@@ -367,6 +371,10 @@ export const eraseSource = async (
  * instruction file), and, in a source others read now, the versions that
  * were theirs alone. Content added for them later is new. Safe to repeat.
  * For an admin's erasure of a person, or a person's withdrawal.
+ *
+ * Only a call that returned is in the Brain's ledger. A call that fails
+ * or throws must be retried until it succeeds: until then, a restore of
+ * the Brain's store can bring what it covers back.
  */
 export const erasePerson = async (
   env: BrainEnv,

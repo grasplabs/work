@@ -353,6 +353,13 @@ export interface WorkOverview {
    */
   sourcesWithoutCurrent: number;
   /**
+   * How many entries of the erasure ledger this instance still has to
+   * apply, as its last step of a replay counted them: 0 once it is through.
+   * Above 0 after a restore, while the store answers nothing but this
+   * overview and each call applies one more step.
+   */
+  ledgerLeft: number;
+  /**
    * The tick's own steps before its queue, each with its last failure
    * since the store started: the erasure ledger, read as the store starts
    * and written for each erasure, cleared once it was read whole and every
