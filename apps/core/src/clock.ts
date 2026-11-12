@@ -35,6 +35,7 @@ import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { checkReadings } from "./onboarding/documents.ts";
+import { keepOnboardingBrain } from "./onboarding/new-brain.ts";
 import { rescanPackages } from "./packages/rescan.ts";
 import { sweepPageFrames } from "./page-frame.ts";
 import { sweepBuilds } from "./pages.ts";
@@ -91,6 +92,10 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // What core noted to hand over to the new Brain, put on its work queue
   // (src/brain-hand-overs.ts, src/brain-sources.ts).
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
+  // What the onboarding owes the new Brain: each interview, readable by
+  // its person, and each team claim five or more back
+  // (src/onboarding/new-brain.ts).
+  { name: "onboarding.brain", period: "minute", run: keepOnboardingBrain },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
   {

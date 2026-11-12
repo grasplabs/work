@@ -85,6 +85,11 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
     upload: t({ message: "Upload", context: "a source of the Brain" }),
     chat: t({ message: "Chat", context: "a source of the Brain" }),
     run: t({ message: "Workflow run", context: "a source of the Brain" }),
+    interview: t({ message: "Interview", context: "a source of the Brain" }),
+    claim: t({
+      message: "What your team said",
+      context: "a source of the Brain",
+    }),
   }[producer];
   return <Badge variant="outline">{label}</Badge>;
 };

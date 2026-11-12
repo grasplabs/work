@@ -29,6 +29,7 @@ import {
   openGate,
   setGateThreshold,
 } from "./onboarding/gate.ts";
+import { keepOnboardingBrainQuietly } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
 // Commands from Grasp's admin (`@grasp-os/shared/admin-command`, which
@@ -124,6 +125,8 @@ const applyChange = async (
         await store.newStart(command.payload.person, by),
         "onboarding.no_link"
       );
+      // What they said leaves the new Brain now, or on the clock.
+      await keepOnboardingBrainQuietly(env);
       return;
     }
     case "onboarding.gate.open": {

@@ -369,6 +369,8 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
+        "a staff-list team's claim": markerWord(),
+        "the holder's interview": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
         "a source narrowed to the holder alone": markerWord(),
         "the holder's instruction file": markerWord(),
@@ -380,6 +382,8 @@ describe(
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
+        "a staff-list team's claim": claimMarker,
+        "the holder's interview": interviewMarker,
         "a source narrowed away from the outsider": narrowedMarker,
         "a source narrowed to the holder alone": toHolderMarker,
         "the holder's instruction file": holderFileMarker,
@@ -466,6 +470,21 @@ describe(
       const noneId = await add(`Unfiled note ${sharedWord} ${noneMarker}`, {
         kind: "none",
       });
+      // A claim five or more of a staff-list team made in their interviews
+      // (GRA-1741), readable by that team's group alone, which no one
+      // probing is in.
+      const claimId = await add(`Team claim ${sharedWord} ${claimMarker}`, {
+        kind: "interviews",
+        teamId: `roster-${unique()}`,
+      });
+      // The holder's interview (GRA-1790): what they approved in it, theirs
+      // alone, as the onboarding hands it over.
+      const interviewId = await add(
+        `Every refund needs ${sharedWord} ${interviewMarker} first.`,
+        { kind: "owner", personId: holder },
+        { producer: "interview", id: crypto.randomUUID() }
+      );
+      ownerIds.push(interviewId);
       // More marked matches than a recall returns, each shorter than the
       // outsider's own, so hidden ones would crowd it out if they took
       // places.
@@ -602,11 +621,19 @@ describe(
           ownerMarker,
           teamMarker,
           noneMarker,
+          claimMarker,
+          interviewMarker,
           narrowedMarker,
           toHolderMarker,
           ...instructionMarkers,
         ],
-        hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
+        hiddenVersions: everyVersionOf(
+          ...ownerIds,
+          teamId,
+          noneId,
+          claimId,
+          narrowedId
+        ),
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         usedApps,
         instructionGroups,
@@ -632,11 +659,18 @@ describe(
           markers: [
             ownerMarker,
             noneMarker,
+            claimMarker,
+            interviewMarker,
             narrowedMarker,
             toHolderMarker,
             ...instructionMarkers,
           ],
-          hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
+          hiddenVersions: everyVersionOf(
+            ...ownerIds,
+            noneId,
+            claimId,
+            narrowedId
+          ),
         },
         notJoined,
         { inRecall }
@@ -665,9 +699,15 @@ describe(
           },
           personal: true,
           sharedWord,
-          markers: [noneMarker, narrowedMarker, agentFileMarker, appFileMarker],
+          markers: [
+            noneMarker,
+            claimMarker,
+            narrowedMarker,
+            agentFileMarker,
+            appFileMarker,
+          ],
           hiddenVersions: [
-            ...everyVersionOf(noneId),
+            ...everyVersionOf(noneId, claimId),
             { source: narrowedId, version: 1 },
           ],
           // Their own instruction file is theirs, and so are the Apps'
@@ -678,6 +718,7 @@ describe(
         },
         {
           "a source nobody is known to read": noneMarker,
+          "a staff-list team's claim": claimMarker,
           "a source narrowed away from the outsider": narrowedMarker,
           "another agent's instruction file": agentFileMarker,
           "an App's instruction file the outsider doesn't build": appFileMarker,

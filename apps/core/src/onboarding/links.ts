@@ -13,6 +13,7 @@ import { log } from "@grasp-os/shared/log";
 
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { keepOnboardingBrainQuietly } from "./new-brain.ts";
 import { onboardingStore } from "./store.ts";
 import type { LinkAnswer, LinkRefusal } from "./store.ts";
 
@@ -178,6 +179,9 @@ export const interviewResponse = async (
         body.progress
       );
       done(result);
+      // What it took out of the interview leaves the new Brain now, and
+      // what it added reaches it (onboarding/new-brain.ts).
+      await keepOnboardingBrainQuietly(env);
       return answer(result, requestId, (value) =>
         json(value, value.saved ? 200 : 409)
       );
@@ -185,6 +189,9 @@ export const interviewResponse = async (
     case "delete": {
       const result = await store.deleteInterview(secretMark, keyMark ?? "");
       done(result);
+      // What it took out of the interview leaves the new Brain now, and
+      // what it added reaches it (onboarding/new-brain.ts).
+      await keepOnboardingBrainQuietly(env);
       return answer(result, requestId, (value) => json(value));
     }
     case "participate": {
@@ -199,6 +206,9 @@ export const interviewResponse = async (
     case "approve": {
       const result = await store.approve(secretMark, keyMark ?? "", body.facts);
       done(result);
+      // What it took out of the interview leaves the new Brain now, and
+      // what it added reaches it (onboarding/new-brain.ts).
+      await keepOnboardingBrainQuietly(env);
       return answer(result, requestId, (value) =>
         json(value, value.approved ? 200 : 409)
       );
@@ -206,6 +216,9 @@ export const interviewResponse = async (
     case "withdraw": {
       const result = await store.withdraw(secretMark, keyMark ?? "");
       done(result);
+      // What it took out of the interview leaves the new Brain now, and
+      // what it added reaches it (onboarding/new-brain.ts).
+      await keepOnboardingBrainQuietly(env);
       return answer(result, requestId, (value) => json(value));
     }
     default: {

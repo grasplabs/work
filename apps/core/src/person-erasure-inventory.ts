@@ -370,6 +370,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
   "onboarding.interview_settings": { erased: "interview" },
+  // What the new Brain holds of their interview, until its erasure there
+  // returned; and every address their link went to.
+  "onboarding.brain_interviews": { erased: "interview" },
+  "onboarding.link_addresses": { erased: "interview" },
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
@@ -385,6 +389,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "audit events on their way to the log (D2)",
   },
   "onboarding.brain_teams": noPerson,
+  "onboarding.brain_claims": {
+    company: "a team's claims seven or more told and five back, names out",
+  },
   "onboarding.checked_differences": {
     company: "a team's difference five or more told each way, names out",
   },
@@ -674,12 +681,14 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_store": ["deleted_by"],
   "onboarding.approvals": ["person"],
   "onboarding.asked_about": ["person"],
+  "onboarding.brain_interviews": ["person"],
   "onboarding.brain_sent": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],
   "onboarding.interviews": ["person"],
   "onboarding.link_codes": ["person"],
+  "onboarding.link_addresses": ["person"],
   "onboarding.links": ["person"],
   "onboarding.participations": ["person"],
   "onboarding.people": ["email"],

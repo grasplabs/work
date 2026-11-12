@@ -55,6 +55,18 @@ import type { Took } from "./store.ts";
 // someone outside, a role only one person has). The prompts forbid both,
 // and the checks answer for each fact apart.
 
+/**
+ * Whether a team with `interviewed` people who told their own work may
+ * have claims shown at all (GRA-1741, review of #2206): only with two more
+ * than the floor. A claim needs `floor` backers; in a team of `floor` or
+ * one more, a claim's readers would know nearly everyone behind it, and
+ * so who said it. Derived from the one floor, never a number of its own.
+ */
+export const teamMayClaim = (
+  interviewed: number,
+  floor: number = minTeamShown
+): boolean => interviewed >= floor + 2;
+
 /** What a team's claims are put together from. */
 export interface ClaimBrief {
   /** Everyone on the staff list, by name: none reaches the model or the brain. */

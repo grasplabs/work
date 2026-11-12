@@ -74,6 +74,7 @@ import {
 import { dropHeldStarts } from "./held-starts.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { coreErasure } from "./knowledge/rpc.ts";
+import { eraseOnboardingInterview } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 
@@ -359,6 +360,10 @@ const interview: ErasureStep = {
         // the entry since, as this ran (`eraseInterviewOf`).
         // oxlint-disable-next-line no-await-in-loop -- one entry at a time
         await store.eraseInterviewOf(id, erasure.requestedAt.toISOString());
+        // Their interview leaves the new Brain before this area is done:
+        // until it has, this throws and the erasure is tried again.
+        // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+        await eraseOnboardingInterview(env, id);
         found += 1;
       }
     }
