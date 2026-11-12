@@ -432,6 +432,42 @@ const versionsHeld = async (): Promise<number> =>
         .one().count
   );
 
+/**
+ * Starts restoring `id` into the shared store and takes its item off the
+ * queue before any part is checked, as an outage or a throw that parks it
+ * for good would: then ticks twice, so the tick settles it.
+ */
+const startedAndStopped = async (id: string): Promise<void> => {
+  await shared().startRestore(id, "test");
+  await runInDurableObject(shared(), (_instance, state) => {
+    state.storage.sql.exec(
+      "DELETE FROM work_items WHERE kind = 'brain.restore' AND key = ?",
+      `restore:${id}`
+    );
+  });
+  await tick(shared());
+  await tick(shared());
+};
+
+/**
+ * The files of `files` (keys under `exports/<id>/`) the shared store
+ * serves, of those a download may ask for.
+ */
+const servedOf = async (id: string, files: readonly string[]) => {
+  const served: string[] = [];
+  for (const key of files) {
+    const file = key.slice(`exports/${id}/`.length);
+    if (!exportFileNameSchema.safeParse(file).success) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one file at a time
+    if ((await shared().exportFile({ id, file })) !== null) {
+      served.push(file);
+    }
+  }
+  return served;
+};
+
 describe("exports and restores", () => {
   /** The shared store as it was before any test added to it: empty. */
   let emptyShared: Copy = [];
@@ -1467,6 +1503,117 @@ describe("exports and restores", () => {
         restore: "done",
         export: "done",
       });
+    });
+
+    it("keeps an adopted export whose restore stopped before its check ended, serving none of it, and restores it when started again (threat 9)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const sources = [`test:${unique()}`, `test:${unique()}`];
+      for (const source of sources) {
+        // oxlint-disable-next-line no-await-in-loop -- one source at a time
+        await add(shared(), source, `kept ${unique()}`, team(group));
+      }
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      const files = await keysUnder(`exports/${id}/`);
+      await putBack(shared(), emptyShared);
+      await startedAndStopped(id);
+      const served = await servedOf(id, files);
+      const kept = await keysUnder(`exports/${id}/`);
+      const stopped = await shared().restoreStatus(id);
+      await shared().startRestore(id, "test");
+      const again = await restoreSettled(id);
+      const status = await shared().exportStatus({ id });
+      expect({
+        kept,
+        served,
+        stopped: stopped?.state,
+        again: again?.state,
+        restored: again?.restored,
+        export: status?.state,
+      }).toStrictEqual({
+        kept: files,
+        served: [],
+        stopped: "failed",
+        again: "done",
+        restored: 2,
+        export: "done",
+      });
+    });
+
+    it("drops an adopted export handed back by a stopped check once the ledger names a version it holds (threats 6, 9)", async () => {
+      await putBack(shared(), emptyShared);
+      const marker = `marker${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, marker, team(`team:${unique()}`));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      const files = await keysUnder(`exports/${id}/`);
+      await putBack(shared(), emptyShared);
+      await startedAndStopped(id);
+      const kept = await keysUnder(`exports/${id}/`);
+      await shared().eraseSource({ source, reason: "deleted" });
+      for (let ticks = 0; ticks < 4; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      expect({
+        kept,
+        after: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ kept: files, after: [] });
+    });
+
+    it("holds no file past the parts its manifest names once a restore adopts it (threats 6, 8)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const sources = Array.from({ length: 60 }, () => `test:${unique()}`);
+      for (const source of sources) {
+        // oxlint-disable-next-line no-await-in-loop -- one source at a time
+        await add(shared(), source, `words ${source}`, team(group));
+      }
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // A manifest naming only the first part: the second's files are
+      // never checked, so nothing records what they hold.
+      const manifestKey = `exports/${id}/manifest.json`;
+      const manifestFile = await env.BRAIN_OBJECTS.get(manifestKey);
+      const manifest = storeManifestSchema.parse(
+        JSON.parse((await manifestFile?.text()) ?? "")
+      );
+      const [first] = manifest.parts;
+      if (first === undefined || manifest.parts.length < 2) {
+        throw new Error("The export has fewer than two parts");
+      }
+      const second = await env.BRAIN_OBJECTS.get(
+        `exports/${id}/part-0001.jsonl`
+      );
+      const unnamed = lineSchema.parse(
+        JSON.parse(((await second?.text()) ?? "").split("\n")[0] ?? "")
+      ).source;
+      await env.BRAIN_OBJECTS.put(
+        manifestKey,
+        JSON.stringify({
+          ...manifest,
+          versions: first.versions,
+          parts: [first],
+        })
+      );
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      await restoreSettled(id);
+      await shared().eraseSource({ source: unnamed, reason: "deleted" });
+      await tick(shared());
+      await tick(shared());
+      const holding: string[] = [];
+      for (const key of await keysUnder(`exports/${id}/`)) {
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        const file = await env.BRAIN_OBJECTS.get(key);
+        // oxlint-disable-next-line no-await-in-loop -- one file at a time
+        if (((await file?.text()) ?? "").includes(`words ${unnamed}`)) {
+          holding.push(key);
+        }
+      }
+      expect(holding).toStrictEqual([]);
     });
 
     it("goes on with a sweep pass whose item went before it ended, from its saved place (threat 6)", async () => {

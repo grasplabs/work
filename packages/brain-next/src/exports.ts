@@ -726,16 +726,19 @@ const settleStuck = (storage: DurableObjectStorage): void => {
 };
 
 /**
- * Of a row of `restores`: a failed one to give up, as it failed before its
- * export was wholly checked (still `restoring`: what its files hold is not
- * all on record, so they go), the store took something since it failed
- * (`held_to`, but Grasp's own skills), or the ledger names a version its
- * export holds.
+ * Of a row of `restores`: a failed one whose check found a damaged part
+ * while its export was still `restoring` (what its files hold may not all
+ * be on record, so they go), or one that failed with its export no longer
+ * adopted (`handedBackSql`) or checked whole, once the store took
+ * something since it failed (`held_to`, but Grasp's own skills) or the
+ * ledger names a version its export holds: to give up.
  */
 const givenUpSql = `restores.state = 'failed' AND (
-  EXISTS (
-    SELECT 1 FROM exports
-    WHERE exports.id = restores.export AND exports.state = 'restoring'
+  (
+    restores.damaged = 1 AND EXISTS (
+      SELECT 1 FROM exports
+      WHERE exports.id = restores.export AND exports.state = 'restoring'
+    )
   )
   OR
   EXISTS (
@@ -750,6 +753,43 @@ const givenUpSql = `restores.state = 'failed' AND (
 )`;
 
 /**
+ * Of a row of `restores`: a failed one whose check found no damage but
+ * didn't end (its item of the queue parked for good or gone: an outage,
+ * a throw), its export still `restoring`. Nothing was wrong with the
+ * export, and after a storage loss it may be the company's only copy.
+ */
+const handedBackSql = `restores.state = 'failed' AND restores.damaged = 0
+  AND EXISTS (
+    SELECT 1 FROM exports
+    WHERE exports.id = restores.export AND exports.state = 'restoring'
+  )`;
+
+/**
+ * Every adopted export whose check stopped (`handedBackSql`) handed back
+ * to the sweep, as one the store has no record of: its rows deleted, its
+ * files kept, and the sweep's pass marked as covering no erasure, so the
+ * next pass judges them by the ledger (`orphanFileDrops`), as soon as one
+ * is recorded. Its restore stays failed, to start again. In the caller's
+ * transaction.
+ */
+const handBackStopped = (storage: DurableObjectStorage): void => {
+  const { sql } = storage;
+  const handed = sql
+    .exec<{ export: string }>(
+      `SELECT export FROM restores WHERE ${handedBackSql}`
+    )
+    .toArray();
+  for (const { export: id } of handed) {
+    sql.exec("DELETE FROM export_sources WHERE export = ?", id);
+    sql.exec("DELETE FROM export_parts WHERE export = ?", id);
+    sql.exec("DELETE FROM exports WHERE id = ?", id);
+  }
+  if (handed.length > 0) {
+    sql.exec("UPDATE export_sweep SET through = 0 WHERE id = 1");
+  }
+};
+
+/**
  * Every failed restore to give up (`givenUpSql`) settled as abandoned, its
  * export no longer held: retired at once when the ledger names a version
  * it holds. In the caller's transaction.
@@ -761,8 +801,8 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
     )
     .toArray();
   for (const restore of given) {
-    // Adopted and never wholly checked: what its files hold is not all on
-    // record, so they go.
+    // Adopted, and its check found a damaged part: what its files hold is
+    // not all on record, so they go.
     retire(
       storage,
       "failed",
@@ -775,12 +815,15 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
 
 /**
  * The tick's step for exports and restores, in one transaction: the stuck
- * settled as failed and failed restores given up; once per new erasure
+ * settled as failed, adopted exports whose check stopped handed back to
+ * the sweep, and failed restores given up; once per new erasure
  * (the `checked` marker), every export the ledger now makes stale retired
  * (`staleSql`); and, when no pass of the sweep is on the queue, a pass
  * started: from the first key when an erasure was recorded past the one
  * the last pass started for (`through`), or from its saved place when a
- * pass's item went before it ended. A pass is never restarted. Its rule is
+ * pass's item went before it ended. A pass is never restarted, but from
+ * the first key once an export is handed back, which its saved place may
+ * be past. Its rule is
  * `exportsDue`. Between erasures nothing can make an export stale: a part
  * and a restore done are asked as they land (`writePart`, `retireIfStale`).
  */
@@ -788,6 +831,7 @@ export const exportsStep = (storage: DurableObjectStorage): void => {
   storage.transactionSync(() => {
     const { sql } = storage;
     settleStuck(storage);
+    handBackStopped(storage);
     giveUpRestores(storage);
     const at = sql
       .exec<{
@@ -834,13 +878,16 @@ export const exportsStep = (storage: DurableObjectStorage): void => {
 
 /**
  * Whether the tick's step for exports has something to do (`exportsStep`):
- * an erasure recorded since it last looked, a failed restore to give up,
- * or an export or a restore stuck.
+ * an erasure recorded since it last looked, a failed restore to give up
+ * or an adopted export to hand back, or an export or a restore stuck.
  */
 export const exportsDue = (sql: SqlStorage): boolean =>
   sweepDue(sql) ||
-  sql.exec(`SELECT 1 FROM restores WHERE ${givenUpSql} LIMIT 1`).toArray()
-    .length > 0 ||
+  sql
+    .exec(
+      `SELECT 1 FROM restores WHERE (${givenUpSql}) OR (${handedBackSql}) LIMIT 1`
+    )
+    .toArray().length > 0 ||
   sql
     .exec(
       `SELECT 1 FROM exports WHERE ${stuckExportSql.replaceAll("?3", "?1")}
@@ -952,9 +999,10 @@ const fail = (storage: DurableObjectStorage, id: string): void => {
  * Deletes every part file, and its holdings, numbered `parts` or past:
  * what a run wrote before the store stopped and a later run, finding other
  * versions, didn't write again. Before the manifest makes the export
- * whole, so it holds nothing it doesn't name.
+ * whole, and before a restore adopts it, so it holds nothing it doesn't
+ * name.
  */
-const dropPartsBeyond = async (
+export const dropPartsBeyond = async (
   bucket: BrainBucket,
   id: string,
   parts: number

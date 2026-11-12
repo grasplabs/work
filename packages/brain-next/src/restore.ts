@@ -18,6 +18,7 @@ import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import { keepSubject, subjectOf } from "./erasure.ts";
 import {
+  dropPartsBeyond,
   exportKeyOf,
   exportLineSchema,
   isStale,
@@ -684,6 +685,9 @@ export const startRestore = async (
   if (!("format" in manifest)) {
     return manifest;
   }
+  // Files past the parts the manifest names are never checked, so nothing
+  // would record what they hold: they go before the export is adopted.
+  await dropPartsBeyond(bucket, id, manifest.parts.length);
   return storage.transactionSync(() => {
     const started = rowOf(sql, id);
     if (started?.state === "abandoned") {

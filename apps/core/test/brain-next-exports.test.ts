@@ -8,7 +8,11 @@ import {
   brainExportsPath,
   brainRestorePath,
 } from "../src/brain-next-exports.ts";
-import { addSource, workBrain } from "../src/brain-next.ts";
+import {
+  addSource,
+  readSourceVersionAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
@@ -285,7 +289,7 @@ describe(
       });
     });
 
-    it("answers an export started, and an add made, while a restore runs with a code of their own: a conflict, never an error of core's", async () => {
+    it("answers an export started, and a shared add made, while a restore runs with a code of their own, and keeps a person's own add in their own store meanwhile", async () => {
       const admin = await signedInWithRole(idp, "admin");
       const store = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
       const restoring = crypto.randomUUID();
@@ -316,14 +320,30 @@ describe(
         } catch (error) {
           added = brainExportErrors.codeOf(error);
         }
+        // What only one person may read goes to their own store, which no
+        // restore touches: kept, never lost.
+        const mine = { producer: "upload", id: crypto.randomUUID() } as const;
+        const text = `mine while it restores ${crypto.randomUUID()}`;
+        const { version } = await addSource(env, {
+          source: mine,
+          change: "1",
+          text,
+          readers: { kind: "owner", personId: admin.userId },
+        });
+        const read = await readSourceVersionAs(env, admin.userId, {
+          source: mine,
+          version,
+        });
         expect({
           status: started.status,
           code,
           added,
+          own: read?.text,
         }).toStrictEqual({
           status: 409,
           code: "brain.export_refused",
           added: "brain.restoring",
+          own: text,
         });
       } finally {
         await runInDurableObject(store, (_instance, state) => {
