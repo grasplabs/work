@@ -7,6 +7,8 @@ import { packAcross } from "./across.ts";
 import { bucketUnder } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
 import {
+  attributeRuleOf,
+  entityKinds,
   confirmRequestSchema,
   contestedRequestSchema,
   entitiesRequestSchema,
@@ -31,10 +33,11 @@ import {
 import type {
   AddedMemories,
   ConfirmRequest,
-  ContestedFact,
+  ContestedPage,
   ContestedRequest,
   EntitiesRequest,
   Entity,
+  EntityPage,
   EntityRequest,
   MemoriesRead,
   MemoriesRequest,
@@ -102,6 +105,7 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
+import { forgetStranded } from "./forget.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   confirmMemory,
@@ -206,6 +210,10 @@ const notTheirs =
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
+
+/** What a read of memories under an attribute it can't have answers. */
+const noSuchAttribute =
+  "The Brain refused it: the attribute is not one the entity's kind has";
 
 /** What a store whose name says no one's answers every call. */
 const noOnes =
@@ -438,6 +446,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       releaseInterrupted(this.ctx.storage);
       markWordsCurrentIfEmpty(this.ctx.storage.sql);
       await keepMissingSubjects(this.ctx.storage);
+      // What a rollback's older release left of memories, whose set of
+      // readers or version it deleted: read by no one, and gone now.
+      this.ctx.storage.transactionSync(() => {
+        forgetStranded(this.ctx.storage.sql);
+      });
       this.#opened = true;
       this.#schema = true;
     }
@@ -1340,45 +1353,68 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     });
   }
 
-  /** The memories about an entity the reader may read (memories.ts). */
+  /**
+   * A page of the memories about an entity the reader may read
+   * (memories.ts). An attribute no kind lists is refused; one the entity's
+   * kind lacks is refused when the reader may see the entity, and reads
+   * as an unknown id's empty page when they may not.
+   */
   async readMemories(request: MemoriesRequest): Promise<MemoriesRead> {
     const asked = checked(memoriesRequestSchema, request);
     this.#mayRead(asked.reader);
-    if (!(await this.#readable())) {
-      return { memories: [] };
+    const { attribute } = asked;
+    if (
+      attribute !== undefined &&
+      !entityKinds.some((kind) => attributeRuleOf(kind, attribute))
+    ) {
+      throw new Error(noSuchAttribute);
     }
-    return {
-      memories: readMemories(this.ctx.storage.sql, {
+    if (!(await this.#readable())) {
+      return { memories: [], more: false };
+    }
+    const { sql } = this.ctx.storage;
+    if (attribute !== undefined) {
+      const seen = readEntity(sql, {
         entity: asked.entity,
         reader: asked.reader,
-        ...(asked.attribute === undefined
-          ? {}
-          : { attribute: asked.attribute }),
-        at: (asked.asOf ?? new Date()).getTime(),
-        history: asked.history ?? false,
-        limit: asked.limit,
-      }),
-    };
+      });
+      if (
+        seen !== null &&
+        attributeRuleOf(seen.kind, attribute) === undefined
+      ) {
+        throw new Error(noSuchAttribute);
+      }
+    }
+    return readMemories(sql, {
+      entity: asked.entity,
+      reader: asked.reader,
+      ...(attribute === undefined ? {} : { attribute }),
+      at: (asked.asOf ?? new Date()).getTime(),
+      history: asked.history ?? false,
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
   }
 
-  /** The contested facts the reader may read (memories.ts). */
-  async listContested(request: ContestedRequest): Promise<ContestedFact[]> {
+  /** A page of the contested facts the reader may read (memories.ts). */
+  async listContested(request: ContestedRequest): Promise<ContestedPage> {
     const asked = checked(contestedRequestSchema, request);
     this.#mayRead(asked.reader);
     if (!(await this.#readable())) {
-      return [];
+      return { facts: [], more: false };
     }
     return listContested(this.ctx.storage.sql, {
       ...(asked.entity === undefined ? {} : { entity: asked.entity }),
       reader: asked.reader,
       at: Date.now(),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
   }
 
-  /** Retires one of the writer's own memories (memories.ts). */
+  /** Retires one of the reader's own memories (memories.ts). */
   async retireMemory(request: RetireRequest): Promise<MemoryChangeOutcome> {
-    const { memory, writer, reader } = checked(retireRequestSchema, request);
+    const { memory, reader } = checked(retireRequestSchema, request);
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
@@ -1386,7 +1422,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       return retireMemory(this.ctx.storage.sql, {
         id: memory,
-        writer,
         reader,
         at: Date.now(),
       });
@@ -1412,11 +1447,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /** The entities the reader may see that match (entities.ts). */
-  async findEntities(request: EntitiesRequest): Promise<Entity[]> {
+  async findEntities(request: EntitiesRequest): Promise<EntityPage> {
     const asked = checked(entitiesRequestSchema, request);
     this.#mayRead(asked.reader);
     if (!(await this.#readable())) {
-      return [];
+      return { entities: [], more: false };
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,
@@ -1425,6 +1460,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         ? {}
         : { identifier: asked.identifier }),
       ...(asked.name === undefined ? {} : { name: asked.name }),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
   }

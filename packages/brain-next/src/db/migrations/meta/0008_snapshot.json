@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8ae06332-edb7-47c9-be0a-0fcea74052d8",
+  "id": "cc73a726-13f6-44dc-a92c-20144af31761",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -666,8 +666,15 @@
           "notNull": false,
           "autoincrement": false
         },
-        "version_row": {
-          "name": "version_row",
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -729,9 +736,9 @@
           "notNull": false,
           "autoincrement": false
         },
-        "reader_set": {
-          "name": "reader_set",
-          "type": "integer",
+        "readers": {
+          "name": "readers",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -771,14 +778,15 @@
         "memories_version_idx": {
           "name": "memories_version_idx",
           "columns": [
-            "version_row"
+            "source",
+            "version"
           ],
           "isUnique": false
         },
-        "memories_reader_set_idx": {
-          "name": "memories_reader_set_idx",
+        "memories_readers_idx": {
+          "name": "memories_readers_idx",
           "columns": [
-            "reader_set"
+            "readers"
           ],
           "isUnique": false
         },
@@ -983,15 +991,8 @@
     "memory_extractions": {
       "name": "memory_extractions",
       "columns": {
-        "version_row": {
-          "name": "version_row",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lineage": {
-          "name": "lineage",
+        "source": {
+          "name": "source",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -1004,6 +1005,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "lineage": {
+          "name": "lineage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "at": {
           "name": "at",
           "type": "integer",
@@ -1011,9 +1019,9 @@
           "notNull": true,
           "autoincrement": false
         },
-        "reader_set": {
-          "name": "reader_set",
-          "type": "integer",
+        "readers": {
+          "name": "readers",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -1035,6 +1043,13 @@
           ],
           "isUnique": false
         },
+        "memory_extractions_readers_idx": {
+          "name": "memory_extractions_readers_idx",
+          "columns": [
+            "readers"
+          ],
+          "isUnique": false
+        },
         "memory_extractions_only_for_idx": {
           "name": "memory_extractions_only_for_idx",
           "columns": [
@@ -1045,12 +1060,13 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "memory_extractions_version_row_reader_set_pk": {
+        "memory_extractions_source_version_readers_pk": {
           "columns": [
-            "version_row",
-            "reader_set"
+            "source",
+            "version",
+            "readers"
           ],
-          "name": "memory_extractions_version_row_reader_set_pk"
+          "name": "memory_extractions_source_version_readers_pk"
         }
       },
       "uniqueConstraints": {},

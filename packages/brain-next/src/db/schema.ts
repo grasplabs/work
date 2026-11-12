@@ -621,12 +621,14 @@ export const memories = sqliteTable(
     type: text().notNull(),
     statement: text().notNull(),
     quote: text(),
-    // No foreign key to the version, nor below to the set of readers: a
-    // release before memories deletes both without knowing of them (an
-    // admin's rollback), and must never abort on it. The store's own code
-    // deletes a memory with its version and keeps a set while one points
-    // at it (erasure.ts).
-    versionRow: integer("version_row"),
+    // The version it rests on, by its source's key and its number, and
+    // its readers, by their set's key (`reader_sets.key`): never by a
+    // row id, which a release before memories may delete (an admin's
+    // rollback) and SQLite then give to another version or group. A
+    // memory whose version or set is gone is read by no one and deleted
+    // as the store starts (forget.ts `forgetStranded`).
+    source: text(),
+    version: integer(),
     writer: text(),
     lineage: text().notNull(),
     lineageOrder: integer("lineage_order").notNull(),
@@ -636,7 +638,7 @@ export const memories = sqliteTable(
     validUntil: integer("valid_until"),
     learnedAt: integer("learned_at").notNull(),
     retiredAt: integer("retired_at"),
-    readerSet: integer("reader_set").notNull(),
+    readers: text().notNull(),
     onlyFor: text("only_for"),
   },
   (table) => [
@@ -646,8 +648,8 @@ export const memories = sqliteTable(
       table.lineage
     ),
     index("memories_object_idx").on(table.object),
-    index("memories_version_idx").on(table.versionRow),
-    index("memories_reader_set_idx").on(table.readerSet),
+    index("memories_version_idx").on(table.source, table.version),
+    index("memories_readers_idx").on(table.readers),
     index("memories_only_for_idx").on(table.onlyFor),
   ]
 );
@@ -725,18 +727,19 @@ export const memoryConfirmedOver = sqliteTable(
 export const memoryExtractions = sqliteTable(
   "memory_extractions",
   {
-    versionRow: integer("version_row").notNull(),
-    lineage: text().notNull(),
+    source: text().notNull(),
     version: integer().notNull(),
+    lineage: text().notNull(),
     at: integer().notNull(),
-    /** The add's set of readers: only they, of the version's, see it end what came before. */
-    readerSet: integer("reader_set").notNull(),
+    /** The add's readers, by their set's key: only they, of the version's, see it end what came before. */
+    readers: text().notNull(),
     /** As `memories.only_for`: the one person who alone read the add, hashed. */
     onlyFor: text("only_for"),
   },
   (table) => [
-    primaryKey({ columns: [table.versionRow, table.readerSet] }),
+    primaryKey({ columns: [table.source, table.version, table.readers] }),
     index("memory_extractions_lineage_idx").on(table.lineage, table.version),
+    index("memory_extractions_readers_idx").on(table.readers),
     index("memory_extractions_only_for_idx").on(table.onlyFor),
   ]
 );
