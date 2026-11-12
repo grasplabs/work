@@ -224,7 +224,7 @@ export const Route = createFileRoute("/")({ component: Desk });
 /**
  * A new App of `appFiles` whose `followUp` binds version 1 of a new
  * workflow of `builder`'s asking `admin` or `colleague`, its decision
- * binding approved for them, released, published and current, its
+ * binding approved for them, released and live, its
  * `start` grant given by `admin`. Bound
  * before the release, so the pages' `workflows.followUp` names the
  * decision.
@@ -278,8 +278,7 @@ const boundApp = async (
       appFiles(admin.userId, colleague.userId),
       "Requests"
     );
-    await builds.api.apps.versions.setCurrent(app, version);
-    await builds.api.apps.publish(app);
+    await builds.api.apps.versions.publish(app, version);
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

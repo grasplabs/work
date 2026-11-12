@@ -5,16 +5,18 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { approvalDrawn } from "./model-scripts.ts";
+import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // An independent workflow, end to end, as its people make and use it: a
-// builder draws it with Grasp's chat beside its Flow (the stack's scripted
+// builder makes it from Make something, saying what they want done, and
+// Grasp's chat draws it once they say Build it (the stack's scripted
 // model saves an invoice approval, a person's decision, as its draft,
-// e2e/model-scripts.ts) and publishes it; an admin names who answers its
-// decision on its Files and apps tab; the builder starts a run naming the
+// e2e/model-scripts.ts); the builder publishes it from its Settings'
+// Definition; an admin names who answers its decision in its Settings'
+// Files and apps; the builder starts a run with Run, naming the
 // approver, whose nav counts the workflow that needs them, and who decides
 // from their inbox, on the decision's own page: its link, which anyone
 // else who opens it only sees isn't for them; and the run ends with their
@@ -39,8 +41,8 @@ const untilItHappens = { timeout: 45_000 };
 test.use({ trace: "retain-on-failure", actionTimeout: pageRead.timeout });
 test.describe.configure({ retries: 0 });
 
-/** A new workflow's name, as New workflow makes one. */
-const newName = /^new-workflow-[\da-f]{8}$/u;
+/** A new workflow's name, as Build it makes one from the plan. */
+const newName = /^[a-z\d-]+-[\da-f]{6}$/u;
 
 /** Picks `person` in the open list of people, teams and roles on `page`. */
 const pick = async (page: Page, person: Person): Promise<void> => {
@@ -72,31 +74,50 @@ const decisionIn = async (page: Page, name: string): Promise<void> => {
 };
 
 /**
- * Draws the approval with Grasp's chat on a new workflow's empty Flow
- * and publishes it as version 1, as the builder on `page`: its ID and name.
+ * Makes a new workflow saying what it should do, which Grasp's chat draws
+ * as the approval on its Flow, and publishes it as version 1, as the
+ * builder on `page`: its ID and name.
  */
 const drawnAndPublished = async (
   page: Page
 ): Promise<{ workflow: string; name: string }> => {
   await page.goto("/workflows");
-  await page.getByRole("button", { name: "New workflow" }).click();
-  const title = page.getByRole("heading", { name: newName });
-  await expect(title).toBeVisible(pageRead);
+  await page.getByRole("link", { name: "Make something" }).click();
+  // Nothing is made until Build it: then it lands on the workflow, where
+  // Grasp draws it in the chat docked beside it.
+  await expect(
+    page.getByRole("heading", { name: "What do you want to get done?" })
+  ).toBeVisible(pageRead);
+  const ask = page.getByRole("textbox", { name: "Your question" });
+  await ask.fill(modelScripts.drawsApproval.opener);
+  await ask.press("Enter");
+  await page
+    .getByRole("region", { name: "Here's what Grasp will make" })
+    .getByRole("button", { name: "Build it" })
+    .click(agentTurn);
+  await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u, agentTurn);
+  const title = page.getByRole("heading", { level: 1, name: newName });
+  await expect(title).toBeAttached(pageRead);
   const name = (await title.textContent()) ?? "";
   const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
-  // Which process it is for, and the chat draws the approval.
-  const chat = page.getByRole("region", { name: "Ask Grasp" });
-  const asks = chat.getByRole("region", { name: "Grasp asks" });
-  await asks.getByRole("radio", { name: "Opportunity-to-Cash" }).click();
-  await asks.getByRole("button", { name: "Send" }).click();
+  // The chat docked beside the Flow draws the approval.
+  const chat = page.getByRole("region", { name: "Chat" });
   await expect(chat.getByText(approvalDrawn)).toBeVisible(agentTurn);
   const diagram = page.getByRole("region", { name: "Diagram", exact: true });
   await expect(diagram.getByRole("listitem", { name: "approve" })).toBeVisible(
     pageRead
   );
 
-  await page.getByRole("tab", { name: "Definition" }).click();
+  // Its definition, in its Settings, is where it is published.
+  await page
+    .getByRole("navigation", { name: "Workflow views" })
+    .getByRole("link", { name: "Settings" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: "Definition" })
+    .click();
   await page.getByRole("button", { name: "Publish revision 1" }).click();
   await expect(page.getByText("Published as version 1.")).toBeVisible(pageRead);
   return { workflow, name };
@@ -124,7 +145,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
 
   // Its decision waits for an admin to name who answers it.
   const asAdmin = await pageOf(admin);
-  await asAdmin.goto(`/workflows/${workflow}?tab=files`);
+  await asAdmin.goto(`/workflows/${workflow}?view=settings&section=files`);
   const waiting = asAdmin.getByRole("region", {
     name: "Waiting for your approval",
   });
@@ -135,11 +156,9 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await waiting.getByRole("button", { name: "Approve approval" }).click();
   await expect(asAdmin.getByText("Approved: approval.")).toBeVisible(pageRead);
 
-  // The builder starts a run, naming the approver.
+  // The builder starts a run with Run, naming the approver.
   await page.reload();
-  await page
-    .getByRole("button", { name: "Start", exact: true })
-    .click(pageRead);
+  await page.getByRole("button", { name: "Run", exact: true }).click(pageRead);
   const start = page.getByRole("dialog", { name: "Start a run" });
   await start.getByLabel("invoice").fill("INV-42");
   // Picked from the organization's people, never typed as an ID. Everyone
@@ -204,7 +223,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   // until the engine has finished it.
   const run = page.getByRole("row").nth(1);
   await expect(async () => {
-    await page.goto(`/workflows/${workflow}?tab=traces`);
+    await page.goto(`/workflows/${workflow}?view=runs`);
     await expect(run).toBeVisible(pageRead);
     await expect(run).toContainText("Completed", { timeout: 1000 });
   }).toPass(untilItHappens);
@@ -230,8 +249,16 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("textbox", { name: `URL of ${sourceName}` })
     .inputValue(pageRead);
 
-  // The builder starts the workflow on its invoices.
-  await page.getByRole("tab", { name: "Triggers" }).click();
+  // The builder starts the workflow on its invoices, in its Settings'
+  // Triggers.
+  await page
+    .getByRole("navigation", { name: "Workflow views" })
+    .getByRole("link", { name: "Settings" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: "Triggers" })
+    .click();
   await page.getByLabel("What starts it").selectOption({
     label: "An event from a webhook source",
   });
@@ -260,7 +287,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(asAdmin.getByText(/^Approved: Webhook trigger /u)).toBeVisible(
     pageRead
   );
-  await page.goto(`/workflows/${workflow}?tab=triggers`);
+  await page.goto(`/workflows/${workflow}?view=settings&section=triggers`);
   await expect(
     page.getByText(`On invoice.received events from ${sourceName}`)
   ).toBeVisible(pageRead);

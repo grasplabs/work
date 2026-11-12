@@ -41,14 +41,13 @@ const intakeFor = async (admin: Person): Promise<string> => {
       name: `Intake ${crypto.randomUUID().slice(0, 8)}`,
     });
     for (const { id } of created.permissions) {
-      // Reviewed before a version of the copy is current.
+      // Reviewed before a version of the copy is live.
       // oxlint-disable-next-line no-await-in-loop -- one grant at a time
       await api.permissions.grant(id, { version: null });
     }
-    await api.apps.versions.setCurrent(created.app.id, 1);
-    // Published, for the people it is shared with (a draft is its
+    // Live, for the people it is shared with (until then, its
     // builders' alone).
-    await api.apps.publish(created.app.id);
+    await api.apps.versions.publish(created.app.id, 1);
     // Its stakeholder chats, through the permission just granted, bound as
     // an admin binds them on the App's Resources tab.
     const guests = created.permissions.find(
@@ -230,7 +229,7 @@ test("an admin invites a stakeholder, who opens the link without an account, wri
   await expect(guestPage.getByRole("alert")).toHaveText(
     /^The chat can't answer right now\. Try sending it again in a while\. Reference: [\da-f-]{36}$/u
   );
-  await expect(guestPage.getByLabel("Your message")).toHaveValue(
+  await expect(guestPage.getByLabel("Your message")).toHaveText(
     "I approve invoices."
   );
   await guestPage.getByRole("button", { name: "Finish" }).click();

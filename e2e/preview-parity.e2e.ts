@@ -12,7 +12,7 @@ import { apiOf, peopleIn } from "./people.ts";
 // preview's own addresses, and what it shows must be what goes live. The
 // differences meant to stay don't reach the page's markup: Fast Refresh's
 // hooks, React's development build, and the preview's own store instead
-// of the App's data. The preview is the chat's studio's (chat-preview.e2e
+// of the App's data. The preview is the App's workspace's (chat-preview.e2e
 // .ts), of a draft that adds a file no page imports; the published page
 // is the App's own, as people open it.
 
@@ -77,8 +77,7 @@ for (const { blueprint, heading, settled } of pages) {
         .toBeTruthy();
       const created = await api.apps.blueprints.create(blueprint, { name });
       app = created.app.id;
-      await api.apps.versions.setCurrent(app, 1);
-      await api.apps.publish(app);
+      await api.apps.versions.publish(app, 1);
       const thread = await api.chats.create(`Build ${tag}`);
       chat = thread.id;
     } finally {
@@ -96,9 +95,9 @@ for (const { blueprint, heading, settled } of pages) {
     await writeDraft(admin.userId, chat, app, 1, {
       "src/components/parity.ts": "export const parity = true;\n",
     });
-    await page.goto(`/?chat=${chat}`);
+    await page.goto(`/apps/${app}?chat=${chat}`);
     const preview = page
-      .getByRole("region", { name: `Preview of ${name}` })
+      .getByRole("region", { name: `${name}, your version` })
       .frameLocator("iframe");
 
     expect(await settledMarkupOf(preview, settled)).toBe(live);

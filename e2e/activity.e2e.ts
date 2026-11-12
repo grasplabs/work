@@ -199,18 +199,19 @@ test("an admin sees a grant asked for again after a new version, and approves on
       new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
     );
     await expect(card).toContainText(
-      /Asked again after version 2 was made current \(previously granted by .+ on .+\)/u
+      /Asked again after \d{2}\.\d{2}\.2 was published \(previously granted by .+ on .+\)/u
     );
-    await expect(card).toContainText("Version to review: 2");
+    // Versions as people know them: YY.MM.N, the second this month.
+    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
 
-    // Another version is made current while the admin looks at version 2.
+    // Another version is published while the admin looks at version 2.
     await release(builds.api, appId, { "README.md": "Three" }, "Third");
     await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(card.getByRole("alert")).toHaveText(
-      "Another version of this App was made current since this list was read. The list now shows it: review that version, then approve again."
+      "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
     );
-    await expect(card).toContainText("Version to review: 3");
-    await expect(card).toContainText("Asked again after version 3");
+    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.3/u);
+    await expect(card).toContainText(/Asked again after \d{2}\.\d{2}\.3/u);
     await expect(
       page.getByRole("status").filter({ hasText: "Approved:" })
     ).toHaveCount(0);
