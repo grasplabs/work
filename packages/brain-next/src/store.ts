@@ -388,8 +388,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /**
    * Puts every current version whose chunks lack vectors of the host's
    * model on the queue again, over the next ticks (embedding.ts):
-   * `nothing` while no model was seen or a walk is under way already;
-   * `unavailable`, changing nothing, until the ledger is read through.
+   * `nothing` while no model was seen; during a walk, it starts the walk
+   * over; `unavailable`, changing nothing, until the ledger is read
+   * through.
    */
   async reembed(): Promise<StaffActionOutcome> {
     if ((await this.#ledgerStep()) !== "through") {

@@ -549,6 +549,35 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
+  it("offers a re-embed while a rebuild waits on parked items, and points at them", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    const report = brainReport(1_000_000);
+    acme.core.brain = {
+      ...report,
+      embedding: { ...report.embedding, rebuilding: true },
+    };
+
+    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+    const text = textOf(html);
+    const button = /<button[^>]*>Re-embed<\/button>/u.exec(html)?.[0] ?? "";
+
+    expect({
+      shown: button !== "",
+      disabled: button.includes(' disabled=""'),
+      pointer: text.includes(
+        "It waits on what it put on the queue, parked items included: see Parked above."
+      ),
+      // Passed over is the embedder's verdict on the text: shown, not flagged.
+      passedOver: text.includes("found by words only, until a re-embed. 2 "),
+    }).toStrictEqual({
+      shown: true,
+      disabled: false,
+      pointer: true,
+      passedOver: true,
+    });
+  });
+
   it("says in one line that no embedding model runs, and offers no re-embed", async () => {
     const acme = await liveClient();
     acme.core.admin = heardSnapshot("Acme");

@@ -871,10 +871,9 @@ export interface Brain {
    * with chunks it hasn't embedded goes on the queue again, those parked
    * for good among them, over the next ticks, and the passages it couldn't
    * embed are tried again. For staff: after the embedders were broken long
-   * enough for items to park. Codes already there stay. `nothing` while no
-   * model was seen or a walk is under way already (it reaches every
-   * version anyway); `unavailable`, changing nothing, while the store reads
-   * its erasure ledger.
+   * enough for items to park. Codes already there stay. During a walk, it
+   * starts the walk over. `nothing` while no model was seen; `unavailable`,
+   * changing nothing, while the store reads its erasure ledger.
    */
   reembed: () => Promise<StaffActionOutcome>;
   /** The queue, as staff see it. */

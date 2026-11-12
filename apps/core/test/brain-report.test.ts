@@ -749,7 +749,7 @@ const embedAll = async (embedders: Embedders): Promise<void> => {
 };
 
 describe("the Brain's embedding, as staff see it", () => {
-  it("counts what its model embedded, with nothing of the content, and re-embeds once at a time, each audited", async () => {
+  it("counts what its model embedded, with nothing of the content, and re-embeds, during its walk too, each audited", async () => {
     const marked = marker();
     await addSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
@@ -765,7 +765,7 @@ describe("the Brain's embedding, as staff see it", () => {
     const events = await auditedDuring(async () => {
       answers.push(
         await answerTo({ type: "reembed" }),
-        // The walk it started is under way: a repeat starts nothing.
+        // The walk it started is under way: a repeat starts it over.
         await answerTo({ type: "reembed" })
       );
     });
@@ -799,7 +799,7 @@ describe("the Brain's embedding, as staff see it", () => {
         some: true,
         rebuilding: false,
       },
-      answers: [{ outcome: "done" }, { outcome: "nothing" }],
+      answers: [{ outcome: "done" }, { outcome: "done" }],
       during: true,
       events: [
         { action: "admin.brain.action.asked", detail: { type: "reembed" } },
@@ -810,7 +810,153 @@ describe("the Brain's embedding, as staff see it", () => {
         { action: "admin.brain.action.asked", detail: { type: "reembed" } },
         {
           action: "admin.brain.action.answered",
-          detail: { type: "reembed", outcome: "nothing" },
+          detail: { type: "reembed", outcome: "done" },
+        },
+      ],
+    });
+  });
+
+  it("clears what its model passed over when staff re-embed while its rebuild is under way", async () => {
+    const marked = marker();
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `${marked}\n\nThe second passage, about the warehouse in Assen.`.padEnd(
+        2000,
+        " filler"
+      ),
+      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+    });
+    const working = await testModelEmbedders();
+    // The model passes over the marked passage and embeds nothing else this
+    // time: the rebuild stays under way, with something passed over.
+    const choosy: Embedders = {
+      model: working.model,
+      embed: async ({ texts }) => {
+        await Promise.resolve();
+        return {
+          kind: "vectors",
+          model: working.model,
+          results: texts.map((text) =>
+            text.includes(marked) ? "unembeddable" : null
+          ),
+        };
+      },
+    };
+    const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
+    await brain.work(quietModel, nextDay(), choosy);
+    const before = await reported((report) => report?.embedding);
+    const answered = await answerTo({ type: "reembed" });
+    const after = await reported((report) => report?.embedding);
+
+    expect({
+      before: [(before?.passedOver ?? 0) > 0, before?.rebuilding],
+      answered,
+      after: [after?.passedOver, after?.rebuilding],
+    }).toStrictEqual({
+      before: [true, true],
+      answered: { outcome: "done" },
+      after: [0, true],
+    });
+  });
+
+  it("mends a rebuild whose items parked while the embedders were broken, once they work again", async () => {
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: "The invoice from the supplier in Zwolle, due in thirty days.",
+      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+    });
+    const working = await testModelEmbedders();
+    const broken: Embedders = {
+      model: working.model,
+      embed: async () => {
+        await Promise.resolve();
+        return { kind: "unavailable" };
+      },
+    };
+    const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
+    for (let attempt = 0; attempt <= workAttemptsMax; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick after another, past each backoff
+      await brain.work(quietModel, nextDay(), broken);
+    }
+    const { embedding: whileBroken } = await brainWorkOverview(env);
+    const answered = await answerTo({ type: "reembed" });
+    await embedAll(working);
+    const { embedding: mended } = await brainWorkOverview(env);
+
+    expect({
+      whileBroken: [whileBroken.parked > 0, whileBroken.rebuilt],
+      answered,
+      mended: [mended.parked, mended.rebuilt],
+    }).toStrictEqual({
+      whileBroken: [true, false],
+      answered: { outcome: "done" },
+      mended: [0, true],
+    });
+  });
+});
+
+/**
+ * The audit log's binding, taking the first `taken` appends and refusing
+ * every one after, as a log that went down in the middle of a request would.
+ */
+const auditLogFailingAfter = (taken: number): Env["AUDIT_LOG"] => {
+  let appends = 0;
+  return new Proxy(env.AUDIT_LOG, {
+    get: (namespace, name): unknown => {
+      if (name !== "getByName" && name !== "get") {
+        return Reflect.get(namespace, name, namespace);
+      }
+      return (id: string) => {
+        const log = namespace.getByName(id);
+        return new Proxy(log, {
+          get: (stub, method): unknown => {
+            if (method !== "append") {
+              return Reflect.get(stub, method, stub);
+            }
+            return async (...events: Parameters<typeof log.append>) => {
+              appends += 1;
+              if (appends > taken) {
+                throw new Error("Unavailable");
+              }
+              return await log.append(...events);
+            };
+          },
+        });
+      };
+    },
+  });
+};
+
+describe("the Brain's actions when the log fails after they applied", () => {
+  it("answers the error, keeps what was applied, and leaves the ask alone in the log", async () => {
+    const { id } = await parked(marker());
+    // The failed request is logged as an error: that's what it is.
+    const logged = vi.spyOn(console, "error").mockReturnValue();
+    const statuses: number[] = [];
+    const events = await auditedDuring(async () => {
+      const { status } = await act(
+        { type: "requeue", item: id },
+        { ...env, AUDIT_LOG: auditLogFailingAfter(1) }
+      );
+      statuses.push(status);
+    });
+    logged.mockRestore();
+
+    expect({
+      statuses,
+      stillParked: await isParked(id),
+      events: brainEvents(events),
+    }).toStrictEqual({
+      statuses: [500],
+      stillParked: false,
+      // An ask with no answer: its outcome is unknown.
+      events: [
+        {
+          action: "admin.brain.action.asked",
+          actor: staffActor,
+          detail: { type: "requeue", item: id },
         },
       ],
     });

@@ -29,25 +29,53 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { Await, useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { brainActionFn } from "../clients/brain-functions.ts";
-import { thenRefresh, useAction } from "../use-action.ts";
+import { thenRefresh } from "../use-action.ts";
 import { agoWords } from "./ai-status-words.ts";
 import type { BrainRead } from "./brain-loads.ts";
 import { Figure } from "./parts.tsx";
 import { EmptySection, Section, SectionRow } from "./section.tsx";
 import { formatList, formatPercent, plural, whole } from "./words.ts";
 
-/** Why an action changed nothing, as staff read it. */
-const refusals: Readonly<
+/** What an action did, as staff read it: its kind's line when done. */
+const doneWords: Readonly<Record<BrainAction["type"], string>> = {
+  requeue: "The item is back in the queue: it runs at the next tick.",
+  rebuild_words:
+    "The word indexes are being rebuilt, a batch a minute; recall goes on meanwhile.",
+  reembed:
+    "The embedding's rebuild started over: passages without vectors go back on the queue.",
+};
+
+/** What an action that changed nothing answered, as staff read it. */
+const notDoneWords: Readonly<
   Record<Exclude<BrainActionOutcome, "done"> | "not_answered", string>
 > = {
   nothing:
-    "Nothing to do: the item isn't parked any more, or a rebuild is under way already.",
+    "Nothing to do: the item isn't parked any more, a rebuild of the word indexes is under way already, or no embedding model runs.",
   unavailable:
     "The Brain is reading its erasure ledger and takes nothing else yet: try again shortly.",
   not_answered: "The company's Grasp didn't answer: try again.",
 };
+
+/** What staff read when the action failed otherwise. */
+const failedWords = "That didn't work: try again.";
+
+/** The line an action leaves, and whether it says something went wrong. */
+interface Said {
+  text: string;
+  wrong: boolean;
+}
+
+/** The line `outcome` of `action` leaves. */
+const saidOf = (
+  action: BrainAction,
+  outcome: BrainActionOutcome | "not_answered"
+): Said =>
+  outcome === "done"
+    ? { text: doneWords[action.type], wrong: false }
+    : { text: notDoneWords[outcome], wrong: outcome !== "nothing" };
 
 const replayWords: Record<BrainReport["ledger"]["replay"], string> = {
   through: "Read through",
@@ -104,24 +132,29 @@ const sizeWords = (bytes: number): string =>
  */
 const useBrainAction = (clientId: string) => {
   const router = useRouter();
-  const { busy, failure, run } = useAction(refusals);
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<Said | null>(null);
   const act = (action: BrainAction) => {
-    void run(
-      async () =>
-        await thenRefresh(
-          async () => {
-            const { outcome } = await brainActionFn({
-              data: { clientId, action },
-            });
-            return { refused: outcome === "done" ? null : outcome };
-          },
+    setBusy(true);
+    setSaid(null);
+    void (async () => {
+      let next: Said = { text: failedWords, wrong: true };
+      try {
+        const { outcome } = await thenRefresh(
+          async () => await brainActionFn({ data: { clientId, action } }),
           async () => {
             await router.invalidate({ sync: true });
           }
-        )
-    );
+        );
+        next = saidOf(action, outcome);
+      } catch {
+        // Said as failed: nothing of the error is for staff.
+      }
+      setSaid(next);
+      setBusy(false);
+    })();
   };
-  return { busy, failure, act };
+  return { busy, said, act };
 };
 
 /** What staff may do to the Brain, as the report's parts are given it. */
@@ -375,7 +408,7 @@ const Embedding = ({
     <Section
       action={
         <Button
-          disabled={busy || embedding.rebuilding}
+          disabled={busy}
           onClick={() => {
             act({ type: "reembed" });
           }}
@@ -400,13 +433,16 @@ const Embedding = ({
         description="Passages the model can't embed: found by words only, until a re-embed."
         label="Passed over"
       >
-        {embedding.passedOver > 0 ? (
-          <Badge variant="attention">{whole(embedding.passedOver)}</Badge>
-        ) : (
-          <span className="tabular-nums">0</span>
-        )}
+        <span className="tabular-nums">{whole(embedding.passedOver)}</span>
       </SectionRow>
-      <SectionRow label="Rebuild">
+      <SectionRow
+        description={
+          embedding.rebuilding && report.queue.parkedCount > 0
+            ? "It waits on what it put on the queue, parked items included: see Parked above. Once the embedders work again, re-embed to put them back now."
+            : undefined
+        }
+        label="Rebuild"
+      >
         {embedding.rebuilding ? (
           <Badge>Under way</Badge>
         ) : (
@@ -582,12 +618,19 @@ export const BrainHealth = ({
   clientId: string;
   read: Promise<BrainRead>;
 }) => {
-  const { busy, failure, act } = useBrainAction(clientId);
+  const { busy, said, act } = useBrainAction(clientId);
   return (
     <>
-      {failure === null ? null : (
-        <p className="text-destructive text-sm" role="alert">
-          {failure}
+      {said === null ? null : (
+        <p
+          className={
+            said.wrong
+              ? "text-destructive text-sm"
+              : "text-muted-foreground text-sm"
+          }
+          role={said.wrong ? "alert" : "status"}
+        >
+          {said.text}
         </p>
       )}
       <Await fallback={<Reading />} promise={read}>

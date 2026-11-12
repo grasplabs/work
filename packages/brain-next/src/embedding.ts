@@ -577,16 +577,17 @@ export const embeddingStep = (
 /**
  * Starts the rebuild for the host's model as last seen again (staff's
  * re-embed): the walk from the first version, and the passages it
- * couldn't embed tried again. Answers whether it started one: not while
- * the store has seen no model (nothing to embed with), nor while a walk is
- * under way already, which reaches every version anyway; so a repeat
- * restarts nothing until that walk is over.
+ * couldn't embed tried again. Answers whether it did: not while the store
+ * has seen no model, as there is nothing to embed with. During a walk it
+ * starts the walk over, so versions the walk already passed (their items
+ * parked, say) are put back too; that is safe, as a version put on the
+ * queue again replaces its item waiting or parked there.
  */
 export const reembed = (storage: DurableObjectStorage): boolean =>
   storage.transactionSync(() => {
     const { sql } = storage;
     const state = stateOf(sql);
-    if (state === undefined || state.model === null || state.walked === 0) {
+    if (state === undefined || state.model === null) {
       return false;
     }
     sql.exec(
