@@ -7,7 +7,6 @@
  * its leads' and its works'), never anything someone wrote or said.
  */
 import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
-import type { Interviewer } from "@grasp-os/shared/admin/interviewer";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import type { Phase, WorkflowState } from "@grasp-os/shared/admin/interviews";
 import {
@@ -85,17 +84,6 @@ const wholeNumber = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 
 /** A fee or a value: always in whole euros. */
 export const euros = (amount: number): string => wholeEuros.format(amount);
-
-const euroFractions = new Intl.NumberFormat("en", {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 3,
-});
-
-/** A price per unit in euros: to a tenth of a cent, as a minute of voice costs less than a cent or two. */
-export const euroRate = (amount: number): string =>
-  amount >= 10 ? euros(amount) : euroFractions.format(amount);
 
 /** An amount in euros: to the cent while it is small, in whole euros from ten on. */
 export const euro = (amount: number): string =>
@@ -451,12 +439,6 @@ export const interviewPhaseWords: Record<Phase, string> = {
   numbers: "The numbers",
   result: "Done right",
   readback: "Reading it back",
-};
-
-/** The interviewers by name. */
-export const interviewerNames: Record<Interviewer, string> = {
-  stephen: "Stephen",
-  claire: "Claire",
 };
 
 /** So many of so many have had their interview: "3 of 9 talked". */

@@ -6,6 +6,7 @@ import { OrgBrief } from "../../../admin/org-brief.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { Section } from "../../../admin/section.tsx";
 import {
+  needSearch,
   needSection,
   sectionTo,
   sectionWords,
@@ -53,6 +54,7 @@ const NeedsHere = () => {
                 render={
                   <Link
                     params={{ clientId: admin.client.id }}
+                    search={needSearch(need)}
                     to={sectionTo[section]}
                   />
                 }

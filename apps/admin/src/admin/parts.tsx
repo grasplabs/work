@@ -275,25 +275,6 @@ export const PeopleDots = ({
   </span>
 );
 
-const dotLegend: readonly [DotMark, string][] = [
-  ["talked", "Talked"],
-  ["started", "Started"],
-  ["not", "Has not talked"],
-  ["none", "No link yet"],
-];
-
-/** What the dots mean, in the same marks. */
-export const DotLegend = () => (
-  <ul className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
-    {dotLegend.map(([mark, label]) => (
-      <li className="flex items-center gap-1.5" key={mark}>
-        <Dot mark={mark} />
-        {label}
-      </li>
-    ))}
-  </ul>
-);
-
 /**
  * A few things counted, as rows: what each is, a bar as long as its share
  * of the most, and the number. The words take the room they need and the
