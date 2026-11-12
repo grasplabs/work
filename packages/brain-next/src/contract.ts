@@ -1577,8 +1577,10 @@ export interface Brain {
   repackVectors: () => Promise<boolean>;
   /**
    * Erases a source for good: every version, its chunks and their words,
-   * vector codes, change keys and queued work, and its files once no
-   * version holds them (the sweep). Returns once the erasure is in the
+   * vector codes, change keys and queued work, the memories drawn from it
+   * (hidden at once, deleted with their version) with any entity no other
+   * memory mentions, and its files once no version holds them (the
+   * sweep). Returns once the erasure is in the
    * ledger and nothing of the source is found or read any more; what is
    * left to delete, the store's tick finishes. The source's key is closed:
    * an add to it is refused from then on. It answers alike whether the
@@ -1588,7 +1590,8 @@ export interface Brain {
   /**
    * Erases what only `person` may read, as `eraseSource` erases a source:
    * every version readable by them alone, added up to now, and whole each
-   * source whose current version is such. A source others read now keeps
+   * source whose current version is such, and every memory readable by
+   * them alone, learned up to now, at once. A source others read now keeps
    * their versions. Content added for them afterwards is new and kept.
    * Answers alike whatever they held, and is safe to repeat.
    */
@@ -1631,7 +1634,10 @@ export interface Brain {
    * read the memory and each one it was confirmed over.
    */
   confirmMemory: (request: ConfirmRequest) => Promise<MemoryChangeOutcome>;
-  /** The entities the reader may see that match, the earliest first. */
+  /**
+   * The entities the reader may see that match, in the order of the first
+   * memory they may read that mentions each.
+   */
   findEntities: (request: EntitiesRequest) => Promise<Entity[]>;
   /** An entity, if the reader may see it; null alike when there is none. */
   readEntity: (request: EntityRequest) => Promise<Entity | null>;

@@ -559,6 +559,49 @@ describe("who may read a memory", () => {
       })
     ).resolves.toBeNull();
   });
+
+  // Threat 4: where an entity stands depends only on what the reader may read.
+  it("lists entities in the order of the first memory the reader may read, whatever was linked before", async () => {
+    const group = unique("group");
+    const email = `${unique("old")}@example.test`;
+    const linked = (key: string): NewEntity => ({
+      key,
+      kind: "supplier",
+      identifiers: [{ type: "email", value: email }],
+    });
+    const say = (about: string, statement: string): NewMemory => ({
+      about,
+      type: "fact",
+      statement,
+      speaker: { kind: "system" },
+      basis: { kind: "writer", writer: unique("w") },
+    });
+    await remember(
+      audience(unique("hidden")),
+      [linked("s")],
+      [say("s", "Hidden")]
+    );
+    const first = await remember(
+      audience(group),
+      [{ key: "s", kind: "supplier", names: [unique("First")] }],
+      [say("s", "First")]
+    );
+    const second = await remember(
+      audience(group),
+      [linked("s")],
+      [say("s", "Second")]
+    );
+
+    const found = await shared().findEntities({
+      reader: readerOf(unique("reader"), group),
+      kind: "supplier",
+    });
+    expect(
+      found
+        .map(({ id }) => id)
+        .filter((id) => id === first.entities.s || id === second.entities.s)
+    ).toStrictEqual([first.entities.s, second.entities.s]);
+  });
 });
 
 describe("what the store refuses", () => {

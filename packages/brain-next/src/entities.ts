@@ -97,35 +97,52 @@ const mentionedSql = (entity: string): string => `(
 )`;
 
 /**
+ * The first memory the reader may read that mentions the entity at
+ * `entity`, by row: null when there is none, so they may not see it. What
+ * entities are ordered by, so where one stands among those a reader sees
+ * depends only on what they may read: an entity linked long ago through
+ * a hidden memory stands where its first memory they may read puts it.
+ */
+const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
+  SELECT m.row AS first FROM memories AS m WHERE m.entity = ${entity} AND ${visibleSql("m")}
+  UNION ALL
+  SELECT m.row FROM memories AS m WHERE m.object = ${entity} AND ${visibleSql("m")}
+))`;
+
+/**
  * `?1` the kind or null, `?4` the names and identifiers asked (JSON, each
  * `[type, folded]`, every one to be held), `?5` the limit: the entities
- * the reader may see that hold each, by a memory they may read, the
- * earliest first.
+ * the reader may see that hold each, by a memory they may read, in the
+ * order of the first memory they may read that mentions each.
  */
 const findSql = `
-WITH ${readableSql}
-SELECT entities.row AS row, entities.id AS id, entities.kind AS kind
-FROM entities
-WHERE (?1 IS NULL OR entities.kind = ?1)
-  -- Found through the index of names when one is asked: the first.
-  AND (json_array_length(?4) = 0 OR entities.row IN (
-    SELECT entity_names.entity FROM entity_names
-    WHERE entity_names.type = ?4 ->> '$[0][0]'
-      AND entity_names.folded = ?4 ->> '$[0][1]'
-  ))
-  AND NOT EXISTS (
-    SELECT 1 FROM json_each(?4) AS asked
-    WHERE NOT EXISTS (
-      SELECT 1 FROM entity_names
-      JOIN memories AS m ON m.row = entity_names.memory
-      WHERE entity_names.entity = entities.row
-        AND entity_names.type = asked.value ->> 0
-        AND entity_names.folded = asked.value ->> 1
-        AND ${visibleSql("m")}
+WITH ${readableSql},
+found AS MATERIALIZED (
+  SELECT entities.row AS row, entities.id AS id, entities.kind AS kind,
+    ${firstMentionSql("entities.row")} AS first
+  FROM entities
+  WHERE (?1 IS NULL OR entities.kind = ?1)
+    -- Found through the index of names when one is asked: the first.
+    AND (json_array_length(?4) = 0 OR entities.row IN (
+      SELECT entity_names.entity FROM entity_names
+      WHERE entity_names.type = ?4 ->> '$[0][0]'
+        AND entity_names.folded = ?4 ->> '$[0][1]'
+    ))
+    AND NOT EXISTS (
+      SELECT 1 FROM json_each(?4) AS asked
+      WHERE NOT EXISTS (
+        SELECT 1 FROM entity_names
+        JOIN memories AS m ON m.row = entity_names.memory
+        WHERE entity_names.entity = entities.row
+          AND entity_names.type = asked.value ->> 0
+          AND entity_names.folded = asked.value ->> 1
+          AND ${visibleSql("m")}
+      )
     )
-  )
-  AND ${mentionedSql("entities.row")}
-ORDER BY entities.row
+)
+SELECT row, id, kind FROM found
+WHERE first IS NOT NULL
+ORDER BY first
 LIMIT ?5`;
 
 /**

@@ -70,6 +70,14 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 // lands after it. What is added for them after the erasure is new and
 // kept.
 //
+// Memories go with what they rest on (forget.ts): those drawn from a
+// version are hidden with it (memories.ts reads none whose version an
+// erasure holds) and deleted with it; those only an erased person may
+// read are deleted in the erasure's own transaction, and again by a
+// replay, found by the person's SHA-256 they carry (`only_for`) and
+// learned up to the erasure. An entity no memory mentions any more goes
+// with them, its names and identifiers with it.
+//
 // Nothing an erasure answers depends on what it found: it is recorded
 // and answers alike for a source or person that held nothing.
 //
