@@ -1,4 +1,8 @@
-import type { AppDraft, AppDraftChanges } from "@grasp-os/shared/app-drafts";
+import type {
+  AppDraft,
+  AppDraftChanges,
+  AppDraftHistoryPoint,
+} from "@grasp-os/shared/app-drafts";
 // @vitest-environment happy-dom
 import type {
   App,
@@ -93,12 +97,15 @@ const fakeApps = ({
   archived = false,
   currentVersion = 1,
   sharedWith = [],
+  points = [],
 }: {
   role?: ViewedApp["role"];
   archived?: boolean;
   currentVersion?: number | null;
   /** Whom it is shared with now. */
   sharedWith?: AppMember[];
+  /** The draft's undo points, newest first. */
+  points?: AppDraftHistoryPoint[];
 } = {}) => {
   const calls: string[] = [];
   let members = sharedWith;
@@ -120,6 +127,10 @@ const fakeApps = ({
   };
   return {
     calls,
+    /** Someone shares the App meanwhile, as `member`, the page unaware. */
+    sharedMeanwhile: (member: AppMember): void => {
+      members = [...members, member];
+    },
     /** The App's draft was published as version `version`: it is live. */
     published: (version: number): App => {
       app = { ...app, currentVersion: version, liveLabel: `26.11.${version}` };
@@ -190,6 +201,18 @@ const fakeApps = ({
             (member) => !(member.type === type && member.id === id)
           );
         },
+      },
+      /** The draft's undo points, newest first. */
+      draftPoints: async (): Promise<AppDraftHistoryPoint[]> =>
+        await Promise.resolve(points),
+      /** Makes undo point `point` the draft again, over `revision`. */
+      restoreDraftPoint: async (
+        _app: string,
+        point: number,
+        revision: number
+      ): Promise<void> => {
+        calls.push(`restore point ${point} over ${revision}`);
+        await Promise.resolve();
       },
       /** Discards the draft's changes, over the revision the person saw. */
       discardDraft: async (_app: string, revision: number): Promise<void> => {
@@ -315,7 +338,8 @@ const opened = async (
       get: draft,
       publish,
       changes,
-      points: async () => await Promise.resolve([]),
+      points: apps.draftPoints,
+      restorePoint: apps.restoreDraftPoint,
       discard: apps.discardDraft,
     },
   };
@@ -1545,6 +1569,63 @@ describe(AppWorkspace, () => {
       ],
       status: "Bo uses it",
     });
+  });
+
+  it("shares only with whom it has no share yet, and Undo puts the shared changes back as the draft over the version before", async () => {
+    // The draft as shared, at revision 1, over version 1.
+    const sharedPoint: AppDraftHistoryPoint = {
+      number: 3,
+      revision: 1,
+      base: 1,
+      contentHash: "shared",
+      personId: "user-1",
+      chatId: null,
+      callId: null,
+      restoredFrom: null,
+      createdAt: "2026-10-20T08:00:00.000Z",
+      touched: ["src/routes/index.tsx"],
+      changes: 1,
+    };
+    const fake = fakeApps({ currentVersion: 1, points: [sharedPoint] });
+    let drafted = true;
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-undo-restores",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () =>
+        await Promise.resolve(
+          drafted ? draftOf("invoice-desk") : draftOf("invoice-desk", [])
+        ),
+      async () => {
+        await Promise.resolve();
+        drafted = false;
+        return fake.published(2);
+      },
+      async () =>
+        await Promise.resolve(
+          changesOf({ live: 1, liveLabel: "26.11.1", next: "26.11.2" })
+        )
+    );
+    await settled();
+    await press(shareButton());
+    await tick("Finance team");
+    await tick("Bo");
+    // A colleague makes Bo a builder of it while the sheet is open.
+    fake.sharedMeanwhile({ ...memberOf("person", "p-bo"), role: "builder" });
+    await press(sheetButton("Share"));
+    await press(button("Undo"));
+    await settled();
+
+    expect(fake.calls).toStrictEqual([
+      // Bo stays a builder: only the team, which had no share, is added.
+      "share team:t-fin as user",
+      "unshare team:t-fin",
+      "publish invoice-desk 1 over 0 from 2",
+      // The changes shared are the draft again, as before the share.
+      "restore point 3 over 0",
+    ]);
   });
 
   it("asks before Undo drops changes taken since the share, even once the workspace was left", async () => {

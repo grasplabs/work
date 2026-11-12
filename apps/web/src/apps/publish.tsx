@@ -75,12 +75,14 @@ import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
 // the builders see (`apps.drafts.publish`, over the revision the sheet
 // read, so a draft someone changed meanwhile is refused with
 // `app.conflict` and read again rather than shared unseen), then shares
-// the App with whoever was ticked (`apps.members.add`). A toast says
-// "Shared with …", with Undo: whoever was added is taken off again, and
-// the version the team had before is theirs again (`apps.versions.publish`
-// over the one just made, so a colleague's since stays), confirmed first
-// when the App changed since. The toasts outlive the workspace, so Undo
-// works after leaving it.
+// the App with whoever was ticked and has no share of it yet
+// (`apps.members.add`), so nobody's role changes. A toast says "Shared
+// with …", with Undo: whoever the share added is taken off again, the
+// version the team had before is theirs again (`apps.versions.publish`
+// over the one just made, so a colleague's since stays), and the changes
+// shared are the builders' draft again (`apps.drafts.restorePoint`), as
+// before the share; confirmed first when the App changed since. The
+// toasts outlive the workspace, so Undo works after leaving it.
 //
 // Once the App is shared, changes stay its builders' until they share
 // them: one slim line under the bar says how many and of what, with
@@ -319,13 +321,14 @@ const ChangesNotes = ({
 
 /**
  * What Undo puts back: whom a share added, and, when it made a new
- * version current over one the team had (`before`), that version again
- * over the new one (`made`).
+ * version current over one the team had (`before`) from the draft at
+ * `revision`, that version again over the new one (`made`), with the
+ * draft as it was shared.
  */
 interface Undoable {
   app: string;
   added: readonly AppMemberRef[];
-  back: { before: number; made: number } | undefined;
+  back: { before: number; made: number; revision: number } | undefined;
 }
 
 /**
@@ -347,19 +350,27 @@ const undoFailed = (error: unknown): void => {
 /**
  * The version the team had before, current again over the App's changes
  * at `revision`, while the one the share made still is: a colleague's
- * share since stays.
+ * share since stays. Then the draft as it was shared is the draft again,
+ * over that version (its undo point at the revision shared), so nothing
+ * of the builders' work is left only in History.
  */
 const takeBack = async (
   { core, router, onDone }: UndoTools,
   app: string,
-  back: { before: number; made: number },
+  back: NonNullable<Undoable["back"]>,
   revision: number
 ): Promise<void> => {
-  const done = await settled(
-    core,
-    async (session) =>
-      await session.apps.versions.publish(app, back.before, revision, back.made)
-  );
+  const done = await settled(core, async (session) => {
+    await session.apps.versions.publish(app, back.before, revision, back.made);
+    const [points, now] = await Promise.all([
+      session.apps.drafts.points(app),
+      session.apps.drafts.get(app),
+    ]);
+    const shared = points.find((point) => point.revision === back.revision);
+    if (shared !== undefined) {
+      await session.apps.drafts.restorePoint(app, shared.number, now.revision);
+    }
+  });
   onDone();
   await router.invalidate();
   if (!done.ok) {
@@ -441,6 +452,9 @@ const versionToShare = (
     ? draft.base
     : undefined;
 
+/** A share's key: its kind and ID. */
+const keyOf = ({ type, id }: AppMemberRef): string => `${type}:${id}`;
+
 /** Someone to share with, by name. */
 export interface Recipient extends AppMemberRef {
   name: string;
@@ -482,6 +496,12 @@ const useSharing = (
     const before = app.currentVersion;
     const shared = await settled(core, async (session) => {
       let made = before;
+      // Only who has no share yet: a builder ticked stays one.
+      const sharedWith = await session.apps.members.list(app.id);
+      const had = new Set(sharedWith.map((member) => keyOf(member)));
+      const added = recipients.filter(
+        (recipient) => !had.has(keyOf(recipient))
+      );
       if (version !== undefined) {
         const published = await session.apps.versions.publish(
           app.id,
@@ -498,11 +518,11 @@ const useSharing = (
         );
         made = published.currentVersion;
       }
-      for (const { type, id } of recipients) {
+      for (const { type, id } of added) {
         // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
         await session.apps.members.add(app.id, { type, id, role: "user" });
       }
-      return made;
+      return { made, added };
     });
     setBusy(false);
     if (!shared.ok) {
@@ -515,15 +535,18 @@ const useSharing = (
     }
     onShared();
     await router.invalidate();
-    const made = shared.value;
+    const { made, added } = shared.value;
     const tools = { core, router, onDone: onShared };
     const undoable: Undoable = {
       app: app.id,
-      added: recipients.map(({ type, id }) => ({ type, id })),
+      added: added.map(({ type, id }) => ({ type, id })),
       back:
-        before === null || made === null || made === before
+        before === null ||
+        made === null ||
+        made === before ||
+        changes === undefined
           ? undefined
-          : { before, made },
+          : { before, made, revision: changes.revision },
     };
     const who = formatList(recipients.map(({ name }) => name));
     toast.add({
@@ -613,8 +636,6 @@ const recipientsOf = (
           .filter(({ id }) => id !== owner)
           .map(({ id, name }) => ({ type: "person" as const, id, name })),
       ];
-
-const keyOf = ({ type, id }: AppMemberRef): string => `${type}:${id}`;
 
 /** Ticks who gets the App: whom it is shared with already stays ticked. */
 const WhoGetsIt = ({
