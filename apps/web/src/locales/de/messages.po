@@ -8115,6 +8115,10 @@ msgstr "Name"
 msgid "Name a model this endpoint serves below and choose it, then test it."
 msgstr "Nennen Sie unten ein Modell, das dieser Endpunkt bereitstellt, wählen Sie es und testen Sie es dann."
 
+#: src/agents/agent-page.tsx
+msgid "Name and job"
+msgstr "Name und Aufgabe"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-workflows.tsx
 msgid "Name in the App's code"
