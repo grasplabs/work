@@ -22,6 +22,9 @@ export const readManaged = async (session: Session): Promise<ManagedAgents> => {
     session.connections.agents(),
     session.connections.stephenReach(),
   ]);
+  // What each used this month: none when core won't say, and the pages
+  // then show the agents without it.
+  const [used] = await Promise.allSettled([session.connections.agentsUsage()]);
   const settings = await Promise.all(
     agents
       .slice(1)
@@ -43,6 +46,12 @@ export const readManaged = async (session: Session): Promise<ManagedAgents> => {
     agents,
     settings: Object.fromEntries(settings),
     wakes: Object.fromEntries(wakes),
+    usage: Object.fromEntries(
+      (used.status === "fulfilled" ? used.value : []).map((usage) => [
+        usage.agentId,
+        usage,
+      ])
+    ),
     teams: reach.teams,
   };
 };

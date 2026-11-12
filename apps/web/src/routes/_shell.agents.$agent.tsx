@@ -65,6 +65,7 @@ const AgentRoutePage = () => {
         tab={agentTabOf(tab)}
         teams={managed.teams}
         usable={usable.some(({ id }) => id === agent.id)}
+        usage={managed.usage[agent.id]}
         wakes={managed.wakes[agent.id] ?? []}
       />
     </>

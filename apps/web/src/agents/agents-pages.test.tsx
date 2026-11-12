@@ -90,6 +90,26 @@ const managed: ManagedAgents = {
     [milan.id]: settingsOf({ who: "nobody" }, 0),
   },
   wakes: { [claire.id]: [wake] },
+  usage: {
+    [claire.id]: {
+      agentId: claire.id,
+      month: "2026-11",
+      spent: 12.5,
+      spentBefore: 3,
+      requests: 40,
+      people: 4,
+      lastAt: "2026-11-12T08:00:00.000Z",
+    },
+    [milan.id]: {
+      agentId: milan.id,
+      month: "2026-11",
+      spent: 0,
+      spentBefore: 0,
+      requests: 0,
+      people: 0,
+      lastAt: null,
+    },
+  },
   teams,
 };
 
@@ -203,6 +223,7 @@ const page = (agent: Agent, tab: AgentTab, usable = true) => (
     tab={tab}
     teams={teams}
     usable={usable}
+    usage={managed.usage[agent.id]}
     wakes={managed.wakes[agent.id] ?? []}
   />
 );
@@ -265,16 +286,23 @@ describe("the company's agents, on pages of their own", () => {
       ]);
       const [, clairesCard, milansCard] = cards();
       expect({
-        claire: ["Finance", "3 of 6 kinds of work", "1 schedule", "On"].map(
-          (words) => clairesCard?.text.includes(words)
-        ),
+        claire: [
+          "Finance",
+          "3 of 6 kinds of work",
+          "1 schedule",
+          "$12.50 this month",
+          "On",
+        ].map((words) => clairesCard?.text.includes(words)),
+        // Never asked this month: nothing about what it cost.
+        milanCost: milansCard?.text.includes("this month"),
         milan: ["Nobody yet", "May do nothing yet", "Only when asked"].map(
           (words) => milansCard?.text.includes(words)
         ),
         milanPaused: milansCard?.text.endsWith("Paused"),
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
-        claire: [true, true, true, true],
+        claire: [true, true, true, true, true],
+        milanCost: false,
         milan: [true, true, true],
         milanPaused: true,
         newAgent: true,
@@ -408,6 +436,28 @@ describe("the company's agents, on pages of their own", () => {
         asked: [["deleted", "agent-claire"]],
         firstOffers: false,
       });
+    });
+
+    it("says what an agent used this month: how much and how often, never what", async () => {
+      await mounted(page(claire, "overview"));
+      const said = [...document.querySelectorAll("dl")]
+        .at(1)
+        ?.textContent?.replaceAll(/\s+/gu, " ");
+      expect(
+        [
+          "November 2026",
+          "Cost$12.50$3.00 the month before",
+          "Requests to a model40",
+          "People it worked for4",
+          "Last asked",
+        ].map(
+          (words) =>
+            (words === "November 2026"
+              ? document.body.textContent
+              : said
+            )?.includes(words) ?? false
+        )
+      ).toStrictEqual([true, true, true, true, true]);
     });
   });
 });

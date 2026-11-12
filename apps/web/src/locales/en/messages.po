@@ -189,6 +189,10 @@ msgstr "{attempts, plural, one {# attempt} other {# attempts}}"
 msgid "{back} measured return"
 msgstr "{back} measured return"
 
+#: src/agents/agent-page.tsx
+msgid "{before} the month before"
+msgstr "{before} the month before"
+
 #: src/workflows/requests/request-detail.tsx
 msgid "{billed, plural, one {# request} other {# requests}}"
 msgstr "{billed, plural, one {# request} other {# requests}}"
@@ -1070,6 +1074,10 @@ msgstr "{sources, plural, one {Time-consuming work that could be automated, rais
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
 msgstr "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
+
+#: src/agents/agents-overview.tsx
+msgid "{spent} this month"
+msgstr "{spent} this month"
 
 #: src/onboarding/about-story.tsx
 msgid "{sponsor} gave me the big picture. Now I need the details."
@@ -2870,6 +2878,10 @@ msgstr "Asked for a permission"
 msgid "asked for by the agent, in their chat"
 msgstr "asked for by the agent, in their chat"
 
+#: src/agents/agent-page.tsx
+msgid "Asked it, or it works for them on a schedule"
+msgstr "Asked it, or it works for them on a schedule"
+
 #: src/workflows/go-lives-waiting.tsx
 msgid "Asked on"
 msgstr "Asked on"
@@ -4335,6 +4347,10 @@ msgstr "Correct it"
 #: src/brain/memory-page.tsx
 msgid "Corrected by"
 msgstr "Corrected by"
+
+#: src/agents/agent-page.tsx
+msgid "Cost"
+msgstr "Cost"
 
 #: src/dashboard/signals.tsx
 #: src/dashboard/widget-board.tsx
@@ -7339,6 +7355,10 @@ msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Last 7 days"
 
+#: src/agents/agent-page.tsx
+msgid "Last asked"
+msgstr "Last asked"
+
 #. placeholder {0}: moment(agent.changedAt)
 #: src/agents/agent-page.tsx
 msgid "Last changed {0}"
@@ -8969,6 +8989,10 @@ msgstr "Not verified"
 msgid "Not working: the last call, {when}, failed because {why}."
 msgstr "Not working: the last call, {when}, failed because {why}."
 
+#: src/agents/agent-page.tsx
+msgid "Not yet"
+msgstr "Not yet"
+
 #: src/workflows/run-detail.tsx
 msgctxt "a run that hasn't ended"
 msgid "Not yet"
@@ -10000,6 +10024,10 @@ msgstr "People do “{name}” in two ways"
 msgid "People heard"
 msgstr "People heard"
 
+#: src/agents/agent-page.tsx
+msgid "People it worked for"
+msgstr "People it worked for"
+
 #: src/workflows/requests/request-who.tsx
 msgid "People one by one are off"
 msgstr "People one by one are off"
@@ -10942,6 +10970,10 @@ msgstr "Requests"
 #: src/workflows/requests/request-detail.tsx
 msgid "Requests over time"
 msgstr "Requests over time"
+
+#: src/agents/agent-page.tsx
+msgid "Requests to a model"
+msgstr "Requests to a model"
 
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
@@ -11989,6 +12021,10 @@ msgstr "Settings sections"
 #: src/onboarding/review-parts.tsx
 msgid "Settled: {choice}"
 msgstr "Settled: {choice}"
+
+#: src/agents/agent-page.tsx
+msgid "Several for one question"
+msgstr "Several for one question"
 
 #: src/apps/app-sharing.tsx
 #: src/workflows/share-workflow.tsx

@@ -119,6 +119,25 @@ export interface AgentWake {
 }
 
 /**
+ * What one agent used of the organization's models in a month: how much,
+ * never what was asked or by whom.
+ */
+export interface AgentUsage {
+  agentId: string;
+  /** The UTC month counted, such as `2026-11`. */
+  month: string;
+  /** US dollars at the providers' list prices, in `month` and the month before. */
+  spent: number;
+  spentBefore: number;
+  /** The requests to a model it made in `month`: several for one question. */
+  requests: number;
+  /** How many people it made them for in `month`. */
+  people: number;
+  /** When it last made one, in either month (ISO 8601); null for none. */
+  lastAt: string | null;
+}
+
+/**
  * The agents over `/rpc`, on `connections`: the company's own admins
  * only, never Grasp staff; every change audited.
  */
@@ -157,6 +176,11 @@ export interface AgentsApi {
     toolClass: CompanyToolClass,
     audience: AppClassAudience
   ) => Promise<void>;
+  /**
+   * What every agent used of the organization's models this month and the
+   * month before, in the order of `agents`.
+   */
+  agentsUsage: () => Promise<AgentUsage[]>;
   /** An agent's wake-ups, the oldest first. */
   agentWakes: (agentId: string) => Promise<AgentWake[]>;
   /**

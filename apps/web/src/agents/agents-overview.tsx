@@ -1,4 +1,9 @@
-import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
+import type {
+  Agent,
+  AgentSettings,
+  AgentUsage,
+  AgentWake,
+} from "@grasp-os/shared/agents";
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { buttonVariants } from "@grasp-os/ui/components/button";
@@ -24,6 +29,7 @@ import { Link } from "@tanstack/react-router";
 import {
   BotIcon,
   CalendarClockIcon,
+  CoinsIcon,
   MessageCircleIcon,
   PlusIcon,
   SearchIcon,
@@ -34,6 +40,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
+import { dollars } from "../settings/money.ts";
 import { AgentAvatar } from "./agent-avatar.tsx";
 import {
   AgentStateBadge,
@@ -58,6 +65,8 @@ export interface ManagedAgents {
   settings: Readonly<Record<string, AgentSettings>>;
   /** Each agent's wake-ups, by its ID. */
   wakes: Readonly<Record<string, readonly AgentWake[]>>;
+  /** What each agent used of the models this month, by its ID; none where core didn't say. */
+  usage: Readonly<Record<string, AgentUsage>>;
   teams: StephenReach["teams"];
 }
 
@@ -113,6 +122,7 @@ interface Shown {
         first: boolean;
         settings: AgentSettings | undefined;
         wakes: readonly AgentWake[];
+        usage: AgentUsage | undefined;
       }
     | undefined;
 }
@@ -126,7 +136,8 @@ const ManagedFacts = ({
   teams: StephenReach["teams"];
 }) => {
   const audienceLine = useAudienceLine(teams);
-  const { settings, first } = managed;
+  const { settings, first, usage } = managed;
+  const spent = usage === undefined ? undefined : dollars(usage.spent);
   const scheduled = wakesOn(managed.wakes).length;
   const classes = settings === undefined ? undefined : classesOn(settings);
   return (
@@ -160,6 +171,12 @@ const ManagedFacts = ({
           />
         )}
       </Fact>
+      {/* Only once it was asked this month: a new agent has cost nothing to say. */}
+      {usage === undefined || usage.requests === 0 ? null : (
+        <Fact icon={<CoinsIcon />}>
+          <Trans>{spent} this month</Trans>
+        </Fact>
+      )}
     </div>
   );
 };
@@ -247,6 +264,7 @@ const shownOf = (
       first: agent.id === first?.id,
       settings: managed.settings[agent.id],
       wakes: managed.wakes[agent.id] ?? [],
+      usage: managed.usage[agent.id],
     },
   }));
 };

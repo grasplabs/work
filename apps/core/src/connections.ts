@@ -1,4 +1,9 @@
-import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
+import type {
+  Agent,
+  AgentSettings,
+  AgentUsage,
+  AgentWake,
+} from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   catalogLogoPath,
@@ -54,6 +59,7 @@ import {
   setAgentReach,
   setAgentToolClass,
 } from "./agent-builder.ts";
+import { agentsUsage } from "./agent-usage.ts";
 import {
   deleteAgentWake,
   listAgentWakes,
@@ -77,6 +83,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { errorResponse } from "./errors.ts";
+import { spendMonth } from "./model-spend.ts";
 import { startOAuthConnection } from "./oauth-relay.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -740,6 +747,13 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     return await withPerson(this.#check, async (identity) => {
       requireAdmin(identity);
       return await listAgents(this.#env);
+    });
+  }
+
+  async agentsUsage(): Promise<AgentUsage[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await agentsUsage(this.#env, spendMonth(this.#env));
     });
   }
 
