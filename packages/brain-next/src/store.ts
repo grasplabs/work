@@ -290,10 +290,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async eraseSource(request: SourceErasure): Promise<void> {
     await this.#ready();
     const { source, reason } = checked(sourceErasureSchema, request);
-    stopWorkOn(
-      this.#work,
-      await erase(this.#erasures, "source", source, reason)
-    );
+    await erase(this.#erasures, "source", source, reason, (sources) => {
+      stopWorkOn(this.#work, sources);
+    });
   }
 
   /**
@@ -303,10 +302,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async erasePerson(request: PersonErasure): Promise<void> {
     await this.#ready();
     const { person, reason } = checked(personErasureSchema, request);
-    stopWorkOn(
-      this.#work,
-      await erase(this.#erasures, "person", person, reason)
-    );
+    await erase(this.#erasures, "person", person, reason, (sources) => {
+      stopWorkOn(this.#work, sources);
+    });
   }
 
   /**

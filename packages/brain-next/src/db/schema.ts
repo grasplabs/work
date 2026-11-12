@@ -258,8 +258,17 @@ export const vectorRemoved = sqliteTable(
       .notNull()
       .references(() => vectorBlocks.id),
     slot: integer().notNull(),
+    /**
+     * The chunk whose code it was, so an erasure of the chunk's version
+     * finds and repacks the block (erasure.ts): added by migration 0006,
+     * null on marks from before it.
+     */
+    chunk: integer(),
   },
-  (table) => [primaryKey({ columns: [table.block, table.slot] })]
+  (table) => [
+    primaryKey({ columns: [table.block, table.slot] }),
+    index("vector_removed_chunk_idx").on(table.chunk),
+  ]
 );
 
 /**
@@ -271,7 +280,12 @@ export const vectorRemoved = sqliteTable(
 export const workItems = sqliteTable(
   "work_items",
   {
-    id: integer().primaryKey(),
+    /**
+     * Never used twice, an item deleted included (migration 0006): an
+     * erasure deletes the row of an item under way, and its handler's
+     * settling, by this id, must never reach an item added after it.
+     */
+    id: integer().primaryKey({ autoIncrement: true }),
     /** Which work it is: the kind its handler is defined for. */
     kind: text().notNull(),
     /** What it is about, such as a source. */
@@ -475,5 +489,7 @@ export const erasedVersions = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.erasure, table.subject, table.version] }),
+    // An add numbers a source's next version past every one erased.
+    index("erased_versions_subject_idx").on(table.subject, table.version),
   ]
 );

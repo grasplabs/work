@@ -20,6 +20,7 @@ import {
 import {
   erasuresSoFar,
   isErased,
+  lastErasedVersion,
   isPersonErasedSince,
   keepSubject,
   subjectOf,
@@ -205,7 +206,14 @@ const record = (
     .from(sourceVersions)
     .where(eq(sourceVersions.source, added.source))
     .get();
-  const version = (last?.version ?? 0) + 1;
+  // Past every version erased too (erasure.ts): a number names one
+  // version for good, so nothing that holds an old one (a late vector put,
+  // a citation) ever meets new text under it.
+  const version =
+    Math.max(
+      last?.version ?? 0,
+      lastErasedVersion(storage.sql, adding.subject)
+    ) + 1;
   const { row } = db
     .insert(sourceVersions)
     .values({
@@ -359,21 +367,25 @@ export const readVersion = async (
   { storage, bucket }: SourcesStore,
   { source, version, reader }: VersionRequest
 ): Promise<SourceVersion | null> => {
-  const found = storage.sql
-    .exec<{ file: string; added_at: number }>(
-      versionSql,
-      source,
-      reader.person,
-      JSON.stringify(reader.groups),
-      version
-    )
-    .toArray()
-    .at(0);
+  const stillReadable = () =>
+    storage.sql
+      .exec<{ file: string; added_at: number }>(
+        versionSql,
+        source,
+        reader.person,
+        JSON.stringify(reader.groups),
+        version
+      )
+      .toArray()
+      .at(0);
+  const found = stillReadable();
   if (found === undefined) {
     return null;
   }
   const text = await textOf(bucket, found.file);
-  return text === null
+  // Asked again once the file is read: an erasure or a narrowing of the
+  // source may have landed while it was.
+  return text === null || !stillReadable()
     ? null
     : { source, version, text, addedAt: new Date(found.added_at) };
 };
@@ -418,5 +430,23 @@ export const readCurrent = async (
         : [{ source, version, text, addedAt: new Date(addedAt) }];
     })
   );
-  return read.flat();
+  // Asked again once every file is read: only versions still current and
+  // readable now are answered, so an erasure or a new version that landed
+  // meanwhile is never read past.
+  const now = new Set(
+    storage.sql
+      .exec<{ source: string; version: number }>(
+        currentSql,
+        JSON.stringify(sources),
+        reader.person,
+        JSON.stringify(reader.groups)
+      )
+      .toArray()
+      .map(({ source, version }) => JSON.stringify([source, version]))
+  );
+  return read
+    .flat()
+    .filter(({ source, version }) =>
+      now.has(JSON.stringify([source, version]))
+    );
 };

@@ -67,6 +67,15 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 //
 // Nothing an erasure answers depends on what it found: it is recorded
 // and answers alike for a source or person that held nothing.
+//
+// What an erasure deletes never frees a name for what comes after it: a
+// source's next version is numbered past every one erased (sources.ts),
+// and a queued item's id is never used twice (migration 0006), so a late
+// vector put, a citation or a handler settling under an old name never
+// reaches new content. Reads that wait for a file ask again, after it,
+// whether the version may still be read (sources.ts). And no plain key or
+// id outlives what it named: a source's key leaves `source_subjects` with
+// its last version, and an erased person's set of readers goes with theirs.
 
 /** The parts of the store an erasure works with. */
 export interface ErasureStore {
@@ -303,6 +312,20 @@ export const isPersonErasedSince = (
       soFar
     )
     .toArray().length > 0;
+
+/**
+ * The highest version of the source whose key's subject is `subject` that
+ * an erasure of a person deleted: an add numbers the next one past it
+ * (sources.ts), so a version's number is never used twice. A source's own
+ * erasure closes its key, so none of its versions is added again.
+ */
+export const lastErasedVersion = (sql: SqlStorage, subject: string): number =>
+  sql
+    .exec<{ version: number | null }>(
+      "SELECT max(version) AS version FROM erased_versions WHERE subject = ?",
+      subject
+    )
+    .one().version ?? 0;
 
 /**
  * Keeps `source`'s subject, as its first version is recorded, in the
@@ -575,6 +598,14 @@ const eraseVersion = (sql: SqlStorage, version: Erasing): void => {
   sql.exec("DELETE FROM current_versions WHERE version_row = ?", version.row);
   sql.exec("DELETE FROM erasing_versions WHERE version_row = ?", version.row);
   sql.exec("DELETE FROM source_versions WHERE row = ?", version.row);
+  // The source's key in plain, once no version holds it: it may name a
+  // person (an instruction file's), and the erasure's own record keeps
+  // only its hash.
+  sql.exec(
+    `DELETE FROM source_subjects WHERE source = ?1
+    AND NOT EXISTS (SELECT 1 FROM source_versions WHERE source = ?1)`,
+    version.source
+  );
   // The sweep deletes the file once no version holds it (files.ts).
   sql.exec("UPDATE files SET refs = refs - 1 WHERE hash = ?", version.file);
   dropUnusedReaderSet(sql, version.reader_set);
@@ -733,52 +764,52 @@ const nextAt = (sql: SqlStorage): number => {
 
 /**
  * Erases `id`, a source's key or a person's id, for `reason` (above):
- * recorded and hidden, then the ledger entry, then one batch deleted.
- * Answers the sources whose current version it hid. A source erased
- * before answers at once, its entry written again if it wasn't confirmed.
+ * recorded and hidden, `stop` told at once of the sources whose current
+ * version it hid (their work under way is to stop, whatever happens
+ * next), then the ledger entry, then one batch deleted. Returns only once
+ * its entry is in the ledger. Repeated after a failure, it is the same
+ * erasure: one recorded and not yet written is written now, from what it
+ * recorded (`erased_versions`), however much the tick deleted meanwhile.
+ * A source erased before answers at once.
  */
 export const erase = async (
   store: ErasureStore,
   kind: ErasureKind,
   id: string,
-  reason: ErasureReason
-): Promise<string[]> => {
+  reason: ErasureReason,
+  stop: (sources: string[]) => void
+): Promise<void> => {
   const { storage } = store;
   const { sql } = storage;
   const subject = await subjectOf(id);
-  const before =
-    kind === "source"
-      ? sql
-          .exec<Recorded & { confirmed: number }>(
-            `SELECT key, kind, confirmed FROM erasures
-            WHERE kind = 'source' AND subject = ? LIMIT 1`,
-            subject
-          )
-          .toArray()
-          .at(0)
-      : undefined;
+  // A source's erasure is one for good; a person's, one not yet written.
+  const before = sql
+    .exec<Recorded & { confirmed: number }>(
+      `SELECT key, kind, confirmed FROM erasures
+      WHERE kind = ?1 AND subject = ?2 AND (kind = 'source' OR confirmed = 0)
+      ORDER BY key LIMIT 1`,
+      kind,
+      subject
+    )
+    .toArray()
+    .at(0);
+  if (before?.confirmed === 1) {
+    return;
+  }
   let recorded: Recorded | undefined = before;
-  let stopped: string[] = [];
-  if (before === undefined) {
-    ({ recorded, stopped } = storage.transactionSync(() => {
-      if (kind === "source") {
-        // The sources an entry names are found by their subject.
-        keepSubject(sql, id, subject);
-      }
+  if (recorded === undefined) {
+    const hid = storage.transactionSync(() => {
       const at = nextAt(sql);
       const entry: LedgerEntry = { kind, subject, reason, at };
       const key = ledgerKeyOf(entry);
       const hidden = kind === "person" ? coveredFor(sql, id) : null;
-      return {
-        recorded: { key, kind },
-        stopped: apply(sql, key, entry, hidden, false),
-      };
-    }));
-  } else if (before.confirmed === 1) {
-    return [];
+      return { key, stopped: apply(sql, key, entry, hidden, false) };
+    });
+    recorded = { key: hid.key, kind };
+    stop(hid.stopped);
   }
   try {
-    await confirm(store, recorded ?? { key: "", kind: "source" });
+    await confirm(store, recorded);
   } catch {
     // Recorded and hidden: the tick writes its entry; the caller, told,
     // tries again. Nothing of R2's error: it may name the key.
@@ -789,7 +820,6 @@ export const erase = async (
   } catch {
     // Hidden and recorded: the tick deletes the rest, and shows a failure.
   }
-  return stopped;
 };
 
 /**

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b9a51e41-bc2a-410a-bf65-89df2feab0dd",
+  "id": "44a6ea05-19c8-46dc-95f2-260f2b1da99b",
   "prevId": "ae2f8dfe-f3f5-4204-81da-42c642cbbf79",
   "tables": {
     "chunks": {
@@ -136,7 +136,16 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "erased_versions_subject_idx": {
+          "name": "erased_versions_subject_idx",
+          "columns": [
+            "subject",
+            "version"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "erased_versions_erasure_erasures_key_fk": {
           "name": "erased_versions_erasure_erasures_key_fk",
@@ -936,9 +945,24 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "chunk": {
+          "name": "chunk",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "vector_removed_chunk_idx": {
+          "name": "vector_removed_chunk_idx",
+          "columns": [
+            "chunk"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "vector_removed_block_vector_blocks_id_fk": {
           "name": "vector_removed_block_vector_blocks_id_fk",
@@ -1017,7 +1041,7 @@
           "type": "integer",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": true
         },
         "kind": {
           "name": "kind",

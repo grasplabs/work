@@ -6,6 +6,7 @@ CREATE TABLE `erased_versions` (
 	FOREIGN KEY (`erasure`) REFERENCES `erasures`(`key`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE INDEX `erased_versions_subject_idx` ON `erased_versions` (`subject`,`version`);--> statement-breakpoint
 CREATE TABLE `erasing_versions` (
 	`version_row` integer PRIMARY KEY NOT NULL,
 	`erasure` text NOT NULL,
@@ -95,3 +96,36 @@ END;
 CREATE TRIGGER `erased_versions_no_delete` BEFORE DELETE ON `erased_versions` BEGIN
 	SELECT RAISE(ABORT, 'erased versions are recorded, never deleted');
 END;
+--> statement-breakpoint
+-- The work queue's items again, their ids never used twice (AUTOINCREMENT):
+-- an erasure deletes the row of an item under way, and its handler's
+-- settling, by id, must never reach an item added after it. Nothing points
+-- at the table, so it is made anew and its rows copied.
+CREATE TABLE `__new_work_items` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`kind` text NOT NULL,
+	`key` text NOT NULL,
+	`payload` text NOT NULL,
+	`priority` integer NOT NULL,
+	`connection` text,
+	`added_at` integer NOT NULL,
+	`not_before` integer NOT NULL,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`parks` integer DEFAULT 0 NOT NULL,
+	`running` integer DEFAULT false NOT NULL,
+	`interrupted` integer DEFAULT false NOT NULL,
+	`parked_at` integer,
+	`last_error` text,
+	CONSTRAINT "work_items_priority" CHECK(priority BETWEEN 0 AND 4)
+);
+--> statement-breakpoint
+INSERT INTO `__new_work_items`("id", "kind", "key", "payload", "priority", "connection", "added_at", "not_before", "attempts", "parks", "running", "interrupted", "parked_at", "last_error") SELECT "id", "kind", "key", "payload", "priority", "connection", "added_at", "not_before", "attempts", "parks", "running", "interrupted", "parked_at", "last_error" FROM `work_items`;--> statement-breakpoint
+DROP TABLE `work_items`;--> statement-breakpoint
+ALTER TABLE `__new_work_items` RENAME TO `work_items`;--> statement-breakpoint
+CREATE UNIQUE INDEX `work_items_waiting_key` ON `work_items` (`kind`,`key`) WHERE running = 0;--> statement-breakpoint
+CREATE INDEX `work_items_running_idx` ON `work_items` (`kind`,`key`,`connection`,`interrupted`) WHERE running = 1;--> statement-breakpoint
+CREATE INDEX `work_items_waiting_idx` ON `work_items` (`connection`,`priority`,`id`) WHERE running = 0 AND parked_at IS NULL AND interrupted = 0;--> statement-breakpoint
+CREATE INDEX `work_items_interrupted_idx` ON `work_items` (`priority`,`id`) WHERE running = 0 AND parked_at IS NULL AND interrupted = 1;--> statement-breakpoint
+CREATE INDEX `work_items_parked_idx` ON `work_items` (`parked_at`,`id`) WHERE parked_at IS NOT NULL;--> statement-breakpoint
+ALTER TABLE `vector_removed` ADD `chunk` integer;--> statement-breakpoint
+CREATE INDEX `vector_removed_chunk_idx` ON `vector_removed` (`chunk`);

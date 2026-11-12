@@ -1904,3 +1904,306 @@ describe(
     });
   }
 );
+
+/**
+ * Has the running store's writes to its ledger fail while `failing` is
+ * set, every other call of its bucket going through, until the store
+ * restarts. Answers the switch.
+ */
+const failLedgerWrites = async (): Promise<{ failing: boolean }> => {
+  const switched = { failing: true };
+  await runInDurableObject(store(), (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    const bucket = env.BRAIN_OBJECTS;
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_OBJECTS: {
+        get: async (key: string) => await bucket.get(key),
+        head: async (key: string) => await bucket.head(key),
+        list: async (options: R2ListOptions) => await bucket.list(options),
+        delete: async (keys: string | string[]) => {
+          await bucket.delete(keys);
+        },
+        put: async (
+          key: string,
+          value: ArrayBufferView | string,
+          options?: R2PutOptions
+        ) => {
+          if (switched.failing && key.startsWith("erasures/")) {
+            throw new Error("R2 failed, by the test");
+          }
+          return await bucket.put(key, value, options);
+        },
+      },
+    });
+  });
+  return switched;
+};
+
+/**
+ * Holds the store's next read of its bucket before it reaches the bucket,
+ * until the test releases it: `reached` once it is there.
+ */
+const holdNextBucketGet = async () => {
+  const gate = { reached: false, released: false };
+  await runInDurableObject(store(), (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    const bucket = env.BRAIN_OBJECTS;
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_OBJECTS: {
+        get: async (key: string) => {
+          Reflect.set(instance, "env", objectEnv);
+          gate.reached = true;
+          while (!gate.released) {
+            // oxlint-disable-next-line no-await-in-loop -- until the test says
+            await scheduler.wait(10);
+          }
+          return await bucket.get(key);
+        },
+        list: async (options: R2ListOptions) => await bucket.list(options),
+        put: async (key: string, value: string) => await bucket.put(key, value),
+      },
+    });
+  });
+  return gate;
+};
+
+/** Holds the recording work's handler for `source` until released. */
+const holdHandlerOf = (source: SourceRef) => {
+  const gate = { reached: false, released: false };
+  handling.set(keyOf(source), async (signal) => {
+    gate.reached = true;
+    while (!gate.released) {
+      // oxlint-disable-next-line no-await-in-loop -- until the test says
+      await scheduler.wait(10);
+    }
+    const seen = handled.get(keyOf(source));
+    if (seen !== undefined) {
+      const reason: unknown = signal.reason;
+      seen.abortedAfter =
+        signal.aborted && reason instanceof WorkError ? reason.code : undefined;
+    }
+  });
+  return gate;
+};
+
+describe(
+  "what must hold when an erasure's ledger write fails, and identities an erasure frees",
+  { timeout: 120_000 },
+  () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("writes a person's first erasure when it is retried, though the tick deleted what it covered meanwhile, so a restore erases it again", async () => {
+      const leaver = await person();
+      const mark = newMark();
+      await add(newSource(), `Private ${wordOf(mark)}`, owner(leaver));
+      const backup = await copyOfStore();
+      const switched = await failLedgerWrites();
+
+      const first = await settled(
+        erasePerson(env, { personId: leaver, reason: "person_erased" })
+      );
+      // The tick can't write the entry either, and deletes what it hid.
+      await workBrain(env, new Date());
+      switched.failing = false;
+      const retried = await settled(
+        erasePerson(env, { personId: leaver, reason: "person_erased" })
+      );
+      await restoreStore(backup);
+      const restored = await recalledAs(leaver, wordOf(mark));
+      await tickUntilErased();
+
+      expect({
+        first: "error" in first,
+        retried,
+        restored,
+        tables: await tablesHolding([mark]),
+      }).toStrictEqual({
+        first: true,
+        retried: { value: undefined },
+        restored: [],
+        tables: [],
+      });
+    });
+
+    it("aborts the handler under way on an erased source though the erasure's ledger write failed", async () => {
+      const reader = await person();
+      const source = newSource();
+      await add(source, `Under way ${wordOf(newMark())}`, owner(reader));
+      const gate = holdHandlerOf(source);
+      await queueRecorded(source);
+      const ticking = settled(workBrain(env, new Date()));
+      await vi.waitFor(() => {
+        expect(gate.reached).toBeTruthy();
+      });
+      await nextBucketPut(async () => {
+        await Promise.resolve();
+        throw new Error("R2 failed, by the test");
+      });
+
+      const erased = await settled(
+        eraseSource(env, { source, reason: "deleted" })
+      );
+      gate.released = true;
+      await ticking;
+
+      expect({
+        failed: "error" in erased,
+        seen: handled.get(keyOf(source)),
+      }).toStrictEqual({
+        failed: true,
+        seen: { runs: 1, abortedAfter: "erased" },
+      });
+    });
+
+    it("settles a handler that ends after its source was erased without touching an item added after it", async () => {
+      const reader = await person();
+      const [erased, next] = [newSource(), newSource()];
+      await add(erased, `Erased ${wordOf(newMark())}`, owner(reader));
+      const first = holdHandlerOf(erased);
+      const second = holdHandlerOf(next);
+      await queueRecorded(erased);
+      const ticking = settled(workBrain(env, new Date()));
+      await vi.waitFor(() => {
+        expect(first.reached).toBeTruthy();
+      });
+      await eraseSource(env, { source: erased, reason: "deleted" });
+      // Added after the erasure deleted the first one's row.
+      await queueRecorded(next);
+      await vi.waitFor(() => {
+        expect(second.reached).toBeTruthy();
+      });
+      first.released = true;
+      await vi.waitFor(() => {
+        expect(handled.get(keyOf(erased))?.abortedAfter).toBe("erased");
+      });
+      const queuedWhileRunning = await queuedAbout(next);
+      second.released = true;
+      await ticking;
+
+      expect(queuedWhileRunning).toBe(1);
+    });
+
+    it("never answers a read of a version erased while its file was being read", async () => {
+      const reader = await person();
+      const [history, current] = [newSource(), newSource()];
+      await add(history, `Read late ${wordOf(newMark())}`, owner(reader));
+      await add(current, `Read late too ${wordOf(newMark())}`, owner(reader));
+
+      const heldHistory = await holdNextBucketGet();
+      const readingHistory = settled(historyAs(reader, history, 1));
+      await vi.waitFor(() => {
+        expect(heldHistory.reached).toBeTruthy();
+      });
+      await eraseSource(env, { source: history, reason: "deleted" });
+      heldHistory.released = true;
+
+      const heldCurrent = await holdNextBucketGet();
+      const readingCurrent = settled(
+        brain().readCurrent({
+          sources: [keyOf(current)],
+          reader: { person: reader, groups: [] },
+        })
+      );
+      await vi.waitFor(() => {
+        expect(heldCurrent.reached).toBeTruthy();
+      });
+      await eraseSource(env, { source: current, reason: "deleted" });
+      heldCurrent.released = true;
+
+      expect({
+        history: await readingHistory,
+        current: await readingCurrent,
+      }).toStrictEqual({
+        history: { value: null },
+        current: { value: [] },
+      });
+    });
+
+    it("numbers a source's next version past those a person's erasure deleted, so a late vector put for the old one writes nothing", async () => {
+      const leaver = await person();
+      const source = newSource();
+      const access: Access = { kind: "owner", person: leaver };
+      const [old] = await chunkedSource(source, access, 1, "Old text");
+      await erasePerson(env, { personId: leaver, reason: "withdrawn" });
+      await tickUntilErased();
+      // Their own again, after the erasure: new, and kept.
+      const version = await add(source, "New text", owner(leaver));
+      const model = modelOf();
+      await putCodes(model, old === undefined ? [] : [old]);
+      const codes = await runInDurableObject(
+        store(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              `SELECT count(*) AS count FROM vector_codes
+              WHERE model = (SELECT id FROM vector_models WHERE name = ?)`,
+              model.name
+            )
+            .one().count
+      );
+
+      expect({ old: old?.version, version, codes }).toStrictEqual({
+        old: 1,
+        version: 2,
+        codes: 0,
+      });
+    });
+
+    it("repacks at once each block that held a code of an erased source's earlier version", async () => {
+      const reader = await person();
+      const source = newSource();
+      const access: Access = { kind: "owner", person: reader };
+      const model = modelOf();
+      const earlier = await chunkedSource(source, access, 600, "Earlier");
+      const neighbour = await chunkedSource(
+        newSource(),
+        access,
+        blockSize - 600,
+        "Neighbour"
+      );
+      await putCodes(model, [...earlier, ...neighbour]);
+      const earlierRows = await chunkRowsOf(source);
+      // A new version: the earlier one's codes are marked removed in their
+      // block, waiting for a repack.
+      await add(source, "Later", owner(reader));
+      const waiting = await vectorsOf(earlierRows, []);
+
+      await eraseSource(env, { source, reason: "deleted" });
+      const afterErasure = await vectorsOf(earlierRows, []);
+
+      expect({
+        waiting: waiting.inBlocks,
+        afterErasure: afterErasure.inBlocks,
+      }).toStrictEqual({ waiting: 600, afterErasure: 0 });
+    });
+
+    it("leaves no plain source key or person id once a person's sources and instruction file are erased, nor for a source erased before it was added", async () => {
+      const leaver = await person();
+      await add(newSource(), `Theirs ${wordOf(newMark())}`, owner(leaver));
+      await addInstructionFile(env, {
+        file: { scope: "person", personId: leaver },
+        change: crypto.randomUUID(),
+        text: "Call me by my name",
+      });
+      const never = newSource();
+
+      await erasePerson(env, { personId: leaver, reason: "person_erased" });
+      await eraseSource(env, { source: never, reason: "deleted" });
+      await tickUntilErased();
+
+      await expect(tablesHolding([leaver, never.id])).resolves.toStrictEqual(
+        []
+      );
+    });
+  }
+);

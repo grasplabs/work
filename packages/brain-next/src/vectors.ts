@@ -304,8 +304,9 @@ export const putVectors = (
  * every model: a packed one is marked removed in its block, until a
  * repack drops it, and a block left with no code is deleted at once, so
  * no scan reads it again. Run it in the transaction that makes the
- * version no longer current, or that erases it. Answers the blocks it
- * marked that are left, for an erasure to repack at once.
+ * version no longer current, or that erases it. Answers every block left
+ * that holds a removed code of the version, marked now or before, for an
+ * erasure to repack at once.
  */
 export const removeVectorsOf = (
   sql: SqlStorage,
@@ -323,8 +324,8 @@ export const removeVectorsOf = (
       .map(({ block }) => block)
   );
   sql.exec(
-    `INSERT OR IGNORE INTO vector_removed (block, slot)
-    SELECT block, slot FROM vector_codes
+    `INSERT OR IGNORE INTO vector_removed (block, slot, chunk)
+    SELECT block, slot, chunk FROM vector_codes
     WHERE block IS NOT NULL
       AND chunk IN (SELECT row FROM chunks WHERE version_row = ?)`,
     versionRow
@@ -337,13 +338,16 @@ export const removeVectorsOf = (
     SELECT 1 FROM vector_codes WHERE vector_codes.block = json_each.value)`;
   sql.exec(`DELETE FROM vector_removed WHERE block IN (${emptied})`, blocks);
   sql.exec(`DELETE FROM vector_blocks WHERE id IN (${emptied})`, blocks);
+  // Every block still holding a removed code of these chunks: marked now,
+  // or when the version stopped being current, waiting for its repack.
   return sql
-    .exec<{ id: number }>(
-      "SELECT id FROM vector_blocks WHERE id IN (SELECT value FROM json_each(?))",
-      blocks
+    .exec<{ block: number }>(
+      `SELECT DISTINCT block FROM vector_removed
+      WHERE chunk IN (SELECT row FROM chunks WHERE version_row = ?)`,
+      versionRow
     )
     .toArray()
-    .map(({ id }) => id);
+    .map(({ block }) => block);
 };
 
 /** A block holding removed codes: its id, model and set of readers. */
