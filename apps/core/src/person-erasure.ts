@@ -1,7 +1,11 @@
 import { preparePurge, purge } from "@grasp-os/brain/purge";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  identifierSchema,
+  storeIdSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
@@ -54,9 +58,10 @@ import {
   teamMembers,
   users,
   workflowDecisionConfirmations,
+  apps as appRegistry,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { workspace, inJurisdiction } from "./durable-objects.ts";
+import { appPreview, workspace, inJurisdiction } from "./durable-objects.ts";
 import {
   emailHashOf,
   emailKeyVersion,
@@ -528,8 +533,10 @@ const workspaceArea: ErasureStep = {
  * the company's (`_ownerId` names them), and stay. Every store is asked,
  * whether or not they were a member of its App now: a store's row is never
  * deleted (a deleted store keeps it, `deleted_at` set), so every store
- * there ever was is listed; one never set up holds nothing. Draft
- * previews' stores are their workspace's (GRA-1181).
+ * there ever was is listed; one never set up holds nothing. So are the
+ * stores of every App's preview, its test data, shared by its builders
+ * (app-preview.ts): its records the App's, kept as an App's store keeps
+ * them, their preferences and the values of their changes theirs, gone.
  */
 const apps: ErasureStep = {
   area: "apps",
@@ -544,6 +551,15 @@ const apps: ErasureStep = {
       await inJurisdiction(env, env.DATA_STORES)
         .getByName(storeId)
         .forgetPerson(storeId, userId);
+    }
+    // A removed App's preview was discarded with it (app-removal.ts).
+    const previewed = await db
+      .select({ id: appRegistry.id })
+      .from(appRegistry)
+      .where(isNull(appRegistry.removedAt));
+    for (const { id } of previewed) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await appPreview(env, appIdSchema.parse(id)).forgetPerson(userId);
     }
     await db.batch([
       db.delete(knowledgeSignals).where(eq(knowledgeSignals.owner, userId)),

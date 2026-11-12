@@ -27,7 +27,8 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { decidedAppRole, functionRoles } from "./app-access.ts";
+import { decidedAppRole, functionRoles, isOpenToUsers } from "./app-access.ts";
+import type { AppOpening } from "./app-access.ts";
 import { readerOf, sourcesOf, unreadableBy } from "./app-provenance.ts";
 import type { AppSources } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
@@ -175,10 +176,10 @@ const namedBy = async (env: Env, to: string): Promise<string[]> => {
  */
 const openersOf = async (
   env: Env,
-  app: Pick<App, "id" | "owner" | "status">,
+  app: Pick<App, "id" | "owner"> & AppOpening,
   ids: readonly string[]
 ): Promise<Set<string>> => {
-  if (app.status === "archived" || ids.length === 0) {
+  if (app.archived || ids.length === 0) {
     return new Set();
   }
   const db = drizzle(env.DB);
@@ -232,7 +233,7 @@ const openersOf = async (
       {
         owns: app.owner === row.userId,
         shares: theirs.map((share) => share.role),
-        status: app.status,
+        open: isOpenToUsers(app),
       }
     );
     if (found === undefined) {
@@ -310,7 +311,8 @@ const deliver = async (
     .select({
       id: apps.id,
       owner: apps.ownerId,
-      status: apps.status,
+      currentVersion: apps.currentVersion,
+      archivedAt: apps.archivedAt,
       removedAt: apps.removedAt,
     })
     .from(apps)
@@ -323,7 +325,12 @@ const deliver = async (
   const asked = named.slice(0, appNotificationMaxRecipients);
   const opened = await openersOf(
     env,
-    { id: send.app, owner: app.owner, status: app.status },
+    {
+      id: send.app,
+      owner: app.owner,
+      currentVersion: app.currentVersion,
+      archived: app.archivedAt !== null,
+    },
     asked
   );
   const rows = await Promise.all(

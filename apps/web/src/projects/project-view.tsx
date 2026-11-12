@@ -29,9 +29,9 @@ import { formatList } from "../format.ts";
 import { EmptyCard, Page, PageHeading, SectionTitle } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
+import { MakeSomethingLink } from "../make/make-link.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
-import { NewItemDialog } from "./new-item-dialog.tsx";
 import { ProjectCountsLine } from "./project-counts.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
 import { ProjectIcon } from "./project-icon.tsx";
@@ -312,7 +312,7 @@ export const ProjectView = ({
             builds ? (
               <div className="flex flex-wrap gap-2">
                 {canBuild(identity.role) ? (
-                  <NewItemDialog project={project} />
+                  <MakeSomethingLink kind="app" project={project.id} />
                 ) : null}
                 <FileItemDialog project={project} />
                 <Button

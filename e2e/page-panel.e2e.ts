@@ -23,7 +23,7 @@ test("a new page opens at its top, and what is too wide does not scroll the page
   const nav = page.getByRole("navigation", { name: "Breadcrumb" });
   await expect(nav).toContainText("Brain", pageRead);
 
-  const panel = page.locator('[data-slot="sidebar-inset"]');
+  const panel = page.locator('[data-slot="app-shell-content"]');
   // Content taller and wider than the panel, in the panel itself so it
   // stays through the navigation below. It is set through the style
   // object, which the page's content security policy allows.

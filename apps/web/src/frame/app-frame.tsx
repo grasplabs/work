@@ -1,5 +1,10 @@
 import type { Identity } from "@grasp-os/shared/rpc";
-import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import {
+  AppShell,
+  AppShellContent,
+  AppShellDock,
+  AppShellMain,
+} from "@grasp-os/ui/components/app-shell";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import { useState } from "react";
@@ -15,12 +20,14 @@ import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
 
 /**
- * The signed-in product's frame: the app's sidebar beside the page, which
- * scrolls inside it so its site header stays in view. It scrolls only up
- * and down: what is wider than the page is cut at its edge, rather than
- * sliding the whole page, header and all, sideways. The shell's pages
- * are in it, and a page outside the shell for someone signed in, such as
- * a decision opened from a link.
+ * The signed-in product's frame (the kit's AppShell): the app's sidebar
+ * beside the page, which scrolls inside its card so its site header stays
+ * in view; over the page, at its foot, what stays at hand on every page
+ * (`dock`); and beside or over the page, its panels (`panels`): an App's
+ * page opened beside it, and Grasp's chat. The shell's pages are in it,
+ * with all of them, and a page
+ * outside the shell for someone signed in, such as a decision opened from
+ * a link, with none of them.
  *
  * While Stephen gives the tour, from his question whether the person is
  * ready to its end, the frame is inert: no press or key reaches a page
@@ -32,15 +39,21 @@ export const AppFrame = ({
   core,
   identity,
   failing,
-  aside,
+  dock,
+  panels,
+  covered = false,
   children,
 }: {
   core: CoreConnection;
   identity: Identity;
   /** The AI providers that fail, read before the page showed (`failingUpFront`). */
   failing?: FailingProvider[];
-  /** Beside the page, over it: the shell's chat dock. */
-  aside?: ReactNode;
+  /** Over the page, centred at its foot: the chat's idle bar. */
+  dock?: ReactNode;
+  /** Beside or over the page: an App's page opened beside it, and the chat. */
+  panels?: ReactNode;
+  /** A panel is full screen over the page, whose content fades out under it. */
+  covered?: boolean;
   children: ReactNode;
 }) => {
   // Folded as the person left it in this browser.
@@ -52,8 +65,7 @@ export const AppFrame = ({
     // sign-out from the person menu that core didn't carry out.
     <Toaster>
       <TooltipProvider>
-        <SidebarProvider
-          className="h-svh"
+        <AppShell
           inert={touring}
           onOpenChange={(next) => {
             setOpen(next);
@@ -62,16 +74,19 @@ export const AppFrame = ({
           open={open}
         >
           <AppSidebar core={core} identity={identity} />
-          <SidebarInset className="min-h-0 min-w-0 overflow-x-clip overflow-y-auto">
-            <AiKeyBanner
-              failing={failing}
-              identity={identity}
-              providers={providersOf(core)}
-            />
-            <InFrame value>{children}</InFrame>
-          </SidebarInset>
-          {aside}
-        </SidebarProvider>
+          <AppShellMain covered={covered}>
+            <AppShellContent>
+              <AiKeyBanner
+                failing={failing}
+                identity={identity}
+                providers={providersOf(core)}
+              />
+              <InFrame value>{children}</InFrame>
+            </AppShellContent>
+            {dock === undefined ? null : <AppShellDock>{dock}</AppShellDock>}
+          </AppShellMain>
+          {panels}
+        </AppShell>
         <TourLayer identity={identity} />
       </TooltipProvider>
     </Toaster>

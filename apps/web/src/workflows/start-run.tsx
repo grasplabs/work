@@ -275,7 +275,10 @@ const StartDialog = ({
     >
       <DialogTrigger render={<Button size="sm" variant="outline" />}>
         <PlayIcon aria-hidden="true" />
-        <Trans context="start a workflow's run by hand">Start</Trans>
+        {/* Its icon alone where its bar is narrow (frame/item-shell.tsx). */}
+        <span className="@max-5xl/bar:sr-only">
+          <Trans context="start a workflow's run by hand">Run</Trans>
+        </span>
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
         <form
@@ -399,7 +402,7 @@ export const StartIndependentRun = ({
   }, [core, workflow]);
 
   if (unread !== undefined) {
-    return <ErrorText>{t`Can't offer Start: ${unread}`}</ErrorText>;
+    return <ErrorText>{t`Can't offer Run: ${unread}`}</ErrorText>;
   }
   const version = form?.version ?? null;
   if (version === null) {

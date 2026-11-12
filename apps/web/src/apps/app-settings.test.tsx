@@ -1,10 +1,5 @@
 // @vitest-environment happy-dom
-import type {
-  App,
-  AppMember,
-  AppStatus,
-  ViewedApp,
-} from "@grasp-os/shared/apps";
+import type { App, AppMember, ViewedApp } from "@grasp-os/shared/apps";
 import type { ListedConnection } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -58,7 +53,6 @@ const billing: ListedConnection = {
 /** Core's `apps` and `pages` for one App, as someone with `role` in it reads it. */
 const fakeCore = (
   role: ViewedApp["role"],
-  status: AppStatus = "published",
   { surfacesRefused = false }: { surfacesRefused?: boolean } = {}
 ) => {
   const calls: string[] = [];
@@ -84,8 +78,8 @@ const fakeCore = (
     process: null,
     blueprint: null,
     currentVersion: 1,
-    pendingVersion: null,
-    status,
+    liveLabel: "26.11.1",
+    archived: false,
     link: null,
     createdAt: "2026-10-20T08:00:00.000Z",
     role,
@@ -98,7 +92,7 @@ const fakeCore = (
       archive: async (): Promise<App> => {
         calls.push("archive");
         await Promise.resolve();
-        app = { ...app, status: "archived" };
+        app = { ...app, archived: true };
         return app;
       },
       answerers: async () =>
@@ -169,7 +163,7 @@ const settled = async (): Promise<void> => {
 };
 
 const isApp = (data: unknown): data is ViewedApp =>
-  typeof data === "object" && data !== null && "status" in data;
+  typeof data === "object" && data !== null && "archived" in data;
 
 /** The App's settings, from `fake`, `within` the workspace or the page. */
 const opened = async (
@@ -288,22 +282,22 @@ describe(AppSettings, () => {
       builder: [
         {
           name: "General",
-          to: "/apps/invoice-desk/edit?view=settings&section=general",
+          to: "/apps/invoice-desk?view=settings&section=general",
           open: true,
         },
         {
           name: "Sharing",
-          to: "/apps/invoice-desk/edit?view=settings&section=sharing",
+          to: "/apps/invoice-desk?view=settings&section=sharing",
           open: false,
         },
         {
-          name: "Versions",
-          to: "/apps/invoice-desk/edit?view=settings&section=versions",
+          name: "History",
+          to: "/apps/invoice-desk?view=settings&section=history",
           open: false,
         },
         {
           name: "Webhooks",
-          to: "/apps/invoice-desk/edit?view=settings&section=webhooks",
+          to: "/apps/invoice-desk?view=settings&section=webhooks",
           open: false,
         },
       ],
@@ -397,14 +391,14 @@ describe(AppSettings, () => {
   });
 
   it("keeps every section usable when one of its reads is refused", async () => {
-    await opened(fakeCore("builder", "published", { surfacesRefused: true }));
+    await opened(fakeCore("builder", { surfacesRefused: true }));
 
     expect({
       name: document.querySelector<HTMLInputElement>("#app-name")?.value,
       sections: sections().map(({ name }) => name),
     }).toStrictEqual({
       name: "Invoices",
-      sections: ["General", "Sharing", "Versions", "Webhooks"],
+      sections: ["General", "Sharing", "History", "Webhooks"],
     });
   });
 

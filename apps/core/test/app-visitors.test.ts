@@ -38,7 +38,7 @@ import {
 // domain or an address dressed up as a listed one; guessing a code, or
 // using one twice, late or past its tries; mail sent too often to one
 // address or for one App; a session used on another App, or to call the
-// App's functions; access kept after the App is unpublished, the address
+// App's functions; access kept after the App is archived, the address
 // is taken off the list, or the visitor signs out; the list set by
 // someone who doesn't build the App; and any of it unaudited.
 
@@ -52,7 +52,7 @@ const newLink = (): string => `portal-${unique()}`;
 /** A domain no other test has. */
 const newDomain = (): string => `partner-${unique()}.test`;
 
-/** A builder's App at its own link, published, listing `entries`. */
+/** A builder's App at its own link, live, listing `entries`. */
 const visitedApp = async (
   entries: { kind: "address" | "domain"; value: string }[]
 ) => {
@@ -109,7 +109,7 @@ const releasedNotes = async (
     files,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(app, version);
+  await builder.api.apps.versions.publish(app, version);
 };
 
 /** Posts a visitor's request, as their page does. */
@@ -268,7 +268,7 @@ const askDeferred = async (link: string, address: string) => {
 };
 
 describe("an App's visitors", { timeout: 120_000 }, () => {
-  it("are mailed a code only when listed, by address or domain, for a published App, and asking answers the same whatever happened", async () => {
+  it("are mailed a code only when listed, by address or domain, for a live App, and asking answers the same whatever happened", async () => {
     const domain = newDomain();
     const listed = `ana@${unique()}.test`;
     const { builder, app, link } = await visitedApp([
@@ -291,15 +291,15 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     await vi.waitFor(() => {
       expect(recipients(mail)).toHaveLength(2);
     });
-    await builder.api.apps.unpublish(app);
-    const asDraft = await ask(link, listed);
-    const sentWhileDraft = recipients(mail).length;
+    await builder.api.apps.archive(app);
+    const asArchived = await ask(link, listed);
+    const sentWhileArchived = recipients(mail).length;
 
     expect({
       answers,
-      asDraft,
+      asArchived,
       sent: recipients(mail).toSorted(),
-      sentWhileDraft,
+      sentWhileArchived,
       events: visitorEvents(events, app)
         .map((event) => JSON.stringify(event))
         .toSorted(),
@@ -307,10 +307,10 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       // The same answer, whether a code went out, the address was listed,
       // or the link names an App at all.
       answers: Array.from({ length: 4 }, () => ({ status: 202, code: "ok" })),
-      asDraft: { status: 202, code: "ok" },
+      asArchived: { status: 202, code: "ok" },
       sent: [atDomain, listed].toSorted(),
-      // A draft sends nothing.
-      sentWhileDraft: 2,
+      // An archived App sends nothing.
+      sentWhileArchived: 2,
       events: [
         {
           action: "app.visitor_code_sent",
@@ -575,7 +575,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     });
   });
 
-  it("ends at once when the App is unpublished, the address leaves the list, or the visitor signs out, all audited", async () => {
+  it("ends at once when the App is archived, the address leaves the list, or the visitor signs out, all audited", async () => {
     const domain = newDomain();
     const { builder, app, link } = await visitedApp([
       { kind: "domain", value: domain },
@@ -592,15 +592,15 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       return await signIn(link, visitor, await lastCode(mail, visitor));
     };
 
-    let unpublished: unknown;
+    let archived: unknown;
     let delisted: unknown;
     let signedOut: unknown;
     const events = await auditedDuring(async () => {
       const token = await signedInAs();
-      await builder.api.apps.unpublish(app);
-      unpublished = await open(token);
-      await published(app);
-      // Unpublishing ended the session: signed in again, then delisted.
+      await builder.api.apps.archive(app);
+      archived = await open(token);
+      await builder.api.apps.restore(app);
+      // Archiving ended the session: signed in again, then delisted.
       const again = await signedInAs();
       await builder.api.apps.setVisitors(app, []);
       delisted = await open(again);
@@ -613,7 +613,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     });
 
     expect({
-      unpublished,
+      archived,
       delisted,
       signedOut,
       actions: visitorEvents(events, app).map(({ action, detail }) =>
@@ -622,13 +622,13 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
           : action
       ),
     }).toStrictEqual({
-      unpublished: "visitor.signed_out",
+      archived: "visitor.signed_out",
       delisted: "visitor.signed_out",
       signedOut: "visitor.signed_out",
       actions: [
         "app.visitor_code_sent",
         "app.visitor_signed_in",
-        // Unpublishing deleted the session: nothing is left to open.
+        // Archiving deleted the session: nothing is left to open.
         "app.visitor_code_sent",
         "app.visitor_signed_in",
         // The builder takes the domain off the list, then puts it back.
@@ -856,7 +856,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     });
   });
 
-  it("never keep a session past an unpublish: ending them fails the unpublish, and a sign-in that lands after one opens nothing", async () => {
+  it("never keep a session past an archive: ending them fails the archive, and a sign-in that lands after one opens nothing", async () => {
     const domain = newDomain();
     const { builder, app, link } = await visitedApp([
       { kind: "domain", value: domain },
@@ -865,37 +865,36 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     const visitor = `un@${domain}`;
     await ask(link, visitor);
     await signIn(link, visitor, await lastCode(mail, visitor));
-    const statusOf = async () => {
-      const row = await env.DB.prepare("SELECT status FROM apps WHERE id = ?")
+    const restored = async (): Promise<void> => {
+      await env.DB.prepare("UPDATE apps SET archived_at = NULL WHERE id = ?")
         .bind(app)
-        .first<{ status: string }>();
-      return row?.status;
+        .run();
     };
 
-    // Ending this App's sessions fails, as a database can: the unpublish
-    // goes with it, rather than leaving sessions a republish revives.
+    // Ending this App's sessions fails, as a database can: the archive
+    // goes with it, rather than leaving sessions a restore revives.
     const blocked = `test_block_${app.replaceAll("-", "_")}`;
     await env.DB.prepare(
       `CREATE TRIGGER ${blocked} BEFORE DELETE ON app_visitor_sessions WHEN OLD.app_id = '${app}' BEGIN SELECT RAISE(ABORT, 'unavailable'); END`
     ).run();
-    const unpublish = await outcome(builder.api.apps.unpublish(app));
+    const archive = await outcome(builder.api.apps.archive(app));
     await env.DB.prepare(`DROP TRIGGER ${blocked}`).run();
-    const afterFailed = await statusOf();
-    // Published either way for what follows.
-    await published(app);
+    const { archived: afterFailed } = await builder.api.apps.get(app);
+    // Not archived either way for what follows.
+    await restored();
 
-    // The App is unpublished as the code is taken, before the session
+    // The App is archived as the code is taken, before the session
     // goes in: the sign-in opens nothing.
     const late = `late@${domain}`;
     await ask(link, late);
     const code = await lastCode(mail, late);
     const raced = `test_race_${app.replaceAll("-", "_")}`;
     await env.DB.prepare(
-      `CREATE TRIGGER ${raced} AFTER UPDATE OF used_at ON app_visitor_codes WHEN NEW.app_id = '${app}' BEGIN UPDATE apps SET status = 'draft' WHERE id = '${app}'; END`
+      `CREATE TRIGGER ${raced} AFTER UPDATE OF used_at ON app_visitor_codes WHEN NEW.app_id = '${app}' BEGIN UPDATE apps SET archived_at = ${Date.now()} WHERE id = '${app}'; END`
     ).run();
     const lateSignIn = await signIn(link, late, code);
     await env.DB.prepare(`DROP TRIGGER ${raced}`).run();
-    await published(app);
+    await restored();
     const lateSessions = await env.DB.prepare(
       "SELECT count(*) AS n FROM app_visitor_sessions WHERE app_id = ? AND address = ?"
     )
@@ -903,13 +902,13 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       .first<{ n: number }>();
 
     expect({
-      unpublishRefused: unpublish !== "ok",
+      archiveRefused: archive !== "ok",
       afterFailed,
       lateSignIn,
       lateSessions: lateSessions?.n,
     }).toStrictEqual({
-      unpublishRefused: true,
-      afterFailed: "published",
+      archiveRefused: true,
+      afterFailed: false,
       lateSignIn: "visitor.code_invalid",
       lateSessions: 0,
     });

@@ -79,6 +79,7 @@ import {
   toPermission,
   workflowStartRequests,
 } from "./permissions.ts";
+import { makeInProject } from "./projects.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -161,8 +162,8 @@ import {
 // only the App's builders changed stays theirs, and a file both changed
 // stays theirs, listed as a conflict. Nothing is written until a builder
 // accepts exactly the update they saw (`acceptBlueprintUpdate`): then it
-// is the App's next version, theirs, made current only by publishing it
-// as any version (app-publish.ts), with the same checks, approvals and
+// is the App's next version, theirs, live only once a builder publishes
+// it as any version (app-publish.ts), with the same checks, approvals and
 // permissions as any. It ships no workflows and
 // asks for nothing: a copy's builders ask for what the newer code needs.
 // So a customer's edit is never overwritten, and an update grants
@@ -567,9 +568,12 @@ export const createFromBlueprint = async (
     audienceId: null,
     process: null,
     blueprint: blueprint.id,
+    // Not live, as any new App, until its builders publish it.
     currentVersion: null,
+    liveLabel: null,
+    archivedAt: null,
+    archivedBy: null,
     pendingVersion: null,
-    // A draft, as any new App: its builders publish it (app-status.ts).
     status: "draft",
     statusChangedAt: null,
     statusChangedBy: null,
@@ -597,6 +601,7 @@ export const createFromBlueprint = async (
     approved: blueprint.approved ? 1 : null,
     pages: hasPages(files),
     proposedBy: null,
+    label: null,
     status: null,
     publishedManifestHash: null,
   };
@@ -622,6 +627,9 @@ export const createFromBlueprint = async (
       currentVersion: sql<number | null>`${appRow.currentVersion}`.as(
         "current_version"
       ),
+      liveLabel: sql<string | null>`NULL`.as("live_label"),
+      archivedAt: sql<Date | null>`NULL`.as("archived_at"),
+      archivedBy: sql<null>`NULL`.as("archived_by"),
       pendingVersion: sql<number | null>`${appRow.pendingVersion}`.as(
         "pending_version"
       ),
@@ -982,8 +990,8 @@ export const blueprintUpdate = async (
  * moved on to the code it took, in one audited batch. Refused as
  * `app.conflict` when what they saw no longer holds: the blueprint
  * changed again, a version was committed meanwhile, or the update was
- * accepted already. Nothing is made current: the version is published,
- * as any (`setCurrent`), and asks for nothing.
+ * accepted already. Nothing goes live: a builder publishes the version
+ * (`AppVersionsApi.publish`, app-publish.ts), and it asks for nothing.
  */
 /**
  * Whether the update is still the one offered: the blueprint at the same
@@ -1082,6 +1090,7 @@ export const acceptBlueprintUpdate = async (
     approved: null,
     pages: hasPages(files),
     proposedBy: null,
+    label: null,
     status: null,
     publishedManifestHash: null,
   };
@@ -1338,11 +1347,21 @@ export class AppBlueprintsRpc
 
   async create(
     blueprint: string,
-    input: FromBlueprint
+    input: FromBlueprint,
+    project?: string
   ): Promise<CreatedFromBlueprint> {
     return await withPerson(
       this.#check,
-      async (by) => await createFromBlueprint(this.#env, by, blueprint, input)
+      async (by) =>
+        await makeInProject(
+          this.#env,
+          by,
+          project,
+          "app",
+          async () =>
+            await createFromBlueprint(this.#env, by, blueprint, input),
+          ({ app }) => app.id
+        )
     );
   }
 

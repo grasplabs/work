@@ -4,7 +4,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Permission } from "@grasp-os/shared/permissions";
 
 import { auditedCall, chatAuthority, requireOpenRun } from "./agent-scope.ts";
-import type { AgentScope, CallOutcome } from "./agent-scope.ts";
+import type { AgentCall, AgentScope, CallOutcome } from "./agent-scope.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { forSandbox } from "./bindings.ts";
@@ -29,6 +29,8 @@ export interface PersonRead<T> {
   action?: "read" | "write";
   /** The API and method, for the audit log. */
   method: string;
+  /** What it acts on, for the audit log and the chat's step (`ChatToolEvent.target`). */
+  target?: AgentCall["target"];
   read: (person: Member, permissions: Permission[]) => Promise<T>;
   /** Identifiers and counts for the audit log, never what was read. */
   detail?: (result: T) => Record<string, AuditDetailValue>;
@@ -51,7 +53,7 @@ export const readDenied = (action: "read" | "write" = "read") =>
 export const asPerson = async <T>(
   env: Env,
   scope: AgentScope,
-  { allowed, action, method, read, detail, ended }: PersonRead<T>
+  { allowed, action, method, target, read, detail, ended }: PersonRead<T>
 ): Promise<T> => {
   await requireOpenRun(env, scope, method);
   try {
@@ -60,6 +62,7 @@ export const asPerson = async <T>(
       scope,
       {
         method,
+        ...(target === undefined ? {} : { target }),
         ...(detail === undefined ? {} : { detailOf: detail }),
         ...(ended === undefined ? {} : { endedOf: ended }),
       },

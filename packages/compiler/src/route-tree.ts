@@ -73,7 +73,7 @@ const registerRouter = [
 const surfaceTitleMax = 100;
 
 const surfaceShape =
-  'A page\'s surface is `export const surface = { kind: "sidebar" | "panel" | "settings", title: "…" }`, with literal values.';
+  'A page\'s surface is `export const surface = { kind: "sidebar" | "settings", title: "…" }`, with literal values.';
 
 /** The type assertions a value may be wrapped in (`as const`, `satisfies`). */
 const assertions = new Set([

@@ -39,7 +39,7 @@ import type { Layout } from "./workflow-diagram.tsx";
 // `workflow-diagram.tsx`), to where it ends. Its builders open a step to
 // change it (core's `editStep`, GRA-514), saved as the draft's next
 // revision and checked like any edit; the JSON behind it stays one click
-// away, on Definition.
+// away, in its Settings' Definition.
 
 /** The zooms the canvas steps through, each a scale of its own. */
 const zooms = [
@@ -390,19 +390,12 @@ const Caption = ({
 }) => {
   const { t } = useLingui();
   const { revision } = draft;
-  return (
-    <div className="text-muted-foreground flex flex-col gap-1">
-      <p>
-        {checkpointRevision === 0
-          ? t`Diagram of the current version`
-          : t`Diagram of revision ${checkpointRevision}`}
-      </p>
-      {checkpointRevision === revision ? null : (
-        <p className="text-status-attention">
-          {t`Revision ${revision} doesn't pass yet: fix it under Definition to change steps here.`}
-        </p>
-      )}
-    </div>
+  // Said only while the draft's newest revision doesn't pass: the Flow
+  // then still draws the last one that did.
+  return checkpointRevision === revision ? null : (
+    <p className="text-status-attention px-4 pb-3">
+      {t`Revision ${revision} doesn't pass yet: fix it under Definition to change steps here. The Flow shows revision ${checkpointRevision}.`}
+    </p>
   );
 };
 
@@ -420,9 +413,9 @@ export const WorkflowFlow = ({
   workflow: string;
   draft: WorkflowDraft;
   onDraft: (draft: WorkflowDraft) => void;
-  /** Shows the JSON behind it, on Definition. */
+  /** Shows the JSON behind it, in its Settings' Definition. */
   onDefinition: () => void;
-  /** Shows what starts it, on Triggers. */
+  /** Shows what starts it, in its Settings' Triggers. */
   onTriggers: () => void;
 }) => {
   const { t } = useLingui();
@@ -447,9 +440,11 @@ export const WorkflowFlow = ({
   }, []);
 
   const { className: scale } = zooms[zoom] ?? zooms[unzoomed];
+  // It fills the room the page gives it, edge to edge, the ground taking
+  // what its caption leaves.
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col">
         <Controls
           layout={layout}
           onFit={fit}
@@ -467,7 +462,7 @@ export const WorkflowFlow = ({
           <Trans>Edit JSON</Trans>
         </Button>
         <div
-          className="dot-ground flex h-128 flex-col overflow-auto rounded-xl border px-8 pt-20 pb-12"
+          className="dot-ground flex min-h-96 flex-1 flex-col overflow-auto px-8 pt-20 pb-12"
           data-ground=""
           ref={room}
         >

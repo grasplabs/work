@@ -29,7 +29,7 @@ import type { Person } from "./people.ts";
 // no document of its own whose WebRTC or network it could use (core's
 // page-frame.ts).
 
-const timedOut = "This page didn't start in time.";
+const timedOut = "This page didn't start";
 const left = "This page left its frame and was stopped.";
 const disconnected = "This page lost its connection to Grasp and was stopped.";
 

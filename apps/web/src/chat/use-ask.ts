@@ -4,19 +4,17 @@ import {
   chatFilesPerQuestionMax,
   chatFileTypeOf,
 } from "@grasp-os/shared/chat";
+import type { ChatMake, ChatSubject } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
-import {
-  useNavigate,
-  useRouteContext,
-  useRouter,
-} from "@tanstack/react-router";
+import type { PromptMention } from "@grasp-os/ui/components/prompt-editor";
+import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
-import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import { chatMentionsOf } from "./mentions.tsx";
 import {
   readChoice,
   resolveChoice,
@@ -31,7 +29,7 @@ import type { ModelChoice } from "./model-choice.ts";
 // its chat as it is sent, one at a time, then the question names them.
 
 /** A new chat's title: the start of its first question. */
-const titleOf = (question: string): string => {
+export const titleOf = (question: string): string => {
   const line = question.trim().split("\n")[0] ?? "";
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 };
@@ -58,14 +56,17 @@ const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
 /** Where a question goes when there is no chat yet, and what follows it. */
 export interface AskOptions {
-  /**
-   * The chat a first question goes into, made otherwise (a new App's own,
-   * `chats.forApp`), which the caller opens once asked (`onAsked`); by
-   * default a new chat named after the question.
-   */
-  chatFor?: (session: Session) => Promise<string>;
   /** Once a question is taken, in the chat it went into. */
   onAsked?: (chatId: string) => void;
+  /**
+   * What each question is about: the page it is asked on (chat-subject.ts).
+   */
+  subject?: ChatSubject;
+  /**
+   * What "Make something" started the new chat to make (`ChatMake`),
+   * which the chat keeps: the first question makes the chat with it.
+   */
+  make?: ChatMake;
   /**
    * The agent a new chat named after the question is with, one of
    * `chats.agents()`; the company's first one by default.
@@ -103,20 +104,20 @@ export const unsentChatFor = (
  */
 export const useAsk = (
   chatId: string | undefined,
-  models: readonly string[],
+  /** The models a question may name, once core has said which. */
+  models: readonly string[] | undefined,
   /** The efforts each of `models` takes (`chats.efforts()`). */
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
-  /** Where a new chat opens: on the chat page, or where the person is (the dock). */
-  opens: "page" | "here" = "page",
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { chatFor, onAsked, agentId }: AskOptions = noOptions
+  { onAsked, subject, make, agentId }: AskOptions = noOptions
 ) => {
-  const router = useRouter();
-  const navigate = useNavigate();
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
   const [text, setText] = useState("");
+  // What the person mentioned in the box (`@`), each once: what the
+  // question names exactly, beside its words, and the chips the box shows.
+  const [mentions, setMentions] = useState<readonly PromptMention[]>([]);
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
@@ -130,7 +131,7 @@ export const useAsk = (
   const [choice, setChoice] = useState<ModelChoice>(() =>
     readChoice(identity.userId)
   );
-  const shown = resolveChoice(models, efforts, choice);
+  const shown = resolveChoice(models ?? [], efforts, choice);
   const { model, effort, levels } = shown;
   const choose = (chosen: ModelChoice): void => {
     setChoice(chosen);
@@ -178,20 +179,19 @@ export const useAsk = (
   };
   const ask = async (
     question: string,
-    carried: readonly BoxFile[] = []
+    carried: readonly BoxFile[] = [],
+    mentioned: readonly PromptMention[] = []
   ): Promise<void> => {
     if (sending.current) {
       return;
     }
     sending.current = true;
+    const named = chatMentionsOf(mentioned);
     let created: string | undefined;
     const sent = await run(async (session) => {
       let id = chatId ?? unsentChatFor(unsent.current, question, agentId);
-      if (id === undefined && chatFor !== undefined) {
-        id = await chatFor(session);
-      }
       if (id === undefined) {
-        ({ id } = await session.chats.create(titleOf(question), agentId));
+        ({ id } = await session.chats.create(titleOf(question), agentId, make));
         created = id;
       }
       const askedIn = id;
@@ -217,16 +217,17 @@ export const useAsk = (
         model,
         ...(effort === undefined ? {} : { effort }),
         ...(fileIds.length === 0 ? {} : { files: fileIds }),
+        ...(subject === undefined ? {} : { subject }),
+        ...(named.length === 0 ? {} : { mentions: named }),
       });
       return askedIn;
     });
     sending.current = false;
     if (sent === undefined) {
       // The box keeps the question and says why it wasn't sent; a new chat
-      // made for it waits to be asked in again, and shows in Chat's list.
+      // made for it waits to be asked in again.
       if (created !== undefined) {
         unsent.current = { id: created, question, agentId };
-        await router.invalidate();
       }
       return;
     }
@@ -234,23 +235,17 @@ export const useAsk = (
     // Clears the box only of what was sent from it: asking again sends an
     // earlier question, and a draft the person started stays.
     setText((now) => (now === question ? "" : now));
+    if (mentioned.length > 0) {
+      setMentions([]);
+    }
     setFiles((now) => now.filter((each) => !carried.includes(each)));
     for (const { id } of carried) {
       attached.current.delete(id);
     }
-    // A chat made otherwise (`chatFor`) is the caller's to open.
-    if (chatId === undefined && chatFor === undefined) {
+    if (chatId === undefined) {
       setActiveChat(sent, slot);
-      if (opens === "page") {
-        await navigate({ to: "/", search: { chat: sent } });
-      }
     }
     onAsked?.(sent);
-    // Chat's list shows a new chat; from the dock, Chat reads it when it
-    // opens, and the page the person is on has nothing to read again.
-    if (opens === "page") {
-      await router.invalidate();
-    }
   };
   const stop = async (): Promise<void> => {
     if (chatId !== undefined) {
@@ -261,6 +256,8 @@ export const useAsk = (
     composer: {
       text,
       onText: setText,
+      mentions,
+      onMentions: setMentions,
       models,
       model,
       onModel: (chosen: string) => {
@@ -282,7 +279,7 @@ export const useAsk = (
       onRemoveFile: removeFile,
       onSend: () => {
         setFileProblem(undefined);
-        void ask(text, files);
+        void ask(text, files, mentions);
       },
       onStop: () => {
         void stop();

@@ -1,3 +1,4 @@
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -214,7 +215,28 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       chat.id
     );
     const [typed, fixed] = await codeResults(stub, chat.id);
-    const drafts = await builder.api.chats.drafts(chat.id);
+    // Each call of the draft, as the chat's steps show it: on the App, the
+    // one that failed as failed, so a page knows when examples were added.
+    const calls = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ event: string }>(
+          "SELECT event FROM chat_tool_events WHERE chat_id = ? ORDER BY id",
+          chat.id
+        )
+        .toArray()
+        .map(({ event }) =>
+          z
+            .object({
+              method: z.string(),
+              target: z.unknown(),
+              outcome: z.string(),
+            })
+            .parse(JSON.parse(event))
+        )
+        .filter(({ method }) => method === "build.call")
+        .map(({ target, outcome }) => ({ target, outcome }))
+    );
+    const drafts = [await builder.api.apps.drafts.get(app.id)];
     expect({
       docs: docs?.text.includes("# @grasp-os/sdk/server"),
       // The generated config is never written by hand: the refusal names
@@ -248,6 +270,10 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
         .split("\n")
         .some((line) => line.startsWith("server/cards.ts:16: ")),
     }).toStrictEqual({ code: "version.build_failed", located: true });
+    expect(calls).toStrictEqual([
+      { target: { type: "app", id: app.id }, outcome: "failed" },
+      { target: { type: "app", id: app.id }, outcome: "ok" },
+    ]);
     expect({
       called: returned(fixed?.text),
       // The turn's check of the draft, as it answered, found nothing.

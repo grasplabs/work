@@ -10,6 +10,7 @@ import {
 } from "vite-plus/test";
 
 import { activeChat, setActiveChat } from "./chat/active-chat.ts";
+import { slotOf } from "./chat/chat-subject.ts";
 import {
   CoreConnection,
   frameReadMs,
@@ -254,7 +255,7 @@ describe("the tab's one connection to core", () => {
       const first = frameOn(core);
       const second = frameOn(core);
       setActiveChat("their-chat");
-      setActiveChat("their-brain-chat", "brain");
+      setActiveChat("their-app-chat", slotOf({ kind: "app", id: "invoices" }));
       // Into the same record as the page's reload, so the order is seen.
       const listening = core.onEnded(() => {
         ended.push("frame stopped");
@@ -268,7 +269,10 @@ describe("the tab's one connection to core", () => {
         order: ended,
         disposed: opened[1]?.disposed,
         waiting: await waiting,
-        chats: [activeChat(), activeChat("brain")],
+        chats: [
+          activeChat(),
+          activeChat(slotOf({ kind: "app", id: "invoices" })),
+        ],
       }).toStrictEqual({
         told: [[why], [why]],
         order: ["frame stopped", "page reloads"],

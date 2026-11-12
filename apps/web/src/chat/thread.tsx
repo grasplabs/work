@@ -61,7 +61,10 @@ import {
   ThinkingLine,
   useAnswerThinking,
 } from "./answer-thinking.tsx";
+import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
+import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
+import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
 import {
   Conversation,
@@ -70,6 +73,7 @@ import {
 } from "./conversation.tsx";
 import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
+import { recoveredSteps } from "./recovered.ts";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
@@ -101,13 +105,25 @@ const ThinkingCard = lazy(async () => {
 
 type Result = Extract<ChatMessage, { role: "result" }>;
 type Answer = Extract<ChatMessage, { role: "assistant" }>;
-type StepStatus = "writing" | "running" | "done" | "failed" | "stopped";
+/**
+ * Where a step stands; `retried` for one that failed and a later step of
+ * its turn recovered from (recovered.ts), which is no failure to the
+ * person.
+ */
+type StepStatus =
+  | "writing"
+  | "running"
+  | "done"
+  | "failed"
+  | "retried"
+  | "stopped";
 
 const statusIcon: Record<StepStatus, ReactNode> = {
   writing: <CircleIcon />,
   running: <ClockIcon />,
   done: <CheckCircleIcon className="text-status-agreed" />,
   failed: <XCircleIcon />,
+  retried: <RefreshCcwIcon />,
   stopped: <XCircleIcon />,
 };
 
@@ -120,20 +136,28 @@ const lineStatus: Record<
   running: "running",
   done: undefined,
   failed: "error",
+  retried: undefined,
   stopped: "attention",
 };
 
-/** Where a code step stands: written, running, done, failed or stopped. */
+/** The steps of the thread that failed and were recovered from (recovered.ts). */
+const Recovered = createContext<ReadonlySet<string>>(new Set());
+
+/** Where a step stands: written, running, done, failed, retried or stopped. */
 const stepStatusOf = (
   result: Result | undefined,
   writing: boolean,
-  running: boolean
+  running: boolean,
+  recovered: boolean
 ): StepStatus => {
   if (writing) {
     return "writing";
   }
   if (result !== undefined) {
-    return result.failed ? "failed" : "done";
+    if (!result.failed) {
+      return "done";
+    }
+    return recovered ? "retried" : "failed";
   }
   // Without a result once the agent stopped, it never finished.
   return running ? "running" : "stopped";
@@ -148,6 +172,7 @@ const useStatusLabel = (): ((status: StepStatus) => string) => {
       running: t`Running`,
       done: t`Done`,
       failed: t`Failed`,
+      retried: t`Retried`,
       stopped: t`Stopped`,
     })[status];
 };
@@ -292,7 +317,12 @@ const ToolStep = ({
   writing: boolean;
   running: boolean;
 }) => {
-  const status = stepStatusOf(result, writing, running);
+  const status = stepStatusOf(
+    result,
+    writing,
+    running,
+    use(Recovered).has(call.callId)
+  );
   const summary = useToolSummary()(call, status === "done");
   const label = useStatusLabel()(status);
   return (
@@ -314,7 +344,7 @@ const ToolStep = ({
           />
           {result === undefined ? null : (
             <StepPart
-              failed={result.failed}
+              failed={status === "failed"}
               heading={
                 result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
               }
@@ -344,7 +374,12 @@ const CodeStep = ({
   /** Whether the agent is working on the chat now. */
   running: boolean;
 }) => {
-  const status = stepStatusOf(result, writing, running);
+  const status = stepStatusOf(
+    result,
+    writing,
+    running,
+    use(Recovered).has(code.callId)
+  );
   const label = useStatusLabel()(status);
   return (
     <TraceCollapsible>
@@ -365,7 +400,7 @@ const CodeStep = ({
           )}
           {result === undefined ? null : (
             <StepPart
-              failed={result.failed}
+              failed={status === "failed"}
               heading={
                 result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>
               }
@@ -914,6 +949,45 @@ const Reply = ({
   );
 };
 
+/**
+ * What the person asked, in their bubble: their answers to the agent's
+ * questions (`asked`, the reply before it) as each question and its
+ * answer, compact; anything else as they wrote it.
+ */
+const Question = ({
+  message,
+  asked,
+}: {
+  message: Asked;
+  asked: Answer["asked"];
+}) => {
+  const answered =
+    asked === undefined ? undefined : answeredOf(asked, message.text);
+  return (
+    <Message align="end">
+      {message.files === undefined || message.files.length === 0 ? null : (
+        <FileCards files={message.files} />
+      )}
+      <Bubble variant="muted">
+        <BubbleContent>
+          {answered === undefined ? (
+            message.text
+          ) : (
+            <dl className="flex flex-col gap-1.5">
+              {answered.map(({ question, answer }) => (
+                <div key={question}>
+                  <dt className="text-muted-foreground text-xs">{question}</dt>
+                  <dd>{answer}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </BubbleContent>
+      </Bubble>
+    </Message>
+  );
+};
+
 /** Grasp, reading before its answer starts: its line, and its sign under it, where the answer will stand. */
 const Reading = () => (
   <div className="flex w-full flex-col gap-3">
@@ -965,6 +1039,37 @@ const progressOf = (
   };
 };
 
+/** Each step's result in `messages`, by the step's call. */
+const resultsOf = (messages: readonly ChatMessage[]): Map<string, Result> => {
+  const results = new Map<string, Result>();
+  for (const message of messages) {
+    if (message.role === "result") {
+      results.set(message.callId, message);
+    }
+  }
+  return results;
+};
+
+/**
+ * The last answer, and whether it answers the last question: "Ask again"
+ * asks that question, only under the answer to it, never under an earlier
+ * one when a later question stopped unanswered.
+ */
+const lastAnswerOf = (
+  messages: readonly ChatMessage[]
+): { lastAnswer: Answer | undefined; answersLast: boolean } => {
+  const lastAnswer = messages.findLast(
+    (message): message is Answer => message.role === "assistant"
+  );
+  return {
+    lastAnswer,
+    answersLast:
+      lastAnswer !== undefined &&
+      messages.findLastIndex(({ role }) => role === "user") <
+        messages.indexOf(lastAnswer),
+  };
+};
+
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
@@ -980,6 +1085,7 @@ export const ChatThread = ({
   tools = noTools,
   onRetry,
   compact = false,
+  build,
   children,
 }: {
   /** The chat, whose answers' sources core is asked for. */
@@ -1003,23 +1109,17 @@ export const ChatThread = ({
   onRetry: () => void;
   /** In the chat dock: closer together, 20 pixels from every edge. */
   compact?: boolean;
+  /**
+   * What a plan's Build it asks with, where the thread can build (Grasp's
+   * chat): without it, a plan shows with no way to build it.
+   */
+  build?: ThreadBuild;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const results = new Map<string, Result>();
-  for (const message of messages) {
-    if (message.role === "result") {
-      results.set(message.callId, message);
-    }
-  }
-  const lastAnswer = messages.findLast(({ role }) => role === "assistant");
-  // "Ask again" asks the last question: only under the answer to it, never
-  // under an earlier one when a later question stopped unanswered.
-  const answersLast =
-    lastAnswer !== undefined &&
-    messages.findLastIndex(({ role }) => role === "user") <
-      messages.indexOf(lastAnswer);
+  const results = resultsOf(messages);
+  const { lastAnswer, answersLast } = lastAnswerOf(messages);
   const { shown, replies, doing, step, worked } = progressOf(
     messages,
     partial,
@@ -1102,97 +1202,119 @@ export const ChatThread = ({
       />
     );
   const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
+  const waiting = pendingPlan(messages, running);
+  const reading =
+    doing === "reading" ? (
+      <div aria-busy="true">
+        <Reading />
+      </div>
+    ) : null;
+  const renderReplies = (answers: readonly Answer[]): ReactNode =>
+    answers.map((message) => (
+      <Fragment key={message.id}>
+        <Reply
+          compact={compact}
+          onRetry={
+            !running && message === lastAnswer && answersLast
+              ? onRetry
+              : undefined
+          }
+          output={output}
+          reply={message}
+          results={results}
+          running={running}
+          sign={
+            shown === null && message === replies.at(-1) ? doing : undefined
+          }
+          cited={
+            message.citations.length === 0
+              ? undefined
+              : { chatId, messageId: message.id }
+          }
+          card={cardOf(message.id)}
+          top={topOf(message.id)}
+          writing={false}
+        />
+        {message.asked === undefined ? null : (
+          <AskedLine asked={message.asked} />
+        )}
+        {message.planned === undefined ? null : (
+          <ThreadPlan
+            build={build}
+            chatId={chatId}
+            plan={message.planned}
+            waiting={waiting?.callId === message.planned.callId}
+          />
+        )}
+      </Fragment>
+    ));
+  const isLast = (at: number): boolean => at === items.length - 1;
+  /** The person's question. */
+  const questionItem = (message: Asked, at: number): ReactNode => {
+    const before = items[at - 1];
+    return (
+      <li className="flex flex-col gap-3" key={message.id}>
+        <Question
+          asked={
+            before?.kind === "answer" ? before.replies.at(-1)?.asked : undefined
+          }
+          message={message}
+        />
+      </li>
+    );
+  };
+  /**
+   * Grasp's replies to a question, a Build it's as any other's. The answer
+   * being written goes on the last one, when the question already has
+   * replies.
+   */
+  const answerItem = (answers: Answer[], at: number): ReactNode => {
+    const goesOn = writtenGoesOn && isLast(at);
+    return (
+      <li
+        aria-busy={goesOn ? true : undefined}
+        className="flex flex-col gap-3"
+        key={answers[0]?.id}
+      >
+        {renderReplies(answers)}
+        {goesOn ? written : null}
+      </li>
+    );
+  };
+  const recovered = recoveredSteps(messages);
   return (
     <ChatTools value={tools}>
-      <Conversation>
-        <ConversationContent label={t`Messages`}>
-          <ol
-            aria-label={t`Messages`}
-            className={
-              compact
-                ? "flex w-full flex-col gap-7 p-5"
-                : "mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
-            }
-          >
-            {loaded ? null : (
-              <li className="flex justify-center py-8">
-                <Spinner aria-label={t`Loading…`} />
-              </li>
-            )}
-            {items.map((item, at) => {
-              if (item.kind === "question") {
-                return (
-                  <li key={item.message.id}>
-                    <Message align="end">
-                      {item.message.files === undefined ||
-                      item.message.files.length === 0 ? null : (
-                        <FileCards files={item.message.files} />
-                      )}
-                      <Bubble variant="muted">
-                        <BubbleContent>{item.message.text}</BubbleContent>
-                      </Bubble>
-                    </Message>
-                  </li>
-                );
+      <Recovered value={recovered}>
+        <Conversation>
+          <ConversationContent label={t`Messages`}>
+            <ol
+              aria-label={t`Messages`}
+              className={
+                compact
+                  ? "flex w-full flex-col gap-7 p-5"
+                  : "mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
               }
-              // The answer being written goes on the last one, when the
-              // question already has replies.
-              const goesOn = writtenGoesOn && at === items.length - 1;
-              return (
-                <li
-                  aria-busy={goesOn ? true : undefined}
-                  className="flex flex-col gap-3"
-                  key={item.replies[0]?.id}
-                >
-                  {item.replies.map((message) => (
-                    <Fragment key={message.id}>
-                      <Reply
-                        compact={compact}
-                        onRetry={
-                          !running && message === lastAnswer && answersLast
-                            ? onRetry
-                            : undefined
-                        }
-                        output={output}
-                        reply={message}
-                        results={results}
-                        running={running}
-                        sign={
-                          shown === null && message === replies.at(-1)
-                            ? doing
-                            : undefined
-                        }
-                        cited={
-                          message.citations.length === 0
-                            ? undefined
-                            : { chatId, messageId: message.id }
-                        }
-                        card={cardOf(message.id)}
-                        top={topOf(message.id)}
-                        writing={false}
-                      />
-                      {message.asked === undefined ? null : (
-                        <AskedLine asked={message.asked} />
-                      )}
-                    </Fragment>
-                  ))}
-                  {goesOn ? written : null}
+            >
+              {loaded ? null : (
+                <li className="flex justify-center py-8">
+                  <Spinner aria-label={t`Loading…`} />
                 </li>
-              );
-            })}
-            {written === null || writtenGoesOn ? null : (
-              <li aria-busy="true">{written}</li>
-            )}
-            {doing === "reading" ? (
-              <li aria-busy="true">
-                <Reading />
-              </li>
-            ) : null}
-            {children === undefined ? null : <li>{children}</li>}
-          </ol>
-        </ConversationContent>
-        <ConversationScrollButton label={t`Jump to the newest message`} />
-      </Conversation>
+              )}
+              {items.map((item, at): ReactNode =>
+                item.kind === "question"
+                  ? questionItem(item.message, at)
+                  : answerItem(item.replies, at)
+              )}
+              {written === null || writtenGoesOn ? null : (
+                <li aria-busy="true">{written}</li>
+              )}
+              {reading === null ? null : <li>{reading}</li>}
+              {children === undefined ? null : <li>{children}</li>}
+            </ol>
+          </ConversationContent>
+          <ConversationScrollButton label={t`Jump to the newest message`} />
+        </Conversation>
+      </Recovered>
     </ChatTools>
   );
 };

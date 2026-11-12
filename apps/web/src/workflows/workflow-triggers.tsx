@@ -1,0 +1,1076 @@
+import type {
+  ConnectorEventType,
+  ListedConnection,
+} from "@grasp-os/shared/connect";
+import { failureText } from "@grasp-os/shared/errors";
+import type { EventSource } from "@grasp-os/shared/event-sources";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
+import {
+  triggerEventsRequest,
+  triggerStartRequest,
+} from "@grasp-os/shared/workflow-triggers";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { Input } from "@grasp-os/ui/components/input";
+import { Label } from "@grasp-os/ui/components/label";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import {
+  CalendarClockIcon,
+  MailIcon,
+  PlugIcon,
+  LinkIcon,
+  ZapIcon,
+} from "lucide-react";
+import { useEffect, useId, useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
+import { formatDateTime } from "../format.ts";
+import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
+import {
+  eventLabels,
+  eventTypeOf,
+  eventTypes,
+  summaryOf,
+  triggerDescription,
+} from "./trigger-description.ts";
+
+// An independent workflow's Triggers, in its Settings (GRA-1303): what starts it on
+// its own, as core lists its triggers (`workflowResources.triggers`):
+// every one to its builders and the organization's admins, a person's own
+// to anyone else. Its builders add a schedule (a cron expression in a time
+// zone, with the input each run starts with) or a connection's event (an
+// account's new mail or file, with how the event becomes the run's input)
+// or an email to an address of its own (a name they choose, as an App's
+// email trigger has, or a random one when they leave it empty, with how
+// the message becomes the run's input, shown by the part of its address
+// before the @), for an exact published version. A trigger acts for whoever made it:
+// they alone turn it on again or move it to another version; its builders
+// and admins turn it off and delete it (deleting asks first). A schedule
+// whose starts kept failing stopped, and says so, with Turn on again for
+// its owner. Core decides every change again (trigger-resources.ts) and
+// what it refuses is said where it was asked; nothing starts until an
+// admin grants the trigger `start` on the workflow, and a connector
+// trigger hears nothing until one grants it its event's read on its
+// connection; core asks for both as the trigger is created. Each trigger
+// says while it waits for either, and once refused offers to ask again
+// for whatever was refused.
+//
+// A webhook trigger (GRA-1560) starts on the events of one of the
+// workspace's event sources, of one type, chosen by name: an admin makes
+// the sources, with their URLs and secrets, in Settings › Webhooks.
+
+/** The provider whose connections report events of `type`. */
+const providerOf = (type: ConnectorEventType): string =>
+  type.startsWith("m365.") ? "microsoft" : "google";
+
+/** What starts a run of `trigger`, in words. */
+const TriggerWhat = ({
+  trigger,
+  connections,
+}: {
+  trigger: WorkflowTrigger;
+  connections: readonly ListedConnection[];
+}) => {
+  const summary = summaryOf(trigger);
+  const found = connections.find(
+    (each) => each.id === summary.connection?.connectionId
+  );
+  return triggerDescription(summary, {
+    accountName: found?.accountName ?? found?.provider,
+    address: trigger.address,
+  });
+};
+
+/** The kind of trigger's icon. */
+const KindIcon = ({ kind }: { kind: WorkflowTrigger["kind"] }) => {
+  if (kind === "schedule") {
+    return <CalendarClockIcon aria-hidden="true" className="mt-0.5 size-4" />;
+  }
+  if (kind === "email") {
+    return <MailIcon aria-hidden="true" className="mt-0.5 size-4" />;
+  }
+  if (kind === "webhook") {
+    return <LinkIcon aria-hidden="true" className="mt-0.5 size-4" />;
+  }
+  return kind === "connector" ? (
+    <PlugIcon aria-hidden="true" className="mt-0.5 size-4" />
+  ) : (
+    <ZapIcon aria-hidden="true" className="mt-0.5 size-4" />
+  );
+};
+
+/**
+ * Where `trigger` stands: off, stopped, or when it next starts a run. Off
+ * wins: a stopped trigger someone turned off says so, not that it stopped.
+ */
+const TriggerState = ({ trigger }: { trigger: WorkflowTrigger }) => {
+  if (!trigger.enabled) {
+    return (
+      <Badge variant="outline">
+        <Trans context="a trigger that is turned off">Off</Trans>
+      </Badge>
+    );
+  }
+  if (trigger.stopped) {
+    return (
+      <Badge variant="attention">
+        <Trans>Stopped</Trans>
+      </Badge>
+    );
+  }
+  const next =
+    trigger.nextAt === null ? undefined : formatDateTime(trigger.nextAt);
+  return next === undefined ? (
+    <Badge variant="passed">
+      <Trans context="a trigger that is turned on">On</Trans>
+    </Badge>
+  ) : (
+    <span className="text-muted-foreground text-xs">
+      <Trans>Next run: {next}</Trans>
+    </span>
+  );
+};
+
+/** A permission a trigger asks an admin for, and where it stands. */
+interface Asked {
+  what: "start" | "events";
+  status: WorkflowTrigger["start"];
+}
+
+/** What waiting for, being refused or never asking for `what` means, in words. */
+const askedTexts = {
+  start: {
+    requested: msg`It starts nothing until an admin allows it to start this workflow.`,
+    revoked: msg`An admin refused or took back its start: it starts nothing.`,
+    never: msg`No admin has been asked to let it start this workflow: it starts nothing until one allows it.`,
+  },
+  events: {
+    requested: msg`It hears nothing until an admin allows it to read these events on its connection.`,
+    revoked: msg`An admin refused or took back its reading of these events: it hears nothing.`,
+    never: msg`No admin has been asked to let it read these events on its connection: it hears nothing until one allows it.`,
+  },
+} as const satisfies Record<
+  Asked["what"],
+  Record<"requested" | "revoked" | "never", MessageDescriptor>
+>;
+
+/** Where one of a trigger's permissions that isn't granted stands. */
+const AskedLine = ({ what, status }: Asked) => {
+  const { t } = useLingui();
+  if (status === "requested") {
+    return (
+      <span className="flex flex-wrap items-center gap-2">
+        <Badge variant="attention">
+          <Trans>Waiting for an admin</Trans>
+        </Badge>
+        {t(askedTexts[what].requested)}
+      </span>
+    );
+  }
+  // Never asked (a trigger made before triggers asked as they were
+  // created): nobody refused it, so it isn't said to be refused.
+  if (status === null) {
+    return (
+      <span className="flex flex-wrap items-center gap-2">
+        <Badge variant="attention">
+          <Trans>Not requested yet</Trans>
+        </Badge>
+        {t(askedTexts[what].never)}
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <Badge variant="destructive">
+        <Trans>Not allowed</Trans>
+      </Badge>
+      {t(askedTexts[what].revoked)}
+    </span>
+  );
+};
+
+/**
+ * What `trigger` asks an admin for as it is created: to start its
+ * workflow, and for a connector trigger to read its event on its
+ * connection. Each it holds says nothing; each else says that it waits,
+ * was refused or taken back, or was never asked. Whoever manages it may
+ * ask again for each refused or never asked, at once (`onAsk`).
+ */
+const TriggerAccess = ({
+  asked,
+  manages,
+  busy,
+  onAsk,
+}: {
+  asked: readonly Asked[];
+  manages: boolean;
+  busy: boolean;
+  onAsk: () => void;
+}) => {
+  const open = asked.filter(({ status }) => status !== "active");
+  if (open.length === 0) {
+    return null;
+  }
+  const refused = open.some(({ status }) => status === "revoked");
+  const askable = open.some(
+    ({ status }) => status === "revoked" || status === null
+  );
+  return (
+    <div className="text-muted-foreground flex flex-col gap-2 pl-7 text-sm">
+      {open.map(({ what, status }) => (
+        <AskedLine key={what} status={status} what={what} />
+      ))}
+      {manages && askable ? (
+        <div>
+          <Button disabled={busy} onClick={onAsk} size="sm" variant="outline">
+            {refused ? (
+              <Trans>Request again</Trans>
+            ) : (
+              <Trans context="ask an admin to let a trigger start">
+                Request
+              </Trans>
+            )}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+/** What `trigger` asks an admin for, and where each stands. */
+const askedOf = (trigger: WorkflowTrigger): Asked[] => [
+  { what: "start", status: trigger.start },
+  ...(trigger.kind === "connector"
+    ? [{ what: "events" as const, status: trigger.events }]
+    : []),
+];
+
+/**
+ * The requests that ask again for what `trigger` was refused or never
+ * asked for, under the names it asked with as it was created: a refused
+ * or revoked one no longer holds them.
+ */
+const requestsAgain = (trigger: WorkflowTrigger): PermissionRequest[] =>
+  askedOf(trigger).flatMap(({ what, status }) => {
+    if (status !== "revoked" && status !== null) {
+      return [];
+    }
+    if (what === "start") {
+      return [triggerStartRequest(trigger.id, trigger.workflowId)];
+    }
+    const { connection, event } = summaryOf(trigger);
+    const request =
+      connection === null || event === null
+        ? undefined
+        : triggerEventsRequest(
+            trigger.id,
+            {
+              connectionId: connection.connectionId,
+              resource: connection.resource ?? undefined,
+            },
+            event
+          );
+    return request === undefined ? [] : [request];
+  });
+
+/** One trigger: what starts it, its version, where it stands, and what the reader may change. */
+const TriggerRow = ({
+  trigger,
+  connections,
+  versions,
+  me,
+  builder,
+  onChanged,
+}: {
+  trigger: WorkflowTrigger;
+  connections: readonly ListedConnection[];
+  versions: readonly number[];
+  me: string;
+  builder: boolean;
+  onChanged: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const own = trigger.owner === me;
+  const manages = own || builder;
+  const { workflowVersion } = trigger;
+
+  const change = async (
+    action: (
+      triggers: Parameters<
+        Parameters<typeof run>[0]
+      >[0]["workflowResources"]["triggers"]
+    ) => Promise<unknown>
+  ): Promise<void> => {
+    await run(async (session) => {
+      await action(session.workflowResources.triggers);
+    });
+    // Read again whatever came of it: a change core made can still fail
+    // as it reads the trigger back.
+    await onChanged();
+  };
+
+  const askAgain = async (): Promise<void> => {
+    await run(async (session) => {
+      for (const request of requestsAgain(trigger)) {
+        // oxlint-disable-next-line no-await-in-loop -- one request after another, as an admin sees them
+        await session.permissions.request(request);
+      }
+    });
+    await onChanged();
+  };
+
+  return (
+    <li className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex items-start gap-3">
+        <KindIcon kind={trigger.kind} />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="font-medium">
+            <TriggerWhat connections={connections} trigger={trigger} />
+          </span>
+          <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+            <Trans>Starts version {workflowVersion}</Trans>
+            <TriggerState trigger={trigger} />
+          </span>
+          {trigger.stopped ? (
+            <span className="text-muted-foreground text-sm">
+              <Trans>
+                Its runs kept failing to start, so it starts no more until
+                whoever made it turns it on again.
+              </Trans>
+            </span>
+          ) : null}
+          {trigger.source?.deleted === true ? (
+            <span className="text-muted-foreground text-sm">
+              <Trans>
+                Its source was deleted, so it starts nothing: delete it, or add
+                a trigger on another source.
+              </Trans>
+            </span>
+          ) : null}
+        </span>
+      </div>
+      <TriggerAccess
+        asked={askedOf(trigger)}
+        busy={busy}
+        manages={manages}
+        onAsk={() => {
+          void askAgain();
+        }}
+      />
+      {manages ? (
+        <div className="flex flex-wrap items-center gap-2 pl-7">
+          {/* Turning it on runs it as its owner, so core asks them to
+              build the workflow still; turning off and deleting don't. */}
+          {own && builder && (trigger.stopped || !trigger.enabled) ? (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                void change(
+                  async (triggers) =>
+                    await triggers.setEnabled(trigger.id, true)
+                );
+              }}
+              size="sm"
+              variant="outline"
+            >
+              {trigger.stopped ? t`Turn on again` : t`Turn on`}
+            </Button>
+          ) : null}
+          {/* A stopped trigger is still on in core: turned off, it stays
+              off once someone turns it on again elsewhere. */}
+          {trigger.enabled ? (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                void change(
+                  async (triggers) =>
+                    await triggers.setEnabled(trigger.id, false)
+                );
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <Trans context="turn a trigger off">Turn off</Trans>
+            </Button>
+          ) : null}
+          {own && builder && versions.length > 1 ? (
+            <NativeSelect
+              aria-label={t`Version it starts`}
+              disabled={busy}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                void change(
+                  async (triggers) =>
+                    await triggers.setVersion(trigger.id, next)
+                );
+              }}
+              size="sm"
+              value={String(workflowVersion)}
+            >
+              {versions.map((version) => (
+                <NativeSelectOption key={version} value={String(version)}>
+                  {t`Version ${version}`}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : null}
+          <AlertDialog>
+            <AlertDialogTrigger
+              disabled={busy}
+              render={<Button size="sm" variant="ghost" />}
+            >
+              <Trans context="delete a trigger">Delete</Trans>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  <Trans>Delete this trigger?</Trans>
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  <Trans>
+                    It starts no more runs. Runs it already started go on. This
+                    can&apos;t be undone.
+                  </Trans>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>
+                  <Trans>Cancel</Trans>
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    void change(async (triggers) => {
+                      await triggers.delete(trigger.id);
+                    });
+                  }}
+                  variant="destructive"
+                >
+                  <Trans>Delete the trigger</Trans>
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      ) : null}
+      <ErrorText>{failure}</ErrorText>
+    </li>
+  );
+};
+
+/** JSON typed into a field, or why it isn't. */
+const jsonOf = (text: string): { ok: true; value: unknown } | { ok: false } => {
+  try {
+    const value: unknown = JSON.parse(text);
+    return { ok: true, value };
+  } catch {
+    return { ok: false };
+  }
+};
+
+/** The person's own time zone, as the browser has it. */
+const ownTimeZone = (): string =>
+  Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** The kinds of trigger a builder adds here. */
+const addedKinds = ["schedule", "connector", "email", "webhook"] as const;
+
+type AddedKind = (typeof addedKinds)[number];
+
+/**
+ * A new trigger, for a builder: a schedule, a connection's event, an email
+ * or an event from a webhook source, for one version.
+ */
+const AddTrigger = ({
+  workflow,
+  versions,
+  connections,
+  sources,
+  onAdded,
+}: {
+  workflow: string;
+  versions: readonly number[];
+  connections: readonly ListedConnection[];
+  sources: readonly EventSource[];
+  onAdded: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const ids = useId();
+  const { busy, failure, run } = useCoreAction();
+  const [problem, setProblem] = useState<string>();
+  const [kind, setKind] = useState<AddedKind>("schedule");
+  const [chosen, setChosen] = useState(versions.at(-1) ?? 1);
+  const [cron, setCron] = useState("");
+  const [timeZone, setTimeZone] = useState(ownTimeZone);
+  const [input, setInput] = useState("{}");
+  const [event, setEvent] = useState<ConnectorEventType>("m365.mail.received");
+  const [connection, setConnection] = useState("");
+  const [resource, setResource] = useState("");
+  const [mapping, setMapping] = useState("{}");
+  const [address, setAddress] = useState("");
+  const [source, setSource] = useState("");
+  const [sourceType, setSourceType] = useState("");
+  const reporting = connections.filter(
+    (each) =>
+      each.source === "native" &&
+      each.status === "active" &&
+      each.provider === providerOf(event)
+  );
+
+  const configOf = (): unknown => {
+    // Each event's data is its run's input, as is.
+    if (kind === "webhook") {
+      if (source === "") {
+        setProblem(t`Choose a source.`);
+        return undefined;
+      }
+      return { source, type: sourceType.trim() };
+    }
+    if (kind === "schedule") {
+      const parsed = jsonOf(input);
+      if (!parsed.ok) {
+        setProblem(t`The input isn't JSON.`);
+        return undefined;
+      }
+      return {
+        schedule: { cron: cron.trim(), timeZone: timeZone.trim() },
+        input: parsed.value,
+        missedOccurrences: "coalesce",
+      };
+    }
+    const fields = jsonOf(mapping);
+    if (!fields.ok) {
+      setProblem(t`The input fields aren't JSON.`);
+      return undefined;
+    }
+    if (kind === "email") {
+      // Without a name, core gives it a random address of its own.
+      const name = address.trim();
+      return {
+        input: { fields: fields.value, defaults: {} },
+        ...(name === "" ? {} : { address: name }),
+      };
+    }
+    if (connection === "") {
+      setProblem(t`Choose a connection.`);
+      return undefined;
+    }
+    return {
+      connection: {
+        connectionId: connection,
+        ...(resource.trim() === "" ? {} : { resource: resource.trim() }),
+      },
+      event,
+      input: { fields: fields.value, defaults: {} },
+    };
+  };
+
+  const add = async (): Promise<void> => {
+    setProblem(undefined);
+    const config = configOf();
+    if (config === undefined) {
+      return;
+    }
+    const created = await run(
+      async (session) =>
+        await session.workflowResources.triggers.create({
+          kind,
+          workflowId: workflow,
+          version: chosen,
+          config,
+        })
+    );
+    if (created !== undefined) {
+      setCron("");
+      setInput("{}");
+      setMapping("{}");
+      setAddress("");
+      setSourceType("");
+    }
+    // Read again however it ended, as the rows' own changes are: a trigger
+    // core saved before its answer was lost shows, rather than being added
+    // twice on a retry.
+    await onAdded();
+  };
+
+  return (
+    <form
+      className="bg-card flex flex-col gap-4 rounded-xl border p-4"
+      onSubmit={(submitted) => {
+        submitted.preventDefault();
+        void add();
+      }}
+    >
+      <h3 className="font-medium">
+        <Trans>Add a trigger</Trans>
+      </h3>
+      <div className="flex flex-wrap gap-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`${ids}-kind`}>
+            <Trans>What starts it</Trans>
+          </Label>
+          <NativeSelect
+            id={`${ids}-kind`}
+            onChange={(changed) => {
+              setKind(
+                addedKinds.find((each) => each === changed.target.value) ??
+                  "schedule"
+              );
+            }}
+            value={kind}
+          >
+            <NativeSelectOption value="schedule">{t`A schedule`}</NativeSelectOption>
+            <NativeSelectOption value="connector">
+              {t`An event at a connection`}
+            </NativeSelectOption>
+            <NativeSelectOption value="email">
+              {t`An email to its own address`}
+            </NativeSelectOption>
+            <NativeSelectOption value="webhook">
+              {t`An event from a webhook source`}
+            </NativeSelectOption>
+          </NativeSelect>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`${ids}-version`}>
+            <Trans>Version it starts</Trans>
+          </Label>
+          <NativeSelect
+            id={`${ids}-version`}
+            onChange={(changed) => {
+              setChosen(Number(changed.target.value));
+            }}
+            value={String(chosen)}
+          >
+            {versions.map((version) => (
+              <NativeSelectOption key={version} value={String(version)}>
+                {t`Version ${version}`}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+      </div>
+      {kind === "schedule" ? (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${ids}-cron`}>
+                <Trans>When, as a cron expression</Trans>
+              </Label>
+              <Input
+                id={`${ids}-cron`}
+                onChange={(changed) => {
+                  setCron(changed.target.value);
+                }}
+                placeholder="0 9 * * 1-5"
+                spellCheck={false}
+                value={cron}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${ids}-zone`}>
+                <Trans>Time zone</Trans>
+              </Label>
+              <Input
+                id={`${ids}-zone`}
+                onChange={(changed) => {
+                  setTimeZone(changed.target.value);
+                }}
+                spellCheck={false}
+                value={timeZone}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${ids}-input`}>
+              <Trans>The input each run starts with, as JSON</Trans>
+            </Label>
+            <Textarea
+              id={`${ids}-input`}
+              onChange={(changed) => {
+                setInput(changed.target.value);
+              }}
+              spellCheck={false}
+              value={input}
+              variant="code"
+            />
+          </div>
+        </div>
+      ) : null}
+      {kind === "email" ? (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${ids}-address`}>
+              <Trans>Address, the part before the @</Trans>
+            </Label>
+            <Input
+              aria-describedby={`${ids}-address-hint`}
+              autoCapitalize="none"
+              id={`${ids}-address`}
+              onChange={(changed) => {
+                setAddress(changed.target.value);
+              }}
+              placeholder="invoices"
+              spellCheck={false}
+              value={address}
+            />
+            <p
+              className="text-muted-foreground text-sm"
+              id={`${ids}-address-hint`}
+            >
+              <Trans>
+                Lower case letters, digits, dots, dashes, underscores and plus
+                signs. Leave it empty for a random address of its own, which is
+                harder to guess.
+              </Trans>
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${ids}-mapping`}>
+              <Trans>
+                The run&apos;s input fields, each from the message as a JSON
+                Pointer, as JSON
+              </Trans>
+            </Label>
+            <Textarea
+              id={`${ids}-mapping`}
+              onChange={(changed) => {
+                setMapping(changed.target.value);
+              }}
+              placeholder='{ "subject": "/subject", "from": "/from/address", "attachments": "/attachments" }'
+              spellCheck={false}
+              value={mapping}
+              variant="code"
+            />
+          </div>
+        </div>
+      ) : null}
+      {kind === "connector" ? (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${ids}-event`}>
+                <Trans>Event</Trans>
+              </Label>
+              <NativeSelect
+                id={`${ids}-event`}
+                onChange={(changed) => {
+                  const type = eventTypeOf(changed.target.value);
+                  if (type !== undefined) {
+                    setEvent(type);
+                    setConnection("");
+                  }
+                }}
+                value={event}
+              >
+                {eventTypes.map((type) => (
+                  <NativeSelectOption key={type} value={type}>
+                    {t(eventLabels[type])}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${ids}-connection`}>
+                <Trans>Connection</Trans>
+              </Label>
+              <NativeSelect
+                id={`${ids}-connection`}
+                onChange={(changed) => {
+                  setConnection(changed.target.value);
+                }}
+                value={connection}
+              >
+                <NativeSelectOption value="">{t`Choose…`}</NativeSelectOption>
+                {reporting.map((each) => (
+                  <NativeSelectOption key={each.id} value={each.id}>
+                    {each.accountName ?? each.provider}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${ids}-resource`}>
+                <Trans>Mailbox or drive, if not the account&apos;s own</Trans>
+              </Label>
+              <Input
+                id={`${ids}-resource`}
+                onChange={(changed) => {
+                  setResource(changed.target.value);
+                }}
+                spellCheck={false}
+                value={resource}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${ids}-mapping`}>
+              <Trans>
+                The run&apos;s input fields, each from the event as a JSON
+                Pointer, as JSON
+              </Trans>
+            </Label>
+            <Textarea
+              id={`${ids}-mapping`}
+              onChange={(changed) => {
+                setMapping(changed.target.value);
+              }}
+              placeholder='{ "subject": "/payload/subject" }'
+              spellCheck={false}
+              value={mapping}
+              variant="code"
+            />
+          </div>
+        </div>
+      ) : null}
+      {kind === "webhook" ? (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${ids}-source`}>
+                <Trans>Source</Trans>
+              </Label>
+              <NativeSelect
+                id={`${ids}-source`}
+                onChange={(changed) => {
+                  setSource(changed.target.value);
+                }}
+                value={source}
+              >
+                <NativeSelectOption value="">{t`Choose…`}</NativeSelectOption>
+                {sources.map((each) => (
+                  <NativeSelectOption key={each.id} value={each.id}>
+                    {each.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${ids}-type`}>
+                <Trans>Event type</Trans>
+              </Label>
+              <Input
+                id={`${ids}-type`}
+                onChange={(changed) => {
+                  setSourceType(changed.target.value);
+                }}
+                placeholder="payment.paid"
+                spellCheck={false}
+                value={sourceType}
+              />
+            </div>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            {sources.length === 0 ? (
+              <Trans>
+                No webhook source yet: an admin adds one in Settings, with the
+                URL and secret its sender uses.
+              </Trans>
+            ) : (
+              <Trans>
+                Each event of this type from the source starts a run, with its
+                data as the input.
+              </Trans>
+            )}
+          </p>
+        </div>
+      ) : null}
+      <ErrorText>{problem ?? failure}</ErrorText>
+      <div>
+        <Button disabled={busy} size="sm" type="submit">
+          <Trans>Add the trigger</Trans>
+        </Button>
+      </div>
+    </form>
+  );
+};
+
+/** What the tab read from core. */
+interface Read {
+  triggers: WorkflowTrigger[];
+  versions: number[];
+  connections: ListedConnection[];
+  /** The workspace's webhook sources, for a builder to add a trigger on. */
+  sources: EventSource[];
+  /** Why the connections couldn't be read: its rows name a connection by its id then. */
+  connectionsFailure?: string;
+}
+
+/**
+ * The connections Connect lists, asked only for the accounts' names: when
+ * it can't answer, none, and why, so the triggers still show, by
+ * connection id.
+ */
+const accountsOf = async (
+  list: () => Promise<ListedConnection[]>
+): Promise<Pick<Read, "connections" | "connectionsFailure">> => {
+  try {
+    return { connections: await list() };
+  } catch (error) {
+    return { connections: [], connectionsFailure: failureText(error) };
+  }
+};
+
+/**
+ * Workflow `workflow`'s triggers, read as it mounts and again for each
+ * `generation`, which a change asks for with `onChanged`. The list shown
+ * stays until the next read is in, so the Add form keeps what was typed.
+ */
+const TriggersRead = ({
+  workflow,
+  me,
+  builder,
+  generation,
+  onChanged,
+}: {
+  workflow: string;
+  me: string;
+  builder: boolean;
+  generation: number;
+  onChanged: () => void;
+}) => {
+  const core = useCore();
+  const [read, setRead] = useState<Read>();
+  const [failure, setFailure] = useState<string>();
+
+  useEffect(() => {
+    let stopped = false;
+    const readAll = async (): Promise<void> => {
+      try {
+        const [triggers, versions, sources, accounts] = await core.withSession(
+          async (session) =>
+            await Promise.all([
+              session.workflowResources.triggers.list(workflow),
+              builder
+                ? session.workflowResources.versions(workflow)
+                : Promise.resolve([]),
+              builder
+                ? session.workflowResources.sources.list()
+                : Promise.resolve([]),
+              accountsOf(async () => await session.connections.list()),
+            ])
+        );
+        if (!stopped) {
+          setFailure(undefined);
+          setRead({
+            triggers,
+            versions: versions
+              .map(({ version }) => version)
+              .toSorted((a, b) => a - b),
+            sources,
+            ...accounts,
+          });
+        }
+      } catch (error) {
+        if (!stopped) {
+          setFailure(failureText(error));
+        }
+      }
+    };
+    void readAll();
+    return () => {
+      stopped = true;
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `generation` says when to read again
+  }, [builder, core, generation, workflow]);
+
+  const changed = async (): Promise<void> => {
+    onChanged();
+    await Promise.resolve();
+  };
+
+  if (failure !== undefined) {
+    return <ErrorText>{failure}</ErrorText>;
+  }
+  if (read === undefined) {
+    return null;
+  }
+  return (
+    <>
+      <ErrorText>{read.connectionsFailure}</ErrorText>
+      {read.triggers.length === 0 ? (
+        <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+          <Trans>Nothing starts it on its own yet.</Trans>
+        </p>
+      ) : (
+        <ul className="bg-card flex flex-col divide-y rounded-xl border">
+          {read.triggers.map((trigger) => (
+            <TriggerRow
+              builder={builder}
+              connections={read.connections}
+              key={trigger.id}
+              me={me}
+              onChanged={changed}
+              trigger={trigger}
+              versions={read.versions}
+            />
+          ))}
+        </ul>
+      )}
+      {builder && read.versions.length > 0 ? (
+        <AddTrigger
+          connections={read.connections}
+          onAdded={changed}
+          sources={read.sources}
+          versions={read.versions}
+          workflow={workflow}
+        />
+      ) : null}
+    </>
+  );
+};
+
+/** Workflow `workflow`'s triggers, in its Settings, for `me`, who builds it when `builder`. */
+export const WorkflowTriggers = ({
+  workflow,
+  me,
+  builder,
+}: {
+  workflow: string;
+  me: string;
+  builder: boolean;
+}) => {
+  // One more each time a change asks for the triggers to be read again.
+  const [generation, setGeneration] = useState(0);
+  return (
+    <div className="flex flex-col gap-6">
+      <p className="text-muted-foreground">
+        <Trans>
+          A trigger starts a run on its own, as whoever made it. Adding one asks
+          an admin to allow it to start this workflow, and one on a connection
+          to read its events there: it starts nothing until they do.
+        </Trans>
+      </p>
+      <TriggersRead
+        builder={builder}
+        // Read again, as core has them now, after each change.
+        generation={generation}
+        me={me}
+        onChanged={() => {
+          setGeneration((current) => current + 1);
+        }}
+        workflow={workflow}
+      />
+    </div>
+  );
+};

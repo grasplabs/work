@@ -172,7 +172,7 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const created = await builder.api.apps.create({ name: "Two CRMs" });
     await commitApp(builder.api.apps.files, created.id, twoCrmFiles(), "First");
-    await builder.api.apps.versions.setCurrent(created.id, 1);
+    await builder.api.apps.versions.publish(created.id, 1);
     const down = await crmConnection();
     const up = await crmConnection();
     const granted = async (crm: CrmConnection, binding: string) => {

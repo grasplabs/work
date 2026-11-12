@@ -1086,6 +1086,36 @@ export const fileItem = async (
 };
 
 /**
+ * Makes an App or workflow (`make`), in project `project` when one is
+ * given: what is made inside a project starts in it and shared with
+ * everyone in it as users. Whether `by` builds the project is checked
+ * before anything is made, so a refusal leaves nothing behind; filing
+ * and sharing then run as `fileItem` does them, and one that fails
+ * leaves the item made: a caller that must know what was made keeps it
+ * in `make` (chats-rpc.ts, `build`). Without a project, just `make`.
+ */
+export const makeInProject = async <Made>(
+  env: Env,
+  by: Identity,
+  project: string | undefined,
+  type: ProjectItemRef["type"],
+  make: () => Promise<Made>,
+  idOf: (made: Made) => string
+): Promise<Made> => {
+  if (project === undefined) {
+    return await make();
+  }
+  requireNotStaff(by);
+  await requireProjectRole(env, by, project, "builder");
+  const made = await make();
+  await fileItem(env, by, project, {
+    item: { type, id: idOf(made) },
+    share: true,
+  });
+  return made;
+};
+
+/**
  * Takes an item out of project `id`, for its builders. Its share with the
  * project goes with it: whom that reached loses it, with the item's own
  * unsharing's revocation and audit. Narrowing whom an item reaches is

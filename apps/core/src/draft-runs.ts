@@ -8,13 +8,14 @@ import {
   generateModules,
   manifestText,
 } from "@grasp-os/runtime/host";
+import type { AppDataPage, AppDataTable } from "@grasp-os/shared/app-data";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { draftSealFailures, functionErrors } from "@grasp-os/shared/functions";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import { storeIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -23,7 +24,9 @@ import type { WriterRoles } from "@grasp-os/shared/stores";
 import { exports } from "cloudflare:workers";
 
 import { functionRoles } from "./app-access.ts";
+import { testDataOf } from "./app-data.ts";
 import { schemaIdsOf } from "./app-definition.ts";
+import type { Draft } from "./app-drafts.ts";
 import {
   publicFunctionOf,
   readFunctionRequest,
@@ -49,12 +52,11 @@ import { holdThrowawayStore, throwawayStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { pageModulesOf } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
-import { workspace } from "./durable-objects.ts";
+import { appPreview } from "./durable-objects.ts";
 import { hostFunctionCall } from "./function-host.ts";
 import type { Invocation, ProgressSink } from "./function-host.ts";
 import { checkedValue, isWorkflowMutationPath } from "./page-workflows.ts";
 import { appCodeAndTestFiles } from "./pages.ts";
-import { personalWorkspaceId } from "./personal-workspace.ts";
 import { functionProblem } from "./preview-reports.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import type { SchemaIds } from "./schema-changes.ts";
@@ -62,13 +64,15 @@ import {
   isWorkflowQueryPath,
   workflowQueryOf,
 } from "./workflow-reference-queries.ts";
-import type { Draft } from "./workspace.ts";
 
-// A builder's preview of their draft of an App: the draft, sealed as the
-// version it would become, run by the function host as a version is
-// (function-host.ts), and reached through pages' one call path (page-calls.ts
-// for calls and actions, pages-rpc.ts for live queries) under a lease
-// core signed for the builder, naming the draft's chat (page-delivery.ts).
+// An App's preview of its one shared draft (GRA-1665): the draft, sealed
+// as the version it would become, run by the function host as a version
+// is (function-host.ts), and reached through pages' one call path
+// (page-calls.ts for calls and actions, pages-rpc.ts for live queries)
+// under a lease core signed for the builder, naming the App's draft
+// (page-delivery.ts). Every builder of the App previews the same draft,
+// each as themselves, on one store of test data they share (the App's
+// preview, app-preview.ts, names it).
 // A draft is code nobody reviewed, written by an agent from what it was
 // told. Threat model, and how each is closed:
 //
@@ -76,8 +80,8 @@ import type { Draft } from "./workspace.ts";
 //   draft's release binds none (`loadDraftRelease` refuses one that
 //   does), and every invocation is handed the preview's throwaway store
 //   (`draftStore`): a store object no inventory lists and no release
-//   binds, named by the builder, their chat, the App and the draft's
-//   schema, which refuses to be a listed store (`DataStore.holdThrowaway`).
+//   binds, named by the App, its preview's seed and the draft's schema,
+//   which refuses to be a listed store (`DataStore.holdThrowaway`).
 // - The draft reaches outside systems, or starts real work: its
 //   invocations bind no resource (no connection, Brain, model, template or
 //   other App), start no workflow, send no run an event and tell no
@@ -85,11 +89,11 @@ import type { Draft } from "./workspace.ts";
 //   (`permission.unavailable`); a page's workflow commands and watches, and
 //   a workflow reference's queries, are refused before anything runs. Its
 //   code runs in the release runner's isolates, with no network and no env.
-// - Someone else's draft, or someone who doesn't build the App: the lease
-//   is signed for one person, the App and the chat; the chat is looked up
-//   in that person's own Workspace object, never anyone else's; and they
-//   must build the App, read again before the call starts and before every
-//   protected step (`builderGate`).
+// - Someone who doesn't build the App: the lease is signed for one
+//   person and the App, and they must build the App, read again before
+//   the call starts and before every protected step (`builderGate`). Each
+//   call runs as its caller, with their roles: the test data is all the
+//   builders share.
 // - Other code runs than the draft's: it is sealed from the draft's files
 //   as they are now (`sealDraftRelease`, every check a version's seal
 //   makes) and loaded back through `loadRelease`'s own checks; this isolate
@@ -97,18 +101,17 @@ import type { Draft } from "./workspace.ts";
 //   draft's definition (`sealed`).
 // - What someone typed into a preview stays: its store empties itself a
 //   day after its last use (`throwawayStoreMs`), and at once, for good,
-//   when the draft is dropped, the chat deleted or its person removed or
-//   erased (`DataStore.emptyThrowaway`), which refuses every call after,
-//   one under way included; the preview then names a new store
+//   when a builder resets the test data or the App is removed
+//   (`DataStore.emptyThrowaway`, app-preview.ts), which refuses every call
+//   after, one under way included; the preview then names a new store
 //   (`DraftRun.seed`). A new schema gets a new, empty store too.
-// - One preview's data reaches another's: a store per person, chat, App and
-//   schema, shared with nothing.
+// - One App's test data reaches another's: a store per App, preview seed
+//   and schema, shared with nothing outside the App's builders, who build
+//   its code and read its live data already.
 
 /** What one call of a draft's preview runs on. */
 export interface DraftRun {
   readonly app: AppId;
-  readonly chatId: ChatId;
-  readonly workspaceId: WorkspaceId;
   /** The draft's revision: what the call's problems and logs are filed under. */
   readonly revision: number;
   /**
@@ -117,9 +120,8 @@ export interface DraftRun {
    */
   readonly own: boolean;
   /**
-   * What its throwaway store is named by besides who, which chat and App
-   * and which schema: new once the preview's data is dropped
-   * (`Workspace.previewRun`).
+   * What its throwaway store is named by besides the App and its schema:
+   * new once the preview's test data is reset (`AppPreview.run`).
    */
   readonly seed: string;
   readonly release: Release;
@@ -217,6 +219,35 @@ const sealed = async (
 };
 
 /**
+ * What `draft`, a draft of `app`, holds (`draftSource`) and the release it
+ * seals to (`sealed`); null for a draft that holds nothing.
+ */
+const sealedDraft = async (env: Env, app: AppId, draft: Draft) => {
+  const source = await draftSource(env, app, draft);
+  return source === null
+    ? null
+    : {
+        source,
+        release: await sealed(env, app, (draft.base ?? 0) + 1, source),
+      };
+};
+
+/**
+ * The release `draft`, a draft of `app`, seals to (`sealed`), the very one
+ * its calls run on: what a review of the draft reads its manifest from
+ * (version-review.ts). Null for a draft that holds nothing; throws as the
+ * seal does.
+ */
+export const draftRelease = async (
+  env: Env,
+  app: AppId,
+  draft: Draft
+): Promise<Release | null> => {
+  const drafted = await sealedDraft(env, app, draft);
+  return drafted?.release ?? null;
+};
+
+/**
  * The page modules (`PageModules`: the `@server/_generated/api`
  * references and the release's functions) the pages of `draft`, a draft
  * of `app` (now, or a kept version of it), build with: generated from the
@@ -228,12 +259,11 @@ export const draftReferences = async (
   app: AppId,
   draft: Draft
 ): Promise<PageModules | null> => {
-  const version = (draft.base ?? 0) + 1;
-  const source = await draftSource(env, app, draft);
-  if (source === null) {
+  const drafted = await sealedDraft(env, app, draft);
+  if (drafted === null) {
     return null;
   }
-  const release = await sealed(env, app, version, source);
+  const { source, release } = drafted;
   const generated = await generateModules(
     release.app,
     serverFunctionsIn(Object.fromEntries(source.files))
@@ -242,37 +272,26 @@ export const draftReferences = async (
 };
 
 /**
- * What `by`'s draft of `app` in their chat `chatId` runs on now: only
- * while they build the App and it isn't archived, and only for a chat of
- * their own (their Workspace object knows no one else's). The draft that
- * changes nothing previews the App's latest version, as its page shows it.
+ * What App `app`'s draft runs on now, for `by`: only while they build the
+ * App and it isn't archived. The draft that changes nothing previews the
+ * App's live version, as its page shows it.
  */
 export const draftRunOf = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams">,
-  app: AppId,
-  chatId: ChatId,
-  /** The Workspace object the chat is in: the person's own, unless the
-   * chat's agent names another it runs in (agent-builds.ts). */
-  workspaceId: WorkspaceId = personalWorkspaceId(by.userId)
+  app: AppId
 ): Promise<DraftRun> => {
   await editableApp(env, by, app);
-  const { draft, seed } = await workspace(env, workspaceId).previewRun(
-    chatId,
-    by.userId,
-    app
-  );
-  const source = await draftSource(env, app, draft);
-  // The draft that holds nothing previews the App's latest version, so a
+  const { draft, seed } = await appPreview(env, app).run();
+  const drafted = await sealedDraft(env, app, draft);
+  // The draft that holds nothing previews the App's live version, so a
   // draft to preview always has a definition.
-  if (source === null) {
+  if (drafted === null) {
     throw appErrors.create("app.not_running");
   }
-  const release = await sealed(env, app, (draft.base ?? 0) + 1, source);
+  const { source, release } = drafted;
   return {
     app,
-    chatId,
-    workspaceId,
     revision: draft.revision,
     own: changesAnything(draft),
     seed,
@@ -307,17 +326,15 @@ const needsStore = (release: Release): boolean =>
   Object.keys(release.app.schema.tables).length > 0;
 
 /**
- * The preview's throwaway store for `userId`'s `run`, its tables those of
- * the draft's schema: none for a draft without tables.
+ * The preview's throwaway store for a call of `run`, its tables those of
+ * the draft's schema, made by the App's server as a fixture's are
+ * (app-tests.ts), shared by every builder of the App: none for a draft
+ * without tables.
  * Held again (and its tables made, which changes nothing the second time)
  * at most every `holdAgainMs` per isolate, well within the day it keeps
  * what it holds, so a store in use never empties under its preview.
  */
-const draftStore = async (
-  env: Env,
-  userId: string,
-  run: DraftRun
-): Promise<OpenStore> => {
+const draftStore = async (env: Env, run: DraftRun): Promise<OpenStore> => {
   const { release } = run;
   if (!needsStore(release)) {
     return noStore();
@@ -325,8 +342,6 @@ const draftStore = async (
   const id = storeIdSchema.parse(
     `throwaway-${await sha256Hex(
       canonicalJson([
-        userId,
-        run.chatId,
         run.app,
         run.seed,
         release.manifest.schemaHash,
@@ -341,22 +356,17 @@ const draftStore = async (
   if (now - (heldStores.get(id) ?? 0) < holdAgainMs) {
     return store;
   }
-  // Kept with the chat before it is first touched, so dropping the draft,
-  // deleting the chat or removing or erasing its person empties it at
-  // once; one emptied so refuses this hold, and every call after.
-  await workspace(env, run.workspaceId).keepPreviewStore(
-    run.chatId,
-    userId,
-    run.app,
-    { storeId: id, seed: run.seed, revision: run.revision }
-  );
+  // Kept with the App's preview before it is first touched, so a reset of
+  // its test data or the App's removal empties it at once; one emptied so
+  // refuses this hold, and every call after.
+  await appPreview(env, run.app).keepStore({ storeId: id, seed: run.seed });
   await holdThrowawayStore(env, id, now + throwawayStoreMs);
   // A store made for this schema alone: applied again, it changes nothing.
   await store.applySchema({
     manifest: manifestText(release.app.schema),
     ids: run.ids,
     answers: release.app.answers ?? [],
-    actor: { type: "person", userId },
+    actor: { type: "app", appId: run.app, part: "server" },
   });
   heldStores.set(id, now);
   return store;
@@ -364,9 +374,9 @@ const draftStore = async (
 
 /**
  * `run`'s release as the function host runs it: each isolate tailed for
- * the chat's preview alone, so what the draft's code writes with
- * `console` reaches the agent's next check of this revision
- * (server-logs.ts), as data.
+ * the App's preview alone, so what the draft's code writes with
+ * `console` reaches the next check of this revision (server-logs.ts), as
+ * data.
  */
 const hosted = (env: Env, run: DraftRun): ReturnType<typeof hostedRelease> =>
   hostedRelease(env, run.release, (method) =>
@@ -374,11 +384,7 @@ const hosted = (env: Env, run: DraftRun): ReturnType<typeof hostedRelease> =>
       props: {
         app: run.app,
         version: null,
-        preview: {
-          workspaceId: run.workspaceId,
-          chatId: run.chatId,
-          revision: run.revision,
-        },
+        preview: { revision: run.revision },
         method,
       },
     })
@@ -438,7 +444,6 @@ const invocationOf = (
  */
 const reported = async (
   env: Env,
-  by: Pick<Identity, "userId">,
   run: DraftRun,
   request: unknown,
   result: FunctionResult,
@@ -447,10 +452,7 @@ const reported = async (
   if (!run.own) {
     return;
   }
-  await workspace(env, run.workspaceId).previewCalled(
-    run.chatId,
-    by.userId,
-    run.app,
+  await appPreview(env, run.app).called(
     run.revision,
     functionProblem(request, result, thrown) ?? null
   );
@@ -600,7 +602,7 @@ export const callDraft = async (
       );
       return answerOf({ ok: true, value }, run);
     }
-    const store = await draftStore(env, by.userId, run);
+    const store = await draftStore(env, run);
     result = await draftFunctionCall(env, by, run, store, call, {
       ...options,
       requestId,
@@ -612,7 +614,7 @@ export const callDraft = async (
     result = { ok: false, error: refusalOf(error, requestId) };
   }
   if (told === undefined) {
-    await reported(env, by, run, request, result, thrown);
+    await reported(env, run, request, result, thrown);
   } else if (thrown !== undefined) {
     told(thrown);
   }
@@ -620,8 +622,8 @@ export const callDraft = async (
 };
 
 /**
- * `request`, a page's call as its text, run on `by`'s draft of `app` in
- * their chat `chatId` as it is now (`draftRunOf`, `callDraft`): a draft
+ * `request`, a page's call as its text, run on App `app`'s draft as it is
+ * now, for `by` (`draftRunOf`, `callDraft`): a draft
  * whose code doesn't seal answers why, as a call answers a refusal, for
  * its page to show while it is being fixed; the agent's check of the
  * draft builds it and hears why itself.
@@ -629,13 +631,13 @@ export const callDraft = async (
 export const callDraftOn = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams">,
-  { app, chatId }: { app: AppId; chatId: ChatId },
+  app: AppId,
   request: unknown,
   options: DraftCallOptions
 ): Promise<FunctionAnswer> => {
   let run: DraftRun;
   try {
-    run = await draftRunOf(env, by, app, chatId);
+    run = await draftRunOf(env, by, app);
   } catch (error) {
     if (!(isExpectedError(error) && draftSealFailures.has(error.code))) {
       throw error;
@@ -677,7 +679,7 @@ export const invokeDraftAction = async (
   try {
     const path = publicFunctionOf(run.release, call.reference);
     await builderGate(env, by.userId, run.app)();
-    const store = await draftStore(env, by.userId, run);
+    const store = await draftStore(env, run);
     const invocation = invocationOf(env, by, run, store, {
       requestId,
       deadline,
@@ -705,6 +707,40 @@ export const invokeDraftAction = async (
   } catch (error) {
     result = { ok: false, error: refusalOf(error, requestId) };
   }
-  await reported(env, by, run, JSON.stringify(call), result, thrown);
+  await reported(env, run, JSON.stringify(call), result, thrown);
   return { result, reached, effects };
+};
+
+/**
+ * The preview's test data, as `by` reads it (app-data.ts, `testDataOf`):
+ * its tables, on the data model of what the preview shows, or (`read`) a
+ * page of one's records, newest first, their roles and the tables' access
+ * and row rules applied as on the App's own data. Only while they build
+ * the App (`builderGate`).
+ */
+export const draftTestData = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: AppId,
+  read?: { table: string; cursor: string | null }
+): Promise<AppDataTable[] | AppDataPage> => {
+  const run = await draftRunOf(env, by, app);
+  const roles = await builderGate(env, by.userId, app)();
+  const store = await draftStore(env, run);
+  return await testDataOf(
+    store,
+    {
+      schemaHash: run.release.manifest.schemaHash,
+      principal: by.userId,
+      appMember: roles.appMember,
+      appBuilder: roles.appBuilder,
+      teams: roles.teams,
+      consumer: {
+        resourceId: run.app,
+        resourceVersion: run.release.manifest.resourceVersion,
+      },
+    },
+    run.release.app.schema.tables,
+    read
+  );
 };

@@ -38,8 +38,8 @@ const ledger: ViewedApp = {
   audience: null,
   blueprint: null,
   currentVersion: 1,
-  pendingVersion: null,
-  status: "published",
+  liveLabel: "26.11.1",
+  archived: false,
   process: null,
   createdAt: "2026-10-01T09:00:00.000Z",
   role: "builder",
@@ -308,7 +308,7 @@ describe("The workflows an App starts, for its builders", () => {
 
   it("shows an archived App's bindings without changing them, and none to who doesn't build it", async () => {
     const archived = fakeWorkflows();
-    await shown(archived.session, { app: { ...ledger, status: "archived" } });
+    await shown(archived.session, { app: { ...ledger, archived: true } });
     const kept = {
       listed: listed(),
       changes: button("Bind a workflow") !== undefined,

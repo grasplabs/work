@@ -118,7 +118,7 @@ const notesApp = async (existing?: Awaited<ReturnType<typeof signedInApi>>) => {
     files,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
+  await builder.api.apps.versions.publish(id, version);
   return { builder, app: id, release: await loadRelease(env, id, version) };
 };
 

@@ -413,7 +413,7 @@ export interface LiveReads<By extends Reader> {
 
 /**
  * What a page's live query reads, as its lease names it (page-delivery.ts):
- * a builder's draft on its throwaway store (draft-runs.ts), or the App's
+ * the App's draft on its preview's test store (draft-runs.ts), or the App's
  * current release inside the build's trust check.
  */
 const evaluatePage = async (
@@ -427,19 +427,13 @@ const evaluatePage = async (
 ): Promise<EvaluatedQuery> => {
   if (lease?.kind === "draft") {
     let reads: EvaluatedQuery["reads"];
-    const answer = await callDraftOn(
-      env,
-      by,
-      { app, chatId: lease.chatId },
-      request,
-      {
-        deadline,
-        kind: "query",
-        observeReads: (storeId, readSet) => {
-          reads = { storeId: storeIdSchema.parse(storeId), readSet };
-        },
-      }
-    );
+    const answer = await callDraftOn(env, by, app, request, {
+      deadline,
+      kind: "query",
+      observeReads: (storeId, readSet) => {
+        reads = { storeId: storeIdSchema.parse(storeId), readSet };
+      },
+    });
     return { answer, reads };
   }
   return await delivering(

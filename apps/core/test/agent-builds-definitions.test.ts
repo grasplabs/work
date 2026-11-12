@@ -1,18 +1,20 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { actorOf } from "@grasp-os/shared/audit";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
-import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { draftSummary, readDraft, saveDraft } from "../src/app-drafts.ts";
 import {
-  appName,
   draftDefinitionOf,
   idp,
   restyled,
   returned,
   setUp,
   tryEach,
+  findApp,
 } from "./agent-builds-harness.ts";
 import { codeResults, codeStep, says } from "./agent-chat.ts";
 import { commitApp, definedWith, redefined } from "./app-definitions.ts";
@@ -34,6 +36,40 @@ import { signedInApi } from "./sign-in.ts";
 // that doesn't pass reaches the App; and a repair loop that never ends.
 
 mockIdpWith(idp);
+
+/**
+ * `builder`'s change of App `app`'s draft over version `base`, written as
+ * they write one: the draft over that version, whatever is live.
+ */
+const draftOver = async (
+  builder: { userId: string },
+  app: string,
+  base: number
+): Promise<void> => {
+  await saveDraft(
+    env,
+    appIdSchema.parse(app),
+    { ...(await readDraft(env, app)), base },
+    { changes: { "notes.md": "Notes\n" }, unchanged: [] },
+    {
+      by: {
+        userId: builder.userId,
+        role: "builder",
+        teams: [],
+        staff: false,
+        actor: actorOf({ userId: builder.userId, staff: false }),
+      },
+      detail: {},
+    }
+  );
+};
+
+/** Code that writes the App `app`'s draft, and calls an App's function it doesn't have. */
+const writeAndCall = (app: string): string =>
+  tryEach({
+    write: `(await env.build.write(${JSON.stringify(app)}, { "notes.md": "new" }, { revision: (await env.build.files(${JSON.stringify(app)})).revision })).changed`,
+    call: `await env.build.call("app_refused", "count")`,
+  });
 
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("changes a definition whose table holds records, says what each change does to them, and records each change", async () => {
@@ -65,7 +101,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("Defined."),
     ]);
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await published(app);
     await release(
       builder,
       app,
@@ -102,7 +137,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         detail.chat === chat.chat.id &&
         detail.method === "build.define"
     );
-    const { answers } = await draftDefinitionOf(chat, app);
+    const { answers } = await draftDefinitionOf(app);
     expect({
       ...steps,
       answers: answers.map(({ value }) => value),
@@ -159,7 +194,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         detail.chat === chat.chat.id &&
         detail.method === "build.define"
     );
-    const held = await draftDefinitionOf(chat, app);
+    const held = await draftDefinitionOf(app);
     expect({
       ...z.object({}).loose().parse(returned(result?.text)),
       definition: [held.tables.length, held.permissions.length],
@@ -183,15 +218,19 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("saves a new App's first write with the definition it gets, so its draft reads and previews whole", async () => {
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": restyled.replace(' className="rounded-full"', "") })});
+    const { chat, grant } = await setUp(
+      [
+        codeStep(`export default async (self, env) => {
+        ${findApp}
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": restyled.replace(' className="rounded-full"', "") })}, { revision: (await env.build.files(app.id)).revision });
         const draft = await env.build.files(app.id);
         return { changed: written.changed.toSorted(), files: Object.keys(draft.files).toSorted() };
       };`),
-      says("Written."),
-    ]);
+        says("Written."),
+      ],
+      "builder",
+      true
+    );
     await grant();
 
     await chat.ask("Build a desk");
@@ -220,7 +259,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("Indexed."),
     ]);
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await published(app);
     // Version 1 runs; version 2 adds a category its notes lack, answered,
     // and isn't current yet.
     await release(builder, app, notesFiles);
@@ -236,6 +274,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       }),
       "Categories"
     );
+    // A builder's draft over version 2: the agent changes what they
+    // began.
+    await draftOver(builder, app, 2);
     await grant();
 
     await chat.ask("Index the notes by title");
@@ -244,7 +285,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Released from version 1, the notes still lack the category: the
     // plan of that move checks them for it, unanswered, as version 2's
     // answer was version 2's; answered again, it is the draft's own.
-    const { answers } = await draftDefinitionOf(chat, app);
+    const { answers } = await draftDefinitionOf(app);
     expect({
       ...z.object({}).loose().parse(returned(result?.text)),
       answers: answers.length,
@@ -264,7 +305,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("Renamed."),
     ]);
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await published(app);
     // Version 2 ran with a nickname, which people may have filled in;
     // then the App was rolled back to version 1, which has none.
     await release(builder, app, notesFiles);
@@ -278,7 +318,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         type: "v.string().optional()",
       })
     );
-    await builder.api.apps.versions.setCurrent(app, 1);
+    await builder.api.apps.versions.publish(app, 1);
+    // A builder's draft over version 2 still: the agent changes what they
+    // began.
+    await draftOver(builder, app, 2);
     await grant();
 
     await chat.ask("Call the nickname a display name");
@@ -302,7 +345,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("Changed."),
     ]);
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await published(app);
     // The version people use: a category that may be null, answered null.
     await release(
       builder,
@@ -322,7 +364,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const [result] = await codeResults(chat.stub, chat.chat.id);
     // The draft's own answer stays through a later change: the notes
     // holding null need it to fit the category that can't be null.
-    const { answers } = await draftDefinitionOf(chat, app);
+    const { answers } = await draftDefinitionOf(app);
     expect({
       ...z.object({}).loose().parse(returned(result?.text)),
       answers: answers.map(({ value }) => value),
@@ -336,7 +378,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("commits a definition that renames a field a version has, its ID kept", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await published(app);
     const nicknamed = definedWith(notesFiles, {
       op: "addField",
       table: "notes",
@@ -367,9 +408,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       codeStep(`export default async (self, env) => {
         ${ledger}
         const steps = [];
-        steps.push((await env.build.write(app.id, { "notes.md": "new", "gone.md": null })).changed);
+        steps.push((await env.build.write(app.id, { "notes.md": "new", "gone.md": null }, { revision: (await env.build.files(app.id)).revision })).changed);
         // Back as the base has it, and a missing file deleted again.
-        steps.push((await env.build.write(app.id, { "notes.md": null, "AGENTS.md": "# Ledger\\n", "gone.md": null })).changed);
+        steps.push((await env.build.write(app.id, { "notes.md": null, "AGENTS.md": "# Ledger\\n", "gone.md": null }, { revision: (await env.build.files(app.id)).revision })).changed);
         return steps;
       };`),
       says("Nothing changed."),
@@ -380,27 +421,21 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual([["notes.md"], []]);
-    await expect(
-      runInDurableObject(chat.stub, (instance) =>
-        instance.draft(chatIdSchema.parse(chat.chat.id), existing)
-      )
-    ).resolves.toMatchObject({ changes: {}, revision: 2 });
-    // The chat's page lists it as changing nothing.
-    await expect(
-      runInDurableObject(chat.stub, (instance) =>
-        instance.drafts(chat.chat.id, chat.personId)
-      )
-    ).resolves.toMatchObject([{ app: existing, changed: [], revision: 2 }]);
+    await expect(readDraft(env, existing)).resolves.toMatchObject({
+      changes: {},
+      revision: 2,
+    });
+    // Its builders see it as changing nothing.
+    await expect(draftSummary(env, existing)).resolves.toMatchObject({
+      changed: [],
+      revision: 2,
+    });
   });
 
   it("builds for whoever builds, as them, with no permission of its own, and never past what they may do", async () => {
-    const calls = tryEach({
-      create: `(await env.build.create({ name: ${JSON.stringify(appName)} })).name`,
-      call: `await env.build.call("app_refused", "count")`,
-    });
     const resultOf = async (role: "admin" | "user", granted: boolean) => {
-      const { chat, grant, person } = await setUp(
-        [codeStep(calls), says("Done.")],
+      const { chat, grant } = await setUp(
+        (existing) => [codeStep(writeAndCall(existing)), says("Done.")],
         role
       );
       if (granted) {
@@ -408,27 +443,21 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       }
       await chat.ask("Build something");
       const [result] = await codeResults(chat.stub, chat.chat.id);
-      return { result: returned(result?.text), person };
+      return returned(result?.text);
     };
     const notFound = appErrors.create("app.not_found").message;
 
-    // An admin in a new deployment, whose agent was granted nothing: the
-    // App is made, theirs.
-    const { result: made, person: admin } = await resultOf("admin", false);
-    expect(made).toStrictEqual({ create: appName, call: notFound });
-    const listed = await admin.api.apps.list();
-    expect(
-      listed
-        .filter(({ owner }) => owner === admin.userId)
-        .map(({ name, role }) => ({ name, role }))
-    ).toStrictEqual([{ name: appName, role: "builder" }]);
+    // An admin in a new deployment, whose agent was granted nothing: they
+    // build every App, so the agent writes it, as them.
+    await expect(resultOf("admin", false)).resolves.toStrictEqual({
+      write: ["notes.md"],
+      call: notFound,
+    });
     // Every permission the agent could hold reaches no further than its
-    // person.
-    await expect(resultOf("user", true)).resolves.toMatchObject({
-      result: {
-        create: roleErrors.create("role.forbidden").message,
-        call: notFound,
-      },
+    // person: a member who doesn't build it writes nothing of it.
+    await expect(resultOf("user", true)).resolves.toStrictEqual({
+      write: notFound,
+      call: notFound,
     });
   });
 
@@ -441,8 +470,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { person, chat, grant } = await setUp([
       codeStep(
         tryEach({
-          shared: `await env.build.write(${JSON.stringify(shared)}, { "a.md": "a" })`,
-          unshared: `await env.build.write(${JSON.stringify(unshared)}, { "a.md": "a" })`,
+          shared: `await env.build.write(${JSON.stringify(shared)}, { "a.md": "a" }, { revision: (await env.build.files(${JSON.stringify(shared)})).revision })`,
+          unshared: `await env.build.write(${JSON.stringify(unshared)}, { "a.md": "a" }, { revision: (await env.build.files(${JSON.stringify(unshared)})).revision })`,
           sharedCall: `await env.build.call(${JSON.stringify(shared)}, "count")`,
           unsharedCall: `await env.build.call(${JSON.stringify(unshared)}, "count")`,
         })

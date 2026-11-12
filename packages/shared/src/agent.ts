@@ -49,6 +49,10 @@ export const agentErrors = defineErrorFamily({
   "agent.too_many_files": `A question carries at most ${chatFilesPerQuestionMax} files, and a chat keeps at most ${chatFilesMax}. Start a new chat to attach more.`,
   "agent.file_busy":
     "The file's text couldn't be read just now. Attach it again in a moment.",
+  "agent.plan_not_found":
+    "There's no such plan in this chat, or it was built already.",
+  "agent.plan_needs_connection":
+    "This plan needs a connection that isn't there yet. Connect it, then build it.",
   "agent.file_not_found":
     "There's no such file in this chat, or another question carried it already. Attach it again.",
   "agent.run_revoked":

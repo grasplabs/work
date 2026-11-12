@@ -6,9 +6,9 @@ import { apiOf, peopleIn } from "./people.ts";
 
 // An App's data model, end to end, as a builder makes it in the App's
 // workspace: a table and its fields in the Data view, each a change of the
-// App's definition in the workspace chat's draft, then the draft as the
-// workspace shows it elsewhere: unpublished, and the schema the Code view
-// shows generated from it.
+// App's definition in the App's draft, then the draft as the workspace
+// shows it elsewhere: unpublished, and the schema the Code view shows
+// generated from it.
 
 /** A read or a build on a loaded stack. */
 const read = { timeout: 20_000 };
@@ -62,7 +62,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     core[Symbol.dispose]();
   }
   const page = await pageOf(builder);
-  await page.goto(`/apps/${app}/edit?view=data`);
+  await page.goto(`/apps/${app}?view=data`);
   await expect(page.getByText("No tables yet")).toBeVisible(read);
 
   // A table, named as a person says it, saved as code names it.
@@ -112,15 +112,19 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     page.getByRole("navigation", { name: "Tables" }).getByText("tasks")
   ).toBeVisible();
 
-  // The draft as the workspace shows it: unpublished, previewed as the
-  // chat's draft is, and its schema generated from the table just made.
+  // The draft as the workspace shows it: ready to share, previewed as
+  // the App's own working version, and its schema generated from the
+  // table just made.
   await expect(
-    page.getByText("Unpublished changes", { exact: true })
+    page.getByRole("button", { name: "Share with your team" })
+  ).toBeEnabled(read);
+  await page
+    .getByRole("navigation", { name: "Workspace views" })
+    .getByRole("link", { name: "App" })
+    .click();
+  await expect(
+    page.getByRole("region", { name: /, your version$/u })
   ).toBeVisible(read);
-  await page.getByRole("link", { name: "Preview" }).click();
-  await expect(page.getByRole("region", { name: /^Preview of /u })).toBeVisible(
-    read
-  );
   await page.getByRole("link", { name: "Code" }).click();
   await page
     .getByRole("navigation", { name: "Files" })

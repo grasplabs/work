@@ -4,16 +4,10 @@ import type {
   AppVersion,
   AppVersionsApi,
   FileDiff,
-  VersionReview,
 } from "@grasp-os/shared/apps";
 
 import { publishVersion } from "./app-publish.ts";
-import {
-  diffVersions,
-  getVersion,
-  listVersions,
-  proposeVersion,
-} from "./apps.ts";
+import { diffVersions, getVersion, listVersions } from "./apps.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
 import {
   holdAppRelease,
@@ -24,7 +18,6 @@ import {
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { reviewVersion } from "./version-review.ts";
 
 /** A signed-in person's `apps.versions`. */
 export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
@@ -58,42 +51,32 @@ export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
     );
   }
 
-  async propose(app: string, version: number): Promise<App> {
-    return await withPerson(
-      this.#check,
-      async (by) => await proposeVersion(this.#env, by, app, version)
-    );
-  }
-
-  async review(app: string, version: number): Promise<VersionReview> {
-    return await withPerson(
-      this.#check,
-      async (by) => await reviewVersion(this.#env, by, app, version)
-    );
-  }
-
   /**
-   * Publishes a version and makes it current, over `expected` when given
-   * (app-publish.ts), then indexes the App into the Apps collection
-   * (knowledge/apps-collection.ts): its entry holds the new version once
-   * this returns, unless indexing failed or raced another; the clock
-   * trigger then heals it within 15 minutes.
+   * Publishes one of the App's versions again, to roll back to it (or a
+   * version never live), over `expected` when given, the draft reset to
+   * it over `revision` (app-publish.ts, `publishVersion`), then indexes
+   * the App into the Apps collection (knowledge/apps-collection.ts): its
+   * entry holds the live version once this returns, unless indexing
+   * failed or raced another; the clock trigger then heals it within 15
+   * minutes.
    */
-  async setCurrent(
+  async publish(
     app: string,
     version: number,
+    revision?: number,
     expected?: number | null
   ): Promise<App> {
     return await withPerson(this.#check, async (by) => {
-      const current = await publishVersion(
+      const live = await publishVersion(
         this.#env,
         by,
         app,
         version,
+        revision,
         expected
       );
-      await indexAppNow(this.#env, current.id);
-      return current;
+      await indexAppNow(this.#env, live.id);
+      return live;
     });
   }
 

@@ -144,7 +144,6 @@ export const readWaiting = async (
     reconnect: partOf(feed, "connections", (read) =>
       ofKind(read, "signInAgain")
     ),
-    versions: partOf(feed, "versions", (read) => ofKind(read, "goLive")),
     requests,
     heldStarts: partOf(feed, "heldStarts", (read) =>
       ofKind(read, "heldStart").map(({ start }) => start)

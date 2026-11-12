@@ -337,15 +337,16 @@ const contractArgsSchema = z.object({ args: z.json() });
 const activeSql = (person: string): SQL => activeMember(person);
 
 /**
- * That App `app`'s status lets `person` in now, as SQL, beside their role
+ * That App `app` lets `person` in now, as SQL, beside their role
  * (`appRoleSql`), as `stillOpenTo` decides it (app-access.ts): never an
- * archived App, and a draft only for its builders, in a role that builds.
+ * archived App, and one not live yet only for its builders, in a role
+ * that builds.
  */
 const appStatusAdmitsSql = (person: string, app: string): SQL => sql`(
   EXISTS (SELECT 1 FROM apps AS lived
-    WHERE lived.id = ${app} AND lived.status != 'archived')
+    WHERE lived.id = ${app} AND lived.archived_at IS NULL)
   AND (EXISTS (SELECT 1 FROM apps AS out
-      WHERE out.id = ${app} AND out.status = 'published')
+      WHERE out.id = ${app} AND out.current_version IS NOT NULL)
     OR (${activeMember(person, ["admin", "builder"])}
       AND (${activeMember(person, ["admin"])}
         OR EXISTS (SELECT 1 FROM apps AS owned
@@ -367,7 +368,7 @@ const appStatusAdmitsSql = (person: string, app: string): SQL => sql`(
 /**
  * That `person` has a role in App `app` now, as SQL: an admin of the
  * organization, its owner, or someone it is shared with, as a person or
- * through a team they are in now, while its status lets them in
+ * through a team they are in now, while the App lets them in
  * (`appStatusAdmitsSql`). Only while they are an active member.
  */
 const appRoleSql = (

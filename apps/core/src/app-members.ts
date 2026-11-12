@@ -19,7 +19,7 @@ import {
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -397,7 +397,7 @@ export const addMember = async (
     .where(
       and(
         eq(apps.id, found.id),
-        ne(apps.status, "archived"),
+        isNull(apps.archivedAt),
         // A share with a project only while it is there and `by` builds
         // it, read in this statement: a builder taken out meanwhile shares
         // nothing.

@@ -192,6 +192,15 @@ export const reviewedVersion = (
     : (directory.apps.get(app)?.currentVersion ?? null);
 };
 
+/** The label people know the version to review by (`App.liveLabel`). */
+const reviewedLabel = (
+  { subject }: Permission,
+  directory: Directory
+): string | null =>
+  subject.type === "app"
+    ? (directory.apps.get(subject.appId)?.liveLabel ?? null)
+    : null;
+
 /** The version to review, as the row shows it. */
 export const reviewedVersionText = (
   request: Permission,
@@ -204,8 +213,7 @@ export const reviewedVersionText = (
   if (!directory.apps.has(app)) {
     return i18n._(msg`Unknown`);
   }
-  const version = reviewedVersion(request, directory);
-  return version === null ? i18n._(msg`None current`) : String(version);
+  return reviewedLabel(request, directory) ?? i18n._(msg`None live`);
 };
 
 /**
@@ -220,17 +228,17 @@ export const askedAgain = (
   if (grantedBy === null || grantedAt === null) {
     return undefined;
   }
-  const version = reviewedVersion(request, directory);
+  const label = reviewedLabel(request, directory);
   const person = personName(directory, grantedBy);
   const date = formatTime(grantedAt);
-  return version === null
+  return label === null
     ? i18n._(msg`Asked again (previously granted by ${person} on ${date})`)
     : i18n._(
-        msg`Asked again after version ${version} was made current (previously granted by ${person} on ${date})`
+        msg`Asked again after ${label} was published (previously granted by ${person} on ${date})`
       );
 };
 
-const versionChanged = msg`Another version of this App was made current since this list was read. The list now shows it: review that version, then approve again.`;
+const versionChanged = msg`Another version of this App was published since this list was read. The list now shows it: review that version, then approve again.`;
 
 /**
  * Grants `request` for `version`, the one the admin reviewed. Core refuses

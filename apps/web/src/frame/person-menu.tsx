@@ -27,13 +27,11 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation } from "@tanstack/react-router";
 import {
-  EllipsisVerticalIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
   RocketIcon,
   RouteIcon,
-  SettingsIcon,
   SunIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -56,9 +54,9 @@ import {
 import type { Theme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar, as in the prototype
-// (`components/nav-user.tsx`): a menu with Settings, where their profile
-// and, for admins, the workspace's settings are, their onboarding, the
-// language, the theme, Stephen's tour once more and signing out.
+// (`components/nav-user.tsx`): a menu with their onboarding, the language,
+// the theme, Stephen's tour once more and signing out. Settings is in the
+// sidebar itself, above it (app-sidebar.tsx).
 
 const nameParts = /\s+/u;
 
@@ -86,14 +84,12 @@ export const initials = (name: string): string => {
  */
 const Who = ({ identity }: { identity: Identity }) => (
   <>
-    <Avatar shape="square">
+    <Avatar shape="square" size="xs">
       <AvatarFallback aria-hidden="true">
         {initials(identity.name)}
       </AvatarFallback>
     </Avatar>
-    <span className="flex-1 truncate text-left text-sm font-medium">
-      {identity.name}
-    </span>
+    <span className="flex-1 truncate text-left">{identity.name}</span>
   </>
 );
 
@@ -205,9 +201,8 @@ export const PersonMenu = ({
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
+          <DropdownMenuTrigger render={<SidebarMenuButton />}>
             <Who identity={identity} />
-            <EllipsisVerticalIcon className="ml-auto" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
@@ -220,10 +215,6 @@ export const PersonMenu = ({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem render={<Link to="/settings/profile" />}>
-                <SettingsIcon />
-                {t`Settings`}
-              </DropdownMenuItem>
               {/* The company's own onboarding, which only its admins go through. */}
               {isAdmin(identity.role) && identity.onboardingOnly !== true ? (
                 <DropdownMenuItem render={<Link to="/setup" />}>

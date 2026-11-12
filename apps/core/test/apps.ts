@@ -1,12 +1,15 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type {
   GrantReview,
   Permission,
   PermissionRequest,
 } from "@grasp-os/shared/permissions";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
-import { commitFiles } from "../src/apps.ts";
+import { publishVersion } from "../src/app-publish.ts";
+import { commitFiles, latestVersion } from "../src/apps.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { commitApp, definitionInput, sourceParts } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
@@ -73,21 +76,66 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
- * Marks the App published, as its builders would publish it
- * (app-status.ts), whether or not a version of it is current: for tests
- * of what people it is shared with do, which aren't about its status
- * (app-status.test.ts is).
+ * Makes the App open to the people it is shared with, as its first
+ * publish does: its latest version, an empty first one for an App with
+ * none, published by its owner (app-publish.ts, `publishVersion`). For
+ * tests of what those people do, which aren't about publishing
+ * (draft-publish.test.ts and app-publish.test.ts are).
  */
 export const published = async (app: string): Promise<void> => {
-  await env.DB.prepare("UPDATE apps SET status = 'published' WHERE id = ?")
+  const owner = await env.DB.prepare(
+    `SELECT users.id AS userId, users.name AS name, users.email AS email, members.role AS role
+     FROM apps JOIN users ON users.id = apps.owner_id
+       JOIN members ON members.user_id = users.id
+     WHERE apps.id = ?`
+  )
     .bind(app)
-    .run();
+    .first<Pick<Identity, "userId" | "name" | "email" | "role">>();
+  if (owner === null) {
+    throw new Error(`No App ${app}`);
+  }
+  const by: Identity = {
+    ...owner,
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+  const latest = await latestVersion(env, appIdSchema.parse(app));
+  if (latest !== null) {
+    await publishVersion(env, by, app, latest);
+    return;
+  }
+  const first = await commitFiles(
+    env,
+    by,
+    app,
+    { "README.md": "An App.\n" },
+    "First"
+  );
+  await publishVersion(env, by, app, first.version);
 };
 
 /**
- * Commits `files` as the App's next version, makes it current and
- * publishes the App, with its data classified as ordinary
- * (`ordinaryData`), so a call without a page's lease reaches it too.
+ * Makes version 1 of App `app`, a stand-in its test wrote straight to the
+ * database (no tree a publish could seal), live, as a publish leaves it:
+ * for tests of what runs on it, which bind what it uses first, as a
+ * binding of a live App reads the declarations of its release.
+ */
+export const standInLive = async (app: string): Promise<void> => {
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE app_versions SET status = 'published' WHERE app_id = ? AND version = 1"
+    ).bind(app),
+    env.DB.prepare("UPDATE apps SET current_version = 1 WHERE id = ?").bind(
+      app
+    ),
+  ]);
+};
+
+/**
+ * Commits `files` as the App's next version and publishes it, with its
+ * data classified as ordinary (`ordinaryData`), so a call without a
+ * page's lease reaches it too.
  */
 export const release = async (
   builder: Builder,
@@ -100,13 +148,7 @@ export const release = async (
     files,
     "Release"
   );
-  await builder.api.apps.versions.setCurrent(app, version);
-  // Published, for the people it is shared with: a draft is its builders'.
-  // Once is enough, and Grasp staff, who release too, never publish.
-  const { status } = await builder.api.apps.get(app);
-  if (status !== "published") {
-    await builder.api.apps.publish(app);
-  }
+  await builder.api.apps.versions.publish(app, version);
   await ordinaryData(app);
   return version;
 };

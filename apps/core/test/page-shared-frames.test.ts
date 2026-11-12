@@ -17,7 +17,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { commitApp, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { pastAccessRecheck, published } from "./apps.ts";
+import { pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
@@ -54,14 +54,13 @@ type Person = Awaited<ReturnType<typeof personApi>>;
 /** A new App with `files` as its current version: nobody approves its pages. */
 const currentApp = async (builder: Person, files: TestSource) => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  await published(id);
   const { version } = await commitApp(
     builder.api.apps.files,
     id,
     files,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
+  await builder.api.apps.versions.publish(id, version);
   return { app: id, version };
 };
 
@@ -91,7 +90,7 @@ const nextVersion = async (builder: Person, app: string) => {
     { "src/routes/index.tsx": notesPage.replace(">Add<", ">Add a note<") },
     "Second"
   );
-  await builder.api.apps.versions.setCurrent(app, version);
+  await builder.api.apps.versions.publish(app, version);
   return {
     version,
     api: apiOf(await loadRelease(env, appIdSchema.parse(app), version)),

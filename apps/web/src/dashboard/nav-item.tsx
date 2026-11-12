@@ -3,7 +3,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@grasp-os/ui/components/sidebar";
-import { Plural, Trans } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { LayoutDashboardIcon } from "lucide-react";
 
@@ -44,6 +44,7 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
 
 /** The sidebar's Dashboard entry, with how many things wait. */
 export const DashboardItem = () => {
+  const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const { value: waiting } = useFrameRead(readCount);
   const shown = waiting !== undefined && waiting > 0;
@@ -52,6 +53,7 @@ export const DashboardItem = () => {
       <SidebarMenuButton
         isActive={matchRoute({ to: "/dashboard" }) !== false}
         render={<Link to="/dashboard" />}
+        tooltip={t`Dashboard`}
       >
         <LayoutDashboardIcon />
         <span>

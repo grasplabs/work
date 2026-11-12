@@ -18,7 +18,6 @@ import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { commitApp, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { chatWithDraft, previewLease } from "./previews.ts";
 import { person } from "./sealed-apps.ts";
@@ -38,10 +37,10 @@ import {
 // a role, a session that is someone else's than the frame's, and a body
 // larger than any request may be, are refused, the last before core reads
 // past its bound. Then, from the one path's threat model (page-calls.ts),
-// a builder's preview of a draft on that same path: its calls on its own
-// store and never the App's, and another person's, a forged or another
-// App's draft lease, someone who no longer builds the App and a flood all
-// refused. A visitor's attacks on it are in app-visitor-calls.test.ts.
+// a builder's preview of the App's draft on that same path: its calls on
+// the preview's test store and never the App's, and another person's, a
+// forged or another App's draft lease, someone who no longer builds the
+// App and a flood all refused. A visitor's attacks on it are in app-visitor-calls.test.ts.
 
 const idp = mockIdp();
 
@@ -107,14 +106,13 @@ const personApi = async (role: Role): Promise<Person> =>
 const servedApp = async () => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  await published(id);
   const { version } = await commitApp(
     builder.api.apps.files,
     id,
     files,
     "First"
   );
-  await builder.api.apps.versions.setCurrent(id, version);
+  await builder.api.apps.versions.publish(id, version);
   const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
   return { builder, app: id, lease, release };
@@ -524,10 +522,10 @@ describe("a page calling its App's functions", { timeout: 120_000 }, () => {
 });
 
 /**
- * `served`'s App with `colleague` added as one of its builders, each with
- * their own chat of it previewed, and the lease each preview opened with:
- * a draft of the App (one that changes nothing yet), run on a throwaway
- * store of the preview's own.
+ * `served`'s App with `colleague` added as one of its builders, each
+ * previewing the App's one draft (one that changes nothing yet), and the
+ * lease each one's preview opened with, signed for them: the draft run on
+ * the throwaway test store of the App's preview.
  */
 const previewed = async (served: Served) => {
   const colleague = await personApi("builder");
@@ -537,12 +535,11 @@ const previewed = async (served: Served) => {
     role: "builder",
   });
   const leaseOf = async (by: Person) => {
-    const { id } = await by.api.chats.forApp(served.app);
-    const { lease } = await by.api.chats.preview(id, served.app);
+    const { lease } = await by.api.apps.drafts.preview(served.app);
     if (lease === undefined) {
       throw new Error("The preview opened with no lease.");
     }
-    return { chatId: id, lease };
+    return { lease };
   };
   return {
     colleague,
@@ -573,14 +570,10 @@ const errorCodeOf = (result: unknown): unknown => {
   return isRecord(error) ? error.code : undefined;
 };
 
-/** `lease` with the chat it names swapped for `chatId`, its MAC kept. */
-const withChat = (lease: string, chatId: string): string => {
+/** `lease`, a release's, with the version it names swapped for the draft, its MAC kept. */
+const asDraft = (lease: string): string => {
   const [artifact, , mac] = lease.split(".");
-  const chat = btoa(chatId)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
-  return `${artifact}.d${chat}.${mac}`;
+  return `${artifact}.d.${mac}`;
 };
 
 describe(
@@ -675,12 +668,10 @@ describe(
         replayed: await refusalOf(
           await post(served.app, create, { as: colleague, lease: own.lease })
         ),
-        // The builder's own lease, its chat swapped for their colleague's.
-        forgedChat: await refusalOf(
-          await post(served.app, create, {
-            as,
-            lease: withChat(own.lease, theirs.chatId),
-          })
+        // The builder's lease of the App's release, its version swapped
+        // for the draft.
+        forgedDraft: await refusalOf(
+          await post(served.app, create, { as, lease: asDraft(served.lease) })
         ),
         // A draft's lease of another App.
         anotherApps: await refusalOf(
@@ -689,7 +680,7 @@ describe(
       }).toStrictEqual({
         theirs: { status: 403, code: "page.unreviewed" },
         replayed: { status: 403, code: "page.unreviewed" },
-        forgedChat: { status: 403, code: "page.unreviewed" },
+        forgedDraft: { status: 403, code: "page.unreviewed" },
         anotherApps: { status: 403, code: "page.unreviewed" },
       });
       await expect(titlesOf(served)).resolves.toStrictEqual({
@@ -805,17 +796,13 @@ describe(
       });
     });
 
-    it("hands a draft action's kept result to no one once its draft is discarded or its chat deleted, under the same lease and key", async () => {
+    it("hands a draft action's kept result to no one once the preview's test data is reset, or the App is archived, under the same lease and key", async () => {
       const served = await servedApp();
       const { builder } = served;
-      const { chatId } = await chatWithDraft(
-        builder,
-        appIdSchema.parse(served.app),
-        {
-          "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// Drafted.\n`,
-        }
-      );
-      const lease = await previewLease(builder, chatId, served.app);
+      await chatWithDraft(builder, appIdSchema.parse(served.app), {
+        "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// Drafted.\n`,
+      });
+      const lease = await previewLease(builder, served.app);
       const sent = { as: builder, lease };
       const call = requestFor(
         served,
@@ -829,17 +816,15 @@ describe(
         await framesOf(await post(`${served.app}/stream`, call, sent))
       );
       const before = resultOfLast(await framesOf(await attach()));
-      await builder.api.chats.discardDraft(chatId, served.app);
-      const discarded = errorCodeOf(
-        resultOfLast(await framesOf(await attach()))
-      );
-      await builder.api.chats.remove(chatId);
-      const deleted = await refusalOf(await attach());
-      expect({ streamed, before, discarded, deleted }).toStrictEqual({
+      await builder.api.apps.drafts.resetTestData(served.app);
+      const reset = errorCodeOf(resultOfLast(await framesOf(await attach())));
+      await builder.api.apps.archive(served.app);
+      const archived = await refusalOf(await attach());
+      expect({ streamed, before, reset, archived }).toStrictEqual({
         streamed: { ok: true, value: "Kept" },
         before: { ok: true, value: "Kept" },
-        discarded: "submission.expired",
-        deleted: { status: 403, code: "agent.chat_not_found" },
+        reset: "submission.expired",
+        archived: { status: 403, code: "app.archived" },
       });
     });
 

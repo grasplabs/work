@@ -42,6 +42,7 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { openToUsersSql } from "./app-access.ts";
 import { callVisitorFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { grantHeld } from "./app-visitor-grants.ts";
@@ -71,14 +72,14 @@ import { boundedText, jsonOf } from "./request-body.ts";
 import { requireNotStaff } from "./sharing.ts";
 
 // Visitors (`@grasp-os/shared/app-visitors`): someone who isn't a member
-// opens a published App at its own link (app-own-links.ts) after signing
+// opens a live App at its own link (app-own-links.ts) after signing
 // in with a code mailed to them. It is a way in from outside, so here is
 // each way it can be attacked, and what stops it. Each has a test in
 // test/app-visitors.test.ts.
 //
 // - Anyone asking for a code. Only an address the App's builders listed,
 //   or one at a domain they listed, is sent one, and only while the App
-//   is published. The answer is the same whether a code went out or not
+//   is live. The answer is the same whether a code went out or not
 //   (and whatever the link names), and it comes once the request's form
 //   is checked, before anything is looked up (`ctx.waitUntil` does the
 //   rest), so neither it nor how long it takes tells anyone what is
@@ -114,9 +115,10 @@ import { requireNotStaff } from "./sharing.ts";
 //   the App itself, only for the functions its builders granted visitors
 //   (app-visitor-grants.ts): never as a member.
 // - Access that outlives its reason. On every open and call, the session
-//   must be unexpired (8 hours at most), the App still published, and the
-//   address still listed; removing it from the list ends it at once, and
-//   unpublishing deletes every visitor's session (app-status.ts). Signing
+//   must be unexpired (8 hours at most), the App still live and not
+//   archived, and the address still listed; removing it from the list
+//   ends it at once, and archiving deletes every visitor's session
+//   (app-status.ts). Signing
 //   out deletes the session.
 // - Unseen. Every code sent and every refusal (an address not listed,
 //   too many codes, a wrong or used-up code), every sign-in and sign-out
@@ -252,25 +254,22 @@ export const setAppVisitors = async (
   return await listOf(env, found.id);
 };
 
-/** The published App at `link`, or undefined. */
-const publishedAt = async (
-  env: Env,
-  link: string
-): Promise<App | undefined> => {
+/** The live App at `link`, or undefined. */
+const liveAt = async (env: Env, link: string): Promise<App | undefined> => {
   const row = await drizzle(env.DB)
     .select()
     .from(apps)
-    .where(and(eq(apps.link, link), eq(apps.status, "published")))
+    .where(and(eq(apps.link, link), openToUsersSql))
     .get();
   return row === undefined ? undefined : toApp(row);
 };
 
-/** The published App `app`, or undefined. */
-const publishedApp = async (env: Env, app: AppId): Promise<App | undefined> => {
+/** The live App `app`, or undefined. */
+const liveApp = async (env: Env, app: AppId): Promise<App | undefined> => {
   const row = await drizzle(env.DB)
     .select()
     .from(apps)
-    .where(and(eq(apps.id, app), eq(apps.status, "published")))
+    .where(and(eq(apps.id, app), openToUsersSql))
     .get();
   return row === undefined ? undefined : toApp(row);
 };
@@ -370,7 +369,7 @@ const askForCode = async (
   link: string,
   address: string
 ): Promise<void> => {
-  const found = await publishedAt(env, link);
+  const found = await liveAt(env, link);
   if (found === undefined) {
     return;
   }
@@ -467,7 +466,7 @@ const signIn = async (
 ): Promise<AppVisitorSession> => {
   const address = appVisitorAddressSchema.safeParse(rawAddress);
   const code = appVisitorCodeSchema.safeParse(rawCode);
-  const found = await publishedAt(env, link);
+  const found = await liveAt(env, link);
   if (!address.success || !code.success || found === undefined) {
     throw appVisitorErrors.create("visitor.code_invalid");
   }
@@ -515,9 +514,9 @@ const signIn = async (
   const sessionId = crypto.randomUUID();
   const expiresAt = now + appVisitorSessionHours * hourMs;
   // The code is used once: the session goes in only if this took it, and
-  // only while the App is still published as it goes in, so an unpublish
-  // that ended every session meanwhile leaves none behind it.
-  const stillPublished = sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${eq(apps.id, found.id)} AND ${eq(apps.status, "published")})`;
+  // only while the App is still live as it goes in, so an archive that
+  // ended every session meanwhile leaves none behind it.
+  const stillLive = sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${eq(apps.id, found.id)} AND ${openToUsersSql})`;
   const [, inserted] = await auditedBatch(env, db, [
     db
       .update(appVisitorCodes)
@@ -528,7 +527,7 @@ const signIn = async (
     db
       .insert(appVisitorSessions)
       .select(
-        sql`SELECT ${sessionId}, ${found.id}, ${address.data}, ${await sha256Hex(token)}, ${now}, ${expiresAt} WHERE changes() > 0 AND ${stillPublished}`
+        sql`SELECT ${sessionId}, ${found.id}, ${address.data}, ${await sha256Hex(token)}, ${now}, ${expiresAt} WHERE changes() > 0 AND ${stillLive}`
       )
       .returning({ id: appVisitorSessions.id }),
     outboxedIfChanged(db, {
@@ -540,7 +539,7 @@ const signIn = async (
   ]);
   if (inserted.length === 0) {
     const reason =
-      (await publishedAt(env, link)) === undefined ? "not_published" : "used";
+      (await liveAt(env, link)) === undefined ? "not_live" : "used";
     return await codeRefused(env, found.id, address.data, reason);
   }
   return { token, expiresAt: new Date(expiresAt).toISOString() };
@@ -568,7 +567,7 @@ export interface AppVisit {
 
 /**
  * The App a visitor's session opens, with its first page, while the
- * session is unexpired, the App published and the address still listed.
+ * session is unexpired, the App live and the address still listed.
  * `visitor.signed_out` otherwise.
  */
 const openVisit = async (env: Env, token: string): Promise<AppVisit> => {
@@ -577,10 +576,10 @@ const openVisit = async (env: Env, token: string): Promise<AppVisit> => {
     throw appVisitorErrors.create("visitor.signed_out");
   }
   const appId = appIdSchema.parse(session.appId);
-  const found = await publishedApp(env, appId);
+  const found = await liveApp(env, appId);
   let reason: string | undefined;
   if (found === undefined) {
-    reason = "not_published";
+    reason = "not_live";
   } else if (!(await isListed(env, appId, session.address))) {
     reason = "not_listed";
   }
@@ -730,7 +729,7 @@ export const visitorCall = async (
   if (appId !== app) {
     throw appVisitorErrors.create("visitor.signed_out");
   }
-  const found = await publishedApp(env, appId);
+  const found = await liveApp(env, appId);
   if (
     found === undefined ||
     found.currentVersion === null ||
@@ -785,7 +784,7 @@ export const visitorCall = async (
           actor: { type: "visitor", appId, sessionId: session.id },
           stillAllowed: async (path) => {
             const live = await sessionById(env, session.id);
-            const now = await publishedApp(env, appId);
+            const now = await liveApp(env, appId);
             if (
               live === undefined ||
               now === undefined ||

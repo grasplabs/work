@@ -31,6 +31,7 @@ import type {
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { delegateActorOf } from "@grasp-os/shared/audit";
+import type { ChatMake } from "@grasp-os/shared/chat";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEffort } from "@grasp-os/shared/models";
@@ -45,7 +46,14 @@ import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { showThinking } from "./agent-thinking.ts";
 import { recallFor, textOf } from "./agent.ts";
-import type { CodeTurn, TurnContext, TurnOutcome } from "./agent.ts";
+import type {
+  CodeTurn,
+  QuestionBuilt,
+  QuestionMention,
+  QuestionSubject,
+  TurnContext,
+  TurnOutcome,
+} from "./agent.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { TurnFacts } from "./brain-capture.ts";
 import { readThinkingBrain } from "./brain-rpc.ts";
@@ -60,7 +68,8 @@ import {
   rebase,
   recallTextOf,
 } from "./chat-agent.ts";
-import { coreMessageProvider } from "./chat-messages.ts";
+import { coreMessageProvider, shownBuiltSchema } from "./chat-messages.ts";
+import type { ShownBuilt } from "./chat-messages.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { models } from "./models.ts";
@@ -99,6 +108,14 @@ export interface TurnRequest {
     effort?: ModelEffort;
     /** The files it carries: their IDs and types. */
     files: { id: string; type: string }[];
+    /** What it is about: the page it was asked on, by name. */
+    subject?: QuestionSubject;
+    /** What the person picked with `@` in it, each by name. */
+    mentions?: QuestionMention[];
+    /** What "Make something" started the chat to make, if it did. */
+    make?: ChatMake;
+    /** Build it, said to the chat's plan: what core made of it (`ChatsApi.build`). */
+    built?: QuestionBuilt;
   };
   /** A chat others share, which reads only what they all may. */
   shared: boolean;
@@ -139,6 +156,8 @@ export interface TurnMessage {
   entryId: number;
   message: Message;
   files?: string[];
+  /** For the person's Build it: the plan it built and what that made. */
+  built?: ShownBuilt;
   /** How long a response thought, as its stream showed it. */
   thinkingMs?: number;
 }
@@ -234,12 +253,20 @@ const CopiedDoc = defineDoc<{ after: EntryId | null }>({
   checkpointWhen: () => true,
 });
 
+/** What a Build it shows of what core made (`QuestionBuilt`): its project stays out. */
+const shownBuilt = ({ plan, app, workflow }: QuestionBuilt): ShownBuilt => ({
+  plan,
+  ...(app === undefined ? {} : { app }),
+  ...(workflow === undefined ? {} : { workflow }),
+});
+
 /**
  * What a question's entry keeps besides its message: the files it carries,
  * and its recall's call, so the chat shows the recall as a step of its own.
  */
 const questionDataSchema = z.object({
   files: z.array(z.string()),
+  built: shownBuiltSchema.optional(),
   recall: z
     .object({
       runId: z.string(),
@@ -415,10 +442,12 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
     const data = questionDataSchema.safeParse(entry.data);
     const recall = data.success ? data.data.recall : undefined;
     const recalled = recall === undefined ? undefined : recallTextOf(message);
+    const built = data.success ? data.data.built : undefined;
     return [
       {
         message: { ...message, content: questionText(message) },
         files: data.success ? data.data.files : [],
+        ...(built === undefined ? {} : { built }),
       },
       ...(recall === undefined || recalled === undefined
         ? []
@@ -999,7 +1028,13 @@ export class ChatHarness {
           content: questionContent(
             request.question.text,
             request.question.files,
-            recall
+            recall,
+            {
+              subject: request.question.subject,
+              mentions: request.question.mentions,
+              make: request.question.make,
+              built: request.question.built,
+            }
           ),
           requestId: request.turnId,
           whenBusy: "reject",
@@ -1007,6 +1042,10 @@ export class ChatHarness {
             kind: questionKind,
             data: {
               files: request.question.files.map(({ id }) => id),
+              // Shown with the person's Build it, as what it built.
+              ...(request.question.built === undefined
+                ? {}
+                : { built: shownBuilt(request.question.built) }),
               ...(recall === undefined
                 ? {}
                 : {
@@ -1277,7 +1316,10 @@ export class ChatHarness {
     const transcript = await this.#conversation.context(context);
     const extension = chatAgent({
       ...turn,
-      context: request.context,
+      context:
+        request.question.make === undefined
+          ? request.context
+          : { ...request.context, make: request.question.make },
       assets: env.ASSETS,
       history: transcript.messages,
       // Only in a person's own chat, by an agent that may read the brain.

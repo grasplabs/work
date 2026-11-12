@@ -300,9 +300,8 @@ apps: {
     name: string;
     description: string;
     owner: string;
-    /** The version that runs; null until one is made current. */
+    /** The live version, the one that runs; null until its first publish. */
     currentVersion: number | null;
-    pendingVersion: number | null;
     createdAt: string;
   }[]>;
   /** An App's files by path, at \`version\`, or at its latest version without one. Only for Apps the person builds. */

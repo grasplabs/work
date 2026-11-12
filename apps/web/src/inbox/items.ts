@@ -9,7 +9,6 @@ import type {
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
   BindingApprovalItem,
-  GoLiveItem,
   WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
@@ -30,9 +29,8 @@ import type { Loaded } from "../load-from-core.tsx";
 // lists today fills those it has (a connection to sign in to again) and
 // kinds of its own: a change an agent wants to make, a change sent for
 // the person whose answer was lost, a permission an App
-// or agent asked for, a version of an
-// App the person answers for
-// up for review. Core keeps nothing the inbox adds (put away until a date, given
+// or agent asked for, a version of a
+// workflow asked to go live. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
 
 export type InboxKind =
@@ -59,7 +57,7 @@ export type InboxKind =
 
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
-  | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
+  | { kind: "independentWorkflow"; workflow: string; section?: "triggers" }
   /**
    * An App: its own page, or the section of its settings where what the
    * item is about is decided.
@@ -67,7 +65,7 @@ export type Target =
   | {
       kind: "app";
       app: string;
-      place?: "connections" | "versions";
+      place?: "connections";
     }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -80,7 +78,6 @@ export type InboxSource =
   | { type: "heldStart"; start: HeldStart }
   | { type: "outcome"; outcome: UnknownOutcome }
   | { type: "request"; request: Permission; pending: PendingRequests }
-  | { type: "version"; item: GoLiveItem }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | { type: "bindings"; item: BindingApprovalItem }
   | { type: "reconnect"; integration: string }
@@ -312,33 +309,6 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       date: request.requestedAt,
       urgent: false,
       source: { type: "request", request, pending },
-    };
-  });
-
-/** A version of an App the person answers for, up for review: made current under Versions in its settings. */
-const versionItems = (
-  versions: readonly GoLiveItem[],
-  me: string,
-  readAt: string
-): InboxItem[] =>
-  versions.map((item) => {
-    const { app, version } = item;
-    const { name } = app;
-    return {
-      id: item.id,
-      kind: "goLive",
-      title: t`Make version ${version} of ${name} live?`,
-      context: name,
-      body: [
-        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's settings.`,
-      ],
-      facts: [{ label: t`Version`, value: String(version) }],
-      about: { kind: "app", app: app.id, place: "versions" },
-      forWhom: { person: me },
-      // Core says what waits now, not since when: as of the read.
-      date: readAt,
-      urgent: false,
-      source: { type: "version", item },
     };
   });
 
@@ -583,14 +553,14 @@ const stoppedItems = (
         title: t`The schedule of ${workflowName} stopped`,
         context: workflowName,
         body: [
-          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time.`,
+          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again in the workflow's Triggers: it goes on from its next time.`,
         ],
         facts: [{ label: t`Stopped`, value: formatDateTime(at) }],
-        // Its Triggers tab, where its owner turns it on again.
+        // Its Triggers, in its Settings, where its owner turns it on again.
         about: {
           kind: "independentWorkflow",
           workflow: notification.workflow,
-          tab: "triggers",
+          section: "triggers",
         },
         forWhom: { person: me },
         date: at,
@@ -686,7 +656,6 @@ export const inboxItems = (
   const notifications = readyOf(waiting.notifications);
   const decisions = readyOf(waiting.decisions) ?? [];
   const heldStarts = readyOf(waiting.heldStarts) ?? [];
-  const versions = readyOf(waiting.versions) ?? [];
   const workflowGoLives = readyOf(waiting.workflowGoLives) ?? [];
   const bindings = decidesRequests(viewer)
     ? (readyOf(waiting.bindings) ?? [])
@@ -727,7 +696,6 @@ export const inboxItems = (
     ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
-    ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
@@ -751,7 +719,6 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.requests,
     waiting.notifications,
     waiting.reconnect,
-    waiting.versions,
     waiting.decisions,
     waiting.workflowGoLives,
     waiting.heldStarts,

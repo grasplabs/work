@@ -1,5 +1,4 @@
 import type { AppOverview } from "@grasp-os/shared/apps";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
   EmptyContent,
@@ -15,25 +14,19 @@ import {
 } from "@grasp-os/ui/components/input-group";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { LayoutGridIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { LayoutGridIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
+import { MakeSomethingLink } from "../make/make-link.tsx";
 import { StatusBadge } from "./app-status.tsx";
 
 // The Apps page: every App the person can open, newest first, as a grid of
 // cards (its icon, name, where it stands and when it was made), each
-// opening the live App (/apps/$app). A search over their names, and New
-// App for who builds, which starts one from a single box (new-app.tsx).
-
-/** New App: the page's one action. */
-const NewAppLink = () => (
-  <Link className={buttonVariants()} to="/apps/new">
-    <PlusIcon data-icon="inline-start" />
-    <Trans>New App</Trans>
-  </Link>
-);
+// opening the live App (/apps/$app). A search over their names, and Make
+// something for who builds, which starts a chat to make an App
+// (make/make-link.tsx).
 
 /** One App: its card, whose name opens it. */
 const AppCard = ({ overview: { app } }: { overview: AppOverview }) => {
@@ -63,7 +56,7 @@ const AppCard = ({ overview: { app } }: { overview: AppOverview }) => {
         </div>
       </div>
       <div className="text-muted-foreground mt-auto flex items-center gap-2 text-xs">
-        <StatusBadge status={app.status} />
+        <StatusBadge app={app} />
         <span className="truncate">
           <Trans>Made {made}</Trans>
         </span>
@@ -78,7 +71,7 @@ const newestFirst = (apps: readonly AppOverview[]): AppOverview[] =>
     other.app.createdAt.localeCompare(one.app.createdAt)
   );
 
-/** The Apps page's body: `listed`, as core lists them; New App for who `builds`. */
+/** The Apps page's body: `listed`, as core lists them; Make something for who `builds`. */
 export const AppsOverview = ({
   listed,
   builds,
@@ -97,7 +90,12 @@ export const AppsOverview = ({
   return (
     <Page wide>
       <PageHeading
-        action={builds ? <NewAppLink /> : undefined}
+        // One Make something a page: with no Apps yet, the empty state's.
+        action={
+          builds && apps.length > 0 ? (
+            <MakeSomethingLink kind="app" />
+          ) : undefined
+        }
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
@@ -121,7 +119,7 @@ export const AppsOverview = ({
           </EmptyHeader>
           {builds ? (
             <EmptyContent>
-              <NewAppLink />
+              <MakeSomethingLink kind="app" />
             </EmptyContent>
           ) : null}
         </Empty>

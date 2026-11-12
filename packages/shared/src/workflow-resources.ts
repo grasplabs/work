@@ -233,8 +233,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "The task's call took effect, then the task failed. What the call did stands.",
   "workflow.raised":
     "The workflow raised an error of its own, and nothing in it caught that error.",
-  "workflow.creates_exhausted":
-    "This chat created as many Apps and workflows as one question may. Tell the person what you made.",
 });
 
 /**
@@ -1196,8 +1194,12 @@ export type WorkflowActivity =
     };
 
 export interface WorkflowResourcesApi {
-  /** Creates a workflow the caller owns, named `name`; for builders. */
-  create: (name: string) => Promise<WorkflowResource>;
+  /**
+   * Creates a workflow the caller owns, named `name`; for builders. With
+   * `project`, it is made in that project, shared with everyone in it:
+   * only for a builder of the project, checked before anything is made.
+   */
+  create: (name: string, project?: string) => Promise<WorkflowResource>;
   /** The workflows the caller has a role in, by name. */
   list: () => Promise<WorkflowResource[]>;
   get: (id: string) => Promise<WorkflowResource>;

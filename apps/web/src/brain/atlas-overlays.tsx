@@ -20,7 +20,7 @@ import { Mark } from "./region-marks.tsx";
  * (grasplabs/prototype, packages/grasp: components/knowledge/atlas-overlays.tsx): top left what a
  * dot says, under the small brain when a region is open, and above it the region's groups to
  * narrow it to; with the zoom under it. Bottom left the way you came, to step back along. The
- * chat has the bottom right (chat/chat-dock.tsx). Nothing takes a side of the screen.
+ * chat has the bottom centre (chat/global-chat.tsx). Nothing takes a side of the screen.
  */
 
 /** Which dots a mark of the legend stands for. */

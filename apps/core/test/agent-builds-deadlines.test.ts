@@ -1,7 +1,10 @@
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { appErrors } from "@grasp-os/shared/apps";
+import { actorOf } from "@grasp-os/shared/audit";
 import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { emptyDraft, readDraft, saveDraft } from "../src/app-drafts.ts";
 import {
   endedRefusals,
   idp,
@@ -11,7 +14,6 @@ import {
 import {
   codeStep,
   says,
-  testRunOpening,
   toolResults,
   toolStep,
   transcript,
@@ -20,7 +22,7 @@ import { mockIdpWith } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
-// person in a draft of its own, and repairing what its checks report.
+// person in the App's shared draft, and repairing what its checks report.
 // These tests start from the ways it can fail: the agent builds past what
 // its person may do (an App they don't build, or any App for someone who
 // doesn't build), or not at all for someone who does; a chat that read
@@ -31,12 +33,20 @@ import { fakeProvider } from "./model-provider.ts";
 
 mockIdpWith(idp);
 
+/** A draft over version 1 at `revision`, as a write read it. */
+const over = (revision: number) => ({
+  base: 1,
+  changes: {},
+  definition: null,
+  revision,
+});
+
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("lands no draft write whose run ran out of time while it was under way, with no grant to revoke", async () => {
     const { chat, existing } = await setUp([]);
     await fakeProvider(
       codeStep(`export default async (self, env) => {
-          await env.build.write(${JSON.stringify(existing)}, { "src/routes/late.tsx": "import { createFileRoute } from \\"@tanstack/react-router\\";\\nconst Page = () => null;\\n\\nexport const Route = createFileRoute(\\"/late\\")({ component: Page });\\n" });
+          await env.build.write(${JSON.stringify(existing)}, { "src/routes/late.tsx": "import { createFileRoute } from \\"@tanstack/react-router\\";\\nconst Page = () => null;\\n\\nexport const Route = createFileRoute(\\"/late\\")({ component: Page });\\n" }, { revision: (await env.build.files(${JSON.stringify(existing)})).revision });
         };`),
       says("It ran out of time.")
     );
@@ -55,9 +65,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       },
       { timeout: 15_000, interval: 100 }
     );
-    await expect(
-      chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
-    ).resolves.toStrictEqual({
+    await expect(readDraft(env, existing)).resolves.toStrictEqual({
       base: null,
       changes: {},
       definition: null,
@@ -128,9 +136,7 @@ export const Route = createFileRoute("/late")({ component: Page });
       },
       { timeout: 15_000, interval: 100 }
     );
-    await expect(
-      chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
-    ).resolves.toStrictEqual({
+    await expect(readDraft(env, existing)).resolves.toStrictEqual({
       base: null,
       changes: {},
       definition: null,
@@ -138,190 +144,62 @@ export const Route = createFileRoute("/late")({ component: Page });
     });
   });
 
-  it("commits no proposal whose run ran out of time while it was checked", async () => {
-    const { chat, builder, existing, grant } = await setUp([]);
-    await fakeProvider(
-      codeStep(`export default async (self, env) => {
-          await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, again\\n" });
-        };`),
-      says("Written."),
-      codeStep(`export default async (self, env) => {
-          await env.build.propose(${JSON.stringify(existing)}, "Again");
-        };`),
-      says("It ran out of time.")
-    );
-    await grant();
-    await chat.ask("Write it.");
-
-    // Checked past its run's end: the commit after the check is refused.
-    await slowFilesDuring(chat.stub, async () => {
-      await chat.ask("Propose it.");
-    });
-
-    await vi.waitFor(
-      async () => {
-        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
-          "build.propose",
-        ]);
+  it("lands a draft write only over the revision it read, and keeps its revisions going when its changes are all gone", async () => {
+    const { builder, existing } = await setUp([]);
+    const writer = {
+      by: {
+        userId: builder.userId,
+        role: "builder" as const,
+        teams: [],
+        staff: false,
+        actor: actorOf({ userId: builder.userId, staff: false }),
       },
-      { timeout: 30_000, interval: 200 }
-    );
-    const listed = await builder.api.apps.list();
-    expect(listed.find(({ id }) => id === existing)?.pendingVersion).toBeNull();
-  });
+      detail: {},
+    };
+    const written = async (
+      revision: number,
+      changes: Record<string, string>,
+      unchanged: string[] = []
+    ) =>
+      await saveDraft(
+        env,
+        existing,
+        { ...(await readDraft(env, existing)), ...over(revision) },
+        { changes, unchanged },
+        writer
+      )
+        .then(() => "written")
+        .catch((error: unknown) => appErrors.codeOf(error));
 
-  it("commits no proposal whose run ran out of time while it stored the version's files, after its last check", async () => {
-    const { chat, builder, existing, grant } = await setUp([]);
-    await fakeProvider(
-      codeStep(`export default async (self, env) => {
-          await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, once more\\n" });
-        };`),
-      says("Written."),
-      codeStep(`export default async (self, env) => {
-          await env.build.propose(${JSON.stringify(existing)}, "Once more");
-        };`),
-      says("It ran out of time.")
-    );
-    await grant();
-    await chat.ask("Write it.");
+    const outcomes = [
+      await written(0, { "a.md": "a" }),
+      // Another write read revision 0 too, and lost.
+      await written(0, { "a.md": "b" }),
+      // Its only change written back as the base has it: none left.
+      await written(1, {}, ["a.md"]),
+      // A write that read the draft before a discard lands on nothing.
+      await emptyDraft(env, existing, { revision: 2, base: 1, ...writer })
+        .then(() => "discarded")
+        .catch((error: unknown) => appErrors.codeOf(error)),
+      await written(2, { "b.md": "b" }),
+      await written(3, { "c.md": "c" }),
+    ];
 
-    // Only storing the version's tree is slow: the check and the
-    // admission before it pass, and the run ends while the tree is stored.
-    await slowFilesDuring(
-      chat.stub,
-      async () => {
-        await chat.ask("Propose it.");
-      },
-      (method, key) =>
-        method === "put" && typeof key === "string" && key.includes("/trees/")
-    );
-
-    await vi.waitFor(
-      async () => {
-        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
-          "build.propose",
-        ]);
-      },
-      { timeout: 30_000, interval: 200 }
-    );
-    const listed = await builder.api.apps.list();
-    expect(listed.find(({ id }) => id === existing)?.pendingVersion).toBeNull();
-  });
-
-  it("lands a draft write only over the revision it read", async () => {
-    const { chat } = await setUp([]);
-    const chatId = chatIdSchema.parse(chat.chat.id);
-
-    const saved = await runInDurableObject(chat.stub, (instance) => {
-      const run = instance.openCodeRun(
-        chatId,
-        crypto.randomUUID(),
-        testRunOpening
-      );
-      return [
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, {
-          runId: run,
-        }),
-        // Another write read revision 0 too, and lost.
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "b" }, [], 0, {
-          runId: run,
-        }),
-        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 1, {
-          runId: run,
-        }),
-        instance.draft(chatId, "app-1"),
-      ];
-    });
-
-    expect(saved).toStrictEqual([
-      true,
-      false,
-      true,
-      {
-        base: null,
-        changes: { "a.md": "a", "b.md": "b" },
+    expect({ outcomes, draft: await readDraft(env, existing) }).toStrictEqual({
+      outcomes: [
+        "written",
+        "app.conflict",
+        "written",
+        "discarded",
+        "app.conflict",
+        "written",
+      ],
+      draft: {
+        base: 1,
+        changes: { "c.md": "c" },
         definition: null,
-        revision: 2,
+        revision: 4,
       },
-    ]);
-  });
-
-  it("keeps a draft's revisions going when its changes are all gone", async () => {
-    const { chat } = await setUp([]);
-    const chatId = chatIdSchema.parse(chat.chat.id);
-
-    const saved = await runInDurableObject(chat.stub, (instance) => {
-      const run = instance.openCodeRun(
-        chatId,
-        crypto.randomUUID(),
-        testRunOpening
-      );
-      return [
-        // A write reads revision 0; meanwhile another creates the draft and
-        // writes its only change back as the base has it.
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, {
-          runId: run,
-        }),
-        instance.saveDraft(chatId, "app-1", null, {}, ["a.md"], 1, {
-          runId: run,
-        }),
-        instance.draft(chatId, "app-1"),
-        // The write that read revision 0 lands on nothing.
-        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 0, {
-          runId: run,
-        }),
-        // Nor once the draft is dropped, as a proposal drops it.
-        instance.saveDraft(chatId, "app-1", null, { "c.md": "c" }, [], 2, {
-          runId: run,
-        }),
-        instance.dropDraft(chatId, "app-1", { revision: 3 }),
-        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 0, {
-          runId: run,
-        }),
-        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 3, {
-          runId: run,
-        }),
-        instance.draft(chatId, "app-1"),
-      ];
     });
-
-    expect(saved).toStrictEqual([
-      true,
-      true,
-      { base: null, changes: {}, definition: null, revision: 2 },
-      false,
-      true,
-      true,
-      false,
-      false,
-      { base: null, changes: {}, definition: null, revision: 4 },
-    ]);
-  });
-
-  it("lands no first write that read the draft before a discard", async () => {
-    const { chat } = await setUp([]);
-    const chatId = chatIdSchema.parse(chat.chat.id);
-
-    const saved = await runInDurableObject(chat.stub, (instance) => {
-      const run = instance.openCodeRun(
-        chatId,
-        crypto.randomUUID(),
-        testRunOpening
-      );
-      return [
-        // A first write reads revision 0; a discard runs before it lands.
-        instance.dropDraft(chatId, "app-1", { runId: run }),
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, {
-          runId: run,
-        }),
-        instance.draft(chatId, "app-1"),
-      ];
-    });
-
-    expect(saved).toStrictEqual([
-      true,
-      false,
-      { base: null, changes: {}, definition: null, revision: 1 },
-    ]);
   });
 });

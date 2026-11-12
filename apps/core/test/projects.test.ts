@@ -151,6 +151,55 @@ describe("projects", { timeout: 120_000 }, () => {
     });
   });
 
+  it("makes a workflow inside it shared with everyone in it, and nothing for someone who doesn't build it", async () => {
+    const owner = await personApi("builder");
+    const [ada, user] = await Promise.all([
+      personApi("user"),
+      personApi("builder"),
+    ]);
+    const project = await projectOf(owner);
+    await Promise.all(
+      [ada, user].map(async ({ userId }) => {
+        await owner.api.projects.addMember(project, {
+          type: "person",
+          id: userId,
+          role: "user",
+        });
+      })
+    );
+
+    // An App is made in a project by Make something's Build it
+    // (make.test.ts), through the same check.
+    const workflow = await owner.api.workflowResources.create(
+      `in-project-${unique()}`,
+      project
+    );
+    // Someone who builds, but only uses the project.
+    const refused = await outcome(
+      user.api.workflowResources.create(`not-here-${unique()}`, project)
+    );
+    const asOwner = await owner.api.projects.get(project);
+    const usersWorkflows = await user.api.workflowResources.list();
+
+    expect({
+      items: asOwner.items.map(({ type, id, sharedAs }) => ({
+        type,
+        id,
+        sharedAs,
+      })),
+      adaWorkflow: await seesWorkflow(ada, workflow.id),
+      refused,
+      // What they build is only what they made: here, nothing.
+      madeByUser: usersWorkflows.filter(({ role }) => role === "builder")
+        .length,
+    }).toStrictEqual({
+      items: [{ type: "workflow", id: workflow.id, sharedAs: "user" }],
+      adaWorkflow: "ok",
+      refused: "role.forbidden",
+      madeByUser: 0,
+    });
+  });
+
   it("shares through the project's row with everyone in it, as a person or through a team, and names the row only to them", async () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");

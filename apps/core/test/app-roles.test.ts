@@ -103,8 +103,7 @@ const callsOn = async ({ api }: Person, app: string) => ({
   versions: await outcome(api.apps.versions.list(app)),
   version: await outcome(api.apps.versions.get(app, 1)),
   diff: await outcome(api.apps.versions.diff(app, 1, 1)),
-  propose: await outcome(api.apps.versions.propose(app, 1)),
-  setCurrent: await outcome(api.apps.versions.setCurrent(app, 1)),
+  publish: await outcome(api.apps.versions.publish(app, 1)),
   errors: await outcome(api.pages.errors(app)),
   permission: await outcome(
     api.permissions.request({
@@ -131,8 +130,7 @@ const asUser = {
   versions: "role.forbidden",
   version: "role.forbidden",
   diff: "role.forbidden",
-  propose: "role.forbidden",
-  setCurrent: "role.forbidden",
+  publish: "role.forbidden",
   errors: "role.forbidden",
   permission: "role.forbidden",
   share: "role.forbidden",
@@ -232,8 +230,7 @@ describe("App roles", { timeout: 60_000 }, () => {
       versions: "ok",
       version: "ok",
       diff: "ok",
-      propose: "ok",
-      setCurrent: "ok",
+      publish: "ok",
       errors: "ok",
       permission: "ok",
       // Refused for the team there isn't, past the role check.
@@ -314,7 +311,7 @@ describe("App roles", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual([true, false]);
   });
 
-  it("list a draft's pages to its builders only, and those of the version that is current", async () => {
+  it("list an App to those who only use it once a version is live, with the pages of the live version", async () => {
     const owner = await personApi("builder");
     const [user, builder] = await Promise.all([
       personApi("builder"),
@@ -329,7 +326,6 @@ describe("App roles", { timeout: 60_000 }, () => {
       files,
       "One"
     );
-    await owner.api.apps.versions.setCurrent(app, version);
     await owner.api.apps.members.add(app, {
       type: "person",
       id: user.userId,
@@ -340,7 +336,20 @@ describe("App roles", { timeout: 60_000 }, () => {
       id: builder.userId,
       role: "builder",
     });
-    // A version committed after the current one isn't listed: its page
+    const listedBy = async ({ api }: Person): Promise<boolean> => {
+      const listed = await api.apps.list();
+      return listed.some(({ id }) => id === app);
+    };
+
+    // Nothing live yet: its builders' alone, as opening it is.
+    const notLive = await Promise.all([
+      listedBy(user),
+      listedBy(builder),
+      listedBy(owner),
+      outcome(user.api.apps.contents(app)),
+    ]);
+    await owner.api.apps.versions.publish(app, version);
+    // A version committed after the live one doesn't count: its page
     // opens for nobody yet.
     await commitApp(
       owner.api.apps.files,
@@ -355,13 +364,19 @@ export const Route = createFileRoute("/later")({ component: Page });
       "Later"
     );
 
-    // A draft is its builders' alone, as opening it is.
-    await expect(
-      Promise.all([lists(user, app), lists(builder, app), lists(owner, app)])
-    ).resolves.toStrictEqual([false, true, true]);
-    await expect(outcome(user.api.apps.contents(app))).resolves.toBe(
-      "app.not_found"
-    );
+    expect({
+      notLive,
+      live: await Promise.all([
+        lists(user, app),
+        lists(builder, app),
+        lists(owner, app),
+      ]),
+      contents: await user.api.apps.contents(app),
+    }).toStrictEqual({
+      notLive: [false, true, true, "app.not_found"],
+      live: [true, true, true],
+      contents: { version, pages: true },
+    });
   });
 
   it("list each App once with its pages as its pages, however many pages it has", async () => {
@@ -404,7 +419,7 @@ export const Route = createFileRoute("/later")({ component: Page });
       files,
       "Draft"
     );
-    await owner.api.apps.versions.setCurrent(middle, version);
+    await owner.api.apps.versions.publish(middle, version);
     await owner.api.apps.update(middle, { process: "o2c" });
     // Published, then archived.
     await release(owner, newest, files);
@@ -430,7 +445,7 @@ export const Route = createFileRoute("/later")({ component: Page });
         .map(({ app, contents }) => ({
           id: app.id,
           name: app.name,
-          status: app.status,
+          archived: app.archived,
           process: app.process,
           pages: contents.pages,
         }))
@@ -439,28 +454,28 @@ export const Route = createFileRoute("/later")({ component: Page });
       {
         id: oldest,
         name: names.oldest,
-        status: "published",
+        archived: false,
         process: null,
         pages: true,
       },
       {
         id: middle,
         name: names.middle,
-        status: "draft",
+        archived: false,
         process: "o2c",
         pages: true,
       },
       {
         id: newest,
         name: names.newest,
-        status: "archived",
+        archived: true,
         process: null,
         pages: true,
       },
       {
         id: empty,
         name: names.empty,
-        status: "draft",
+        archived: false,
         process: null,
         pages: false,
       },

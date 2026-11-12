@@ -17,7 +17,6 @@ import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { commitApp, testApp, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { published } from "./apps.ts";
 import { apiOf, notesFiles as files } from "./notes-client-app.ts";
 import {
   personApi,
@@ -518,7 +517,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       }),
       "Second"
     );
-    await opened.builder.api.apps.versions.setCurrent(opened.app, version);
+    await opened.builder.api.apps.versions.publish(opened.app, version);
     await revokeRelease(
       env,
       await sealedPerson("admin"),
@@ -646,7 +645,6 @@ const inspections = async (): Promise<number> => {
 const diagnosticsOf = async (appFiles: TestSource): Promise<string[]> => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  await published(id);
   const { version } = await commitApp(
     builder.api.apps.files,
     id,
@@ -674,7 +672,6 @@ describe("a page's build", { timeout: 120_000 }, () => {
     // either is sealed yet, so the references come from the files.
     const builder = await personApi("builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
-    await published(id);
     const { builds } = await commitApp(
       builder.api.apps.files,
       id,
@@ -704,7 +701,6 @@ describe("a page's build", { timeout: 120_000 }, () => {
     });
     const before = await inspections();
     const { id } = await builder.api.apps.create({ name: "Notes" });
-    await published(id);
     await commitApp(builder.api.apps.files, id, own, "First");
     // A page changed, the server code not: what was inspected is kept.
     await commitApp(

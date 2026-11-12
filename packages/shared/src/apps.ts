@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 import type { AppDataApi } from "./app-data.ts";
+import type { AppDraftsApi } from "./app-drafts.ts";
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
 import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
-import type { DefinitionPlan } from "./data-model.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
 import { defineErrorFamily } from "./errors.ts";
@@ -15,12 +15,11 @@ import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
 
-// An App's code is a tree of text files, versioned as a whole: builders
-// commit changes over the App's latest version as the next version; the
-// chat's agent, for a builder, writes into a draft of its chat's own and
-// proposes that. Versions never change once committed.
-// One version is current, the one that runs; another can be pending, put
-// up for review before a builder makes it current.
+// An App's code is a tree of text files, versioned as a whole. Builders
+// and their chats' agents write into the App's one shared draft; a builder
+// publishes it, which makes it the App's next version and live in one
+// step. Versions never change once committed, and one is live: the one
+// that runs.
 
 /**
  * A file's path in an App, relative to its root and `/`-separated, such
@@ -88,15 +87,6 @@ export const commitMessageSchema = z
   .min(1)
   .max(appLimits.messageLength);
 
-/**
- * Where an App is in its life: `draft` while its builders make it, open to
- * them alone; `published` once the people it is shared with may use it;
- * `archived` once put away, kept as it was and open to nobody until a
- * builder restores it, as a draft. Only a published App's triggers fire.
- */
-export const appStatusSchema = z.enum(["draft", "published", "archived"]);
-export type AppStatus = z.infer<typeof appStatusSchema>;
-
 /** An App in the registry. Times are ISO 8601. */
 export interface App {
   id: AppId;
@@ -125,16 +115,23 @@ export interface App {
    * one, otherwise the label its creator gave, if any.
    */
   blueprint: string | null;
-  /** The version that runs; null until one is made current. */
+  /**
+   * The live version, the one that runs; null until its first publish.
+   * Until then the App is open to its builders alone; from then on to
+   * everyone it is shared with too.
+   */
   currentVersion: number | null;
-  /** The version up for review, if any. */
-  pendingVersion: number | null;
-  /** Where it is in its life (`appStatusSchema`). */
-  status: AppStatus;
+  /** The live version's label (`AppVersion.label`); null while none is live. */
+  liveLabel: string | null;
+  /**
+   * Whether a builder archived it: kept as it was, open to nobody and
+   * running nothing until a builder restores it.
+   */
+  archived: boolean;
   /**
    * The last part of the App's own address under the workspace's
    * (`appLinkSchema`), which opens it for whoever may use it while it is
-   * published; null while its builders gave it none.
+   * live; null while its builders gave it none.
    */
   link: string | null;
   /**
@@ -236,22 +233,23 @@ export interface AppIntegrationsApi {
 /** One committed version of an App. */
 export interface AppVersion {
   app: AppId;
+  /** Its ID within the App, counting up from 1. */
   version: number;
+  /**
+   * What people call it, `YY.MM.N` (@grasp-os/shared/release-id): given
+   * the first time it goes live, and kept; null for one never live.
+   */
+  label: string | null;
   /** The version it was committed on; null for the first. */
   parent: number | null;
   /** SHA-256 of the version's files, which identifies them exactly. */
   tree: string;
   files: number;
-  /**
-   * The user who committed it, or whom the chat's agent that wrote it
-   * acted for (`proposedBy`).
-   */
+  /** The user who published it, or committed it. */
   author: string;
-  /** What changed and why, in its author's words (the agent's, too). */
+  /** What changed and why, in its author's words. */
   message: string;
   createdAt: string;
-  /** The chat's agent that wrote and proposed it; null for a person's. */
-  proposedBy: AgentProposer | null;
 }
 
 /**
@@ -296,122 +294,18 @@ export type FileDiff =
 /** How something differs from the current version. */
 export type ReviewChange = "added" | "modified" | "removed";
 
-/** One row rule, as a version's review shows it (`VersionReview.rowRules`). */
+/** One row rule, as a draft's changes show it (`AppDraftChanges.rowRules`). */
 export type ReviewedRowRule =
   | { kind: "owner" }
   | { kind: "person"; field: string }
   | { kind: "team"; field: string }
   | { kind: "role"; role: "builder" | "user" };
 
-/** A table's row rules, as a version's review shows them. */
+/** A table's row rules, as a draft's changes show them. */
 export interface TableRowRules {
   table: string;
   read: ReviewedRowRule[] | null;
   write: ReviewedRowRule[] | null;
-}
-
-/**
- * What a version changes, as its reviewer reads it before making it
- * current (`AppVersionsApi.review`): worked out by core from the version
- * and the App as they are now, never written by whoever proposed it.
- */
-export interface VersionReview {
-  version: AppVersion;
-  /**
-   * The chat's agent that wrote it; null for a version a person
-   * committed. `ownChat`: the reviewer is the person it acted for, who
-   * alone gets the chat's title (a title may quote their question); null
-   * for them once the chat is deleted.
-   */
-  proposedBy:
-    | (AgentProposer & { ownChat: boolean; chatTitle: string | null })
-    | null;
-  /** What it is compared with: the current version; null while none is. */
-  current: number | null;
-  /** Its files that differ from the current version's, by path. */
-  files: { path: string; change: ReviewChange }[];
-  /**
-   * How its server code (`grasp.config.ts`, `values.ts`,
-   * `server/`, as its seal builds them) differs, if
-   * it does: it runs as whoever uses the App, with every permission the
-   * App holds. Its files that differ are `serverFiles`.
-   */
-  server: ReviewChange | null;
-  serverFiles: { path: string; change: ReviewChange }[];
-  /**
-   * Its explicit migrations (spec 17.2) that the current version doesn't
-   * have, or has otherwise (declared differently, or with server code
-   * changed, which its transform may run), read from the App's manifest
-   * wherever they are declared: each reads and rewrites every record of
-   * its table, whoever owns it, once a release sealed on it runs on the
-   * App's store. Null when its manifest can't be read (its code doesn't
-   * build or inspect): it may then rewrite any table. Each says how many
-   * fixtures it is run on as the version is sealed, and whether they all
-   * passed (`fixturesPassed`), null until the version is sealed: one that
-   * failed runs on no records, and the version can't be made current.
-   */
-  migrations:
-    | {
-        name: string;
-        table: string;
-        change: "added" | "modified";
-        fixtures: number;
-        fixturesPassed: boolean | null;
-      }[]
-    | null;
-  /**
-   * What making it current does to the App's records, as the store plans
-   * it from the current version's definition (none while none is current)
-   * to its own: null when its definition is the current version's. A
-   * definition changes no file of its own, so this is how a change of it
-   * alone (two fields' IDs swapped, which moves their values) shows; it
-   * counts as a change of the server code too (`server`).
-   */
-  schema: DefinitionPlan | null;
-  /**
-   * Whether its server code may hand files people can read to the
-   * workflows it binds (GRA-976): it declares a files resource with
-   * `read` and a bound workflow whose input can hold a file. Its
-   * pages' and server code's starts then copy the person's file into
-   * the run, as they may read it. Null when its manifest can't be read.
-   */
-  handsFilesToWorkflows: boolean | null;
-  /**
-   * Whether its server code and pages read the organization's people
-   * (`permissions: { people: true }`, GRA-1474): every member's name, email and
-   * teams, for whoever uses it. No admin approves it; its reviewer sees
-   * it. Null when its manifest can't be read.
-   */
-  readsPeople: boolean | null;
-  /**
-   * Who sees and changes which rows of its tables, for each table that
-   * declares row rules (`defineTable(...).access`, GRA-1482). `read`: its
-   * read rules, or null for reading left to the table's access mode.
-   * `write`: who changes its rows, as the store holds a write: its write
-   * rules; without them its read rules (for a write mode that reaches
-   * every row) or the owner (for an `owner` mode), each of the rows they
-   * can read too; null when nobody writes them (a `none` mode). A row
-   * reaches whoever any of a direction's rules admits. Null when its
-   * manifest can't be read.
-   */
-  rowRules: TableRowRules[] | null;
-  /**
-   * What the App asks for that no admin has granted yet: each waits for
-   * an admin, whether the version is made current or not.
-   */
-  permissions: Permission[];
-  /**
-   * What the App holds now, which the version's code uses once current;
-   * `askedAgain` for each that making it current would ask an admin for
-   * again, as this reviewer can't grant it (`AppVersionsApi.setCurrent`).
-   */
-  grants: { permission: Permission; askedAgain: boolean }[];
-  /**
-   * The workflows' grants to call the App's functions, which trust its
-   * code as its own grants do; `askedAgain` likewise. Only those this
-   * reviewer may see.
-   */
-  callers: { permission: Permission; askedAgain: boolean }[];
 }
 
 /**
@@ -551,34 +445,26 @@ export interface AppVersionsApi {
   get: (app: string, version: number) => Promise<AppVersion>;
   /** How the files of `to` differ from those of `from`, by path. */
   diff: (app: string, from: number, to: number) => Promise<FileDiff[]>;
-  /** Puts a version up for review. */
-  propose: (app: string, version: number) => Promise<App>;
   /**
-   * What a version changes against the current one (`VersionReview`),
-   * for its builders to review before they make it current.
+   * Publishes one of the App's versions again, to roll back to it (or a
+   * version that never was live, such as the first of an App created
+   * from a blueprint): published if it isn't yet (built, sealed and its
+   * tests run) and made live in one step, as `AppDraftsApi.publish`
+   * does. With `revision`, the draft's revision the person read, the
+   * draft is reset to it, its unpublished changes discarded
+   * (`app.conflict` once the draft moved since): what they confirm as
+   * they roll back. Without, the draft keeps its changes, which its next
+   * publish commits over the version live then. Given `expected`, the
+   * live version the person saw (null for none), only over it: once
+   * someone published another since,
+   * `app.conflict`, and that one stays live. Published by anyone but one
+   * of the organization's admins, the App's permissions that change
+   * things are asked for again (`AppDraftsApi.publish`).
    */
-  review: (app: string, version: number) => Promise<VersionReview>;
-  /**
-   * Makes a version the one that runs, after review or to roll back,
-   * publishing it first if it isn't yet (built, sealed and its tests run),
-   * then made current only over the version current as it began. By
-   * anyone but one of the organization's admins (Grasp staff too, and a
-   * rollback too), it asks again for the App's permissions on a
-   * connection or to start a workflow: they allow
-   * nothing until an admin grants them again, which approves the version
-   * they reviewed (`PermissionsApi.grant`). Code of a version no admin approved changes
-   * nothing, in a run that started on it too. Not for the first version
-   * of an App created from a blueprint, made current for the first time:
-   * it existed and was immutable when an admin granted its requests.
-   */
-  setCurrent: (
+  publish: (
     app: string,
     version: number,
-    /**
-     * The version the caller expects is current (null for none): refused
-     * as `app.conflict` when another is. Without it, whichever is current
-     * as the call begins.
-     */
+    revision?: number,
     expected?: number | null
   ) => Promise<App>;
   /**
@@ -814,10 +700,14 @@ export interface AppBlueprintsApi {
   mark: (app: string, version: number) => Promise<Blueprint>;
   /** Stops offering a blueprint. Its App's builders. */
   unmark: (blueprint: string) => Promise<void>;
-  /** Creates an App of the person's own from a blueprint. */
+  /**
+   * Creates an App of the person's own from a blueprint; with `project`,
+   * in that project, as `chats.newApp` makes one.
+   */
   create: (
     blueprint: string,
-    input: FromBlueprint
+    input: FromBlueprint,
+    project?: string
   ) => Promise<CreatedFromBlueprint>;
   /**
    * The newer code of the built-in the App was created from, merged over
@@ -826,7 +716,7 @@ export interface AppBlueprintsApi {
   update: (app: string) => Promise<BlueprintUpdate | null>;
   /**
    * Commits the update the builder saw as the App's next version, which
-   * is published and made current as any. Its builders.
+   * a builder then publishes (`AppVersionsApi.publish`). Its builders.
    */
   acceptUpdate: (app: string, accepted: AcceptedUpdate) => Promise<AppVersion>;
 }
@@ -867,21 +757,14 @@ export interface AppsApi {
    */
   definition: (app: string) => Promise<DefinitionPackage>;
   /**
-   * Publishes a draft for the people it is shared with, for its builders:
-   * refused with `app.no_version` while no version of it is current, and
-   * with `app.archived` once archived (restore it first). Audited; a
-   * published App is answered as it is.
-   */
-  publish: (app: string) => Promise<App>;
-  /**
    * Gives the App its own link (`appLinkSchema`), or takes it off with
    * `null`, for its builders: refused with `app.link_taken` when another
    * App has it, and `app.invalid_link` for one it can't be. Audited. The
-   * link opens the App only while it is published.
+   * link opens the App only while it is live.
    */
   setLink: (app: string, link: string | null) => Promise<App>;
   /**
-   * The App link `link` opens, for the person: only one that is published
+   * The App link `link` opens, for the person: only one that is live
    * and that they may use; any other is answered as no App at all
    * (`app.not_found`), so a link tells nothing of an App they can't open.
    */
@@ -920,11 +803,6 @@ export interface AppsApi {
     functions: string[]
   ) => Promise<AppVisitorGrants>;
   /**
-   * Takes a published App back to a draft, for its builders: the people
-   * it is shared with as users lose it, their open pages cleared.
-   */
-  unpublish: (app: string) => Promise<App>;
-  /**
    * Archives the App, for its builders: nobody opens its pages or calls
    * it, its triggers stop, and its unfinished runs are cancelled, each
    * audited. Its data, members and grants are kept for `restore`.
@@ -939,7 +817,7 @@ export interface AppsApi {
    */
   resetData: (app: string, name: string) => Promise<void>;
   /**
-   * Restores an archived App, for its builders, as a draft: refused with
+   * Restores an archived App, for its builders: refused with
    * `app.stops_pending` while runs it started are still being stopped.
    */
   restore: (app: string) => Promise<App>;
@@ -974,6 +852,7 @@ export interface AppsApi {
   readonly integrations: AppIntegrationsApi;
   readonly webhooks: AppWebhooksApi;
   readonly data: AppDataApi;
+  readonly drafts: AppDraftsApi;
 }
 
 /** Why a call to the App registry was refused. */
@@ -994,9 +873,9 @@ export const appErrors = defineErrorFamily({
   "app.version_not_found": "The App has no such version.",
   "app.too_large": "The App's files would be over its limits.",
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
+  "app.draft_empty": "The draft has no changes to publish.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
-  "app.no_version": "Make a version of the App current before publishing it.",
   "app.link_taken": "Another App has that link. Choose another.",
   "app.invalid_link":
     "A link is lower-case letters and digits with single dashes between them, at most 48, and none the workspace already has a page at.",
@@ -1010,25 +889,17 @@ export const appErrors = defineErrorFamily({
     "Only the App's owner or an admin of the organization removes it.",
   "app.stops_pending":
     "Runs the App started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
-  "app.not_published":
-    "The App isn't published, so other Apps and workflows can't call it.",
   "app.failed": "The App's server code failed.",
   "app.answer_invalid":
     "The App's server code answered with something other than plain data.",
-  "app.creates_exhausted":
-    "This chat created as many Apps as one question may. Tell the person what you made.",
   "app.no_workflows":
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
   "app.generated_file":
     "grasp.config.ts and server/schema.ts are the code Grasp generates from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission, renameFunction and their remove counterparts), never by writing them.",
   "app.definition_invalid":
     "The App's definition, from which its grasp.config.ts and server/schema.ts are generated, isn't valid.",
-  "app.chat_has_app":
-    "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.draft_failed":
     "The changes don't pass their checks yet. Ask Grasp in the chat to fix them, then publish.",
-  "app.not_in_chat":
-    "This chat neither changes that App nor is its chat, so it has no preview of it.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
   "app.preview_side_effect":

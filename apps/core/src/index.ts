@@ -5,6 +5,7 @@ import { handleRequest } from "./entry.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
 
 export { App } from "./app.ts";
+export { AppPreview } from "./app-preview.ts";
 export { Clock } from "./clock.ts";
 export { AuditLog } from "./audit-log.ts";
 export { ChatApi } from "./agent-apis.ts";

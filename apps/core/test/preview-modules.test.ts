@@ -19,7 +19,7 @@ import {
 } from "./page-frames.ts";
 import type { LoadedFrame, ModuleParts } from "./page-frames.ts";
 import { deskDraft, deskFiles } from "./preview-drafts.ts";
-import { chatsOf, chatWithDraft, refreshed } from "./previews.ts";
+import { chatWithDraft, previewOf, refreshed } from "./previews.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
 import {
   auditedDuring,
@@ -88,6 +88,20 @@ const before = async <T>(ago: number, run: () => Promise<T>): Promise<T> => {
   } finally {
     vi.useRealTimers();
   }
+};
+
+/** Another builder of `app`, which `owner` shares with them. */
+const anotherBuilder = async (
+  owner: Awaited<ReturnType<typeof signedInApi>>,
+  app: string
+) => {
+  const other = await signedInApi(idp, "builder");
+  await owner.api.apps.members.add(app, {
+    type: "person",
+    id: other.userId,
+    role: "builder",
+  });
+  return other;
 };
 
 const minute = 60 * 1000;
@@ -165,14 +179,8 @@ describe(
         })
       );
       const published = await framed(await builder.api.pages.open(app));
-      const { chatId } = await chatWithDraft(
-        builder,
-        app,
-        withComponent("Draft")
-      );
-      const preview = await framed(
-        await builder.api.chats.preview(chatId, app)
-      );
+      await chatWithDraft(builder, app, withComponent("Draft"));
+      const preview = await framed(await builder.api.apps.drafts.preview(app));
       const info = vi.spyOn(console, "info").mockReturnValue();
       let lines: string[] = [];
       try {
@@ -223,8 +231,8 @@ describe(
 
     it("refuses a module asked with no token, one that isn't core's, or one for another scope", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId } = await deskDraft(builder);
-      const frame = await framed(await builder.api.chats.preview(chatId, app));
+      const { app } = await deskDraft(builder);
+      const frame = await framed(await builder.api.apps.drafts.preview(app));
       const own = modulePartsOf(pageModuleOf(frame));
       const [expires = ""] = own.token.split(".");
       const kitAddress = Object.values(frame.addresses).find((address) =>
@@ -254,12 +262,12 @@ describe(
 
     it("holds a preview's token for at most an hour and a published build's for at most six", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId } = await deskDraft(builder);
+      const { app } = await deskDraft(builder);
       const previewAt = async (ago: number): Promise<ModuleParts> =>
         await before(ago, async () =>
           modulePartsOf(
             pageModuleOf(
-              await framed(await builder.api.chats.preview(chatId, app))
+              await framed(await builder.api.apps.drafts.preview(app))
             )
           )
         );
@@ -284,29 +292,26 @@ describe(
       });
     });
 
-    it("reads only modules of its own preview's scope: not another App's, nor another chat's draft's, by their hashes", async () => {
+    it("reads only modules of its own preview's scope: not another App's, nor another builder's preview's, by their hashes", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId } = await deskDraft(builder);
-      const own = await framed(await builder.api.chats.preview(chatId, app));
+      const { app } = await deskDraft(builder);
+      const own = await framed(await builder.api.apps.drafts.preview(app));
       // Another App of the same builder, published.
       const { id: otherId } = await builder.api.apps.create({ name: "Other" });
       await release(builder, otherId, deskFiles("Other"));
       const otherApp = await framed(await builder.api.pages.open(otherId));
-      // Another chat's draft of the same App.
-      const { chatId: otherChat } = await chatWithDraft(builder, app, {
-        "src/routes/index.tsx":
-          deskFiles("Elsewhere").files["src/routes/index.tsx"] ?? "",
-      });
-      const otherDraft = await framed(
-        await builder.api.chats.preview(otherChat, app)
-      );
+      // Another builder's preview of the same App's draft.
+      const other = await anotherBuilder(builder, app);
+      const otherDraft = await framed(await other.api.apps.drafts.preview(app));
       const mine = modulePartsOf(pageModuleOf(own));
       const theirs = [otherApp, otherDraft].map((frame) =>
         modulePartsOf(pageModuleOf(frame))
       );
       expect({
         own: await asked(mine),
-        // Its hash, under the frame's own scope and token: kept nowhere there.
+        // Its hash, under the frame's own scope and token: another App's
+        // kept nowhere there; another builder's preview of the same draft
+        // is the same code, staged under this scope too.
         underOwnScope: await Promise.all(
           theirs.map(async ({ hash }) => await asked({ ...mine, hash }))
         ),
@@ -318,7 +323,7 @@ describe(
         ),
       }).toStrictEqual({
         own: 200,
-        underOwnScope: [404, 404],
+        underOwnScope: [404, 200],
         underOwnToken: [403, 403],
       });
     });
@@ -356,15 +361,13 @@ describe(
 
     it("serves no module whose bytes were changed in R2, or moved there from another scope, and stages it again at the next update", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId, revision } = await deskDraft(builder);
-      const opened = await builder.api.chats.preview(chatId, app);
+      const { app, revision } = await deskDraft(builder);
+      const opened = await builder.api.apps.drafts.preview(app);
       const frame = await framed(opened);
-      const { chatId: otherChat } = await chatWithDraft(builder, app, {
-        "src/routes/index.tsx":
-          deskFiles("Elsewhere").files["src/routes/index.tsx"] ?? "",
-      });
+      // Another builder's preview of the same draft, in a scope of its own.
+      const otherBuilder = await anotherBuilder(builder, app);
       const other = await framed(
-        await builder.api.chats.preview(otherChat, app)
+        await otherBuilder.api.apps.drafts.preview(app)
       );
       const address = pageModuleOf(frame);
       const key = moduleKeyOf(address);
@@ -392,7 +395,7 @@ describe(
       await tamper();
       const tampered = await routed(pathOf(address));
       const removed = (await env.FILES.head(key)) === null;
-      // Or moves another chat's module into this scope, with its MAC.
+      // Or moves another preview's module into this scope, with its MAC.
       const elsewhere = await env.FILES.get(moduleKeyOf(pageModuleOf(other)));
       const otherHash = modulePartsOf(pageModuleOf(other)).hash;
       const moved = modulePath({ ...modulePartsOf(address), hash: otherHash });
@@ -404,8 +407,7 @@ describe(
       const movedResponse = await routed(moved);
       const movedServed = movedResponse.status;
       // The next update stages what it loads again, from core's own build.
-      const updated = await builder.api.chats.previewUpdate(
-        chatId,
+      const updated = await builder.api.apps.drafts.previewUpdate(
         app,
         revision,
         {}
@@ -440,10 +442,10 @@ describe(
 
     it("refuses a frame opened over an hour ago its next update's modules, which a frame opened again reads", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId, revision, write } = await deskDraft(builder);
+      const { app, revision, write } = await deskDraft(builder);
       const frame = await before(
         61 * minute,
-        async () => await framed(await builder.api.chats.preview(chatId, app))
+        async () => await framed(await builder.api.apps.drafts.preview(app))
       );
       const next = await write(
         {
@@ -452,17 +454,14 @@ describe(
         },
         revision
       );
-      const updated = await builder.api.chats.previewUpdate(
-        chatId,
+      const updated = await builder.api.apps.drafts.previewUpdate(
         app,
         next,
         {}
       );
       const hash = refreshed(updated).entry;
       // What the page does on the frame's `reset`: opens it again.
-      const reopened = await framed(
-        await builder.api.chats.preview(chatId, app)
-      );
+      const reopened = await framed(await builder.api.apps.drafts.preview(app));
       expect({
         expired: await asked({ ...modulePartsOf(frame.page.entry), hash }),
         reopened: await asked({
@@ -498,7 +497,7 @@ describe(
 
     it("mints no token for Grasp staff, and records each ask for a page's frame or a preview's", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId } = await deskDraft(builder);
+      const { app } = await deskDraft(builder);
       const session = await signedIn(idp, "grasp-staff", staffPerson());
       const { core } = await openRpc(session);
       const staff = core.authenticate();
@@ -507,21 +506,21 @@ describe(
         async () => {
           answers.push(
             await outcome(staff.pages.open(app)),
-            await outcome(staff.chats.preview(chatId, app))
+            await outcome(staff.apps.drafts.preview(app))
           );
         },
         { staffAccesses: true }
       );
       expect({ answers, surfaces: staffSurfaces(events) }).toStrictEqual({
         answers: ["role.forbidden", "role.forbidden"],
-        surfaces: ["pages.open", "chats.preview"],
+        surfaces: ["pages.open", "appDrafts.preview"],
       });
     });
 
     it("serves a module privately and immutably, and lets neither it nor its frame send a referrer", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId } = await deskDraft(builder);
-      const opened = await builder.api.chats.preview(chatId, app);
+      const { app } = await deskDraft(builder);
+      const opened = await builder.api.apps.drafts.preview(app);
       const frame = await framed(opened);
       const own = modulePartsOf(pageModuleOf(frame));
       const [document, served, refused, missing] = await Promise.all([
@@ -553,28 +552,22 @@ describe(
 
     it("keeps no token from a reported stack or message in the App's error log or a preview's reports", async () => {
       const builder = await signedInApi(idp, "builder");
-      const { app, chatId, revision } = await deskDraft(builder);
-      const frame = await framed(await builder.api.chats.preview(chatId, app));
+      const { app, revision } = await deskDraft(builder);
+      const frame = await framed(await builder.api.apps.drafts.preview(app));
       const published = await framed(await builder.api.pages.open(app));
       await builder.api.pages.report(
         app,
         { version: 1, path: "/" },
         problemOf(pageModuleOf(published))
       );
-      await builder.api.chats.previewReport(
-        chatId,
+      await builder.api.apps.drafts.previewReport(
         app,
         revision,
         "/",
         problemOf(pageModuleOf(frame))
       );
       const { entries } = await builder.api.pages.errors(app);
-      const reported = await chatsOf(builder).previewReports(
-        chatId,
-        app,
-        revision,
-        0
-      );
+      const reported = await previewOf(app).reports(revision, 0);
       const tokens = [published, frame].map(
         (opened) => modulePartsOf(pageModuleOf(opened)).token
       );

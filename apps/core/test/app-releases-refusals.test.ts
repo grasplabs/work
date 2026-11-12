@@ -5,7 +5,13 @@ import { z } from "zod";
 
 import { publishVersion } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
-import { createApp, draftOverLatest, proposeDraft } from "../src/apps.ts";
+import {
+  commitDraft,
+  createApp,
+  draftDefinition,
+  draftFiles,
+  nextVersion,
+} from "../src/apps.ts";
 import { deleteStore, openStore } from "../src/data-stores.ts";
 import { buildAppCode } from "../src/pages.ts";
 import {
@@ -340,25 +346,26 @@ export const reach = action({
 
   it("is an App of spec 8's layout: a draft that drops its schema gets it back from its definition", async () => {
     const fixture = await appWith(notesFiles());
-    const draft = await draftOverLatest(env, fixture.app, {
+    const changes = {
       base: 1,
       changes: { "server/schema.ts": null },
       definition: null,
-    });
+    };
+    const defined = await draftDefinition(env, fixture.app, changes);
+    const draft = {
+      parent: 1,
+      version: await nextVersion(env, fixture.app),
+      files: await draftFiles(env, fixture.app, changes),
+      definition: defined?.definition ?? null,
+    };
     await expect(
       failure(
         async () =>
-          await proposeDraft(
-            env,
-            fixture.owner,
-            fixture.app,
-            draft,
-            "No schema"
-          )
+          await commitDraft(env, fixture.owner, fixture.app, draft, "No schema")
       )
       // Its schema generated from its definition again: the version it
       // would commit is the one it is over.
-    ).resolves.toBe("app.nothing_to_commit");
+    ).resolves.toBe("app.draft_empty");
   });
 
   it("can't keep anything but server code under server/: each is refused by name", async () => {

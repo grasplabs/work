@@ -54,9 +54,9 @@ import { buildsApp } from "./app-role.ts";
 
 /** Whether `identity` may share `app`: a builder of it, while it isn't archived. */
 export const sharesApp = (
-  app: Pick<App, "status"> & { role: AppRole },
+  app: Pick<App, "archived"> & { role: AppRole },
   identity: Pick<Identity, "staff">
-): boolean => buildsApp(app, identity) && app.status !== "archived";
+): boolean => buildsApp(app, identity) && !app.archived;
 
 /** How a member is named: a team, and everyone in a project, say so. */
 interface MemberWords {
@@ -163,7 +163,10 @@ export const ShareApp = ({
         roleHeading={<Trans>Share as</Trans>}
         roleName={t`Role to share with`}
       >
-        <Trans>Share</Trans>
+        {/* Its icon alone where its bar is narrow (frame/item-shell.tsx). */}
+        <span className="@max-4xl/bar:sr-only">
+          <Trans>Share</Trans>
+        </span>
       </SharePicker>
       <ErrorText>{failure}</ErrorText>
     </div>

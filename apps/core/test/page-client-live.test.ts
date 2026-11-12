@@ -244,7 +244,7 @@ describe("live queries", { timeout: 120_000 }, () => {
     }).toStrictEqual({ value: undefined, code: "app.not_found" });
   });
 
-  it("ends a page's live queries once its App is unpublished or archived, with nothing written to set them off", async () => {
+  it("ends a page's live queries once its App is archived, its builders' included, with nothing written to set them off", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const member = await personApi("builder");
@@ -272,34 +272,25 @@ describe("live queries", { timeout: 120_000 }, () => {
       ]);
     });
 
-    // A draft is its builders' alone: its users' pages stop.
-    await opened.builder.api.apps.unpublish(opened.app);
-    await vi.waitFor(
-      () => {
-        expect(theirs.now().error).toBeDefined();
-      },
-      { timeout: 10_000, interval: 250 }
-    );
-    const draftForBuilder = builders.now().error?.code;
     // Nobody uses an archived App, its builders included.
     await opened.builder.api.apps.archive(opened.app);
     await vi.waitFor(
       () => {
-        expect(builders.now().error).toBeDefined();
+        expect([theirs.now().error, builders.now().error]).not.toContain(
+          undefined
+        );
       },
       { timeout: 10_000, interval: 250 }
     );
 
     expect({
       user: { value: theirs.now().value, code: theirs.now().error?.code },
-      draftForBuilder,
       builder: {
         value: builders.now().value,
         code: builders.now().error?.code,
       },
     }).toStrictEqual({
       user: { value: undefined, code: "app.not_found" },
-      draftForBuilder: undefined,
       // Cleared as for anyone who lost the App, before anything more reaches it.
       builder: { value: undefined, code: "app.not_found" },
     });
@@ -797,7 +788,7 @@ export const glance = query({
       }),
       "Second"
     );
-    await opened.builder.api.apps.versions.setCurrent(opened.app, version);
+    await opened.builder.api.apps.versions.publish(opened.app, version);
     await client.mutation(api.create, { title: "Second" });
     await shows(2);
     await client.mutation(api.create, { title: "Third" });

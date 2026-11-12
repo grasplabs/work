@@ -107,7 +107,7 @@ describe(
       await fakeProvider(
         codeStep(`export default async (self, env) => {
           const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-          await env.build.write(app.id, ${JSON.stringify(agentWritten(drafted))});
+          await env.build.write(app.id, ${JSON.stringify(agentWritten(drafted))}, { revision: (await env.build.files(app.id)).revision });
           const created = await env.build.call(app.id, "notes.create", { title: "Invoice 7" });
           // Checked as proposing it would, without proposing it.
           const { preview } = await env.build.check(app.id);

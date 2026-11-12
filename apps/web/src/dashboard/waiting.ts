@@ -5,7 +5,6 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type {
   BindingApprovalItem,
-  GoLiveItem,
   SignInAgainItem,
   WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
@@ -30,8 +29,6 @@ export interface Waiting {
   notifications: Loaded<NotificationsPage>;
   /** Connections whose access ran out, among those the person may sign in to again. */
   reconnect: Loaded<SignInAgainItem[]>;
-  /** Versions of Apps the person answers for, up for review. */
-  versions: Loaded<GoLiveItem[]>;
   /** Admins only. */
   requests: Loaded<PendingRequests> | undefined;
   /** Decisions of workflows' runs that wait for the person's answer. */

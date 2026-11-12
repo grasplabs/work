@@ -298,7 +298,7 @@ const BindingChoice = ({
       <Link
         className="underline-offset-4 hover:underline"
         params={{ workflow: elsewhere }}
-        search={{ tab: "files" }}
+        search={{ view: "settings", section: "files" }}
         to="/workflows/$workflow"
       >
         <Trans>Approve it on the workflow&apos;s page</Trans>

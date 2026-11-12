@@ -1023,7 +1023,7 @@ const inspectForSeal = async (
   key: { app: AppId; version: number },
   files: Readonly<Record<string, string>>,
   definition: AppDefinition,
-  /** `preview` for a chat's draft. */
+  /** `preview` for the App's draft. */
   profile: BuildProfile
 ): Promise<InspectedRelease> => {
   // The SDK read once: the modules the inspection runs with are the
@@ -1220,7 +1220,7 @@ export interface SealedDraft extends StoredDraft {
 }
 
 /**
- * Seals `files` and `definition`, a chat's draft of `key.app`, as the
+ * Seals `files` and `definition`, the draft of App `key.app`, as the
  * release of the version it would become (`key.version`), exactly as
  * `sealRelease` seals a version (see the header), but bound to no store
  * and stored nowhere: its keeper (draft-runs.ts) keeps what this answers,

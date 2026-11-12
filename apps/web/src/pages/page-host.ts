@@ -52,10 +52,11 @@ import type { FrameLink, Joined } from "./tab-link.ts";
 // person's session and role on every call; the page binds the bridge to
 // one App, which the frame can't change.
 //
-// A preview of a chat's draft (`runPreview`) runs the same way, in the same
+// A preview of an App's draft (`runPreview`) runs the same way, in the same
 // frame, with its bridge bound to the draft instead: its server calls go to
 // the draft's preview in core, which has no side effects; what its page
-// reports goes to the chat's agent; and its calls on the App's workflow
+// reports goes to the agent's next check of the draft, whoever's chat
+// wrote it; and its calls on the App's workflow
 // runs start nothing and find none.
 //
 // Nothing the frame sends or its App answers is ever read as the platform
@@ -115,14 +116,19 @@ export type PageState =
   | { status: "loading" }
   | { status: "running" }
   /**
-   * A chat's preview whose draft ran into a problem (it doesn't build,
+   * The App's preview whose draft ran into a problem (it doesn't build,
    * or its page failed): it shows the last version that worked while
    * the agent fixes it.
    */
   | { status: "fixing" }
   | { status: "updated" }
   | { status: "signed-out" }
-  | { status: "failed"; reason: FailureReason };
+  /**
+   * `detail`: what core or the browser said of it, for the technical
+   * details the person may open (`FrameFailure`), when there was more
+   * than the reason.
+   */
+  | { status: "failed"; reason: FailureReason; detail?: string };
 
 export type FailureReason =
   | "forbidden"
@@ -163,7 +169,6 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "app.unreadable": "forbidden",
   "permission.person_inactive": "forbidden",
   "app.not_found": "not-found",
-  "app.not_in_chat": "not-found",
   "page.not_found": "not-found",
   "page.invalid": "not-found",
   "app.not_running": "not-running",
@@ -214,6 +219,22 @@ const refusalCode = (error: unknown): string | undefined => {
       ? Reflect.get(error, "code")
       : undefined;
   return typeof code === "string" ? code : undefined;
+};
+
+/** The failed state `error` leaves a frame in, with what it said. */
+const failedWith = (
+  error: unknown
+): Extract<PageState, { status: "failed" }> => {
+  const code = refusalCode(error);
+  const message = error instanceof Error ? error.message : undefined;
+  const detail = [code, message]
+    .filter((part) => part !== undefined && part !== "")
+    .join(": ");
+  return {
+    status: "failed",
+    reason: failureOf(error),
+    ...(detail === "" ? {} : { detail }),
+  };
 };
 
 /**
@@ -764,6 +785,12 @@ const refusedInPreview = async (): Promise<never> => {
  */
 export interface PreviewFollow {
   problem: () => void;
+  /**
+   * A call or query was refused as the preview's test data doesn't fit
+   * the draft's data model (`testDataRefusals`): resetting it lets the
+   * change apply.
+   */
+  testDataStale?: () => void;
   followUpdates: NonNullable<FrameTarget["followUpdates"]>;
   /** The build of the page code the frame runs now (preview-updates.ts). */
   runningAt: () => PreviewAt;
@@ -777,6 +804,26 @@ const failedByDraft = (answer: unknown): boolean => {
       ? Reflect.get(error, "code")
       : undefined;
   return typeof code === "string" && isDraftFault(code);
+};
+
+/**
+ * How the preview's store refuses a change of the draft's data model its
+ * test data doesn't fit: until a builder resets the test data.
+ */
+const testDataRefusals: ReadonlySet<string> = new Set([
+  "migration.required",
+  "migration.backfill_failed",
+  "migration.rollback_incompatible",
+]);
+
+/** Whether `answer`, a preview call's or push, was refused as its test data doesn't fit. */
+const refusedForTestData = (answer: unknown): boolean => {
+  const error = refusalOf(answer);
+  const code: unknown =
+    typeof error === "object" && error !== null
+      ? Reflect.get(error, "code")
+      : undefined;
+  return typeof code === "string" && testDataRefusals.has(code);
 };
 
 /** A live query the frame follows in a preview, followed again at each revision. */
@@ -827,12 +874,11 @@ const releaseWatch = async (
 };
 
 /**
- * A preview of the chat's draft: what its page reports to the chat's
- * agent; it starts no workflow run, finds none, and follows none. Its
- * function calls, streams and live queries go where every page's go, under
- * the bundle's lease, which names the builder's draft (core's
- * page-calls.ts): they run on the draft as it is, on a store of the
- * preview's own. A version of the draft opened read-only has no lease:
+ * A preview of the App's draft: what its page reports to the agent; it
+ * starts no workflow run, finds none, and follows none. Its function
+ * calls, streams and live queries go where every page's go, under the
+ * bundle's lease, which names the App's draft (core's page-calls.ts): they
+ * run on the draft as it is, on the App's preview's test data. A version of the draft opened read-only has no lease:
  * nothing it calls runs (`app.preview_outdated`).
  *
  * Once the frame takes a newer revision (`moved`), its live queries are
@@ -841,7 +887,6 @@ const releaseWatch = async (
  */
 export const previewTarget = (
   link: FrameLink,
-  chatId: string,
   bundle: PreviewBundle,
   location: FrameLocation,
   follow?: PreviewFollow
@@ -898,6 +943,9 @@ export const previewTarget = (
         if (!current()) {
           return null;
         }
+        if (refusedForTestData(push)) {
+          follow?.testDataStale?.();
+        }
         const numbered = renumbered(push, after);
         const at: unknown =
           typeof numbered === "object" && numbered !== null
@@ -943,6 +991,9 @@ export const previewTarget = (
       if (failedByDraft(answer)) {
         follow?.problem();
       }
+      if (refusedForTestData(answer)) {
+        follow?.testDataStale?.();
+      }
       return answer;
     },
     streamFunction: async (what, request, onFrame, onEnded) => {
@@ -973,8 +1024,8 @@ export const previewTarget = (
       if (problem.kind !== "warning") {
         follow?.problem();
       }
-      await on(link, async ({ chats }) => {
-        await chats.previewReport(chatId, app, at, location.current(), problem);
+      await on(link, async ({ apps }) => {
+        await apps.drafts.previewReport(app, at, location.current(), problem);
       });
     },
     ...(follow === undefined ? {} : { followUpdates: follow.followUpdates }),
@@ -1300,7 +1351,7 @@ const runFrame = <Bundle extends FrameCode>(
       fail(
         authErrors.codeOf(error) === "auth.unauthenticated"
           ? { status: "signed-out" }
-          : { status: "failed", reason: failureOf(error) }
+          : failedWith(error)
       );
     }
   };
@@ -1400,13 +1451,12 @@ export const appPage = (
             });
             // The person lost the App (it was unshared, or is gone): the
             // page stops, its frame emptied, as its calls would be
-            // refused from now on, and whatever holds it (the shell's
-            // panel) can let it go. No new version is offered then.
+            // refused from now on. No new version is offered then.
             const code = refusalCode(error);
             if (code === "auth.unauthenticated") {
               setState({ status: "signed-out" });
             } else if (code !== undefined && endingCodes.has(code)) {
-              setState({ status: "failed", reason: failureOf(error) });
+              setState(failedWith(error));
             }
             return;
           }
@@ -1456,38 +1506,33 @@ export const runPage = (
   );
 
 /**
- * The newest revision of a chat's draft as the page hears of it, for the
+ * The newest revision of an App's draft as the page hears of it, for the
  * preview open now to take (`runPreview`): `latest`, and who hears of
  * each newer one, while a preview takes them.
  */
 export interface DraftRevisions {
   latest: number | undefined;
   listener: ((revision: number) => void) | undefined;
-  /**
-   * Told what the frame shows: the App's version, if one
-   * (`PreviewRefresh.appVersion`), as core opens it and as each update
-   * comes in.
-   */
-  onShows?: ((appVersion: number | undefined) => void) | undefined;
+  /** Told the preview's test data doesn't fit the draft's data model (`PreviewFollow`). */
+  onTestDataStale?: (() => void) | undefined;
 }
 
 /**
- * Runs the pages of the chat's draft of `app` in `frame`, as a preview
- * (`runFrame`), at `location`: of its draft's `version`, read-only. The
- * draft as it is
- * now takes each newer revision `revisions` names in the frame it has
+ * Runs the pages of the draft of `app` in `frame`, as a preview
+ * (`runFrame`), at `location`: of the draft's undo point `point`, or of
+ * the App's version `version`, read-only. The draft as it is now takes each newer revision `revisions` names in the frame it has
  * open (preview-updates.ts); one that can't come in that way starts the
  * frame afresh, as a new version of an App does (`updated`).
  */
 export const runPreview = (
   frame: HTMLIFrameElement,
   {
-    chatId,
     app,
+    point,
     version,
   }: {
-    chatId: string;
     app: string;
+    point?: number;
     version?: number;
   },
   location: FrameLocation,
@@ -1510,16 +1555,8 @@ export const runPreview = (
   return runFrame(
     frame,
     {
-      open: async (session) => {
-        const bundle = await session.chats.preview(
-          chatId,
-          app,
-          ...(version === undefined ? [] : [version])
-        );
-        // What core opened, as soon as it said (studio.tsx).
-        revisions?.onShows?.(bundle.refresh?.appVersion);
-        return bundle;
-      },
+      open: async (session) =>
+        await session.apps.drafts.preview(app, point, version),
       openMs: pageLimits.previewOpenMs,
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
@@ -1530,7 +1567,7 @@ export const runPreview = (
       connect: (link, bundle, _refused, cleanups) => {
         const opened = bundle.refresh;
         if (opened === undefined || revisions === undefined) {
-          const target = previewTarget(link, chatId, bundle, location);
+          const target = previewTarget(link, bundle, location);
           cleanups.push(target.close);
           return { target };
         }
@@ -1547,9 +1584,8 @@ export const runPreview = (
             fetch: async (revision, appVersion) =>
               await on(
                 link,
-                async ({ chats }) =>
-                  await chats.previewUpdate(
-                    chatId,
+                async ({ apps }) =>
+                  await apps.drafts.previewUpdate(
                     bundle.app,
                     revision,
                     appVersion === undefined ? {} : { appVersion }
@@ -1567,9 +1603,6 @@ export const runPreview = (
             moved: (next) => {
               moves.to?.(next);
             },
-            shows: (appVersion) => {
-              revisions.onShows?.(appVersion);
-            },
           },
           bundle.fallback === true
         );
@@ -1583,9 +1616,12 @@ export const runPreview = (
             updates.again();
           }
         });
-        const target = previewTarget(link, chatId, bundle, location, {
+        const target = previewTarget(link, bundle, location, {
           problem: () => {
             updates.problem();
+          },
+          testDataStale: () => {
+            revisions?.onTestDataStale?.();
           },
           followUpdates: (toFrame) => {
             updates.follow(toFrame);

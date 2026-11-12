@@ -8,7 +8,7 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { AppErrorPayload } from "@grasp-os/shared/functions";
 import { readAtMost } from "@grasp-os/shared/http";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -39,7 +39,7 @@ import { visitorCall, visitorStatusFor } from "./app-visitors.ts";
 import { currentVersionOf } from "./apps.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
 import { callDraftOn } from "./draft-runs.ts";
-import { workspace } from "./durable-objects.ts";
+import { appPreview } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import {
   delivering,
@@ -49,7 +49,6 @@ import {
 } from "./page-delivery.ts";
 import type { PageLease } from "./page-delivery.ts";
 import { admitted } from "./pages-rpc.ts";
-import { personalWorkspaceId } from "./personal-workspace.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { routeMember } from "./staff-audit.ts";
@@ -339,23 +338,19 @@ const buildOf = (lease: PageLease | undefined) =>
   lease?.kind === "release" ? lease.build : undefined;
 
 /**
- * The draft a call's lease names, if it names one: its chat, and its
- * preview's seed now, which a draft action's invocation is named by, so
- * one kept from before its data was dropped is never found again. Refused
- * once the chat is gone (`agent.chat_not_found`).
+ * The draft a call's lease names, if it names one: the App's preview's
+ * seed now, which a draft action's invocation is named by, so one kept
+ * from before its test data was reset is never found again.
  */
 const draftOf = async (
   env: Env,
-  { person, id, lease }: AdmittedCall
-): Promise<{ chatId: ChatId; seed: string } | undefined> => {
+  { id, lease }: AdmittedCall
+): Promise<{ seed: string } | undefined> => {
   if (lease?.kind !== "draft") {
     return undefined;
   }
-  const seed = await workspace(
-    env,
-    personalWorkspaceId(person.userId)
-  ).previewSeed(lease.chatId, person.userId, id);
-  return { chatId: lease.chatId, seed };
+  const { seed } = await appPreview(env, id).run();
+  return { seed };
 };
 
 /**
@@ -480,7 +475,7 @@ const keyedAnswer = async (
     by: { userId: person.userId, role: person.role, teams: person.teams },
     access,
     app: id,
-    ...(draft === undefined ? {} : { draft: draft.chatId }),
+    ...(draft === undefined ? {} : { draft: true as const }),
     name,
     call,
     streaming: false,
@@ -566,7 +561,7 @@ const memberCall = async (
   const deadline = Date.now() + pageCallMs;
   if (lease?.kind === "draft") {
     return withinFrame(
-      await callDraftOn(env, person, { app: id, chatId: lease.chatId }, body, {
+      await callDraftOn(env, person, id, body, {
         deadline,
       })
     );
@@ -866,7 +861,7 @@ const appStreamResponse = async (
       by: { userId: person.userId, role: person.role, teams: person.teams },
       access,
       app: id,
-      ...(draft === undefined ? {} : { draft: draft.chatId }),
+      ...(draft === undefined ? {} : { draft: true as const }),
       name,
       call,
       streaming: true,

@@ -4,7 +4,8 @@
  * so every page has something to show and shows what the prototype does:
  * the company's name, people in teams and roles, the onboarding's roster and plan, the
  * prototype's Apps with the workflows core can run, 30 days of their
- * runs and pages over them (scripts/seed/pages.ts), Knowledge, and
+ * runs, a page over each App's own records (scripts/seed/pages.ts),
+ * Knowledge, and
  * chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
@@ -46,7 +47,8 @@ import {
   signInAs,
 } from "./seed/local.ts";
 import type { Session } from "./seed/local.ts";
-import { appPages } from "./seed/pages.ts";
+import { boardCsv, boards } from "./seed/pages.ts";
+import type { Board } from "./seed/pages.ts";
 import { seedRuns } from "./seed/runs.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -245,23 +247,25 @@ const seedCollection = async (
 };
 
 /**
- * Brings an App seeded before it had its pages, or with older ones, to
- * the seed's pages, as its next version made current. Only the seed's
- * own change is made current: a later version that holds exactly the
- * current one plus the seed's pages (a seed stopped before making it
- * current) is reused; one with anyone else's changes is left alone, and
- * so is the App, as committing over it would release them.
+ * Brings an App seeded before it had its board, or with an older one, to
+ * the seed's, as its next version published with the definition that
+ * holds its table. Only the seed's own change is published: a later
+ * version that holds exactly the live one plus the seed's files (a seed
+ * stopped before publishing it) is published; one with anyone else's
+ * changes is left alone, and so is the App, as committing over it would
+ * release them.
  */
-const upgradePages = async (
+const upgradeBoard = async (
   owner: Session,
   adminSession: Session,
   app: { id: string; name: string; currentVersion: number | null },
-  pages: Readonly<Record<string, string>>
+  seed: AppSeed
 ): Promise<void> => {
   const current = app.currentVersion ?? undefined;
   const files = await owner.api.apps.files.read(app.id, current);
+  const wanted = appFiles(seed);
   const changed = Object.fromEntries(
-    Object.entries(pages).filter(([path, code]) => files[path] !== code)
+    Object.entries(wanted).filter(([path, code]) => files[path] !== code)
   );
   if (Object.keys(changed).length === 0) {
     return;
@@ -269,23 +273,55 @@ const upgradePages = async (
   const [latest] = await owner.api.apps.versions.list(app.id);
   if (latest !== undefined && latest.version !== current) {
     const later = await owner.api.apps.files.read(app.id, latest.version);
-    const upgraded = { ...files, ...pages };
-    const paths = new Set([...Object.keys(later), ...Object.keys(upgraded)]);
-    if ([...paths].some((path) => later[path] !== upgraded[path])) {
+    if (Object.entries(changed).some(([path, code]) => later[path] !== code)) {
       console.warn(
-        `${app.name} has a version that isn't current, with changes of its own: its pages are left as they are.`
+        `${app.name} has a version that isn't live, with changes of its own: its board is left as it is.`
       );
       return;
     }
-    await adminSession.api.apps.versions.setCurrent(app.id, latest.version);
+    await adminSession.api.apps.versions.publish(app.id, latest.version);
     return;
   }
   const { version } = await owner.api.apps.files.commit(
     app.id,
     changed,
-    "Add the App's pages"
+    "Add the App's board",
+    JSON.parse(appDefinitionText(appDefinition(seed)))
   );
-  await adminSession.api.apps.versions.setCurrent(app.id, version);
+  await adminSession.api.apps.versions.publish(app.id, version);
+};
+
+/**
+ * The records of an App's board, imported by its owner while its table
+ * has none.
+ */
+const seedBoardRecords = async (
+  owner: Session,
+  app: string,
+  board: Board
+): Promise<void> => {
+  const { currentVersion } = await owner.api.apps.get(app);
+  if (currentVersion === null) {
+    return;
+  }
+  const { records } = await owner.api.apps.data.records(
+    app,
+    board.table,
+    currentVersion,
+    null
+  );
+  if (records.length > 0) {
+    return;
+  }
+  const result = await owner.api.apps.data.import(app, board.table, {
+    version: currentVersion,
+    ...boardCsv(board),
+  });
+  if (!result.ok) {
+    throw new Error(
+      `${board.table} didn't import: ${result.errors.map(({ message }) => message).join("; ")}`
+    );
+  }
 };
 
 /** A workflow's name in the organization, as an error says it is taken. */
@@ -430,8 +466,8 @@ const seedStartPermissions = async (
 
 /**
  * An App: created by its owner with its workflows and pages, its version
- * made current by an admin,
- * shared with its teams, its workflows' owners and deciders set, and,
+ * published by an admin, shared with its teams, its workflows' owners and
+ * deciders set, and,
  * while it has none, its runs. Returns its ID, and how many runs it got.
  */
 const seedApp = async (
@@ -451,7 +487,7 @@ const seedApp = async (
     }));
   // Someone archived it: it is read-only, and restoring it is their
   // decision. The seed leaves it as it is.
-  if (app.status === "archived") {
+  if (app.archived) {
     console.warn(`${app.name} is archived: the seed leaves it as it is.`);
     return { id: app.id, runs: 0 };
   }
@@ -459,13 +495,6 @@ const seedApp = async (
   if (app.process === null) {
     await owner.api.apps.update(app.id, { process: seed.process });
   }
-  // Its one page, the App's `/`.
-  const pages = Object.fromEntries(
-    Object.values(appPages[seed.name] ?? {}).map((code) => [
-      "src/routes/index.tsx",
-      code,
-    ])
-  );
   const workflowIds = new Map<string, string>();
   for (const workflow of seed.workflows) {
     workflowIds.set(
@@ -488,31 +517,29 @@ const seedApp = async (
     }
     const { version } = await owner.api.apps.files.commit(
       app.id,
-      appFiles(seed, pages),
-      "Release the App's workflows and pages",
+      appFiles(seed),
+      "Release the App's workflows and board",
       JSON.parse(appDefinitionText(appDefinition(seed)))
     );
-    // An admin makes it current, which approves its code, once its
-    // workflow tests pass.
-    await adminSession.api.apps.versions.setCurrent(app.id, version);
-  } else if (Object.keys(pages).length > 0) {
-    // Its pages need the App's own files and workflow bindings:
-    // one seeded before them keeps the pages it has (nothing has
-    // shipped, so no seed migrates it; reset local data to seed it anew).
+    // An admin publishes it, which approves its code, once its workflow
+    // tests pass: live, the people it is shared with use it.
+    await adminSession.api.apps.versions.publish(app.id, version);
+  } else {
+    // Its board needs the App's own files and workflow bindings: one
+    // seeded before them keeps what it has (nothing has shipped, so no
+    // seed migrates it; reset local data to seed it anew).
     const files = await owner.api.apps.files.read(app.id, app.currentVersion);
-    if (files["grasp.config.ts"] === appFiles(seed, pages)["grasp.config.ts"]) {
-      await upgradePages(owner, adminSession, app, pages);
+    if (files["grasp.config.ts"] === appFiles(seed)["grasp.config.ts"]) {
+      await upgradeBoard(owner, adminSession, app, seed);
     } else {
       console.warn(
-        `${app.name} was seeded before its independent workflows: its pages are left as they are. Reset local data to seed it again.`
+        `${app.name} was seeded before its independent workflows: its board is left as it is. Reset local data to seed it again.`
       );
     }
   }
-  // Published, so the people it is shared with use it, once it has a
-  // version current: only an App this run created. One it found is left
-  // as someone left it, a draft they took it back to included.
-  if (existing === undefined) {
-    await adminSession.api.apps.publish(app.id);
+  const board = boards[seed.name];
+  if (board !== undefined) {
+    await seedBoardRecords(owner, app.id, board);
   }
   const shared = await owner.api.apps.members.list(app.id);
   for (const { team, role } of seed.teams) {

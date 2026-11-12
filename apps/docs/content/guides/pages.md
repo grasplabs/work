@@ -126,7 +126,7 @@ Anyone the App is shared with can open any of its routes from a link, with any p
 
 ## Where Grasp shows a Page
 
-A Page without parameters can also show elsewhere in Grasp: as an entry in the sidebar, in the side panel beside a chat, or as the App's own settings. Its file says so:
+A Page without parameters can also show elsewhere in Grasp: as an entry in the sidebar, or as the App's own settings. Its file says so:
 
 ```tsx src/routes/settings.tsx
 import { createFileRoute } from "@tanstack/react-router";
@@ -138,7 +138,7 @@ const Settings = () => <main className="p-6">Options</main>;
 export const Route = createFileRoute("/settings")({ component: Settings });
 ```
 
-`kind` is `sidebar`, `panel` or `settings`, and both values are written out: Grasp reads them without running your code.
+`kind` is `sidebar` or `settings`, and both values are written out: Grasp reads them without running your code.
 
 ## Who is using it
 

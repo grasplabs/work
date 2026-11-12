@@ -20,18 +20,18 @@ import {
 import type { LoadedFrame } from "./page-frames.ts";
 import { notesFiles, previewDraftsOf } from "./preview-drafts.ts";
 import {
-  chatsOf,
   chatWithDraft,
   outcome,
   previewCall,
+  previewOf,
   previewStores,
   requestFor,
   refreshed,
 } from "./previews.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// A chat's preview taking each write of its draft in the frame it has
-// open (chats.previewUpdate, spec 19.2.1): the page as one module for
+// A person's preview taking each write of an App's draft in the frame
+// they have open (apps.drafts.previewUpdate, spec 19.2.1): the page as one module for
 // React Fast Refresh, built without staging a frame or sealing anything
 // when only pages changed. The ways it can fail, from the threat model
 // in core's page-frame.ts: the frame handed another App's module, or
@@ -40,7 +40,7 @@ import { signedInApi } from "./sign-in.ts";
 // updates; a write of a page throwing away what the preview's store
 // holds, or sealing the draft again; a frame kept on the last version
 // that worked losing its server calls and live data; a preview opened
-// from someone else's chat; builds started for every ask; and a write
+// by someone who doesn't build the App; builds started for every ask; and a write
 // the seal does read taken for one it doesn't; a frame's live data lost,
 // or told the App is gone, as the draft's server code changes; and a
 // frame stuck while the draft's server code doesn't build.
@@ -120,9 +120,9 @@ const scripts = (frame: LoadedFrame | null): string[] =>
 
 describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
   it("answers the page of the draft now by its module's address, staging only the modules the write changed where the open frame loads them, within the kit it loaded", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
-    const opened = await chats.preview(chatId, app);
+    const { builder, app, revision, write } = await setUp();
+    const { drafts } = builder.api.apps;
+    const opened = await drafts.preview(app);
     const frame = await loadFrame(opened);
     const next = await write(
       { "src/routes/index.tsx": deskSaying("Hot") },
@@ -130,14 +130,14 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     // Warm, as the person's next write finds it: measured each time.
     const started = performance.now();
-    const updated = await chats.previewUpdate(chatId, app, next, {});
+    const updated = await drafts.previewUpdate(app, next, {});
     const updateMs = performance.now() - started;
     const again = await write(
       { "src/routes/index.tsx": deskSaying("Again") },
       next
     );
     const secondStarted = performance.now();
-    const second = await chats.previewUpdate(chatId, app, again, {});
+    const second = await drafts.previewUpdate(app, again, {});
     const secondMs = performance.now() - secondStarted;
     console.info(
       `preview update after a page write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
@@ -181,45 +181,47 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
-  it("answers only the person's own chat's draft of an App they build, never another App's", async () => {
-    const { builder, app, chatId, revision } = await setUp();
-    const other = await builder.api.apps.create({ name: "Other" });
-    await release(builder, other.id, notesFiles("other"));
-    // Another builder of the organization, who doesn't build this App.
+  it("answers the App's draft to every builder of it, and to nobody else", async () => {
+    const { builder, app, revision } = await setUp();
+    // Another builder of the organization, who doesn't build this App yet.
     const colleague = await signedInApi(idp, "builder");
-    expect({
-      // An App this chat neither changes nor is the chat of.
-      otherApp: await codeOf(
-        builder.api.chats.previewUpdate(chatId, other.id, revision, {})
-      ),
-      colleague: await codeOf(
-        colleague.api.chats.previewUpdate(chatId, app, revision, {})
-      ),
-    }).toStrictEqual({
-      otherApp: "app.not_in_chat",
-      colleague: "app.not_found",
+    const outside = await codeOf(
+      colleague.api.apps.drafts.previewUpdate(app, revision, {})
+    );
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: colleague.userId,
+      role: "builder",
+    });
+    const shared = await colleague.api.apps.drafts.previewUpdate(
+      app,
+      revision,
+      {}
+    );
+    expect({ outside, shared: refreshed(shared).revision }).toStrictEqual({
+      outside: "app.not_found",
+      shared: revision,
     });
   });
 
   it("keeps what the preview's store holds across writes of its pages and its server code, while its schema stays", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
+    const { builder, app, revision, write } = await setUp();
+    const { drafts } = builder.api.apps;
     const call = async (at: number, path: string, input: unknown = {}) =>
       outcome(
         await previewCall(
           builder,
-          chatId,
           app,
-          await requestFor(builder, { chatId, app, revision: at }, path, input)
+          await requestFor({ app, revision: at }, path, input)
         )
       );
     await call(revision, "notes.create", { title: "kept" });
-    const storesBefore = await previewStores(builder, chatId, app);
+    const storesBefore = await previewStores(app);
     const next = await write(
       { "src/routes/index.tsx": deskSaying("Changed") },
       revision
     );
-    await chats.previewUpdate(chatId, app, next, {});
+    await drafts.previewUpdate(app, next, {});
     const kept = await call(next, "notes.titles");
     const server = await write(
       {
@@ -229,20 +231,15 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       next
     );
     const rewritten = await call(server, "notes.titles");
-    const storesAfter = await previewStores(builder, chatId, app);
+    const storesAfter = await previewStores(app);
     expect({
       kept,
       rewritten,
-      stores: [storesBefore, storesAfter].map((rows) =>
-        rows.map(({ store_id: id }) => id)
-      ),
+      stores: [storesBefore, storesAfter],
     }).toStrictEqual({
       kept: ["kept"],
       rewritten: ["kept"],
-      stores: [
-        storesBefore.map(({ store_id: id }) => id),
-        storesBefore.map(({ store_id: id }) => id),
-      ],
+      stores: [storesBefore, storesBefore],
     });
   });
 
@@ -259,14 +256,14 @@ export const Route = createFileRoute("/")({ component: Desk });
 `;
     await release(builder, app, { "src/routes/index.tsx": page });
     const published = await loadFrame(await builder.api.pages.open(app));
-    const { chatId, revision, write } = await chatWithDraft(builder, app, {
+    const { revision, write } = await chatWithDraft(builder, app, {
       "src/routes/index.tsx": page.replace("Desk<", "Drafted<"),
     });
-    const opened = await builder.api.chats.preview(chatId, app);
+    const opened = await builder.api.apps.drafts.preview(app);
     const preview = await loadFrame(opened);
     // Its first version, opened read-only: the same code, which takes no
     // updates, so it is staged apart from the draft's writes.
-    const readOnlyOpened = await builder.api.chats.preview(chatId, app, 1);
+    const readOnlyOpened = await builder.api.apps.drafts.preview(app, 1);
     const readOnly = await loadFrame(readOnlyOpened);
     // The draft's next write, staged where the open preview loads it.
     const next = await write(
@@ -274,7 +271,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       revision
     );
     const { entry } = refreshed(
-      await builder.api.chats.previewUpdate(chatId, app, next, {})
+      await builder.api.apps.drafts.previewUpdate(app, next, {})
     );
     const written = new URL(`${entry}.js`, preview?.page.entry).href;
     /** Whether `frame`'s policy runs the module the write staged. */
@@ -346,9 +343,9 @@ export const Route = createFileRoute("/")({ component: Desk });
     }).toStrictEqual({ sameBuild: true, status: 200 });
   });
 
-  it("builds a preview's revision for its own person alone, and never one the draft moved past", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const object = chatsOf(builder);
+  it("builds a preview's revision once for each person, and never one the draft moved past", async () => {
+    const { builder, app, revision, write } = await setUp();
+    const object = previewOf(app);
     const built: number[] = [];
     const building = (at: number) => async (): Promise<PreviewUpdate> => {
       built.push(at);
@@ -358,52 +355,39 @@ export const Route = createFileRoute("/")({ component: Desk });
       { "src/routes/index.tsx": deskSaying("Newer") },
       revision
     );
-    const newer = await object.previewBuild(
-      chatId,
+    const newer = await object.build(
       builder.userId,
-      app,
       "update:desk",
       next,
       building(next)
     );
     // A preview that still knows only the revision before asks for it.
     const older = await codeOf(
-      object.previewBuild(
-        chatId,
-        builder.userId,
-        app,
-        "update:desk",
-        revision,
-        building(revision)
-      )
+      object.build(builder.userId, "update:desk", revision, building(revision))
     );
-    // Someone else's chat builds nothing of it, nor shares its build.
-    const elsewhere = await codeOf(
-      object.previewBuild(
-        chatId,
-        "someone-else",
-        app,
-        "update:desk",
-        next,
-        building(next)
-      )
+    // Someone else's ask builds for them, never sharing the builder's.
+    const theirs = await object.build(
+      "someone-else",
+      "update:desk",
+      next,
+      building(next)
     );
     expect({
       newer: entryBuilt(newer),
       older,
-      elsewhere,
+      theirs: entryBuilt(theirs),
       built,
     }).toStrictEqual({
       newer: String(next),
       older: "app.preview_outdated",
-      elsewhere: "agent.chat_not_found",
-      built: [next],
+      theirs: String(next),
+      built: [next, next],
     });
   });
 
   it("says the draft's server code doesn't build even of a page that calls none of it", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
+    const { builder, app, revision, write } = await setUp();
+    const { drafts } = builder.api.apps;
     const broken = await write(
       {
         "server/notes.ts": titlesUnbuilt,
@@ -418,16 +402,12 @@ export const Route = createFileRoute("/")({ component: Desk });
       },
       revision
     );
-    const update = refreshed(
-      await chats.previewUpdate(chatId, app, broken, {})
-    );
+    const update = refreshed(await drafts.previewUpdate(app, broken, {}));
     const fixed = await write(
       { "server/notes.ts": titlesSaying("fixed") },
       broken
     );
-    const afterFix = refreshed(
-      await chats.previewUpdate(chatId, app, fixed, {})
-    );
+    const afterFix = refreshed(await drafts.previewUpdate(app, fixed, {}));
     expect({
       broken: update.serverUnbuilt,
       fixed: afterFix.serverUnbuilt,
