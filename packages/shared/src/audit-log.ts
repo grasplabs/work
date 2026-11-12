@@ -144,6 +144,10 @@ const typeRules: readonly {
   // Core handing a source over to the new Brain (GRA-1727): started, handed
   // over or refused, by ids alone.
   { action: "brain.source", type: "action" },
+  // A Grasp staff member reading the client's Brain report, and asking for
+  // an action on it and its outcome (core's brain-report.ts).
+  { action: "admin.brain.read", type: "read" },
+  { action: "admin.brain.action", type: "action" },
   { action: "knowledge.search", type: "read" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
