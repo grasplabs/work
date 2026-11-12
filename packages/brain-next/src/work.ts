@@ -19,6 +19,7 @@ import type {
   EmbedModel,
   EmbedReply,
   Embedders,
+  HandOvers,
   ModelTrouble,
   OverdueWork,
   WorkErrorCode,
@@ -233,6 +234,11 @@ export interface WorkContext {
   /** The host's Brain bucket, where the store keeps what it keeps in R2. */
   bucket: BrainBucket;
   /**
+   * The host's side of hand-overs (contract.ts `HandOvers`): the shared
+   * store's tick only, as hand-overs are queued there alone.
+   */
+  handOvers?: HandOvers;
+  /**
    * Says more is left once this run returns (rule 7), having written
    * `progress` pieces of the work (more than 0, or the attempt fails): the
    * item is put back, due at once with its attempts reset, unless a newer
@@ -244,11 +250,16 @@ export interface WorkContext {
   signal: AbortSignal;
 }
 
-/** What a tick works with of its host: its model, its embedders and its bucket. */
+/**
+ * What a tick works with of its host: its model, its embedders, its
+ * bucket and its side of hand-overs.
+ */
 export interface WorkHost {
   ask: AskModel;
   embedders: Embedders;
   bucket: BrainBucket;
+  /** The shared store's tick only (`WorkContext.handOvers`). */
+  handOvers?: HandOvers;
 }
 
 /** A kind of work, and how one item of it is done. */
@@ -1137,6 +1148,7 @@ const runItem = async (
         storage,
         signal,
         bucket: host.bucket,
+        handOvers: host.handOvers,
         again: (progress) => {
           again = { progress };
         },

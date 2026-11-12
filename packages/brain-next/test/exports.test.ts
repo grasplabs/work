@@ -9,6 +9,7 @@ import type {
   AskModel,
   Embedders,
   ExportScope,
+  HandOvers,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
@@ -30,6 +31,14 @@ const quietAsk: AskModel = async () => {
   return { kind: "answer", text: "" };
 };
 
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 const noEmbedders: Embedders = {
   model: null,
   embed: async () => {
@@ -40,7 +49,12 @@ const noEmbedders: Embedders = {
 
 /** One tick of `store`, as the host's clock (or a person's own alarm) gives it. */
 const tick = async (store: Store): Promise<void> => {
-  await store.work(quietAsk, new Date(), noEmbedders);
+  await store.work({
+    ask: quietAsk,
+    at: new Date(),
+    embedders: noEmbedders,
+    handOvers: noHandOvers,
+  });
 };
 
 const unique = (): string => crypto.randomUUID();

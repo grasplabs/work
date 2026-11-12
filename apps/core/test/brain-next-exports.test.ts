@@ -11,6 +11,7 @@ import {
 import { addSource, workBrain } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import {
   auditedDuring,
   routed,
@@ -93,7 +94,7 @@ const writtenFiles = async (
   scope: "company" | "own",
   exports: Record<string, string>
 ): Promise<string[]> => {
-  await workBrain(env, new Date());
+  await workBrain(env, new Date(), noProducers);
   const bodies: string[] = [];
   for (const [store, id] of Object.entries(exports)) {
     // oxlint-disable-next-line no-await-in-loop -- one export at a time

@@ -5980,3 +5980,26 @@ export const providerHealth = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.provider, table.credential] })]
 );
+
+/**
+ * What core has still to hand over to the new Brain (src/brain-hand-overs.ts):
+ * a source by its producer's kind and that producer's id for it, noted from
+ * the audit event of the change that touched it, until the Brain's work
+ * queue took it. Never content: what is handed over is read from core's
+ * records when the Brain's queue runs the hand-over. `noting` is new each
+ * time it is noted, so the relay removes only the noting it put on the queue.
+ */
+export const brainHandOvers = sqliteTable(
+  "brain_hand_overs",
+  {
+    /** A kind brain-hand-overs.ts registers; the relay drops one it doesn't. */
+    producer: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    noting: text().notNull(),
+    notedAt: timestamp("noted_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.producer, table.sourceId] }),
+    index("brain_hand_overs_noted_at_idx").on(table.notedAt),
+  ]
+);
