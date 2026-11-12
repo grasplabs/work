@@ -1,5 +1,6 @@
 import {
   brainOf,
+  listPageMax,
   personalBrainOf,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
@@ -15,6 +16,8 @@ import {
   addSource,
   eraseSource,
   erasePerson,
+  listSourcesAs,
+  listVersionsAs,
   readInstructionFilesAs,
   readSourceVersionAs,
   recallAs,
@@ -341,6 +344,74 @@ describe("what one person alone may read, in their own store", () => {
         () => true
       ),
     }).toStrictEqual({ found: [], read: null, readdedRefused: true });
+  });
+});
+
+describe("listing a person's sources", () => {
+  it("lists their own beside the team's, newest first, a page at a time across both stores, and none of theirs to anyone else", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    // More than a page, the person's own and the team's taking turns.
+    const added: { source: SourceRef; theirs: boolean }[] = [];
+    for (let index = 0; index <= listPageMax; index += 1) {
+      const theirs = index % 2 === 0;
+      const source = newSource();
+      added.push({ source, theirs });
+      // oxlint-disable-next-line no-await-in-loop -- in order of adding
+      await add(
+        source,
+        `Note ${index}`,
+        theirs
+          ? { kind: "owner", personId: person }
+          : { kind: "team", teamId: team }
+      );
+      // oxlint-disable-next-line no-await-in-loop -- a time of its own each
+      await scheduler.wait(2);
+    }
+    const ownSource = added[0]?.source ?? newSource();
+
+    const first = await listSourcesAs(env, person, {});
+    const second = await listSourcesAs(env, person, {
+      after: first.next ?? undefined,
+    });
+    const colleagues = await addressedBy(
+      async () => await listSourcesAs(env, colleague, {})
+    );
+    const ownVersions = await listVersionsAs(env, person, {
+      source: ownSource,
+    });
+    const listedIds = [...first.sources, ...second.sources].map(
+      ({ source }) => source.id
+    );
+
+    expect({
+      pages: [first.sources.length, second.sources.length],
+      last: second.next,
+      listed: listedIds,
+      personal: [...first.sources, ...second.sources]
+        .filter(({ personal }) => personal)
+        .map(({ source }) => source.id)
+        .toSorted(),
+      versions: ownVersions.versions.length,
+      colleague: colleagues.value.sources
+        .map(({ source }) => source.id)
+        .toSorted(),
+      colleagueAddressed: colleagues.names.includes(`person:${person}`),
+    }).toStrictEqual({
+      pages: [listPageMax, 1],
+      last: null,
+      listed: added.map(({ source }) => source.id).toReversed(),
+      personal: added
+        .filter(({ theirs }) => theirs)
+        .map(({ source }) => source.id)
+        .toSorted(),
+      versions: 1,
+      colleague: added
+        .filter(({ theirs }) => !theirs)
+        .map(({ source }) => source.id)
+        .toSorted(),
+      colleagueAddressed: false,
+    });
   });
 });
 

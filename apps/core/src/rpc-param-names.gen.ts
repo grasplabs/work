@@ -128,6 +128,12 @@ export const rpcParamNames: ParamNames = {
     "transcript": ["sourceId"],
     "work": ["id"],
   },
+  "BrainSourcesRpc": {
+    "list": ["after"],
+    "read": ["source","version"],
+    "search": ["question"],
+    "versions": ["source","before"],
+  },
   "ChannelAccountsRpc": {
     "link": ["secret"],
     "list": [],
