@@ -15,6 +15,7 @@ import type {
   AskModel,
   Brain,
   ErasureReason,
+  Embedders,
   ModelReply,
   Pack,
   PackItem,
@@ -32,6 +33,7 @@ import { z } from "zod";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import { embedInBulk, embedderModel } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
@@ -703,13 +705,37 @@ const askModel =
   };
 
 /**
+ * Core's embedders, as the Brain's background work uses them: the bulk
+ * embedders, running the model core ships, or none while none ships (then
+ * the Brain embeds nothing, and its overview says so). Whatever an
+ * embedder answers or throws, the Brain gets vectors or `unavailable`.
+ */
+const embeddersOf = async (env: Env): Promise<Embedders> => ({
+  model: await embedderModel(),
+  embed: async ({ texts, timeoutMs }) =>
+    await embedInBulk(env, texts, timeoutMs),
+});
+
+/**
  * One tick of the Brain's background work at `at`, the time core's clock
  * runs it: the store sweeps what adds that never finished left, repacks a
- * few blocks of vector codes, then runs what is due in its queue, its
- * model calls through core's gateway. Harmless late or twice.
+ * few blocks of vector codes, keeps its vectors to core's embedding model,
+ * then runs what is due in its queue, its model calls through core's
+ * gateway and its passages through core's bulk embedders. Harmless late or
+ * twice.
  */
 export const workBrain = async (env: Env, at: Date): Promise<void> => {
-  await brain(env).work(askModel(env), at);
+  await brain(env).work(askModel(env), at, await embeddersOf(env));
+};
+
+/**
+ * Has the Brain put every current version whose chunks lack vectors of
+ * core's model on its queue again, over the next ticks: for staff, once
+ * the embedders work again after long enough broken for items to park
+ * for good (GRA-1733 gives it its button).
+ */
+export const reembedBrain = async (env: BrainEnv): Promise<void> => {
+  await brain(env).reembed();
 };
 
 /** The Brain's work queue, as staff will see it (GRA-1733). */

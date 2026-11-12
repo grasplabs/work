@@ -3,8 +3,8 @@
   "compilerOptions": {
     // drizzle-kit writes the store's migrations.js.
     "allowJs": true,
-    // The store is a Durable Object in core's Worker.
-    "types": ["@cloudflare/workers-types"]
+    // The store is a Durable Object in core's Worker; its tests run in workerd.
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src", "test", "drizzle.config.ts"]
+  "include": ["src", "test", "drizzle.config.ts", "vite.config.ts"]
 }

@@ -3,9 +3,16 @@ import type { Embedder } from "@grasp-os/embed/embedder";
 import {
   modelFileKey,
   modelFilesOf,
+  modelIdentity,
   shippedModel,
 } from "@grasp-os/embed/model-files";
-import type { EmbedModel, ModelFile } from "@grasp-os/embed/model-files";
+import type {
+  EmbedModel,
+  ModelFile,
+  ModelIdentity,
+} from "@grasp-os/embed/model-files";
+import { embedWithPool } from "@grasp-os/embed/pool";
+import type { PoolReply } from "@grasp-os/embed/pool";
 import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { deployedModelPrefix } from "@grasp-os/shared/release";
@@ -22,6 +29,12 @@ import { inJurisdiction } from "./durable-objects.ts";
 // embedder checks every file by its hash as it loads it, so neither copy
 // is trusted: that check is the last line, whatever is checked before it.
 //
+// Two uses, never sharing an object: questions go to the question
+// embedder; the Brain's background work embeds passages through the bulk
+// embedders, a pool of objects of the same namespace (@grasp-os/embed/pool,
+// `embedInBulk`), so a first load never slows a question. Every one is got
+// in core's jurisdiction, the EU's.
+//
 // Warming: an object's first load copies the model into its own storage
 // (about 115 MB and 256,000 rows for the real model, seconds); after an
 // eviction it reloads from its own storage. The first question after a
@@ -36,6 +49,24 @@ export const questionEmbedderOf = (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">
 ): DurableObjectStub<Embedder> =>
   questionEmbedder(inJurisdiction(env, env.EMBEDDER));
+
+/** The model core's embedders run, and its build: none while no model ships. */
+export const embedderModel = async (): Promise<ModelIdentity | null> =>
+  shippedModel === null ? null : await modelIdentity(shippedModel);
+
+/**
+ * `texts` embedded by the bulk embedders (@grasp-os/embed/pool), in core's
+ * jurisdiction, within `timeoutMs`: for the Brain's background work, never
+ * a question.
+ */
+export const embedInBulk = async (
+  env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
+  texts: readonly string[],
+  timeoutMs: number
+): Promise<PoolReply> =>
+  await embedWithPool(inJurisdiction(env, env.EMBEDDER), texts, {
+    timeoutMs,
+  });
 
 /**
  * Whether `head` is `file`: there at its size, and with its SHA-256 where

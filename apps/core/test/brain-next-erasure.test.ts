@@ -1,4 +1,8 @@
-import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
+import {
+  brainOf,
+  recallBudgetMax,
+  vectorModelNameOf,
+} from "@grasp-os/brain-next/contract";
 import type {
   Access,
   ChunkRef,
@@ -11,6 +15,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import {
   addInstructionFile,
@@ -552,6 +557,68 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       objects: [],
       vectors: { codes: 0, inBlocks: 0, kept: 424 },
       overview: [],
+    });
+  });
+
+  it("takes a source's vectors with it: their objects and rows go with the sweep, its passages' marks with the erasure", async () => {
+    const reader = await person();
+    const erased = newSource();
+    // One passage: one chunk, one vector.
+    const texts = [`Vector passage ${crypto.randomUUID()}`];
+    await add(erased, texts.join(""), owner(reader));
+    // The queue embeds it, with the embed package's test model.
+    const { model } = await embedInProcess([]);
+    const name = vectorModelNameOf(model);
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work(
+      async () => {
+        await Promise.resolve();
+        return { kind: "answer", text: "" };
+      },
+      new Date(),
+      {
+        model,
+        embed: async ({ texts: asked }) => {
+          const embedded = await embedInProcess(asked);
+          return {
+            kind: "vectors",
+            model: embedded.model,
+            results: embedded.vectors,
+          };
+        },
+      }
+    );
+    const hashes = await Promise.all(texts.map(hashOf));
+    const kept = async () => {
+      const objects = await Promise.all(
+        hashes.map(
+          async (hash) =>
+            await env.BRAIN_OBJECTS.head(
+              `vectors/${encodeURIComponent(name)}/${hash}`
+            )
+        )
+      );
+      const rows = await runInDurableObject(store(), (_instance, state) =>
+        state.storage.sql
+          .exec(
+            "SELECT 1 FROM vector_files WHERE hash IN (SELECT value FROM json_each(?))",
+            JSON.stringify(hashes)
+          )
+          .toArray()
+      );
+      return {
+        objects: objects.filter((object) => object !== null).length,
+        rows: rows.length,
+      };
+    };
+    const before = await kept();
+
+    await eraseSource(env, { source: erased, reason: "deleted" });
+    await tickPastGrace();
+    await tickPastGrace();
+
+    expect({ before, after: await kept() }).toStrictEqual({
+      before: { objects: 1, rows: 1 },
+      after: { objects: 0, rows: 0 },
     });
   });
 
@@ -1203,7 +1270,8 @@ describe("queued work about what is erased", { timeout: 120_000 }, () => {
     await workBrain(env, new Date());
 
     expect({ before, atOnce, ran: handled.get(keyOf(source)) }).toStrictEqual({
-      before: 1,
+      // Its own, and the embedding its add queued.
+      before: 2,
       atOnce: 0,
       ran: undefined,
     });

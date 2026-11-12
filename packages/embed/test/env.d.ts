@@ -1,4 +1,5 @@
 import type {
+  BreakableEmbedder,
   CustomEmbedder,
   DotEmbedder,
   FloatEmbedder,
@@ -17,6 +18,7 @@ declare global {
       PAIRS: DurableObjectNamespace<PairsEmbedder>;
       CUSTOM: DurableObjectNamespace<CustomEmbedder>;
       TRAPPING: DurableObjectNamespace<TrappingEmbedder>;
+      BREAKABLE: DurableObjectNamespace<BreakableEmbedder>;
     }
   }
 }

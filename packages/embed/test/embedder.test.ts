@@ -10,7 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { Embedder, questionEmbedder } from "../src/embedder.ts";
 import type { EmbedResult } from "../src/embedder.ts";
 import type { Kernel } from "../src/engine.ts";
-import { modelFileKey } from "../src/model-files.ts";
+import { modelFileKey, modelIdentity } from "../src/model-files.ts";
 import type { EmbedModel } from "../src/model-files.ts";
 import deepEncoderFloat from "./fixtures/deep/encoder-float.bin";
 import deepEncoderInt8 from "./fixtures/deep/encoder-int8.bin";
@@ -893,8 +893,13 @@ describe("embedder, several texts a call", () => {
       "failed: kernel",
       int8Bits[2],
     ]);
-    // A failure is its kind and reason, nothing more.
-    expect(results[4]).toStrictEqual({ kind: "failed", reason: "kernel" });
+    // A failure is its kind, its reason and the build that tried the
+    // text, nothing more.
+    expect(results[4]).toStrictEqual({
+      kind: "failed",
+      reason: "kernel",
+      model: await modelIdentity(int8Model),
+    });
   });
 
   it("tries a text whose module trapped once more on a fresh instance, and embeds it when that runs", async () => {

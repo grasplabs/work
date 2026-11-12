@@ -1,3 +1,4 @@
+import type { Embedders } from "@grasp-os/brain-next/contract";
 import {
   defineWork,
   enqueueWork,
@@ -50,6 +51,15 @@ import { testBinding } from "./test-env.ts";
 // defines, whose handler the tests control: what it does for an item is
 // looked up by the item's key, and nothing for a key without one. One
 // kind takes the queue's usual time per attempt, the other a short one.
+
+/** No embedders: the store's own ticks here embed nothing, as core's while no model ships. */
+const noEmbedders: Embedders = {
+  model: null,
+  embed: async () => {
+    await Promise.resolve();
+    return { kind: "unavailable" };
+  },
+};
 
 /** The Brain's one store, as the tests reach into it to add items. */
 const store = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
@@ -126,6 +136,85 @@ const quickWork = defineWork({
   },
 });
 
+/** What runs of the work done in pieces were given: key and round, in order. */
+const pieceRuns: { key: string; round: number }[] = [];
+
+/** Work done in pieces (rule 7): what each run does is its key's behaviour. */
+const pieceWork = defineWork({
+  kind: kindOf("pieces"),
+  payload: z.strictObject({ key: z.string(), round: z.int() }),
+  run: async ({ key, round }, context) => {
+    pieceRuns.push({ key, round });
+    await handle(key, context);
+  },
+});
+
+/** Adds an item of the work done in pieces. */
+const enqueuePieces = async (
+  key: string,
+  {
+    round = 1,
+    priority = "recent",
+    connection,
+  }: {
+    round?: number;
+    priority?: WorkPriority;
+    connection?: string;
+  } = {}
+): Promise<void> => {
+  await runInDurableObject(store(), (_store, state) => {
+    enqueueWork(state.storage, pieceWork, {
+      key,
+      payload: { key, round },
+      priority,
+      ...(connection === undefined ? {} : { connection }),
+    });
+  });
+};
+
+/**
+ * Does `key`'s work in `total` pieces, a row each in the store, from where
+ * the last run left it, so a run made again resumes; `during` runs after a
+ * piece is written and before it says more is left.
+ */
+const inPieces =
+  (key: string, total: number, during?: (piece: number) => Promise<void>) =>
+  async (context: WorkContext): Promise<void> => {
+    const { sql } = context.storage;
+    sql.exec(
+      "CREATE TABLE IF NOT EXISTS test_pieces (key TEXT NOT NULL, piece INTEGER NOT NULL)"
+    );
+    const { done } = sql
+      .exec<{ done: number }>(
+        "SELECT count(*) AS done FROM test_pieces WHERE key = ?",
+        key
+      )
+      .one();
+    if (done >= total) {
+      return;
+    }
+    sql.exec("INSERT INTO test_pieces (key, piece) VALUES (?, ?)", key, done);
+    await during?.(done);
+    if (done + 1 < total) {
+      context.again(1);
+    }
+  };
+
+/** The pieces written for `key`, in order, each as many times as written. */
+const piecesOf = async (key: string): Promise<number[]> =>
+  await runInDurableObject(store(), (_store, state) => {
+    state.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS test_pieces (key TEXT NOT NULL, piece INTEGER NOT NULL)"
+    );
+    return state.storage.sql
+      .exec<{ piece: number }>(
+        "SELECT piece FROM test_pieces WHERE key = ? ORDER BY piece",
+        key
+      )
+      .toArray()
+      .map(({ piece }) => piece);
+  });
+
 const reset = (): void => {
   // A run in a store the test killed never ends: none is left running.
   seen.running.length = 0;
@@ -190,7 +279,12 @@ const runsOf = (key: string): number =>
 /** The queue as staff see it: waiting of this file's kinds, and parked of `keys`. */
 const queue = async (keys: readonly string[] = []) => {
   const overview = await brainWorkOverview(env);
-  const kinds = new Set([testWork.kind, quickWork.kind, mediumWork.kind]);
+  const kinds = new Set([
+    testWork.kind,
+    quickWork.kind,
+    mediumWork.kind,
+    pieceWork.kind,
+  ]);
   return {
     waiting: overview.waiting
       .filter(({ kind }) => kinds.has(kind))
@@ -962,7 +1056,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     for (let tickNumber = 0; tickNumber <= workAttemptsMax; tickNumber += 1) {
       // Past each wait, which doubles up to 30 minutes.
       // oxlint-disable-next-line no-await-in-loop -- tick after tick
-      await store().work(brokenHost, later(40 * 60_000));
+      await store().work(brokenHost, later(40 * 60_000), noEmbedders);
     }
     const meanwhile = await queue([item]);
     await answeringProvider(() => answer);
@@ -1357,7 +1451,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       return { kind: "answer" as const, text: "An answer." };
     };
     const at = later(1000);
-    await store().work(host, at);
+    await store().work(host, at, noEmbedders);
     const { paused } = await queue();
     expect({
       reason: paused?.reason,
@@ -1455,7 +1549,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     const plain = keyOf("plain");
     behaviours.set(asking, asksOnce);
     await enqueue({ key: asking, priority: "asked" });
-    await store().work(brokenHost, later(1000));
+    await store().work(brokenHost, later(1000), noEmbedders);
     await enqueue({ key: plain, priority: "archive" });
     // Within the pause's minute: nothing runs, not even work with no model.
     await tick(10_000);
@@ -1866,6 +1960,298 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
   // One sweep R2 never answers, its batch two leftover files: the setup
   // waits its 10 s once, and each test below checks one thing of it. File
   // A's delete lands late; file B's never does.
+  describe("work done in pieces", () => {
+    afterEach(async () => {
+      pieceRuns.length = 0;
+      await runInDurableObject(store(), (_store, state) => {
+        state.storage.sql.exec(
+          "DELETE FROM work_items WHERE running = 0 AND kind = ?",
+          pieceWork.kind
+        );
+      });
+    });
+
+    it("lets a newer item of its key, added while a piece ran, replace it: one copy afterwards, the newer one's", async () => {
+      reset();
+      const key = keyOf("replaced");
+      const reached = flag();
+      const gate = flag();
+      behaviours.set(key, async (context) => {
+        const last = pieceRuns.findLast((run) => run.key === key);
+        if (last?.round === 1) {
+          reached.set();
+          await gate.wait();
+          context.again(1);
+        }
+      });
+      await enqueuePieces(key, { round: 1 });
+      const ticking = tick();
+      await reached.wait();
+      await enqueuePieces(key, { round: 2 });
+      gate.set();
+      await ticking;
+      await tick();
+
+      const { waiting } = await queue();
+      expect({
+        runs: pieceRuns
+          .filter((run) => run.key === key)
+          .map(({ round }) => round),
+        waiting,
+      }).toStrictEqual({ runs: [1, 2], waiting: 0 });
+    });
+
+    it("gives an item back all its attempts after a piece done, as a new item has", async () => {
+      reset();
+      const key = keyOf("attempts");
+      let runs = 0;
+      behaviours.set(key, async (context) => {
+        runs += 1;
+        await Promise.resolve();
+        if (runs === 3) {
+          context.again(1);
+          return;
+        }
+        throw new Error("Failed on purpose");
+      });
+      await enqueuePieces(key);
+      for (
+        let tickNumber = 0;
+        tickNumber < 2 * workAttemptsMax;
+        tickNumber += 1
+      ) {
+        // Past each backoff.
+        // oxlint-disable-next-line no-await-in-loop -- tick after tick
+        await tick(2 * 60 * 60_000);
+      }
+
+      const overview = await brainWorkOverview(env);
+      expect({
+        runs,
+        parked: overview.parked
+          .filter((parked) => parked.key === key)
+          .map(({ attempts }) => attempts),
+      }).toStrictEqual({
+        // Two failures, a piece, then all of a new item's attempts.
+        runs: 2 + 1 + workAttemptsMax,
+        parked: [workAttemptsMax],
+      });
+    });
+
+    it("resumes an item the store was killed in between a piece's write and its putting back, running it alone once, nothing lost or done twice", async () => {
+      reset();
+      const key = keyOf("killed-piece");
+      const others = keysOf("beside", 2);
+      const reached = flag();
+      const gate = flag();
+      /** Who else ran during each of its runs after the kill. */
+      const beside: number[] = [];
+      let killed = false;
+      behaviours.set(
+        key,
+        inPieces(key, 3, async (piece) => {
+          if (piece === 0) {
+            reached.set();
+            await gate.wait();
+          } else if (killed) {
+            beside.push(seen.running.length - 1);
+            await brief();
+          }
+        })
+      );
+      for (const other of others) {
+        behaviours.set(other, brief);
+      }
+      await enqueuePieces(key, { priority: "archive" });
+      const first = failed(tick());
+      await reached.wait();
+      await killStore();
+      killed = true;
+      await expect(first).resolves.toBeTruthy();
+      gate.set();
+      // The run in the killed store never ends: it isn't running.
+      seen.running.splice(seen.running.indexOf(key), 1);
+      await enqueueAll(others, { priority: "asked" });
+      await tick();
+      await tick();
+
+      const { waiting } = await queue();
+      expect({
+        pieces: await piecesOf(key),
+        firstRunAlone: beside[0],
+        othersRan: others.map(runsOf),
+        waiting,
+      }).toStrictEqual({
+        pieces: [0, 1, 2],
+        firstRunAlone: 0,
+        othersRan: [1, 1],
+        waiting: 0,
+      });
+    });
+
+    it("runs alone a newer item that replaced one the store was killed under", async () => {
+      reset();
+      const key = keyOf("replaced-interrupted");
+      const others = keysOf("beside-newer", 2);
+      const reached = flag();
+      const gate = flag();
+      /** Who else ran during each of its runs after the kill. */
+      const beside: number[] = [];
+      let killed = false;
+      behaviours.set(key, async () => {
+        if (killed) {
+          beside.push(seen.running.length - 1);
+          await brief();
+          return;
+        }
+        reached.set();
+        await gate.wait();
+      });
+      for (const other of others) {
+        behaviours.set(other, brief);
+      }
+      await enqueuePieces(key, { round: 1 });
+      const first = failed(tick());
+      await reached.wait();
+      await killStore();
+      killed = true;
+      await expect(first).resolves.toBeTruthy();
+      gate.set();
+      seen.running.splice(seen.running.indexOf(key), 1);
+      await enqueuePieces(key, { round: 2, priority: "archive" });
+      await enqueueAll(others, { priority: "asked" });
+      await tick();
+
+      expect({
+        rounds: pieceRuns
+          .filter((run) => run.key === key)
+          .map(({ round }) => round),
+        beside,
+        othersRan: others.map(runsOf),
+      }).toStrictEqual({ rounds: [1, 2], beside: [0], othersRan: [1, 1] });
+    });
+
+    it("fails the attempt of a run that says more is left having done nothing, until it parks", async () => {
+      reset();
+      const key = keyOf("no-progress");
+      behaviours.set(key, async (context) => {
+        await Promise.resolve();
+        context.again(0);
+      });
+      await enqueuePieces(key);
+      for (let tickNumber = 0; tickNumber < workAttemptsMax; tickNumber += 1) {
+        // Past each backoff.
+        // oxlint-disable-next-line no-await-in-loop -- tick after tick
+        await tick(2 * 60 * 60_000);
+      }
+
+      const { parked } = await brainWorkOverview(env);
+      expect({
+        runs: runsOf(key),
+        parked: parked
+          .filter((one) => one.key === key)
+          .map(({ attempts, error }) => ({ attempts, error })),
+      }).toStrictEqual({
+        runs: workAttemptsMax,
+        parked: [{ attempts: workAttemptsMax, error: "no_progress" }],
+      });
+    });
+
+    it("settles only the row a run claimed: never an item that took a deleted row's place", async () => {
+      reset();
+      const piecesKey = keyOf("pieces-beside");
+      const erasedKey = keyOf("erased-under");
+      const reached = [flag(), flag()];
+      const gates = [flag(), flag()];
+      const erasedAt = flag();
+      const erasedGate = flag();
+      behaviours.set(
+        piecesKey,
+        inPieces(piecesKey, 3, async (piece) => {
+          if (piece < 2) {
+            reached[piece]?.set();
+            await gates[piece]?.wait();
+          }
+        })
+      );
+      behaviours.set(erasedKey, async () => {
+        erasedAt.set();
+        await erasedGate.wait();
+      });
+      // The second added last, so its row has the highest id.
+      await enqueuePieces(piecesKey);
+      await enqueuePieces(erasedKey);
+      const ticking = tick();
+      await reached[0]?.wait();
+      await erasedAt.wait();
+      // An erasure deletes the second's row while it runs.
+      await runInDurableObject(store(), (_store, state) => {
+        state.storage.sql.exec(
+          "DELETE FROM work_items WHERE key = ?",
+          erasedKey
+        );
+      });
+      // The first puts itself back and runs again; then the erased one's
+      // run ends and settles.
+      gates[0]?.set();
+      await reached[1]?.wait();
+      erasedGate.set();
+      await until(() => seen.finished.includes(erasedKey));
+      gates[1]?.set();
+      await ticking;
+      await tick();
+
+      await expect(piecesOf(piecesKey)).resolves.toStrictEqual([0, 1, 2]);
+    });
+
+    it("keeps to the most of one connection at once while its items put themselves back", async () => {
+      reset();
+      const connection = `connection-${crypto.randomUUID()}`;
+      const keys = keysOf("connected", workPerConnection + 1);
+      const most = { atOnce: 0 };
+      const noteRunning = async (): Promise<void> => {
+        const running = seen.running.filter((one) => keys.includes(one));
+        most.atOnce = Math.max(most.atOnce, running.length);
+        await brief();
+      };
+      for (const key of keys) {
+        behaviours.set(key, inPieces(key, 3, noteRunning));
+        // oxlint-disable-next-line no-await-in-loop -- added in this order
+        await enqueuePieces(key, { connection });
+      }
+      await tick();
+
+      const pieces = await Promise.all(keys.map(piecesOf));
+      expect({ mostAtOnce: most.atOnce, pieces }).toStrictEqual({
+        mostAtOnce: workPerConnection,
+        pieces: keys.map(() => [0, 1, 2]),
+      });
+    });
+
+    it("puts an item back behind the rest of its class after each piece, so large work never starves the class", async () => {
+      reset();
+      const large = keysOf("large", workAtOnce);
+      const small = keyOf("small");
+      for (const key of large) {
+        behaviours.set(key, inPieces(key, 5, brief));
+        // oxlint-disable-next-line no-await-in-loop -- added in this order
+        await enqueuePieces(key);
+      }
+      behaviours.set(small, brief);
+      await enqueuePieces(small);
+      await tick();
+
+      expect({
+        // The first pieces of the large ones, then the small one.
+        smallStartedAt: seen.started.indexOf(small),
+        large: await Promise.all(large.map(piecesOf)),
+      }).toStrictEqual({
+        smallStartedAt: workAtOnce,
+        large: large.map(() => [0, 1, 2, 3, 4]),
+      });
+    });
+  });
+
   describe("a sweep R2 doesn't answer", () => {
     const swept = {
       tookMs: 0,
@@ -2057,6 +2443,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
           sweep: null,
           repack: null,
           reindex: null,
+          embedding: null,
         },
       });
     });

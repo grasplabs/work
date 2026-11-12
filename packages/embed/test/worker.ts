@@ -7,21 +7,9 @@ import type { Loaded } from "../src/embedder.ts";
 import type { Kernel, RunningKernel } from "../src/engine.ts";
 import type { EmbedModel } from "../src/model-files.ts";
 import deepFiles from "./fixtures/deep/files.json";
-import files from "./fixtures/files.json";
+import { BreakableEmbedder, floatModel, int8Model } from "./test-models.ts";
 
-export const floatModel: EmbedModel = {
-  name: "fixture-float",
-  tokenizer: files["tokenizer.bin"],
-  encoder: files["encoder-float.bin"],
-  tokens: files["tokens-float.bin"],
-};
-
-export const int8Model: EmbedModel = {
-  name: "fixture-int8",
-  tokenizer: files["tokenizer.bin"],
-  encoder: files["encoder-int8.bin"],
-  tokens: files["tokens-int8.bin"],
-};
+export { floatModel, int8Model } from "./test-models.ts";
 
 /** The deep fixture: 5 layers, another set of local layers, pruned widths. */
 export const deepFloatModel: EmbedModel = {
@@ -38,8 +26,9 @@ export const deepInt8Model: EmbedModel = {
   tokens: deepFiles["tokens-int8.bin"],
 };
 
-export class FloatEmbedder extends Embedder {
-  protected override readonly model = floatModel;
+/** The float model, breakable as `BreakableEmbedder` is: another build than the int8 one. */
+export class FloatEmbedder extends BreakableEmbedder {
+  protected override readonly model: EmbedModel = floatModel;
 }
 
 export class Int8Embedder extends Embedder {
@@ -153,6 +142,8 @@ export class TrappingEmbedder extends Embedder {
     return loaded;
   }
 }
+
+export { BreakableEmbedder } from "./test-models.ts";
 
 export default {
   fetch: (): Response => new Response(null, { status: 404 }),

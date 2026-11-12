@@ -245,7 +245,12 @@ export const coreProject = (
         wrangler: { configPath: "./wrangler.jsonc" },
         // Tests run fully local, including in CI without Cloudflare credentials.
         miniflare: {
-          modulesRules: oxcParseTestConfig.modulesRules,
+          // The embed package's test model's files as bytes, for the
+          // Brain's permission harness (test/brain-next-surfaces.ts).
+          modulesRules: [
+            ...oxcParseTestConfig.modulesRules,
+            { type: "Data", include: ["**/*.bin"] },
+          ],
           bindings: {
             ROUTER_SECRET: "test-router-secret",
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",

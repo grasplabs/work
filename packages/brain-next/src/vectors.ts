@@ -186,16 +186,19 @@ const modelOf = (sql: SqlStorage, model: VectorModel): StoredModel => {
 };
 
 /**
- * `?1` the source, `?2` the version, `?3` the position: the chunk there
- * and its version's set of readers, if that version is current.
+ * `?1` the source, `?2` the version, `?3` the position, `?4` the SHA-256
+ * of the text the vector was made of, or null: the chunk there and its
+ * version's set of readers, if that version is current and, given a
+ * hash, the chunk still holds that text. So a vector made of a text a
+ * chunk no longer holds is never kept for it, whatever its place.
  */
-const currentChunkSql = `
+export const currentChunkSql = `
 SELECT chunks.row AS chunk, source_versions.reader_set AS reader_set
 FROM source_versions
 JOIN current_versions ON current_versions.version_row = source_versions.row
 JOIN chunks ON chunks.version_row = source_versions.row
 WHERE source_versions.source = ?1 AND source_versions.version = ?2
-  AND chunks.position = ?3`;
+  AND chunks.position = ?3 AND (?4 IS NULL OR chunks.hash = ?4)`;
 
 /**
  * Packs the tail of the group of `model` and `readerSet` into blocks of
@@ -261,42 +264,49 @@ const packTail = (sql: SqlStorage, model: number, readerSet: number): void => {
 /**
  * Keeps the codes of each vector for its chunk, if that chunk is of a
  * current version and has none for the model yet, then packs the tails
- * that reached a block. Run it in one transaction.
+ * that reached a block. Run it in one transaction. How many codes it
+ * inserted: one per chunk that had none.
  */
 export const putVectors = (
   sql: SqlStorage,
   { model, vectors }: VectorsToPut
-): void => {
+): number => {
   const stored = modelOf(sql, model);
   const groups = new Set<number>();
-  for (const { chunk, vector } of vectors) {
+  let written = 0;
+  for (const { chunk, vector, hash } of vectors) {
     const found = sql
       .exec<{ chunk: number; reader_set: number }>(
         currentChunkSql,
         chunk.source,
         chunk.version,
-        chunk.position
+        chunk.position,
+        hash ?? null
       )
       .toArray()
       .at(0);
     if (found !== undefined) {
       const { inverseLength, fine } = fineOf(vector);
-      sql.exec(
-        `INSERT INTO vector_codes (chunk, model, reader_set, bits, inverse_length, fine)
-        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (chunk, model) DO NOTHING`,
-        found.chunk,
-        stored.id,
-        found.reader_set,
-        bytesOf(bitsOf(vector, stored.centre)),
-        inverseLength,
-        bytesOf(fine)
-      );
+      written += sql
+        .exec(
+          `INSERT INTO vector_codes (chunk, model, reader_set, bits, inverse_length, fine)
+        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (chunk, model) DO NOTHING
+        RETURNING chunk`,
+          found.chunk,
+          stored.id,
+          found.reader_set,
+          bytesOf(bitsOf(vector, stored.centre)),
+          inverseLength,
+          bytesOf(fine)
+        )
+        .toArray().length;
       groups.add(found.reader_set);
     }
   }
   for (const readerSet of groups) {
     packTail(sql, stored.id, readerSet);
   }
+  return written;
 };
 
 /**
@@ -416,6 +426,77 @@ export const repackBlocks = (
       repack(sql, marked);
     }
   }
+};
+
+/** A model whose codes are being removed, and whether any are left. */
+export interface DroppingModel {
+  id: number;
+  name: string;
+  /** No block or code of it is left: only its row. */
+  empty: boolean;
+}
+
+/**
+ * Removes up to `blocks` blocks of codes, with their marks, and up to
+ * `blockSize` tail codes, of the first model kept that isn't `keep`: a
+ * build the host no longer runs. Run it in one transaction; null when
+ * every model kept is `keep`. Its row stays until `forgetModel`.
+ */
+export const dropVectorsStep = (
+  sql: SqlStorage,
+  keep: string,
+  blocks: number
+): DroppingModel | null => {
+  const model = sql
+    .exec<{ id: number; name: string }>(
+      "SELECT id, name FROM vector_models WHERE name <> ? ORDER BY id LIMIT 1",
+      keep
+    )
+    .toArray()
+    .at(0);
+  if (model === undefined) {
+    return null;
+  }
+  const taken = `SELECT id FROM vector_blocks WHERE model = ?1 ORDER BY id LIMIT ?2`;
+  sql.exec(
+    `DELETE FROM vector_removed WHERE block IN (${taken})`,
+    model.id,
+    blocks
+  );
+  sql.exec(
+    `DELETE FROM vector_codes WHERE block IN (${taken})`,
+    model.id,
+    blocks
+  );
+  sql.exec(
+    `DELETE FROM vector_blocks WHERE id IN (${taken})`,
+    model.id,
+    blocks
+  );
+  sql.exec(
+    `DELETE FROM vector_codes WHERE rowid IN (
+      SELECT rowid FROM vector_codes WHERE model = ? AND block IS NULL LIMIT ?)`,
+    model.id,
+    blockSize
+  );
+  const left = sql
+    .exec(
+      `SELECT 1 FROM vector_blocks WHERE model = ?1
+      UNION ALL SELECT 1 FROM vector_codes WHERE model = ?1 LIMIT 1`,
+      model.id
+    )
+    .toArray();
+  return { ...model, empty: left.length === 0 };
+};
+
+/** Forgets a model `dropVectorsStep` emptied: its row, unless codes came back meanwhile. */
+export const forgetModel = (sql: SqlStorage, id: number): void => {
+  sql.exec(
+    `DELETE FROM vector_models WHERE id = ?1
+      AND NOT EXISTS (SELECT 1 FROM vector_blocks WHERE model = ?1)
+      AND NOT EXISTS (SELECT 1 FROM vector_codes WHERE model = ?1)`,
+    id
+  );
 };
 
 /** A 32-bit word's set bits. */

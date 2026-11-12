@@ -72,12 +72,14 @@ export type EmbedFailure = "too-long" | "not-text" | "kernel";
 
 /**
  * What a call answers for each of its texts: its embedding; why it has
- * none; or `deferred`, when the call's tokens (`maxTokensPerCall`) ran out
- * before it, so the caller sends it again in another call.
+ * none, with the model and build that tried it, so a verdict is never
+ * taken for another build's; or `deferred`, when the call's tokens
+ * (`maxTokensPerCall`) ran out before it, so the caller sends it again in
+ * another call (it was not tried).
  */
 export type EmbedResult =
   | ({ kind: "embedded" } & Embedding)
-  | { kind: "failed"; reason: EmbedFailure }
+  | { kind: "failed"; reason: EmbedFailure; model: ModelIdentity }
   | { kind: "deferred" };
 
 /**
@@ -254,10 +256,13 @@ export class Embedder extends DurableObject<EmbedderEnv> {
     text: unknown,
     budget: number
   ): Promise<[EmbedResult, number]> {
-    if (!isText(text)) {
-      return [{ kind: "failed", reason: "not-text" }, 0];
-    }
     const loaded = await this.loaded();
+    if (!isText(text)) {
+      return [
+        { kind: "failed", reason: "not-text", model: loaded.identity },
+        0,
+      ];
+    }
     let given = 0;
     try {
       const ids = this.inModule(() => loaded.engine.tokenize(text));
@@ -272,7 +277,7 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       if (reason === undefined) {
         throw error;
       }
-      return [{ kind: "failed", reason }, given];
+      return [{ kind: "failed", reason, model: loaded.identity }, given];
     }
   }
 

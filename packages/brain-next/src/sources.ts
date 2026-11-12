@@ -17,6 +17,7 @@ import {
   sourceChanges,
   sourceVersions,
 } from "./db/schema.ts";
+import { enqueueEmbedding } from "./embedding.ts";
 import {
   erasuresSoFar,
   isErased,
@@ -28,6 +29,7 @@ import {
 import {
   fileKeyOf,
   hashOf,
+  releaseVectors,
   holdFile,
   isHeld,
   isInDoubt,
@@ -70,8 +72,8 @@ const encoder = new TextEncoder();
 
 /**
  * An add, with what it is compared by (its file's hash and its readers'
- * key), and whether its text is indexed for recall: an instruction file's
- * never is (contract.ts `addInstructions`).
+ * key), and its chunks when its text is indexed for recall: an
+ * instruction file's never is (contract.ts `addInstructions`).
  */
 interface Adding {
   readonly added: NewSource;
@@ -86,7 +88,8 @@ interface Adding {
   readonly onlyFor?: { subject: string; soFar: number };
   readonly hash: string;
   readonly readers: string;
-  readonly indexed: boolean;
+  /** Its chunks when it is indexed, each with its text's SHA-256: none when not. */
+  readonly chunks: readonly { text: string; hash: string }[];
 }
 
 /**
@@ -163,7 +166,8 @@ const madeBefore = (
 
 /**
  * Writes the next version of `adding.added.source`, whole: the version,
- * its chunks and their words when it is indexed, its count on the file,
+ * its chunks and their words when it is indexed, with an item on the
+ * queue to embed them (embedding.ts), its count on the file,
  * its change, and the source's current pointer, which makes it visible and
  * removes the vector codes of the version it replaces (vectors.ts). Run it
  * in one transaction. Answers `undefined` when the file's row is gone (swept
@@ -225,16 +229,20 @@ const record = (
     })
     .returning({ row: sourceVersions.row })
     .get();
-  const indexed = adding.indexed ? chunksOf(added.text) : [];
   // Each word as written is stemmed once per add, however many chunks hold it.
   const memo: WordMemo = new Map();
-  for (const [position, chunk] of indexed.entries()) {
+  for (const [position, chunk] of adding.chunks.entries()) {
     const written = db
       .insert(chunks)
-      .values({ versionRow: row, position, text: chunk })
+      .values({ versionRow: row, position, text: chunk.text, hash: chunk.hash })
       .returning({ row: chunks.row })
       .get();
-    indexWords(storage.sql, written.row, chunk, memo);
+    indexWords(storage.sql, written.row, chunk.text, memo);
+  }
+  if (adding.chunks.length > 0) {
+    // Embedded through the queue, put on it with the chunks: no crash
+    // leaves chunks that are never embedded.
+    enqueueEmbedding(storage, added.source, version);
   }
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })
@@ -257,9 +265,24 @@ const record = (
       set: { versionRow: row },
     })
     .run();
+  if (replaced !== undefined) {
+    // Their full vectors too, once no current chunk holds their text: the
+    // sweep checks and deletes (files.ts).
+    releaseVectors(
+      storage.sql,
+      JSON.stringify(
+        storage.sql
+          .exec<{ hash: string | null }>(
+            "SELECT hash FROM chunks WHERE version_row = ? AND hash IS NOT NULL",
+            replaced.versionRow
+          )
+          .toArray()
+          .map((chunk) => chunk.hash)
+      )
+    );
+  }
   return { source: added.source, version };
 };
-
 /** What an add that must be made again says: the same words as a lost file's. */
 const addAgain = "The Brain lost the file while adding it: add it again";
 
@@ -285,7 +308,12 @@ export const addVersion = async (
       : {}),
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
-    indexed,
+    chunks: await Promise.all(
+      (indexed ? chunksOf(added.text) : []).map(async (text) => ({
+        text,
+        hash: await hashOf(encoder.encode(text)),
+      }))
+    ),
   };
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
