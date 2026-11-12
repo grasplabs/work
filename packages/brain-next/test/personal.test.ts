@@ -970,6 +970,16 @@ describe("a person's own store", () => {
     ).resolves.toMatchObject({ text: "Still theirs" });
   });
 
+  // A store never written has no add that could still write a file.
+  it("erased whole before its first write, is erased at once, keeping only the record of it", async () => {
+    await expect(
+      called(own().erasePerson({ person, reason: "person_erased" }))
+    ).resolves.toBeUndefined();
+    await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
+      `${await ownPrefix()}erased`,
+    ]);
+  });
+
   it("answers that it is still deleting until its files are gone, and only then that it is erased", async () => {
     await add(own(), "Theirs", theirs());
     const { heal } = await breakBucket(own(), ["delete"]);

@@ -844,11 +844,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * couldn't be written.
    */
   async #eraseWhole(reason: ErasureReason): Promise<void> {
+    // Whether the store was never written when this call erased it: an
+    // add makes the schema before it writes a file, so no add of an
+    // earlier instance can still land under its prefix.
+    let neverWritten = false;
     if (!this.#erased) {
       const recorded = await this.ctx.blockConcurrencyWhile(async () => {
         if (this.#erased) {
           return true;
         }
+        neverWritten = !hasSchema(this.ctx.storage.sql);
         try {
           await recordStoreErased(this.#bucket, reason, Date.now());
         } catch {
@@ -868,9 +873,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // this instance, the erasure isn't finished. Nor is it while one that
     // an earlier instance started (reset meanwhile, so no longer seen
     // here) may still land: until the grace an add has to write its file
-    // (files.ts `fileGraceMs`) has passed since the record. Both are read
-    // before the listing, so what lands after it is deleted by a later
-    // call: the caller calls again until one is done.
+    // (files.ts `fileGraceMs`) has passed since the record, unless the
+    // store was never written. Both are read before the listing, so what
+    // lands after it is deleted by a later call: the caller calls again
+    // until one is done.
     const quiet = this.#writes.size === 0;
     let done = false;
     try {
@@ -881,7 +887,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         vectorsPrefix,
         ledgerPrefix,
       ]);
-      done = quiet && settled && emptied;
+      done = quiet && (settled || neverWritten) && emptied;
     } catch {
       // Nothing of the error is kept: it may name a key.
     }

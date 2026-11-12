@@ -15,6 +15,7 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { publishVersion } from "../src/app-publish.ts";
 import { formSubmissionOf, queueFormSent } from "../src/app-webhook-queue.ts";
+import { addSource } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
@@ -585,10 +586,6 @@ describe("erasing a person", () => {
     const preview = await admin.api.members.erasure(person.userId);
 
     const erased = await admin.api.members.erase(person.userId, name);
-    // Their own Brain store is still deleting as the request ends; the
-    // clock finishes it once an add under way could have ended.
-    await finishedByTheClock(person.userId);
-    const done = await admin.api.members.erasure(person.userId);
 
     const row = await userRow(person.userId);
     expect({
@@ -598,7 +595,6 @@ describe("erasing a person", () => {
         requestedAt: typeof erased.requestedAt,
         completedAt: typeof erased.completedAt,
       },
-      done: typeof done.erasure?.completedAt,
       name: row?.name,
       emailKept: row?.email.toLowerCase() === email.toLowerCase(),
       emailLooksLikeOne: row?.email.includes(email.split("@")[0] ?? email),
@@ -629,7 +625,7 @@ describe("erasing a person", () => {
       },
       erased: {
         requestedAt: "string",
-        completedAt: "object",
+        completedAt: "string",
         areas: [
           { area: "identity", state: "complete" },
           { area: "channels", state: "complete" },
@@ -639,10 +635,9 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
-          { area: "brain_sources", state: "pending" },
+          { area: "brain_sources", state: "complete" },
         ],
       },
-      done: "string",
       name,
       emailKept: false,
       emailLooksLikeOne: false,
@@ -825,7 +820,6 @@ describe("erasing a person", () => {
     const invited = await outcome(
       core.authenticate().members.invite(email, "user")
     );
-    await finishedByTheClock(person.userId);
 
     const after = await admin.api.members.erasure(person.userId);
     const invitations = await env.DB.prepare(
@@ -852,7 +846,6 @@ describe("erasing a person", () => {
       // Once erased, the name they had still asks for them.
       const again = await admin.api.members.erase(person.userId, name);
       expect(again).toStrictEqual(first);
-      await finishedByTheClock(person.userId);
     });
     const requested = audited.filter(
       ({ action }) => action === "member.erasure.requested"
@@ -882,6 +875,14 @@ describe("erasing a person", () => {
   it("waits for the Brain to finish deleting their own store without counting a failure or logging one, and is finished by the clock", async () => {
     const { admin, person } = await removedPerson();
     const name = String(person.person.name);
+    // Something of theirs alone in their own store: its erasure waits out
+    // the time an add under way has to write a file.
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: "A note of theirs alone",
+      readers: { kind: "owner", personId: person.userId },
+    });
     const logged: string[] = [];
     const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
       logged.push(JSON.stringify(args));
@@ -935,7 +936,7 @@ describe("erasing a person", () => {
       accounts: await rowsOf("accounts", "user_id", person.userId),
     };
 
-    await finishedByTheClock(person.userId);
+    await runMinuteTasks();
 
     const done = await admin.api.members.erasure(person.userId);
     expect({
@@ -959,8 +960,7 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
-          // Their own Brain store still deleting, until the clock.
-          { area: "brain_sources", state: "pending" },
+          { area: "brain_sources", state: "complete" },
         ],
       },
       // Nothing of the area went: one statement, or none of it.
