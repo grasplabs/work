@@ -1,6 +1,7 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
+import type { BrainBucket } from "./bucket.ts";
 import { files, vectorFiles } from "./db/schema.ts";
 
 // The original files of source versions, in the host's Brain bucket (R2,
@@ -61,12 +62,18 @@ export const sweepDeleteMs = 10_000;
 /** Vector objects swept at once: with a batch of files, one R2 call. */
 const vectorSweepBatch = 400;
 
+/** Where versions' files are kept in the store's part of the bucket. */
+export const filesPrefix = "sources/";
+
+/** Where vectors are kept in the store's part of the bucket. */
+export const vectorsPrefix = "vectors/";
+
 /** The file of `hash`'s key in the bucket. */
-export const fileKeyOf = (hash: string): string => `sources/${hash}`;
+export const fileKeyOf = (hash: string): string => `${filesPrefix}${hash}`;
 
 /** Where `model`'s vectors are kept in the bucket. */
 export const vectorPrefixOf = (model: string): string =>
-  `vectors/${encodeURIComponent(model)}/`;
+  `${vectorsPrefix}${encodeURIComponent(model)}/`;
 
 /** The key of the vector of a passage of `hash` by `model`. */
 export const vectorKeyOf = (model: string, hash: string): string =>
@@ -196,13 +203,37 @@ export const releaseVectors = (store: SqlStorage, hashes: string): void => {
   );
 };
 
+/** A file no version points at: what the sweep deletes, past its grace. */
+const unreferencedFile = "refs = 0";
+
+/** A vector row let go: what the sweep deletes, past its grace. */
+const unheldVector = "unheld = 1";
+
+/**
+ * `?1` the grace (`fileGraceMs`): when the sweep (`sweepFiles`) next has a
+ * file or a vector to look at, by the same conditions it takes them by: a
+ * file no version points at, or a vector row marked unheld, once its
+ * grace is over. Null when there is none.
+ */
+const sweepDueSql = `
+SELECT min(at) AS at FROM (
+  SELECT min(written_at) + ?1 AS at FROM files WHERE ${unreferencedFile}
+  UNION ALL SELECT min(written_at) + ?1 FROM vector_files WHERE ${unheldVector}
+)
+HAVING min(at) IS NOT NULL`;
+
+/** When the sweep next has something to look at (above), or null. */
+export const sweepDueAt = (store: SqlStorage): number | null =>
+  store.exec<{ at: number }>(sweepDueSql, fileGraceMs).toArray().at(0)?.at ??
+  null;
+
 /**
  * `?1` the cut-off: rows noted before it, `?2` how many. The oldest
  * unheld vector rows past the grace and not in doubt.
  */
 const vectorsDueSql = `
 SELECT model, hash FROM vector_files INDEXED BY vector_files_unheld_idx
-WHERE unheld = 1 AND written_at <= ?1
+WHERE ${unheldVector} AND written_at <= ?1
 ORDER BY written_at
 LIMIT ?2`;
 
@@ -325,7 +356,7 @@ export const holdFile = (db: DrizzleSqliteDODatabase, hash: string): boolean =>
  * never holds back the others.
  */
 const deleteObjects = async (
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   keys: readonly string[]
 ): Promise<string[]> => {
   try {
@@ -404,12 +435,12 @@ const settleVectorSweep = (
 export const sweepFiles = async (
   storage: DurableObjectStorage,
   db: DrizzleSqliteDODatabase,
-  bucket: R2Bucket,
+  bucket: BrainBucket,
   at: Date
 ): Promise<"swept" | "idle" | "timed_out"> => {
   const asOf = Math.min(at.getTime(), Date.now());
   const unreferenced = and(
-    eq(files.refs, 0),
+    sql.raw(unreferencedFile),
     lte(files.writtenAt, new Date(asOf - fileGraceMs))
   );
   const due = db

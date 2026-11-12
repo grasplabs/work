@@ -7,6 +7,7 @@ import type {
   VectorSearch,
   VectorsToPut,
 } from "./contract.ts";
+import { byNearness } from "./order.ts";
 import { readableSql } from "./reader-sets.ts";
 
 // The vector way: an exact 1-bit scan, no index structure, with the
@@ -407,6 +408,10 @@ const repack = (sql: SqlStorage, marked: MarkedBlock): void => {
   packTail(sql, marked.model, marked.reader_set);
 };
 
+/** Whether a block holds removed codes: what `repackVectors` repacks. */
+export const repackDue = (sql: SqlStorage): boolean =>
+  sql.exec("SELECT 1 FROM vector_removed LIMIT 1").toArray().length > 0;
+
 /**
  * Repacks one block holding removed codes. Run it in one transaction.
  * True when another block holds removed codes.
@@ -417,7 +422,7 @@ export const repackVectors = (sql: SqlStorage): boolean => {
     return false;
   }
   repack(sql, marked);
-  return sql.exec("SELECT 1 FROM vector_removed LIMIT 1").toArray().length > 0;
+  return repackDue(sql);
 };
 
 /**
@@ -450,6 +455,9 @@ export interface DroppingModel {
   empty: boolean;
 }
 
+/** A build other than `?1` (the host's), which `dropVectorsStep` drops. */
+export const replacedModels = "name <> ?1";
+
 /**
  * Removes up to `blocks` blocks of codes, with their marks, and up to
  * `blockSize` tail codes, of the first model kept that isn't `keep`: a
@@ -463,7 +471,8 @@ export const dropVectorsStep = (
 ): DroppingModel | null => {
   const model = sql
     .exec<{ id: number; name: string }>(
-      "SELECT id, name FROM vector_models WHERE name <> ? ORDER BY id LIMIT 1",
+      `SELECT id, name FROM vector_models WHERE ${replacedModels}
+      ORDER BY id LIMIT 1`,
       keep
     )
     .toArray()
@@ -671,7 +680,8 @@ WITH ${readableSql}
 SELECT vector_codes.chunk AS chunk,
   vector_codes.inverse_length AS inverse_length,
   vector_codes.fine AS fine, source_versions.source AS source,
-  source_versions.version AS version, chunks.position AS position
+  source_versions.version AS version, chunks.position AS position,
+  source_versions.added_at AS added_at
 FROM json_each(?4) AS candidate
 CROSS JOIN vector_codes ON vector_codes.chunk = candidate.value
   AND vector_codes.model = ?1
@@ -695,10 +705,11 @@ const maskOf = (removed: string, size: number): Uint8Array | undefined => {
   return mask;
 };
 
-/** A chunk the vector way found: its row, and its place and cosine. */
+/** A chunk the vector way found: its row, its place and cosine, and when its version was added. */
 interface Closest {
   chunk: number;
   found: FoundChunk;
+  addedAt: number;
 }
 
 /**
@@ -707,8 +718,8 @@ interface Closest {
  * at most `limit`: the `rescoreCandidates` nearest by Hamming distance
  * over every such
  * code, block by block, then re-scored by the cosine of their 8-bit
- * codes. Ties go to the older chunk. Memory stays at one block and the
- * candidates.
+ * codes. Ties go to the older version, then by source and place
+ * (order.ts `byNearness`). Memory stays at one block and the candidates.
  */
 const closestOf = (
   sql: SqlStorage,
@@ -764,21 +775,38 @@ const closestOf = (
       source: string;
       version: number;
       position: number;
+      added_at: number;
     }>(candidatesSql, stored.id, person, readerJson, JSON.stringify(candidates))
     .toArray()
-    .map(({ chunk, inverse_length, fine, source, version, position }) => ({
-      chunk,
-      found: {
+    .map(
+      ({
+        chunk,
+        inverse_length,
+        fine,
         source,
         version,
         position,
-        score: cosineOf(asked, {
-          inverseLength: inverse_length,
-          fine: new Int8Array(fine),
-        }),
-      } satisfies FoundChunk,
-    }));
-  scored.sort((a, b) => b.found.score - a.found.score || a.chunk - b.chunk);
+        added_at,
+      }) => ({
+        chunk,
+        addedAt: added_at,
+        found: {
+          source,
+          version,
+          position,
+          score: cosineOf(asked, {
+            inverseLength: inverse_length,
+            fine: new Int8Array(fine),
+          }),
+        } satisfies FoundChunk,
+      })
+    );
+  scored.sort((a, b) =>
+    byNearness(
+      { ...a.found, addedAt: a.addedAt },
+      { ...b.found, addedAt: b.addedAt }
+    )
+  );
   return scored.slice(0, limit);
 };
 
@@ -808,10 +836,16 @@ export const searchVectors = (
   };
 };
 
-/** A chunk recall's vector way found, with its row and text. */
+/**
+ * A chunk recall's vector way found, with its row, its text and its
+ * cosine to the question's vector (by its 8-bit code), which recall
+ * across stores orders by.
+ */
 export interface NearChunk extends ChunkRef {
   row: number;
   text: string;
+  score: number;
+  addedAt: number;
 }
 
 /**
@@ -844,10 +878,12 @@ export const nearChunks = (
       .toArray()
       .map(({ row, text }) => [row, text])
   );
-  return closest.flatMap(({ chunk, found: { source, version, position } }) => {
-    const text = texts.get(chunk);
-    return text === undefined
-      ? []
-      : [{ row: chunk, source, version, position, text }];
-  });
+  return closest.flatMap(
+    ({ chunk, addedAt, found: { source, version, position, score } }) => {
+      const text = texts.get(chunk);
+      return text === undefined
+        ? []
+        : [{ row: chunk, source, version, position, text, score, addedAt }];
+    }
+  );
 };

@@ -1696,20 +1696,21 @@ export const instructionProbes = {
   },
 } satisfies Record<InstructionMember, Probe>;
 
+/** What no caller reaches over RPC: the runtime's own handlers, such as the alarm. */
+type Handler = keyof Rpc.DurableObjectBranded | "alarm";
+
 /**
  * Each public method of the Brain's store: what it defines, not the
- * handlers its base class only declares. The store implements `Brain`,
- * so the contract's members are among them.
+ * handlers its base class declares, which the runtime alone calls. The
+ * store implements `Brain`, so the contract's members are among them.
  */
 type StoreMember = {
-  [
-    Key in Exclude<keyof BrainStore, keyof Rpc.DurableObjectBranded>
-  ]-?: Key extends string
+  [Key in Exclude<keyof BrainStore, Handler>]-?: Key extends string
     ? Record<never, never> extends Pick<BrainStore, Key>
       ? never
       : Key
     : never;
-}[Exclude<keyof BrainStore, keyof Rpc.DurableObjectBranded>];
+}[Exclude<keyof BrainStore, Handler>];
 
 /** Dimensions of the vectors the vector probes put: few, so they're cheap. */
 const vectorDimensions = 64;
@@ -2212,6 +2213,24 @@ export const storeProbes = {
       )
     );
     return asked;
+  },
+  // What recall finds before it is packed: the same questions, answered
+  // as lists with their order keys, must hold no marker either.
+  find: async (probing) => {
+    const find = async (asking: PackAsk) =>
+      await store().find({ ...asking, reader: probing.reader });
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), find)),
+      await answer(
+        "the shared word",
+        async () => await find({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "nothing",
+        async () => await find({ question: "", budget: whole })
+      ),
+    ];
   },
   recall: async (probing) => {
     const { reader, markers } = probing;
@@ -3232,5 +3251,7 @@ export const membersOf = (module: object): string[] => {
     }
   }
   names.delete("constructor");
+  // The runtime's own handler, which no caller reaches over RPC.
+  names.delete("alarm");
   return [...names];
 };

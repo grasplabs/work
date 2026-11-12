@@ -6,6 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./across": "./src/across.ts",
     "./contract": "./src/contract.ts",
     "./store": "./src/store.ts",
     "./work": "./src/work.ts"
