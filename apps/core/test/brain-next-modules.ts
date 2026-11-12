@@ -16,6 +16,8 @@
  */
 export const brainModules = {
   "apps/core/src/instruction-files.ts": "instructions",
+  // The skills' rules (GRA-1826): its own surface, each export probed.
+  "apps/core/src/brain-skills.ts": "skills",
   // Runs core's workBrain on the clock, and hands nothing of it on.
   "apps/core/src/clock.ts": "core",
   // Answers the staff with core's brainStaffReport and actOnBrainForStaff,
@@ -24,4 +26,10 @@ export const brainModules = {
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.
   "apps/core/src/brain-sources-rpc.ts": "sources",
+  // Erases the sources of runs past their retention with core's
+  // eraseSource, and answers nothing of it.
+  "apps/core/src/brain-next-origins.ts": "core",
+  // Erases what an erased person alone may read with core's erasePerson,
+  // and answers nothing of it.
+  "apps/core/src/person-erasure.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;

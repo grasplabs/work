@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch } from "../audit-outbox.ts";
+import { eraseSources, runSource } from "../brain-next-origins.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
@@ -233,6 +234,15 @@ const startDetailsRemoved = async (
   if (heldOf.length > 0) {
     await env.CONNECT.dropForEndedRuns({ runs: heldOf });
   }
+  // And what the new Brain took in of their runs (brain-next-origins.ts):
+  // erased before they are marked, so a sweep it fails for marks nothing
+  // and the next erases them again. A hand-over still on its way for one
+  // of them is refused from now on.
+  await eraseSources(
+    env,
+    heldOf.map(({ runId }) => runSource(runId)),
+    "retention"
+  );
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
@@ -339,24 +349,29 @@ export const sweepWorkflowStartDetails = async (
   const db = drizzle(env.DB);
   let swept = 0;
   let after: DueStart | undefined;
-  while (swept < startDetailsPerSweep) {
-    const limit = Math.min(sweptPerBatch, startDetailsPerSweep - swept);
-    // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
-    const page = await dueStarts(db, before, after, limit);
-    if (page.length === 0) {
-      break;
+  // What follows the starts needs neither connect nor the Brain: it runs
+  // even when a page of starts failed on one of them.
+  try {
+    while (swept < startDetailsPerSweep) {
+      const limit = Math.min(sweptPerBatch, startDetailsPerSweep - swept);
+      // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
+      const page = await dueStarts(db, before, after, limit);
+      if (page.length === 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
+      await startDetailsRemoved(env, page, before, now);
+      swept += page.length;
+      if (page.length < limit) {
+        break;
+      }
+      after = page.at(-1);
     }
-    // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
-    await startDetailsRemoved(env, page, before, now);
-    swept += page.length;
-    if (page.length < limit) {
-      break;
-    }
-    after = page.at(-1);
+  } finally {
+    await paramValuesRemoved(db, before, now);
+    // The snapshots no start or test run names any more.
+    await orphanedSnapshotsRemoved(db);
   }
-  await paramValuesRemoved(db, before, now);
-  // The snapshots no start or test run names any more.
-  await orphanedSnapshotsRemoved(db);
 };
 
 /**

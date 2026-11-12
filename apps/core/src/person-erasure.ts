@@ -31,6 +31,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
+import { erasePerson as eraseFromBrain } from "./brain-next.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
@@ -572,6 +573,26 @@ const apps: ErasureStep = {
 };
 
 /**
+ * What the Brain keeps that only they may read (brain-next.ts
+ * `erasePerson`): whatever was added for them alone, their own
+ * instruction file included, every version. Its place among the areas doesn't matter, and nothing
+ * orders a retry's pending areas: nothing of theirs lands after it,
+ * whichever areas are still pending, as they were removed before they
+ * could be erased, producers hand over nothing for someone no longer a
+ * member, and a hand-over that began before is refused by the Brain as it
+ * records. Complete only once the Brain's call returned, which puts the
+ * erasure in its ledger; one that fails or throws leaves the area pending
+ * for the clock, and asking the Brain again is safe.
+ */
+const brainSources: ErasureStep = {
+  area: "brain_sources",
+  erase: async (env, userId) => {
+    await eraseFromBrain(env, { personId: userId, reason: "person_erased" });
+    await completed(drizzle(env.DB), userId, "brain_sources");
+  },
+};
+
+/**
  * The erasure's areas, in the order they run. Each area's own leaf of
  * GRA-903 adds its step here.
  */
@@ -584,6 +605,7 @@ const steps: readonly ErasureStep[] = [
   interview,
   runs,
   brain,
+  brainSources,
 ];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */

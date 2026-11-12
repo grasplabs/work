@@ -63,6 +63,7 @@ const areaLabels: Record<string, MessageDescriptor> = {
   brain: msg`Personal Knowledge and memories`,
   runs: msg`Unfinished runs (stopped) and decision confirmations`,
   interview: msg`Onboarding interview`,
+  brain_sources: msg`What the Brain keeps that only they may read`,
 };
 
 /** How far an area got, in the page's language. */

@@ -1,5 +1,4 @@
 import { listTranscripts, readTranscript } from "@grasp-os/brain/transcripts";
-import type { Transcript as StoredTranscript } from "@grasp-os/brain/transcripts";
 import {
   brainErrors,
   brainTranscriptSourcesMax,
@@ -8,6 +7,7 @@ import {
 import type { Source, Transcript } from "@grasp-os/shared/brain";
 import { documentIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { Transcript as StoredTranscript } from "@grasp-os/shared/transcripts";
 
 import { brainOf } from "./knowledge/ports.ts";
 
