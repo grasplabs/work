@@ -1397,7 +1397,14 @@ export type NewMemory = z.infer<typeof newMemorySchema>;
  * `reader` is who the add is made for, as the host resolved them: given,
  * an entity's `id` is taken only if they may see it; without it, only if
  * a memory with exactly `access`'s readers mentions it. Either way an id
- * that fails is refused in the words of an unknown one.
+ * that fails is refused in the words of an unknown one. It is not part of
+ * the change: a repeat with another reader gets the first answer.
+ *
+ * An instruction (by type or by attribute) is only ever its writer's own:
+ * its `access` must be `owner` of that writer. Shared with a group it
+ * would steer colleagues' agents without the approved publish that shared
+ * skills and instruction files need. A consumer presents one as an
+ * instruction only in its writer's own chats and runs.
  */
 export const newMemoriesSchema = z
   .strictObject({
@@ -1413,6 +1420,20 @@ export const newMemoriesSchema = z
   .refine(
     ({ memories, extracted }) => memories.length > 0 || extracted !== undefined,
     { message: "Adds no memory and marks no extraction", path: ["memories"] }
+  )
+  .refine(
+    ({ access, memories }) =>
+      memories.every(
+        ({ type, attribute, basis }) =>
+          (type !== "instruction" && attribute !== "instruction") ||
+          (basis.kind === "writer" &&
+            access.kind === "owner" &&
+            access.person === basis.writer)
+      ),
+    {
+      message: "An instruction is readable by its writer alone",
+      path: ["access"],
+    }
   );
 export type NewMemories = z.input<typeof newMemoriesSchema>;
 
@@ -1757,9 +1778,11 @@ export interface Brain {
   listContested: (request: ContestedRequest) => Promise<ContestedFact[]>;
   /**
    * Retires one of the writer's own memories (its lineage is that
-   * writer) that the reader may read: it stops being current from now on,
-   * and stays as history. Nothing else changes: a memory it had ended
-   * stays ended.
+   * writer) that the reader may read and that is current for them: it
+   * stops being current from now on, and stays as history. Nothing else
+   * changes: a memory it had ended stays ended. One already retired
+   * answers `done` again, so a retry never reads as not found; one ended
+   * otherwise, expired included, answers `nothing`.
    */
   retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
   /**
