@@ -643,6 +643,109 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
     });
   });
 
+  it("goes on without the evidence, told it took too long, when the audit log doesn't answer within the recall's time, and never hands it over later", async () => {
+    const depot = word();
+    const fact = `Depot ${depot} opens at seven`;
+    const chat = await recallingChat(says("I can't say."), says("Noted."));
+    await added(fact, owner(chat.personId));
+
+    // A log that never answers the recall's event.
+    await withEnv(
+      chat,
+      {
+        AUDIT_LOG: answering(env.AUDIT_LOG, "append", async (own, events) =>
+          holdsRecalled(events)
+            ? await Promise.withResolvers<never>().promise
+            : await own(events)
+        ),
+      },
+      async () => await chat.ask(`When does depot ${depot} open?`)
+    );
+    await chat.ask("Thanks!");
+
+    const [asked, next] = chat.provider.requests.map(({ body }) => body);
+    const events = await eventsOf(
+      chat.agent.agentId,
+      (all) => recallsIn(all, chat.chat.id).length > 0
+    );
+    expect({
+      fact: recallIn(asked)?.includes(fact),
+      told: recallIn(asked)?.includes("The recall took too long."),
+      later: JSON.stringify(next).includes(fact),
+      logged: outcomesOf(events, recallRunIn(asked)),
+    }).toStrictEqual({
+      fact: false,
+      told: true,
+      later: false,
+      logged: [{ outcome: "failed", reason: recallTimeoutReason }],
+    });
+  });
+
+  it("lets go of the analysis as soon as a sufficient first pass ends, before its reads are recorded, and searches no rewrite", async () => {
+    const depot = word();
+    const decoy = word();
+    const fact = `Depot ${depot} opens at seven`;
+    const chat = await recallingChat(
+      says("Hello."),
+      says("Seven."),
+      says("Still seven.")
+    );
+    await added(fact, owner(chat.personId));
+    await added(`Warehouse ${decoy} locks at nine`, owner(chat.personId));
+    await chat.ask("Hi!");
+    // Held: it answers only once let go of.
+    chat.provider.analysisReplies.push({ hang: true });
+    // The log holds the recall's event until the test saw the analysis go:
+    // flags, as what one object resolves the test can't go on from.
+    const step = { reached: false, released: false };
+
+    await withEnv(
+      chat,
+      {
+        AUDIT_LOG: answering(env.AUDIT_LOG, "append", async (own, events) => {
+          if (holdsRecalled(events)) {
+            step.reached = true;
+            for (let waits = 0; !step.released && waits < 500; waits += 1) {
+              // oxlint-disable-next-line no-await-in-loop -- until the test saw it
+              await scheduler.wait(20);
+            }
+          }
+          return await own(events);
+        }),
+      },
+      async () => {
+        const asked = chat.ask(`When does depot ${depot} open?`).then(
+          () => "answered",
+          (error: unknown) => (error instanceof Error ? error.message : "")
+        );
+        await vi.waitFor(
+          () => {
+            expect(step.reached).toBeTruthy();
+          },
+          { timeout: 10_000, interval: 20 }
+        );
+        // While the recall's event is still on its way to the log.
+        await vi.waitFor(
+          () => {
+            expect(chat.provider.analyses[0]?.signal.aborted).toBeTruthy();
+          },
+          { timeout: 5000, interval: 20 }
+        );
+        step.released = true;
+        return await asked;
+      }
+    );
+    // Answered at once with words of its own: not searched.
+    chat.provider.analysisReplies.push(analysed(`warehouse ${decoy}`));
+    await chat.ask(`And when does depot ${depot} open on Sundays?`);
+
+    expect({
+      first: recallIn(chat.provider.requests[1]?.body)?.includes(fact),
+      rewrite: recallIn(chat.provider.requests[2]?.body)?.includes(decoy),
+      found: recallIn(chat.provider.requests[2]?.body)?.includes(fact),
+    }).toStrictEqual({ first: true, rewrite: false, found: true });
+  });
+
   it("logs a recall revoked after it was recorded and before it was handed over as failed for its run, and the turn stops with nothing handed over", async () => {
     const depot = word();
     const fact = `Depot ${depot} opens at seven`;

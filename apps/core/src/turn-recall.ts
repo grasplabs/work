@@ -83,9 +83,9 @@ export const analysisPurpose = "chat.recall_analysis";
  * The messages before the question the analysis reads, at most: the
  * last three exchanges, where what "he" or "that deal" names almost
  * always is. With `analysisMessageChars` it bounds the analysis to one
- * cheap prompt of a quick model per question (about 12,000 characters,
- * some 3,000 tokens, the size of the recall's own budget), however long
- * the chat.
+ * cheap prompt of a quick model per question (up to about 14,000
+ * characters with the question, some 3,500 tokens, about the size of the
+ * recall's own budget), however long the chat.
  */
 const analysisMessages = 6;
 
@@ -362,28 +362,38 @@ export const recallForTurn = async (
     throw error;
   }
   const scope = { ...turn.scope, runId };
+  const started = Date.now();
   let status: CodeRunStatus = "crashed";
   let result: string | undefined;
   let failure = "The recall failed.";
   try {
     const pack = await recalled(recalling, query, analysed);
+    // Its answer can no longer be used: let go of now, not after the writes.
+    analysis.abort();
     const versions = [
       ...new Set(pack.items.map((item) => brainVersionRead(item))),
     ];
-    // Pinned with the run before it is handed over: a run revoked or
-    // ended meanwhile records nothing and hands over nothing.
-    await recordRunReads(env, scope, [brainGrantRead, ...versions]);
     const call = {
       method: turnRecallMethod,
       detail: { versions: versions.length, run: runId },
     };
-    // In the log before the model gets any of it: straight to it, so a
-    // log that doesn't take it fails the recall, and nothing is handed over.
-    // Recorded before the hand-over: a later failure of the turn (the
-    // object restarting, the run's close failing, the turn stopping before
-    // its first request) is not this event's to tell, so its `ok` may stand
-    // for a recall the model never got.
-    await appendAuditEvent(env, agentCallEntry(scope, call));
+    // Pinned with the run, then in the log, before the model gets any of
+    // it, within what is left of the recall's time: a run revoked or ended
+    // meanwhile records nothing, and a log that doesn't take the event, or
+    // doesn't answer in time, fails the recall, so nothing is handed over
+    // and the turn goes on, told why. An event the log takes after that
+    // stands beside the `failed` written below. Recorded before the
+    // hand-over: a later failure of the turn (the object restarting, the
+    // run's close failing, the turn stopping before its first request) is
+    // not this event's to tell, so its `ok` may stand for a recall the
+    // model never got.
+    await withinTime(
+      async () => {
+        await recordRunReads(env, scope, [brainGrantRead, ...versions]);
+        await appendAuditEvent(env, agentCallEntry(scope, call));
+      },
+      leftOf(started, turnRecallDeadlineMs)
+    );
     await recordToolCall(env, scope, call);
     result = JSON.stringify(forModel(pack));
     status = "completed";

@@ -225,10 +225,10 @@ const newSourceSchema = z.strictObject({
   readers: sourceReadersSchema,
 });
 
-/** A question as the Brain takes one (`recallRequestSchema`). */
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
 
+/** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
 
 const versionRefSchema = z.strictObject({

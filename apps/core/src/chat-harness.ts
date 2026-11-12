@@ -267,23 +267,40 @@ const shownBuilt = ({ plan, app, workflow }: QuestionBuilt): ShownBuilt => ({
   ...(workflow === undefined ? {} : { workflow }),
 });
 
+/** A question's recall's call (turn-recall.ts), as its entry keeps it. */
+const questionRecallSchema = z.object({
+  runId: z.string(),
+  callId: z.string(),
+  query: z.string(),
+  status: z.string(),
+});
+type QuestionRecall = z.infer<typeof questionRecallSchema>;
+
+const questionFilesSchema = z.array(z.string());
+
 /**
  * What a question's entry keeps besides its message: the files it carries,
- * and its recall's call (turn-recall.ts), so the chat shows the recall as a
- * step of its own.
+ * what its Build it built, and its recall's call, so the chat shows the
+ * recall as a step of its own. Each read on its own: one that doesn't
+ * parse is left out alone, never the others with it. Only the shape this
+ * code writes: nothing is released, so no older one is read.
  */
-const questionDataSchema = z.object({
-  files: z.array(z.string()),
-  built: shownBuiltSchema.optional(),
-  recall: z
-    .object({
-      runId: z.string(),
-      callId: z.string(),
-      query: z.string(),
-      status: z.string(),
-    })
-    .optional(),
-});
+export const questionDataOf = (
+  data: unknown
+): { files: string[]; built?: ShownBuilt; recall?: QuestionRecall } => {
+  const field = (key: string): unknown =>
+    typeof data === "object" && data !== null
+      ? Reflect.get(data, key)
+      : undefined;
+  const files = questionFilesSchema.safeParse(field("files"));
+  const built = shownBuiltSchema.safeParse(field("built"));
+  const recall = questionRecallSchema.safeParse(field("recall"));
+  return {
+    files: files.success ? files.data : [],
+    ...(built.success ? { built: built.data } : {}),
+    ...(recall.success ? { recall: recall.data } : {}),
+  };
+};
 
 const noUsage = {
   input: 0,
@@ -301,7 +318,7 @@ const noUsage = {
  * it found with the question.
  */
 const recallStepOf = (
-  recall: NonNullable<z.infer<typeof questionDataSchema>["recall"]>,
+  recall: QuestionRecall,
   text: string,
   timestamp: number
 ): Omit<TurnMessage, "entryId">[] => [
@@ -447,14 +464,12 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
     return [];
   }
   if (entry.kind === questionKind && message.role === "user") {
-    const data = questionDataSchema.safeParse(entry.data);
-    const recall = data.success ? data.data.recall : undefined;
+    const { files, built, recall } = questionDataOf(entry.data);
     const recalled = recall === undefined ? undefined : recallTextOf(message);
-    const built = data.success ? data.data.built : undefined;
     return [
       {
         message: { ...message, content: questionText(message) },
-        files: data.success ? data.data.files : [],
+        files,
         ...(built === undefined ? {} : { built }),
       },
       ...(recall === undefined || recalled === undefined
