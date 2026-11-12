@@ -24,9 +24,19 @@ export const skillNameSchema = z
 /** Most characters of a skill's description, as the format has it. */
 export const skillDescriptionMaxLength = 1024;
 
+/** Control characters, line breaks among them. */
+const controlCharacters = /\p{Cc}/u;
+
 const frontmatterSchema = z.looseObject({
   name: skillNameSchema,
-  description: z.string().trim().min(1).max(skillDescriptionMaxLength),
+  // One line: a description is listed in every chat's prompt, where a
+  // line break could close the list and start text of its own.
+  description: z
+    .string()
+    .trim()
+    .min(1)
+    .max(skillDescriptionMaxLength)
+    .refine((description) => !controlCharacters.test(description)),
 });
 
 /** A skill as a selection weighs it: its name and when to use it. */

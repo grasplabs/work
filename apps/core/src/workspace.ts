@@ -2096,11 +2096,26 @@ export class Workspace extends DurableObject<Env> {
     this.#keepSources(work.chatId, memory.provenance.collectionIds);
     // The skills the chat may use, from the Brain: guidance every member
     // may read, as the company's instruction file, never a grant
-    // (brain-skills.ts). Recorded as the code's calls are, by count.
-    const skills = await skillsFor(this.env, authority);
+    // (brain-skills.ts). Recorded as the code's calls are, by count. A
+    // Brain that can't answer leaves the turn without them, not without
+    // an answer: missing guidance is no question of access.
+    let skills: Awaited<ReturnType<typeof skillsFor>> = [];
+    let unavailable = false;
+    try {
+      skills = await skillsFor(this.env, authority);
+    } catch (error) {
+      unavailable = true;
+      log.warn("skills.turn_unavailable", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    }
     await auditAgentCall(this.env, scope, {
       method: "brain.skills",
-      detail: { skills: skills.length, turn: true },
+      detail: {
+        skills: skills.length,
+        turn: true,
+        ...(unavailable ? { unavailable } : {}),
+      },
     });
     const { via } = this.#chat(work.chatId);
     // A chat that came through a chat platform: how to answer there.

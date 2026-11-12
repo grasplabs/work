@@ -852,9 +852,6 @@ export interface SkillVersion extends SkillAt {
 const skillKeyOf = ({ scope, name }: Skill): SourceId =>
   `${skillsKind}:${scope}:${name}`;
 
-/** Every skill's key starts with one of these. */
-const skillPrefixes = skillScopes.map((scope) => `${skillsKind}:${scope}:`);
-
 /** `key` as the skill it names, or null for one that isn't a skill's. */
 const skillOfKey = (key: SourceId): Skill | null => {
   const [kind, scope, name, ...rest] = key.split(":");
@@ -922,24 +919,17 @@ export const addSkill = async (
 };
 
 /**
- * Most skills a listing answers, of those it keeps: past them, the ones
+ * Most of the company's skills a listing answers: past them, the ones
  * whose current version is oldest are left out. Far more than a company
  * writes.
  */
-const skillsListedMax = 10 * listPageMax;
-
-/**
- * Most skills a listing walks through to find those it keeps: twice what
- * it answers, so the ones it drops (Grasp's skills a release no longer
- * ships, or that a company skill replaces) don't take their places.
- */
-const skillsScannedMax = 2 * skillsListedMax;
+const companySkillsMax = 10 * listPageMax;
 
 /**
  * Each skill version's card, by its key and version, which never change
  * (the store never writes a version over); null for one whose text
  * declares no card of its own name. Read once per isolate. A card is only
- * ever used for a version a listing returned to its reader just now.
+ * ever used for a version the store answered its reader just now.
  */
 const cards = new Map<string, Omit<SkillCardAt, keyof SkillAt> | null>();
 
@@ -948,6 +938,29 @@ const cardsKept = 1000;
 
 const cardKeyOf = (source: SourceId, version: number): string =>
   `${source}\u0000${version}`;
+
+/** Keeps `card` as the card of `source` at `version`. */
+const keepCard = (
+  source: SourceId,
+  version: number,
+  card: Omit<SkillCardAt, keyof SkillAt> | null
+): void => {
+  if (cards.size >= cardsKept) {
+    cards.clear();
+  }
+  cards.set(cardKeyOf(source, version), card);
+};
+
+/** The card `text` declares, if it is the one `source` names. */
+const declaredCard = (
+  source: SourceId,
+  text: string
+): Omit<SkillCardAt, keyof SkillAt> | null => {
+  const card = skillCardOf(text);
+  return card !== null && card.name === skillOfKey(source)?.name
+    ? { description: card.description }
+    : null;
+};
 
 /**
  * `personId` as a reader of skills: the person, and the company, which
@@ -965,12 +978,83 @@ const skillReaderOf = async (
   return { person: member.userId, groups: [companyGroup] };
 };
 
+/** The current versions of `sources`, whole, a batch at a time, in order. */
+const readEachCurrent = async (
+  env: BrainEnv,
+  reader: Reader,
+  sources: readonly SourceId[]
+) => {
+  const read: Awaited<ReturnType<Brain["readCurrent"]>> = [];
+  for (let at = 0; at < sources.length; at += currentReadMax) {
+    // oxlint-disable-next-line no-await-in-loop -- a few batches, in order
+    const batch = await brain(env).readCurrent({
+      sources: sources.slice(at, at + currentReadMax),
+      reader,
+    });
+    read.push(...batch);
+  }
+  return read;
+};
+
+/**
+ * The company's skills `reader` may read, newest first, at most
+ * `companySkillsMax`, with their cards: those read before, the rest read
+ * now. A version replaced between the listing and the read is left out,
+ * as if listed a moment later.
+ */
+const companySkillsAs = async (
+  env: BrainEnv,
+  reader: Reader
+): Promise<SkillCardAt[]> => {
+  const listed: { source: SourceId; version: number }[] = [];
+  let after: { addedAt: Date; source: SourceId } | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, in order
+    const page = await brain(env).listSources({
+      reader,
+      prefixes: [`${skillsKind}:company:`],
+      after,
+      limit: listPageMax,
+    });
+    listed.push(...page.sources);
+    const last = page.sources.at(-1);
+    after =
+      page.more && last !== undefined
+        ? { addedAt: last.addedAt, source: last.source }
+        : undefined;
+  } while (after !== undefined && listed.length < companySkillsMax);
+  const kept = listed.slice(0, companySkillsMax);
+  const read = await readEachCurrent(
+    env,
+    reader,
+    kept
+      .filter(({ source, version }) => !cards.has(cardKeyOf(source, version)))
+      .map(({ source }) => source)
+  );
+  const known = new Map(
+    read.map(({ source, version, text }) => {
+      const card = declaredCard(source, text);
+      keepCard(source, version, card);
+      return [cardKeyOf(source, version), card] as const;
+    })
+  );
+  return kept.flatMap(({ source, version }) => {
+    const key = cardKeyOf(source, version);
+    const card = known.get(key) ?? cards.get(key);
+    const skill = skillOfKey(source);
+    return skill === null || card === undefined || card === null
+      ? []
+      : [{ ...skill, version, description: card.description }];
+  });
+};
+
 /**
  * The skills `personId` may use, at their current versions, with their
- * descriptions, newest first: Grasp's only by the names in `shipped`
- * (this release's), and the company's, a company skill in place of
- * Grasp's of the same name; those that declare their own name only. Kept
- * before capped, so a skill left out never takes a place. Refused with
+ * descriptions: Grasp's by the names in `shipped` (this release's), read
+ * by name, so however long ago they were installed; and the company's,
+ * listed on their own, newest first, at most `companySkillsMax`. A
+ * company skill takes the place of Grasp's of the same name. Those that
+ * declare their own name only. Refused with
  * `permission.person_inactive` once they are no longer a member.
  */
 export const listSkillsAs = async (
@@ -979,83 +1063,25 @@ export const listSkillsAs = async (
   shipped: ReadonlySet<string>
 ): Promise<SkillCardAt[]> => {
   const reader = await skillReaderOf(env, personId);
-  const listed: { source: SourceId; version: number; skill: Skill }[] = [];
-  let scanned = 0;
-  let after: { addedAt: Date; source: SourceId } | undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- a page at a time, in order
-    const page = await brain(env).listSources({
-      reader,
-      prefixes: skillPrefixes,
-      after,
-      limit: listPageMax,
+  const company = await companySkillsAs(env, reader);
+  const replaced = new Set(company.map(({ name }) => name));
+  const graspSources = [...shipped]
+    .filter((name) => !replaced.has(name))
+    .flatMap((name) => {
+      const skill = skillSchema.safeParse({ scope: "grasp", name });
+      return skill.success ? [skillKeyOf(skill.data)] : [];
     });
-    scanned += page.sources.length;
-    for (const { source, version } of page.sources) {
-      const skill = skillOfKey(source);
-      if (skill !== null) {
-        listed.push({ source, version, skill });
-      }
-    }
-    const last = page.sources.at(-1);
-    after =
-      page.more && last !== undefined
-        ? { addedAt: last.addedAt, source: last.source }
-        : undefined;
-  } while (after !== undefined && scanned < skillsScannedMax);
-  const company = new Set(
-    listed.flatMap(({ skill }) =>
-      skill.scope === "company" ? [skill.name] : []
-    )
-  );
-  const kept = listed
-    .filter(
-      ({ skill }) =>
-        skill.scope === "company" ||
-        (shipped.has(skill.name) && !company.has(skill.name))
-    )
-    .slice(0, skillsListedMax);
-  // This listing's cards: those read before, then the rest read now.
-  const known = new Map(
-    kept.flatMap(({ source, version }) => {
-      const key = cardKeyOf(source, version);
-      const card = cards.get(key);
-      return card === undefined ? [] : [[key, card] as const];
-    })
-  );
-  const unread = kept.filter(
-    ({ source, version }) => !known.has(cardKeyOf(source, version))
-  );
-  for (let at = 0; at < unread.length; at += currentReadMax) {
-    // oxlint-disable-next-line no-await-in-loop -- a few batches, in order
-    const read = await brain(env).readCurrent({
-      sources: unread
-        .slice(at, at + currentReadMax)
-        .map(({ source }) => source),
-      reader,
-    });
-    for (const { source, version, text } of read) {
-      const card = skillCardOf(text);
-      const declared =
-        card !== null && card.name === skillOfKey(source)?.name
-          ? { description: card.description }
-          : null;
-      const key = cardKeyOf(source, version);
-      known.set(key, declared);
-      if (cards.size >= cardsKept) {
-        cards.clear();
-      }
-      cards.set(key, declared);
-    }
-  }
-  return kept.flatMap(({ source, version, skill }) => {
-    // A version read a moment ago may have been replaced since: then it
-    // is left out of this listing, as if listed a moment later.
-    const card = known.get(cardKeyOf(source, version));
-    return card === undefined || card === null
+  const graspRead = await readEachCurrent(env, reader, graspSources);
+  const grasp = graspRead.flatMap(({ source, version, text }) => {
+    const key = cardKeyOf(source, version);
+    const card = cards.get(key) ?? declaredCard(source, text);
+    keepCard(source, version, card);
+    const skill = skillOfKey(source);
+    return skill === null || card === null
       ? []
       : [{ ...skill, version, description: card.description }];
   });
+  return [...grasp, ...company];
 };
 
 /**
