@@ -19,6 +19,7 @@ import {
   modelWaitMaxSeconds,
   personalBrainOf,
   storeBytesMax,
+  storeKindOf,
 } from "@grasp-os/brain-next/contract";
 import type {
   Access,
@@ -46,6 +47,7 @@ import {
   brainSearchWays,
   brainSteps,
   brainWithoutMeaningReasons,
+  storeNearLimit,
 } from "@grasp-os/shared/brain-report";
 import type {
   BrainAction,
@@ -68,6 +70,12 @@ import { z } from "zod";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { erasureBegun } from "./brain-hand-overs.ts";
+import {
+  forgetOwnStoreHealth,
+  keepOwnStoreHealth,
+  ownStoresTotals,
+} from "./brain-own-stores.ts";
+import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { connectionOfCapture } from "./connection-capture-key.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
@@ -870,7 +878,7 @@ export const eraseSource = async (
  * the Brain's store can bring what it covers back.
  */
 export const erasePerson = async (
-  env: BrainEnv,
+  env: BrainEnv & Pick<Env, "DB">,
   erased: { personId: string; reason: ErasureReason }
 ): Promise<"erased" | "still_deleting"> => {
   const { personId, reason } = checked(personErasureSchema, erased);
@@ -886,6 +894,10 @@ export const erasePerson = async (
     }
     throw error;
   }
+  // Only once their store is erased, so no tick of it under way can write
+  // the row again (the store counts its report as a write under way). A
+  // failure throws, and the caller's retry removes it.
+  await forgetOwnStoreHealth(env, personId);
   return "erased";
 };
 
@@ -1761,6 +1773,80 @@ export const workBrain = async (
   });
 };
 
+/**
+ * What a person's own store tells core of itself as its tick ends
+ * (brain-own-stores.ts): numbers and flags, from its overview, field by
+ * field. Nothing that names anything: no item's kind, key, error or
+ * words, and no size, only whether it is near its limit.
+ */
+const healthOf = (overview: WorkOverview, at: Date): OwnStoreHealth => {
+  let waiting = 0;
+  let oldest: number | null = null;
+  for (const { count, oldestAddedAt } of overview.waiting) {
+    waiting += count;
+    const added = oldestAddedAt.getTime();
+    oldest = oldest === null ? added : Math.min(oldest, added);
+  }
+  return {
+    reportedAt: at,
+    waiting,
+    oldestWaitingAt: oldest === null ? null : new Date(oldest),
+    parked: overview.parkedCount,
+    failing:
+      overview.paused !== null ||
+      overview.ledgerReplay !== "through" ||
+      Object.values(overview.stepsFailed).some((failure) => failure !== null),
+    notRebuilt:
+      overview.embedding.model !== null && !overview.embedding.rebuilt,
+    nearLimit: storeNearLimit({
+      bytes: overview.storeBytes,
+      limitBytes: storeBytesMax,
+    }),
+  };
+};
+
+/**
+ * What the store named `name` works with on its own alarm (core's
+ * BrainStore, brain-store.ts), when it is a person's own: core's model
+ * gateway and embedders, as the clock gives the shared store's tick
+ * (`workBrain`), and its health row kept for staff's totals. No
+ * hand-overs: a person's own store never queues one. Only the store
+ * itself asks, inside its own object, by its own name: so it works for
+ * no one but its person, and its row is its own.
+ */
+export const alarmHostOf = async (
+  env: Env,
+  name: string | undefined
+): Promise<{
+  ask: AskModel;
+  embedders: Embedders;
+  report: (overview: WorkOverview) => Promise<void>;
+}> => {
+  const kind = storeKindOf(name);
+  if (kind.kind !== "person") {
+    throw new Error("Only a person's own store works on its own alarm");
+  }
+  return {
+    ask: askModel(env),
+    embedders: await embeddersOf(env),
+    report: async (overview) => {
+      const at = new Date();
+      try {
+        // A store that holds nothing any more (erasures took it all) has
+        // no row: staff's count is of stores that hold anything. One
+        // whose ledger isn't read through shows nothing of what it holds,
+        // so it keeps its row, as failing.
+        await (overview.ledgerReplay === "through" && !overview.holding
+          ? forgetOwnStoreHealth(env, kind.person, at)
+          : keepOwnStoreHealth(env, kind.person, healthOf(overview, at)));
+      } catch {
+        // Stale until the next tick: logged by a fixed name alone.
+        log.warn("brain.own_store_health_unkept", {});
+      }
+    },
+  };
+};
+
 /** The Brain's work queue, store and ledger, as staff see it (brain-report.ts). */
 export const brainWorkOverview = async (env: BrainEnv): Promise<WorkOverview> =>
   await brain(env).workOverview();
@@ -1835,8 +1921,13 @@ const recallOf = (recall: WorkOverview["recall"]): BrainReport["recall"] =>
  * work item's key and an overdue item's key (a source's key, say).
  * Erasures are counts alone: never which, when, or by what hash.
  */
-export const brainStaffReport = async (env: BrainEnv): Promise<BrainReport> => {
-  const overview = await brain(env).workOverview();
+export const brainStaffReport = async (
+  env: BrainEnv & Pick<Env, "DB">
+): Promise<BrainReport & Required<Pick<BrainReport, "ownStores">>> => {
+  const [overview, own] = await Promise.all([
+    brain(env).workOverview(),
+    ownStoresTotals(env),
+  ]);
   return {
     now: new Date().toISOString(),
     queue: {
@@ -1887,6 +1978,10 @@ export const brainStaffReport = async (env: BrainEnv): Promise<BrainReport> => {
     },
     stepsFailed: stepsFailedOf(overview.stepsFailed),
     recall: recallOf(overview.recall),
+    ownStores: {
+      ...own,
+      oldestWaitingAt: own.oldestWaitingAt?.toISOString() ?? null,
+    },
   };
 };
 
