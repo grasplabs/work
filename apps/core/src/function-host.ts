@@ -1,10 +1,3 @@
-import {
-  memoryPackSchema,
-  skillReadSchema,
-  skillSelectionSchema,
-  skillsReadInputSchema,
-  skillsSelectInputSchema,
-} from "@grasp-os/brain/contract";
 import { AppError } from "@grasp-os/runtime/app";
 import type {
   AnyPermission,
@@ -38,7 +31,6 @@ import {
   appErrorMessageMaxLength,
   invocationMaxReads,
   isAppErrorCode,
-  knowledgeSearchMaxLength,
   functionArgsMaxBytes,
   functionResultMaxBytes,
   stagedReadMaxBytes,
@@ -60,7 +52,6 @@ import type {
 } from "@grasp-os/shared/functions";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { peopleAlias } from "@grasp-os/shared/notifications";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -1684,35 +1675,11 @@ export type ResourceBindings = (
   declaration: AnyPermission
 ) => Promise<BoundResource | undefined>;
 
-/** A knowledge search's request, as the declaration's client sends it. */
-const knowledgeSearchSchema = z.strictObject({
-  text: z.string().min(1).max(knowledgeSearchMaxLength),
-  limit: z.number().int().min(1).max(20).optional(),
-});
-
-/** A knowledge read's request. */
-const knowledgeReadSchema = z.strictObject({ id: z.string().min(1).max(256) });
-
 /** A model request. */
 const modelRequestSchema = z.strictObject({
   prompt: z.string().min(1).max(100_000),
   instructions: z.string().max(20_000).optional(),
 });
-
-/** Each knowledge operation's request. */
-const knowledgeRequests = {
-  search: knowledgeSearchSchema,
-  read: knowledgeReadSchema,
-  recall: resourceRecallInputSchema,
-  skillsSelect: skillsSelectInputSchema,
-  skillsRead: skillsReadInputSchema,
-} as const;
-
-/** Whether `method` is an operation a knowledge resource serves. */
-const isKnowledgeOperation = (
-  method: unknown
-): method is keyof typeof knowledgeRequests =>
-  typeof method === "string" && Object.hasOwn(knowledgeRequests, method);
 
 /** A request a resource's declaration doesn't allow. */
 const notAllowed = () => functionErrors.create("permission.not_allowed");
@@ -1721,25 +1688,24 @@ const notAllowed = () => functionErrors.create("permission.not_allowed");
 const invalidResult = () =>
   functionErrors.create("contract.invalid_permission_result");
 
-/** What a knowledge search answers: hits of exactly a title and an excerpt. */
-const knowledgeHitsSchema = z
-  .array(z.strictObject({ title: z.string(), excerpt: z.string() }))
-  .max(20);
-
-/** What a knowledge read answers. */
-const knowledgeDocumentSchema = z.strictObject({
-  title: z.string(),
-  text: z.string(),
+/** What a recall of the Brain answers (`BrainPack`), and nothing more. */
+const brainPackSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      source: z.strictObject({
+        producer: z.enum(["upload", "chat", "run"]),
+        id: z.string(),
+      }),
+      version: z.int().positive(),
+      position: z.int().nonnegative(),
+      text: z.string(),
+      whole: z.boolean(),
+      found: z.enum(["exact", "words", "stop words", "meaning"]),
+    })
+  ),
+  notFound: z.array(z.string()),
+  truncated: z.boolean(),
 });
-
-/** What each knowledge operation answers: a recall, a Brain memory pack. */
-const knowledgeResults = {
-  search: knowledgeHitsSchema,
-  read: knowledgeDocumentSchema,
-  recall: memoryPackSchema,
-  skillsSelect: skillSelectionSchema,
-  skillsRead: skillReadSchema,
-} as const;
 
 /**
  * Whether `method` with `args` is one of the operations a guests
@@ -1813,37 +1779,18 @@ const isNamedCall = (
 };
 
 /**
- * Whether `declaration` allows knowledge operation `method` with `args`:
- * one it declares, with one request. A declared operation asked with a
- * request outside its contract (a search text past Knowledge's limit, or
- * a recall naming a collection the declaration doesn't, say) is refused
- * as arguments that don't fit.
+ * Whether `declaration` allows Brain operation `method` with `args`: one
+ * it declares, with one request. What the request holds is the recall's
+ * own to check (brain-recall.ts), so an App's, a workflow's and a chat's
+ * get the same answer to the same request.
  */
-const allowsKnowledge = (
+const allowsBrain = (
   declaration: Extract<AnyPermission, { "~permission": "brain" }>,
   method: unknown,
   args: readonly Json[]
-): boolean => {
-  const [first] = args;
-  const schema = isKnowledgeOperation(method)
-    ? knowledgeRequests[method]
-    : undefined;
-  const allowed =
-    schema !== undefined &&
-    declaration.operations.some((operation) => operation === method) &&
-    args.length === 1;
-  const names = method === "recall" && isRecord(first) ? first.collections : [];
-  const undeclared =
-    Array.isArray(names) &&
-    names.some(
-      (name) =>
-        typeof name !== "string" || !declaration.collections.includes(name)
-    );
-  if (allowed && (!schema?.safeParse(first).success || undeclared)) {
-    throw functionErrors.create("contract.invalid_args");
-  }
-  return allowed;
-};
+): boolean =>
+  declaration.operations.some((operation) => operation === method) &&
+  args.length === 1;
 
 /**
  * Whether `args` is an AI request: the request, and the descriptor of the
@@ -1887,7 +1834,7 @@ const allowedRequest = (
     const { actions } = declaration;
     allowed = isNamedCall(method, args, (name) => actions.includes(name));
   } else if (declaration["~permission"] === "brain") {
-    allowed = allowsKnowledge(declaration, method, args);
+    allowed = allowsBrain(declaration, method, args);
   } else if (declaration["~permission"] === "ai") {
     allowed = method === "generate" && isAiRequest(args);
   } else if (declaration["~permission"] === "guests") {
@@ -1953,11 +1900,7 @@ const checkedResourceResult = (
         ? typeof result === "string"
         : isNormalized(output, result);
   } else if (declaration["~permission"] === "brain") {
-    valid = (
-      isKnowledgeOperation(method)
-        ? knowledgeResults[method]
-        : knowledgeDocumentSchema
-    ).safeParse(result).success;
+    valid = method === "recall" && brainPackSchema.safeParse(result).success;
   } else if (declaration["~permission"] === "guests") {
     valid =
       (method === "invite" ||

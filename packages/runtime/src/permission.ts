@@ -58,8 +58,8 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 // - `ai`: answers from the workspace's model (`ctx.ai.generate`);
 // - `connections`: some actions of a connection, through connect
 //   (`ctx.connections.<alias>`);
-// - `brain`: searching and reading some of the Brain's collections
-//   (`ctx.brain`);
+// - `brain`: recalling from the Brain, as the person each call acts for
+//   may read it (`ctx.brain.recall`);
 // - `workflows`: independent workflows the App starts
 //   (`ctx.workflows.<alias>.start`);
 // - `grasp`: the platform's own read-only functions, such as its
@@ -235,13 +235,16 @@ export const permission = Object.freeze({
       actions: checkedActions(checked.actions),
     }) as ConnectionPermission<Alias, Contract, Actions>;
   },
-  /** Some operations on some of the Brain's collections. An App holds one (`ctx.brain`). */
+  /**
+   * The Brain, as the person each call acts for may read it, never more:
+   * `operations: ["recall"]` (`ctx.brain.recall`). An App holds one.
+   */
   brain: <
     const Operations extends readonly [BrainOperation, ...BrainOperation[]],
   >(
     config: BrainConfig<Operations>
   ): BrainPermission<Operations> => {
-    const checked = checkedConfig(config, ["operations", "collections"]);
+    const checked = checkedConfig(config, ["operations"]);
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: lists holding exactly the names given, in order.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -252,7 +255,6 @@ export const permission = Object.freeze({
         checkedList(checked.operations, "operations", brainOperations),
         brainOperations
       ),
-      collections: checkedList(checked.collections, "collections"),
     }) as BrainPermission<Operations>;
   },
   /**

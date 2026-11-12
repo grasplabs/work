@@ -1,7 +1,9 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { addSource } from "../src/brain-next.ts";
 import {
   codeResults,
   codeStep,
@@ -14,7 +16,6 @@ import {
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The company brain for a chat's code (`env.brain`): read as the chat's
@@ -166,28 +167,23 @@ describe("a chat's brain", setUpTime, () => {
     const builder = await signedInApi(idp, "builder");
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
     const fact = `The depot opens at ${unique()}`;
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "depot.md",
-      text: `# Depot ${word}\n\n${fact}.`,
-      ifVersion: 0,
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `Depot ${word}: ${fact}.`,
+      readers: { kind: "owner", personId: builder.userId },
     });
     const app = await builder.api.apps.create({ name: `Depot ${unique()}` });
     const { stub, agent, provider, newChat } = await personalChatsOf(
       builder.userId,
       toolStep("writeFile", { app: app.id, files: { "notes.md": "Depot" } }),
       says("Written."),
-      toolStep("searchBrain", { query: word }),
+      toolStep("searchBrain", { question: word }),
       says("It opens then.")
     );
     const forApp = await builder.api.chats.forApp(app.id);
     await stub.ask(forApp.id, { text: "Note the depot.", model });
     const withoutGrant = provider.requests.length;
-    await requestGranted(idp, admin, readCollection(agent, collectionId));
     await requestGranted(idp, admin, {
       subject: agent,
       object: { type: "platform" },

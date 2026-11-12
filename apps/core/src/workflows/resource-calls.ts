@@ -32,6 +32,8 @@ import { permissions } from "../db/core/schema.ts";
 import { models } from "../models.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { writeJson } from "./bounded-json.ts";
+import { callBrain, requireBrainRequest } from "./brain-calls.ts";
+import type { BrainCall } from "./brain-calls.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
 import { runFileTypeShown } from "./office-files.ts";
 import {
@@ -44,12 +46,7 @@ import type {
   CandidateBinding,
   FrozenCatalogBinding,
 } from "./resource-authority.ts";
-import {
-  callKnowledge,
-  requireKnowledgeRequest,
-  requireResourceRunEvidenceReadable,
-} from "./resource-reads.ts";
-import type { KnowledgeCall } from "./resource-reads.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import {
   attachRunFiles,
   callFiles,
@@ -179,10 +176,10 @@ export type BuiltCall =
       readonly outputSchema: Json;
     }
   | {
-      /** A Knowledge collection's search, read or recall (GRA-700). */
-      readonly name: "grasp.knowledge";
+      /** A recall of the Brain (brain-calls.ts). */
+      readonly name: "grasp.brain";
       readonly binding: string;
-      readonly operation: KnowledgeCall["operation"];
+      readonly operation: BrainCall["operation"];
       readonly arguments: Json;
     }
   | {
@@ -206,7 +203,7 @@ type BoundBuiltCall = Exclude<BuiltCall, AppCall>;
 const kindOf = {
   "grasp.connector": "connector",
   "grasp.model": "model",
-  "grasp.knowledge": "knowledge",
+  "grasp.brain": "brain",
   "grasp.files": "files",
 } as const;
 
@@ -917,8 +914,8 @@ const candidateAnswer = async (
       requireModelRequest(call);
       return requireShape(JSON.stringify(call.outputSchema), answer, "output");
     }
-    case "grasp.knowledge": {
-      requireKnowledgeRequest(call);
+    case "grasp.brain": {
+      requireBrainRequest(call);
       return boundedAnswer(answer, "output");
     }
     // A test run keeps no file: its files calls answer what its start
@@ -1162,8 +1159,8 @@ export const makeCall = async (
         output = await callModel(env, run, task, binding, call, effect);
         break;
       }
-      case "grasp.knowledge": {
-        output = await callKnowledge(env, run, binding, call);
+      case "grasp.brain": {
+        output = await callBrain(env, run, binding, call);
         break;
       }
       case "grasp.files": {

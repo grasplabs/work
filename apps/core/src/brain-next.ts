@@ -11,6 +11,7 @@ import {
   isOverInstructionsLimit,
   principalMaxLength,
   questionMaxLength,
+  recallRequestSchema,
   sourceIdMaxLength,
   wellFormedString,
   modelWaitMaxSeconds,
@@ -253,6 +254,31 @@ export interface Recall {
    */
   asOf?: Date;
 }
+
+/**
+ * A recall as code asks for one (an App's action, a workflow's step, a
+ * chat's code: brain-recall.ts): the question and the budget, held to the
+ * Brain's own limits, and the moment as an ISO 8601 date-time with its
+ * offset, which crosses JSON where a `Date` can't. Nothing else, so code
+ * never names a reader, groups or a vector.
+ */
+const codeRecallSchema = recallRequestSchema
+  .pick({ question: true, budget: true })
+  .extend({ asOf: z.iso.datetime({ offset: true }).optional() });
+
+/** `input` as a recall code asks for (`codeRecallSchema`), or undefined. */
+export const recallOf = (input: unknown): Recall | undefined => {
+  const parsed = codeRecallSchema.safeParse(input);
+  if (!parsed.success) {
+    return undefined;
+  }
+  const { question, budget, asOf } = parsed.data;
+  return {
+    question,
+    budget,
+    ...(asOf === undefined ? {} : { asOf: new Date(asOf) }),
+  };
+};
 
 /** An item of a pack, citing its source as its producer named it. */
 export interface RecalledItem extends Omit<PackItem, "source"> {

@@ -11,7 +11,8 @@
  * in: a module (or the store's class) and its probes, one per member:
  * `coreProbes` one per export of core's `brain-next.ts`,
  * `instructionProbes` one per export of core's `instruction-files.ts` (the
- * rules over the instruction files brain-next.ts names), `storeProbes` one
+ * rules over the instruction files brain-next.ts names), `recallProbes`
+ * one per export of core's `brain-recall.ts` (code's recall), `storeProbes` one
  * per public method of the Brain's store (its contract, and anything else
  * a holder of its namespace could call), `sourcesProbes` one per method of
  * the Brain's Sources page's RPC (`session.brainSources`, as the signed-in
@@ -60,6 +61,11 @@ import {
   enqueueWork,
   workAttemptsMax,
 } from "@grasp-os/brain-next/work";
+import {
+  chatIdSchema,
+  permissionIdSchema,
+  workspaceIdSchema,
+} from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -78,6 +84,7 @@ import type {
 import * as brainSkills from "../src/brain-skills.ts";
 import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { producersOf } from "../src/brain-sources.ts";
+import * as codeRecall from "../src/brain-recall.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
@@ -1176,6 +1183,34 @@ export const coreProbes = {
         "a field the scope hasn't",
         unchecked({ scope: "company", name: "facts", appId: text })
       ),
+    ];
+  },
+  // Pure: a request as code sends it, read; what is refused holds the
+  // markers, and is refused alike.
+  recallOf: async ({ markers, sharedWord }) => {
+    const of = async (name: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return coreBrain.recallOf(input);
+      });
+    const hidden = markers.join(" ");
+    return [
+      await of("a request", {
+        question: sharedWord,
+        budget: { tokens: 1 },
+        asOf: "2026-03-14T23:59:59.999+01:00",
+      }),
+      await of("a reader of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        reader: hidden,
+      }),
+      await of("a moment of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        asOf: hidden,
+      }),
+      await of("no tokens", { question: hidden, budget: { tokens: 0 } }),
     ];
   },
   instructionFileOf: async ({ markers }) => {
@@ -2391,6 +2426,141 @@ const meaningProbes = async ({
     ),
   ].map((answered) => echoesHidden(answered, markers));
 };
+
+/** Each export of core's brain-recall.ts. */
+type RecallMember = keyof typeof codeRecall;
+
+/**
+ * An agent of `personId`'s holding an active grant to read the Brain, as
+ * code's recall needs one (brain-recall.ts): its authority, and the
+ * grant's ID.
+ */
+const agentWithBrain = async (
+  personId: string
+): Promise<{ authority: Authority; permissionId: string }> => {
+  const authority = readersAgent(personId);
+  const permissionId = crypto.randomUUID();
+  if (authority.subject.type !== "agent") {
+    throw new Error("Not an agent");
+  }
+  await env.DB.prepare(
+    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'agent', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
+  )
+    .bind(permissionId, authority.subject.agentId, personId, Date.now())
+    .run();
+  return { authority, permissionId };
+};
+
+/** Code recalling as `as`, in a chat of its own, under `grant`. */
+const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
+  authority: as,
+  context: {
+    type: "chat",
+    workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
+    chatId: chatIdSchema.parse(crypto.randomUUID()),
+  },
+  permissionId: permissionIdSchema.parse(grant),
+  actor: { type: "system" },
+});
+
+/** A recall as code asks for one, from what a probe asks. */
+const codeAsk = ({ question, budget, asOf }: PackAsk) => ({
+  question,
+  budget,
+  ...(asOf === undefined ? {} : { asOf: asOf.toISOString() }),
+});
+
+/** One probe per export of core's brain-recall.ts. */
+export const recallProbes = {
+  // Code's recall, as an App, a workflow and a chat make it: under an
+  // agent's grant of the reader's, asked every way the store is, as code
+  // sends it, then every way it refuses, the markers in what is refused.
+  recallFor: async (probing) => {
+    const { authority, permissionId } = await agentWithBrain(probing.personId);
+    const recall = async (
+      input: unknown,
+      as = authority,
+      grant = permissionId
+    ) => await codeRecall.recallFor(env, callerOf(as, grant), input);
+    const hidden = probing.markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(
+        probing,
+        momentsOf(probing),
+        async (asking) => await recall(codeAsk(asking))
+      )),
+      await answer(
+        "the shared word",
+        async () =>
+          await recall({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "too long a question",
+        async () =>
+          await recall({
+            question: `${hidden} `
+              .repeat(questionMaxLength)
+              .slice(0, questionMaxLength + 1),
+            budget: whole,
+          })
+      ),
+      await answer(
+        "no tokens",
+        async () => await recall({ question: hidden, budget: { tokens: 0 } })
+      ),
+      await answer(
+        "a moment named by the markers",
+        async () =>
+          await recall({ question: hidden, budget: whole, asOf: hidden })
+      ),
+      await answer(
+        "a reader named by the markers",
+        async () =>
+          await recall({ question: hidden, budget: whole, reader: hidden })
+      ),
+      await answer(
+        "the markers, under a grant the agent doesn't hold",
+        async () =>
+          await recall(
+            { question: hidden, budget: whole },
+            authority,
+            crypto.randomUUID()
+          )
+      ),
+      await answer(
+        "the markers, for someone who isn't a member",
+        async () =>
+          await recall(
+            { question: hidden, budget: whole },
+            readersAgent(stranger())
+          )
+      ),
+    ];
+  },
+  // Pure: what a request is, never what it holds.
+  isBrainRecall: async ({ markers, sharedWord }) => {
+    const is = async (name: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return codeRecall.isBrainRecall(input);
+      });
+    const hidden = markers.join(" ");
+    return [
+      await is("a request", { question: sharedWord, budget: { tokens: 1 } }),
+      await is("one naming a reader of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        reader: hidden,
+      }),
+      await is("a moment of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        asOf: hidden,
+      }),
+    ];
+  },
+} satisfies Record<RecallMember, Probe>;
 
 /** One probe per public method of the Brain's store. */
 export const storeProbes = {
@@ -3626,6 +3796,7 @@ export const brainSurfaces = [
   { name: "core", module: coreBrain, probes: coreProbes },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
   { name: "skills", module: brainSkills, probes: skillProbes },
+  { name: "recall", module: codeRecall, probes: recallProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
   { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
 ] as const satisfies readonly Surface[];

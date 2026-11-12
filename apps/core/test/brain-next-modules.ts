@@ -36,4 +36,6 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Code's recall: an App's action, a workflow's step and a chat's code.
+  "apps/core/src/brain-recall.ts": "recall",
 } as const satisfies Readonly<Record<string, string>>;

@@ -478,7 +478,6 @@ export const rpcParamNames: ParamNames = {
     "files": ["id"],
     "get": ["id"],
     "itemTest": ["id","testId"],
-    "knowledge": ["id"],
     "list": [],
     "members": ["id"],
     "params": ["id"],

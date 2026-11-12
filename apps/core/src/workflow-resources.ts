@@ -36,7 +36,6 @@ import type {
   WorkflowVersionBinding,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
-import { contractKindOf } from "@grasp-os/workflow-schema/catalog";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import type { CheckedWorkflow, Problem } from "@grasp-os/workflow-schema/check";
 import { expressionTypeRequest } from "@grasp-os/workflow-schema/expression-scope";
@@ -912,10 +911,7 @@ const bindingProblems = (
   for (const [alias, binding] of Object.entries(bindings)) {
     const pointer = `${permissionPointer(binding, alias)}/contract`;
     const contract = catalog.get(binding.contract);
-    if (
-      contract === undefined ||
-      contract.kind !== contractKindOf(binding.kind)
-    ) {
+    if (contract === undefined || contract.kind !== binding.kind) {
       problems.push({
         code: "binding.unknown_contract",
         message: `The catalog has no ${binding.kind} contract \`${binding.contract}\`.`,

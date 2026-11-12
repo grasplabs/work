@@ -103,10 +103,15 @@ export { sensitiveParam } from "./workflow-params.ts";
 // (workflow-generated.ts), which the SDK re-exports for it.
 export { caughtError, itemsOf, own, parse } from "./workflow-generated.ts";
 export type { Json } from "@grasp-os/shared/json";
+export type {
+  BrainFound,
+  BrainPack,
+  BrainPackItem,
+  BrainRecall,
+} from "./brain-recall.ts";
 export type { Param, ParamMetadata } from "./workflow-params.ts";
 export type {
   BrainActions,
-  BrainHit,
   CallOptions,
   CaughtError,
   ConnectionCallOptions,

@@ -1,0 +1,75 @@
+import { delegateActorOf } from "@grasp-os/shared/audit";
+import { permissionIdSchema } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+
+import { isBrainRecall, recallFor } from "../brain-recall.ts";
+import { runAuthority, runContext } from "./resource-authority.ts";
+import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
+
+// A run's recall of the Brain (`ctx.brain.<alias>.recall`), one of its
+// named calls (resource-calls.ts, `makeCall`): its binding frozen at the
+// start, its authority decided again first, its receipts kept. The
+// binding names the workflow's own `{ type: "platform" }` permission to
+// read the Brain, which `recallFor` checks again as it recalls, as the
+// person the run acts for (who started it, or the workflow's owner for a
+// trigger's or a schedule's run), never more: the same request, checks
+// and pack as an App's action and a chat's code (threat model on
+// GRA-1731).
+
+/** A brain call, as a run's step asks it. */
+export interface BrainCall {
+  readonly operation: "recall";
+  readonly arguments: Json;
+}
+
+/**
+ * Refuses, as `workflow.call_invalid`, a call that isn't a recall of a
+ * request: what a test run checks before it answers from its fixtures.
+ */
+export const requireBrainRequest = (call: BrainCall): void => {
+  if (call.operation !== "recall" || !isBrainRecall(call.arguments)) {
+    throw workflowResourceErrors.create("workflow.call_invalid", {
+      issues: [
+        "arguments: Give a question of at most 2,000 characters, a budget of 1 to 32,000 tokens, and an ISO 8601 date-time with its offset as asOf if any.",
+      ],
+    });
+  }
+};
+
+/**
+ * Recalls for call `call` of `run` through `binding`, its authority already
+ * decided again (`makeCall`): the pack.
+ */
+export const callBrain = async (
+  env: Env,
+  run: CallingRun,
+  binding: FrozenCatalogBinding,
+  call: BrainCall
+): Promise<Json> => {
+  const { target } = binding;
+  if (target.kind !== "brain") {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  const authority = runAuthority(run);
+  const pack = await recallFor(
+    env,
+    {
+      authority,
+      context: runContext(run),
+      permissionId: permissionIdSchema.parse(target.permissionId),
+      actor: delegateActorOf(authority),
+      target: { type: "workflow_run", id: run.runId },
+    },
+    call.arguments
+  );
+  // As JSON, which the run's journal keeps.
+  return {
+    items: pack.items.map(({ source, ...item }) => ({
+      ...item,
+      source: { ...source },
+    })),
+    notFound: [...pack.notFound],
+    truncated: pack.truncated,
+  };
+};

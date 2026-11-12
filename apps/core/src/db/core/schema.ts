@@ -1471,7 +1471,7 @@ export const sdkResourceBindings = sqliteTable(
         "model",
         "decision",
         "event",
-        "knowledge",
+        "brain",
         "files",
       ],
     }).notNull(),
@@ -1804,7 +1804,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "knowledge", "grasp", "guests"],
+      enum: ["model", "connector", "brain", "grasp", "guests"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),
@@ -4969,10 +4969,10 @@ export const workflowCatalogContracts = sqliteTable(
   "workflow_catalog_contracts",
   {
     key: text().primaryKey(),
-    // An older row may still say `template` (or `operation`): read as not
+    // An older row may still say `template`, `operation` or `knowledge`: read as not
     // there, as every read filters by the kinds still served.
     kind: text({
-      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -4999,10 +4999,10 @@ export const workflowBindingApprovals = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     alias: text().notNull(),
-    // An older row may still say `template`: read as not there, as every
+    // An older row may still say `template` or `knowledge`: read as not there, as every
     // read filters by the kinds still served.
     kind: text({
-      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),

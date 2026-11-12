@@ -7,7 +7,7 @@ import { appIdSchema, permissionIdSchema } from "./ids.ts";
 // each permission an App of spec 8's layout declares for its actions. A
 // declaration in App code is a requirement and grants nothing; an admin's
 // binding, together with the live grant it names, is what lets an action
-// reach a model (`ai`), a connection, the Brain's collections, another
+// reach a model (`ai`), a connection, the Brain, another
 // App, the platform's own functions (`grasp`) or guest chats.
 //
 // A binding is the host's record, never part of a sealed manifest: it is
@@ -33,9 +33,9 @@ const modelNameSchema = z
  *   model gateway (its rules and accounting apply on every call);
  * - `connector` (`connections`): one of the App's connection permissions,
  *   checked on every call, through connect;
- * - `knowledge` (`brain`): one of the App's collection permissions for
- *   each collection the declaration names, read as a delegate on every
- *   call;
+ * - `brain` (`brain`): one of the App's `{ type: "platform" }`
+ *   permissions to read the Brain (`brain`), checked on every call, which
+ *   recalls as the person the call acts for, never more;
  * - `grasp` (`grasp`): the platform's own read-only
  *   functions, under one of the App's `{ type: "platform" }` permissions
  *   to read the platform's statistics (`statistics`), checked on every
@@ -52,16 +52,8 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
     permissionId: permissionIdSchema,
   }),
   z.strictObject({
-    kind: z.literal("knowledge"),
-    /** The permission for each collection name the declaration lists. */
-    collections: z
-      .record(
-        z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u),
-        permissionIdSchema
-      )
-      .refine((map) => Object.keys(map).length <= 32, {
-        message: "At most 32 collections",
-      }),
+    kind: z.literal("brain"),
+    permissionId: permissionIdSchema,
   }),
   z.strictObject({
     kind: z.literal("grasp"),
@@ -144,18 +136,10 @@ export interface ConnectorChoice {
   resource: string | null;
 }
 
-/** One of the App's collection permissions, as a collection's choice. */
-export interface CollectionChoice {
-  permissionId: string;
-  collectionId: string;
-  /** The collection's name; null once it is gone. */
-  name: string | null;
-}
-
 /**
  * One of the App's `{ type: "platform" }` permissions, as the platform's
- * functions' (`grasp`) or a guests permission's choice: to read the
- * platform's statistics, or to invite guests.
+ * functions' (`grasp`), a guests or a brain permission's choice: to read
+ * the platform's statistics, to invite guests, or to read the Brain.
  */
 export interface PlatformChoice {
   permissionId: string;
@@ -167,8 +151,7 @@ export interface PlatformChoice {
  * - `model`: the models the deployment allows;
  * - `connector`: the App's own active connection permissions that serve
  *   the declared contract and allow the tool of every declared action;
- * - `knowledge`: the App's own active permissions to read a collection,
- *   one for each declared collection;
+ * - `brain`: the App's own active permissions to read the Brain;
  * - `grasp`: the App's own active permissions to read the platform's
  *   statistics;
  * - `guests`: the App's own active permissions to invite guests.
@@ -181,7 +164,7 @@ export interface PlatformChoice {
 export type BindingChoices = { truncated: boolean } & (
   | { kind: "model"; models: string[] }
   | { kind: "connector"; permissions: ConnectorChoice[] }
-  | { kind: "knowledge"; permissions: CollectionChoice[] }
+  | { kind: "brain"; permissions: PlatformChoice[] }
   | { kind: "grasp"; permissions: PlatformChoice[] }
   | { kind: "guests"; permissions: PlatformChoice[] }
 );
@@ -196,11 +179,6 @@ export interface BindingLabel {
    * their own connections; null otherwise, and for other kinds.
    */
   connection: { account: string | null; provider: string } | null;
-  /**
-   * A knowledge binding's collections, by the names App code uses: each
-   * bound collection's name, null once it is gone. Empty for other kinds.
-   */
-  collections: Record<string, string | null>;
 }
 
 /**
@@ -219,8 +197,6 @@ export interface DeclaredResource {
    * functions, by path, or guests'; empty for the other kinds.
    */
   operations: string[];
-  /** The Brain's declared collections, by the names App code uses. */
-  collections: string[];
   /** AI's output token ceiling; null for the other kinds. */
   maxOutputTokens: number | null;
   state: BindingState;
