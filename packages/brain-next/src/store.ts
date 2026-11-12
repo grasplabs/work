@@ -9,6 +9,7 @@ import type { BrainBucket } from "./bucket.ts";
 import {
   currentRequestSchema,
   embedModelSchema,
+  erasureLookupSchema,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -27,6 +28,8 @@ import type {
   Embedders,
   ErasureReason,
   Finding,
+  ErasureLookup,
+  ErasureStatus,
   NewInstructions,
   Reader,
   Access,
@@ -61,6 +64,7 @@ import {
   deleteStoreObjects,
   erase,
   eraseBatch,
+  erasureStatusOf,
   erasuresOverview,
   erasureDue,
   erasuresUnfinished,
@@ -71,6 +75,7 @@ import {
   readLedgerStart,
   recordStoreErased,
   replayStep,
+  subjectOf,
   sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
@@ -835,6 +840,55 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (!done) {
       throw new Error(stillDeleting);
     }
+  }
+
+  /**
+   * Whether a source or a person was erased, from this store's record of
+   * its ledger alone (erasure.ts `erasureStatusOf`, by the SHA-256 the
+   * ledger names it by). A read: it changes nothing and leaves no work.
+   * Refused, as every call is, by a store whose name says no one's;
+   * `unavailable` while the ledger can't be read or is being replayed (the
+   * gate `#ready` throws for, answered instead). A person's own store
+   * erased whole answers `erased` for its own person, at the time of its
+   * record, and `not_erased` for anything else: what it held is gone with
+   * the record of each erasure in it. One never written holds no record:
+   * `not_erased`, without a table read.
+   */
+  async erasureStatus(request: ErasureLookup): Promise<ErasureStatus> {
+    if (this.#kind.kind === "unknown") {
+      this.#refuseNoOnes();
+    }
+    const lookup = checked(erasureLookupSchema, request);
+    const subject = await subjectOf(
+      lookup.kind === "source" ? lookup.source : lookup.person
+    );
+    const ledger = await this.#ledgerStep();
+    if (this.#erased) {
+      const own =
+        this.#kind.kind === "person" &&
+        lookup.kind === "person" &&
+        lookup.person === this.#kind.person;
+      if (!own) {
+        return { state: "not_erased" };
+      }
+      try {
+        const at = await storeErasedAt(this.#bucket);
+        return at === null
+          ? { state: "unavailable" }
+          : { state: "erased", at: new Date(at) };
+      } catch {
+        // Nothing of the error is kept: it may name a key.
+        return { state: "unavailable" };
+      }
+    }
+    if (ledger !== "through") {
+      return { state: "unavailable" };
+    }
+    // The gate, then the record, with no await between.
+    if (!this.#schema) {
+      return { state: "not_erased" };
+    }
+    return erasureStatusOf(this.ctx.storage.sql, lookup.kind, subject);
   }
 
   /**

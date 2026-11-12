@@ -1503,6 +1503,72 @@ export const coreProbes = {
             version: 1,
           })
       ),
+  brainErasureForStaff: async ({ markers }) => {
+    const look = async (
+      name: string,
+      lookup: unknown,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.brainErasureForStaff(env, unchecked(lookup)),
+        about,
+        like
+      );
+    const holder = stranger();
+    const kept = missingSource();
+    const erased = missingSource();
+    for (const source of [kept, erased]) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await coreBrain.addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text: markedText(markers),
+        readers: { kind: "owner", personId: holder },
+      });
+    }
+    await coreBrain.eraseSource(env, { source: erased, reason: "deleted" });
+    return [
+      await look(
+        "a source no one added",
+        { kind: "source", key: keyOf(missingSource()) },
+        "nothing"
+      ),
+      await look(
+        "someone else's marked source, never erased",
+        { kind: "source", key: keyOf(kept) },
+        "hidden"
+      ),
+      await look(
+        "someone with nothing",
+        { kind: "person", id: stranger() },
+        "nothing",
+        "person"
+      ),
+      await look(
+        "someone with marked sources, never erased",
+        { kind: "person", id: holder },
+        "hidden",
+        "person"
+      ),
+      await look("an erased marked source", {
+        kind: "source",
+        key: keyOf(erased),
+      }),
+      await look("a key of the markers", {
+        kind: "source",
+        key: `upload:${markers.join(" ")}`,
+      }),
+      await look("an id of the markers, too long", {
+        kind: "person",
+        id: markers.join("").repeat(300),
+      }),
+      await look("a kind named by the markers", {
+        kind: markers.join(" "),
+        id: stranger(),
+      }),
     ];
   },
 } satisfies Record<CoreMember, Probe>;
@@ -3292,6 +3358,70 @@ export const storeProbes = {
       async () => await store().rebuildWords()
     ),
   ],
+  erasureStatus: async ({ markers }) => {
+    const look = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () => await store().erasureStatus(unchecked(request)),
+        about,
+        like
+      );
+    const holder = stranger();
+    const kept = keyOf(missingSource());
+    const erased = keyOf(missingSource());
+    for (const source of [kept, erased]) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await store().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: markedText(markers),
+        access: { kind: "owner", person: holder },
+      });
+    }
+    await store().eraseSource({ source: erased, reason: "deleted" });
+    return [
+      await look(
+        "a source no one added",
+        { kind: "source", source: keyOf(missingSource()) },
+        "nothing"
+      ),
+      await look(
+        "someone else's marked source, never erased",
+        { kind: "source", source: kept },
+        "hidden"
+      ),
+      await look(
+        "someone with nothing",
+        { kind: "person", person: stranger() },
+        "nothing",
+        "person"
+      ),
+      await look(
+        "someone with marked sources, never erased",
+        { kind: "person", person: holder },
+        "hidden",
+        "person"
+      ),
+      await look("an erased marked source", {
+        kind: "source",
+        source: erased,
+      }),
+      await look("a key of the markers", {
+        kind: "source",
+        source: `upload:${markers.join(" ")}`,
+      }),
+      await look("an unknown field", {
+        kind: "person",
+        person: stranger(),
+        extra: markers.join(" "),
+      }),
+    ];
+  },
 } satisfies Record<StoreMember, Probe>;
 
 /** The Sources page's RPC for `personId`, signed in as a member. */

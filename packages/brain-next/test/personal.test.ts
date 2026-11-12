@@ -7,6 +7,7 @@
 // store's bucket. The threat model is on GRA-1762; each test names the
 // threat it holds.
 import type {
+  ErasureLookup,
   Access,
   AskModel,
   Embedders,
@@ -1282,6 +1283,7 @@ const leavingWork: Record<string, () => Promise<void>> = {
 /** The methods that only read, or take work away (`erasePerson` erases it all). */
 const leavingNone = [
   "erasePerson",
+  "erasureStatus",
   "find",
   "listSources",
   "listVersions",
@@ -1292,6 +1294,87 @@ const leavingNone = [
   "searchVectors",
   "workOverview",
 ];
+
+/** When this test's person's store recorded its erasure whole. */
+const erasedWholeAt = async (): Promise<string> => {
+  const record = await env.BRAIN_OBJECTS.get(`${await ownPrefix()}erased`);
+  if (record === null) {
+    throw new Error("The store has no record of its erasure");
+  }
+  const { at } = erasureRecordSchema.parse(JSON.parse(await record.text()));
+  return new Date(at).toISOString();
+};
+
+/** What `store` says of the erasure `lookup` names, its time as text. */
+const statusOf = async (store: Store, lookup: ErasureLookup) => {
+  const status = await store.erasureStatus(lookup);
+  return status.state === "erased"
+    ? { state: status.state, at: status.at.toISOString() }
+    : status;
+};
+
+describe("whether something was erased, as a person's own store says it", () => {
+  beforeEach(() => {
+    person = `person-${crypto.randomUUID()}`;
+  });
+
+  it("says nothing was, and makes nothing, while it was never written", async () => {
+    const said = [
+      await statusOf(own(), { kind: "person", person }),
+      await statusOf(own(), { kind: "source", source: "test:never" }),
+    ];
+
+    expect({ said, tables: await tablesOf(own()) }).toStrictEqual({
+      said: [{ state: "not_erased" }, { state: "not_erased" }],
+      tables: [],
+    });
+  });
+
+  it("says a source of its own was erased, and its person not yet", async () => {
+    const { source } = await add(own(), "Marker of their own", theirs());
+    await own().eraseSource({ source, reason: "deleted" });
+
+    const ofSource = await statusOf(own(), { kind: "source", source });
+    const ofPerson = await statusOf(own(), { kind: "person", person });
+
+    expect([ofSource.state, ofPerson]).toStrictEqual([
+      "erased",
+      { state: "not_erased" },
+    ]);
+  });
+
+  it("says its person was erased at its record's time once it was erased whole, and nothing of anything else", async () => {
+    const { source } = await add(own(), "Marker of their own", theirs());
+    await eraseWhole();
+
+    const said = [
+      await statusOf(own(), { kind: "person", person }),
+      await statusOf(own(), {
+        kind: "person",
+        person: `other-${crypto.randomUUID()}`,
+      }),
+      await statusOf(own(), { kind: "source", source }),
+    ];
+
+    expect({ said, tables: await tablesOf(own()) }).toStrictEqual({
+      said: [
+        { state: "erased", at: await erasedWholeAt() },
+        { state: "not_erased" },
+        { state: "not_erased" },
+      ],
+      tables: [],
+    });
+  });
+
+  it("refuses the question when its name says no one's", async () => {
+    await expect(
+      statusOf(env.BRAIN_STORE.getByName(`Person:${person}`), {
+        kind: "person",
+        person,
+      })
+    ).rejects.toThrow(/name doesn't say whose it is/u);
+  });
+});
 
 describe("a person's own store's alarm", () => {
   beforeEach(() => {

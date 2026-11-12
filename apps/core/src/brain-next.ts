@@ -1,5 +1,6 @@
 import {
   brainOf,
+  personalBrainOf,
   currentReadMax,
   listPageMax,
   erasureReasons,
@@ -18,6 +19,7 @@ import type {
   AskModel,
   Brain,
   ErasureReason,
+  ErasureStatus,
   Embedders,
   ModelReply,
   Pack,
@@ -39,6 +41,8 @@ import {
 import type {
   BrainAction,
   BrainActionOutcome,
+  BrainErasureAnswer,
+  BrainErasureLookup,
   BrainReport,
   BrainSearchWay,
   BrainStep,
@@ -268,6 +272,15 @@ type BrainEnv = Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">;
 /** The Brain, in its store in core's jurisdiction. */
 const brain = (env: BrainEnv): Brain =>
   brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/**
+ * `personId`'s own store, in core's jurisdiction: what only they may read
+ * (GRA-1762). The one place core names a person's own store; whoever
+ * calls it reaches that person's own content, so only for the person core
+ * has verified, or for staff's erasure lookup, which reads nothing of it.
+ */
+const personalBrain = (env: BrainEnv, personId: string): Brain =>
+  personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), personId);
 
 /**
  * A team, as the Brain's group: named by kind, so no other kind of group
@@ -1408,4 +1421,62 @@ export const actOnBrainForStaff = async (
       throw new Error(`No such action (${typeof unhandled})`);
     }
   }
+};
+
+/** A store's answer as staff read it: its state, and for `erased` when, in ISO. */
+const answerOf = (status: ErasureStatus): BrainErasureAnswer =>
+  status.state === "erased"
+    ? { state: "erased", at: status.at.toISOString() }
+    : { state: status.state };
+
+/**
+ * A person's erasure as both stores say it: `unavailable` while either
+ * can't say; `erased` once both recorded it, with the later time;
+ * `not_erased` while neither did; `erasing` while one did and the other
+ * not yet, so nothing reads as done before both are.
+ */
+const bothOf = (
+  shared: ErasureStatus,
+  own: ErasureStatus
+): BrainErasureAnswer => {
+  if (shared.state === "unavailable" || own.state === "unavailable") {
+    return { state: "unavailable" };
+  }
+  if (shared.state === "erased" && own.state === "erased") {
+    return answerOf(shared.at >= own.at ? shared : own);
+  }
+  if (shared.state === "not_erased" && own.state === "not_erased") {
+    return { state: "not_erased" };
+  }
+  return { state: "erasing" };
+};
+
+/**
+ * Whether what Grasp's staff named (brain-report.ts) was erased: a source,
+ * by the Brain's key for it, in the shared store; a person, by their id,
+ * in the shared store and in their own store (`bothOf`). Each store hashes
+ * what it is asked as its ledger names it, and reads its record of the
+ * ledger alone. A source kept in a person's own store is not looked up
+ * there: finding whose store holds it needs its readers, which core's
+ * routing of sources to stores brings (#2196).
+ */
+export const brainErasureForStaff = async (
+  env: BrainEnv,
+  lookup: BrainErasureLookup
+): Promise<BrainErasureAnswer> => {
+  if (lookup.kind === "source") {
+    return answerOf(
+      await brain(env).erasureStatus({ kind: "source", source: lookup.key })
+    );
+  }
+  const asked = { kind: "person", person: lookup.id } as const;
+  // Both stores named before either is asked: naming one refuses an id it
+  // can't take, and no call may be left under way when it does.
+  const sharedStore = brain(env);
+  const ownStore = personalBrain(env, lookup.id);
+  const [shared, own] = await Promise.all([
+    sharedStore.erasureStatus(asked),
+    ownStore.erasureStatus(asked),
+  ]);
+  return bothOf(shared, own);
 };

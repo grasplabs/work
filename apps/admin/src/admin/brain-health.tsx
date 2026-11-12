@@ -5,8 +5,9 @@
  * opened (src/clients/brain.ts), with its embedding's progress and how
  * its recall does by each way since its store started; and the
  * three things staff may do: put a parked item back in the queue, rebuild
- * the word indexes, and re-embed. Every
- * read and action is in the company's audit log, by the staff member.
+ * the word indexes, and re-embed; and whether one source or person was
+ * erased (brain-erasure-lookup.tsx). Every read, action and lookup is in
+ * the company's audit log, by the staff member.
  *
  * Operational state only: counts, ages, kinds of work, error codes,
  * sizes, recall's counts, and erasures as counts alone. Amber marks what
@@ -50,6 +51,7 @@ import { useState } from "react";
 import { brainActionFn } from "../clients/brain-functions.ts";
 import { thenRefresh } from "../use-action.ts";
 import { agoWords } from "./ai-status-words.ts";
+import { BrainErasureLookupSection } from "./brain-erasure-lookup.tsx";
 import type { BrainRead } from "./brain-loads.ts";
 import { Figure } from "./parts.tsx";
 import { EmptySection, Section, SectionRow } from "./section.tsx";
@@ -755,6 +757,7 @@ export const BrainHealth = ({
       <Await fallback={<Reading />} promise={read}>
         {(answered) => <Report acting={{ busy, act }} read={answered} />}
       </Await>
+      <BrainErasureLookupSection clientId={clientId} />
     </>
   );
 };

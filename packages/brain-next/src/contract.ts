@@ -928,6 +928,28 @@ export const personErasureSchema = z.strictObject({
 });
 export type PersonErasure = z.infer<typeof personErasureSchema>;
 
+/**
+ * What staff look up in the store's record of its erasure ledger: a
+ * source, by its key, or a person, by their id, as they were erased.
+ */
+export const erasureLookupSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("source"), source: sourceIdSchema }),
+  z.strictObject({ kind: z.literal("person"), person: principalSchema }),
+]);
+export type ErasureLookup = z.infer<typeof erasureLookupSchema>;
+
+/**
+ * Whether what staff looked up was erased, and nothing else (no reason,
+ * no count, no hash): `erased`, with when the ledger recorded the latest
+ * erasure of it, once every erasure of it is written to the ledger and
+ * none still holds versions to delete; `erasing` until then; `not_erased`
+ * when the record holds no erasure of it, alike whether it ever existed;
+ * `unavailable` while the store reads its erasure ledger.
+ */
+export type ErasureStatus =
+  | { state: "erased"; at: Date }
+  | { state: "erasing" | "not_erased" | "unavailable" };
+
 /** Most vectors one put takes. */
 export const vectorsPerPutMax = 256;
 
@@ -1181,6 +1203,13 @@ export interface Brain {
    * Answers alike whatever they held, and is safe to repeat.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
+  /**
+   * Whether a source or a person was erased, from the store's record of
+   * its ledger alone (`ErasureStatus`). For staff, who name what a client
+   * gave them: it reads nothing but that record, so what was never erased
+   * answers as what never existed.
+   */
+  erasureStatus: (request: ErasureLookup) => Promise<ErasureStatus>;
 }
 
 /** The shared store's name: everything readable by more than one person. */

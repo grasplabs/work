@@ -20,8 +20,8 @@ export const brainModules = {
   "apps/core/src/brain-skills.ts": "skills",
   // Runs core's workBrain on the clock, and hands nothing of it on.
   "apps/core/src/clock.ts": "core",
-  // Answers the staff with core's brainStaffReport and actOnBrainForStaff,
-  // through their schemas.
+  // Answers the staff with core's brainStaffReport, actOnBrainForStaff and
+  // brainErasureForStaff, through their schemas.
   "apps/core/src/brain-report.ts": "core",
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.

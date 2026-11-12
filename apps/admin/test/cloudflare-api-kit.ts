@@ -11,6 +11,8 @@ import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type {
   BrainActionOutcome,
   BrainActionRequest,
+  BrainErasureAnswer,
+  BrainErasureRequest,
   BrainReport,
   BrainReportRequest,
 } from "@grasp-os/shared/brain-report";
@@ -221,8 +223,10 @@ export interface CoreState {
   brainHeld?: () => Promise<void>;
   /** What its core answers a signed Brain action with: `done` unless set. */
   brainOutcome?: BrainActionOutcome;
-  /** The Brain's reads and actions its core took, as each signed request sent them. */
-  brainAsks: (BrainReportRequest | BrainActionRequest)[];
+  /** What its core answers a signed erasure lookup with: `not_erased` unless set. */
+  brainErasure?: BrainErasureAnswer;
+  /** The Brain's reads, actions and lookups its core took, as each signed request sent them. */
+  brainAsks: (BrainReportRequest | BrainActionRequest | BrainErasureRequest)[];
 }
 
 /** A call the fake got. */
