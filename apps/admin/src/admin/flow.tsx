@@ -22,9 +22,14 @@ import {
 } from "@grasp-os/ui/components/sortable-list";
 import type { SortableWords } from "@grasp-os/ui/components/sortable-list";
 import { Switch } from "@grasp-os/ui/components/switch";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
 import { useId, useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
+import { Attention } from "./parts.tsx";
 import { EmptySection, Section } from "./section.tsx";
 
 // An organization's Flow: how much onboarding it goes through, as Grasp's
@@ -207,20 +212,27 @@ export const OrgFlow = ({
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        {presets.map(({ id, name }) => (
-          <Button
-            aria-pressed={id === preset}
-            disabled={busy}
-            key={id}
-            onClick={() => {
-              setDraft(flowPresets[id]);
-            }}
-            size="sm"
-            variant={id === preset ? "secondary" : "outline"}
-          >
-            {name}
-          </Button>
-        ))}
+        {/* One of a few, as every choice inside a page is made: the kit's joined toggle, the chosen one filled. */}
+        <ToggleGroup
+          aria-label="How much onboarding"
+          disabled={busy}
+          onValueChange={(next: unknown[]) => {
+            const chosen = presets.find(({ id }) => id === next[0]);
+            if (chosen !== undefined) {
+              setDraft(flowPresets[chosen.id]);
+            }
+          }}
+          size="sm"
+          spacing={0}
+          value={preset === undefined ? [] : [preset]}
+          variant="outline"
+        >
+          {presets.map(({ id, name }) => (
+            <ToggleGroupItem key={id} value={id}>
+              {name}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
         {flow.on ? null : (
           <span className="text-muted-foreground">
             No onboarding: pick another to switch the steps back on.
@@ -234,7 +246,8 @@ export const OrgFlow = ({
         description="Interview links wait for each agreement that is on."
         title="Grasp’s steps"
       >
-        <div className="flex flex-col gap-4 px-5 pb-5">
+        {/* In the rhythm of the admin's steps above, and as far in as their switches stand past the handles. */}
+        <div className="flex flex-col gap-px pr-5 pb-5 pl-12 *:py-2">
           <Switched
             checked={flow.grasp.kickoff}
             disabled={busy || !flow.on}
@@ -264,8 +277,8 @@ export const OrgFlow = ({
       </Section>
       <div className="flex flex-col gap-2">
         {problem === null ? null : (
-          <output className="text-status-attention">
-            {problemWords[problem]}
+          <output>
+            <Attention>{problemWords[problem]}</Attention>
           </output>
         )}
         <CommandFailure failure={failure} />
@@ -285,7 +298,7 @@ export const OrgFlow = ({
               onClick={() => {
                 setDraft(null);
               }}
-              variant="ghost"
+              variant="outline"
             >
               Leave it as it was
             </Button>
