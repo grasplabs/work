@@ -4908,6 +4908,10 @@ msgstr "Document introuvable"
 msgid "Documents"
 msgstr "Documents"
 
+#: src/brain/sources-page.tsx
+msgid "Documents and workflow runs show here once they reach the Brain."
+msgstr "Les documents et les exécutions de workflows apparaissent ici dès qu'ils arrivent dans le cerveau."
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Les documents rédigés ici et les fichiers importés apparaissent ici pour que Grasp et ses agents les lisent."
@@ -14943,10 +14947,6 @@ msgstr "A téléversé dans les connaissances"
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Import en cours…"
-
-#: src/brain/sources-page.tsx
-msgid "Uploads, chats and workflow runs show here once they reach the Brain."
-msgstr "Les fichiers importés, les discussions et les exécutions de workflows apparaissent ici dès qu'ils arrivent dans le cerveau."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"

@@ -91,16 +91,25 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/**
- * Shows the page on a faked core, refusing every call with `refusal` when
- * given, and holding each search until `searched` settles when given.
- */
+/** How the faked core answers. */
+interface Faked {
+  /** Refuses every call with this. */
+  refusal?: string;
+  /** Holds each search until it settles. */
+  searched?: Promise<boolean>;
+  /** Holds each read of a source's first version until it settles. */
+  firstRead?: Promise<boolean>;
+  /** Lists no source at all. */
+  empty?: boolean;
+}
+
+/** A question nothing the person may read holds: its pack is empty. */
+const unmatched = "zeppelin";
+
+/** Shows the page on a faked core, answering as `faked` says. */
 const shown = async (
   connections: Connection[],
-  refusal?: string,
-  searched?: Promise<boolean>,
-  /** Holds each read of a source's first version until it settles. */
-  firstRead?: Promise<boolean>
+  { refusal, searched, firstRead, empty = false }: Faked = {}
 ) => {
   const calls: string[] = [];
   const brainSources = {
@@ -111,6 +120,9 @@ const shown = async (
       );
       if (refusal !== undefined) {
         throw new Error(refusal);
+      }
+      if (empty) {
+        return { sources: [], next: null };
       }
       return after === undefined
         ? {
@@ -150,7 +162,9 @@ const shown = async (
     search: async (question: string) => {
       calls.push(`search ${question}`);
       await (searched ?? Promise.resolve());
-      return pack;
+      return question === unmatched
+        ? { items: [], notFound: [unmatched], truncated: false }
+        : pack;
     },
   };
   const core = {
@@ -310,7 +324,7 @@ describe(SourcesPage, () => {
 
   it("shows a version picked as loading until its own text arrives, never the text of the one before", async () => {
     const read = Promise.withResolvers<boolean>();
-    await shown([], undefined, undefined, read.promise);
+    await shown([], { firstRead: read.promise });
     await press("Handbook");
     const newest = panel();
     await press("Version 1");
@@ -325,9 +339,49 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ newest: true, waiting: false, arrived: true });
   });
 
+  it("says once that a search found nothing, and what wasn't found only beside what was", async () => {
+    await shown([]);
+    await search(unmatched);
+    const nothing = section("Results");
+    await search("invoices refunds");
+    const some = section("Results");
+
+    expect({
+      nothing: [
+        "Nothing you may read matched.",
+        `Nothing you may read holds ${unmatched}.`,
+      ].map((text) => nothing.includes(text)),
+      some: some.includes("Nothing you may read holds refunds and INV-7."),
+    }).toStrictEqual({ nothing: [true, false], some: true });
+  });
+
+  it("says what Only you means only when there are sources to mark", async () => {
+    await shown([], { empty: true });
+    const empty = section("Sources you may read");
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown([]);
+    const listedText = section("Sources you may read");
+
+    expect({
+      empty: {
+        onlyYou: empty.includes("Those marked Only you"),
+        documents: empty.includes(
+          "Documents and workflow runs show here once they reach the Brain."
+        ),
+      },
+      listed: listedText.includes("Those marked Only you"),
+    }).toStrictEqual({
+      empty: { onlyYou: false, documents: true },
+      listed: true,
+    });
+  });
+
   it("asks one search at a time: a question sent while one is searched is not asked", async () => {
     const answered = Promise.withResolvers<boolean>();
-    const { calls } = await shown([], undefined, answered.promise);
+    const { calls } = await shown([], { searched: answered.promise });
     await search("invoices");
     await search("refunds");
     answered.resolve(true);
@@ -362,7 +416,7 @@ describe(SourcesPage, () => {
   });
 
   it("says why core refused, and shows nothing as listed", async () => {
-    await shown([], "You aren't a member of this organization.");
+    await shown([], { refusal: "You aren't a member of this organization." });
     const text = document.body.textContent;
 
     expect({

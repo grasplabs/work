@@ -167,7 +167,9 @@ const SearchResults = ({
           })}
         </ItemGroup>
       )}
-      {pack.notFound.length === 0 ? null : (
+      {/* What wasn't found only beside what was: a search that found
+          nothing says so once, above. */}
+      {pack.items.length === 0 || pack.notFound.length === 0 ? null : (
         <p className="text-muted-foreground text-sm">
           <Trans>Nothing you may read holds {missing}.</Trans>
         </p>
@@ -368,8 +370,7 @@ const SourceList = ({
           </EmptyTitle>
           <EmptyDescription>
             <Trans>
-              Uploads, chats and workflow runs show here once they reach the
-              Brain.
+              Documents and workflow runs show here once they reach the Brain.
             </Trans>
           </EmptyDescription>
         </EmptyHeader>
@@ -377,7 +378,13 @@ const SourceList = ({
     );
   }
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-3">
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          Those marked Only you are yours alone: nobody else sees them, admins
+          included.
+        </Trans>
+      </p>
       <ItemGroup render={<ul />} spacing="tight">
         {sources.map((each) => (
           <li key={keyOf(each.source)}>
@@ -647,12 +654,6 @@ export const SourcesPage = ({
           <h2 className="text-sm font-medium" id={heading}>
             <Trans>Sources you may read</Trans>
           </h2>
-          <p className="text-muted-foreground text-sm">
-            <Trans>
-              Those marked Only you are yours alone: nobody else sees them,
-              admins included.
-            </Trans>
-          </p>
           <div className="grid min-h-0 gap-6 lg:grid-cols-2">
             <SourceList
               onPick={(source) => {

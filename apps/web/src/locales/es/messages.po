@@ -4908,6 +4908,10 @@ msgstr "Documento no encontrado"
 msgid "Documents"
 msgstr "Documentos"
 
+#: src/brain/sources-page.tsx
+msgid "Documents and workflow runs show here once they reach the Brain."
+msgstr "Los documentos y las ejecuciones de flujos de trabajo aparecen aquí cuando llegan al cerebro."
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Los documentos escritos aquí y los archivos que se suban aparecen aquí para que Grasp y sus agentes los lean."
@@ -14943,10 +14947,6 @@ msgstr "Subió al conocimiento"
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Subiendo…"
-
-#: src/brain/sources-page.tsx
-msgid "Uploads, chats and workflow runs show here once they reach the Brain."
-msgstr "Los archivos subidos, los chats y las ejecuciones de flujos de trabajo aparecen aquí cuando llegan al cerebro."
 
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"

@@ -67,13 +67,13 @@ import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
 import * as coreBrain from "../src/brain-next.ts";
-import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import type {
   InstructionFile,
   InstructionFileVersion,
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
@@ -3034,7 +3034,10 @@ export const storeProbes = {
 
 /** The Sources page's RPC for `personId`, signed in as a member. */
 const sourcesAs = (personId: string): BrainSourcesRpc =>
-  new BrainSourcesRpc(env, async () => await Promise.resolve(sessionOf(personId)));
+  new BrainSourcesRpc(
+    env,
+    async () => await Promise.resolve(sessionOf(personId))
+  );
 
 /** A source as the page names it after a list: its time as ISO 8601. */
 const pageAfter = (source: SourceRef) => ({
@@ -3051,11 +3054,13 @@ const pageAfter = (source: SourceRef) => ({
 export const sourcesProbes = {
   list: async ({ personId, hiddenVersions, markers }) => {
     const asked: Answer[] = [
-      await answer("every source they may read", async () =>
-        await sourcesAs(personId).list()
+      await answer(
+        "every source they may read",
+        async () => await sourcesAs(personId).list()
       ),
-      await answer("a null page start", async () =>
-        await sourcesAs(personId).list(unchecked(null))
+      await answer(
+        "a null page start",
+        async () => await sourcesAs(personId).list(unchecked(null))
       ),
       await answer(
         "after a source no one added",
@@ -3073,19 +3078,24 @@ export const sourcesProbes = {
       asked.push(answered);
     }
     asked.push(
-      await answer("as someone who isn't a member", async () =>
-        await sourcesAs(stranger()).list()
+      await answer(
+        "as someone who isn't a member",
+        async () => await sourcesAs(stranger()).list()
       ),
-      await answer("after a moment named by the markers", async () =>
-        await sourcesAs(personId).list({
-          addedAt: markers.join(" "),
-          source: missingSource(),
-        })
+      await answer(
+        "after a moment named by the markers",
+        async () =>
+          await sourcesAs(personId).list({
+            addedAt: markers.join(" "),
+            source: missingSource(),
+          })
       ),
-      await answer("after an unknown producer named by the markers", async () =>
-        await sourcesAs(personId).list(
-          pageAfter(unchecked({ producer: markers.join(""), id: "x" }))
-        )
+      await answer(
+        "after an unknown producer named by the markers",
+        async () =>
+          await sourcesAs(personId).list(
+            pageAfter(unchecked({ producer: markers.join(""), id: "x" }))
+          )
       )
     );
     return asked;
@@ -3109,13 +3119,16 @@ export const sourcesProbes = {
     }
     const hidden = hiddenVersions[0]?.source ?? missingSource();
     asked.push(
-      await answer("as someone who isn't a member", async () =>
-        await sourcesAs(stranger()).versions(hidden)
+      await answer(
+        "as someone who isn't a member",
+        async () => await sourcesAs(stranger()).versions(hidden)
       ),
-      await answer("an unknown producer named by the markers", async () =>
-        await sourcesAs(personId).versions(
-          unchecked({ producer: markers.join(""), id: hidden.id })
-        )
+      await answer(
+        "an unknown producer named by the markers",
+        async () =>
+          await sourcesAs(personId).versions(
+            unchecked({ producer: markers.join(""), id: hidden.id })
+          )
       )
     );
     return asked;
@@ -3139,14 +3152,17 @@ export const sourcesProbes = {
     }
     const hidden = hiddenVersions[0]?.source ?? missingSource();
     asked.push(
-      await answer("as someone who isn't a member", async () =>
-        await sourcesAs(stranger()).read(hidden, 1)
+      await answer(
+        "as someone who isn't a member",
+        async () => await sourcesAs(stranger()).read(hidden, 1)
       ),
-      await answer("an unknown producer named by the markers", async () =>
-        await sourcesAs(personId).read(
-          unchecked({ producer: markers.join(""), id: hidden.id }),
-          1
-        )
+      await answer(
+        "an unknown producer named by the markers",
+        async () =>
+          await sourcesAs(personId).read(
+            unchecked({ producer: markers.join(""), id: hidden.id }),
+            1
+          )
       )
     );
     return asked;
@@ -3159,15 +3175,18 @@ export const sourcesProbes = {
       [],
       async ({ question }) => await sourcesAs(probing.personId).search(question)
     )),
-    await answer("too long a question", async () =>
-      await sourcesAs(probing.personId).search(
-        `${probing.markers.join(" ")} `
-          .repeat(questionMaxLength)
-          .slice(0, questionMaxLength + 1)
-      )
+    await answer(
+      "too long a question",
+      async () =>
+        await sourcesAs(probing.personId).search(
+          `${probing.markers.join(" ")} `
+            .repeat(questionMaxLength)
+            .slice(0, questionMaxLength + 1)
+        )
     ),
-    await answer("as someone who isn't a member", async () =>
-      await sourcesAs(stranger()).search(probing.markers.join(" "))
+    await answer(
+      "as someone who isn't a member",
+      async () => await sourcesAs(stranger()).search(probing.markers.join(" "))
     ),
   ],
 } satisfies Record<"list" | "versions" | "read" | "search", Probe>;
