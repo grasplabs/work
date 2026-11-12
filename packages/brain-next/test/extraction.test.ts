@@ -19,7 +19,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { tokensOf } from "../src/contract.ts";
@@ -285,16 +285,6 @@ const instructingProposal = (name: string) => ({
     },
   ],
 });
-
-/** How many memories of the store, ended or not, hold `name` in their statement. */
-const memoriesHolding = async (name: string): Promise<number> =>
-  await runInDurableObject(
-    shared(),
-    (_instance, state) =>
-      state.storage.sql
-        .exec("SELECT 1 FROM memories WHERE instr(statement, ?) > 0", name)
-        .toArray().length
-  );
 
 /** How long the store may take to start, its schema made and its first tick run. */
 const startMs = 30_000;
@@ -646,57 +636,51 @@ describe("extracting memories", () => {
     expect(callsOf(token)).toStrictEqual([]);
   });
 
-  it("keeps a value only when its words are in the quote, and a date the model writes out only when the quote states it", async () => {
+  it("shows the checker every value it would store, a date it can't resolve included, and keeps only what it supports", async () => {
     const token = unique("t");
     const name = unique("Wayne");
     const group = unique("g");
     answers.set(
       token,
-      answering({
-        entities: [{ key: "c", kind: "customer", names: [name] }],
-        memories: [
-          // Its value is not what the quote says.
-          customerFact(
-            `${name} is in Rotterdam.`,
-            `${name} is based in Utrecht`,
-            "location",
-            "Rotterdam"
-          ),
-          customerFact(
-            `${name} is in Utrecht.`,
-            `${name} is based in Utrecht`,
-            "location",
-            "Utrecht"
-          ),
-          {
-            // A date the text never states: the model's guess.
-            about: "c",
-            attribute: "renewal_date",
-            date: { kind: "date", date: "2027-04-30" },
-            type: "fact",
-            statement: `${name} renews in spring.`,
-            quote: `${name} renews in spring`,
-          },
-        ],
-      })
+      answering(
+        {
+          entities: [{ key: "c", kind: "customer", names: [name] }],
+          memories: [
+            // Its value is not what the quote says: the checker's to see.
+            customerFact(
+              `${name} is in Rotterdam.`,
+              `${name} is based in Utrecht`,
+              "location",
+              "Rotterdam"
+            ),
+            {
+              about: "c",
+              attribute: "renewal_date",
+              date: { kind: "phrase", phrase: "end of the quarter" },
+              type: "fact",
+              statement: `${name} renews at the end of the quarter.`,
+              quote: `${name} renews at the end of the quarter`,
+            },
+          ],
+        },
+        [1]
+      )
     );
     await added(
-      `${token}: ${name} is based in Utrecht. ${name} renews in spring.`,
+      `${token}: ${name} is based in Utrecht. ${name} renews at the end of the quarter.`,
       audience(group),
       { extract: fromOutside() }
     );
     await tick();
-
     const read = await readAs({ person: unique("p"), groups: [group] }, name);
-    expect(
-      read
-        .map(({ attribute, value }) => ({ attribute, value }))
-        .toSorted((a, b) => String(a.value).localeCompare(String(b.value)))
-    ).toStrictEqual([
-      // Kept, filed under none, with no date nobody wrote.
-      { attribute: null, value: null },
-      { attribute: "location", value: "Utrecht" },
-    ]);
+
+    expect({
+      checked: checkedOf(token)?.statements.map(({ value }) => value),
+      read: read.map(({ attribute, value }) => ({ attribute, value })),
+    }).toStrictEqual({
+      checked: ["Rotterdam", "end of the quarter"],
+      read: [{ attribute: "renewal_date", value: "end of the quarter" }],
+    });
   });
 
   it("reads all of a long version a piece at a time, and ends what an earlier version said only once its last piece is read", async () => {
@@ -740,8 +724,9 @@ describe("extracting memories", () => {
       { length: 40 },
       (_, index) => `Sentence ${index} of ${token} says nothing to keep.`
     ).join(" ");
+    // Every sentence holds the token, so the model knows each piece's answer.
     await added(
-      `${token}: ${filler} ${complaint("deliveries")}.`,
+      `${token}: ${filler} ${complaint("deliveries")} in ${token}.`,
       audience(group),
       { extract: fromOutside(), source }
     );
@@ -763,9 +748,11 @@ describe("extracting memories", () => {
     expect({
       // More than one piece, each shorter than the version.
       pieces: pieces.length > 1,
-      // Every sentence of the version reached the model.
-      allRead: Array.from({ length: 40 }, (_, index) => index).every((index) =>
-        pieces.some(({ input }) => input.includes(`Sentence ${index} of`))
+      // Every sentence of the version reached the model, once.
+      allReadOnce: Array.from({ length: 40 }, (_, index) => index).every(
+        (index) =>
+          pieces.filter(({ input }) => input.includes(`Sentence ${index} of`))
+            .length === 1
       ),
       // While the newer version's pieces were read, what the first said stood.
       before: seenDuringPieces
@@ -774,38 +761,38 @@ describe("extracting memories", () => {
       now: read.map(({ value }) => value),
     }).toStrictEqual({
       pieces: true,
-      allRead: true,
+      allReadOnce: true,
       before: true,
       now: ["deliveries"],
     });
   });
 
-  it("writes nothing of a version a newer one replaced while the model was asked", async () => {
+  it("gives a reader nothing of a version a newer one replaced while the model was asked", async () => {
     const token = unique("t");
     const name = unique("Cyberdyne");
     const group = unique("g");
     const source = unique("doc");
+    const reader = { person: unique("p"), groups: [group] };
     let replaced = false;
     answers.set(token, async (request) => {
       if (!replaced && request.purpose === "brain.extract") {
         replaced = true;
-        await added(`${token}: Nothing more about it.`, audience(group), {
+        await added(`${token}: ${name} is lost.`, audience(group), {
           extract: fromOutside(),
           source,
         });
       }
+      const status = request.input.includes("lost") ? "lost" : "active";
       return answering({
         entities: [{ key: "c", kind: "customer", names: [name] }],
-        memories: request.input.includes("active")
-          ? [
-              customerFact(
-                `${name} is active.`,
-                `${name} is active`,
-                "status",
-                "active"
-              ),
-            ]
-          : [],
+        memories: [
+          customerFact(
+            `${name} is ${status}.`,
+            `${name} is ${status}`,
+            "status",
+            status
+          ),
+        ],
       })(request);
     });
     await added(`${token}: ${name} is active.`, audience(group), {
@@ -814,15 +801,31 @@ describe("extracting memories", () => {
     });
     await tick();
     await tick();
+    const [entity] = await entitiesNamed(reader, name);
+    const history =
+      entity === undefined ? [] : await memoriesAbout(entity.id, reader, true);
 
-    await expect(memoriesHolding(name)).resolves.toBe(0);
+    const now = await readAs(reader, name);
+
+    expect({
+      now: now.map(({ value }) => value),
+      // Not even as history: the replaced version was never drawn from.
+      history: history.map(({ value, source: from }) => ({
+        value,
+        version: from?.version,
+      })),
+    }).toStrictEqual({
+      now: ["lost"],
+      history: [{ value: "lost", version: 2 }],
+    });
   });
 
-  it("writes nothing of a source erased while the model was asked", async () => {
+  it("gives a reader nothing of a source erased while the model was asked", async () => {
     const token = unique("t");
     const name = unique("Soylent");
     const group = unique("g");
     const source = unique("doc");
+    const reader = { person: unique("p"), groups: [group] };
     answers.set(token, async (request) => {
       if (request.purpose === "brain.extract") {
         await shared().eraseSource({ source, reason: "deleted" });
@@ -846,7 +849,10 @@ describe("extracting memories", () => {
     await tick();
     await tick();
 
-    await expect(memoriesHolding(name)).resolves.toBe(0);
+    expect({
+      entities: await entitiesNamed(reader, name),
+      read: await readAs(reader, name),
+    }).toStrictEqual({ entities: [], read: [] });
   });
 
   it("asks nothing again and adds nothing twice when a piece runs again after its add landed", async () => {
@@ -882,10 +888,12 @@ describe("extracting memories", () => {
     });
     await tick();
 
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
     expect({
       calls: callsOf(token).length - callsBefore,
-      memories: await memoriesHolding(name),
-    }).toStrictEqual({ calls: 0, memories: 1 });
+      read: read.map(({ value }) => value),
+    }).toStrictEqual({ calls: 0, read: ["active"] });
   });
 
   it("asks nothing of a version nobody may read", async () => {
@@ -940,5 +948,291 @@ describe("extracting memories", () => {
     expect(entity?.identifiers).toStrictEqual([
       { type: "email", value: `Ann@${domain}` },
     ]);
+  });
+
+  it("keeps every valid memory a model proposes, however many, in as many adds as it takes", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const prefix = unique("Cust");
+    const count = 150;
+    const nameOf = (index: number) => `${prefix}x${index}`;
+    const text = `${token}: ${Array.from(
+      { length: count },
+      (_, index) => `${nameOf(index)} is active.`
+    ).join(" ")}`;
+    answers.set(
+      token,
+      answering({
+        entities: Array.from({ length: count }, (_, index) => ({
+          key: `e${index}`,
+          kind: "customer",
+          names: [nameOf(index)],
+        })),
+        memories: [
+          // A hundred first whose quotes the text doesn't hold.
+          ...Array.from({ length: 100 }, (_, index) => ({
+            about: `e${index}`,
+            attribute: "status",
+            value: "lost",
+            type: "fact",
+            statement: `${nameOf(index)} is lost.`,
+            quote: `${nameOf(index)} is lost`,
+          })),
+          ...Array.from({ length: count }, (_, index) => ({
+            about: `e${index}`,
+            attribute: "status",
+            value: "active",
+            type: "fact",
+            statement: `${nameOf(index)} is active.`,
+            quote: `${nameOf(index)} is active`,
+          })),
+        ],
+      })
+    );
+    await added(text, audience(group), { extract: fromOutside() });
+    await tick();
+    const reader = { person: unique("p"), groups: [group] };
+    const found: string[] = [];
+    let after: EntitiesCursor | undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- page after page
+      const page = await shared().findEntities({
+        reader,
+        kind: "customer",
+        ...(after === undefined ? {} : { after }),
+      });
+      found.push(...page.entities.flatMap(({ names }) => names));
+      after = page.more ? page.next : undefined;
+    } while (after !== undefined);
+
+    expect(found.filter((name) => name.startsWith(prefix))).toHaveLength(count);
+  });
+
+  it("finishes a long version when the store stopped between two of its pieces, drawing nothing twice", async () => {
+    const token = unique("t");
+    const name = unique("Gringotts");
+    const group = unique("g");
+    const reader = { person: unique("p"), groups: [group] };
+    const extract = fromOutside();
+    const facts = ["invoices", "deliveries"];
+    const filler = Array.from(
+      { length: 30 },
+      (_, index) => `Line ${index} of ${token} says nothing to keep.`
+    ).join(" ");
+    // Every sentence holds the token, so the model knows each piece's answer.
+    const text = `${token}: ${name} complained about the invoices. ${filler} ${name} complained about the deliveries in ${token}.`;
+    let stopped = false;
+    answers.set(token, (request) => {
+      // The second piece's first call: as if the store stopped there,
+      // after the first piece's add and before its item settled.
+      if (
+        !stopped &&
+        request.purpose === "brain.extract" &&
+        !request.input.includes("invoices")
+      ) {
+        stopped = true;
+        return "The store stopped.";
+      }
+      const found = facts.filter((about) =>
+        request.input.includes(`${name} complained about the ${about}`)
+      );
+      return answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: found.map((about) =>
+          customerFact(
+            `${name} complained about the ${about}.`,
+            `${name} complained about the ${about}`,
+            "complaint",
+            about
+          )
+        ),
+      })(request);
+    });
+    const { source, version } = await added(text, audience(group), {
+      extract,
+    });
+    const window =
+      2 * (tokensOf(proposeInstructions) + tokensOf(checkInstructions) + 150);
+    await tick(1, window);
+    // The store's restart puts the first item back; the second piece's
+    // item was never put on the queue.
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM work_items WHERE kind = 'extract' AND key = ?",
+        source
+      );
+      enqueueExtraction(state.storage, source, version, extract);
+    });
+    for (let round = 0; round < 6; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one piece a tick at most
+      await tick(1, window);
+    }
+    const firstPieceCalls = calls.filter(
+      ({ purpose, input }) =>
+        purpose === "brain.extract" &&
+        input.includes(token) &&
+        input.includes("about the invoices")
+    ).length;
+
+    const read = await readAs(reader, name);
+
+    expect({
+      firstPieceCalls,
+      read: read
+        .map(({ value }) => value ?? "")
+        .toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      firstPieceCalls: 1,
+      read: ["deliveries", "invoices"],
+    });
+  });
+
+  it("logs one event per piece, with counts alone", async () => {
+    const token = unique("t");
+    const name = unique("Massive");
+    const group = unique("g");
+    answers.set(
+      token,
+      answering(
+        {
+          entities: [{ key: "c", kind: "customer", names: [name] }],
+          memories: [
+            customerFact(
+              `${name} is active.`,
+              `${name} is active`,
+              "status",
+              "active"
+            ),
+            // Not in the text.
+            customerFact(
+              `${name} is lost.`,
+              `${name} is lost`,
+              "status",
+              "lost"
+            ),
+            customerFact(
+              `${name} is in Oslo.`,
+              `${name} is in Oslo`,
+              "location",
+              "Oslo"
+            ),
+          ],
+        },
+        [0]
+      )
+    );
+    const lines: unknown[] = [];
+    const spy = vi.spyOn(console, "info").mockImplementation((line) => {
+      lines.push(line);
+    });
+    try {
+      await added(
+        `${token}: ${name} is active. ${name} is in Oslo.`,
+        audience(group),
+        {
+          extract: fromOutside(),
+        }
+      );
+      await tick();
+    } finally {
+      spy.mockRestore();
+    }
+    const events = lines.filter(
+      (line) =>
+        typeof line === "object" &&
+        line !== null &&
+        Reflect.get(line, "event") === "brain.extract"
+    );
+
+    expect(events).toStrictEqual([
+      {
+        event: "brain.extract",
+        version: 1,
+        from: 0,
+        proposed: 3,
+        quoted: 2,
+        supported: 1,
+      },
+    ]);
+  });
+
+  it("asks nothing of a model whose window can't hold the instructions, and draws once one can", async () => {
+    const token = unique("t");
+    const name = unique("Vandelay");
+    const group = unique("g");
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        memories: [
+          customerFact(
+            `${name} is active.`,
+            `${name} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    await added(`${token}: ${name} is active.`, audience(group), {
+      extract: fromOutside(),
+    });
+    await tick(1, tokensOf(proposeInstructions));
+    const asked = callsOf(token).length;
+    // Past the first failure's wait, with a model of a larger window.
+    await tick(2, null);
+    const drawn = await readAs({ person: unique("p"), groups: [group] }, name);
+
+    expect({
+      asked,
+      read: drawn.map(({ value }) => value),
+    }).toStrictEqual({ asked: 0, read: ["active"] });
+  });
+
+  it("keeps an entity of more names than one add takes, and its memory, with the first names the text writes", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const names = Array.from({ length: 25 }, (_, index) =>
+      unique(`N${index}x`)
+    );
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names }],
+        memories: [
+          customerFact(
+            `${names[0]} is active.`,
+            `${names[0]} is active`,
+            "status",
+            "active"
+          ),
+        ],
+      })
+    );
+    await added(
+      `${token}: ${names.join(", ")}. ${names[0]} is active.`,
+      audience(group),
+      { extract: fromOutside() }
+    );
+    await tick();
+    const reader = { person: unique("p"), groups: [group] };
+    const [entity] = await entitiesNamed(reader, names[0] ?? "");
+    const read = await readAs(reader, names[0] ?? "");
+
+    expect({
+      names: entity?.names.toSorted((a, b) => a.localeCompare(b)),
+      read: read.map(({ value }) => value),
+    }).toStrictEqual({
+      names: names.slice(0, 20).toSorted((a, b) => a.localeCompare(b)),
+      read: ["active"],
+    });
+  });
+
+  it("refuses words said before 1970 as the version is added", async () => {
+    await expect(
+      added("Old words.", audience(unique("g")), {
+        extract: fromOutside({ saidAt: new Date(-1) }),
+      })
+    ).rejects.toThrow("saidAt");
   });
 });

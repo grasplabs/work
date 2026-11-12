@@ -173,7 +173,8 @@ const isTimeZone = (timeZone: string): boolean => {
  */
 export const extractSchema = z.strictObject({
   speaker: speakerSchema,
-  saidAt: z.date(),
+  // From 1970 on: the queue keeps it as milliseconds since then.
+  saidAt: z.date().min(new Date(0)),
   timeZone: z.string().min(1).max(64).refine(isTimeZone, {
     message: "Is no time zone",
   }),
@@ -719,6 +720,8 @@ export const workErrors = {
   embedder_unavailable: "The embedder gave no vectors for it.",
   no_progress: "It asked to go on without having done any of its work.",
   invalid_answer: "The model's answer isn't what its work takes.",
+  window_too_small:
+    "The model's context window can't hold the work's instructions.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
 

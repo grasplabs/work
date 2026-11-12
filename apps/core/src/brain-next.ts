@@ -226,7 +226,8 @@ const saidBySchema = z.discriminatedUnion("kind", [
  */
 const saidSchema = z.strictObject({
   by: saidBySchema,
-  at: z.date(),
+  // From 1970 on, as the Brain takes it (`extractSchema`).
+  at: z.date().min(new Date(0)),
   priority: z.enum(workPriorities),
 });
 export type Said = z.infer<typeof saidSchema>;
@@ -985,8 +986,11 @@ const askModel =
 /**
  * The context window of the models the Brain's work asks, in tokens: the
  * smaller of the careful and the quick one's, from the gateway's catalog;
- * null when either isn't in it (an OpenAI-compatible endpoint's), or no
- * model is set up (the calls then fail as the account's trouble).
+ * null when either is an OpenAI-compatible endpoint's (the catalog gives
+ * such a model a window it doesn't know), or no model is set up (the
+ * calls then fail as the account's trouble). Null means a version is read
+ * as one piece: a model whose window it overflows refuses the call, and
+ * the item parks.
  */
 const contextTokensOf = async (env: Env): Promise<number | null> => {
   let settings: Awaited<ReturnType<typeof modelSettings>>;
@@ -997,9 +1001,12 @@ const contextTokensOf = async (env: Env): Promise<number | null> => {
   }
   const windows = brainModelRoles.map((role) => {
     try {
-      const window = parseModelRef(modelForRole(settings, role))?.catalog
-        .contextWindow;
-      return window !== undefined && window > 0 ? window : null;
+      const ref = parseModelRef(modelForRole(settings, role));
+      if (ref === undefined || ref.provider === "openai-compatible") {
+        return null;
+      }
+      const window = ref.catalog.contextWindow;
+      return window > 0 ? window : null;
     } catch {
       return null;
     }

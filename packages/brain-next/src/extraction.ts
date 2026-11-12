@@ -1,4 +1,5 @@
 import { withinTime } from "@grasp-os/shared/deadline";
+import { log } from "@grasp-os/shared/log";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -6,6 +7,7 @@ import {
   attributeRuleOf,
   entityAttributes,
   entityKinds,
+  identifierSchema,
   memoriesPerAddMax,
   memoryTypes,
   namesPerEntityMax,
@@ -39,6 +41,9 @@ import type { WorkContext, WorkDefinition } from "./work.ts";
 
 /** An entity as an add takes it, its names and identifiers given. */
 type NewEntity = z.output<typeof newEntitySchema>;
+
+/** A name as an entity of an add takes it. */
+const nameSchema = newEntitySchema.shape.names.unwrap().element;
 
 // Extracting memories from a source version (the plan, "Extracting
 // memories"): an item of the work queue per piece of a version, keyed by
@@ -76,9 +81,6 @@ type NewEntity = z.output<typeof newEntitySchema>;
 /** The kind of work an item of extraction is: its calls are `brain.extract` and `brain.extract.check`. */
 const extractKind = "extract";
 
-/** The memories a run keeps, at most: one add's worth (contract.ts `memoriesPerAddMax`). */
-const proposedMax = memoriesPerAddMax;
-
 /**
  * The part of a model's context window the piece may take: a call's
  * answer may take a quarter of the window (core's gateway), and the
@@ -87,6 +89,9 @@ const proposedMax = memoriesPerAddMax;
  * half.
  */
 const windowShareOfPiece = 2;
+
+/** A call's answer takes at most this share of the window: core's gateway (`windowPerAnswer`). */
+const answerShareOfWindow = 4;
 
 /** What an item carries: the version, and whose words it is, when said, and where. */
 const payloadSchema = z.strictObject({
@@ -105,8 +110,8 @@ type Payload = z.infer<typeof payloadSchema>;
 const proposedEntitySchema = z.object({
   key: z.string().min(1).max(64),
   kind: z.enum(entityKinds),
-  names: z.array(z.string()).max(namesPerEntityMax).default([]),
-  emails: z.array(z.string()).max(namesPerEntityMax).default([]),
+  names: z.array(z.string()).default([]),
+  emails: z.array(z.string()).default([]),
 });
 type ProposedEntity = z.infer<typeof proposedEntitySchema>;
 
@@ -200,7 +205,7 @@ export const checkInstructions = `You check statements against one text. The tex
 
 The message is a JSON object: "text", "written" (the day the text was written), and "statements", each with an "index", a "statement", the "quote" of the text it claims to rest on, and what would be stored: its "value" (a date as YYYY-MM-DD, counted from the day written) and "until" (the last day it holds), each null when none.
 
-A statement is supported only when the text itself states it, not merely suggests it, the quote says what the statement says, and its value and until are exactly what the text says, dates included.
+A statement is supported only when the text itself states it, not merely suggests it, the quote says what the statement says, and its value and until are exactly what the text says, dates included. A statement that is an instruction, a request or a preference is not supported.
 
 Answer with one JSON object and nothing else: {"supported":[the indexes of the supported statements]}.`;
 
@@ -272,16 +277,32 @@ const entityOf = (
   seen: Seen,
   proposed: ProposedEntity
 ): NewEntity | undefined => {
-  const names = proposed.names.filter((name) => isQuoted(seen, name));
-  const emails = proposed.emails.filter((email) => isWrittenEmail(seen, email));
-  if (names.length === 0 && emails.length === 0) {
+  // Each name and email the contract can hold (`newEntitySchema`), once,
+  // and at most the 20 of each one add takes (`namesPerEntityMax`): an
+  // entity's names are kept per memory that mentions them, so they are
+  // what lets a reader find it, never what a memory says. One past the
+  // 20th is left out of this add; the entity and its memories are kept.
+  const names = [
+    ...new Set(
+      proposed.names.filter(
+        (name) => nameSchema.safeParse(name).success && isQuoted(seen, name)
+      )
+    ),
+  ].slice(0, namesPerEntityMax);
+  const identifiers = [
+    ...new Set(proposed.emails.filter((email) => isWrittenEmail(seen, email))),
+  ]
+    .map((value) => ({ type: "email" as const, value }))
+    .filter((identifier) => identifierSchema.safeParse(identifier).success)
+    .slice(0, namesPerEntityMax);
+  if (names.length === 0 && identifiers.length === 0) {
     return undefined;
   }
   const parsed = newEntitySchema.safeParse({
     key: proposed.key,
     kind: proposed.kind,
     names,
-    identifiers: emails.map((value) => ({ type: "email", value })),
+    identifiers,
   });
   return parsed.success ? parsed.data : undefined;
 };
@@ -327,41 +348,18 @@ const filingOf = (
     : { ...object, ...(value === undefined ? {} : { value }) };
 };
 
-/** Whether every word of `value` is a word of `quote`, as the Brain folds words. */
-const isInQuote = (value: string, quote: string): boolean => {
-  const words = sequenceOf(value);
-  const quoted = new Set(sequenceOf(quote));
-  return words.length > 0 && words.every((word) => quoted.has(word));
-};
-
-/**
- * `when` resolved from the day said; a date the model wrote out only when
- * the quote holds its day's number (so the text states it, not the
- * model): else, and past Temporal's range, none.
- */
+/** `when` resolved from the day said; none when absent, or past Temporal's range. */
 const resolvedIn = (
   when: When | null | undefined,
-  quote: string,
   said: Drawing["said"]
-): Resolved => {
-  if (when === null || when === undefined) {
-    return null;
-  }
-  if (when.kind === "date") {
-    const day = String(Number(when.date.slice(-2)));
-    const quoted = sequenceOf(quote).map((word) => String(Number(word)));
-    if (!quoted.includes(day)) {
-      return null;
-    }
-  }
-  return resolveWhen(when, said);
-};
+): Resolved =>
+  when === null || when === undefined ? null : resolveWhen(when, said);
 
 /**
- * `proposed` as a memory to add, or none: its quote must be in the text;
- * it is no preference or instruction, by type or by attribute; a value
- * that isn't a date has every word in the quote; a date the model wrote
- * out is in the quote (else the memory keeps no date, filed under none).
+ * `proposed` as a memory to add, or none: its quote must be in the text
+ * (the plan's check in code), and it is no preference or instruction, by
+ * type or by attribute. Its value and dates are the checker call's to
+ * judge, which is shown them (`supportedOf`).
  */
 const memoryOf = (
   seen: Seen,
@@ -373,32 +371,18 @@ const memoryOf = (
   const instructs =
     !drawnTypes.has(proposed.type) ||
     instructingAttributes.has(proposed.attribute ?? "");
-  const value = proposed.value ?? undefined;
-  if (
-    instructs ||
-    !kinds.has(proposed.about) ||
-    !isQuoted(seen, quote) ||
-    (value !== undefined && !isInQuote(value, quote))
-  ) {
+  if (instructs || !kinds.has(proposed.about) || !isQuoted(seen, quote)) {
     return undefined;
   }
-  const dated = resolvedIn(proposed.date, quote, drawing.said);
-  const until = resolvedIn(proposed.until, quote, drawing.said);
-  let filed = value;
-  let unfiled = false;
+  const dated = resolvedIn(proposed.date, drawing.said);
+  const until = resolvedIn(proposed.until, drawing.said);
+  let filed = proposed.value ?? undefined;
   if (dated !== null) {
-    // A date that couldn't be resolved stays the phrase, as written.
+    // A date that couldn't be resolved is the phrase, as written: a value
+    // like any other, which the checker judges.
     filed = "date" in dated ? dated.date : dated.phrase;
-  } else if (proposed.date !== null && proposed.date !== undefined) {
-    // A date the text doesn't state: no value, and so no attribute.
-    filed = undefined;
-    unfiled = true;
   }
-  const filing = filingOf(
-    unfiled ? { ...proposed, attribute: null } : proposed,
-    kinds,
-    filed
-  );
+  const filing = filingOf(proposed, kinds, filed);
   const parsed = newMemorySchema.safeParse({
     about: proposed.about,
     ...filing,
@@ -425,18 +409,23 @@ interface Candidates {
   memories: NewMemory[];
 }
 
+/** What a first call proposed, as code kept it, and how many memories it proposed. */
+interface Proposal extends Candidates {
+  proposed: number;
+}
+
 /** What of the model's `answer` holds against the text (above). */
 const candidatesOf = (
   seen: Seen,
   drawing: Drawing,
   answer: string
-): Candidates => {
+): Proposal => {
   const proposal = proposalSchema.safeParse(jsonOf(answer));
   if (!proposal.success) {
     throw new WorkError("invalid_answer");
   }
   const entities = new Map<string, NewEntity>();
-  for (const entry of proposal.data.entities.slice(0, proposedMax)) {
+  for (const entry of proposal.data.entities) {
     const proposed = proposedEntitySchema.safeParse(entry);
     const entity = proposed.success ? entityOf(seen, proposed.data) : undefined;
     // A key given twice: the first.
@@ -445,16 +434,18 @@ const candidatesOf = (
     }
   }
   const kinds = new Map([...entities].map(([key, { kind }]) => [key, kind]));
-  const memories = proposal.data.memories
-    .slice(0, proposedMax)
-    .flatMap((entry) => {
-      const proposed = proposedMemorySchema.safeParse(entry);
-      const memory = proposed.success
-        ? memoryOf(seen, drawing, kinds, proposed.data)
-        : undefined;
-      return memory === undefined ? [] : [memory];
-    });
-  return { entities: [...entities.values()], memories };
+  const memories = proposal.data.memories.flatMap((entry) => {
+    const proposed = proposedMemorySchema.safeParse(entry);
+    const memory = proposed.success
+      ? memoryOf(seen, drawing, kinds, proposed.data)
+      : undefined;
+    return memory === undefined ? [] : [memory];
+  });
+  return {
+    entities: [...entities.values()],
+    memories,
+    proposed: proposal.data.memories.length,
+  };
 };
 
 /** `candidates` with only `memories`, and only the entities they mention. */
@@ -470,6 +461,70 @@ const keeping = (entities: NewEntity[], memories: NewMemory[]): Candidates => {
   };
 };
 
+/**
+ * The most tokens one checker message may hold: the window less the
+ * answer's share (a quarter, core's gateway) and the checker's
+ * instructions; none when the window is unknown.
+ */
+const checkTokensOf = (contextTokens: number | null): number | null =>
+  contextTokens === null
+    ? null
+    : contextTokens -
+      Math.floor(contextTokens / answerShareOfWindow) -
+      tokensOf(checkInstructions);
+
+/** What the checker is shown of one memory: what would be stored. */
+const statementOf = (
+  { statement, basis, value, validUntil }: NewMemory,
+  index: number,
+  timeZone: string
+) => ({
+  index,
+  statement,
+  quote: basis.quote,
+  value: value ?? null,
+  // The last day it holds: the day before its end.
+  until:
+    validUntil === undefined
+      ? null
+      : dayOf(new Date(validUntil.getTime() - 1), timeZone).toString(),
+});
+
+/**
+ * The checker's messages for `memories`: the text, the day written, and as
+ * many statements as fit in `tokens` (the window less the instructions and
+ * the answer's share); all in one when the window is unknown. A statement
+ * that doesn't fit beside the text even alone goes in a message of its
+ * own, which the model then refuses: the item's failure.
+ */
+const checkMessagesOf = (
+  text: string,
+  drawing: Drawing,
+  memories: readonly NewMemory[],
+  tokens: number | null
+): string[] => {
+  const messageOf = (statements: ReturnType<typeof statementOf>[]) =>
+    JSON.stringify({ text, written: drawing.said.toString(), statements });
+  const messages: string[] = [];
+  let batch: ReturnType<typeof statementOf>[] = [];
+  for (const [index, memory] of memories.entries()) {
+    const statement = statementOf(memory, index, drawing.timeZone);
+    if (
+      tokens !== null &&
+      batch.length > 0 &&
+      tokensOf(messageOf([...batch, statement])) > tokens
+    ) {
+      messages.push(messageOf(batch));
+      batch = [];
+    }
+    batch.push(statement);
+  }
+  if (batch.length > 0) {
+    messages.push(messageOf(batch));
+  }
+  return messages;
+};
+
 /** The memories of `candidates` the second call says the text supports. */
 const supportedOf = async (
   context: WorkContext,
@@ -477,36 +532,28 @@ const supportedOf = async (
   drawing: Drawing,
   { entities, memories }: Candidates
 ): Promise<Candidates> => {
-  const answer = await context.ask({
-    step: "check",
-    role: "quick",
-    system: checkInstructions,
-    input: JSON.stringify({
-      text,
-      written: drawing.said.toString(),
-      statements: memories.map(
-        ({ statement, basis, value, validUntil }, index) => ({
-          index,
-          statement,
-          quote: basis.quote,
-          value: value ?? null,
-          // The last day it holds: the day before its end.
-          until:
-            validUntil === undefined
-              ? null
-              : dayOf(
-                  new Date(validUntil.getTime() - 1),
-                  drawing.timeZone
-                ).toString(),
-        })
-      ),
-    }),
-  });
-  const verdict = verdictSchema.safeParse(jsonOf(answer));
-  if (!verdict.success) {
-    throw new WorkError("invalid_answer");
+  const supported = new Set<number>();
+  for (const input of checkMessagesOf(
+    text,
+    drawing,
+    memories,
+    checkTokensOf(context.contextTokens)
+  )) {
+    // oxlint-disable-next-line no-await-in-loop -- one check call at a time, each its turn in the queue's rate
+    const answer = await context.ask({
+      step: "check",
+      role: "quick",
+      system: checkInstructions,
+      input,
+    });
+    const verdict = verdictSchema.safeParse(jsonOf(answer));
+    if (!verdict.success) {
+      throw new WorkError("invalid_answer");
+    }
+    for (const index of verdict.data.supported) {
+      supported.add(index);
+    }
   }
-  const supported = new Set(verdict.data.supported);
   return keeping(
     entities,
     memories.filter((_memory, index) => supported.has(index))
@@ -569,6 +616,13 @@ const changeOf = async (
 ): Promise<string> =>
   `extract:${await hashOf(encoder.encode(JSON.stringify([source, version, from])))}`;
 
+/** The change key of an add of a piece past its first: the piece's key and the add's content. */
+const changeOfContent = async (
+  change: string,
+  adding: Candidates
+): Promise<string> =>
+  `${change}:${await hashOf(encoder.encode(JSON.stringify(adding)))}`;
+
 /**
  * Whether the memories of change `change` were added already: remember.ts
  * keeps each change's key as its SHA-256, so a second run spends no call.
@@ -617,8 +671,8 @@ const sentences = new Intl.Segmenter("en", { granularity: "sentence" });
  * The piece of `text` from `from`: whole sentences while they fit in
  * `tokens` (the Brain's estimate, `tokensOf`), at least one, a sentence
  * longer than that cut where it no longer fits; all the rest when the
- * host knows no bound. The next piece starts at this one's last sentence,
- * so a quote that crosses into it is read whole once.
+ * host knows no bound. The next piece starts where this one ends: no text
+ * is read twice, so no fact is drawn twice.
  */
 export const pieceOf = (
   text: string,
@@ -630,7 +684,6 @@ export const pieceOf = (
     return { text: rest, end: text.length, last: true, next: text.length };
   }
   let end = 0;
-  let lastStart = 0;
   let used = 0;
   for (const { segment, index } of sentences.segment(rest)) {
     const cost = tokensOf(segment);
@@ -638,7 +691,6 @@ export const pieceOf = (
       break;
     }
     used += cost;
-    lastStart = index;
     end = index + segment.length;
   }
   if (end === 0) {
@@ -651,28 +703,68 @@ export const pieceOf = (
       used += cost;
       end += character.length;
     }
-    return {
-      text: rest.slice(0, end),
-      end: from + end,
-      last: false,
-      next: from + end,
-    };
   }
-  // Overlap by the last sentence, unless it is the piece's only one.
-  const next = lastStart > 0 ? from + lastStart : from + end;
-  return { text: rest.slice(0, end), end: from + end, last: false, next };
+  return {
+    text: rest.slice(0, end),
+    end: from + end,
+    last: false,
+    next: from + end,
+  };
 };
 
-/** The most tokens a piece may hold, from the host's model's context window; none when unknown. */
-const pieceTokensOf = (contextTokens: number | null): number | null =>
-  contextTokens === null
-    ? null
-    : Math.max(
-        1,
-        Math.floor(contextTokens / windowShareOfPiece) -
-          tokensOf(proposeInstructions) -
-          tokensOf(checkInstructions)
-      );
+/**
+ * The most tokens a piece may hold, from the host's model's context
+ * window; none when unknown. A window whose share leaves no room past
+ * the instructions fails the item (`window_too_small`): no text fits.
+ */
+const pieceTokensOf = (contextTokens: number | null): number | null => {
+  if (contextTokens === null) {
+    return null;
+  }
+  const tokens =
+    Math.floor(contextTokens / windowShareOfPiece) -
+    tokensOf(proposeInstructions) -
+    tokensOf(checkInstructions);
+  if (tokens <= 0) {
+    throw new WorkError("window_too_small");
+  }
+  return tokens;
+};
+
+/**
+ * `memories` in adds of at most `memoriesPerAddMax` memories that mention
+ * at most `memoriesPerAddMax` entities (the contract's bounds for one
+ * add), in order, each with the entities it mentions.
+ */
+const addsOf = (entities: NewEntity[], memories: NewMemory[]): Candidates[] => {
+  const adds: Candidates[] = [];
+  let batch: NewMemory[] = [];
+  for (const memory of memories) {
+    const next = keeping(entities, [...batch, memory]);
+    if (
+      batch.length > 0 &&
+      (next.memories.length > memoriesPerAddMax ||
+        next.entities.length > memoriesPerAddMax)
+    ) {
+      adds.push(keeping(entities, batch));
+      batch = [];
+    }
+    batch.push(memory);
+  }
+  adds.push(keeping(entities, batch));
+  return adds;
+};
+
+/** Adds `adding`, checked whole by the store's own schema, as an add through the store is. */
+const add = async (
+  storage: DurableObjectStorage,
+  adding: z.input<typeof newMemoriesSchema>
+): Promise<void> => {
+  await addMemories(
+    { storage, db: drizzle(storage) },
+    newMemoriesSchema.parse(adding)
+  );
+};
 
 const extractWork: WorkDefinition<Payload> = defineWork({
   kind: extractKind,
@@ -721,6 +813,14 @@ const extractWork: WorkDefinition<Payload> = defineWork({
         candidates.memories.length === 0
           ? candidates
           : await supportedOf(context, piece.text, drawing, candidates);
+      // One event for the piece: counts alone, nothing of the text.
+      log.info("brain.extract", {
+        version,
+        from,
+        proposed: proposed.proposed,
+        quoted: candidates.memories.length,
+        supported: kept.memories.length,
+      });
       // Asked again after the calls: a newer version or an erasure (its
       // versions erasing, then gone) may have landed meanwhile. (A
       // version's readers never change.)
@@ -728,18 +828,32 @@ const extractWork: WorkDefinition<Payload> = defineWork({
         return;
       }
       // A piece with nothing kept adds nothing, but the last: its add says
-      // the version is extracted.
+      // the version is extracted. More than one add holds: the others go
+      // first, each under a key of its own content, and the first add,
+      // under the piece's key, last, as the piece's mark of done. A store
+      // that stops between them runs the piece again: an add of the same
+      // content answers what it added; one the model now words otherwise
+      // is added beside it.
       if (kept.memories.length > 0 || piece.last) {
-        await addMemories(
-          { storage, db: drizzle(storage) },
-          newMemoriesSchema.parse({
-            change,
-            access,
-            entities: kept.entities,
-            memories: kept.memories,
-            ...(piece.last ? { extracted: { source, version } } : {}),
-          })
+        const [first, ...others] = addsOf(kept.entities, kept.memories);
+        const keys = await Promise.all(
+          others.map(async (other) => await changeOfContent(change, other))
         );
+        for (const [index, other] of others.entries()) {
+          // oxlint-disable-next-line no-await-in-loop -- one add after another
+          await add(storage, {
+            change: keys[index] ?? change,
+            access,
+            ...other,
+          });
+        }
+        await add(storage, {
+          change,
+          access,
+          entities: first?.entities ?? [],
+          memories: first?.memories ?? [],
+          ...(piece.last ? { extracted: { source, version } } : {}),
+        });
       }
     }
     // The next piece, while the version is still current: checked and put
