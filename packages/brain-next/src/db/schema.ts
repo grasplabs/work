@@ -578,10 +578,8 @@ export const unembeddable = sqliteTable(
 /**
  * An export: whose (`scope`, and for a person the SHA-256 of their id, as
  * the erasure ledger names them: no plain id outlives an erasure of them),
- * how far it has come, and where the erasure ledger was when it started
- * (`ledgerMark`, the key of the last entry the store had applied): an
- * erasure past it of a source the export holds (`export_sources`), or of
- * the person whose export it is, makes it stale, and its files are deleted
+ * and how far it has come. It is stale once the erasure ledger names a
+ * version it holds (`export_sources`), and its files are deleted
  * (exports.ts).
  */
 export const exportsTable = sqliteTable(
@@ -599,8 +597,6 @@ export const exportsTable = sqliteTable(
     upTo: integer("up_to").notNull(),
     /** The last version's row written to a part. */
     cursor: integer().notNull(),
-    /** The key of the last erasure the store had applied as it started: "" for none. */
-    ledgerMark: text("ledger_mark").notNull(),
     state: text({
       enum: ["writing", "done", "failed", "erased", "expired"],
     }).notNull(),
@@ -617,9 +613,11 @@ export const exportsTable = sqliteTable(
 );
 
 /**
- * The sources an export holds, by their keys as the erasure ledger names
- * them (SHA-256): recorded with each part, so an erasure of one of them
- * makes exactly the exports that hold it stale.
+ * The versions an export holds, by their source's key as the erasure
+ * ledger names it (SHA-256) and their number: recorded with each part, so
+ * the ledger naming one of them makes exactly the exports that hold it
+ * stale. Kept until the export's files are deleted, so an erasure is
+ * known unfinished while a file still holds what it took.
  */
 export const exportSources = sqliteTable(
   "export_sources",
@@ -628,8 +626,13 @@ export const exportSources = sqliteTable(
       .notNull()
       .references(() => exportsTable.id),
     subject: text().notNull(),
+    version: integer().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.export, table.subject] })]
+  (table) => [
+    primaryKey({ columns: [table.export, table.subject, table.version] }),
+    // An erasure finds the exports holding what it names.
+    index("export_sources_subject_idx").on(table.subject, table.version),
+  ]
 );
 
 /** A part of an export, as written: its SHA-256 and how many versions it holds. */

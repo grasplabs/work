@@ -24,8 +24,9 @@ import {
   manifestSchema,
   recordExportSources,
   recordRestoredExport,
+  retireIfStale,
 } from "./exports.ts";
-import type { ExportLine, Manifest } from "./exports.ts";
+import type { ExportLine, Held, Manifest } from "./exports.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -90,9 +91,6 @@ const refusals = {
   notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
 } as const;
 
-/** Room a part's versions leave in the store, at least, for what it writes beside their text. */
-const quotaFactor = 4;
-
 /** A restore's row, as the store keeps it. */
 interface RestoreRow extends Record<string, SqlStorageValue> {
   export: string;
@@ -140,7 +138,16 @@ const refusalOf = (sql: SqlStorage, id: string): string | undefined => {
   if (rowOf(sql, id)?.state === "failed") {
     return undefined;
   }
-  return sql.exec("SELECT 1 FROM source_versions LIMIT 1").toArray().length > 0
+  // Grasp's own skills, which a release installs, don't count: no export
+  // holds them, so a restore never meets them.
+  return sql
+    .exec(
+      `SELECT 1 FROM source_versions
+      WHERE substr(source, 1, ?1) != ?2 LIMIT 1`,
+      shippedSkillsPrefix.length,
+      shippedSkillsPrefix
+    )
+    .toArray().length > 0
     ? refusals.notEmpty
     : undefined;
 };
@@ -261,28 +268,38 @@ const partLinesOf = async (
 };
 
 /**
- * Whether `line` is to be left out: the store's record of the ledger names
- * it (above), or it is there already (written by a run before this one,
- * stopped part-way). Asked again in the transaction that writes it.
+ * Why `line` is not to be written, if it isn't: the store's record of the
+ * ledger names it (above), or it is there already (written by a run of
+ * this restore before, stopped part-way or failed: nothing else adds while
+ * a restore runs). Asked again in the transaction that writes it.
  */
 const passedOver = (
   sql: SqlStorage,
   line: ExportLine,
   subject: string
-): boolean =>
-  isErased(sql, subject) ||
-  sql
+): "erased" | "there" | undefined => {
+  if (
+    isErased(sql, subject) ||
+    sql
+      .exec(
+        "SELECT 1 FROM erased_versions WHERE subject = ? AND version = ? LIMIT 1",
+        subject,
+        line.version
+      )
+      .toArray().length > 0
+  ) {
+    return "erased";
+  }
+  return sql
     .exec(
-      `SELECT 1 FROM erased_versions WHERE subject = ? AND version = ?
-      UNION ALL
-      SELECT 1 FROM source_versions WHERE source = ? AND version = ?
-      LIMIT 1`,
-      subject,
-      line.version,
+      "SELECT 1 FROM source_versions WHERE source = ? AND version = ? LIMIT 1",
       line.source,
       line.version
     )
-    .toArray().length > 0;
+    .toArray().length > 0
+    ? "there"
+    : undefined;
+};
 
 /** What a restore of a version that must be made again says. */
 const restoreAgain = "The restore lost a file while writing it: run it again";
@@ -290,7 +307,8 @@ const restoreAgain = "The restore lost a file while writing it: run it again";
 /**
  * Writes `line` back as the version it was (above): its file first, then
  * the version whole, in one transaction, unless it is passed over. Answers
- * whether it wrote it.
+ * whether it is restored: written now, or by a run of this restore before,
+ * so `restored` counts the whole restore across its restarts.
  */
 const restoreVersion = async (
   storage: DurableObjectStorage,
@@ -300,8 +318,9 @@ const restoreVersion = async (
 ): Promise<boolean> => {
   const encoder = new TextEncoder();
   const subject = await subjectOf(line.source);
-  if (passedOver(storage.sql, line, subject)) {
-    return false;
+  const before = passedOver(storage.sql, line, subject);
+  if (before !== undefined) {
+    return before === "there";
   }
   const body = encoder.encode(line.text);
   const hash = await hashOf(body);
@@ -323,8 +342,9 @@ const restoreVersion = async (
   }
   return storage.transactionSync(() => {
     const { sql } = storage;
-    if (passedOver(sql, line, subject)) {
-      return false;
+    const now = passedOver(sql, line, subject);
+    if (now !== undefined) {
+      return now === "there";
     }
     if (isInDoubt(db, hash)) {
       throw new WorkError("failed");
@@ -389,17 +409,25 @@ const restoreVersion = async (
 
 /** The restore's state set to `state`, once it is still running. In the caller's transaction. */
 const settle = (
-  sql: SqlStorage,
+  storage: DurableObjectStorage,
   id: string,
   state: "done" | "failed"
 ): void => {
-  sql.exec(
-    `UPDATE restores SET state = ?, finished_at = ?
-    WHERE export = ? AND state = 'running'`,
-    state,
-    Date.now(),
-    id
-  );
+  const { sql } = storage;
+  const settled = sql
+    .exec(
+      `UPDATE restores SET state = ?, finished_at = ?
+      WHERE export = ? AND state = 'running' RETURNING export`,
+      state,
+      Date.now(),
+      id
+    )
+    .toArray();
+  // Done, its export is no longer held: the ledger may name what its files
+  // hold (an erasure before or during the restore).
+  if (settled.length > 0 && state === "done") {
+    retireIfStale(storage, id);
+  }
 };
 
 /** The restore's state settled in a transaction of its own. */
@@ -409,7 +437,7 @@ const settleNow = (
   state: "done" | "failed"
 ): void => {
   storage.transactionSync(() => {
-    settle(storage.sql, id, state);
+    settle(storage, id, state);
   });
 };
 
@@ -441,11 +469,14 @@ const restorePart = async (
     return;
   }
   if (checking) {
-    const subjects = await Promise.all(
-      [...new Set(lines.map(({ source }) => source))].map(subjectOf)
+    const held: Held[] = await Promise.all(
+      lines.map(
+        async ({ source, version }) =>
+          [await subjectOf(source), version] as const
+      )
     );
     storage.transactionSync(() => {
-      recordExportSources(sql, id, subjects);
+      recordExportSources(sql, id, held);
       sql.exec(
         `UPDATE restores SET checked = checked + 1
         WHERE export = ? AND checked = ? AND state = 'running'`,
@@ -456,7 +487,8 @@ const restorePart = async (
     again(1);
     return;
   }
-  if (sql.databaseSize + quotaFactor * part.bytes > storeBytesMax) {
+  // A store at its quota fails every write (contract.ts `storeBytesMax`).
+  if (sql.databaseSize >= storeBytesMax) {
     settleNow(storage, id, "failed");
     return;
   }
@@ -477,7 +509,7 @@ const restorePart = async (
       index
     );
     if (last) {
-      settle(sql, id, "done");
+      settle(storage, id, "done");
     }
   });
   if (!last) {

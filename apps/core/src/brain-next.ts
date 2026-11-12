@@ -1100,12 +1100,15 @@ export const addShippedSkill = async (
   if (current?.text === text) {
     return { ...skill, version: current.version, changed: false };
   }
-  const { version } = await brain(env).addInstructions({
-    source,
-    change,
-    text,
-    access: skillAccess,
-  });
+  const { version } = await whileNotRestoring(
+    async () =>
+      await brain(env).addInstructions({
+        source,
+        change,
+        text,
+        access: skillAccess,
+      })
+  );
   return { ...skill, version, changed: true };
 };
 

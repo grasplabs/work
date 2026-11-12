@@ -11,10 +11,12 @@ CREATE TABLE `export_parts` (
 CREATE TABLE `export_sources` (
 	`export` text NOT NULL,
 	`subject` text NOT NULL,
-	PRIMARY KEY(`export`, `subject`),
+	`version` integer NOT NULL,
+	PRIMARY KEY(`export`, `subject`, `version`),
 	FOREIGN KEY (`export`) REFERENCES `exports`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE INDEX `export_sources_subject_idx` ON `export_sources` (`subject`,`version`);--> statement-breakpoint
 CREATE TABLE `export_sweep` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`through` integer NOT NULL,
@@ -30,7 +32,6 @@ CREATE TABLE `exports` (
 	`reader_set` integer,
 	`up_to` integer NOT NULL,
 	`cursor` integer NOT NULL,
-	`ledger_mark` text NOT NULL,
 	`state` text NOT NULL,
 	`parts` integer NOT NULL,
 	`versions` integer NOT NULL,

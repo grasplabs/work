@@ -16,6 +16,7 @@ import {
   startBrainRestore,
 } from "./brain-next.ts";
 import type { ExportAsker } from "./brain-next.ts";
+import { installShippedSkills } from "./brain-skills.ts";
 import { errorResponse } from "./errors.ts";
 
 // Exports of the Brain and their restore, over core's own site (GRA-1755),
@@ -216,8 +217,6 @@ const startExport = async (
   }
   return answer({
     exports,
-    // How long it is kept (the Brain's `exportKeptMs`), said plainly.
-    kept: "An export is kept for 7 days after it is done, or until a newer one is done.",
     ...(asked.scope === "own"
       ? {
           // Said plainly, as the export holds it (core's brain-next.ts).
@@ -332,7 +331,15 @@ export const brainRestoreResponse = async (
           exportId: asked.exportId,
           ...(outcome === undefined ? {} : { outcome }),
         }),
-      async () => await startBrainRestore(env, asked.exportId)
+      async () => {
+        // Grasp's own skills first, whatever the release's install
+        // recorded: a restore never writes them (no export holds them) and
+        // adds nothing while it runs, so what is installed now is there
+        // when it is done, also in a store whose storage was lost after
+        // the release installed them.
+        await installShippedSkills(env);
+        return await startBrainRestore(env, asked.exportId);
+      }
     );
     return answer(status);
   } catch (error) {

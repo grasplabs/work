@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fd61de9a-8ea4-4925-b992-4e250eb77085",
+  "id": "5ce33b4c-563a-4a7f-ad0f-1ca4720afc0f",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -471,9 +471,25 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "export_sources_subject_idx": {
+          "name": "export_sources_subject_idx",
+          "columns": [
+            "subject",
+            "version"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "export_sources_export_exports_id_fk": {
           "name": "export_sources_export_exports_id_fk",
@@ -490,12 +506,13 @@
         }
       },
       "compositePrimaryKeys": {
-        "export_sources_export_subject_pk": {
+        "export_sources_export_subject_version_pk": {
           "columns": [
             "export",
-            "subject"
+            "subject",
+            "version"
           ],
-          "name": "export_sources_export_subject_pk"
+          "name": "export_sources_export_subject_version_pk"
         }
       },
       "uniqueConstraints": {},
@@ -585,13 +602,6 @@
         "cursor": {
           "name": "cursor",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ledger_mark": {
-          "name": "ledger_mark",
-          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false

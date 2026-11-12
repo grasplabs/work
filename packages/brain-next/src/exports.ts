@@ -1,12 +1,7 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import {
-  accessSchema,
-  exportKeptMs,
-  restoringNow,
-  shippedSkillsPrefix,
-} from "./contract.ts";
+import { accessSchema, restoringNow, shippedSkillsPrefix } from "./contract.ts";
 import type {
   Access,
   ExportFileRequest,
@@ -23,9 +18,9 @@ import type { WorkContext } from "./work.ts";
 
 // Exports: what a scope holds, written as files in the store's own part of
 // the bucket, under `exports/<id>/`: parts of JSON Lines, a version a
-// line, and a manifest written last, naming the deployment, where the
-// erasure ledger was as it started, and each part with its SHA-256, size
-// and how many versions it holds. So an export whose manifest is there is
+// line, the versions it holds (`holdsFile`), and a manifest written last,
+// naming the deployment and each part with its SHA-256, size and how many
+// versions it holds. So an export whose manifest is there is
 // whole, and a restore (restore.ts) checks each part against it.
 //
 // Whose:
@@ -54,37 +49,40 @@ import type { WorkContext } from "./work.ts";
 // an add after the export started may then take a row it still reads. It
 // is the scope's to read as any version the scope selects.)
 //
-// Erasure: an export is stale only once it holds what was erased. Each
-// part records the sources it holds by their keys as the erasure ledger
-// names them (`export_sources`), so an erasure past the ledger's place as
-// the export started (`ledger_mark`) of a source it holds makes it stale,
-// and so does the erasure of the person whose own export it is. A company
-// export holds nothing one person alone may read, so a person's erasure
-// never touches it; an erasure of a source it doesn't hold neither: the
-// erasures retention makes all day leave it be. A stale export is never
-// served (`exportFile` asks before and after it reads), a restore refuses
-// it, and the tick marks it erased and puts the deletion of its files on
-// the queue (`exportsStep`, `dropWork`). Re-checking each file against the
-// ledger as it is read was the other way: it would leave erased content in
-// the bucket, and filtering a checked part breaks its checksum. A copy
+// Erasure, one rule: an export is stale exactly when the erasure ledger
+// names a version it holds. Each part records the versions it holds, by
+// their source's key as the ledger names it and their number
+// (`export_sources`); a source's erasure names every version of its source,
+// a person's names each version it hid (`erased_versions`), whoever's export
+// it is. So retention's erasures of what an export doesn't hold leave it be,
+// and a person's erasure that hid a team source's history makes the
+// company export holding that history stale. A stale export is never served
+// (`exportFile` asks before and after it reads), a restore refuses it, and
+// its files are deleted by the queue (`dropWork`). The same rule is asked
+// of a part as it is recorded (an erasure that landed while its versions
+// were read), of a restored export once its restore is done, of every
+// export whenever an erasure was recorded since the tick last looked, and
+// of export files the store has no record of. Re-checking each file against
+// the ledger as it is read was the other way: it would leave erased content
+// in the bucket, and filtering a checked part breaks its checksum. A copy
 // someone already downloaded is outside the Brain's reach, and so outside
-// its erasure.
+// its erasure. An export's versions are kept on record until its files are
+// gone, so an erasure is unfinished while a file holds what it took
+// (`erasureHeldByExportFilesSql`).
 //
 // The files outlive the store's record of them when its storage is lost or
-// rolled back and its bucket kept. So each erasure the store records past
-// its last sweep starts a sweep of `exports/` (`sweepWork`), which deletes
-// every export it has no row of whose manifest is gone, or whose ledger
-// place is behind an entry the store holds now: nothing better is known
-// of what such files hold. A restore records the export it restores, its
-// sources as it checks them, so from then on the rule above holds for it;
-// and while its restore runs, or failed and may start again, its files are
-// never deleted.
+// rolled back and its bucket kept. So each export writes the versions it
+// holds beside its manifest (`holdsFile`), and each erasure the store
+// records past its last sweep starts a sweep of `exports/` (`sweepWork`),
+// which deletes every export it has no row of whose manifest or holdings
+// are gone, or whose holdings the ledger names: the same rule. A restore
+// records the export it restores, its versions as it checks them; while its
+// restore runs, or failed and may start again, its files are never deleted.
 //
-// Nothing piles up or stays put: a done export is deleted `exportKeptMs`
-// after it is done, or once a newer one of its scope is done; an export
-// being written whose item of the queue is parked for good, or gone, is
-// settled as failed and its files deleted (`settleStuck`); a restore
-// likewise (restore.ts).
+// Nothing stays put: a done export is replaced once a newer one of its
+// scope is done; an export being written whose item of the queue is parked
+// for good, or gone, is settled as failed and its files deleted
+// (`settleStuck`); a restore likewise (restore.ts).
 
 /** Where exports are kept in the store's part of the bucket. */
 export const exportsPrefix = "exports/";
@@ -109,7 +107,7 @@ const dropPage = 1000;
 /** Most keys one run of the sweep lists. */
 const sweepPage = 1000;
 
-/** Most manifests one run of the sweep reads. */
+/** Most exports one run of the sweep reads the files of: each read is a page of R2's own. */
 const sweepReads = 20;
 
 const encoder = new TextEncoder();
@@ -127,6 +125,17 @@ const partFileOf = (index: number): string =>
 
 /** The manifest's file. */
 export const manifestFile = "manifest.json";
+
+/**
+ * The versions an export holds, beside its manifest: each by its source's
+ * key as the ledger names it and its number. For the sweep, which judges
+ * export files the store has no record of by them (above); never served.
+ */
+const holdsFile = "holds.json";
+
+const holdsSchema = z.array(
+  z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().positive()])
+);
 
 /** What a line of a part holds: one version. */
 export const exportLineSchema = z.strictObject({
@@ -154,8 +163,6 @@ export const manifestSchema = z.strictObject({
    * is named `local` (core's brain-next.ts), so there it tells little.
    */
   deployment: z.string().min(1),
-  /** The key of the last erasure the store had applied as it started: "" for none. */
-  ledger: z.string(),
   scope: z.enum(["company", "person"]),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
@@ -180,7 +187,6 @@ interface ExportRow extends Record<string, SqlStorageValue> {
   reader_set: number | null;
   up_to: number;
   cursor: number;
-  ledger_mark: string;
   state: "writing" | "done" | "failed" | "erased" | "expired";
   parts: number;
   versions: number;
@@ -192,20 +198,48 @@ const rowOf = (sql: SqlStorage, id: string): ExportRow | undefined =>
   sql.exec<ExportRow>("SELECT * FROM exports WHERE id = ?", id).toArray().at(0);
 
 /**
- * Of a row of `exports`: whether an erasure past its ledger place took
- * something it holds (above).
+ * Whether the erasure ledger, as the store holds it, names the version
+ * `version` of the source whose key's subject is `subject` (SQL
+ * expressions): a source's erasure names every version, a person's those it
+ * hid. The one rule of staleness (above).
  */
+const namedSql = (subject: string, version: string): string => `(
+  EXISTS (
+    SELECT 1 FROM erasures
+    WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
+  )
+  OR EXISTS (
+    SELECT 1 FROM erased_versions
+    WHERE erased_versions.subject = ${subject}
+      AND erased_versions.version = ${version}
+  )
+)`;
+
+/** Of a row of `exports`: whether the ledger names a version it holds. */
 const staleSql = `EXISTS (
-  SELECT 1 FROM erasures
-  WHERE erasures.key > exports.ledger_mark
-    AND (
-      (erasures.kind = 'source' AND EXISTS (
-        SELECT 1 FROM export_sources
-        WHERE export_sources.export = exports.id
-          AND export_sources.subject = erasures.subject
-      ))
-      OR (erasures.kind = 'person' AND exports.scope = 'person'
-        AND erasures.subject = exports.subject)
+  SELECT 1 FROM export_sources AS held
+  WHERE held.export = exports.id
+    AND ${namedSql("held.subject", "held.version")}
+)`;
+
+/** `?1` versions as JSON (`[subject, version]` each): whether the ledger names one. */
+const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
+WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
+LIMIT 1`;
+
+/**
+ * Of a row of `erasures` (named so): whether a version it names is held by
+ * an export whose files are not yet deleted. An erasure is unfinished until
+ * then: for the store's answer of whether an erasure is done.
+ */
+export const erasureHeldByExportFilesSql = `EXISTS (
+  SELECT 1 FROM export_sources AS held
+  WHERE (erasures.kind = 'source' AND held.subject = erasures.subject)
+    OR EXISTS (
+      SELECT 1 FROM erased_versions
+      WHERE erased_versions.erasure = erasures.key
+        AND erased_versions.subject = held.subject
+        AND erased_versions.version = held.version
     )
 )`;
 
@@ -219,12 +253,6 @@ export const isStale = (sql: SqlStorage, id: string): boolean =>
   sql
     .exec(`SELECT 1 FROM exports WHERE exports.id = ? AND ${staleSql}`, id)
     .toArray().length > 0;
-
-/** The last erasure the store holds: the ledger's place, "" for none. */
-const ledgerPlace = (sql: SqlStorage): string =>
-  sql
-    .exec<{ key: string }>("SELECT coalesce(max(key), '') AS key FROM erasures")
-    .one().key;
 
 /** Whose an export is, as its row keeps it: the scope and the person's subject. */
 interface Whose {
@@ -447,13 +475,28 @@ const dropWork = defineWork({
       prefix: exportPrefixOf(id),
       limit: dropPage,
     });
-    if (page.objects.length === 0) {
+    // Asked again after the listing: a restore may have recorded it
+    // meanwhile. A restore that records it during the delete itself only
+    // meets an export the rule already made stale (a restore refuses one
+    // the store has a row of in any other state), whose files hold what
+    // was erased: it fails, as it should, and starts again on none.
+    if (!droppable(storage.sql, id)) {
       return;
     }
-    await bucket.delete(page.objects.map(({ key }) => key));
+    if (page.objects.length > 0) {
+      await bucket.delete(page.objects.map(({ key }) => key));
+    }
     if (page.truncated) {
       again(page.objects.length);
+      return;
     }
+    // Its files are gone: so is the record of what they held, and with it
+    // what kept an erasure of it unfinished.
+    storage.transactionSync(() => {
+      if (droppable(storage.sql, id)) {
+        storage.sql.exec("DELETE FROM export_sources WHERE export = ?", id);
+      }
+    });
   },
 });
 
@@ -488,18 +531,15 @@ const retire = (
       ...params
     )
     .toArray();
+  // What they hold stays on record until their files are gone (`dropWork`).
   for (const { id } of retired) {
     sql.exec("DELETE FROM export_parts WHERE export = ?", id);
-    sql.exec("DELETE FROM export_sources WHERE export = ?", id);
     enqueueDrop(storage, id);
   }
 };
 
 /** Of a row of `exports`: written or done, and stale. */
 const staleNowSql = `exports.state IN ('writing', 'done') AND ${staleSql}`;
-
-/** `?2` the time before which a done export is past its time. */
-const pastItsTimeSql = "exports.state = 'done' AND exports.finished_at <= ?2";
 
 /**
  * Whether an item of the queue of `kind` for the key `prefix` followed by
@@ -533,18 +573,25 @@ const sweepDue = (sql: SqlStorage): boolean =>
     )
     .toArray().length > 0;
 
-/** Where export `id`'s manifest says the ledger was as it started: none when it can't be read. */
-const manifestLedgerOf = async (
+/**
+ * What export `id`'s files say it holds (`holdsFile`), as JSON for
+ * `namesAnySql`, once its manifest is there too: none when either can't
+ * be read.
+ */
+const holdingsOf = async (
   bucket: BrainBucket,
   id: string
 ): Promise<string | undefined> => {
-  const object = await bucket.get(exportKeyOf(id, manifestFile));
-  if (object === null) {
+  const [manifest, holds] = await Promise.all([
+    bucket.head(exportKeyOf(id, manifestFile)),
+    bucket.get(exportKeyOf(id, holdsFile)),
+  ]);
+  if (manifest === null || holds === null) {
     return undefined;
   }
   try {
-    const manifest = manifestSchema.safeParse(JSON.parse(await object.text()));
-    return manifest.success ? manifest.data.ledger : undefined;
+    const held = holdsSchema.safeParse(JSON.parse(await holds.text()));
+    return held.success ? JSON.stringify(held.data) : undefined;
   } catch {
     return undefined;
   }
@@ -552,9 +599,9 @@ const manifestLedgerOf = async (
 
 /**
  * The sweep of `exports/` (above), from where the last run stopped: each
- * export listed that the store has no row of, whose manifest is gone or
- * whose ledger place is behind an entry the store holds, has the deletion
- * of its files put on the queue. Its place is saved after each export it
+ * export listed that the store has no row of, whose manifest or holdings
+ * are gone or whose holdings the ledger names, has the deletion of its
+ * files put on the queue. Its place is saved after each export it
  * decides, with what it decided; it reads at most `sweepReads` manifests a
  * run, and goes on again while the listing does.
  */
@@ -590,21 +637,19 @@ const sweepWork = defineWork({
         return;
       }
       const known = rowOf(sql, id) !== undefined;
-      let ledger: string | undefined = "";
+      let held: string | undefined = "[]";
       if (!known) {
         reads += 1;
-        // oxlint-disable-next-line no-await-in-loop -- one manifest at a time, a run's few
-        ledger = await manifestLedgerOf(bucket, id);
+        // oxlint-disable-next-line no-await-in-loop -- one export at a time, a run's few
+        held = await holdingsOf(bucket, id);
       }
       storage.transactionSync(() => {
         // Asked again: a restore may have recorded it meanwhile.
         const orphan =
           !known &&
           rowOf(sql, id) === undefined &&
-          (ledger === undefined ||
-            sql
-              .exec("SELECT 1 FROM erasures WHERE key > ? LIMIT 1", ledger)
-              .toArray().length > 0);
+          (held === undefined ||
+            sql.exec(namesAnySql, held).toArray().length > 0);
         if (orphan) {
           enqueueDrop(storage, id);
         }
@@ -638,60 +683,58 @@ const settleStuck = (storage: DurableObjectStorage): void => {
 };
 
 /**
- * The tick's step for exports and restores at `now`, in one transaction:
- * the stale marked erased, those past their time expired, the stuck
- * settled as failed, and a sweep of `exports/` started when an erasure was
- * recorded since the last. Its rule is `exportsDueAt`.
+ * The tick's step for exports and restores, in one transaction: the stuck
+ * settled as failed; and, once an erasure was recorded since the step last
+ * looked, every export the ledger now makes stale retired (`staleSql`) and
+ * a sweep of `exports/` started. Its rule is `exportsDue`. Between
+ * erasures nothing can make an export stale: a part recorded and a
+ * restore done are asked as they land (`recordPart`, `retireIfStale`).
  */
-export const exportsStep = (
-  storage: DurableObjectStorage,
-  now: number
-): void => {
+export const exportsStep = (storage: DurableObjectStorage): void => {
   storage.transactionSync(() => {
-    retire(storage, "erased", staleNowSql);
-    retire(storage, "expired", pastItsTimeSql, now - exportKeptMs);
     settleStuck(storage);
-    if (sweepDue(storage.sql)) {
-      storage.sql.exec(
-        `INSERT INTO export_sweep (id, through, cursor) VALUES (1, ${lastErasureSql}, NULL)
-        ON CONFLICT (id) DO UPDATE SET through = excluded.through, cursor = NULL`
-      );
-      enqueueWork(storage, sweepWork, {
-        key: "exports",
-        payload: {},
-        priority: "asked",
-      });
+    if (!sweepDue(storage.sql)) {
+      return;
     }
+    retire(storage, "erased", staleNowSql);
+    storage.sql.exec(
+      `INSERT INTO export_sweep (id, through, cursor) VALUES (1, ${lastErasureSql}, NULL)
+      ON CONFLICT (id) DO UPDATE SET through = excluded.through, cursor = NULL`
+    );
+    enqueueWork(storage, sweepWork, {
+      key: "exports",
+      payload: {},
+      priority: "asked",
+    });
   });
 };
 
 /**
- * When the tick's step for exports next has something to do
- * (`exportsStep`), in milliseconds, or null: now for an export to mark
- * stale, an export or a restore stuck, or a sweep due; otherwise when the
- * first done export is past its time.
+ * Whether the tick's step for exports has something to do (`exportsStep`):
+ * an erasure recorded since it last looked, or an export or a restore
+ * stuck.
  */
-export const exportsDueAt = (sql: SqlStorage, now: number): number | null => {
-  const dueNow =
-    sql
-      .exec(
-        `SELECT 1 FROM exports WHERE ${staleNowSql} AND NOT ${heldSql}
-        UNION ALL SELECT 1 FROM exports WHERE ${stuckExportSql.replaceAll("?3", "?1")}
-        UNION ALL SELECT 1 FROM restores WHERE ${stuckRestoreSql.replaceAll("?3", "?1")}
-        LIMIT 1`,
-        workParksMax
-      )
-      .toArray().length > 0 || sweepDue(sql);
-  if (dueNow) {
-    return now;
-  }
-  const first = sql
-    .exec<{ at: number | null }>(
-      `SELECT min(finished_at) AS at FROM exports
-      WHERE state = 'done' AND NOT ${heldSql}`
+export const exportsDue = (sql: SqlStorage): boolean =>
+  sweepDue(sql) ||
+  sql
+    .exec(
+      `SELECT 1 FROM exports WHERE ${stuckExportSql.replaceAll("?3", "?1")}
+      UNION ALL SELECT 1 FROM restores WHERE ${stuckRestoreSql.replaceAll("?3", "?1")}
+      LIMIT 1`,
+      workParksMax
     )
-    .one().at;
-  return first === null ? null : first + exportKeptMs;
+    .toArray().length > 0;
+
+/**
+ * Retires export `id` as erased when the ledger names a version it holds,
+ * unless a restore holds it: for a restore that is done (restore.ts). In
+ * the caller's transaction.
+ */
+export const retireIfStale = (
+  storage: DurableObjectStorage,
+  id: string
+): void => {
+  retire(storage, "erased", `exports.id = ?2 AND ${staleNowSql}`, id);
 };
 
 /**
@@ -703,8 +746,15 @@ export const exportsDueAt = (sql: SqlStorage, now: number): number | null => {
 const linesOf = async (
   bucket: BrainBucket,
   selected: readonly Selected[]
-): Promise<{ row: number; source: string; line: Uint8Array | null }[]> => {
-  const read: { row: number; source: string; line: Uint8Array | null }[] = [];
+): Promise<
+  { row: number; source: string; version: number; line: Uint8Array | null }[]
+> => {
+  const read: {
+    row: number;
+    source: string;
+    version: number;
+    line: Uint8Array | null;
+  }[] = [];
   let bytes = 0;
   for (let at = 0; at < selected.length; at += readsAtOnce) {
     // oxlint-disable-next-line no-await-in-loop -- a few at a time, until the part is full
@@ -717,7 +767,12 @@ const linesOf = async (
     for (const { version, text } of texts) {
       const access = accessOfKey(version.readers);
       if (text === null || access === undefined) {
-        read.push({ row: version.row, source: version.source, line: null });
+        read.push({
+          row: version.row,
+          source: version.source,
+          version: version.version,
+          line: null,
+        });
         return read;
       }
       const line: ExportLine = {
@@ -734,27 +789,36 @@ const linesOf = async (
       if (read.length > 0 && bytes + encoded.byteLength > exportPartBytes) {
         return read;
       }
-      read.push({ row: version.row, source: version.source, line: encoded });
+      read.push({
+        row: version.row,
+        source: version.source,
+        version: version.version,
+        line: encoded,
+      });
       bytes += encoded.byteLength;
     }
   }
   return read;
 };
 
+/** A version an export holds: its source's key as the ledger names it, and its number. */
+export type Held = readonly [subject: string, version: number];
+
 /**
- * Records that export `id` holds the sources of `subjects` (their keys as
- * the ledger names them). In the caller's transaction.
+ * Records that export `id` holds `held`. In the caller's transaction.
  */
 export const recordExportSources = (
   sql: SqlStorage,
   id: string,
-  subjects: Iterable<string>
+  held: readonly Held[]
 ): void => {
-  for (const subject of subjects) {
+  for (const [subject, version] of held) {
     sql.exec(
-      "INSERT OR IGNORE INTO export_sources (export, subject) VALUES (?, ?)",
+      `INSERT OR IGNORE INTO export_sources (export, subject, version)
+      VALUES (?, ?, ?)`,
       id,
-      subject
+      subject,
+      version
     );
   }
 };
@@ -772,8 +836,9 @@ const fail = (storage: DurableObjectStorage, id: string): void => {
 };
 
 /**
- * Writes the manifest of `row`, from its parts, and settles it done, in one
- * transaction with expiring the done one of its scope it replaces.
+ * Writes what `row` holds and its manifest, from its parts, and settles it
+ * done, in one transaction with expiring the done one of its scope it
+ * replaces.
  */
 const finish = async (
   storage: DurableObjectStorage,
@@ -790,7 +855,6 @@ const finish = async (
     format: 1,
     id: row.id,
     deployment: row.deployment,
-    ledger: row.ledger_mark,
     scope: row.scope,
     startedAt: new Date(row.started_at).toISOString(),
     finishedAt: new Date().toISOString(),
@@ -802,6 +866,17 @@ const finish = async (
       bytes,
     })),
   };
+  // What it holds, before the manifest that makes it whole (`holdsFile`).
+  const held = storage.sql
+    .exec<{ subject: string; version: number }>(
+      "SELECT subject, version FROM export_sources WHERE export = ? ORDER BY subject, version",
+      row.id
+    )
+    .toArray()
+    .map(({ subject, version }) => [subject, version]);
+  await bucket.put(exportKeyOf(row.id, holdsFile), JSON.stringify(held), {
+    httpMetadata: { contentType: "application/json" },
+  });
   await bucket.put(
     exportKeyOf(row.id, manifestFile),
     JSON.stringify(manifest),
@@ -876,9 +951,9 @@ const writePart = async (
   }
   const read = await linesOf(bucket, selected);
   const lines: Uint8Array[] = [];
-  const sources = new Set<string>();
+  const versions: { source: string; version: number }[] = [];
   let last = row.cursor;
-  for (const { row: versionRow, source, line } of read) {
+  for (const { row: versionRow, source, version, line } of read) {
     if (line === null) {
       // Gone: only an erasure deletes a held file, and then its source is
       // hidden and left out of the next select; otherwise it fails, never
@@ -892,10 +967,14 @@ const writePart = async (
       return;
     }
     lines.push(line);
-    sources.add(source);
+    versions.push({ source, version });
     last = versionRow;
   }
-  const subjects = await Promise.all([...sources].map(subjectOf));
+  const held: Held[] = await Promise.all(
+    versions.map(
+      async ({ source, version }) => [await subjectOf(source), version] as const
+    )
+  );
   const body = joined(lines);
   const hash = await hashOf(body);
   await bucket.put(exportKeyOf(id, partFileOf(row.parts)), body, {
@@ -907,7 +986,7 @@ const writePart = async (
     if (now?.state !== "writing" || now.cursor !== row.cursor) {
       return false;
     }
-    recordExportSources(sql, id, subjects);
+    recordExportSources(sql, id, held);
     sql.exec(
       `INSERT INTO export_parts (export, part, hash, versions, bytes)
       VALUES (?, ?, ?, ?, ?)`,
@@ -924,6 +1003,12 @@ const writePart = async (
       lines.length,
       id
     );
+    // The part as it lands: an erasure that came while its versions were
+    // read, of one of them, makes the export stale now.
+    if (sql.exec(namesAnySql, JSON.stringify(held)).toArray().length > 0) {
+      retire(storage, "erased", "exports.id = ?2", id);
+      return false;
+    }
     return true;
   });
   if (recorded) {
@@ -987,15 +1072,14 @@ export const startExport = (
       .one().last;
     sql.exec(
       `INSERT INTO exports (id, scope, subject, deployment, reader_set, up_to,
-        cursor, ledger_mark, state, parts, versions, started_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'writing', 0, 0, ?)`,
+        cursor, state, parts, versions, started_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 'writing', 0, 0, ?)`,
       id,
       whose.scope,
       whose.subject,
       deployment,
       readerSet,
       upTo,
-      ledgerPlace(sql),
       Date.now()
     );
     enqueueWork(storage, exportWork, {
@@ -1019,11 +1103,10 @@ export const recordRestoredExport = (
 ): void => {
   sql.exec(
     `INSERT OR IGNORE INTO exports (id, scope, subject, deployment, reader_set,
-      up_to, cursor, ledger_mark, state, parts, versions, started_at, finished_at)
-    VALUES (?, 'company', NULL, ?, NULL, 0, 0, ?, 'done', ?, ?, ?, ?)`,
+      up_to, cursor, state, parts, versions, started_at, finished_at)
+    VALUES (?, 'company', NULL, ?, NULL, 0, 0, 'done', ?, ?, ?, ?)`,
     manifest.id,
     manifest.deployment,
-    manifest.ledger,
     manifest.parts.length,
     manifest.versions,
     Date.parse(manifest.startedAt),

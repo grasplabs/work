@@ -1002,9 +1002,9 @@ export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
 /**
  * Where an export is: being written; done, with its files (the manifest
  * first); failed (a file it was to read was gone: its files deleted);
- * erased, as an erasure since it started took something it holds, and its
- * files are deleted; or expired, kept its time (`exportKeptMs`) or
- * replaced by a newer one of its scope, its files deleted. Start a new one.
+ * erased, as the erasure ledger names a version it holds, and its files
+ * are deleted; or expired, replaced by a newer one of its scope, its files
+ * deleted. Start a new one.
  */
 export interface ExportStatus {
   id: string;
@@ -1014,9 +1014,6 @@ export interface ExportStatus {
   /** Its files, once done: none before. */
   files: string[];
 }
-
-/** How long a done export is kept: 7 days, unless a newer one of its scope is done first. */
-export const exportKeptMs = 7 * 24 * 60 * 60_000;
 
 /** Where a restore of a company export is, and how many versions it restored. */
 export interface RestoreStatus {

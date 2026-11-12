@@ -88,7 +88,7 @@ import type { ErasureStore } from "./erasure.ts";
 import {
   exportFile,
   exportStatus,
-  exportsDueAt,
+  exportsDue,
   exportsPrefix,
   exportsStep,
   personKeyOf,
@@ -928,7 +928,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#repack(tickAt);
     this.#reindex(tickAt);
     this.#embedding(tickAt, embedders.model);
-    this.#exports(tickAt);
+    this.#exports();
     await workTick(
       this.ctx.storage,
       this.#work,
@@ -1010,12 +1010,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * - words.ts `wordsRebuilding`: word indexes behind their rules;
    * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
    *   still to remove;
-   * - exports.ts `exportsDueAt`: at once for an export an erasure made
-   *   stale, an export or a restore whose item of the queue is parked for
-   *   good or gone, or a sweep of export files the store has no record of,
-   *   due since an erasure; else when the first done export is past its
-   *   time (writing an export, restoring one, deleting files and the sweep
-   *   are items of the queue, which `queueDueAt` covers);
+   * - exports.ts `exportsDue`: an erasure recorded since the step last
+   *   looked (exports it makes stale, and a sweep of export files the store
+   *   has no record of), or an export or a restore whose item of the queue
+   *   is parked for good or gone (writing an export, restoring one,
+   *   deleting files and the sweep are items of the queue, which
+   *   `queueDueAt` covers);
    * - work.ts `queueDueAt`: an item of the queue, due or coming back from
    *   parked, once the queue's pause is over.
    *
@@ -1029,7 +1029,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       erasureDue(sql) ||
       repackDue(sql) ||
       wordsRebuilding(sql) ||
-      embeddingDue(storage)
+      embeddingDue(storage) ||
+      exportsDue(sql)
     ) {
       return now;
     }
@@ -1037,7 +1038,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const due = [
       sweep === null ? null : Math.max(sweep, this.#sweepAfter),
       queueDueAt(storage),
-      exportsDueAt(sql, now),
     ].filter((at) => at !== null);
     return due.length === 0 ? null : Math.min(...due);
   }
@@ -1138,9 +1138,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * next tick (`#nextWorkAt`), and meanwhile a stale export is served to
    * no one (`exportFile` asks itself).
    */
-  #exports(at: Date): void {
+  #exports(): void {
     try {
-      exportsStep(this.ctx.storage, at.getTime());
+      exportsStep(this.ctx.storage);
     } catch {
       // Nothing of the error is kept.
     }
