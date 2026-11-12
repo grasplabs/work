@@ -193,8 +193,8 @@ export interface SourceVersionRef {
 }
 
 /**
- * How recall found a chunk: as the question wrote one of its IDs, dates,
- * quoted phrases or names (`exact`); by its telling words in any form
+ * How recall found a chunk: as the question wrote one of its IDs or
+ * quoted phrases (`exact`); by its telling words in any form
  * (`words`); or by its commonest words alone (`stop words`), which say
  * little: a chunk found so is no answer by itself.
  */
@@ -215,9 +215,10 @@ export interface PackItem extends SourceVersionRef {
 }
 
 /**
- * What a recall found the reader may read, best first, within its budget;
+ * What a recall found the reader may read, best first, within its budget
+ * as `tokensOf` counts it;
  * the parts of the question no passage the reader may read holds
- * (`notFound`: its words, folded, and its IDs, dates and quoted phrases as
+ * (`notFound`: its words, folded, and its IDs and quoted phrases as
  * written), and whether the budget left out or shortened any passage
  * found (`truncated`).
  */
@@ -231,8 +232,12 @@ export interface Pack {
 const thirdOfAToken = /[A-Za-z ]/u;
 
 /**
- * The tokens `text` counts as in a pack's budget: an upper estimate, the
- * Brain's own, since it knows no model and makes no outside call.
+ * The tokens `text` counts as in a pack's budget: an estimate, the
+ * Brain's own, since it knows no model and makes no outside call. At or
+ * above what today's tokenizers give prose in the five languages, and
+ * numbers, amounts and IDs; single letters, random letter strings (keys,
+ * base64) and rare scripts can count higher on a real tokenizer. A pack
+ * never passes its budget as counted here.
  *
  * - An ASCII letter, or a space: a third of a token. A real tokenizer
  *   takes a word of prose, with the space before it, as one token or two:
@@ -638,7 +643,7 @@ export interface Brain {
    * French and Spanish, then more of them as asked, then shorter, then
    * newer; passages holding only its commonest words after them, and only
    * when the others are fewer than the limit), and exact (for each of its
-   * IDs, dates and quoted phrases, the passages holding it as written, in
+   * IDs and quoted phrases, the passages holding it as written, in
    * the words way's order, then shorter, then newer). The lists are fused
    * by rank and packed to the budget: each passage's best part first,
    * then whole passages.

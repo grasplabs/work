@@ -52,7 +52,7 @@ import { testBinding } from "./test-env.ts";
 //   question's order, a list: the chunks of current versions the reader
 //   may read that hold it as written, in the words list's order, then the
 //   shorter; at most `recallLimit`.
-//   No question here has a quoted phrase, a date or a name.
+//   No question here has a quoted phrase.
 // - The pack (GRA-1728): the ID lists and the words list fused by
 //   reciprocal rank (1 / (60 + rank), summed; ties to the better rank,
 //   then to the list given first), each chunk whole at the largest budget,

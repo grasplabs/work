@@ -20,8 +20,8 @@ import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // The cited pack (GRA-1728), through core's `recallAs` into the Brain's
-// store. From the threat list on the issue: an exact ID, date or quoted
-// phrase is found however low word search ranks it; a pack never passes
+// store. From the threat list on the issue: an exact ID or quoted phrase
+// is found however low word search ranks it; a pack never passes
 // its budget and says when the budget cut it short; every item cites a
 // version its reader may read, now or as of a moment, by the rule
 // `readSourceVersionAs` follows; and what a pack says was not found, or
@@ -144,7 +144,7 @@ const spent = (pack: RecalledPack): number => {
 };
 
 describe("the cited pack", () => {
-  it("finds an exact ID, a date and a quoted phrase that word search ranks past its limit", async () => {
+  it("finds an exact ID and a quoted phrase that word search ranks past its limit", async () => {
     const reader = await person();
     const [topic, other] = [word(), word()];
     const invoice = id();
@@ -161,58 +161,49 @@ describe("the cited pack", () => {
       `Paid: ${invoice.replace("-", " ")}.`,
       owner(reader)
     );
-    const byDate = await add(`${topic} closed on 4 maart 2026.`, owner(reader));
     const byPhrase = await add(
       `${topic}: the night shift rota is posted on Fridays.`,
       owner(reader)
     );
 
-    const [idPack, datePack, phrasePack] = await Promise.all([
+    const [idPack, phrasePack] = await Promise.all([
       packFor(
         reader,
         `${topic} ${other} invoice payment terms supplier delivery ${invoice}`
       ),
-      packFor(reader, `${topic} ${other} invoice payment terms on 2026-03-04`),
       packFor(
         reader,
         `${topic} ${other} invoice payment terms "night shift rota"`
       ),
     ]);
 
-    expect({
-      id: idPack.items[0],
-      date: datePack.items[0],
-      phrase: phrasePack.items[0],
-    }).toMatchObject({
+    expect({ id: idPack.items[0], phrase: phrasePack.items[0] }).toMatchObject({
       id: { source: byId, found: "exact" },
-      date: { source: byDate, found: "exact" },
       phrase: { source: byPhrase, found: "exact" },
     });
-    expect(
-      [idPack, datePack, phrasePack].map(({ notFound }) => notFound)
-    ).toStrictEqual([[], [], []]);
+    expect([idPack, phrasePack].map(({ notFound }) => notFound)).toStrictEqual([
+      [],
+      [],
+    ]);
   });
 
-  it("finds an ID past more chunks a common date part holds than the exact way checks, and still says another ID was not found", async () => {
+  it("finds an ID past more chunks than the exact way checks of another ID, a year among them, and still says a third ID was not found", async () => {
     const reader = await person();
     const [topic, other] = [word(), word()];
-    const invoice = id();
-    const missing = id();
-    // More short chunks than the cap holding the date, every one shorter
-    // than the ID's and as likely to hold it in a row: the date part is
-    // capped, and has its own cap, so the ID's is never crowded out.
+    const [invoice, common, missing] = [id(), id(), id()];
+    // More short chunks than the cap holding the common ID and the year,
+    // each shorter than the invoice's and as likely to hold the ID in a
+    // row: the common ID is capped, with a cap of its own, so the
+    // invoice's is never crowded out; the year is a plain word.
     for (let index = 0; index <= exactCandidatesMax + 4; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await add(
-        index % 2 === 0 ? "Due 04-01-2026" : "Due on 04/01/2026",
-        owner(reader)
-      );
+      await add(`Ref ${common} due 2026`, owner(reader));
     }
     // And more chunks than a list holds with more of the question's words
-    // than the ID's: word search ranks it past its limit.
+    // than the invoice's: word search ranks it past its limit.
     for (let index = 0; index <= recallLimit; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await add(`${topic} ${other} paid, number ${index}.`, owner(reader));
+      await add(`${topic} ${other} paid 2026, number ${index}.`, owner(reader));
     }
     const byId = await add(
       `A longer note: order ${invoice} was booked in full on time.`,
@@ -220,16 +211,17 @@ describe("the cited pack", () => {
     );
 
     const [found, notFound] = await Promise.all([
-      packFor(reader, `${topic} ${other} paid ${invoice} on 2026-01-04`),
-      packFor(reader, `${topic} ${other} paid ${missing} on 2026-01-04`),
+      packFor(reader, `${topic} ${other} paid ${invoice} ${common} in 2026`),
+      packFor(reader, `${topic} ${other} paid ${missing} ${common} in 2026`),
     ]);
 
-    // First in its own part's list, tied there with the date's first and
-    // the words way's first, the date's list before it.
+    // First in its own part's list, tied there with the common ID's first
+    // and the words way's first, the common ID's list before it.
     expect(
       found.items.slice(0, 3).find(({ source }) => source.id === byId.id)
     ).toMatchObject({ source: byId, found: "exact" });
-    // The capped date is never said to be missing; the missing ID is.
+    // The capped ID is never said to be missing, nor the year, a word
+    // found; the missing ID is.
     expect({ found: found.notFound, missing: notFound.notFound }).toStrictEqual(
       { found: [], missing: [missing] }
     );
@@ -412,7 +404,16 @@ describe("the cited pack", () => {
           found: "words",
         },
       ],
-      notFound: [`${hidden} plan`, "14 maart 2026", hiddenId, hidden, "plan"],
+      // A date is words: found apart, or not, as any word.
+      notFound: [
+        `${hidden} plan`,
+        hiddenId,
+        hidden,
+        "plan",
+        "14",
+        "maart",
+        "2026",
+      ],
       truncated: false,
     });
   });

@@ -437,14 +437,19 @@ describe(
       }
       // More hidden chunks holding a marker than the exact way checks of
       // a part: its cap counts only what the reader may read, so a marker
-      // the reader asks for is still not found, as its twin is.
+      // the reader asks for is still not found, as its twin is. They hold
+      // an ID the outsider's own longer chunk holds too: ranked past the
+      // hidden ones, it would be missed if the cap counted them.
+      const capId = `CAP-${unique()}`;
       for (let index = 0; index <= exactCandidatesMax; index += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one source at a time
-        await add(`Copy ${index} ${ownerMarker}`, {
+        await add(`Copy ${index} ${ownerMarker} ${capId}`, {
           kind: "owner",
           personId: holder,
         });
       }
+      const capped = `The outsider's own, much longer than any copy: ${capId}.`;
+      await add(capped, { kind: "owner", personId: outsider });
       // The outsider's own source, with more earlier versions than a
       // recall returns, each holding the shared word and shorter than the
       // current one: superseded, they may neither show nor take its place.
@@ -501,6 +506,15 @@ describe(
       // What the outsider finds by the shared word: their own source, past
       // the marked ones.
       const outsiderFinds = await textsFor(outsider, sharedWord);
+      // And by the ID the hidden copies share: their own chunk, as exact.
+      const { items: cappedItems } = await recallAs(env, outsider, {
+        question: capId,
+        budget: { tokens: recallBudgetMax },
+      });
+      const cappedFinds = cappedItems.map(({ text, found }) => ({
+        text,
+        found,
+      }));
 
       const asOutsider = (groups: string[]): Probing => ({
         personId: outsider,
@@ -629,6 +643,7 @@ describe(
           ...prompted,
         ],
         outsiderFinds,
+        cappedFinds,
         joinedFinds,
         leftFinds,
         holderAppFile: holderAppFiles.some(({ text }) => text === usedAppText),
@@ -636,6 +651,7 @@ describe(
       }).toStrictEqual({
         findings: [],
         outsiderFinds: [handbook],
+        cappedFinds: [{ text: capped, found: "exact" }],
         joinedFinds: [teamSource],
         leftFinds: [],
         holderAppFile: true,

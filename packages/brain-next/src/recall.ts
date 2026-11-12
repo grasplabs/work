@@ -373,33 +373,18 @@ const byExact = (
  * the words way's, fused by rank (the exact parts' first on a tie, in the
  * question's order), and the parts of the
  * question neither found: its exact parts, but those capped, then its
- * telling words, but those of its IDs and dates.
+ * telling words, but those of its IDs.
  */
 export const recall = (
   sql: SqlStorage,
   { question, reader, budget, asOf }: RecallRequest
 ): Pack => {
   const exacts = exactsOf(question);
-  const wordsOfKind = (kinds: readonly Exact["kind"][]): Set<string> =>
-    new Set(
-      exacts
-        .filter(({ kind }) => kinds.includes(kind))
-        .flatMap(({ forms }) => forms.flat())
-    );
-  // A date's words are the exact way's alone: a day, a month and a year
-  // are common numbers, which the words way would find in chunks of other
-  // dates and rank with the date's own list once more; the exact way finds
-  // the date however it is written. An ID's words stay words: rare, and
-  // the ID's own, found in any form.
-  const ofDates = wordsOfKind(["date"]);
-  const asked = termsOf(question);
-  const terms: Terms = {
-    telling: asked.telling.filter(({ word }) => !ofDates.has(word)),
-    stops: asked.stops,
-  };
-  // An ID or a date stands for its words: none is said not found apart,
-  // as "03" would be when "2026-03-04" was found as "4 maart 2026".
-  const standing = wordsOfKind(["date", "id"]);
+  const terms = termsOf(question);
+  // An ID stands for its words: none is said not found apart.
+  const standing = new Set(
+    exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words)
+  );
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
   const words = byWords(sql, terms, reader, at);
   const exact = byExact(

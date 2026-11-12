@@ -192,7 +192,10 @@ export interface Recall {
    * including it: a version added at it counts. A caller who means "on
    * that day" passes the day's last millisecond in the time zone they
    * mean (for 14 March 2026 in Amsterdam, 2026-03-14T23:59:59.999+01:00),
-   * not its midnight, which leaves out what was added that day.
+   * not its midnight, which leaves out what was added that day. Each
+   * source answers with its newest version added by then that still
+   * exists, if the reader may read it: once a later version is erased, a
+   * moment when it was current answers with the one before it.
    */
   asOf?: Date;
 }
