@@ -163,6 +163,52 @@ describe(ChatThread, () => {
     forgotten.length = 0;
   });
 
+  it("says under a call of remember that it is an instruction, with the value it holds", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Answer in Dutch" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "instruction",
+          statement: "Always answer in Dutch",
+          value: "Dutch",
+        },
+      },
+    ]);
+    const text = document.body.textContent;
+
+    expect({
+      kind: text.includes("Instruction"),
+      saved: text.includes(
+        "Grasp will remember: Always answer in Dutch (value: Dutch)"
+      ),
+    }).toStrictEqual({ kind: true, saved: true });
+  });
+
   it("says under a call of remember who or what it is about, when it isn't the person", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([
@@ -193,6 +239,7 @@ describe(ChatThread, () => {
         at,
         saved: {
           memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "fact",
           statement: "Prefers answers by mail",
           about: "Bob",
         },
@@ -233,7 +280,7 @@ describe(ChatThread, () => {
         text: "Saved.",
         failed: false,
         at,
-        saved: { memory, statement: "Acme renews on 1 March" },
+        saved: { memory, type: "fact", statement: "Acme renews on 1 March" },
       },
     ]);
     const shown = document.body.textContent;

@@ -11,7 +11,14 @@ import { z } from "zod";
  */
 export const chatSavedMemorySchema = z.strictObject({
   memory: z.uuid(),
+  /**
+   * What kind it is: a fact or a decision, or how Grasp should act for
+   * them (a preference or an instruction), which the notice says.
+   */
+  type: z.enum(["fact", "decision", "preference", "instruction"]),
   statement: z.string().min(1),
+  /** The value it holds of its attribute, when it has one. */
+  value: z.string().min(1).optional(),
   /** Who or what it is about, by name, when it isn't the person themselves. */
   about: z.string().min(1).optional(),
 });

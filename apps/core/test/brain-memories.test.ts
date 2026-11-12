@@ -4,8 +4,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { forgetFor, rememberFor } from "../src/brain-memories.ts";
 import type { MemoryCaller } from "../src/brain-memories.ts";
-import { forgetAs, rememberAs } from "../src/brain-next.ts";
+import { erasePerson, forgetAs, rememberAs } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
 import { eventsOf } from "./model-rules.ts";
@@ -254,6 +255,43 @@ describe("a person's memories, for a caller", () => {
         },
       ],
       named: false,
+    });
+  });
+
+  it("audits a save to an erased own store as refused for that reason", async () => {
+    const anna = await person();
+    await Promise.allSettled([
+      erasePerson(env, { personId: anna, reason: "person_erased" }),
+    ]);
+    await ageOwnErasure(anna);
+    const caller = themselves(anna);
+    const refused = await rememberFor(
+      env,
+      caller,
+      status(`Acme ${unique()}`, "Renewing")
+    ).then(
+      () => "saved",
+      (error: unknown) =>
+        typeof error === "object" && error !== null && "code" in error
+          ? error.code
+          : "an error with no code"
+    );
+    const events = await vi.waitFor(
+      async () => {
+        const kept = await eventsOf(caller.actor);
+        expect(kept).toHaveLength(2);
+        return kept;
+      },
+      { timeout: 10_000 }
+    );
+    expect({
+      refused,
+      outcome: events
+        .map(({ detail }) => detail)
+        .find((detail) => detail?.outcome === "refused")?.reason,
+    }).toStrictEqual({
+      refused: "brain.source_erased",
+      outcome: "brain.source_erased",
     });
   });
 

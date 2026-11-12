@@ -40,6 +40,8 @@ import type {
   EntityNamesCursor,
   Identifier,
   EntityId,
+  Memory,
+  MemoriesCursor,
   MemoryChangeOutcome,
   MemoryId,
   KeyState,
@@ -1948,18 +1950,61 @@ const rememberedSchema = z.strictObject({
   type: z.enum(memoryTypes),
   statement: memoryText(statementMaxLength),
   quote: memoryText(quoteMaxLength),
-  validFrom: z.date().optional(),
-  validUntil: z.date().optional(),
 });
 
 /** A memory a person said, to save for them (`rememberAs`), as its schema takes it. */
 export type Remembered = z.input<typeof rememberedSchema>;
 
-/** What `rememberAs` saved: the memory, and the entity it is about. */
+/**
+ * What `rememberAs` saved: the memory and the entity it is about, and the
+ * memory's own fields as the store holds them (`kept`), read back from
+ * it: what the person is shown, never what the caller asked for.
+ */
 export interface RememberedMemory {
   memory: MemoryId;
   entity: EntityId;
+  kept: Pick<Memory, "type" | "attribute" | "value" | "statement">;
 }
+
+/**
+ * `error`, an erased store's or key's refusal (the Brain's own words), as
+ * the code core gives it everywhere (`brain.source_erased`): final, never
+ * tried again. Any other error as it is.
+ */
+const erasedAs = (error: unknown): unknown =>
+  error instanceof Error &&
+  (error.message === erasedSource || error.message === storeErased)
+    ? brainSourceErrors.create("brain.source_erased")
+    : error;
+
+/**
+ * Memory `memory` about `entity` in `store`, as `reader` reads it, history
+ * included: every page, read at the first page's moment, until it is
+ * found. Undefined when none holds it.
+ */
+const keptMemory = async (
+  store: Brain,
+  reader: Reader,
+  entity: EntityId,
+  memory: MemoryId
+): Promise<Memory | undefined> => {
+  let after: MemoriesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readMemories({
+      entity,
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    });
+    const found = page.memories.find(({ id }) => id === memory);
+    if (found !== undefined) {
+      return found;
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return undefined;
+};
 
 /**
  * Saves what the member `personId` said as their own memory, readable by
@@ -1983,27 +2028,42 @@ export const rememberAs = async (
   );
   const reader = await readerOf(env, personId);
   const { person } = reader;
-  const added = await ownBrain(env, person).addMemories({
-    change,
-    access: { kind: "owner", person },
-    // An entity's id is taken only as they may see it.
-    reader,
-    entities: [{ key: "about", ...about }],
-    memories: [
-      {
-        about: "about",
-        ...memory,
-        speaker: { kind: "internal", person },
-        basis: { kind: "writer", writer: person, quote },
-      },
-    ],
-  });
+  const store = ownBrain(env, person);
+  let added: Awaited<ReturnType<Brain["addMemories"]>>;
+  try {
+    added = await store.addMemories({
+      change,
+      access: { kind: "owner", person },
+      // An entity's id is taken only as they may see it.
+      reader,
+      entities: [{ key: "about", ...about }],
+      memories: [
+        {
+          about: "about",
+          ...memory,
+          speaker: { kind: "internal", person },
+          basis: { kind: "writer", writer: person, quote },
+        },
+      ],
+    });
+  } catch (error) {
+    throw erasedAs(error);
+  }
   const [saved] = added.memories;
   const entity = added.entities.about;
-  if (saved === undefined || entity === undefined) {
-    throw new Error("The Brain saved no memory");
+  const kept =
+    saved === undefined || entity === undefined
+      ? undefined
+      : await keptMemory(store, reader, entity, saved);
+  if (saved === undefined || entity === undefined || kept === undefined) {
+    throw new Error("The Brain kept no memory");
   }
-  return { memory: saved, entity };
+  const { type, attribute, value, statement } = kept;
+  return {
+    memory: saved,
+    entity,
+    kept: { type, attribute, value, statement },
+  };
 };
 
 /**
@@ -2073,8 +2133,12 @@ export const forgetAs = async (
 ): Promise<MemoryChangeOutcome> => {
   const id = checked(memoryIdSchema, memory);
   const reader = await readerOf(env, personId);
-  return await ownBrain(env, reader.person).retireMemory({
-    memory: id,
-    reader,
-  });
+  try {
+    return await ownBrain(env, reader.person).retireMemory({
+      memory: id,
+      reader,
+    });
+  } catch (error) {
+    throw erasedAs(error);
+  }
 };

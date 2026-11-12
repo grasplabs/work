@@ -6347,8 +6347,16 @@ msgid "Grasp will remember about {about}: {statement}"
 msgstr "Grasp retiendra à propos de {about} : {statement}"
 
 #: src/chat/saved-memory.tsx
+msgid "Grasp will remember about {about}: {statement} (value: {value})"
+msgstr "Grasp retiendra à propos de {about} : {statement} (valeur : {value})"
+
+#: src/chat/saved-memory.tsx
 msgid "Grasp will remember: {statement}"
 msgstr "Grasp retiendra : {statement}"
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember: {statement} (value: {value})"
+msgstr "Grasp retiendra : {statement} (valeur : {value})"
 
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -6899,6 +6907,10 @@ msgstr "Entrée"
 #: src/workflows/start-run.tsx
 msgid "Input, as JSON"
 msgstr "Entrée, en JSON"
+
+#: src/chat/saved-memory.tsx
+msgid "Instruction"
+msgstr "Instruction"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
@@ -10347,6 +10359,10 @@ msgstr "Position"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Prague"
 msgstr "Prague"
+
+#: src/chat/saved-memory.tsx
+msgid "Preference"
+msgstr "Préférence"
 
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."

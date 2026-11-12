@@ -179,7 +179,16 @@ describe("the agent remembering in a person's own chat", () => {
         checkedTheirMessage: check?.includes(said) === true,
         checkedTheSubject: check?.includes(customer) === true,
       }).toStrictEqual({
-        shown: [{ memory, statement, about: customer }],
+        // What the store kept: its statement and its value, which differ.
+        shown: [
+          {
+            memory,
+            type: "fact",
+            statement,
+            value: "1 March",
+            about: customer,
+          },
+        ],
         kept: [[statement]],
         theirs: [],
         undoneByOther: "nothing",

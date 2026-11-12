@@ -326,9 +326,13 @@ export const rememberTool = (
           text: `Saved, about ${saved.entity}. The person sees a notice of it and can undo it.`,
         },
       ],
+      // What the store kept, as the notice shows it: never the call's own
+      // fields, so the person sees what was saved.
       details: {
         memory: saved.memory,
-        statement: input.statement,
+        type: saved.kept.type,
+        statement: saved.kept.statement,
+        ...(saved.kept.value === null ? {} : { value: saved.kept.value }),
         // Who or what it is about, when it isn't the person themselves.
         ...("self" in about.subject ? {} : { about: about.subject.name }),
       },
