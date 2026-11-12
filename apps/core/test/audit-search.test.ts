@@ -268,6 +268,39 @@ describe("audit log search", () => {
     );
   });
 
+  it("finds a staff member's Brain read among reads, and the actions they asked for among actions", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const resource = `item-${unique()}`;
+    const actor = { type: "staff", userId: `staff-${unique()}` } as const;
+    const [read, asked, answered] = await logged(
+      event({
+        source: "core",
+        actor,
+        action: "admin.brain.read",
+        provenance: [resource],
+      }),
+      event({
+        source: "core",
+        actor,
+        action: "admin.brain.action.asked",
+        provenance: [resource],
+      }),
+      event({
+        source: "core",
+        actor,
+        action: "admin.brain.action.answered",
+        provenance: [resource],
+      })
+    );
+    const found = async (type: AuditEventType) =>
+      new Set(idsOf(await searchAll(api, { resource, type })));
+
+    await expect(found("read")).resolves.toStrictEqual(new Set([read?.id]));
+    await expect(found("action")).resolves.toStrictEqual(
+      new Set([asked?.id, answered?.id])
+    );
+  });
+
   it("pages newest first, each record once", async () => {
     const { api } = await signedInApi(idp, "admin");
     const targetId = `many-${unique()}`;

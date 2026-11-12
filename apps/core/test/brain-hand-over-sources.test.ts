@@ -1,5 +1,6 @@
 import {
   brainOf,
+  personalBrainOf,
   recallBudgetMax,
   sourceIdMaxLength,
 } from "@grasp-os/brain-next/contract";
@@ -88,6 +89,7 @@ const recalled = async (
   const { items } = await recallAs(env, personId, {
     question,
     budget: { tokens: recallBudgetMax },
+    personal: true,
   });
   return items.map(({ source, version }) => ({ source, version }));
 };
@@ -285,6 +287,31 @@ const eraseFailsOnce = (real: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] => {
   return namespaceOf(real);
 };
 
+/** What each store has of `source`'s key: the shared one, and `personId`'s own. */
+const keyStatesOf = async (source: SourceRef, personId: string) => {
+  const key = `${source.producer}:${source.id}`;
+  const namespace = inJurisdiction(env, env.BRAIN_STORE);
+  return {
+    shared: await brainOf(namespace).keyState(key),
+    own: await personalBrainOf(namespace, personId).keyState(key),
+  };
+};
+
+/**
+ * Core's record that `personId`'s erasure began, as the person-erasure
+ * area writes it before it asks the Brain to erase them.
+ */
+const erasureRecorded = async (personId: string): Promise<void> => {
+  await drizzle(env.DB).insert(personErasures).values({
+    userId: personId,
+    name: "Erased",
+    emailHash: null,
+    emailKeyVersion: 1,
+    requestedBy: personId,
+    requestedAt: new Date(),
+  });
+};
+
 /** The hand-overs noted and not yet relayed, among `ids`. */
 const notedAmong = async (ids: readonly string[]): Promise<string[]> => {
   const rows = await drizzle(env.DB)
@@ -407,7 +434,12 @@ describe("how a hand-over fails closed", () => {
       {
         ...env,
         DB: racing(env.DB, auditWrite, async () => {
-          await eraseSource(env, { source, reason: "retention" });
+          // A run's readers: the person it ran for, as its producer names.
+          await eraseSource(env, {
+            source,
+            readers: { kind: "owner", personId: runner.userId },
+            reason: "retention",
+          });
         }),
       },
       later()
@@ -445,81 +477,110 @@ describe("how a hand-over fails closed", () => {
     });
   });
 
-  it("erases a person's own source whose add landed after their erasure began, also when that erasure failed once and the item is tried again", async () => {
+  it("erases a person's own source whose add landed after their erasure began, its key closed in both stores, refused once and run once", async () => {
     const runner = await builder();
     const said = word();
     const id = await endedRun(runner, said);
     const source: SourceRef = { producer: "run", id };
     await relayNow();
-    // The person's erasure begins once the hand-over has read their run,
-    // before its add: core's record, then the Brain's erasure. The add
-    // lands after both; the erasure the hand-over then owes fails.
+    // Core's record of the person's erasure lands once the hand-over has
+    // read their run, before its add: the add lands in their own store,
+    // whose erasure by the Brain comes after.
     await tick(
       {
         ...env,
         DB: racing(env.DB, auditWrite, async () => {
-          await drizzle(env.DB).insert(personErasures).values({
-            userId: runner.userId,
-            name: "Erased",
-            emailHash: null,
-            emailKeyVersion: 1,
-            requestedBy: runner.userId,
-            requestedAt: new Date(),
-          });
-          await erasePerson(env, {
-            personId: runner.userId,
-            reason: "person_erased",
-          });
+          await erasureRecorded(runner.userId);
+        }),
+      },
+      later()
+    );
+    const closed = await keyStatesOf(source, runner.userId);
+    await tick(env, later(2 * 60_000));
+    const outcomes = await outcomesFor(id);
+    await Promise.allSettled([
+      erasePerson(env, { personId: runner.userId, reason: "person_erased" }),
+    ]);
+
+    expect({
+      closed,
+      outcomes,
+      queued: await queuedFor(source),
+    }).toStrictEqual({
+      closed: { shared: "erased", own: "erased" },
+      // Refused once, as erased, and never run again.
+      outcomes: [
+        "brain.source.handover_started",
+        "brain.source.handover_refused",
+      ],
+      queued: { waiting: false, parked: false },
+    });
+  });
+
+  it("erases a person's own source whose add landed after their erasure began, also when closing its key failed once", async () => {
+    const runner = await builder();
+    const said = word();
+    const id = await endedRun(runner, said);
+    const source: SourceRef = { producer: "run", id };
+    await relayNow();
+    // As above; the close of its key fails once, so the item is tried
+    // again, recording again, and closes it then.
+    await tick(
+      {
+        ...env,
+        DB: racing(env.DB, auditWrite, async () => {
+          await erasureRecorded(runner.userId);
         }),
         BRAIN_STORE: eraseFailsOnce(env.BRAIN_STORE),
       },
       later()
     );
-    const landed = await readSourceVersionAs(env, runner.userId, {
-      source,
-      version: 1,
-    });
-    const afterFailure = await outcomesFor(id);
-    // Past the failed attempt's backoff: the producer answers that the
-    // person's erasure has begun, and the key is erased.
-    await tick(env, later(2 * 60_000));
-
-    expect({
-      landed: landed?.text.includes(said),
-      afterFailure,
-      after: await outcomesFor(id),
-      version: await readSourceVersionAs(env, runner.userId, {
+    const afterFailure = {
+      outcomes: await outcomesFor(id),
+      landed: await readSourceVersionAs(env, runner.userId, {
         source,
         version: 1,
       }),
+    };
+    // Past the failed attempt's backoff.
+    await tick(env, later(2 * 60_000));
+
+    expect({
+      afterFailure: {
+        outcomes: afterFailure.outcomes,
+        landed: afterFailure.landed?.text.includes(said),
+      },
+      after: await outcomesFor(id),
+      closed: await keyStatesOf(source, runner.userId),
       queued: await queuedFor(source),
     }).toStrictEqual({
-      landed: true,
-      // The refusal is recorded before the key is closed; the close
-      // failed, so the item was tried again, and recorded again.
-      afterFailure: [
-        "brain.source.handover_started",
-        "brain.source.handover_refused",
-      ],
+      afterFailure: {
+        outcomes: [
+          "brain.source.handover_started",
+          "brain.source.handover_refused",
+        ],
+        landed: true,
+      },
       after: [
         "brain.source.handover_started",
         "brain.source.handover_refused",
         "brain.source.handover_refused",
       ],
-      version: null,
+      closed: { shared: "erased", own: "erased" },
       queued: { waiting: false, parked: false },
     });
   });
 
-  it("records the refusal of an add that landed after its person's erasure, also when that record failed once, and closes the key", async () => {
+  it("records the refusal of a hand-over their own store refused as its person was erased, also when that record failed once", async () => {
     const runner = await builder();
     const said = word();
     const id = await endedRun(runner, said);
     const source: SourceRef = { producer: "run", id };
     await relayNow();
     // The person's erasure begins once the hand-over has read their run
-    // (its first audit write), before its add; the add lands after it, and
-    // the next audit write, the refusal's, fails once.
+    // (its first audit write), before its add: core's record, then the
+    // Brain's, which erases their own store whole, so the add is refused
+    // there; the next audit write, the refusal's, fails once.
     await tick(
       {
         ...env,
