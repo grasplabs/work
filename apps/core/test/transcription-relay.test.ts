@@ -436,7 +436,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
   });
 
-  it("holds a stretch's final for words the session writes down a moment after the commit, and opens the next stretch after it", async () => {
+  it("holds a stretch's final for words the session writes down a moment after the commit", async () => {
     const { ada } = await openedTwo();
 
     const { result } = await relaying(async () => {
@@ -457,19 +457,51 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       const rest = await page.next();
       const final = await page.next();
       const waited = Date.now() - committedAt;
-      // The next stretch starts anew.
-      page.socket.send(tenthOfASecond());
-      const next = await page.next();
       page.socket.close(1000, "Done");
-      return { first, rest, final, next, held: waited >= lateMs };
+      return { first, rest, final, held: waited >= lateMs };
     });
 
     expect(result).toStrictEqual({
       first: { type: "partial", text: "Hello" },
       rest: { type: "partial", text: "Hello there" },
       final: { type: "final", text: "Hello there", words: [] },
-      next: { type: "partial", text: "Hello" },
       held: true,
+    });
+  });
+
+  it("keeps the next stretch's words out of a stretch's final when the page goes on speaking before it comes", async () => {
+    const { ada } = await openedTwo();
+
+    const { result } = await relaying(async () => {
+      const page = await listen();
+      page.start({
+        type: "start",
+        language: "en",
+        sampleRate: 16_000,
+        link: ada,
+      });
+      await page.next();
+      page.socket.send(tenthOfASecond());
+      await page.next();
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      // The next stretch, at once: its words come behind its audio.
+      page.socket.send(tenthOfASecond());
+      const rest = await page.next();
+      const final = await page.next();
+      const next = await page.next();
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      const nextRest = await page.next();
+      const nextFinal = await page.next();
+      page.socket.close(1000, "Done");
+      return { rest, final, next, nextRest, nextFinal };
+    });
+
+    expect(result).toStrictEqual({
+      rest: { type: "partial", text: "Hello there" },
+      final: { type: "final", text: "Hello there", words: [] },
+      next: { type: "partial", text: "Hello" },
+      nextRest: { type: "partial", text: "Hello there" },
+      nextFinal: { type: "final", text: "Hello there", words: [] },
     });
   });
 

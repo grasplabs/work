@@ -14,9 +14,9 @@
  * character said, each said in `secondsPerCharacter`, a direction in
  * brackets not said, and a voice Grasp didn't choose refused; a recording
  * with `writtenText`; and a realtime transcription socket with a delta of
- * `partialText` for the first audio of each stretch, and the rest of
- * `writtenText` once that audio is flushed, nothing for a flush with no
- * audio. Every socket's opening, events and close are kept
+ * `partialText` for the first audio of each stretch, behind it by the
+ * delay the session was told, and the rest of `writtenText` at once when
+ * that audio is flushed, nothing for a flush with no audio. Every socket's opening, events and close are kept
  * (`realtimeControlUrl`).
  *
  * A key can instead be bridged to the test (`bridgeUrl`): each request
@@ -35,7 +35,7 @@ export const writtenText = "Hello there";
 export const partialText = "Hello";
 
 /** How long after a flush the rest of a stretch comes, once tests ask for it late (`{ late: true }`). */
-export const lateMs = 300;
+export const lateMs = 150;
 
 /** Bytes of a line's WAV header, before its audio. */
 export const speechHeaderBytes = 44;
@@ -214,6 +214,8 @@ export const aiProvidersFake = () => {
     realtime.push({ record, asked });
     /** Whether audio came since the last flush: a stretch being said. */
     let saying = false;
+    /** The stretch's first word, on its way: behind the audio, as the session is told to write. */
+    let first: ReturnType<typeof setTimeout> | undefined = undefined;
     /** Whether the rest of a stretch comes late after its flush. */
     let late = false;
     const send = (event: Record<string, unknown>): void => {
@@ -276,15 +278,29 @@ export const aiProvidersFake = () => {
         }
         if (!saying) {
           saying = true;
-          send({ type: "transcription.text.delta", text: "Hello" });
+          const delay =
+            isRecord(record.session) &&
+            typeof record.session.target_streaming_delay_ms === "number"
+              ? record.session.target_streaming_delay_ms
+              : 0;
+          first = setTimeout(() => {
+            first = undefined;
+            send({ type: "transcription.text.delta", text: "Hello" });
+          }, delay);
         }
       } else if (parsed.type === "input_audio.flush" && saying) {
         saying = false;
+        // A flush has what is held back written down at once.
+        if (first !== undefined) {
+          clearTimeout(first);
+          first = undefined;
+          send({ type: "transcription.text.delta", text: "Hello" });
+        }
         const rest = { type: "transcription.text.delta", text: " there" };
         if (late) {
           setTimeout(() => {
             send(rest);
-          }, 300);
+          }, 150);
         } else {
           send(rest);
         }

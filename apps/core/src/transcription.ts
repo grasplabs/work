@@ -34,16 +34,18 @@ import { Resampler } from "./resampler.ts";
 // not here, not in a log.
 //
 // Settling: the page counts on exactly one `final` for each of its
-// commits, in order, holding the whole stretch it closed. The session
-// sends words only (`transcription.text.delta`, each final, to be added to
-// the ones before), a little behind the audio (`streamingDelayMs`), and
-// names no end of a stretch: its one `transcription.done` ends the whole
-// session. So a commit flushes the audio sent so far
-// (`input_audio.flush`), which has the session write down what it still
-// held back, and the stretch's final goes out once no more words came for
-// `settleMs`: the session says nothing when a flush is through. Words
-// that come later than that open the next stretch, so none are lost. A
-// commit with nothing said settles as an empty final.
+// commits, in order, holding the whole stretch it closed, and goes on
+// sending the next stretch without waiting for it. The session sends
+// words only (`transcription.text.delta`, each final, to be added to the
+// ones before), behind the audio by `streamingDelayMs`, and names no end
+// of a stretch: its one `transcription.done` ends the whole session. So a
+// commit flushes the audio sent so far (`input_audio.flush`), which has
+// the session write down at once what it still held back, and the
+// stretch's final goes out `settleMs` after the commit, with the words
+// that came until then: the session says nothing when a flush is through.
+// `settleMs` is below `streamingDelayMs`, so no word of audio sent after
+// the commit can be among them: the next stretch's words come later, and
+// open it. A commit with nothing said settles as an empty final.
 //
 // The realtime session takes names and terms to listen out for
 // (`context_bias`) and no free text, so what was said just before, which
@@ -63,12 +65,11 @@ const realtimePathOf = (model: string): string =>
 const streamingDelayMs = 480;
 
 /**
- * How long after a commit, and after each word that still comes, a
- * stretch waits for more before its final goes out: above what the
- * session takes to write down flushed audio, below what someone waits for
- * their words.
+ * How long after a commit its stretch's final goes out, in ms: time for
+ * the session to write down the audio flushed, and below
+ * `streamingDelayMs`, the soonest a word of the next stretch can come.
  */
-export const settleMs = 700;
+export const settleMs = 300;
 
 /** What the session sends, as far as the relay reads it: the first that fits. */
 const serverEventSchema = z.union([
@@ -143,44 +144,35 @@ interface Settling {
 }
 
 /**
- * One final for each of the page's commits, in order: the words that
- * came since the one before, once none came for `settleMs` after the
- * commit. Commits that settle together share the words between them: the
- * first has them all.
+ * One final for each of the page's commits, in order: the words that came
+ * since the one before, until `settleMs` after the commit. Words that
+ * come after it are the next stretch's.
  */
 const settlingOf = (events: EventQueue): Settling => {
   /** The stretch being said, as the session wrote it so far. */
   let saying = "";
-  /** The page's commits whose final hasn't gone out. */
-  let unsettled = 0;
-  let quiet: ReturnType<typeof setTimeout> | undefined = undefined;
-  const settle = (): void => {
-    quiet = undefined;
-    for (; unsettled > 0; unsettled -= 1) {
-      // The session times no words: a final carries its text alone.
-      events.push({ type: "committed", text: saying.trim(), words: [] });
-      saying = "";
-    }
-  };
-  const wait = (): void => {
-    clearTimeout(quiet);
-    quiet = setTimeout(settle, settleMs);
-  };
+  /** The commits whose final hasn't gone out, each with its own wait. */
+  const settling = new Set<ReturnType<typeof setTimeout>>();
   return {
     pageCommitted: () => {
-      unsettled += 1;
-      wait();
+      const wait = setTimeout(() => {
+        settling.delete(wait);
+        // The session times no words: a final carries its text alone.
+        events.push({ type: "committed", text: saying.trim(), words: [] });
+        saying = "";
+      }, settleMs);
+      settling.add(wait);
     },
     delta: (text) => {
       // As Mistral sends it: each delta brings its own spaces.
       saying += text;
       events.push({ type: "partial", text: saying.trim() });
-      if (unsettled > 0) {
-        wait();
-      }
     },
     stop: () => {
-      clearTimeout(quiet);
+      for (const wait of settling) {
+        clearTimeout(wait);
+      }
+      settling.clear();
     },
   };
 };
