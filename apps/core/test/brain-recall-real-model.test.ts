@@ -5,10 +5,11 @@ import { z } from "zod";
 import { parseModelRef } from "../src/model-catalog.ts";
 import { modelForRole, modelSettings } from "../src/models.ts";
 import { charged, setUpBrainCompany } from "./brain-harness.ts";
-import { realProvider, realProviderTakes } from "./brain-real-provider.ts";
+import { realProvider } from "./brain-real-provider.ts";
 import { runBrainRecallComparison } from "./brain-recall-harness.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
+import { realProviderTakes } from "./real-providers.ts";
 import { testBinding } from "./test-env.ts";
 
 // Experiment E02 (GRA-304) against a real reranking model, on request

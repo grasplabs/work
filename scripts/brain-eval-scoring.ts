@@ -18,6 +18,8 @@
  * - The size of a difference, and MRR, which isn't 0 or 1, get a 95%
  *   interval by a seeded bootstrap over questions, for display.
  */
+import { readdirSync } from "node:fs";
+
 import { z } from "zod";
 
 import {
@@ -32,6 +34,19 @@ import {
  */
 export const evalArgs = (args: readonly string[]): string[] =>
   args[0] === "--" ? args.slice(1) : [...args];
+
+/**
+ * The newest earlier run of the evaluation in `dir`, by name (a run's
+ * name starts with its time): files at its top alone, so a model run's,
+ * kept in a folder of their own (brain-eval-model-scoring.ts
+ * `modelResultsFolder`), is never read as one.
+ */
+export const lastRunIn = (dir: string): string | undefined =>
+  readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map(({ name }) => name)
+    .toSorted()
+    .at(-1);
 
 /** How many results a reader is counted as looking at. */
 export const resultBudget = 5;

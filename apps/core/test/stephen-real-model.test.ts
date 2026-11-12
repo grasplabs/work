@@ -3,10 +3,11 @@ import { z } from "zod";
 
 import { parseModelRef } from "../src/model-catalog.ts";
 import { charged } from "./brain-harness.ts";
-import { realProvider, realProviderTakes } from "./brain-real-provider.ts";
+import { realProvider } from "./brain-real-provider.ts";
 import type { ModelExchange } from "./brain-real-provider.ts";
 import { stephenCases } from "./fixtures/stephen-cases.ts";
 import { mockIdp } from "./idp.ts";
+import { realProviderTakes } from "./real-providers.ts";
 import { runStephenEval, setUpStephenCompany } from "./stephen-harness.ts";
 import type { StephenProvider } from "./stephen-stub.ts";
 import { testBinding } from "./test-env.ts";
