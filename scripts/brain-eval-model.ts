@@ -33,7 +33,9 @@ import {
   answeringPassageOf,
   costOf,
   everythingBudgetOf,
+  everythingCapOf,
   everythingFor,
+  judgedAnswerTokensMax,
   packTokens,
   questionTokensMax,
 } from "../apps/core/test/fixtures/brain-eval/everything.ts";
@@ -41,6 +43,10 @@ import {
   askerOf,
   brainEvalSet,
 } from "../apps/core/test/fixtures/brain-eval/set.ts";
+import {
+  realProviderTakes,
+  unreachableModel,
+} from "../apps/core/test/real-providers.ts";
 import {
   modelReport,
   modelResultSchema,
@@ -60,7 +66,6 @@ const model =
   named === undefined || named === "" ? "mistral/mistral-large-latest" : named;
 const key = process.env.BRAIN_MODEL_KEY ?? "";
 const budgetUsd = Number(process.env.BRAIN_MODEL_BUDGET_USD);
-const cap = Number(process.env.BRAIN_EVAL_EVERYTHING_TOKENS ?? Number.NaN);
 
 const fail: (message: string) => never = (message) => {
   process.stderr.write(`${message}\n`);
@@ -79,8 +84,14 @@ if (!(cost.input > 0 && cost.output > 0)) {
     `The gateway's catalog has no price for ${model}: its cost can't be bounded`
   );
 }
-if (process.env.BRAIN_EVAL_EVERYTHING_TOKENS !== undefined && !(cap > 0)) {
-  fail("BRAIN_EVAL_EVERYTHING_TOKENS is a number of tokens above 0");
+if (!realProviderTakes(model)) {
+  fail(unreachableModel(model));
+}
+let cap: number | null = null;
+try {
+  cap = everythingCapOf(process.env.BRAIN_EVAL_EVERYTHING_TOKENS);
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
 }
 
 const { sources, questions } = brainEvalSet;
@@ -89,8 +100,15 @@ const { sources, questions } = brainEvalSet;
 const budgetOf = (question: (typeof questions)[number]): number =>
   Math.min(
     everythingBudgetOf(contextWindow, question),
-    cap > 0 ? cap : Number.POSITIVE_INFINITY
+    cap ?? Number.POSITIVE_INFINITY
   );
+
+const tightest = Math.min(...questions.map(budgetOf));
+if (!(tightest > 0)) {
+  fail(
+    `${model}'s window (${contextWindow} tokens), or the cut, leaves no room for "everything"`
+  );
+}
 
 // What a run would send: every question's "everything", as the run builds it.
 const planned = questions.map((question) => {
@@ -118,7 +136,7 @@ const mostUsd = costOf(most, cost);
 const plan = [
   `Brain evaluation against a model · set ${brainEvalSet.version} · ${questions.length} questions over ${sources.length} sources`,
   `Model: ${model} (window ${contextWindow} tokens; list price $${cost.input} / $${cost.output} per million input / output tokens), also the judge.`,
-  `Each question: the model answers from the Brain's recall pack (at most ${packTokens} tokens) and from everything the asker may read, newest first, cut at ${cap > 0 ? `${cap} tokens` : "the model's window"} (${Math.min(...sizes)} to ${Math.max(...sizes)} tokens; cut for ${planned.filter(({ everything }) => everything.cut).length} questions). The judge checks each answer to a question with an answer against the passage that answers it.`,
+  `Each question: the model answers from the Brain's recall pack (at most ${packTokens} tokens) and from everything the asker may read, newest first, cut at ${cap === null ? "the model's window" : `${cap} tokens`} (${Math.min(...sizes)} to ${Math.max(...sizes)} tokens; cut for ${planned.filter(({ everything }) => everything.cut).length} questions). The pack arm's recall searches by words and exact parts only: the run embeds no passage. The judge checks each answer to a question with an answer against the passage that answers it, reading at most ${judgedAnswerTokensMax} tokens of it.`,
   `At most ${most.input} input and ${most.output} output tokens (the Brain's token count, above a real tokenizer's; every output at its limit): at most $${mostUsd.toFixed(2)} at list price for every question.`,
 ].join("\n");
 
@@ -175,23 +193,24 @@ if (info === undefined || end === undefined || results.length !== end.asked) {
 }
 const summary = summarizeModelRun(results, cost);
 process.stdout.write(`${modelReport(summary, end, questions.length)}\n`);
-const passed = run.status === 0 && summary.leaks.length === 0;
-if (passed) {
-  const out = path.join(root, ".brain-eval");
-  mkdirSync(out, { recursive: true });
-  const at = new Date().toISOString();
-  const file = path.join(
-    out,
-    `model-${at.replaceAll(":", "-")}-${sha.slice(0, 8)}.json`
-  );
-  writeFileSync(
-    file,
-    `${JSON.stringify({ identity: { info, sha, at }, end, results, summary }, null, 2)}\n`
-  );
-  process.stdout.write(`\nResult: ${file}\n`);
-} else {
+// What was asked is kept even when the run failed (a provider's error part
+// of the way, a leak), marked so, since it was paid for.
+const passed = run.status === 0 && !end.failed && summary.leaks.length === 0;
+const out = path.join(root, ".brain-eval");
+mkdirSync(out, { recursive: true });
+const at = new Date().toISOString();
+const file = path.join(
+  out,
+  `model-${at.replaceAll(":", "-")}-${sha.slice(0, 8)}${passed ? "" : "-failed"}.json`
+);
+writeFileSync(
+  file,
+  `${JSON.stringify({ identity: { info, sha, at }, failed: !passed, end, results, summary }, null, 2)}\n`
+);
+if (!passed) {
   process.stderr.write(
-    "\nThe run failed, or an answer held what its asker may not read: see above. Nothing was kept.\n"
+    `\n${run.status === 0 ? "" : `${output.split("\n").slice(-60).join("\n")}\n`}The run failed, or an answer held what its asker may not read: see above.\n`
   );
 }
+process.stdout.write(`\nResult${passed ? "" : ", marked failed"}: ${file}\n`);
 process.exit(passed ? 0 : 1);

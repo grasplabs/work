@@ -76,15 +76,19 @@ export interface Everything {
 }
 
 /**
- * The longest start of `text` whose block, under `key`, takes at most
- * `tokens`: by halves, since `tokensOf` only grows with the text.
+ * The longest start of `text` that `count` puts at most at `tokens`: by
+ * halves, since the count only grows with the text.
  */
-const cutTo = (key: string, text: string, tokens: number): string => {
+const startWithin = (
+  text: string,
+  tokens: number,
+  count: (start: string) => number
+): string => {
   let low = 0;
   let high = text.length;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
-    if (tokensOf(sourceBlock(key, text.slice(0, middle))) <= tokens) {
+    if (count(text.slice(0, middle)) <= tokens) {
       low = middle;
     } else {
       high = middle - 1;
@@ -94,14 +98,28 @@ const cutTo = (key: string, text: string, tokens: number): string => {
 };
 
 /**
+ * The longest start of `text` whose block, under `key`, takes at most
+ * `tokens`: by halves, since `tokensOf` only grows with the text.
+ */
+const cutTo = (key: string, text: string, tokens: number): string =>
+  startWithin(text, tokens, (start) => tokensOf(sourceBlock(key, start)));
+
+/**
  * Everything `asker` may read of `sources` (in the set's order, oldest
- * first), newest first, within `budget` tokens.
+ * first), newest first, within `budget` tokens. Throws when `budget`
+ * leaves no room: "everything" with nothing in it would cost money and
+ * compare nothing.
  */
 export const everythingFor = (
   sources: readonly BrainEvalSource[],
   asker: BrainEvalPerson,
   budget: number
 ): Everything => {
+  if (!(budget > 0)) {
+    throw new RangeError(
+      `"Everything" has ${budget} tokens: the model's window or the cut leaves no room for it`
+    );
+  }
   const readable = sources
     .filter((source) => mayRead(asker, source))
     .toReversed();
@@ -163,6 +181,20 @@ export const answeringPassageOf = (
   );
 };
 
+/**
+ * The most of an answer the judge reads, counted as everything else in
+ * the bound is (`tokensOf`): an answer is bounded by the model in real
+ * tokens, which `tokensOf` counts several times over (a 1,024-token
+ * English answer is about 4,000), so the judge reads at most this much of
+ * it, whatever the tokenizer, and the bound holds. Far past the one or two
+ * sentences asked for.
+ */
+export const judgedAnswerTokensMax = 4 * outputTokensMax;
+
+/** The answer as the judge reads it: cut at {@link judgedAnswerTokensMax}. */
+export const judgedAnswerOf = (answer: string): string =>
+  startWithin(answer, judgedAnswerTokensMax, (text) => tokensOf(text));
+
 /** Input and output tokens. */
 export interface Tokens {
   input: number;
@@ -185,10 +217,12 @@ export const questionTokensMax = (
     tokensOf(answerSystem) + tokensOf(answerInput(question.question, ""));
   const answers = 2;
   const verdicts = question.expects.kind === "answer" ? 2 : 0;
+  // `tokensOf` of a joined text is at most the sum of its parts', so the
+  // answer the judge reads adds at most its own cap.
   const judged =
     tokensOf(judgeSystem) +
     tokensOf(judgeInput(question.question, passage, "")) +
-    outputTokensMax;
+    judgedAnswerTokensMax;
   return {
     input: 2 * asked + everything + packTokens + verdicts * judged,
     output: (answers + verdicts) * outputTokensMax,
@@ -204,6 +238,25 @@ export interface Price {
 /** What `tokens` cost at `price`, in US dollars. */
 export const costOf = (tokens: Tokens, price: Price): number =>
   (tokens.input * price.input + tokens.output * price.output) / 1_000_000;
+
+/**
+ * The cut below the model's window that `BRAIN_EVAL_EVERYTHING_TOKENS`
+ * says: null while unset (or empty), for the window itself; otherwise a
+ * whole number of tokens above 0, or it throws. Read alike by the script
+ * and the run's config.
+ */
+export const everythingCapOf = (value: string | undefined): number | null => {
+  if (value === undefined || value === "") {
+    return null;
+  }
+  const tokens = Number(value);
+  if (!(Number.isInteger(tokens) && tokens > 0)) {
+    throw new RangeError(
+      "BRAIN_EVAL_EVERYTHING_TOKENS is a whole number of tokens above 0; leave it unset for the model's window"
+    );
+  }
+  return tokens;
+};
 
 /** The tokens a model's window leaves for the "everything" context. */
 export const everythingBudgetOf = (

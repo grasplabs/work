@@ -6,7 +6,11 @@ import {
   answerInput,
   answerSystem,
   answeringPassageOf,
+  everythingCapOf,
   everythingFor,
+  judgeInput,
+  judgeSystem,
+  judgedAnswerOf,
   judgedCorrect,
   outputTokensMax,
   packTokens,
@@ -20,6 +24,10 @@ import {
   brainEvalSet,
   mayRead,
 } from "../apps/core/test/fixtures/brain-eval/set.ts";
+import {
+  realProviderTakes,
+  unreachableModel,
+} from "../apps/core/test/real-providers.ts";
 // By relative path, as the set's own checks read the Brain's chunker
 // (fixtures/brain-eval/set.ts): the repository's root depends on no package.
 // oxlint-disable-next-line no-restricted-imports -- see above
@@ -122,6 +130,14 @@ describe("everything the asker may read", () => {
   });
 });
 
+/**
+ * An answer longer than any a model gives within its output limit: past
+ * {@link outputTokensMax} real tokens of plain English many times over.
+ */
+const longest = "The answer is in the handbook, section 4.2. ".repeat(
+  outputTokensMax
+);
+
 describe("the most a question can cost", () => {
   it("covers what both answers and both verdicts send and get back", () => {
     const short = questions.filter(
@@ -132,14 +148,20 @@ describe("the most a question can cost", () => {
       const passage = answeringPassageOf(sources, question);
       const most = questionTokensMax(question, everything.tokens, passage);
       // What the run sends at most: both answers with their contexts (the
-      // pack at its budget), both verdicts with the passage and an answer
-      // at its limit.
+      // pack at its budget), and both verdicts, each with the passage and
+      // the longest answer a model gives, as the judge reads it.
+      const verdict =
+        tokensOf(judgeSystem) +
+        tokensOf(
+          judgeInput(question.question, passage, judgedAnswerOf(longest))
+        );
       const sent =
         tokensOf(answerSystem) +
         tokensOf(answerInput(question.question, everything.text)) +
         tokensOf(answerSystem) +
         tokensOf(answerInput(question.question, "")) +
-        packTokens;
+        packTokens +
+        2 * verdict;
       return most.input >= sent && most.output === 4 * outputTokensMax
         ? []
         : [question.id];
@@ -163,6 +185,49 @@ describe("the most a question can cost", () => {
     });
 
     expect(wrong).toStrictEqual([]);
+  });
+});
+
+/** The cut `value` says, or "refused". */
+const capRead = (value: string | undefined): number | null | "refused" => {
+  try {
+    return everythingCapOf(value);
+  } catch {
+    return "refused";
+  }
+};
+
+describe("what a run is given", () => {
+  it('refuses an "everything" with no room in it, rather than sending none', () => {
+    expect(() => everythingFor(sources, "eva", 0)).toThrow(
+      /leaves no room for it/u
+    );
+  });
+
+  it("reads the cut below the window one way: unset for the window, else a whole number above 0", () => {
+    expect(
+      [undefined, "", "5000", "0", "-1", "1.5", "lots"].map(capRead)
+    ).toStrictEqual([
+      null,
+      null,
+      5000,
+      "refused",
+      "refused",
+      "refused",
+      "refused",
+    ]);
+  });
+
+  it("refuses, before a run, a model of the catalog no run can reach", () => {
+    expect({
+      openai: realProviderTakes("openai/gpt-4"),
+      anthropic: realProviderTakes("anthropic/claude-sonnet-5"),
+      said: unreachableModel("openai/gpt-4"),
+    }).toStrictEqual({
+      openai: false,
+      anthropic: true,
+      said: "A run reaches Anthropic, Mistral and OpenRouter models of the gateway's catalog, not openai/gpt-4",
+    });
   });
 });
 
@@ -258,7 +323,7 @@ describe("scoring the run", () => {
 
     const text = modelReport(
       summarizeModelRun([leaked, result("q", true, true)], price),
-      { asked: 2, stoppedAtBudget: true, spentUsd: 0.5 },
+      { asked: 2, stoppedAtBudget: true, failed: false, spentUsd: 0.5 },
       10
     );
 
@@ -267,5 +332,20 @@ describe("scoring the run", () => {
       stopped: text.includes("STOPPED AT THE BUDGET after 2 of 10 questions"),
       secret: text.includes("the secret salary"),
     }).toStrictEqual({ leak: true, stopped: true, secret: false });
+  });
+
+  it("reports a run a failed call stopped, with the results asked before it", () => {
+    const text = modelReport(
+      summarizeModelRun([result("q", true, false)], price),
+      { asked: 1, stoppedAtBudget: false, failed: true, spentUsd: 0.1 },
+      10
+    );
+
+    expect({
+      failed: text.includes(
+        "FAILED after 1 of 10 questions: a call failed (see the run's output). The results above are those asked before it."
+      ),
+      counted: /^All answerable\s+1\s/mu.test(text),
+    }).toStrictEqual({ failed: true, counted: true });
   });
 });
