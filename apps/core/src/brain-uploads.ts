@@ -33,11 +33,8 @@ import { uploadSource } from "./brain-next-origins.ts";
 import { addSource, eraseSource } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
 import { brainUploads } from "./db/core/schema.ts";
-import {
-  ExtractorUnavailableError,
-  localExtractor,
-} from "./knowledge/extract.ts";
-import { hasText, signatures } from "./knowledge/upload-checks.ts";
+import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
+import { hasText, signatures } from "./files/upload-checks.ts";
 
 // Files a person uploads straight into the Brain, on Brain › Sources
 // (GRA-1824; its threat model is on the issue). The uploader chooses who
@@ -223,6 +220,8 @@ const textOf = async (
     if (error instanceof ExtractorUnavailableError) {
       throw brainUploadErrors.create("brain.upload_busy");
     }
+    // The extractor (files/extract.ts) still says text too large with
+    // Knowledge's error code; it is the upload's too large here.
     if (knowledgeErrors.codeOf(error) === "knowledge.too_large") {
       throw uploadErrors.create("upload.too_large", {
         bytes: file.bytes.byteLength,
