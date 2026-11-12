@@ -1579,18 +1579,24 @@ export interface Memory {
  * Where a page of `readMemories` ended: the moment the first page was
  * read (`at`: its `asOf`, or then) and the moment what the store learned
  * was read at (`learned`: the earlier of that and the moment the read was
- * given), at which every later page is read too; and its last
+ * given; store-produced, passed back untouched, and never after `at`), at
+ * which every later page is read too; and its last
  * memory's place in the order (its attribute, whether the reader saw it
  * confirmed, when it was learned, its id). The next page starts after it.
  */
-export const memoriesCursorSchema = z.strictObject({
-  at: z.date(),
-  learned: z.date(),
-  attribute: wellFormedString().min(1).max(64).nullable(),
-  confirmed: z.boolean(),
-  learnedAt: z.date(),
-  memory: memoryIdSchema,
-});
+export const memoriesCursorSchema = z
+  .strictObject({
+    at: z.date(),
+    learned: z.date(),
+    attribute: wellFormedString().min(1).max(64).nullable(),
+    confirmed: z.boolean(),
+    learnedAt: z.date(),
+    memory: memoryIdSchema,
+  })
+  .refine(({ at, learned }) => learned.getTime() <= at.getTime(), {
+    message: "Learned after the moment it reads at",
+    path: ["learned"],
+  });
 export type MemoriesCursor = z.infer<typeof memoriesCursorSchema>;
 
 /**

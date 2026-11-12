@@ -1740,7 +1740,7 @@ describe("pages, attributes, and a retired newer memory", () => {
     });
   });
 
-  it("pages memories, contested facts and entities on their own order, one page after another", async () => {
+  it("pages memories, contested facts and entities on their own order, one page after another, nothing skipped or repeated", async () => {
     const group = unique("g");
     const reader = readerOf(unique("r"), group);
     const statements = Array.from({ length: 5 }, (_, index) => `Note ${index}`);
@@ -2964,11 +2964,20 @@ describe("pages while who may read a source changes (contract v11)", () => {
       [status(unique("w1"), "A")]
     );
     const entity = made.entities.c ?? "";
+    // B, then C in an add of its own: C is learned later, so it ranks
+    // before B.
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [status(unique("w2"), "B")],
+      shared(),
+      crypto.randomUUID(),
+      reader
+    );
     await remember(
       audience(group),
       [customer({ id: entity })],
       [
-        status(unique("w2"), "B"),
         fact(
           { kind: "source", ...first, quote: "C" },
           { attribute: "status", value: "C", statement: "C" }
@@ -2998,12 +3007,10 @@ describe("pages while who may read a source changes (contract v11)", () => {
       ({ next } = later);
     }
 
-    expect({
-      distinct: [...new Set(seen)].toSorted((a, b) => a.localeCompare(b)),
-      everyReadable: seen.every((statement) =>
-        ["A", "B", "C"].includes(statement)
-      ),
-    }).toStrictEqual({ distinct: ["A", "B", "C"], everyReadable: true });
+    // C, hidden on the first page, is back on the later ones; A comes
+    // again after it, as the confirmation over B alone no longer counts
+    // once C, which it was not made over, contests it.
+    expect(seen).toStrictEqual(["A", "C", "B", "A"]);
   });
 
   it("may skip a memory on a later page once a source's readers narrow between pages, and never returns what the reader may not read", async () => {
@@ -3061,12 +3068,42 @@ describe("pages while who may read a source changes (contract v11)", () => {
     }
     const after = await shared().readMemories({ entity, reader });
 
-    // On a page after the narrowing, C is never returned.
+    // C on the first page; after the narrowing, A (confirmed once C no
+    // longer contests it) moves ahead of the cursor and is skipped.
     expect({
-      laterPages: seen.slice(page.memories.length).includes("C"),
+      pages: seen,
       freshRead: after.memories
         .map(({ statement }) => statement)
         .toSorted((a, b) => a.localeCompare(b)),
-    }).toStrictEqual({ laterPages: false, freshRead: ["A", "B"] });
+    }).toStrictEqual({ pages: ["C", "B"], freshRead: ["A", "B"] });
+  });
+});
+
+describe("a readMemories cursor as the store gave it", () => {
+  it("refuses a cursor whose learned moment is after the moment it reads at", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [status(unique("w1"), "A"), status(unique("w2"), "B")]
+    );
+    const entity = made.entities.c ?? "";
+    const { next } = await shared().readMemories({ entity, reader, limit: 1 });
+    const forged =
+      next === undefined
+        ? undefined
+        : { ...next, learned: new Date(next.at.getTime() + 86_400_000) };
+
+    await expect(
+      called(
+        shared().readMemories({
+          entity,
+          reader,
+          limit: 1,
+          ...(forged === undefined ? {} : { after: forged }),
+        })
+      )
+    ).rejects.toThrow("Learned after the moment it reads at");
   });
 });

@@ -865,7 +865,8 @@ export interface MemoryFound extends Memory {
  * most `limit` (`recallLimit` by default). For recall's words way: each
  * memory is scored on its own words alone, never on how often a word is
  * in what the reader may not read. Synchronous, so it reads the same
- * snapshot as the rest of a recall.
+ * snapshot as the rest of a recall. It takes one moment, `at`: what the
+ * store learned and the dates a fact is true are judged at the same one.
  */
 export const memoriesByWords = (
   sql: SqlStorage,
