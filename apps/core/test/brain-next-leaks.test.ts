@@ -762,7 +762,7 @@ describe(
           reader: { person: holder, groups: [`team:${secretTeam}`] },
           name,
         });
-        holderReads.push(found.length);
+        holderReads.push(found.entities.length);
       }
       const prompts = provider.requests.map(({ body }) =>
         all.filter((marker) => JSON.stringify(body).includes(marker))

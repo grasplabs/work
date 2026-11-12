@@ -65,7 +65,10 @@ describe("extracting memories through core", () => {
 
     await tick();
     const reader = { person: crypto.randomUUID(), groups: [`team:${teamId}`] };
-    const [entity] = await store().findEntities({ reader, name });
+    // One entity, one memory: a first page holds them whole.
+    const {
+      entities: [entity],
+    } = await store().findEntities({ reader, name });
     const { memories } =
       entity === undefined
         ? { memories: [] }

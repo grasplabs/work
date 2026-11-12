@@ -9,7 +9,11 @@ import type {
   Access,
   AskModel,
   Embedders,
+  EntitiesCursor,
+  Entity,
   Extract,
+  Memory,
+  MemoriesCursor,
   ModelRequest,
   Reader,
 } from "@grasp-os/brain-next/contract";
@@ -159,15 +163,52 @@ const answering =
     });
   };
 
+/** Every entity named `name` `reader` may see, page after page. */
+const entitiesNamed = async (reader: Reader, name: string) => {
+  const all: Entity[] = [];
+  let after: EntitiesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- page after page
+    const page = await shared().findEntities({
+      reader,
+      name,
+      ...(after === undefined ? {} : { after }),
+    });
+    all.push(...page.entities);
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return all;
+};
+
+/** Every memory about `entity` `reader` may read, ended ones too with `history`, page after page. */
+const memoriesAbout = async (
+  entity: string,
+  reader: Reader,
+  history = false
+): Promise<Memory[]> => {
+  const all: Memory[] = [];
+  let after: MemoriesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- page after page
+    const page = await shared().readMemories({
+      entity,
+      reader,
+      history,
+      ...(after === undefined ? {} : { after }),
+    });
+    all.push(...page.memories);
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return all;
+};
+
 /** What `reader` reads of the entities named `name`: each memory's gist. */
 const readAs = async (reader: Reader, name: string) => {
-  const entities = await shared().findEntities({ reader, name });
+  const entities = await entitiesNamed(reader, name);
   const read = await Promise.all(
-    entities.map(
-      async ({ id }) => await shared().readMemories({ entity: id, reader })
-    )
+    entities.map(async ({ id }) => await memoriesAbout(id, reader))
   );
-  return read.flatMap(({ memories }) =>
+  return read.flatMap((memories) =>
     memories.map(
       ({
         attribute,
@@ -538,16 +579,10 @@ describe("extracting memories", () => {
       source,
     });
     await tick();
-    const [entity] = await shared().findEntities({ reader, name });
+    const [entity] = await entitiesNamed(reader, name);
     const now = await readAs(reader, name);
-    const { memories: history } =
-      entity === undefined
-        ? { memories: [] }
-        : await shared().readMemories({
-            entity: entity.id,
-            reader,
-            history: true,
-          });
+    const history =
+      entity === undefined ? [] : await memoriesAbout(entity.id, reader, true);
 
     expect({
       before: before.map(({ value }) => value),
@@ -900,7 +935,7 @@ describe("extracting memories", () => {
     );
     await tick();
     const reader = { person: unique("p"), groups: [group] };
-    const [entity] = await shared().findEntities({ reader, name });
+    const [entity] = await entitiesNamed(reader, name);
 
     expect(entity?.identifiers).toStrictEqual([
       { type: "email", value: `Ann@${domain}` },
