@@ -177,7 +177,7 @@ describe("a person's memories", () => {
         { kind: "agent", agent: `app:${crypto.randomUUID()}` },
         preference
       )
-    ).rejects.toThrow(/preference or instruction/u);
+    ).rejects.toThrow(/instruction or preference/u);
     const { memory } = await rememberAs(env, anna, own, preference);
     expect(memory).toMatch(/^[0-9a-f-]{36}$/u);
   });
@@ -205,7 +205,8 @@ describe("a person's memories", () => {
     expect({ byOthers, before, byHer, after: await current() }).toStrictEqual({
       byOthers: ["nothing", "nothing"],
       before: 1,
-      byHer: ["done", "nothing"],
+      // A retried forget never reads as not found.
+      byHer: ["done", "done"],
       after: 0,
     });
   });

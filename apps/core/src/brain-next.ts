@@ -1251,9 +1251,11 @@ const forgottenSchema = z.strictObject({
 
 /**
  * Retires one of the memories `word` saved for the member `personId`
- * (`rememberAs`): it stops being current, and stays as history. `nothing`
- * alike when there is no such memory, when another writer's it is, and
- * when it was no longer current as they see it. Refused once they are no longer a member.
+ * (`rememberAs`): it stops being current, and stays as history; `done`
+ * again for one they retired before, so a retry never reads as not found.
+ * `nothing` alike when there is no such memory, when another writer's it
+ * is, and when it ended otherwise as they see it (replaced, or past its
+ * `validUntil`). Refused once they are no longer a member.
  */
 export const forgetAs = async (
   env: BrainEnv & Pick<Env, "DB">,

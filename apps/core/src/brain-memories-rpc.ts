@@ -12,8 +12,8 @@ import type { SessionCheck } from "./session-check.ts";
 // The memories the agent saved for a person in their own chats, over
 // `/rpc` (`session.brainMemories`): the chat's notice undoes one here.
 // Each call acts as the signed-in person, in their own word, on their own
-// store alone (brain-memories.ts): a memory of anyone else's, or one no
-// longer current, answers `nothing`, as one that doesn't exist. Like the
+// store alone (brain-memories.ts): a memory of anyone else's answers
+// `nothing`, as one that doesn't exist; one they undid before, `done`. Like the
 // rest of the workspace it refuses a Grasp staff session.
 
 export class BrainMemoriesRpc

@@ -18,7 +18,10 @@ export const chatSavedMemorySchema = z.strictObject({
 });
 export type ChatSavedMemory = z.infer<typeof chatSavedMemorySchema>;
 
-/** What undoing a saved memory did: `nothing` alike for none, another's, or one undone before. */
+/**
+ * What undoing a saved memory did: `done`, also for one undone before;
+ * `nothing` alike for none, another's, or one that ended otherwise.
+ */
 export type BrainMemoryOutcome = "done" | "nothing";
 
 /** The person's own memories, over `/rpc` as `session.brainMemories`. */

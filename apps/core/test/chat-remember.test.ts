@@ -127,7 +127,7 @@ describe("the agent remembering in a person's own chat", () => {
         ],
         othersFind: [],
         undoneByOther: "nothing",
-        undone: ["done", "nothing"],
+        undone: ["done", "done"],
         after: [],
       });
     }
