@@ -390,6 +390,9 @@ describe("HTTP connections", () => {
     };
     const result = await callAs(app, call);
     const answered: unknown = JSON.parse(result.output);
+    // An answer names no item of its own: core keeps none of it in the
+    // Brain (`ConnectResult.keep`).
+    const { keep } = result;
     await callAs(app, {
       connectionId,
       action: "get",
@@ -435,8 +438,11 @@ describe("HTTP connections", () => {
       httpBytes: JSON.stringify({ method: "GET", invoices: [{ id: "inv-1" }] })
         .length,
     });
-    // The bytes as they came, not as many as their text takes.
-    expect(notText?.detail.httpBytes).toBe(3);
+    // The bytes as they came, and none of it for the Brain to keep.
+    expect({ bytes: notText?.detail.httpBytes, keep }).toStrictEqual({
+      bytes: 3,
+      keep: undefined,
+    });
     // Neither the credential nor the query is audited.
     expect(
       [secret, "status=open"].filter((text) => allText(recorded).includes(text))

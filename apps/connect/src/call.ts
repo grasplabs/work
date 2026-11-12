@@ -647,23 +647,22 @@ const requireAllowedEffect = (
 };
 
 /**
- * Whether core may keep what a read answered as a source in the Brain
- * (`ConnectResult.keep`): never from a toolkit whose provider's terms
- * forbid copies; by the items it names when its server named any, else
- * as an answer of its own (`withProvenance` names it by its tool alone).
+ * Whether core may keep what a read answered as sources in the Brain
+ * (`ConnectResult.keep`): only when its server named the items it read
+ * (a name `withProvenance` makes up from the tool is no item), and never
+ * from a toolkit whose provider's terms forbid copies.
  */
 const keepOf = (
   connection: Pick<Connection, "serverKind" | "provider">,
   answered: McpToolResult
-): ConnectResult["keep"] => {
-  if (
+): ConnectResult["keep"] =>
+  answered.provenance.length > 0 &&
+  !(
     connection.serverKind === "composio" &&
     toolkitsWithoutCopies.has(connection.provider)
-  ) {
-    return undefined;
-  }
-  return answered.provenance.length > 0 ? "item" : "answer";
-};
+  )
+    ? true
+    : undefined;
 
 /** One call of a read, its answer as the tool gave it. */
 const readOnce = async (

@@ -402,10 +402,11 @@ describe(
         { kind: "owner", personId: holder },
         {
           producer: "capture",
-          id: await captureIdOf(captureConnection, holder, {
-            kind: "item",
-            items: [`quote-${captureMarker}`],
-          }),
+          id: await captureIdOf(
+            captureConnection,
+            holder,
+            `quote-${captureMarker}`
+          ),
         }
       );
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;

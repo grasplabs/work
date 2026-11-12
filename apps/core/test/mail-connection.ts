@@ -65,7 +65,8 @@ const agentMayUse = async (connectionId: string): Promise<void> => {
 };
 
 /**
- * A shared mail connection in connect's registry, as a Composio toolkit's,
+ * A mail connection in connect's registry, shared unless `owner` is
+ * given, as a Composio toolkit's,
  * allowing `tools`, to a mail server of its own that answers its next
  * calls as `plan` says (then sends mail), and tells what it did. The
  * chat's agent may use it (`agentMayUse`).
@@ -73,17 +74,33 @@ const agentMayUse = async (connectionId: string): Promise<void> => {
 export const mailConnection = async (
   plan: MailAnswer[] = [],
   tools: unknown[] = ["mail.send"],
-  /** The toolkit it is of, as connect's review classes it. */
-  provider = "mail"
+  {
+    provider = "mail",
+    owner,
+  }: {
+    /** The toolkit it is of, as connect's review classes it. */
+    provider?: string;
+    /** The person whose own connection it is: none for a shared one. */
+    owner?: string;
+  } = {}
 ) => {
   const name = `mail-${crypto.randomUUID()}`;
   const id = `connection-${name}`;
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, ?, 'shared', 'active', 'composio', ?, ?, ?, ?)"
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'composio', ?, ?, ?, ?)"
     )
-    .bind(id, provider, mailServerUrl(name), JSON.stringify(tools), now, now)
+    .bind(
+      id,
+      provider,
+      owner === undefined ? "shared" : "personal",
+      owner ?? null,
+      mailServerUrl(name),
+      JSON.stringify(tools),
+      now,
+      now
+    )
     .run();
   await agentMayUse(id);
   await providers().fetch(mailControlUrl(name), {

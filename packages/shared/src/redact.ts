@@ -10,17 +10,20 @@
  * Google API keys (`AIza`); JSON Web Tokens; PEM private keys, an
  * unfinished block to the end of the text; AWS access key IDs; and the
  * whole value of an `api_key`, `apikey`, `token`, `secret`, `password`,
- * `passwd` or `authorization`, or of a name ending in one
- * (`access_token`, `client_secret`), written as `name=value` or
+ * `passwd`, `authorization`, `session` (`sessionId`, `JSESSIONID`) or
+ * `cookie`, or of a name ending in one (`access_token`, `client_secret`), written as `name=value` or
  * `name: value`: quoted, to its closing quote (or the end of the line),
  * spaces included; unquoted, to the next space or separator, with a
  * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
- * caught the same way, to the escaped closing quote. Anything else
+ * caught the same way, to the escaped closing quote. And a URL's
+ * signature (`X-Amz-Signature`, `X-Goog-Signature`, an Azure SAS's `sig`)
+ * and an OAuth redirect's `code`, as query parameters. Anything else
  * shaped like a secret is not caught: this is a net for what an outside
  * system's data may carry, not a guarantee (a run holds no secret of its
- * own). Applied to what streams to the chat, to what the model reads and
- * to a tool's error connect logs, over the whole text, so a credential
+ * own). Applied to what streams to the chat, to what the model reads, to
+ * what the Brain keeps of a connection's reads and to a tool's error
+ * connect logs, over the whole text, so a credential
  * split across lines is caught.
  */
 /**
@@ -72,8 +75,16 @@ const credentials: readonly (readonly [
   // linear. A name's prefix (`access_`) is word characters only, so a
   // match starts once per word, not at every "-" of a flood.
   [
-    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
     redactedAssignment,
+  ],
+  // A URL's query parameters that sign or grant it, by name alone: a
+  // signed URL's signature (S3's, Google Cloud Storage's, an Azure SAS's
+  // `sig`) and an OAuth redirect's `code`. Only as a parameter, after `?`
+  // or `&`: a field merely named for a code (`statusCode`) is no credential.
+  [
+    /(?<=[?&])(?<param>x-amz-signature|x-goog-signature|sig|code)=[^&#\s"']+/giu,
+    "$<param>=[redacted]",
   ],
 ];
 
