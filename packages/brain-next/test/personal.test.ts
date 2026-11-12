@@ -1445,4 +1445,158 @@ describe("a person's own store's alarm", () => {
     await own().repackVectors();
     await expect(alarmOf(own())).resolves.not.toBeNull();
   });
+
+  // A call that did what it was asked but couldn't set the alarm says so in
+  // its own words, never the storage's; repeating it is safe.
+  it("answers that it did it but couldn't schedule what is left, and a repeat answers the same version", async () => {
+    await runInDurableObject(own(), (_instance, state) => {
+      Reflect.set(state.storage, "setAlarm", async () => {
+        await Promise.resolve();
+        throw new Error("Broken by the test: SQLITE_ERROR in the bucket");
+      });
+    });
+    const adding = {
+      source: "test:unscheduled",
+      change: "1",
+      text: "Left to embed",
+      access: theirs(),
+    };
+    let answer = "";
+    try {
+      await own().addSource(adding);
+      answer = "added";
+    } catch (error) {
+      answer = String(error).replace(/^Error: /u, "");
+    }
+    await kill(own());
+
+    expect({ answer, again: await own().addSource(adding) }).toStrictEqual({
+      answer:
+        "The Brain did it but couldn't schedule what it left to finish: try again",
+      again: { source: adding.source, version: 1 },
+    });
+  });
+});
+
+/** Puts the same `vector` for the first chunk of each of `sources`' first versions. */
+const putTied = async (
+  store: Store,
+  sources: readonly string[],
+  vector: number[]
+): Promise<void> => {
+  await store.putVectors({
+    model: { name: splitModelName, centre: splitCentre },
+    vectors: sources.map((source) => ({
+      chunk: { source, version: 1, position: 0 },
+      vector,
+    })),
+  });
+};
+
+/**
+ * Every version of `sources` in `store` added at `at`, as within one
+ * millisecond: no two adds can be made to land in one here. Versions are
+ * never updated (a trigger refuses it), so the trigger is lifted for this
+ * one statement and put back as it was.
+ */
+const addedAtOnce = async (
+  store: Store,
+  sources: readonly string[],
+  at: number
+): Promise<void> => {
+  await runInDurableObject(store, (_instance, state) => {
+    const { sql } = state.storage;
+    state.storage.transactionSync(() => {
+      const triggers = sql
+        .exec<{ name: string; sql: string }>(
+          `SELECT name, sql FROM sqlite_master
+          WHERE type = 'trigger' AND tbl_name = 'source_versions'
+            AND sql LIKE '%BEFORE UPDATE%'`
+        )
+        .toArray();
+      for (const { name } of triggers) {
+        sql.exec(`DROP TRIGGER "${name}"`);
+      }
+      sql.exec(
+        `UPDATE source_versions SET added_at = ?1
+        WHERE source IN (SELECT value FROM json_each(?2))`,
+        at,
+        JSON.stringify(sources)
+      );
+      for (const { sql: created } of triggers) {
+        sql.exec(created);
+      }
+    });
+  });
+};
+
+describe("recall by meaning across stores", () => {
+  beforeEach(() => {
+    person = `person-${crypto.randomUUID()}`;
+  });
+
+  // More passages tied by meaning than recall keeps, added within one
+  // millisecond in the reverse of their sources' order: which are kept
+  // is decided by the tie order alone, in one store as across two.
+  it("keeps the same tied passages in one store as across two", async () => {
+    const count = 14;
+    const names = Array.from(
+      { length: count },
+      (_, index) => `z${String(count - 1 - index).padStart(2, "0")}`
+    );
+    const one = { person: `one-${person}`, groups: [`one-${person}`] };
+    const two = { person, groups: [`two-${person}`] };
+    const vector = [1, 0, 0, 0, 0, 0, 0, 0];
+    for (const [index, name] of names.entries()) {
+      const text = `Passage ${name} of the tied set`;
+      // oxlint-disable-next-line no-await-in-loop -- in order: rows follow it
+      await shared().addSource({
+        source: `a:${name}`,
+        change: "1",
+        text,
+        access: { kind: "audience", group: one.groups[0] ?? "" },
+      });
+      // oxlint-disable-next-line no-await-in-loop -- in order: rows follow it
+      await (index % 2 === 0 ? own() : shared()).addSource({
+        source: `b:${name}`,
+        change: "1",
+        text,
+        access:
+          index % 2 === 0
+            ? theirs()
+            : { kind: "audience", group: two.groups[0] ?? "" },
+      });
+    }
+    const ofOne = names.map((name) => `a:${name}`);
+    const ofTwo = names.map((name) => `b:${name}`);
+    const ownSources = ofTwo.filter((_, index) => index % 2 === 0);
+    const sharedSources = ofTwo.filter((_, index) => index % 2 === 1);
+    const at = Date.now();
+    await putTied(shared(), [...ofOne, ...sharedSources], vector);
+    await putTied(own(), ownSources, vector);
+    await addedAtOnce(shared(), [...ofOne, ...sharedSources], at);
+    await addedAtOnce(own(), ownSources, at);
+
+    const asking = {
+      question: "elephant",
+      budget: whole,
+      meaning: { model: splitModel, vector },
+    };
+    const single = await called(shared().recall({ ...asking, reader: one }));
+    const split = packAcross(asking.question, asking.budget.tokens, [
+      await called(shared().find({ ...asking, reader: two })),
+      await called(own().find({ ...asking, reader: two })),
+    ]);
+    expect({
+      ...split,
+      items: split.items.map((item) => ({
+        ...item,
+        source: item.source.replace(/^b:/u, "a:"),
+      })),
+    }).toStrictEqual(single);
+    // The first by their sources, not the first added.
+    expect(single.items.map(({ source }) => source)).toStrictEqual(
+      ofOne.toSorted().slice(0, single.items.length)
+    );
+  });
 });
