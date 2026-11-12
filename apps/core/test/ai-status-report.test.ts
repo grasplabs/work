@@ -66,12 +66,12 @@ const ask = async (
   });
 };
 
-/** What a line of `characters` costs at Eleven v4's $0.08 per 1,000: 80 micros each. */
-const lineMicros = (characters: number): number => characters * 80;
+/** What a line of `characters` costs at Voxtral TTS 3's $13 a million: 13 micros each. */
+const lineMicros = (characters: number): number => characters * 13;
 
-/** What GPT-4o Transcribe costs for `seconds`, at $0.60 an hour, in micros. */
+/** What Voxtral Mini Transcribe 3 costs for `seconds`, at $0.21 an hour, in micros. */
 const heardMicros = (seconds: number): number =>
-  Math.round(((seconds * 0.6) / 3600) * 1e6);
+  Math.round(((seconds * 0.21) / 3600) * 1e6);
 
 /** The UTC month `monthsBack` before this one, such as `2026-09`. */
 const monthBack = (monthsBack: number): string => {
@@ -100,14 +100,14 @@ const said = async (month: string): Promise<number> => {
     purpose: "onboarding.speech",
     trigger: newPerson(),
     work: { onboarding: true },
-  }).speak({ text, voice: "s3TPKV1kjDlVtZbl4Ksh", language: "en" });
+  }).speak({ text, voice: "voice_3150", language: "en" });
   return lineMicros(text.length);
 };
 
 /** `seconds` of a recording heard in `month`, on Grasp's key. */
 const heard = async (month: string, seconds: number): Promise<void> => {
   const listening = await models(inMonth(month)).listen({
-    model: "openai/gpt-4o-transcribe",
+    model: "mistral/voxtral-mini-transcribe-3-0",
     seconds,
     openMs: 60_000,
     purpose: "onboarding.hear",
@@ -284,12 +284,12 @@ describe("the organization's AI, for the admin", () => {
         rows: [
           {
             feature: "speech",
-            model: "elevenlabs/eleven_v4",
+            model: "mistral/voxtral-mini-tts-3-0",
             micros: spoken,
           },
           {
             feature: "transcription",
-            model: "openai/gpt-4o-transcribe",
+            model: "mistral/voxtral-mini-transcribe-3-0",
             micros: heardMicros(30),
           },
         ],
@@ -300,7 +300,7 @@ describe("the organization's AI, for the admin", () => {
         rows: [
           {
             feature: "speech",
-            model: "elevenlabs/eleven_v4",
+            model: "mistral/voxtral-mini-tts-3-0",
             micros: spokenBefore,
           },
         ],

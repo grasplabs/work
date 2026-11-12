@@ -121,8 +121,8 @@ describe("an organization's AI use and hours", () => {
       shares: [has(">63%<"), has(">25%<"), has(">13%<")],
       prices: [
         has("€5 a million tokens read, €25 written"),
-        has("€0.15 a minute"),
-        has("€0.006 a minute"),
+        has("€0.012 a minute"),
+        has("€0.008 a minute"),
         has("Other models (not priced)"),
         has("No price: its tokens count, its cost doesn’t"),
       ],

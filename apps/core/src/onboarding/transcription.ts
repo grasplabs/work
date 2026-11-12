@@ -39,8 +39,8 @@ import type { Took } from "./store.ts";
 // its microphone to its own origin over a WebSocket, as `connect-src
 // 'self'` allows and nothing else; core relays it to live transcription
 // behind its interface (src/transcription.ts), which reaches the provider
-// fixed in src/platform-ai.ts, OpenAI's realtime transcription at its EU
-// host, through connect with Grasp's own key.
+// fixed in src/platform-ai.ts, Mistral's realtime transcription, in the
+// EU, through connect with Grasp's own key.
 // No provider token or host ever reaches the browser (GRA-361, A2).
 //
 // The socket's protocol, one session per socket:
@@ -117,8 +117,11 @@ export const maxOpenMs = 2 * maxSessionSeconds * 1000;
  */
 export const heardBudgets = { link: 60 * 60, admin: 30 * 60 } as const;
 
-/** The transcription model sockets and recordings are written down with, as the gateway names it. */
+/** The transcription model sockets hear with, as the gateway names it. */
 export const transcriptionModel = `${platformAi.transcription.provider}/${platformAi.transcription.model}`;
+
+/** The transcription model recordings are written down with (hear.ts). */
+export const recordedTranscriptionModel = `${platformAi.transcription.provider}/${platformAi.transcription.recordedModel}`;
 
 /** What the gateway is told every socket is for. */
 const purpose = "onboarding.transcription";

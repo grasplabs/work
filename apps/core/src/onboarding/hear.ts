@@ -18,7 +18,7 @@ import type { Listening } from "../models.ts";
 import { boundedBytes } from "../request-body.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
-import { heardBudgets, transcriptionModel } from "./transcription.ts";
+import { heardBudgets, recordedTranscriptionModel } from "./transcription.ts";
 
 // `POST /api/interview/hear` (`@grasp-os/shared/interview-hear`): a
 // stretch of what someone said on their interview link, written down from
@@ -27,9 +27,9 @@ import { heardBudgets, transcriptionModel } from "./transcription.ts";
 // Ported from the prototype (grasplabs/prototype, packages/grasp:
 // worker/interview.ts, `hear`).
 //
-// Written down by Grasp's transcription model (src/platform-ai.ts), the
-// one live transcription takes, through connect with Grasp's own key: core sends
-// none. Only once the model gateway admitted it (models.ts,
+// Written down by Grasp's transcription model for recordings
+// (src/platform-ai.ts), Mistral's as the live line's is, through connect
+// with Grasp's own key: core sends none. Only once the model gateway admitted it (models.ts,
 // `models(env).listen`): the rules judge it, and the deployment's budgets
 // hold its seconds, before anything is sent; the way to the upstream is
 // the one its admission hands over. The words to listen out for are the
@@ -65,11 +65,10 @@ const gatewayRefusals: Partial<Record<string, readonly [number, HearCode]>> = {
 };
 
 /**
- * The file name a recording goes to the provider under, by its media type:
- * OpenAI tells the audio's format by the name's extension alone, and
- * refuses a file without one it takes (flac, m4a, mp3, mp4, mpeg, mpga,
- * oga, ogg, wav, webm). What browsers record: WebM or Ogg with Opus
- * (Chrome, Firefox), MP4/M4A with AAC (Safari), WAV.
+ * The file name a recording goes to the provider under, by its media
+ * type, so its extension says the audio's format whatever the provider
+ * reads it from. What browsers record: WebM or Ogg with Opus (Chrome,
+ * Firefox), MP4/M4A with AAC (Safari), WAV.
  */
 const recordingExtensions: Readonly<Record<string, string>> = {
   "audio/webm": "webm",
@@ -162,9 +161,9 @@ const writtenDown = async (
   const sent = new FormData();
   sent.set("model", listening.modelId);
   sent.set("language", asked.locale);
-  sent.set("response_format", "json");
-  if (keyterms.length > 0) {
-    sent.set("prompt", `Names and terms: ${keyterms.join(", ")}.`);
+  // Names and terms to listen out for, one field each, as Mistral takes them.
+  for (const term of keyterms) {
+    sent.append("context_bias", term);
   }
   sent.set("file", asked.audio, asked.name);
   let answer: Response;
@@ -207,7 +206,7 @@ const admitted = async (
 ): Promise<Listening | Response> => {
   try {
     return await models(env).listen({
-      model: transcriptionModel,
+      model: recordedTranscriptionModel,
       seconds,
       // Admitted within half of it at most, written down in the rest.
       openMs: 2 * hearTimeoutMs,

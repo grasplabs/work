@@ -7,7 +7,7 @@
 //
 // Each goes to the provider and model the platform's settings name
 // (@grasp-os/shared/platform-ai), with Grasp's own key, which connect
-// holds: ElevenLabs says lines, OpenAI writes down what is heard.
+// holds: Mistral's Voxtral says lines and writes down what is heard.
 //
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
@@ -40,7 +40,10 @@ export interface SpeechRequest {
   model?: string;
 }
 
-/** A word of a line, and when it is said, in ms from the start of the audio. */
+/**
+ * A word of a line, and when it is said, in ms from the start of the
+ * audio: estimated where the provider times none (core's voice-models.ts).
+ */
 export interface SpokenWord {
   text: string;
   startMs: number;
@@ -50,7 +53,7 @@ export interface SpokenWord {
 /** A line as said: its audio, and when each of its words is said. */
 export interface Speech {
   audio: Uint8Array;
-  /** The audio's media type, such as `audio/mpeg`. */
+  /** The audio's media type, such as `audio/wav`. */
   mime: string;
   /** In the order they are said; punctuation stays with its word. */
   words: SpokenWord[];
@@ -139,7 +142,8 @@ export const speechRequestSchema = z.strictObject({
   speaker: z.enum(speakers).default("stephen"),
   /**
    * For a line only known as it is said, such as one with a count or a
-   * name: said by the platform's quicker speech model.
+   * name. Said as any other: the platform has one speech model. Still
+   * taken, as pages open before this release send it.
    */
   quick: z.boolean().default(false),
   /** How the line is said: one of the tones Stephen may use. */

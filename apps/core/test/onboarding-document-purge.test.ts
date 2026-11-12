@@ -24,7 +24,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keptLine } from "../src/speech-cache.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformElevenLabsKey } from "./connect-providers.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
@@ -1018,9 +1018,9 @@ const writers: Writer[] = [
       const told = fact("l1", "work", `Tickets arrive in ${word}.`);
       const link = await openLink(ids.lea);
       await agree(ids.lea, [told], link);
-      // ElevenLabs says the line once the purge has landed meanwhile.
+      // Mistral says the line once the purge has landed meanwhile.
       const held = `line-${unique()}`;
-      await planReplies(platformElevenLabsKey, [{ release: held }]);
+      await planReplies(platformMistralKey, [{ release: held }]);
       const saying = routed(speechPath, {
         method: "POST",
         headers: { "content-type": "application/json" },

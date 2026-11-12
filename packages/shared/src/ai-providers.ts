@@ -34,7 +34,8 @@ export type OrganizationProviderId = z.infer<
 
 /**
  * Every provider: an organization's, and ElevenLabs, which only Grasp's
- * own speech feature reaches, on Grasp's key (core's src/platform-ai.ts).
+ * own speech feature reached, on Grasp's key, until it went to Mistral
+ * (core's src/platform-ai.ts): no feature asks for it now.
  */
 export const aiProviderIds = [
   ...organizationProviderIds,
@@ -77,7 +78,7 @@ export interface AiProviderSpec {
   queries: readonly string[];
   /**
    * The paths below its host a realtime WebSocket may open, with the one
-   * query each takes, and nothing else: OpenAI's realtime transcription,
+   * query each takes, and nothing else: Mistral's realtime transcription,
    * for Grasp's live listening (platform features only, never an
    * organization's key). Empty for a provider with none.
    */
@@ -140,15 +141,9 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "openai-responses": "https://api.openai.com/v1",
       "openai-completions": "https://api.openai.com/v1",
     },
-    // Its audio endpoints too, for Grasp's own speech and transcription
-    // (core's src/platform-ai.ts): models, never files or an account's.
-    paths: [
-      "/v1/responses",
-      "/v1/chat/completions",
-      "/v1/audio/transcriptions",
-    ],
+    paths: ["/v1/responses", "/v1/chat/completions"],
     queries: [""],
-    realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
+    realtime: [],
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
     region: "us",
@@ -160,9 +155,21 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     id: "mistral",
     label: "Mistral AI",
     baseUrls: { "openai-completions": "https://api.mistral.ai/v1" },
-    paths: ["/v1/chat/completions"],
+    // Its audio endpoints too, for Grasp's own speech and transcription
+    // (core's src/platform-ai.ts): models, never files, saved voices or
+    // an account's.
+    paths: [
+      "/v1/chat/completions",
+      "/v1/audio/speech",
+      "/v1/audio/transcriptions",
+    ],
     queries: [""],
-    realtime: [],
+    realtime: [
+      {
+        path: "/v1/audio/transcriptions/realtime",
+        query: "?model=voxtral-mini-transcribe-realtime-3-0",
+      },
+    ],
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
     region: "eu",
@@ -202,8 +209,9 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     testModel: undefined,
     statusPage: undefined,
   },
-  // Grasp's own speech feature only, never an organization's key: a line
-  // said with when each character is said, kept by neither side.
+  // Grasp's own speech feature only, never an organization's key, until
+  // speech went to Mistral: a line said with when each character is said,
+  // kept by neither side.
   elevenlabs: {
     id: "elevenlabs",
     label: "ElevenLabs",

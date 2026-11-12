@@ -9,9 +9,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { lateMs } from "./ai-providers-fake.ts";
 import type { RealtimeSocket } from "./ai-providers-fake.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, participate } from "./interview-link.ts";
 import { spentMicros } from "./model-usage.ts";
@@ -26,11 +27,11 @@ import { routed, signedInWithRole, unique } from "./sign-in.ts";
 
 // What someone says, written down as they say it, relayed through core
 // over a WebSocket on the page's own origin (src/onboarding/
-// transcription.ts). OpenAI's realtime transcription, Grasp's own by
+// transcription.ts). Mistral's realtime transcription, Grasp's own by
 // default (@grasp-os/shared/platform-ai), reached through connect, is the
 // outside system: a fake behind connect's fetch that answers the first
-// audio of a stretch with a delta, and each commit with a transcript
-// (test/ai-providers-fake.ts). Connect, the store, the link checks and the
+// audio of a stretch with a delta, and its flush with the rest of its
+// words (test/ai-providers-fake.ts). Connect, the store, the link checks and the
 // audit log are real. The ways it can fail, tried here (GRA-361, C4 and
 // A1):
 //
@@ -58,7 +59,7 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 /** What a session answers, as far as these tests read it: the device's key. */
 const sessionKey = z.object({ key: z.string().optional() });
 
-/** The realtime sockets OpenAI's fake took while `run` ran, as they are now. */
+/** The realtime sockets Mistral's fake took while `run` ran, as they are now. */
 interface Upstream {
   opened: RealtimeSocket[];
 }
@@ -73,7 +74,7 @@ const newMonth = (): string => {
 
 /**
  * What `run` returns with model spend counted in `month`, and the
- * realtime sockets OpenAI's fake took meanwhile.
+ * realtime sockets Mistral's fake took meanwhile.
  */
 const relaying = async <T>(
   run: () => Promise<T>,
@@ -250,9 +251,9 @@ const twoSeconds = (): Uint8Array => new Uint8Array(32_000).fill(7);
 const slowStart = (link: { secret: string; key: string }) =>
   ({ type: "start", language: "en", sampleRate: 8000, link }) as const;
 
-/** What `seconds` heard cost, in micros: $0.60 an hour. */
+/** What `seconds` heard cost, in micros: $0.48 an hour. */
 const heardMicros = (seconds: number): number =>
-  Math.round(((seconds * 0.6) / 3600) * 1e6);
+  Math.round(((seconds * 0.48) / 3600) * 1e6);
 
 /** What the organization's keys spent in `month`: nothing heard counts there. */
 const deploymentSpend = async (month: string) => await spentMicros(month);
@@ -333,73 +334,60 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       page.start({
         type: "start",
         language: "nl",
-        sampleRate: 16_000,
+        sampleRate: 8000,
         link: ada,
       });
       const ready = await page.next();
-      page.socket.send(tenthOfASecond());
+      // A tenth of a second at 8 kHz.
+      page.socket.send(new Uint8Array(1600).fill(7));
       const partial = await page.next();
       page.socket.send(JSON.stringify({ type: "commit" }));
+      // The rest of the stretch's words as they come, then its final.
+      const rest = await page.next();
       const final = await page.next();
       page.socket.close(1000, "Done");
-      return { ready: ready?.type, partial, final };
+      return { ready: ready?.type, partial, rest, final };
     });
 
     const [opened] = upstream.opened;
     const session = z
       .object({
-        type: z.string(),
-        audio: z.object({
-          input: z.object({
-            format: z.unknown(),
-            transcription: z.object({
-              model: z.string(),
-              language: z.string(),
-              prompt: z.string(),
-            }),
-            turn_detection: z.unknown(),
-          }),
-        }),
+        audio_format: z.unknown(),
+        target_streaming_delay_ms: z.number(),
+        language: z.string(),
+        context_bias: z.array(z.string()),
       })
       .parse(opened?.session);
     expect({
       ...result,
       path: opened?.path,
       authorization: opened?.authorization,
-      type: session.type,
-      format: session.audio.input.format,
-      model: session.audio.input.transcription.model,
-      language: session.audio.input.transcription.language,
+      format: session.audio_format,
+      language: session.language,
       // What to listen out for is the store's: the team, and its people.
       keyterms: ["Ops", "Person"].every((term) =>
-        session.audio.input.transcription.prompt.includes(term)
+        session.context_bias.some((bias) => bias.includes(term))
       ),
-      turns: session.audio.input.turn_detection,
       events: opened?.events,
-      // A tenth of a second at 16 kHz, as 24 kHz: 2,400 samples but the one
-      // after the last, which waits for more; each as sent.
+      // A tenth of a second at 8 kHz, as 16 kHz: 1,600 samples but the
+      // last two, which wait for more; each as sent.
       audio: opened?.audioBytes,
       samples: opened?.firstSamples,
     }).toStrictEqual({
       ready: "ready",
       partial: { type: "partial", text: "Hello" },
+      rest: { type: "partial", text: "Hello there" },
       // The session times no words.
       final: { type: "final", text: "Hello there", words: [] },
-      path: "/v1/realtime?intent=transcription",
+      path: "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3-0",
       // Grasp's key, which connect added: core sent none.
-      authorization: `Bearer ${platformOpenAiKey}`,
-      type: "transcription",
-      format: { type: "audio/pcm", rate: 24_000 },
-      model: "gpt-4o-transcribe",
+      authorization: `Bearer ${platformMistralKey}`,
+      format: { encoding: "pcm_s16le", sample_rate: 16_000 },
       language: "nl",
       keyterms: true,
-      turns: { type: "server_vad" },
-      events: [
-        "session.update",
-        "input_audio_buffer.append",
-        "input_audio_buffer.commit",
-      ],
-      audio: 4798,
+      // Its settings before any audio, and a flush for the page's commit.
+      events: ["session.update", "input_audio.append", "input_audio.flush"],
+      audio: 3196,
       samples: Array.from({ length: 8 }, () => 0x07_07),
     });
     // A tenth of a second heard, counted once the socket closed.
@@ -410,7 +398,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
   });
 
-  it("answers a commit the session already settled at a pause with an empty final, in its place", async () => {
+  it("answers a commit with nothing said since the one before with an empty final, in its place", async () => {
     const { ada } = await openedTwo();
 
     const { upstream, result } = await relaying(async () => {
@@ -427,26 +415,28 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       page.socket.send(JSON.stringify({ type: "commit" }));
       // Nothing sent since: nothing to settle.
       page.socket.send(JSON.stringify({ type: "commit" }));
-      const finals = [await page.next(), await page.next()];
+      // The rest of the stretch's words, as they come, then its finals.
+      const heard = [await page.next(), await page.next(), await page.next()];
       page.socket.close(1000, "Done");
-      return finals;
+      return heard;
     });
 
     expect({
-      finals: result,
-      commits: upstream.opened[0]?.events.filter(
-        (type) => type === "input_audio_buffer.commit"
+      heard: result,
+      flushes: upstream.opened[0]?.events.filter(
+        (type) => type === "input_audio.flush"
       ).length,
     }).toStrictEqual({
-      finals: [
+      heard: [
+        { type: "partial", text: "Hello there" },
         { type: "final", text: "Hello there", words: [] },
         { type: "final", text: "", words: [] },
       ],
-      commits: 2,
+      flushes: 2,
     });
   });
 
-  it("sends one final for a stretch the session split at a pause, its first part's words written down after the page's commit", async () => {
+  it("holds a stretch's final for words the session writes down a moment after the commit, and opens the next stretch after it", async () => {
     const { ada } = await openedTwo();
 
     const { result } = await relaying(async () => {
@@ -458,36 +448,28 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         link: ada,
       });
       await page.next();
+      // From here the session writes the rest of a stretch down late.
+      await actOnRealtime({ late: true });
       page.socket.send(tenthOfASecond());
       const first = await page.next();
-      // The person pauses: the session settles what they said so far, and
-      // writes it down only after the rest.
-      await actOnRealtime({ pause: true });
-      await vi.waitFor(async () => {
-        const socket = await newestSocket();
-        expect(socket?.paused).toBe(1);
-      });
-      page.socket.send(tenthOfASecond());
-      const both = await page.next();
+      const committedAt = Date.now();
       page.socket.send(JSON.stringify({ type: "commit" }));
+      const rest = await page.next();
       const final = await page.next();
-      // Nothing said since: this commit's own final, empty.
-      page.socket.send(JSON.stringify({ type: "commit" }));
+      const waited = Date.now() - committedAt;
+      // The next stretch starts anew.
+      page.socket.send(tenthOfASecond());
       const next = await page.next();
       page.socket.close(1000, "Done");
-      return { first, both, final, next };
+      return { first, rest, final, next, held: waited >= lateMs };
     });
 
     expect(result).toStrictEqual({
       first: { type: "partial", text: "Hello" },
-      // The stretch so far: the part before the pause, then this one.
-      both: { type: "partial", text: "Hello Hello" },
-      final: {
-        type: "final",
-        text: "Before the pause Hello there",
-        words: [],
-      },
-      next: { type: "final", text: "", words: [] },
+      rest: { type: "partial", text: "Hello there" },
+      final: { type: "final", text: "Hello there", words: [] },
+      next: { type: "partial", text: "Hello" },
+      held: true,
     });
   });
 
@@ -576,6 +558,11 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       "failed",
       { upstream: 1011, page: 1011, errors: ["transcription.failed"] },
     ],
+    [
+      "the upstream says an error",
+      "errored",
+      { upstream: 1000, page: 1011, errors: ["transcription.failed"] },
+    ],
   ] as const)("closes both sides when %s", async (_, side, closes) => {
     const { ada } = await openedTwo();
 
@@ -590,6 +577,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       await page.next();
       if (side === "page") {
         page.socket.close(1000, "Done");
+      } else if (side === "errored") {
+        await actOnRealtime({ error: 500 });
       } else {
         await actOnRealtime({ close: side === "upstream" ? 1000 : 1011 });
       }
@@ -893,7 +882,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
   });
 
-  it("listens at OpenAI's EU host, where Grasp's project keeps its data", async () => {
+  it("listens at Mistral's own host, in the EU", async () => {
     const { ada } = await openedTwo();
 
     const { upstream, result } = await relaying(async () => {
@@ -915,8 +904,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       upstream.opened[0]?.path,
     ]).toStrictEqual([
       "ready",
-      "eu.api.openai.com",
-      "/v1/realtime?intent=transcription",
+      "api.mistral.ai",
+      "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3-0",
     ]);
   });
 });

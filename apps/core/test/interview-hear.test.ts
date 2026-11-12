@@ -7,14 +7,14 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { heardBudgets } from "../src/onboarding/transcription.ts";
 import { writtenText } from "./ai-providers-fake.ts";
 import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { codeOf, openedFor } from "./interview-link.ts";
 import { spentMicros } from "./model-usage.ts";
 import { carrying, keyPlaces, plan, sentCount } from "./platform-providers.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A stretch of what someone said, written down from its recording when the
-// live line can't be used (src/onboarding/hear.ts). OpenAI's transcription,
+// live line can't be used (src/onboarding/hear.ts). Mistral's transcription,
 // Grasp's own by default (@grasp-os/shared/platform-ai), is the outside
 // system: a fake behind connect's fetch that writes every recording down
 // as the same words. Connect, the store, the link checks and the counting
@@ -31,7 +31,7 @@ import { routed, unique } from "./sign-in.ts";
 /** Something no recording would hold by chance: if it shows anywhere, the recording was kept. */
 const marker = "RECORDING-MARKER-7f3a";
 
-/** A request core made of OpenAI, as far as these tests read it. */
+/** A request core made of Mistral, as far as these tests read it. */
 interface Asked {
   path: string;
   fields: Record<string, string[]>;
@@ -40,7 +40,7 @@ interface Asked {
   fileName: string;
 }
 
-/** What reached OpenAI with `audio` in it: each request's fields and file. */
+/** What reached Mistral with `audio` in it: each request's fields and file. */
 const askedWith = async (audio: string): Promise<Asked[]> => {
   const carried = await carrying(audio);
   return await Promise.all(
@@ -64,15 +64,11 @@ const askedWith = async (audio: string): Promise<Asked[]> => {
   );
 };
 
-/** The words a request listened out for, from its prompt. */
+/** The words a request listened out for: one `context_bias` field each. */
 const termsOf = (asked: Asked | undefined): string[] =>
-  (asked?.fields.prompt?.[0] ?? "")
-    .replace(/^Names and terms: /u, "")
-    .replace(/\.$/u, "")
-    .split(", ")
-    .filter((term) => term !== "");
+  asked?.fields.context_bias ?? [];
 
-/** A recording's audio no other test sends, so what reached OpenAI with it is this test's. */
+/** A recording's audio no other test sends, so what reached Mistral with it is this test's. */
 const newAudio = (): string => `${marker}-${unique()}${"x".repeat(2000)}`;
 
 let monthsUsed = 0;
@@ -99,9 +95,9 @@ const hearing = async <T>(
   }
 };
 
-/** What `seconds` heard cost, in micros: $0.60 an hour. */
+/** What `seconds` heard cost, in micros: $0.21 an hour. */
 const heardMicros = (seconds: number): number =>
-  Math.round(((seconds * 0.6) / 3600) * 1e6);
+  Math.round(((seconds * 0.21) / 3600) * 1e6);
 
 /** What the organization's keys spent in `month`: nothing heard counts there. */
 const deploymentSpend = async (month: string) => await spentMicros(month);
@@ -232,19 +228,21 @@ describe(
       }).toStrictEqual({
         result: { status: 200, body: { heard: writtenText } },
         path: "/v1/audio/transcriptions",
-        model: ["gpt-4o-transcribe"],
+        model: ["voxtral-mini-transcribe-3-0"],
         language: ["en"],
         file: audio.length,
         counted: 2.4,
         kept: false,
       });
-      // Grasp's key from connect alone, once, to OpenAI.
-      await expect(keyPlaces(audio, platformOpenAiKey)).resolves.toStrictEqual({
-        hosts: ["eu.api.openai.com"],
-        headers: ["authorization"],
-        inBody: false,
-        placeholder: false,
-      });
+      // Grasp's key from connect alone, once, to Mistral.
+      await expect(keyPlaces(audio, platformMistralKey)).resolves.toStrictEqual(
+        {
+          hosts: ["api.mistral.ai"],
+          headers: ["authorization"],
+          inBody: false,
+          placeholder: false,
+        }
+      );
     });
 
     it.each([
@@ -254,7 +252,7 @@ describe(
       ["an M4A recording", "audio/x-m4a", "stretch.m4a"],
       ["a WAV recording", "audio/wav", "stretch.wav"],
     ])(
-      "sends %s under a name whose extension OpenAI reads its format by",
+      "sends %s under a name whose extension says its format",
       async (_, type, name) => {
         const { link } = await openedFor();
         const audio = newAudio();
@@ -271,7 +269,7 @@ describe(
       }
     );
 
-    it("refuses a recording of a type OpenAI can't take, sending nothing", async () => {
+    it("refuses a recording of a type browsers don't record, sending nothing", async () => {
       const { link } = await openedFor();
       const audio = newAudio();
       const refusal = await hearing(
@@ -404,7 +402,7 @@ describe(
     it("says when the upstream failed", async () => {
       const { link } = await openedFor();
       const failed = newAudio();
-      await plan(platformOpenAiKey, [{ status: 500 }]);
+      await plan(platformMistralKey, [{ status: 500 }]);
       const failing = await hearing(
         async () => await codeOf(await hear(recording(link, { audio: failed })))
       );
@@ -439,8 +437,8 @@ describe(
       const heardEvent = {
         action: "model.call",
         actor: { type: "system" },
-        model: "gpt-4o-transcribe",
-        cost: (30 * 0.6) / 3600,
+        model: "voxtral-mini-transcribe-3-0",
+        cost: (30 * 0.21) / 3600,
         seconds: 30,
         outcome: "answered",
         reason: undefined,
