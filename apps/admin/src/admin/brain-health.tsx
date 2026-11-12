@@ -694,6 +694,87 @@ const Steps = ({ report }: { report: BrainReport }) => {
   );
 };
 
+/**
+ * People's own stores, what one person alone may read: totals across
+ * them, as each last told its core when its own upkeep ran. Never a
+ * store, never a person.
+ */
+const OwnStores = ({ report }: { report: BrainReport }) => {
+  const now = Date.parse(report.now);
+  const own = report.ownStores;
+  const description =
+    "What one person alone may read is kept in a store of their own, which runs its own upkeep. Totals across them only: never which person.";
+  if (own === undefined) {
+    // A core of an older release, on a slower channel, doesn't send them.
+    return (
+      <Section description={description} title="People's own stores">
+        <SectionRow label="Not available yet">
+          <span>
+            This client’s release doesn’t report people’s own stores yet.
+          </span>
+        </SectionRow>
+      </Section>
+    );
+  }
+  const people = `${whole(own.stores)} ${plural(own.stores, "person", "people")}`;
+  return (
+    <Section description={description} title="People's own stores">
+      <SectionRow
+        description="Stores holding anything, as their own upkeep last found them."
+        label="Stores"
+      >
+        <span className="tabular-nums">{people}</span>
+      </SectionRow>
+      <SectionRow
+        description={
+          own.oldestWaitingAt === null
+            ? undefined
+            : `Oldest added ${agoWords(Date.parse(own.oldestWaitingAt), now)}.`
+        }
+        label="Waiting"
+      >
+        <span className="tabular-nums">{whole(own.waiting)}</span>
+      </SectionRow>
+      <SectionRow
+        description="Failed too often in someone's store; they come back by themselves unless parked for good."
+        label="Parked"
+      >
+        {own.parked > 0 ? (
+          <Badge variant="attention">{whole(own.parked)}</Badge>
+        ) : (
+          <span className="tabular-nums">{whole(own.parked)}</span>
+        )}
+      </SectionRow>
+      <SectionRow
+        description="Stores whose last upkeep failed a step, waits for the model, or hasn't read its erasure ledger through."
+        label="Failing"
+      >
+        {own.failing > 0 ? (
+          <Badge variant="attention">{whole(own.failing)}</Badge>
+        ) : (
+          <Badge variant="passed">None</Badge>
+        )}
+      </SectionRow>
+      <SectionRow
+        description="Stores whose passages aren't all embedded by the current model yet."
+        label="Embedding not done"
+      >
+        <span className="tabular-nums">{whole(own.notRebuilt)}</span>
+      </SectionRow>
+      <SectionRow
+        description="Stores near what one store holds: writes fail once one is full."
+        label="Near the limit"
+      >
+        {own.nearLimit > 0 ? (
+          <Badge variant="attention">{whole(own.nearLimit)}</Badge>
+        ) : (
+          <span className="tabular-nums">{whole(own.nearLimit)}</span>
+        )}
+      </SectionRow>
+    </Section>
+  );
+};
+
 /** While the section waits for its core, or hasn't asked it (a preload). */
 const Reading = () => (
   <EmptySection>Reading how its Brain is doing from its core…</EmptySection>
@@ -722,6 +803,7 @@ const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
       <Recall report={report} />
       <Ledger report={report} />
       <Steps report={report} />
+      <OwnStores report={report} />
       <Engine acting={acting} report={report} />
     </>
   );

@@ -29,6 +29,7 @@
  */
 import {
   brainOf,
+  personalBrainOf,
   currentReadMax,
   handOversMax,
   instructionsMaxLength,
@@ -1899,6 +1900,34 @@ export const coreProbes = {
       ),
     ];
   },
+  // The host of a store's own alarm: refused for any name but a person's
+  // own store's; for the reader's own, its report kept and summed into
+  // staff's totals, which hold numbers alone.
+  alarmHostOf: async ({ personId, markers }) => [
+    await answer(
+      "the shared store's",
+      async () => await coreBrain.alarmHostOf(env, "brain")
+    ),
+    await answer(
+      "a store named by the markers",
+      async () => await coreBrain.alarmHostOf(env, markers.join(" "))
+    ),
+    await answer(
+      "a person's store named by the markers",
+      async () => await coreBrain.alarmHostOf(env, `person:${markers.join("")}`)
+    ),
+    await answer("the reader's own store's, its report kept", async () => {
+      const host = await coreBrain.alarmHostOf(env, `person:${personId}`);
+      await host.report(
+        await personalBrainOf(
+          inJurisdiction(env, env.BRAIN_STORE),
+          personId
+        ).workOverview()
+      );
+      const { ownStores } = await coreBrain.brainStaffReport(env);
+      return { model: host.embedders.model, totals: ownStores };
+    }),
+  ],
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */
