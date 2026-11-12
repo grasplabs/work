@@ -83,9 +83,9 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import * as brainSkills from "../src/brain-skills.ts";
-import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { producersOf } from "../src/brain-sources.ts";
 import * as codeRecall from "../src/brain-recall.ts";
+import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
@@ -1126,6 +1126,15 @@ export const coreProbes = {
         "nothing"
       ),
       await check("the hidden versions", hiddenVersions, personId, "hidden"),
+      // As code's recall pinned them: the reader's teams alone.
+      await answer(
+        "the hidden versions, not personal",
+        async () =>
+          await coreBrain.readableVersionsAs(env, personId, hiddenVersions, {
+            personal: false,
+          }),
+        "hidden"
+      ),
       await check(
         "as someone who isn't a member",
         [{ source: hidden, version: 1 }],
@@ -3246,11 +3255,13 @@ export const storeProbes = {
       more: Partial<{
         after: { addedAt: Date; source: string };
         limit: number;
-      }> = {}
+      }> = {},
+      as: Reader = reader
     ) =>
       await answer(
         name,
-        async () => await store().listSources({ reader, prefixes, ...more }),
+        async () =>
+          await store().listSources({ reader: as, prefixes, ...more }),
         about
       );
     const hidden = whollyHidden(hiddenVersions).map(keyOf);
@@ -3272,7 +3283,16 @@ export const storeProbes = {
         await list("every hidden source at once", atOnce, "hidden"),
         await list("every hidden source, one a page", atOnce, "hidden", {
           limit: 1,
-        })
+        }),
+        // As a reader with no person, as code's recall reads: their
+        // groups alone, so nothing of theirs alone either.
+        await list(
+          "every hidden source at once, as no person",
+          atOnce,
+          "hidden",
+          {},
+          { ...reader, person: null }
+        )
       );
     }
     asked.push(
@@ -3324,14 +3344,15 @@ export const storeProbes = {
       name: string,
       source: string,
       before?: number,
-      about?: Answer["about"]
+      about?: Answer["about"],
+      as: Reader = reader
     ) =>
       await answer(
         name,
         async () =>
           await store().listVersions({
             source,
-            reader,
+            reader: as,
             ...(before === undefined ? {} : { before }),
           }),
         about
@@ -3352,7 +3373,16 @@ export const storeProbes = {
         undefined,
         "hidden"
       );
-      asked.push(answered);
+      // As a reader with no person, as code's recall reads.
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const asNoPerson = await list(
+        `hidden source ${index}, as no person`,
+        keyOf(source),
+        undefined,
+        "hidden",
+        { ...reader, person: null }
+      );
+      asked.push(answered, asNoPerson);
     }
     for (const [index, { source, version }] of hiddenVersions.entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one listing at a time

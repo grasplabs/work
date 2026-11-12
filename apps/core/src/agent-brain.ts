@@ -34,7 +34,7 @@ import { brainGaps } from "./brain-rpc.ts";
 import {
   brainDocumentRead,
   brainGrantRead,
-  brainVersionRead,
+  brainTeamVersionRead,
 } from "./history-access.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
@@ -231,9 +231,9 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * The recall, under the agent's permission to read the Brain: that grant
    * is recorded with the run before anything is read (`brainGrantRead`),
-   * and each version the pack hands over after (`brainVersionRead`)
+   * and each version the pack hands over after (`brainTeamVersionRead`)
    * before the code gets it, so what the run holds is withheld once the
-   * grant is revoked or the person may no longer read one of them
+   * grant is revoked or the person's teams may no longer read one of them
    * (history-access.ts). Without the grant `recallFor` refuses it, and
    * audits that.
    */
@@ -248,7 +248,7 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
     if (grant !== undefined) {
       await recordRunReads(this.env, scope, [brainGrantRead]);
     }
-    const pack = await recallFor(
+    return await recallFor(
       this.env,
       {
         authority,
@@ -257,17 +257,18 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
           grant === undefined ? null : permissionIdSchema.parse(grant.id),
         actor: delegateActorOf(authority, scope.via),
         target: { type: "chat", id: scope.chatId },
+        keep: async ({ items }) => {
+          await recordRunReads(
+            this.env,
+            scope,
+            items.map(({ source, version }) =>
+              brainTeamVersionRead({ source, version })
+            )
+          );
+        },
       },
       input
     );
-    await recordRunReads(
-      this.env,
-      scope,
-      pack.items.map(({ source, version }) =>
-        brainVersionRead({ source, version })
-      )
-    );
-    return pack;
   }
 
   /**

@@ -86,6 +86,7 @@ import { z } from "zod";
 import type { PeopleNotifications } from "./app-notifications.ts";
 import { answerPeople } from "./app-people.ts";
 import type { PeopleAccess } from "./app-people.ts";
+import { brainPackSchema } from "./brain-pack.ts";
 import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
 import { CallTree } from "./call-tree.ts";
 import type { RunnerCall } from "./call-tree.ts";
@@ -1687,25 +1688,6 @@ const notAllowed = () => functionErrors.create("permission.not_allowed");
 /** An answer a resource's contract doesn't allow. */
 const invalidResult = () =>
   functionErrors.create("contract.invalid_permission_result");
-
-/** What a recall of the Brain answers (`BrainPack`), and nothing more. */
-const brainPackSchema = z.strictObject({
-  items: z.array(
-    z.strictObject({
-      source: z.strictObject({
-        producer: z.enum(["upload", "chat", "run"]),
-        id: z.string(),
-      }),
-      version: z.int().positive(),
-      position: z.int().nonnegative(),
-      text: z.string(),
-      whole: z.boolean(),
-      found: z.enum(["exact", "words", "stop words", "meaning"]),
-    })
-  ),
-  notFound: z.array(z.string()),
-  truncated: z.boolean(),
-});
 
 /**
  * Whether `method` with `args` is one of the operations a guests

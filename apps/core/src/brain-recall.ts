@@ -53,6 +53,12 @@ export interface RecallCaller {
   readonly actor: AuditActor;
   /** What the audit event is about: the App, the run or the chat. */
   readonly target?: AuditEntry["target"];
+  /**
+   * What the caller keeps of the pack before it gets it: a run's pins, a
+   * chat's reads. Run before the recall is audited as answered, so a pack
+   * that couldn't be kept is audited as refused, and nobody gets it.
+   */
+  readonly keep?: (pack: BrainPack) => Promise<void>;
 }
 
 /** Whether `input` is a recall as code asks for one (`BrainRecall`). */
@@ -112,6 +118,7 @@ export const recallFor = async (
       ...recall,
       personal: false,
     });
+    await caller.keep?.(pack);
     await audit({ items: pack.items.length, truncated: pack.truncated });
     return pack;
   } catch (error) {

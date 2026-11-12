@@ -279,10 +279,13 @@ const packDescriptor = {
  * budget and returns the pack, its `brain` permission bound by `admin`
  * to a grant of its own; `grant: false` binds none.
  */
+/** A step that waits a moment. */
+const holdStep = { id: "hold", type: "wait", for: "3 seconds" };
+
 const recallingWorkflow = async (
   by: Member,
   admin: Member,
-  { hold = false }: { hold?: boolean } = {}
+  { hold }: { hold?: "before" | "after" } = {}
 ) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
@@ -298,6 +301,9 @@ const recallingWorkflow = async (
       result: { $expr: "recalled" },
       permissions: { brain: { docs: { contract: key } } },
       steps: [
+        // A pause before the recall or the run's output, for a test to act
+        // in.
+        ...(hold === "before" ? [holdStep] : []),
         {
           id: "recalled",
           type: "call",
@@ -308,8 +314,7 @@ const recallingWorkflow = async (
             budget: { tokens: { $expr: "args.tokens" } },
           },
         },
-        // A pause before the run's output, for a test to act in.
-        ...(hold ? [{ id: "hold", type: "wait", for: "3 seconds" }] : []),
+        ...(hold === "after" ? [holdStep] : []),
       ],
     }),
     basedOn: null,
@@ -594,10 +599,11 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   it("refuses what leaves a run once its person may no longer read what it recalled, and lets it through when nothing changed", async () => {
     const { admin, ada } = await company();
     const [left, kept] = await Promise.all([teamOf(ada), teamOf(ada)]);
-    const words = [1, 2, 3].map(
+    const words = [1, 2, 3, 4].map(
       (at) => `plan${at}${unique().replaceAll(/\W/gu, "")}`
     );
-    const [leftWord = "", erasedWord = "", keptWord = ""] = words;
+    const [leftWord = "", erasedWord = "", keptWord = "", narrowedWord = ""] =
+      words;
     await added(`Route plan: ${leftWord} departs at noon.`, {
       kind: "team",
       teamId: left,
@@ -608,7 +614,14 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     });
     const keptText = `Route plan: ${keptWord} departs at two.`;
     await added(keptText, { kind: "team", teamId: kept });
-    const { workflow } = await recallingWorkflow(ada, admin, { hold: true });
+    const narrowed = await added(
+      `Route plan: ${narrowedWord} departs at three.`,
+      {
+        kind: "team",
+        teamId: kept,
+      }
+    );
+    const { workflow } = await recallingWorkflow(ada, admin, { hold: "after" });
     const runs = await Promise.all(
       words.map(
         async (question) =>
@@ -628,7 +641,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
                 .first<number>("n")
           )
         );
-        expect(pinned).toStrictEqual([1, 1, 1]);
+        expect(pinned).toStrictEqual([1, 1, 1, 1]);
       },
       { timeout: 10_000, interval: 50 }
     );
@@ -639,26 +652,39 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       .bind(left, ada.userId)
       .run();
     await eraseSource(env, { source: erased, reason: "deleted" });
-    const [afterLeaving, afterErasure, unchanged] = await Promise.all(
-      runs.map(async (runId) => await endOf(ada, workflow.id, runId))
-    );
+    // The fourth is narrowed to her alone: she may still read it, but
+    // what code reads is what her teams may.
+    await addSource(env, {
+      source: narrowed,
+      change: crypto.randomUUID(),
+      text: `Route plan: ${narrowedWord} departs at four.`,
+      readers: { kind: "owner", personId: ada.userId },
+    });
+    const [afterLeaving, afterErasure, unchanged, afterNarrowing] =
+      await Promise.all(
+        runs.map(async (runId) => await endOf(ada, workflow.id, runId))
+      );
     expect({
       afterLeaving,
       afterErasure,
+      afterNarrowing,
       unchanged: textsOf(unchanged),
     }).toStrictEqual({
       afterLeaving: { failed: "brain.revoked" },
       afterErasure: { failed: "brain.revoked" },
+      afterNarrowing: { failed: "brain.revoked" },
       unchanged: [keptText],
     });
   });
 
-  it("withholds what a chat's code recalled from its later requests once its person may no longer read it", async () => {
+  it("withholds what a chat's code recalled from its later requests once its person's teams may no longer read it", async () => {
     const { admin, ada } = await company();
     const team = await teamOf(ada);
     const word = `route${unique().replaceAll(/\W/gu, "")}`;
     const text = `Route plan: ${word} departs at noon.`;
     const source = await added(text, { kind: "team", teamId: team });
+    const narrowedText = `Route plan: ${word} returns at five.`;
+    const narrowed = await added(narrowedText, { kind: "team", teamId: team });
     const { ask, agent, provider } = await chatOf(
       ada.userId,
       recallCode(requestOf(word)),
@@ -669,12 +695,19 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     await ask("Where is the route plan?");
     const before = JSON.stringify(provider.requests.at(-1)?.body);
     await eraseSource(env, { source, reason: "deleted" });
+    // Narrowed to her alone: hers to read, no longer her teams'.
+    await addSource(env, {
+      source: narrowed,
+      change: crypto.randomUUID(),
+      text: `Route plan: ${word} returns at six.`,
+      readers: { kind: "owner", personId: ada.userId },
+    });
     await ask("And now?");
     const after = JSON.stringify(provider.requests.at(-1)?.body);
     expect({
-      before: before.includes(text),
-      after: after.includes(text),
-    }).toStrictEqual({ before: true, after: false });
+      before: [before.includes(text), before.includes(narrowedText)],
+      after: [after.includes(text), after.includes(narrowedText)],
+    }).toStrictEqual({ before: [true, true], after: [false, false] });
   });
 
   it("answers nothing when the audit log can't take the recall", async () => {
@@ -702,5 +735,55 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     );
     logged.mockRestore();
     expect(answered).toBe("refused");
+  });
+
+  it("gives a run that would keep more than 1,000 recalled versions no pack, refused and audited so", async () => {
+    const { word, admin, ada } = await company();
+    const { workflow } = await recallingWorkflow(ada, admin, {
+      hold: "before",
+    });
+    const runId = await startedRun(ada, workflow.id, {
+      question: word,
+      tokens: 800,
+    });
+    // While it waits, it is made to hold as many as a run may keep.
+    await env.DB.prepare(
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000) INSERT INTO run_brain_versions (run_id, producer, source_id, version, permission_id, recorded_at) SELECT ?, 'upload', 'kept-' || i, 1, 'kept', ? FROM n"
+    )
+      .bind(runId, Date.now())
+      .run();
+    const ended = await endOf(ada, workflow.id, runId);
+    // Once the call's outcome is in the log, kept through the outbox.
+    const ofRun = await vi.waitFor(
+      async () => {
+        const all = await allEvents();
+        const kept = all.filter(({ target }) => target?.id === runId);
+        expect(
+          kept.some(({ detail }) => detail?.outcome === "brain.budget_exceeded")
+        ).toBeTruthy();
+        return kept;
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    expect({
+      // The run fails: its kept versions are no one's to read (they name
+      // nothing), so even its failure is held back as revoked.
+      ended,
+      // The recall's call was refused for the cap, and so was the recall:
+      // never audited as answered.
+      call: ofRun
+        .filter(
+          ({ action, detail }) =>
+            action === "workflow.run.called" && detail?.call === "grasp.brain"
+        )
+        .map(({ detail }) => detail?.outcome),
+      recall: ofRun
+        .filter(({ action }) => action === "brain.recall")
+        .map(({ detail }) => detail?.refused ?? "answered"),
+    }).toStrictEqual({
+      ended: { failed: "brain.revoked" },
+      call: ["started", "brain.budget_exceeded"],
+      recall: ["brain.budget_exceeded"],
+    });
   });
 });

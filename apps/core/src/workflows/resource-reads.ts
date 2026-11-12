@@ -93,7 +93,10 @@ const requireOwnEvidenceReadable = async (
         runContext(run)
       );
     }
-    const readable = await readableVersionsAs(env, run.principal, versions);
+    // As the run's recalls read them: its person's teams alone.
+    const readable = await readableVersionsAs(env, run.principal, versions, {
+      personal: false,
+    });
     const kept = new Set(
       readable.map(({ source, version }) =>
         JSON.stringify([source.producer, source.id, version])
@@ -116,7 +119,7 @@ const requireOwnEvidenceReadable = async (
  * Refuses anything leaving a run of a JSON workflow (GRA-299) that recalled
  * what it may no longer read, as `brain.revoked`: each permission its
  * recalls came through still the run's, active, now (`authorize`), and
- * each version they handed it still one its person may read
+ * each version they handed it still one its person's teams may read
  * (`readableVersionsAs`): not erased, nor its readers narrowed away from
  * them. A test run recalls nothing, so has nothing to check.
  *

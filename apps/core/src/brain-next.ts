@@ -634,25 +634,29 @@ export const listVersionsAs = async (
     versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
     before: more && last !== undefined ? last.version : null,
   };
+};
+
 const versionRefsSchema = z.array(versionRefSchema);
 
 /**
  * Of `versions`, those the member `personId` may read now, as
  * `readSourceVersionAs` decides it, in the order given and each once,
  * without reading their text: for core to check what a chat once read
- * before it sends it again (history-access.ts). Refused once they are no
- * longer a member. For the server only, as `addSource`.
+ * before it sends it again (history-access.ts). Not `personal`: those
+ * their teams may read alone, as code's recall read them. Refused once
+ * they are no longer a member. For the server only, as `addSource`.
  */
 export const readableVersionsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  versions: readonly SourceVersionRef[]
+  versions: readonly SourceVersionRef[],
+  { personal = true }: { personal?: boolean } = {}
 ): Promise<SourceVersionRef[]> => {
   const asked = checked(versionRefsSchema, versions);
   if (asked.length === 0) {
     return [];
   }
-  const reader = await readerOf(env, personId);
+  const reader = await readerOf(env, personId, { personal });
   const parts = Array.from(
     { length: Math.ceil(asked.length / readableCheckMax) },
     (_, at) => asked.slice(at * readableCheckMax, (at + 1) * readableCheckMax)

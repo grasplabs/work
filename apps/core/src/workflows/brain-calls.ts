@@ -1,10 +1,9 @@
-import type { BrainPack } from "@grasp-os/runtime/app";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { z } from "zod";
 
+import { brainPackSchema } from "../brain-pack.ts";
 import { isBrainRecall, recallFor } from "../brain-recall.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
@@ -40,28 +39,6 @@ export const requireBrainRequest = (call: BrainCall): void => {
     });
   }
 };
-
-/**
- * A pack, as a test run's fixture answers a recall: what a real recall
- * answers (`BrainPack`), and nothing else.
- */
-const brainPackSchema: z.ZodType<BrainPack> = z.strictObject({
-  items: z.array(
-    z.strictObject({
-      source: z.strictObject({
-        producer: z.enum(["upload", "chat", "run"]),
-        id: z.string().min(1),
-      }),
-      version: z.int().positive(),
-      position: z.int().nonnegative(),
-      text: z.string(),
-      whole: z.boolean(),
-      found: z.enum(["exact", "words", "stop words", "meaning"]),
-    })
-  ),
-  notFound: z.array(z.string()),
-  truncated: z.boolean(),
-});
 
 /**
  * Refuses, as `workflow.call_invalid`, a test run's fixture answer to a
@@ -101,12 +78,15 @@ export const callBrain = async (
       permissionId,
       actor: delegateActorOf(authority),
       target: { type: "workflow_run", id: run.runId },
+      // Pinned with the run before the run gets it, so what it recalled
+      // is checked again before anything leaves the run
+      // (resource-reads.ts).
+      keep: async ({ items }) => {
+        await recordRunVersions(env, run.runId, permissionId, items);
+      },
     },
     call.arguments
   );
-  // Pinned with the run before the run gets it, so what it recalled is
-  // checked again before anything leaves the run (resource-reads.ts).
-  await recordRunVersions(env, run.runId, permissionId, pack.items);
   // As JSON, which the run's journal keeps.
   return {
     items: pack.items.map(({ source, ...item }) => ({
