@@ -209,6 +209,8 @@ interface Into {
   ids: readonly string[];
   /** The add's readers, by their set's key (`reader_sets.key`). */
   readers: string;
+  /** Each source the add names, by its SHA-256 as the erasure ledger names it. */
+  subjects: ReadonlyMap<string, string>;
   learnedAt: number;
   onlyFor: string | null;
   memo: WordMemo;
@@ -234,12 +236,13 @@ const valueKeyOf = (
 
 /** Where a memory's basis puts it: its version, writer, lineage and place in that lineage. */
 const basisOf = (
-  sql: SqlStorage,
+  { sql, subjects }: Into,
   basis: NewMemory["basis"],
   index: number
 ): {
   source: string | null;
   version: number | null;
+  subject: string | null;
   writer: string | null;
   lineage: string;
   order: number;
@@ -248,6 +251,7 @@ const basisOf = (
     return {
       source: null,
       version: null,
+      subject: null,
       writer: basis.writer,
       lineage: lineageOfWriter(basis.writer),
       order: 0,
@@ -262,6 +266,7 @@ const basisOf = (
   return {
     source: basis.source,
     version: basis.version,
+    subject: subjects.get(basis.source) ?? null,
     writer: null,
     lineage: lineageOfSource(basis.source),
     order: basis.version,
@@ -297,15 +302,15 @@ const writeMemory = (
   if (plan === undefined || aboutRow === undefined) {
     throw refused(`memory ${index} names an entity the add doesn't give`);
   }
-  const based = basisOf(sql, memory.basis, index);
+  const based = basisOf(into, memory.basis, index);
   const id = crypto.randomUUID();
   const { row } = sql
     .exec<{ row: number }>(
       `INSERT INTO memories (id, entity, attribute, object, value, value_key,
-        one_value, type, statement, quote, source, version, writer, lineage,
-        lineage_order, speaker, valid_from, valid_until, learned_at,
+        one_value, type, statement, quote, source, version, subject, writer,
+        lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
         readers, only_for)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING row`,
       id,
       aboutRow,
@@ -319,6 +324,7 @@ const writeMemory = (
       memory.basis.quote ?? null,
       based.source,
       based.version,
+      based.subject,
       based.writer,
       based.lineage,
       based.order,
@@ -344,7 +350,7 @@ const writeMemory = (
 const markExtracted = (
   sql: SqlStorage,
   { source, version }: { source: string; version: number },
-  { learnedAt, readers, onlyFor }: Into
+  { learnedAt, readers, onlyFor, subjects }: Into
 ): void => {
   holdVersion(
     sql,
@@ -354,10 +360,11 @@ const markExtracted = (
   );
   sql.exec(
     `INSERT OR IGNORE INTO memory_extractions
-      (source, version, lineage, at, readers, only_for)
-    VALUES (?, ?, ?, ?, ?, ?)`,
+      (source, version, subject, lineage, at, readers, only_for)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`,
     source,
     version,
+    subjects.get(source) ?? "",
     lineageOfSource(source),
     learnedAt,
     readers,
@@ -386,6 +393,19 @@ export const addMemories = async (
         adding.memories,
         adding.extracted ?? null,
       ])
+    )
+  );
+  const sources = new Set([
+    ...adding.memories.flatMap(({ basis }) =>
+      basis.kind === "source" ? [basis.source] : []
+    ),
+    ...(adding.extracted === undefined ? [] : [adding.extracted.source]),
+  ]);
+  const subjects = new Map(
+    await Promise.all(
+      [...sources].map(
+        async (source) => [source, await subjectOf(source)] as const
+      )
     )
   );
   const onlyFor =
@@ -427,6 +447,7 @@ export const addMemories = async (
       rows,
       ids,
       readers,
+      subjects,
       learnedAt: Date.now(),
       onlyFor,
       memo: new Map(),

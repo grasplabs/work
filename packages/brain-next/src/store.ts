@@ -90,6 +90,7 @@ import {
   isStoreErased,
   storeErasedAt,
   keepMissingSubjects,
+  replayMemoryErasures,
   ledgerPrefix,
   readLedgerStart,
   recordStoreErased,
@@ -105,7 +106,6 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
-import { forgetStranded } from "./forget.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   confirmMemory,
@@ -446,10 +446,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       releaseInterrupted(this.ctx.storage);
       markWordsCurrentIfEmpty(this.ctx.storage.sql);
       await keepMissingSubjects(this.ctx.storage);
-      // What a rollback's older release left of memories, whose set of
-      // readers or version it deleted: read by no one, and gone now.
+      // What erasures covered of memories, replayed: one an older release
+      // recorded (an admin's rollback) reaches them now; and the sets of
+      // readers it dropped are made again from their keys.
       this.ctx.storage.transactionSync(() => {
-        forgetStranded(this.ctx.storage.sql);
+        replayMemoryErasures(this.ctx.storage.sql);
       });
       this.#opened = true;
       this.#schema = true;
