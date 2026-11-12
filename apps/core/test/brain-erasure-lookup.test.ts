@@ -27,6 +27,7 @@ import {
 import { personErasureAreas } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { retryErasures } from "../src/person-erasure.ts";
+import { ageOwnErasure } from "./brain-next-own-store.ts";
 import {
   copyOfStore,
   killStore,
@@ -178,6 +179,22 @@ const ownSource = async (person: string, text: string) => {
   return source;
 };
 
+/**
+ * A source no one may read, which only the shared store keeps (one
+ * person's own goes to their own store): for the shared store's own
+ * states of an erasure.
+ */
+const sharedSource = async (text: string) => {
+  const source = { producer: "upload" as const, id: crypto.randomUUID() };
+  await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text,
+    readers: { kind: "none" },
+  });
+  return source;
+};
+
 /** Runs `run` while every write of the store to its bucket fails; its bucket is back after. */
 const bucketPutsFailingDuring = async (
   run: () => Promise<void>
@@ -267,7 +284,11 @@ describe("whether something was erased", () => {
     const source = await ownSource(`someone-${marked}`, `${marked} is kept.`);
     await ownSource(person, `${marked} is theirs.`);
     const before = Date.now();
-    await eraseSource(env, { source, reason: "deleted" });
+    await eraseSource(env, {
+      source,
+      readers: { kind: "owner", personId: `someone-${marked}` },
+      reason: "deleted",
+    });
     // A withdrawal: the shared store's alone, with no erasure in core's own
     // record, so the ledger's answer is the answer.
     await erasePerson(env, { personId: person, reason: "withdrawn" });
@@ -330,11 +351,14 @@ describe("whether something was erased", () => {
   });
 
   it("says an erasure whose ledger entry isn't written yet isn't finished, and erased once a tick wrote it", async () => {
-    const person = `person-${crypto.randomUUID()}`;
-    const source = await ownSource(person, `${marker()} is to go.`);
+    const source = await sharedSource(`${marker()} is to go.`);
     await bucketPutsFailingDuring(async () => {
       await expect(
-        eraseSource(env, { source, reason: "deleted" })
+        eraseSource(env, {
+          source,
+          readers: { kind: "none" },
+          reason: "deleted",
+        })
       ).rejects.toThrow("The Brain could not record the erasure");
     });
     const lookup = { kind: "source", key: `upload:${source.id}` } as const;
@@ -399,17 +423,25 @@ describe("whether a person was erased, as core's own record and the shared ledge
     // The Brain's tick writes the entry: its ledger has it, core not yet.
     await workBrain(env, new Date(), noProducers);
     const ledgerOnly = await answerTo(lookup);
-    // Core's clock asks the Brain again, which returns: the area is complete.
+    // Core's clock asks the Brain again: their own store, erased after the
+    // shared one, still deletes until an add under way could have written
+    // its file, so the area stays pending.
+    await retryErasures(env);
+    const ownDeleting = await answerTo(lookup);
+    // That time passed, the clock asks once more: the area is complete.
+    await ageOwnErasure(erased.userId);
     await retryErasures(env);
     const complete = await answerTo(lookup);
 
     expect({
       pending,
       ledgerOnly,
+      ownDeleting,
       complete: complete?.state,
     }).toStrictEqual({
       pending: { state: "erasing" },
       ledgerOnly: { state: "erasing" },
+      ownDeleting: { state: "erasing" },
       complete: "erased",
     });
   });
@@ -458,15 +490,16 @@ const deletesFailingDuring = async (
 
 describe("whether something was erased, while its versions wait to be deleted", () => {
   it("says an erasure in the ledger isn't finished while versions it hid are still kept, and erased once a tick deleted them", async () => {
-    const source = await ownSource(
-      `person-${crypto.randomUUID()}`,
-      `${marker()} is to go.`
-    );
+    const source = await sharedSource(`${marker()} is to go.`);
     const lookup = { kind: "source", key: `upload:${source.id}` } as const;
     let waiting: unknown = null;
     await deletesFailingDuring(async () => {
       // The entry is written and the erasure returns; its own batch fails.
-      await eraseSource(env, { source, reason: "deleted" });
+      await eraseSource(env, {
+        source,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
       waiting = await answerTo(lookup);
     });
     await workBrain(env, new Date(), noProducers);

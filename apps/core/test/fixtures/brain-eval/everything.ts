@@ -95,13 +95,20 @@ const cutTo = (key: string, text: string, tokens: number): string => {
 
 /**
  * Everything `asker` may read of `sources` (in the set's order, oldest
- * first), newest first, within `budget` tokens.
+ * first), newest first, within `budget` tokens. Throws when `budget`
+ * leaves no room: "everything" with nothing in it would cost money and
+ * compare nothing.
  */
 export const everythingFor = (
   sources: readonly BrainEvalSource[],
   asker: BrainEvalPerson,
   budget: number
 ): Everything => {
+  if (!(budget > 0)) {
+    throw new RangeError(
+      `"Everything" has ${budget} tokens: the model's window or the cut leaves no room for it`
+    );
+  }
   const readable = sources
     .filter((source) => mayRead(asker, source))
     .toReversed();
@@ -185,6 +192,11 @@ export const questionTokensMax = (
     tokensOf(answerSystem) + tokensOf(answerInput(question.question, ""));
   const answers = 2;
   const verdicts = question.expects.kind === "answer" ? 2 : 0;
+  // The answer the judge reads back is the model's own output, at most
+  // `outputTokensMax` in the provider's own tokens: that term is in
+  // provider tokens, as the budget check reads spend (what core recorded of
+  // the provider's usage). The rest is counted by `tokensOf`, which counts
+  // more than a real tokenizer does for prose.
   const judged =
     tokensOf(judgeSystem) +
     tokensOf(judgeInput(question.question, passage, "")) +
@@ -204,6 +216,25 @@ export interface Price {
 /** What `tokens` cost at `price`, in US dollars. */
 export const costOf = (tokens: Tokens, price: Price): number =>
   (tokens.input * price.input + tokens.output * price.output) / 1_000_000;
+
+/**
+ * The cut below the model's window that `BRAIN_EVAL_EVERYTHING_TOKENS`
+ * says: null while unset (or empty), for the window itself; otherwise a
+ * whole number of tokens above 0, or it throws. Read alike by the script
+ * and the run's config.
+ */
+export const everythingCapOf = (value: string | undefined): number | null => {
+  if (value === undefined || value === "") {
+    return null;
+  }
+  const tokens = Number(value);
+  if (!(Number.isInteger(tokens) && tokens > 0)) {
+    throw new RangeError(
+      "BRAIN_EVAL_EVERYTHING_TOKENS is a whole number of tokens above 0; leave it unset for the model's window"
+    );
+  }
+  return tokens;
+};
 
 /** The tokens a model's window leaves for the "everything" context. */
 export const everythingBudgetOf = (
