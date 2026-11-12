@@ -24,14 +24,14 @@ import { readableSql } from "./reader-sets.ts";
 /**
  * The entity of `kind` an add's entity links to by an exact name, given
  * no identifier: the one entity of that kind holding one of `names`
- * through a memory read by exactly the add's set of readers
- * (`readerSet`), or none when none or several do.
+ * through a memory read by exactly the add's set of readers (`readers`,
+ * its key), or none when none or several do.
  */
 export const linkedByName = (
   sql: SqlStorage,
   kind: EntityKind,
   names: readonly string[],
-  readerSet: number
+  readers: string
 ): number | undefined => {
   if (names.length === 0) {
     return undefined;
@@ -49,7 +49,7 @@ export const linkedByName = (
       LIMIT 2`,
       kind,
       JSON.stringify(names.map((name) => foldName(name))),
-      readerSet
+      readers
     )
     .toArray();
   return found.length === 1 ? found[0]?.entity : undefined;

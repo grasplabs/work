@@ -31,7 +31,8 @@ CREATE TABLE `memories` (
 	`type` text NOT NULL,
 	`statement` text NOT NULL,
 	`quote` text,
-	`version_row` integer,
+	`source` text,
+	`version` integer,
 	`writer` text,
 	`lineage` text NOT NULL,
 	`lineage_order` integer NOT NULL,
@@ -40,7 +41,7 @@ CREATE TABLE `memories` (
 	`valid_until` integer,
 	`learned_at` integer NOT NULL,
 	`retired_at` integer,
-	`reader_set` integer NOT NULL,
+	`readers` text NOT NULL,
 	`only_for` text,
 	FOREIGN KEY (`entity`) REFERENCES `entities`(`row`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`object`) REFERENCES `entities`(`row`) ON UPDATE no action ON DELETE no action
@@ -49,8 +50,8 @@ CREATE TABLE `memories` (
 CREATE UNIQUE INDEX `memories_id_unique` ON `memories` (`id`);--> statement-breakpoint
 CREATE INDEX `memories_entity_idx` ON `memories` (`entity`,`attribute`,`lineage`);--> statement-breakpoint
 CREATE INDEX `memories_object_idx` ON `memories` (`object`);--> statement-breakpoint
-CREATE INDEX `memories_version_idx` ON `memories` (`version_row`);--> statement-breakpoint
-CREATE INDEX `memories_reader_set_idx` ON `memories` (`reader_set`);--> statement-breakpoint
+CREATE INDEX `memories_version_idx` ON `memories` (`source`,`version`);--> statement-breakpoint
+CREATE INDEX `memories_readers_idx` ON `memories` (`readers`);--> statement-breakpoint
 CREATE INDEX `memories_only_for_idx` ON `memories` (`only_for`);--> statement-breakpoint
 CREATE TABLE `memory_changes` (
 	`key` text PRIMARY KEY NOT NULL,
@@ -77,16 +78,17 @@ CREATE TABLE `memory_confirmed_over` (
 --> statement-breakpoint
 CREATE INDEX `memory_confirmed_over_memory_idx` ON `memory_confirmed_over` (`memory`);--> statement-breakpoint
 CREATE TABLE `memory_extractions` (
-	`version_row` integer NOT NULL,
-	`lineage` text NOT NULL,
+	`source` text NOT NULL,
 	`version` integer NOT NULL,
+	`lineage` text NOT NULL,
 	`at` integer NOT NULL,
-	`reader_set` integer NOT NULL,
+	`readers` text NOT NULL,
 	`only_for` text,
-	PRIMARY KEY(`version_row`, `reader_set`)
+	PRIMARY KEY(`source`, `version`, `readers`)
 );
 --> statement-breakpoint
 CREATE INDEX `memory_extractions_lineage_idx` ON `memory_extractions` (`lineage`,`version`);--> statement-breakpoint
+CREATE INDEX `memory_extractions_readers_idx` ON `memory_extractions` (`readers`);--> statement-breakpoint
 CREATE INDEX `memory_extractions_only_for_idx` ON `memory_extractions` (`only_for`);--> statement-breakpoint
 ALTER TABLE `word_index` ADD `memory_cursor` integer DEFAULT 0 NOT NULL;
 --> statement-breakpoint
@@ -121,11 +123,11 @@ WHEN OLD.`retired_at` IS NOT NULL
 	OR NEW.`value` IS NOT OLD.`value` OR NEW.`value_key` IS NOT OLD.`value_key`
 	OR NEW.`one_value` IS NOT OLD.`one_value` OR NEW.`type` IS NOT OLD.`type`
 	OR NEW.`statement` IS NOT OLD.`statement` OR NEW.`quote` IS NOT OLD.`quote`
-	OR NEW.`version_row` IS NOT OLD.`version_row` OR NEW.`writer` IS NOT OLD.`writer`
+	OR NEW.`source` IS NOT OLD.`source` OR NEW.`version` IS NOT OLD.`version` OR NEW.`writer` IS NOT OLD.`writer`
 	OR NEW.`lineage` IS NOT OLD.`lineage` OR NEW.`lineage_order` IS NOT OLD.`lineage_order`
 	OR NEW.`speaker` IS NOT OLD.`speaker` OR NEW.`valid_from` IS NOT OLD.`valid_from`
 	OR NEW.`valid_until` IS NOT OLD.`valid_until` OR NEW.`learned_at` IS NOT OLD.`learned_at`
-	OR NEW.`reader_set` IS NOT OLD.`reader_set` OR NEW.`only_for` IS NOT OLD.`only_for`
+	OR NEW.`readers` IS NOT OLD.`readers` OR NEW.`only_for` IS NOT OLD.`only_for`
 BEGIN
 	SELECT RAISE(ABORT, 'memories are added, never written over');
 END;

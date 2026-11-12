@@ -21,6 +21,7 @@ import type {
   ModelReply,
   Card,
   EntityId,
+  MemoriesCursor,
   Memory,
   Pack,
   PackItem,
@@ -476,18 +477,25 @@ const entityIdSchema = z.uuid();
  * The card of the entity `entity` as the member `personId` may see it,
  * as core counts their teams now: built when asked from the memories they
  * may read (the Brain's `readCard`), or null when they may see no such
- * entity. With `asOf`, as it read then. Refused once they are no longer
- * a member. For GRA-1743's `entities.get`.
+ * entity. With `asOf`, as it read then; a page at a time, after `after`
+ * (the page before's `next`). The `after` is checked by the Brain.
+ * Refused once they are no longer a member. For GRA-1743's
+ * `entities.get`.
  */
 export const entityCardAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  { entity, asOf }: { entity: EntityId; asOf?: Date }
+  {
+    entity,
+    asOf,
+    after,
+  }: { entity: EntityId; asOf?: Date; after?: MemoriesCursor }
 ): Promise<EntityCard | null> => {
   const card = await brain(env).readCard({
     entity: checked(entityIdSchema, entity),
     reader: await readerOf(env, personId),
     ...(asOf === undefined ? {} : { asOf }),
+    ...(after === undefined ? {} : { after }),
   });
   if (card === null) {
     return null;

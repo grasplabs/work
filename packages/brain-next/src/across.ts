@@ -183,12 +183,12 @@ type MemoryOf = FoundMemory & { store: number };
 const memoryKeyOf = ({ store, id }: MemoryOf): string =>
   `memory ${store} ${id}`;
 
-/** After a way's own order: confirmed first, then newer, then by store and row. */
+/** After a way's own order: confirmed first, then newer, then by store and id, as one store orders them. */
 const byMemory = (a: MemoryOf, b: MemoryOf): number =>
   Number(a.confirmed === null) - Number(b.confirmed === null) ||
   b.learnedAt.getTime() - a.learnedAt.getTime() ||
   a.store - b.store ||
-  b.row - a.row;
+  byBytes(b.id, a.id);
 
 /**
  * The memory ways' lists, merged over the stores as one store's

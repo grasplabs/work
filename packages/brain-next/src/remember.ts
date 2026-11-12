@@ -19,7 +19,7 @@ import { erasuresSoFar, isPersonErasedSince, subjectOf } from "./erasure.ts";
 import { hashOf } from "./files.ts";
 import { linkedByName } from "./linking.ts";
 import { entityRowOf, lineageOfSource, lineageOfWriter } from "./memories.ts";
-import { readerSetOf } from "./reader-sets.ts";
+import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
@@ -140,7 +140,7 @@ const erasedPerson = "The Brain refused it: what this adds was erased";
 const entityRowsOf = (
   sql: SqlStorage,
   { entities, reader }: Adding,
-  readerSet: number
+  readers: string
 ): number[] => {
   const linked = new Map<string, number>();
   return entities.map((entity, index) => {
@@ -153,9 +153,9 @@ const entityRowsOf = (
         keys
           .map((key) => linked.get(key))
           .find((found) => found !== undefined) ??
-        linkedBy(sql, entity.kind, entity.identifiers, readerSet) ??
+        linkedBy(sql, entity.kind, entity.identifiers, readers) ??
         (entity.identifiers.length === 0
-          ? linkedByName(sql, entity.kind, entity.names, readerSet)
+          ? linkedByName(sql, entity.kind, entity.names, readers)
           : undefined);
     } else {
       const known = entityRowOf(sql, entity.id);
@@ -164,7 +164,7 @@ const entityRowsOf = (
       if (
         known === undefined ||
         known.kind !== entity.kind ||
-        !mayName(sql, known.row, readerSet, reader)
+        !mayName(sql, known.row, readers, reader)
       ) {
         throw refused(`entity ${index} names no entity of its kind`);
       }
@@ -186,13 +186,13 @@ const entityRowsOf = (
   });
 };
 
-/** The row of a version this store holds and no erasure hides, or a refusal. */
-const versionRowOf = (
+/** Whether this store holds the version and no erasure hides it; a refusal (`why`) if not. */
+const holdVersion = (
   sql: SqlStorage,
   source: string,
   version: number,
-  index: number
-): number => {
+  why: string
+): void => {
   const [found] = sql
     .exec<{ row: number }>(
       `SELECT row FROM source_versions
@@ -203,9 +203,8 @@ const versionRowOf = (
     )
     .toArray();
   if (found === undefined) {
-    throw refused(`memory ${index} rests on a version this store doesn't hold`);
+    throw refused(why);
   }
-  return found.row;
 };
 
 /** Where an add writes its memories: its entities' rows and ids, and what every memory shares. */
@@ -214,7 +213,8 @@ interface Into {
   entities: Adding["entities"];
   rows: readonly number[];
   ids: readonly string[];
-  readerSet: number;
+  /** The add's readers, by their set's key (`reader_sets.key`). */
+  readers: string;
   learnedAt: number;
   onlyFor: string | null;
   memo: WordMemo;
@@ -244,24 +244,35 @@ const basisOf = (
   basis: NewMemory["basis"],
   index: number
 ): {
-  versionRow: number | null;
+  source: string | null;
+  version: number | null;
   writer: string | null;
   lineage: string;
   order: number;
-} =>
-  basis.kind === "source"
-    ? {
-        versionRow: versionRowOf(sql, basis.source, basis.version, index),
-        writer: null,
-        lineage: lineageOfSource(basis.source),
-        order: basis.version,
-      }
-    : {
-        versionRow: null,
-        writer: basis.writer,
-        lineage: lineageOfWriter(basis.writer),
-        order: 0,
-      };
+} => {
+  if (basis.kind === "writer") {
+    return {
+      source: null,
+      version: null,
+      writer: basis.writer,
+      lineage: lineageOfWriter(basis.writer),
+      order: 0,
+    };
+  }
+  holdVersion(
+    sql,
+    basis.source,
+    basis.version,
+    `memory ${index} rests on a version this store doesn't hold`
+  );
+  return {
+    source: basis.source,
+    version: basis.version,
+    writer: null,
+    lineage: lineageOfSource(basis.source),
+    order: basis.version,
+  };
+};
 
 /** The names and identifiers of the entities a memory mentions, kept as it gave them. */
 const keepMentions = (into: Into, plan: Planned, row: number): void => {
@@ -297,10 +308,10 @@ const writeMemory = (
   const { row } = sql
     .exec<{ row: number }>(
       `INSERT INTO memories (id, entity, attribute, object, value, value_key,
-        one_value, type, statement, quote, version_row, writer, lineage,
+        one_value, type, statement, quote, source, version, writer, lineage,
         lineage_order, speaker, valid_from, valid_until, learned_at,
-        reader_set, only_for)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        readers, only_for)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING row`,
       id,
       aboutRow,
@@ -312,7 +323,8 @@ const writeMemory = (
       memory.type,
       memory.statement,
       memory.basis.quote ?? null,
-      based.versionRow,
+      based.source,
+      based.version,
       based.writer,
       based.lineage,
       based.order,
@@ -320,7 +332,7 @@ const writeMemory = (
       memory.validFrom?.getTime() ?? null,
       memory.validUntil?.getTime() ?? null,
       into.learnedAt,
-      into.readerSet,
+      into.readers,
       into.onlyFor
     )
     .one();
@@ -338,29 +350,23 @@ const writeMemory = (
 const markExtracted = (
   sql: SqlStorage,
   { source, version }: { source: string; version: number },
-  { learnedAt, readerSet, onlyFor }: Into
+  { learnedAt, readers, onlyFor }: Into
 ): void => {
-  const [found] = sql
-    .exec<{ row: number }>(
-      `SELECT row FROM source_versions
-      WHERE source = ? AND version = ?
-        AND row NOT IN (SELECT version_row FROM erasing_versions)`,
-      source,
-      version
-    )
-    .toArray();
-  if (found === undefined) {
-    throw refused("it marks extracted a version this store doesn't hold");
-  }
+  holdVersion(
+    sql,
+    source,
+    version,
+    "it marks extracted a version this store doesn't hold"
+  );
   sql.exec(
     `INSERT OR IGNORE INTO memory_extractions
-      (version_row, lineage, version, at, reader_set, only_for)
+      (source, version, lineage, at, readers, only_for)
     VALUES (?, ?, ?, ?, ?, ?)`,
-    found.row,
-    lineageOfSource(source),
+    source,
     version,
+    lineageOfSource(source),
     learnedAt,
-    readerSet,
+    readers,
     onlyFor
   );
 };
@@ -410,8 +416,11 @@ export const addMemories = async (
     if (onlyFor !== null && isPersonErasedSince(sql, onlyFor, soFar)) {
       throw new Error(erasedPerson);
     }
-    const readerSet = readerSetOf(db, adding.access);
-    const rows = entityRowsOf(sql, adding, readerSet);
+    // The set is stored (read sets match readers by it); memories name it
+    // by its key alone, never its row id.
+    readerSetOf(db, adding.access);
+    const readers = readerSetKeyOf(adding.access);
+    const rows = entityRowsOf(sql, adding, readers);
     const ids = rows.map(
       (row) =>
         sql
@@ -423,7 +432,7 @@ export const addMemories = async (
       entities: adding.entities,
       rows,
       ids,
-      readerSet,
+      readers,
       learnedAt: Date.now(),
       onlyFor,
       memo: new Map(),

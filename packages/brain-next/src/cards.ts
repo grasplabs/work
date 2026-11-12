@@ -1,10 +1,11 @@
-import { cardMemoriesMax, entityAttributes } from "./contract.ts";
+import { entityAttributes } from "./contract.ts";
 import type {
   Card,
   CardAttribute,
   CardRelation,
   EntityId,
   EntityKind,
+  MemoriesCursor,
   Memory,
   Reader,
 } from "./contract.ts";
@@ -49,20 +50,26 @@ const seenOf = (
     )
     .toArray();
 
-/** Memories in a card's order: by attribute (none last), confirmed first, newest first. */
-const byCardOrder = (a: Memory, b: Memory): number =>
-  Number(a.attribute === null) - Number(b.attribute === null) ||
-  (a.attribute ?? "").localeCompare(b.attribute ?? "") ||
-  Number(a.confirmed === null) - Number(b.confirmed === null) ||
-  b.learnedAt.getTime() - a.learnedAt.getTime();
-
 /**
- * The card of the entity `entity` as `reader` sees it as of `at`
- * (milliseconds), or null when they may see no such entity.
+ * A page of the card of the entity `entity` as `reader` sees it as of
+ * `at` (milliseconds), after `after`, from at most `limit` memories; or
+ * null when they may see no such entity.
  */
 export const readCard = (
   sql: SqlStorage,
-  { entity, reader, at }: { entity: EntityId; reader: Reader; at: number }
+  {
+    entity,
+    reader,
+    at,
+    after,
+    limit,
+  }: {
+    entity: EntityId;
+    reader: Reader;
+    at: number;
+    after?: MemoriesCursor;
+    limit: number;
+  }
 ): Card | null => {
   const found = entityRowOf(sql, entity);
   if (found === undefined) {
@@ -72,14 +79,14 @@ export const readCard = (
   if (card === undefined) {
     return null;
   }
-  const memories = readMemories(sql, {
+  const page = readMemories(sql, {
     entity: card.id,
     reader,
     at,
     history: false,
-    limit: cardMemoriesMax + 1,
-  }).toSorted(byCardOrder);
-  const kept = memories.slice(0, cardMemoriesMax);
+    ...(after === undefined ? {} : { after }),
+    limit,
+  });
   const order = attributeOrder(card.kind);
   const attributes = new Map<string, CardAttribute>();
   const relations: {
@@ -88,7 +95,7 @@ export const readCard = (
     other: EntityId;
   }[] = [];
   const notes: Memory[] = [];
-  for (const memory of kept) {
+  for (const memory of page.memories) {
     if (memory.object !== null) {
       const side = memory.about === card.id ? "about" : "object";
       relations.push({
@@ -137,6 +144,7 @@ export const readCard = (
         : [{ attribute: memory.attribute, side, other: seenOther, memory }];
     }),
     notes,
-    truncated: memories.length > cardMemoriesMax,
+    more: page.more,
+    ...(page.next === undefined ? {} : { next: page.next }),
   };
 };

@@ -1407,6 +1407,11 @@ export type NewMemory = z.infer<typeof newMemorySchema>;
  * answers what it added, whatever was added since, and is refused with
  * other memories. Every entity is mentioned by at least one memory.
  *
+ * The change key is unique per change within the store, and comes from
+ * the change's intent, never minted per attempt: for extraction, the
+ * source and version (one add per version); for `remember`, the writer
+ * and what they said. So a retry, from any caller, is the same change.
+ *
  * `extracted` says a version of a source is fully extracted: every memory
  * drawn from an earlier version of that source ends then, as a newer
  * memory of its lineage ends it, for readers of the add (`access`) and of
@@ -1494,9 +1499,27 @@ export interface Memory {
 }
 
 /**
+ * Where a page of `readMemories` ended: its last memory's place in the
+ * order (its attribute, whether the reader saw it confirmed, when it was
+ * learned, its id). The next page starts after it.
+ */
+export const memoriesCursorSchema = z.strictObject({
+  attribute: wellFormedString().min(1).max(64).nullable(),
+  confirmed: z.boolean(),
+  learnedAt: z.date(),
+  memory: memoryIdSchema,
+});
+export type MemoriesCursor = z.infer<typeof memoriesCursorSchema>;
+
+/**
  * Memories about an entity to read, for a reader: those current now, or
  * as of a moment (believed then and true then, by both clocks); with
- * `history`, the ended ones too. Of one attribute only, if given.
+ * `history`, the ended ones too, `endedAt` and current both as of that
+ * moment (ended by then, as seen then). Of one attribute only, if given:
+ * one no kind lists, or that the entity's kind lacks, is refused (for an
+ * entity the reader may not see, the answer is the empty page an unknown
+ * id gets). A page of at most `limit` (a page size, at most
+ * `memoriesReadMax`), after `after`.
  */
 export const memoriesRequestSchema = z.strictObject({
   entity: entityIdSchema,
@@ -1504,25 +1527,56 @@ export const memoriesRequestSchema = z.strictObject({
   attribute: wellFormedString().min(1).max(64).optional(),
   asOf: z.date().optional(),
   history: z.boolean().optional(),
+  after: memoriesCursorSchema.optional(),
   limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
 });
 export type MemoriesRequest = z.input<typeof memoriesRequestSchema>;
 
 /**
- * The memories about an entity the reader may read (above), by attribute
- * (none last), then confirmed first, then the newest learned first.
+ * A page of the memories about an entity the reader may read (above), by
+ * attribute (none last), then confirmed first, then the newest learned
+ * first, then by id; whether more follow, and where to go on from.
  */
 export interface MemoriesRead {
   memories: Memory[];
+  more: boolean;
+  next?: MemoriesCursor;
 }
 
-/** Contested facts to list for a reader: about one entity, or any. */
+/**
+ * Where a page of `listContested` ended: its last fact's place (when its
+ * first memory the reader may read was learned, its entity, its
+ * attribute).
+ */
+export const contestedCursorSchema = z.strictObject({
+  learnedAt: z.date(),
+  entity: entityIdSchema,
+  attribute: wellFormedString().min(1).max(64),
+});
+export type ContestedCursor = z.infer<typeof contestedCursorSchema>;
+
+/**
+ * Contested facts to list for a reader: about one entity, or any. A page
+ * of at most `limit` facts, each whole, after `after`.
+ */
 export const contestedRequestSchema = z.strictObject({
   reader: readerSchema,
   entity: entityIdSchema.optional(),
+  after: contestedCursorSchema.optional(),
   limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
 });
 export type ContestedRequest = z.input<typeof contestedRequestSchema>;
+
+/**
+ * A page of contested facts, by when each fact's first memory the reader
+ * may read was learned, then entity id, then attribute; whether more
+ * follow, and where to go on from.
+ */
+export interface ContestedPage {
+  facts: ContestedFact[];
+  more: boolean;
+  next?: ContestedCursor;
+}
 
 /**
  * A contested fact: an entity's one-value attribute for which the reader
@@ -1535,10 +1589,12 @@ export interface ContestedFact {
   memories: Memory[];
 }
 
-/** One of a writer's own memories to retire, for a reader who may read it. */
+/**
+ * One of the reader's own memories to retire: its lineage is the reader's
+ * person, as writer, as `confirmMemory` takes its person from the reader.
+ */
 export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
-  writer: principalSchema,
   reader: readerSchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
@@ -1551,8 +1607,19 @@ export const confirmRequestSchema = z.strictObject({
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
 
 /**
+ * Where a page of `findEntities` ended: its last entity's place (when its
+ * first memory the reader may read was learned, its id).
+ */
+export const entitiesCursorSchema = z.strictObject({
+  learnedAt: z.date(),
+  entity: entityIdSchema,
+});
+export type EntitiesCursor = z.infer<typeof entitiesCursorSchema>;
+
+/**
  * Entities to find for a reader: of a kind, holding an exact identifier,
  * or a name (compared folded, whole), any of them together; at least one.
+ * A page of at most `limit`, after `after`.
  */
 export const entitiesRequestSchema = z
   .strictObject({
@@ -1560,6 +1627,7 @@ export const entitiesRequestSchema = z
     kind: z.enum(entityKinds).optional(),
     identifier: identifierSchema.optional(),
     name: someText(valueMaxLength).optional(),
+    after: entitiesCursorSchema.optional(),
     limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
   })
   .refine(
@@ -1569,6 +1637,17 @@ export const entitiesRequestSchema = z
   );
 export type EntitiesRequest = z.input<typeof entitiesRequestSchema>;
 
+/**
+ * A page of entities, by when the first memory the reader may read that
+ * mentions each was learned, then id; whether more follow, and where to
+ * go on from.
+ */
+export interface EntityPage {
+  entities: Entity[];
+  more: boolean;
+  next?: EntitiesCursor;
+}
+
 /** An entity to read, for a reader. */
 export const entityRequestSchema = z.strictObject({
   entity: entityIdSchema,
@@ -1576,15 +1655,21 @@ export const entityRequestSchema = z.strictObject({
 });
 export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
+/** Most names, and most identifiers, an `Entity` holds: the earliest. */
+export const entityNamesShown = 20;
+
 /**
  * An entity as a reader sees it: its kind, and the names and identifiers
- * given by memories the reader may read, each once, the earliest first.
+ * given by memories the reader may read, each once, the earliest first:
+ * at most `entityNamesShown` of each, with how many there are in all.
  */
 export interface Entity {
   id: EntityId;
   kind: EntityKind;
   names: string[];
   identifiers: Identifier[];
+  nameCount: number;
+  identifierCount: number;
 }
 
 /**
@@ -1609,14 +1694,16 @@ export type MemoryChangeOutcome = "done" | "nothing";
 // reader asks, from the names they may read alone, never stored.
 // Accepting one is not built here (GRA-1835).
 
-/** Most entities one card lists as related, and most memories it is built from. */
-export const cardMemoriesMax = memoriesReadMax;
-
-/** An entity's card to read, for a reader: as now, or as of a moment. */
+/**
+ * An entity's card to read, for a reader: as now, or as of a moment; a
+ * page at a time, as `readMemories` pages the memories it is built from.
+ */
 export const cardRequestSchema = z.strictObject({
   entity: entityIdSchema,
   reader: readerSchema,
   asOf: z.date().optional(),
+  after: memoriesCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
 });
 export type CardRequest = z.input<typeof cardRequestSchema>;
 
@@ -1644,19 +1731,20 @@ export interface CardRelation {
 }
 
 /**
- * An entity's card as a reader sees it: the entity, its current values
- * per attribute (`attributes`, in the order of the kind's list), its
- * relations, and its current memories filed under no attribute
- * (`notes`); all from memories the reader may read, the newest first,
- * from at most `cardMemoriesMax` of them (`truncated` when there were
- * more).
+ * A page of an entity's card as a reader sees it: the entity, its
+ * current values per attribute (`attributes`, in the order of the kind's
+ * list), its relations, and its current memories filed under no
+ * attribute (`notes`); all from a page of the memories the reader may
+ * read about it, in `readMemories`' order; whether more follow, and
+ * where to go on from. An attribute's values may go on in the next page.
  */
 export interface Card {
   entity: Entity;
   attributes: CardAttribute[];
   relations: CardRelation[];
   notes: Memory[];
-  truncated: boolean;
+  more: boolean;
+  next?: MemoriesCursor;
 }
 
 /**
@@ -1976,14 +2064,14 @@ export interface Brain {
    * The contested facts the reader may read, those of the entity given or
    * any: never one only memories hidden from the reader would contest.
    */
-  listContested: (request: ContestedRequest) => Promise<ContestedFact[]>;
+  listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
-   * Retires one of the writer's own memories (its lineage is that
-   * writer) that the reader may read and that is current for them: it
+   * Retires one of the reader's own memories (its lineage is the reader's
+   * person, as writer) that they may read and that is current for them: it
    * stops being current from now on, and stays as history. Nothing else
    * changes: a memory it had ended stays ended. One already retired
    * answers `done` again, so a retry never reads as not found; one ended
-   * otherwise, expired included, answers `nothing`.
+   * otherwise, expired included, answers `nothing`, as one not theirs.
    */
   retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
   /**
@@ -1999,7 +2087,7 @@ export interface Brain {
    * The entities the reader may see that match, in the order of the first
    * memory they may read that mentions each.
    */
-  findEntities: (request: EntitiesRequest) => Promise<Entity[]>;
+  findEntities: (request: EntitiesRequest) => Promise<EntityPage>;
   /** An entity, if the reader may see it; null alike when there is none. */
   readEntity: (request: EntityRequest) => Promise<Entity | null>;
   /**

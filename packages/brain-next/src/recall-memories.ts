@@ -141,7 +141,7 @@ const reachedSql = memoriesSql({
   filter: "judged.is_current = 1",
   columns: `, (SELECT min(reached.step) FROM reached
     WHERE reached.entity IN (m.entity, m.object)) AS step`,
-  order: `step, confirmation IS NULL, m.learned_at DESC, m.row DESC`,
+  order: `step, confirmation IS NULL, m.learned_at DESC, m.id DESC`,
 });
 
 /** A memory row of the entities way, with its step. */
@@ -151,14 +151,13 @@ type ReachedRow = MemoryRow & { step: number };
 const foundOf = (
   row: MemoryRow,
   extra: { words?: number; exact?: number; step?: number }
-): FoundMemory & { versionRow: number | null } => ({
+): FoundMemory => ({
   ...memoryOf(row),
   row: row.row,
   words: extra.words ?? 0,
   exact: extra.exact ?? 0,
   step: extra.step ?? 0,
   context: null,
-  versionRow: row.version_row,
 });
 
 /** Runs `statement` with the reader's bindings around `first`. */
@@ -264,7 +263,7 @@ const sidesSql = memoriesSql({
     JOIN memories AS m ON m.entity = asked.value ->> 0
       AND m.attribute = asked.value ->> 1 AND m.one_value = 1`,
   filter: "judged.is_current = 1",
-  order: "confirmation IS NULL, m.learned_at DESC, m.row DESC",
+  order: "confirmation IS NULL, m.learned_at DESC, m.id DESC",
 });
 
 /**
@@ -317,18 +316,22 @@ const rivalsOf = (
  */
 const contextOf = (
   sql: SqlStorage,
-  { versionRow, quote }: { versionRow: number | null; quote: string | null }
+  { source, quote }: Pick<FoundMemory, "source" | "quote">
 ): FoundMemory["context"] => {
-  if (versionRow === null || quote === null) {
+  if (source === null || quote === null) {
     return null;
   }
   return (
     sql
       .exec<{ position: number; text: string }>(
-        `SELECT position, text FROM chunks
-        WHERE version_row = ? AND instr(text, ?) > 0
-        ORDER BY position LIMIT 1`,
-        versionRow,
+        `SELECT chunks.position AS position, chunks.text AS text
+        FROM source_versions
+        JOIN chunks ON chunks.version_row = source_versions.row
+        WHERE source_versions.source = ? AND source_versions.version = ?
+          AND instr(chunks.text, ?) > 0
+        ORDER BY chunks.position LIMIT 1`,
+        source.source,
+        source.version,
         quote
       )
       .toArray()
@@ -341,13 +344,10 @@ const withContext = (
   sql: SqlStorage,
   found: readonly Reached[]
 ): FoundMemory[] =>
-  found.map(({ versionRow, ...memory }) => ({
-    ...memory,
-    context: contextOf(sql, { versionRow, quote: memory.quote }),
-  }));
+  found.map((memory) => ({ ...memory, context: contextOf(sql, memory) }));
 
 /** A memory a way found, before its context is read. */
-export type Reached = FoundMemory & { versionRow: number | null };
+export type Reached = FoundMemory;
 
 /**
  * The words way over memories: the current memories the reader may read

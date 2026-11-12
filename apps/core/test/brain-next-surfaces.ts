@@ -2507,8 +2507,7 @@ const memoryProbes = {
         async () =>
           await store().retireMemory({
             memory,
-            writer,
-            reader: probing.reader,
+            reader: { ...probing.reader, person: writer },
           }),
         about
       );
@@ -2694,6 +2693,20 @@ const linkingProbes = {
         fixture.seen,
         undefined,
         new Date(0)
+      ),
+      await answer(
+        "the reader's own, a page of one at a time",
+        async () =>
+          await store().readCard({ entity: fixture.seen, reader, limit: 1 })
+      ),
+      await answer(
+        "the reader's own, after a cursor of markers",
+        async () =>
+          await store().readCard({
+            entity: fixture.seen,
+            reader,
+            after: unchecked({ memory: probing.markers.join("") }),
+          })
       ),
     ];
   },
