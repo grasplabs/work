@@ -30,10 +30,11 @@ const aiCoAuthor = new RegExp(
  */
 const aiFooters: readonly RegExp[] = [
   new RegExp(
-    `^[^\\p{L}\\p{N}]*generated (?:with|by) \\[?(?:${aiTools}|crush)\\b`,
+    `^[^\\p{L}\\p{N}]*generated (?:with|by) \\[?(?:${aiTools}|crush)(?![\\p{L}\\p{N}])`,
     "iu"
   ),
   /^\s*claude-session:/iu,
+  /^\s*amp-thread-id:/iu,
   /https:\/\/claude\.ai\/code\/session_/u,
 ];
 
