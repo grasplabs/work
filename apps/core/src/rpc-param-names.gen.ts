@@ -242,6 +242,7 @@ export const rpcParamNames: ParamNames = {
     "entities": ["input"],
     "entityMatches": ["options"],
     "entitySources": ["input"],
+    "finishPurge": ["purgeId"],
     "follow": ["documentId"],
     "getDocument": ["documentId","version"],
     "history": ["documentId","options"],

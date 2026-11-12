@@ -637,9 +637,10 @@ describe("a purge's record", setUpTime, () => {
   it("finishes an unfinished purge run again whose document another purge deleted meanwhile", async () => {
     const admin = await personOf("admin");
     const secret = `meijer${unique()}`;
-    const { leaver, personal } = await leaverWith({});
+    // The admin's own Personal collection: another person's is theirs alone.
+    const { personal } = await admin.api.memory.collections();
     const named = await saveOver(
-      leaver,
+      admin,
       personal,
       "people.md",
       `# People\nWrite to ${secret}.`
@@ -653,10 +654,10 @@ describe("a purge's record", setUpTime, () => {
     const failing = await rebuildFailingOnce(admin);
     const first = await admin.api.knowledge.preparePurge(input);
     await outcome(failing.knowledge.purge(input, first.token));
-    // The leaver's own purge deletes the document the first one names.
+    // A personal purge deletes the document the first one names.
     await purged(admin, {
       type: "personal",
-      userId: leaver.userId,
+      userId: admin.userId,
       reason: "offboarding",
     });
     const resumed = await purged(admin, input);

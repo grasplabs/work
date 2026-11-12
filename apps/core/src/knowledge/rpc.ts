@@ -59,7 +59,7 @@ import {
   remember,
 } from "@grasp-os/brain/memories";
 import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
-import { preparePurge, purge } from "@grasp-os/brain/purge";
+import { finishPurgeById, preparePurge, purge } from "@grasp-os/brain/purge";
 import type { OnErase } from "@grasp-os/brain/purge";
 import { purgeStatus } from "@grasp-os/brain/purge-ledger";
 import { recall } from "@grasp-os/brain/recall";
@@ -558,6 +558,18 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
         knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, purgeId)
       );
     });
+  }
+
+  async finishPurge(purgeId: string): Promise<PurgeStatus> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await finishPurgeById(
+          brainOf(this.#env),
+          purgerOf(person),
+          knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, purgeId)
+        )
+    );
   }
 
   async purge(

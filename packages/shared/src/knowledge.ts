@@ -516,6 +516,15 @@ export interface KnowledgeApi {
    */
   purgeStatus: (purgeId: string) => Promise<PurgeStatus>;
   /**
+   * Finishes unfinished content purge `purgeId` by its ID alone, for any
+   * admin: what it still owes that needs none of its terms, a document
+   * gone since skipped (`knowledge.purge_needs_input` while it owes more).
+   * For a purge whoever began it can't run again. Answers where it stands:
+   * its steps' states, with no counts and no document a step is of.
+   * Audited.
+   */
+  finishPurge: (purgeId: string) => Promise<PurgeStatus>;
+  /**
    * What an export of the company's Brain would hold, with a token to
    * confirm it with (GRA-1192): admins only, never staff. Audited.
    */

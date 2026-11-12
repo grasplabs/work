@@ -794,7 +794,8 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
     const { ids, records } = gapRecords(tag);
     await admin.api.brain.addRecords(records);
     await leaver.api.brain.answerGap(ids.gap, `Ask ${name}, she knows.`);
-    const note = await noteOf(leaver, `# Leaving\n${name} hands over.`);
+    // In the admin's own collection: another person's is the owner's alone.
+    const note = await noteOf(admin, `# Leaving\n${name} hands over.`);
 
     const content: PurgeInput = {
       type: "content",

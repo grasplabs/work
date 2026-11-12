@@ -39,7 +39,7 @@ import {
   purgeMaxDocuments,
   purgedMarker,
 } from "./knowledge.ts";
-import type { PurgePlan, PurgeResult } from "./knowledge.ts";
+import type { PurgePlan, PurgeResult, PurgeStatus } from "./knowledge.ts";
 import { log } from "./log.ts";
 import {
   countStatements,
@@ -60,15 +60,20 @@ import type { PayloadRef, StagedPayload } from "./payloads.ts";
 import {
   attemptHolds,
   attemptHoldsOrIdle,
+  documentStepPrefix,
   finishPurge,
   heldNow,
   keepHold,
   openPurge,
+  purgeStatus,
   purgeUnfinished,
+  releasePurge,
   runStep,
+  takePurge,
+  unfinishedPurge,
   whileHeld,
 } from "./purge-ledger.ts";
-import type { StepCounts } from "./purge-ledger.ts";
+import type { StepCounts, UnfinishedPurge } from "./purge-ledger.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -77,6 +82,7 @@ import {
   owedWritesDoneWhile,
   rebuildOwedWhile,
   rebuildOwedIfChanged,
+  rebuildSearchIndex,
   secureDeleteReady,
 } from "./search-erasure.ts";
 import {
@@ -164,8 +170,11 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // when, why (a reason from a fixed list), which documents and how many
 // versions (and, when preparing, how often a term starts a longer word):
 // never the terms or the text removed. Preparing is recorded too: its
-// counts tell whether text is in a collection the admin can't read, so
-// trying terms one by one leaves a trace.
+// counts tell whether text is in a team's collection the admin isn't in,
+// so trying terms one by one there leaves a trace. A document in someone
+// else's own collection (access `me`, their Personal one among them) can't
+// be named at all: it is answered as one that doesn't exist, with nothing
+// read, counted, changed or recorded (`nameable`).
 //
 // What a purge doesn't reach: paths (a document named after someone keeps
 // its name; a `[[link]]` or a frontmatter field naming it is rewritten
@@ -432,7 +441,8 @@ const personalSteps = [
 ] as const;
 
 /** A named document's step of a content purge. */
-const documentStep = (documentId: string): string => `document:${documentId}`;
+const documentStep = (documentId: string): string =>
+  `${documentStepPrefix}${documentId}`;
 
 /** The steps of a content purge of `documentIds`, in the order it runs them. */
 const contentSteps = (documentIds: readonly string[]): string[] => [
@@ -1134,32 +1144,50 @@ interface Named {
 }
 
 /**
- * The documents a content purge names, in ID order. Refuses with
- * `knowledge.not_found`, naming the ones that don't exist, rather than
- * skipping them: a mistyped ID would otherwise leave the text it was meant
- * for where it is, with a purge recorded as done. Refuses the Grasp
- * skills with `knowledge.read_only`, saying why for each: the next sync
- * would put their text back.
+ * Whether `by` may name documents of `collection` in a content purge: any
+ * but another person's own (access `me`: their Personal collection, with
+ * USER.md, and any they made for themselves), which only its owner reads,
+ * admins included. A purge's counts would tell what such a document says,
+ * a term at a time, so one is answered as if it didn't exist: removing
+ * text there is its owner's, or the personal purge's that erases them.
+ */
+const nameable = (by: Writer, collection: CollectionRow): boolean =>
+  collection.access !== "me" || collection.owner === by.userId;
+
+/**
+ * The documents a content purge names that `by` may name (`nameable`), in
+ * ID order. Refuses with `knowledge.not_found`, naming the others, rather
+ * than skipping them: a mistyped ID would otherwise leave the text it was
+ * meant for where it is, with a purge recorded as done. One that exists
+ * in someone else's own collection is named among them as one that
+ * doesn't, before anything of it is read, counted or recorded. Refuses
+ * the Grasp skills with `knowledge.read_only`, saying why for each: the
+ * next sync would put their text back.
  */
 const documentsNamed = async (
   db: DrizzleD1Database,
+  by: Writer,
   { documentIds }: ContentPurge,
   /**
-   * The purge was begun and isn't finished: a document named that is gone
-   * since (another purge deleted it) has nothing left to erase, and is
-   * left out, so the purge can go on and finish.
+   * `by` began the purge and it isn't finished (`purgeUnfinished`): a
+   * document named that is gone since (another purge deleted it) has
+   * nothing left to erase, and is left out, so the purge can go on and
+   * finish. Never one `by` may not name: that is refused as ever, or a
+   * purge begun would answer otherwise than a missing document does.
    */
   begun = false
 ): Promise<Named[]> => {
-  const found = await db
+  const rows = await db
     .select({ document: documents, collection: collections })
     .from(documents)
     .innerJoin(collections, eq(collections.id, documents.collectionId))
     .where(inList(documents.id, documentIds))
     .orderBy(asc(documents.id));
+  const found = rows.filter(({ collection }) => nameable(by, collection));
+  const hidden = rows.length > found.length;
   const existing = new Set(found.map(({ document }) => document.id));
   const missing = documentIds.filter((id) => !existing.has(id));
-  if (missing.length > 0 && !begun) {
+  if (missing.length > 0 && (!begun || hidden)) {
     throw knowledgeErrors.create("knowledge.not_found", {
       documentIds: missing,
     });
@@ -1177,6 +1205,31 @@ const documentsNamed = async (
   }
   return found;
 };
+
+/** Document `documentId` with its collection as it is now; none once gone. */
+const namedNow = async (
+  db: DrizzleD1Database,
+  documentId: string
+): Promise<Named | undefined> =>
+  await db
+    .select({ document: documents, collection: collections })
+    .from(documents)
+    .innerJoin(collections, eq(collections.id, documents.collectionId))
+    .where(eq(documents.id, documentId))
+    .get();
+
+/**
+ * Passes a document's step makes before it gives up as
+ * `knowledge.conflict`: each one saved again while the one before ran.
+ * Running the purge again goes on from there.
+ */
+const passesMax = 3;
+
+/** What two passes over one document changed: one document, their versions. */
+const passed = (before: Counts, pass: Counts): Counts => ({
+  documents: Math.max(before.documents, pass.documents),
+  versions: before.versions + pass.versions,
+});
 
 /** The text (its payload's) and message of `document`'s version `number`. */
 const versionOf = async <C>(
@@ -1633,12 +1686,15 @@ const filesNamed = (document: DocumentRow): ErasedFiles => ({
  * new key. In the same batch, the current version is pointed at the new
  * one's payload too, and what that leaves unreferenced is collected after.
  *
- * The save is from the version the purge started at, so anyone who saved
- * or restored meanwhile, from text the purge hadn't rewritten yet, makes
- * it fail with
- * `knowledge.conflict`; running the purge again rewrites theirs too. A purge cut short leaves the current version as it
- * was, so running it again finishes it; one run again after it finished
- * finds nothing, and writes nothing.
+ * It reads `named` as the step read it, when it began. The save is from
+ * that version, so a save or restore by anyone meanwhile makes the
+ * purge's own save fail with `knowledge.conflict`; running the purge
+ * again rewrites theirs too. When the purge saves nothing (no version up
+ * to that one held a term), a save meanwhile doesn't conflict: the step
+ * sees the document at a newer version than it answers it left
+ * (`leftAt`), and purges it again from there. A purge cut short leaves
+ * the current version as it was, so running it again finishes it; one
+ * run again after it finished finds nothing, and writes nothing.
  */
 const purgeDocument = async <C>(
   brain: Brain<C>,
@@ -1654,7 +1710,11 @@ const purgeDocument = async <C>(
   save: (soFar: Counts) => BatchItem<"sqlite">,
   /** The purge's hold: each of its changes is made only while it holds. */
   holds: () => SQL
-): Promise<Counts> => {
+): Promise<{
+  counts: Counts;
+  /** The version it left the document at: what it saved, or it read. */
+  leftAt: number;
+}> => {
   const { document, collection } = named;
   // Before anything of it changes: one the host is saving now refuses, and
   // the purge fails here.
@@ -1717,7 +1777,7 @@ const purgeDocument = async <C>(
     // its current version waits for indexing (a purge that failed to
     // publish, say): published now, or the purge fails.
     await requireCurrentIndexed(brain, db, document.id, by.actor);
-    return counts;
+    return { counts, leftAt: at };
   }
   const text = changed?.text ?? current.text;
   const holding = holds();
@@ -1765,7 +1825,7 @@ const purgeDocument = async <C>(
         ];
   // The version it saves carries the document's count, in all.
   pointCurrent.push(save(counts));
-  await writeVersion(brain, by, {
+  const saved = await writeVersion(brain, by, {
     collection,
     path: document.path,
     text,
@@ -1785,7 +1845,7 @@ const purgeDocument = async <C>(
       ? { purgedTranscript: transcript.redacted, transcriptRead: transcript.at }
       : {}),
   });
-  return counts;
+  return { counts, leftAt: saved.currentVersion };
 };
 
 /**
@@ -1897,8 +1957,9 @@ const purgeContent = async <C>(
   const { db } = brain;
   const named = await documentsNamed(
     db,
+    by,
     input,
-    await purgeUnfinished(brain, input)
+    await purgeUnfinished(brain, by, input)
   );
   const matcher = matcherOf(input.terms, { countLeft: false });
   // Read before anything changes: whether a term is part of a longer
@@ -2011,25 +2072,35 @@ const purgeContent = async <C>(
       );
     });
     for (const documentId of input.documentIds) {
-      const one = named.find(({ document }) => document.id === documentId);
+      // The version the step leaves the document at, kept with it.
+      let leftAt: number | null = null;
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       const counts = await runStep(
         brain,
         held,
         documentStep(documentId),
         async (save, stored) => {
-          // Gone since a run before: nothing of it is left to erase.
-          if (one === undefined) {
-            return {};
-          }
           // The step is one document: counted once, however many runs
           // changed it; its versions add up.
           const once = (made: Counts): Counts => ({
             ...made,
             documents: (stored.documents ?? 0) > 0 ? 0 : made.documents,
           });
-          return once(
-            await purgeDocument(
+          let made: Counts = { ...nothing };
+          // Read as the step begins, not as the purge named it: a version
+          // saved in between is purged too. Saved again while it ran, it
+          // goes on from the newer version, a few times at most.
+          for (let pass = 0; ; pass += 1) {
+            // oxlint-disable-next-line no-await-in-loop -- one pass after another
+            const one = await namedNow(db, documentId);
+            // Gone since a run before: nothing of it is left to erase.
+            if (one === undefined) {
+              leftAt = null;
+              return once(made);
+            }
+            const before = made;
+            // oxlint-disable-next-line no-await-in-loop -- one pass after another
+            const purgedOne = await purgeDocument(
               brain,
               db,
               by,
@@ -2040,11 +2111,23 @@ const purgeContent = async <C>(
               async () => {
                 await keepHold(brain, held);
               },
-              (soFar) => save({ ...once(soFar) }),
+              (soFar) => save({ ...once(passed(before, soFar)) }),
               () => heldNow(brain, held)
-            )
-          );
-        }
+            );
+            made = passed(before, purgedOne.counts);
+            // oxlint-disable-next-line no-await-in-loop -- one pass after another
+            const after = await namedNow(db, documentId);
+            if (after?.document.currentVersion !== purgedOne.leftAt) {
+              if (pass < passesMax - 1) {
+                continue;
+              }
+              throw knowledgeErrors.create("knowledge.conflict");
+            }
+            ({ leftAt } = purgedOne);
+            return once(made);
+          }
+        },
+        () => leftAt
       );
       done.push(counts);
     }
@@ -2151,8 +2234,9 @@ export const preparePurge = async <C>(
   } else {
     const named = await documentsNamed(
       db,
+      by,
       parsed,
-      await purgeUnfinished(brain, parsed)
+      await purgeUnfinished(brain, by, parsed)
     );
     originals = await onErase.countFiles(
       named.map(({ document }) => filesNamed(document))
@@ -2219,4 +2303,144 @@ export const purge = async <C>(
   return parsed.type === "personal"
     ? await purgePersonal(brain, by, parsed, onErase, fresh)
     : await purgeContent(brain, by, parsed, onErase, fresh);
+};
+
+/** The steps of a content purge that need none of its terms to run. */
+const termFreeSteps: ReadonlySet<string> = new Set(["payloads", "search"]);
+
+/**
+ * Whether every document a purge names that is still there is provably as
+ * the purge left it: its step complete, at the version the step kept, the
+ * one it is at now. Not one saved again since, which may hold a term
+ * again (with its transcript, payload and files: each comes with a
+ * version), one whose step is owed, or one whose step kept no version.
+ */
+const provenLeft = async (
+  db: DrizzleD1Database,
+  named: UnfinishedPurge["documents"]
+): Promise<boolean> => {
+  if (named.length === 0) {
+    return true;
+  }
+  const rows = await db
+    .select({ id: documents.id, version: documents.currentVersion })
+    .from(documents)
+    .where(
+      inList(
+        documents.id,
+        named.map(({ documentId }) => documentId)
+      )
+    );
+  const existing = new Map(rows.map(({ id, version }) => [id, version]));
+  return named.every(
+    ({ documentId, complete, version }) =>
+      !existing.has(documentId) ||
+      (complete && version !== null && version === existing.get(documentId))
+  );
+};
+
+/**
+ * Finishes the unfinished content purge `purgeId`, by any admin (the host
+ * checks who), with neither its documents nor its terms as input, so it
+ * tells nothing of them: what the purge still owes that needs none of its
+ * terms is done from its own record. A step of a document named that is
+ * gone since finishes with nothing to erase; what the purge's writes let
+ * go of leaves the store; the search index is rebuilt whole. A purge left
+ * open when whoever began it can no longer run it again (their own
+ * document gone with them, or they are no admin any more) is so finished,
+ * and no longer holds back every export (exports.ts).
+ *
+ * Refused as `knowledge.purge_needs_input` while a step that needs the
+ * terms is owed (the memory records, the host's copies, a document's own
+ * step), or a document it names that is still there isn't provably as the
+ * purge left it (`provenLeft`): only running the purge again with them
+ * finishes that. `knowledge.not_found` for a purge that doesn't exist,
+ * finished, was superseded or is a personal one, alike. Both, from what
+ * it reads first, leave nothing: no step, lock or audit event.
+ *
+ * The proof is read again in the statement that completes the purge
+ * (`finishPurge`), so a document saved while this runs is caught too:
+ * then it is refused as `knowledge.purge_needs_input` as well, after its
+ * work, which stays: the audit event naming who finished it, the steps it
+ * ran complete (those of documents gone, `payloads`, `search`) and the
+ * index rebuilt. The purge stays unfinished and is let go at once, for
+ * its starter to run again. Answers where the purge stands, its steps'
+ * states alone: no counts, and no document a step is of.
+ */
+export const finishPurgeById = async <C>(
+  brain: Brain<C>,
+  by: Writer,
+  purgeId: string
+): Promise<PurgeStatus> => {
+  const { db } = brain;
+  const { owed, documents: named } = await unfinishedPurge(brain, purgeId);
+  const needsTerms = owed.some(
+    (step) => !step.startsWith(documentStepPrefix) && !termFreeSteps.has(step)
+  );
+  if (needsTerms || !(await provenLeft(db, named))) {
+    throw knowledgeErrors.create("knowledge.purge_needs_input");
+  }
+  // The steps of documents gone since: nothing of them is left to erase.
+  const documentIds = named
+    .filter(({ complete }) => !complete)
+    .map(({ documentId }) => documentId);
+  // Each attempt owes its own rebuild, as running the purge again does.
+  const held = await takePurge(brain, purgeId, (taken, at) => [
+    rebuildOwedWhile(db, taken.purgeId, attemptHolds(taken, at)),
+  ]);
+  await auditedBatch(brain.ports, db, [
+    outboxed(brain, {
+      actor: by.actor,
+      action: "knowledge.purge.resumed",
+      provenance: [],
+      detail: { purgeId, kind: "content", byId: true },
+    }),
+  ]);
+  try {
+    for (const documentId of documentIds) {
+      // oxlint-disable-next-line no-await-in-loop -- one step after another
+      await runStep(brain, held, documentStep(documentId), async () => {
+        // Gone since: nothing of it is left to erase.
+        await Promise.resolve();
+        return {};
+      });
+    }
+  } finally {
+    await whileHeld(brain, held, (at) => [
+      owedWritesDoneWhile(db, purgeId, attemptHoldsOrIdle(held, at)),
+      erasedDocumentsDone(
+        db,
+        purgeId,
+        brain.ports.clock(),
+        attemptHoldsOrIdle(held, at)
+      ),
+    ]);
+  }
+  await runStep(brain, held, "payloads", async () => {
+    await collectPayloads(brain, db);
+  });
+  await runStep(brain, held, "search", async () => {
+    await cleanSearchIndex(async () => {
+      await rebuildSearchIndex(db);
+    });
+  });
+  // Proven in the statement that completes it, so no save gets in between:
+  // a document saved again since its step, also while this ran, leaves it
+  // open, and let go at once for its starter to run again.
+  if (!(await finishPurge(brain, held, { provenDocuments: true }))) {
+    await releasePurge(brain, held);
+    throw knowledgeErrors.create("knowledge.purge_needs_input");
+  }
+  const status = await purgeStatus(brain, purgeId);
+  // Where it stands, and nothing of what it removed nor where: no counts,
+  // and a document's step without the document.
+  return {
+    ...status,
+    steps: status.steps.map(({ step, state, reason }) => ({
+      step: step.startsWith(documentStepPrefix) ? "document" : step,
+      state,
+      reason,
+      counts: {},
+    })),
+  };
 };
