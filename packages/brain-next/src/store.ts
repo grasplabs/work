@@ -59,7 +59,13 @@ import {
   sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
-import { filesPrefix, hashOf, sweepFiles, vectorsPrefix } from "./files.ts";
+import {
+  fileGraceMs,
+  filesPrefix,
+  hashOf,
+  sweepFiles,
+  vectorsPrefix,
+} from "./files.ts";
 import { find, recall } from "./recall.ts";
 import { addVersion, readCurrent, readVersion } from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
@@ -77,8 +83,16 @@ import {
   requeueWork,
   stopWorkOn,
   workOverview,
+  workParkedMs,
+  workParksMax,
   workTick,
 } from "./work.ts";
+
+/** What a person's own store's alarm works with (`BrainStore.alarmHost`). */
+export interface AlarmHost {
+  ask: AskModel;
+  embedders: Embedders;
+}
 
 /** What the store needs of its host's Worker: the Brain's bucket. */
 export interface BrainStoreEnv {
@@ -118,6 +132,34 @@ const ledgerCatchingUp =
 
 /** How long after a failed read of the ledger a call reads it again. */
 const ledgerRetryMs = 30_000;
+
+/**
+ * The soonest a person's own store wakes itself again (`alarm`): a
+ * minute, as the host's clock ticks the shared store.
+ */
+const alarmWaitMs = 60_000;
+
+/**
+ * When a tick next has something to do (`?1` now), or null when nothing
+ * is left: an item of the queue not parked, when it is due; a parked one,
+ * when it comes back by itself (work.ts rule 5); an erasure's versions to
+ * delete, a ledger entry to write, vector codes to repack or word indexes
+ * to rebuild, now; a file or a vector nothing holds, once the sweep may
+ * delete it (files.ts). Never a parked item that comes back no more, so
+ * a store whose work is all done, or all failed for good, sleeps.
+ */
+const nextWorkSql = `SELECT min(at) AS at FROM (
+  SELECT max(min(not_before), ?1) AS at FROM work_items
+    WHERE parked_at IS NULL AND running = 0
+  UNION ALL SELECT min(parked_at) + ?2 FROM work_items
+    WHERE parked_at IS NOT NULL AND parks < ?3
+  UNION ALL SELECT CASE WHEN EXISTS (SELECT 1 FROM erasing_versions)
+    OR EXISTS (SELECT 1 FROM erasures WHERE confirmed = 0)
+    OR EXISTS (SELECT 1 FROM vector_removed) THEN ?1 END
+  UNION ALL SELECT max(min(written_at) + ?4, ?1) FROM files WHERE refs = 0
+  UNION ALL SELECT max(min(written_at) + ?4, ?1) FROM vector_files
+    WHERE unheld = 1
+)`;
 
 /** A tick's time: a valid date. */
 const tickAtSchema = z.date();
@@ -355,6 +397,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * else.
    */
   async #forget(): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     this.#erased = true;
     this.#schema = false;
@@ -480,7 +523,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const adding = checked(newSourceSchema, source);
     this.#mayKeep(adding.access);
     await this.#readyToWrite();
-    return await addVersion(this.#sources, adding, { indexed: true });
+    const added = await addVersion(this.#sources, adding, { indexed: true });
+    await this.#armAlarm();
+    return added;
   }
 
   /**
@@ -491,7 +536,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const adding = checked(newInstructionsSchema, source);
     this.#mayKeep(adding.access);
     await this.#readyToWrite();
-    return await addVersion(this.#sources, adding, { indexed: false });
+    const added = await addVersion(this.#sources, adding, { indexed: false });
+    await this.#armAlarm();
+    return added;
   }
 
   /** A pack of what the reader may read for the question, within its budget. */
@@ -539,6 +586,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await erase(this.#erasures, "source", source, reason, (sources) => {
       stopWorkOn(this.#work, sources);
     });
+    await this.#armAlarm();
   }
 
   /**
@@ -590,9 +638,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         throw new Error(erasureUnrecorded);
       }
     }
-    if (
-      !(await deleteStoreObjects(this.#bucket, [filesPrefix, vectorsPrefix]))
-    ) {
+    let done = false;
+    try {
+      done = await deleteStoreObjects(this.#bucket, [
+        filesPrefix,
+        vectorsPrefix,
+      ]);
+    } catch {
+      // Nothing of the error is kept: it may name a key.
+    }
+    if (!done) {
       throw new Error(stillDeleting);
     }
   }
@@ -616,6 +671,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // Nothing was ever kept: nothing to do.
       return;
     }
+    try {
+      await this.#tick(ask, tickAt, {
+        model,
+        embed: async (request) => await embedders.embed(request),
+      });
+    } finally {
+      await this.#armAlarm();
+    }
+  }
+
+  /** The tick of `work` at `tickAt`, with the host's checked `embedders`. */
+  async #tick(
+    ask: AskModel,
+    tickAt: Date,
+    embedders: Embedders
+  ): Promise<void> {
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
       return;
@@ -625,20 +696,76 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.#sweep(tickAt);
     this.#repack(tickAt);
     this.#reindex(tickAt);
-    this.#embedding(tickAt, model);
+    this.#embedding(tickAt, embedders.model);
     await workTick(
       this.ctx.storage,
       this.#work,
-      {
-        ask,
-        embedders: {
-          model,
-          embed: async (request) => await embedders.embed(request),
-        },
-        bucket: this.#bucket,
-      },
+      { ask, embedders, bucket: this.#bucket },
       tickAt
     );
+  }
+
+  /**
+   * What the store's own alarm works with: the host's model calls and
+   * embedders, as its clock gives them to the shared store's tick. The
+   * host's subclass gives them; null, as here, works nothing on an alarm.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- a hook the host's subclass overrides
+  protected async alarmHost(): Promise<AlarmHost | null> {
+    await Promise.resolve();
+    return null;
+  }
+
+  /**
+   * A person's own store's tick, on the alarm it set itself (`#armAlarm`):
+   * the host's clock ticks only the shared store, so each person's store
+   * wakes itself while it has work, and sleeps, costing nothing, once it
+   * has none. Its tick sets the next.
+   */
+  override async alarm(): Promise<void> {
+    if (this.#kind.kind !== "person") {
+      return;
+    }
+    // An erased store wakes to nothing (`#ready` would refuse the tick).
+    await this.#ledgerStep();
+    if (this.#erased) {
+      return;
+    }
+    const host = await this.alarmHost();
+    if (host !== null) {
+      await this.work(host.ask, new Date(), host.embedders);
+    }
+  }
+
+  /**
+   * A person's own store's alarm set for when a tick next has something
+   * to do (`nextWorkSql`), a minute on at the soonest, unless one is set
+   * sooner; none when nothing is left, or the store holds nothing.
+   */
+  async #armAlarm(): Promise<void> {
+    if (this.#kind.kind !== "person" || !this.#schema || this.#erased) {
+      return;
+    }
+    const now = Date.now();
+    const { sql } = this.ctx.storage;
+    const [next] = sql
+      .exec<{ at: number | null }>(
+        nextWorkSql,
+        now,
+        workParkedMs,
+        workParksMax,
+        fileGraceMs
+      )
+      .toArray();
+    const due = wordsRebuilding(sql) ? now : (next?.at ?? null);
+    if (due === null) {
+      return;
+    }
+    const at = Math.max(due, now + alarmWaitMs);
+    const set = await this.ctx.storage.getAlarm();
+    if (set === null || set > at) {
+      await this.ctx.storage.setAlarm(at);
+    }
   }
 
   /**
