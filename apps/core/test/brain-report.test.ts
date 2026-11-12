@@ -1,5 +1,5 @@
 import { brainOf, vectorModelNameOf } from "@grasp-os/brain-next/contract";
-import type { Embedders } from "@grasp-os/brain-next/contract";
+import type { Embedders, HandOvers } from "@grasp-os/brain-next/contract";
 import {
   defineWork,
   enqueueWork,
@@ -38,6 +38,7 @@ import {
 } from "./brain-next-store-copy.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { auditedDuring, routed, signedInWithRole } from "./sign-in.ts";
 
 // Grasp's staff's view of this client's Brain (src/brain-report.ts),
@@ -97,7 +98,7 @@ const nextDay = (): Date => {
 const tick = async (times: number): Promise<void> => {
   for (let index = 0; index < times; index += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one tick after another
-    await workBrain(env, nextDay());
+    await workBrain(env, nextDay(), noProducers);
   }
 };
 
@@ -807,6 +808,14 @@ describe("the Brain's actions when the store throws", () => {
 });
 
 /** The host's model, as the store's own tick asks it: it answers, and holds nothing. */
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 const quietModel = async () => {
   await Promise.resolve();
   return { kind: "answer" as const, text: "" };
@@ -836,7 +845,13 @@ const embedAll = async (embedders: Embedders): Promise<void> => {
   const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
   for (let ticks = 0; ticks < 50; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one tick after another
-    await brain.work(quietModel, nextDay(), embedders);
+    await brain.work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders,
+      handOvers: noHandOvers,
+      contextTokens: null,
+    });
     // oxlint-disable-next-line no-await-in-loop -- look after each tick
     const { embedding } = await brainWorkOverview(env);
     if (embedding.rebuilt) {
@@ -942,7 +957,13 @@ describe("the Brain's embedding, as staff see it", () => {
       },
     };
     const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
-    await brain.work(quietModel, nextDay(), choosy);
+    await brain.work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders: choosy,
+      handOvers: noHandOvers,
+      contextTokens: null,
+    });
     const before = await reported((report) => report?.embedding);
     const answered = await answerTo({ type: "reembed" });
     const after = await reported((report) => report?.embedding);
@@ -979,12 +1000,24 @@ describe("the Brain's embedding, as staff see it", () => {
     // and fails again: ticked until the overview shows one parked, as how
     // many items a tick runs depends on the machine's load, at most 20
     // ticks.
-    await brain.work(quietModel, nextDay(), broken);
+    await brain.work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders: broken,
+      handOvers: noHandOvers,
+      contextTokens: null,
+    });
     await brain.reembed();
     let { embedding: whileBroken } = await brainWorkOverview(env);
     for (let round = 0; round < 20 && whileBroken.parked === 0; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one tick after another, past each backoff
-      await brain.work(quietModel, nextDay(), broken);
+      await brain.work({
+        ask: quietModel,
+        at: nextDay(),
+        embedders: broken,
+        handOvers: noHandOvers,
+        contextTokens: null,
+      });
       // oxlint-disable-next-line no-await-in-loop -- looked at after each tick
       ({ embedding: whileBroken } = await brainWorkOverview(env));
     }
@@ -1075,11 +1108,13 @@ describe("the Brain's upkeep, as staff see it", () => {
     const marked = marker();
     // The store sees the test model first, so core's own tick (no model)
     // changes the model it embeds for, which the step writes.
-    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work(
-      quietModel,
-      nextDay(),
-      await testModelEmbedders()
-    );
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work({
+      ask: quietModel,
+      at: nextDay(),
+      embedders: await testModelEmbedders(),
+      handOvers: noHandOvers,
+      contextTokens: null,
+    });
     // The step's own table refuses every write, with the marker in its words.
     await runInDurableObject(storeObject(), (_store, state) => {
       for (const when of ["INSERT", "UPDATE"]) {
@@ -1093,7 +1128,7 @@ describe("the Brain's upkeep, as staff see it", () => {
     try {
       // Core's embedders run no model, which the store last saw running
       // one: the step writes its state, and fails.
-      await workBrain(env, nextDay());
+      await workBrain(env, nextDay(), noProducers);
       const { status, text, report } = await readReport();
 
       expect({

@@ -5,6 +5,7 @@ import { addSource, workBrain } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { allEvents } from "./audit-events.ts";
 import { answeringProvider } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 
 // Extracting memories as core drives it (GRA-1737; the threat model is on
 // the issue): a producer adds a version saying whose words it is, core's
@@ -20,7 +21,7 @@ const store = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
 const clock = { at: Date.now() };
 const tick = async (): Promise<void> => {
   clock.at = Math.max(clock.at + 60_000, Date.now());
-  await workBrain(env, new Date(clock.at));
+  await workBrain(env, new Date(clock.at), noProducers);
 };
 
 describe("extracting memories through core", () => {

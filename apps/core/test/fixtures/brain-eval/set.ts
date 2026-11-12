@@ -204,6 +204,31 @@ export const isLongDocument = (source: BrainEvalSource): boolean =>
   passagesOf([source]).length > 1;
 
 /**
+ * What decides a question's groups in a report (scripts/
+ * brain-eval-scoring.ts `groups`): its language and its source's, what it
+ * expects and how its source is found, whether its source is a long
+ * document, and whether its answer has a look-alike.
+ */
+export const groupingOf = (
+  sources: readonly BrainEvalSource[],
+  question: BrainEvalQuestion
+) => {
+  const { expects } = question;
+  const source =
+    expects.kind === "absent"
+      ? undefined
+      : sources.find(({ key }) => key === expects.source);
+  return {
+    language: question.language,
+    sourceLanguage: source?.language ?? null,
+    expects: expects.kind,
+    way: expects.kind === "answer" ? expects.way : null,
+    long: source !== undefined && isLongDocument(source),
+    lookalike: expects.kind === "answer" && expects.lookalike !== undefined,
+  };
+};
+
+/**
  * What a recall returned, best first: each result's source, as the set's
  * key (`undefined` for a source the set doesn't hold), and its text.
  */

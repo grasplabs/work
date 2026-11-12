@@ -15,6 +15,7 @@ import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { brainWorkOverview, workBrain } from "../src/brain-next.ts";
+import { noProducers } from "./no-producers.ts";
 
 // The vector way of the Brain's store (GRA-1766), through the store's
 // contract: codes are put for chunks of current versions, packed in
@@ -754,10 +755,10 @@ describe("the Brain's vector way", () => {
       });
     });
     const ranBefore = tickRuns.count;
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     const afterOne = await markedBlocks();
     const ran = tickRuns.count - ranBefore;
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     expect({
       enough: before > repackPerTick,
       // Two ticks reach every marked block, the test's own among them.
@@ -797,14 +798,14 @@ describe("the Brain's vector way", () => {
     );
     const at = new Date();
     try {
-      await workBrain(env, at);
+      await workBrain(env, at, noProducers);
     } finally {
       await undo();
     }
     const ran = tickRuns.count - ranBefore;
     const markedWhileBroken = await markedBlocks();
     const whileBroken = await brainWorkOverview(env);
-    await workBrain(env, new Date());
+    await workBrain(env, new Date(), noProducers);
     const fixed = await brainWorkOverview(env);
     expect({
       ran,

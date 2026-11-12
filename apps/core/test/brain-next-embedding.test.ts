@@ -8,6 +8,7 @@ import {
   actOnBrainForStaff,
   workBrain,
 } from "../src/brain-next.ts";
+import { noProducers } from "./no-producers.ts";
 
 // The new Brain's embedding as core drives it (GRA-1768): core's clock
 // ticks the store with core's bulk embedders. No model ships yet
@@ -20,7 +21,7 @@ import {
 const clock = { at: Date.now() };
 const tick = async (): Promise<void> => {
   clock.at = Math.max(clock.at + 1000, Date.now());
-  await workBrain(env, new Date(clock.at));
+  await workBrain(env, new Date(clock.at), noProducers);
 };
 
 describe("embedding the Brain's content through core", () => {

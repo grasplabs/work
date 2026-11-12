@@ -12,6 +12,7 @@ import type {
   EntitiesCursor,
   Entity,
   Extract,
+  HandOvers,
   Memory,
   MemoriesCursor,
   ModelRequest,
@@ -55,6 +56,14 @@ const noModel: Embedders = {
  */
 type Answer = (request: ModelRequest) => string | Promise<string>;
 
+/** No hand-overs: none is queued in these tests. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 /** Each test's answers, by its token. */
 const answers = new Map<string, Answer>();
 
@@ -81,7 +90,13 @@ const tick = async (
   contextTokens: number | null = null
 ): Promise<void> => {
   clock += minutes * 60_000;
-  await shared().work(ask, new Date(clock), noModel, contextTokens);
+  await shared().work({
+    ask,
+    at: new Date(clock),
+    embedders: noModel,
+    handOvers: noHandOvers,
+    contextTokens,
+  });
 };
 
 /** The calls that held `token`: their purpose and role. */

@@ -7,6 +7,7 @@ import type {
   Access,
   AskModel,
   EmbedModel,
+  HandOvers,
   Pack,
   Reader,
   RecallRequest,
@@ -28,6 +29,14 @@ const quietAsk: AskModel = async () => {
 };
 
 /** The host's embedders, while no model runs. */
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 const noEmbedders = {
   model: null,
   embed: async () => {
@@ -356,7 +365,13 @@ describe("recall by meaning", () => {
     switched.failing = false;
     await store().eraseSource({ source: crowd.source, reason: "deleted" });
     const erased = await found();
-    await store().work(quietAsk, new Date(), noEmbedders);
+    await store().work({
+      ask: quietAsk,
+      at: new Date(),
+      embedders: noEmbedders,
+      handOvers: noHandOvers,
+      contextTokens: null,
+    });
     const ticked = await found();
 
     expect({ before, failed, hidden, erased, ticked }).toStrictEqual({

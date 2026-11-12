@@ -102,20 +102,27 @@ const called = async <T>(rpc: Promise<T>): Promise<T> => await rpc;
 
 /** One tick of the store's clock, with no model. */
 const tick = async (store: Store = shared()): Promise<void> => {
-  await store.work(
-    async () => {
+  await store.work({
+    ask: async () => {
       await Promise.resolve();
       return { kind: "answer", text: "" };
     },
-    new Date(),
-    {
+    at: new Date(),
+    embedders: {
       model: null,
       embed: async () => {
         await Promise.resolve();
         return { kind: "unavailable" };
       },
-    }
-  );
+    },
+    handOvers: {
+      handOver: async () => {
+        await Promise.resolve();
+        throw new Error("No hand-overs in these tests");
+      },
+    },
+    contextTokens: null,
+  });
 };
 
 describe("a memory's lineage", () => {

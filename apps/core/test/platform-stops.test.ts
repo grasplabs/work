@@ -6,7 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   ExtractorUnavailableError,
   localExtractor,
-} from "../src/knowledge/extract.ts";
+} from "../src/files/extract.ts";
 import { buildPages } from "../src/pages.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { sandboxStopping } from "./sandbox-stopping.ts";

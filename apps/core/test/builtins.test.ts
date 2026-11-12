@@ -20,12 +20,12 @@ import {
 } from "../src/builtins.ts";
 import worker from "../src/index.ts";
 import {
-  graspSkills,
   graspSkillsCollectionId,
   syncGraspSkills,
 } from "../src/knowledge/grasp-skills.ts";
-import type { GraspSkill } from "../src/knowledge/grasp-skills.ts";
 import { releaseContracts } from "../src/release-contracts.ts";
+import { shippedSkills } from "../src/shipped-skills.ts";
+import type { ShippedSkill } from "../src/shipped-skills.ts";
 import { storedCurrentTexts } from "./knowledge.ts";
 import { auditedDuring } from "./sign-in.ts";
 
@@ -50,20 +50,25 @@ const thisFingerprint = async (): Promise<string> =>
 const storedSkills = async (): Promise<Record<string, string>> =>
   await storedCurrentTexts(graspSkillsCollectionId);
 
-/** This release's skills, by path. */
-const releaseSkills = (skills: readonly GraspSkill[] = graspSkills) =>
-  Object.fromEntries(skills.map(({ path, text }) => [path, text]));
+/** Where Knowledge keeps the Grasp skill `name`. */
+const pathOf = (name: string): string => `${name}/SKILL.md`;
+
+/** This release's skills, by their path in Knowledge. */
+const releaseSkills = (skills: readonly ShippedSkill[] = shippedSkills) =>
+  Object.fromEntries(skills.map(({ name, text }) => [pathOf(name), text]));
 
 /** This release's skills, with those at `paths` changed: another release. */
-const otherRelease = (...paths: string[]): GraspSkill[] =>
-  graspSkills.map(({ path, text }) => ({
-    path,
-    text: paths.includes(path) ? `${text}\nFrom another release.\n` : text,
+const otherRelease = (...paths: string[]): ShippedSkill[] =>
+  shippedSkills.map(({ name, text }) => ({
+    name,
+    text: paths.includes(pathOf(name))
+      ? `${text}\nFrom another release.\n`
+      : text,
   }));
 
-/** The first `count` Grasp skills' paths. */
+/** The first `count` Grasp skills' paths in Knowledge. */
 const firstPaths = (count: number): string[] => {
-  const paths = graspSkills.slice(0, count).map(({ path }) => path);
+  const paths = shippedSkills.slice(0, count).map(({ name }) => pathOf(name));
   if (paths.length < count) {
     throw new Error(`This release ships fewer than ${count} Grasp skills`);
   }
@@ -88,7 +93,13 @@ const installed = async (): Promise<unknown> =>
  * another release's text, so the next install has them to write.
  */
 const forgetInstall = async (...paths: string[]): Promise<void> => {
-  await syncGraspSkills(env, otherRelease(...paths));
+  await syncGraspSkills(
+    env,
+    otherRelease(...paths).map(({ name, text }) => ({
+      path: pathOf(name),
+      text,
+    }))
+  );
   await runInDurableObject(singleton(), async (_instance, state) => {
     await state.storage.delete("installed");
   });
