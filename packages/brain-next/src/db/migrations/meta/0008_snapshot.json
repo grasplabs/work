@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c0ad30a2-12fb-48dc-844e-797115822cbd",
+  "id": "b87c0a90-a8f4-4392-9269-1d21d2d99e89",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -218,6 +218,65 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "entity_merges": {
+      "name": "entity_merges",
+      "columns": {
+        "merged": {
+          "name": "merged",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "into_entity": {
+          "name": "into_entity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "entity_merges_into_idx": {
+          "name": "entity_merges_into_idx",
+          "columns": [
+            "into_entity"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "entity_merges_merged_entities_row_fk": {
+          "name": "entity_merges_merged_entities_row_fk",
+          "tableFrom": "entity_merges",
+          "tableTo": "entities",
+          "columnsFrom": [
+            "merged"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entity_merges_into_entity_entities_row_fk": {
+          "name": "entity_merges_into_entity_entities_row_fk",
+          "tableFrom": "entity_merges",
+          "tableTo": "entities",
+          "columnsFrom": [
+            "into_entity"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -816,32 +875,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "memories_version_row_source_versions_row_fk": {
-          "name": "memories_version_row_source_versions_row_fk",
-          "tableFrom": "memories",
-          "tableTo": "source_versions",
-          "columnsFrom": [
-            "version_row"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "memories_reader_set_reader_sets_id_fk": {
-          "name": "memories_reader_set_reader_sets_id_fk",
-          "tableFrom": "memories",
-          "tableTo": "reader_sets",
-          "columnsFrom": [
-            "reader_set"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1003,6 +1036,53 @@
           "name": "memory_confirmed_over_confirmation_memory_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_extractions": {
+      "name": "memory_extractions",
+      "columns": {
+        "version_row": {
+          "name": "version_row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lineage": {
+          "name": "lineage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "memory_extractions_lineage_idx": {
+          "name": "memory_extractions_lineage_idx",
+          "columns": [
+            "lineage",
+            "version"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -1751,6 +1831,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "memory_cursor": {
+          "name": "memory_cursor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         }
       },
       "indexes": {},

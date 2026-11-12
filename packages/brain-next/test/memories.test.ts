@@ -71,8 +71,16 @@ const remember = async (
   entities: NewEntity[],
   memories: NewMemory[],
   store: Store = shared(),
-  change = crypto.randomUUID()
-) => await store.addMemories({ change, access, entities, memories });
+  change = crypto.randomUUID(),
+  reader?: Reader
+) =>
+  await store.addMemories({
+    change,
+    access,
+    entities,
+    memories,
+    ...(reader === undefined ? {} : { reader }),
+  });
 
 /** What `reader` reads now about `entity`: statements, current first as the store orders them. */
 const statementsAbout = async (
@@ -343,7 +351,10 @@ describe("contested facts", () => {
             statement: "Acme renews on 1 May",
           }
         ),
-      ]
+      ],
+      shared(),
+      crypto.randomUUID(),
+      readerOf(unique("adder"), left, right)
     );
     return {
       entity,
@@ -486,7 +497,10 @@ describe("who may read a memory", () => {
           { kind: "writer", writer },
           { attribute: "status", value: "Churned", statement: "Churned" }
         ),
-      ]
+      ],
+      shared(),
+      crypto.randomUUID(),
+      readerOf(unique("adder"), left, right)
     );
 
     await expect(
@@ -526,7 +540,9 @@ describe("who may read a memory", () => {
       [person([secret])],
       [about("Anna leads the secret project")]
     );
-    expect(second.entities.p).toBe(first.entities.p);
+    // Linked only through what every reader of the add may read: the
+    // other group's memory makes an entity of its own.
+    expect(second.entities.p).not.toBe(first.entities.p);
     const leftReader = readerOf(unique("l"), left);
 
     await expect(
@@ -743,15 +759,27 @@ describe("ending a memory", () => {
     );
     const [mine = "", sourced = ""] = memories;
 
+    const reader = readerOf(unique("reader"), group);
+    const outsider = readerOf(unique("outsider"));
     const outcomes = [
-      await shared().retireMemory({ memory: mine, writer: unique("other") }),
-      await shared().retireMemory({ memory: sourced, writer }),
-      await shared().retireMemory({ memory: mine, writer }),
-      await shared().retireMemory({ memory: mine, writer }),
+      await shared().retireMemory({
+        memory: mine,
+        writer: unique("other"),
+        reader,
+      }),
+      await shared().retireMemory({ memory: sourced, writer, reader }),
+      await shared().retireMemory({ memory: mine, writer, reader: outsider }),
+      await shared().retireMemory({ memory: mine, writer, reader }),
+      await shared().retireMemory({ memory: mine, writer, reader }),
     ];
 
-    expect(outcomes).toStrictEqual(["nothing", "nothing", "done", "nothing"]);
-    const reader = readerOf(unique("reader"), group);
+    expect(outcomes).toStrictEqual([
+      "nothing",
+      "nothing",
+      "nothing",
+      "done",
+      "nothing",
+    ]);
     await expect(
       statementsAbout(entities.c ?? "", reader)
     ).resolves.toStrictEqual(["Sourced"]);
@@ -815,7 +843,10 @@ describe("erasure", () => {
     const shared_ = await remember(
       audience(group),
       [customer({ id: entities.c ?? "" })],
-      [fact({ kind: "writer", writer: person }, { statement: "The team's" })]
+      [fact({ kind: "writer", writer: person }, { statement: "The team's" })],
+      shared(),
+      crypto.randomUUID(),
+      readerOf(person, group)
     );
     const backup = await copyOf(shared());
 
@@ -860,5 +891,323 @@ describe("the words way over memories", () => {
       [`Acme renews its invoices ${marker}`, 2],
     ]);
     await expect(find(readerOf(unique("r")))).resolves.toStrictEqual([]);
+  });
+});
+
+/** A memory about `c` by `writer`. */
+const byWriter = (
+  writer: string,
+  extra: Partial<NewMemory> = {}
+): NewMemory => ({
+  about: "c",
+  type: "fact",
+  statement: `said by ${writer}`,
+  speaker: { kind: "system" },
+  basis: { kind: "writer", writer },
+  ...extra,
+});
+
+/** An email identifier. */
+const email = (value: string) => ({ type: "email", value }) as const;
+
+// Review round 1 of #2202: each states what a store without the hidden
+// memory, or with the fact as the world has it, would answer.
+describe("what hidden memories never decide, and when a fact ends", () => {
+  // Threat 4: an identifier links only through memories every reader of the add may read.
+  it("never joins two identifiers that only a hidden memory joins", async () => {
+    const seen = unique("seen");
+    const a = `${unique("a")}@x.test`;
+    const b = `${unique("b")}@x.test`;
+    await remember(
+      audience(unique("hidden")),
+      [{ key: "c", kind: "customer", identifiers: [email(a), email(b)] }],
+      [byWriter("w-hidden")]
+    );
+    const first = await remember(
+      audience(seen),
+      [{ key: "c", kind: "customer", identifiers: [email(b)] }],
+      [byWriter("w1")]
+    );
+    const second = await remember(
+      audience(seen),
+      [{ key: "c", kind: "customer", identifiers: [email(a)] }],
+      [byWriter("w2")]
+    );
+    const third = await remember(
+      audience(seen),
+      [{ key: "c", kind: "customer", identifiers: [email(b)] }],
+      [byWriter("w3")]
+    );
+
+    expect([
+      second.entities.c === first.entities.c,
+      third.entities.c === first.entities.c,
+    ]).toStrictEqual([false, true]);
+  });
+
+  // Threat 4: an id the add's reader may not see is an unknown id.
+  it("refuses an entity id the add's reader may not see in the words of an unknown one", async () => {
+    const hidden = await remember(
+      audience(unique("hidden")),
+      [customer()],
+      [byWriter("w")]
+    );
+    const named = async (id: string) =>
+      await remember(
+        audience(unique("seen")),
+        [customer({ id })],
+        [byWriter("w")]
+      ).then(() => "added", String);
+
+    const [hiddenAnswer, unknownAnswer] = [
+      await named(hidden.entities.c ?? ""),
+      await named(crypto.randomUUID()),
+    ];
+    expect(hiddenAnswer).toBe(unknownAnswer);
+  });
+
+  // Threat 3: where a contested fact stands depends on nothing hidden.
+  it("orders contested facts by their first memory the reader may read", async () => {
+    const seen = unique("seen");
+    const reader = readerOf(unique("p"), seen);
+    const hidden = unique("hidden");
+    const old = await remember(
+      audience(hidden),
+      [{ key: "c", kind: "customer", names: ["X"] }],
+      [byWriter("w-hidden")]
+    );
+    // Added for someone who sees the hidden entity too, readable by `seen`.
+    const contest = async (entity: NewEntity): Promise<string> => {
+      const added = await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: audience(seen),
+        reader: readerOf(unique("adder"), hidden, seen),
+        entities: [entity],
+        memories: [
+          byWriter(unique("w1"), { attribute: "status", value: "active" }),
+          byWriter(unique("w2"), { attribute: "status", value: "lost" }),
+        ],
+      });
+      return added.entities.c ?? "";
+    };
+    const y = await contest({ key: "c", kind: "customer", names: ["Y"] });
+    const x = await contest({
+      key: "c",
+      kind: "customer",
+      id: old.entities.c ?? "",
+      names: ["X"],
+    });
+
+    const facts = await shared().listContested({ reader });
+    expect(
+      facts.map(({ about }) => about).filter((id) => id === x || id === y)
+    ).toStrictEqual([y, x]);
+  });
+
+  // Threat 3: a confirmation made without seeing a rival never ranks first for one who sees it.
+  it("counts a confirmation only for a reader whose every current rival it was made over", async () => {
+    const left = unique("left");
+    const right = unique("right");
+    const made = await remember(
+      audience(left),
+      [{ key: "c", kind: "customer" }],
+      [byWriter(unique("w1"), { attribute: "status", value: "active" })]
+    );
+    const entity = made.entities.c ?? "";
+    // Added for someone who sees both sides, readable by the right only.
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: audience(right),
+      reader: readerOf(unique("adder"), left, right),
+      entities: [{ key: "c", kind: "customer", id: entity }],
+      memories: [
+        byWriter(unique("w2"), { attribute: "status", value: "lost" }),
+      ],
+    });
+    await expect(
+      shared().confirmMemory({
+        memory: made.memories[0] ?? "",
+        reader: readerOf(unique("a"), left),
+      })
+    ).resolves.toBe("done");
+
+    const { memories } = await shared().readMemories({
+      entity,
+      reader: readerOf(unique("b"), left, right),
+    });
+    const active = memories.find(({ value }) => value === "active");
+    expect([active?.contested, active?.confirmed]).toStrictEqual([true, null]);
+  });
+
+  it("ends what a source's earlier version said once a later version is marked fully extracted", async () => {
+    const group = unique("g");
+    const source = unique("src");
+    const first = await addSource(
+      "Acme renews 1 March",
+      audience(group),
+      source
+    );
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [
+        fact(
+          { kind: "source", ...first, quote: "Acme renews 1 March" },
+          {
+            attribute: "renewal_date",
+            value: "1 March",
+            statement: "Renews 1 March",
+          }
+        ),
+      ]
+    );
+    const entity = made.entities.c ?? "";
+    const before = new Date();
+    const second = await addSource(
+      "Acme is in Rotterdam",
+      audience(group),
+      source
+    );
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: audience(group),
+      entities: [customer({ id: entity })],
+      memories: [
+        fact(
+          { kind: "source", ...second, quote: "Acme is in Rotterdam" },
+          {
+            attribute: "location",
+            value: "Rotterdam",
+            statement: "In Rotterdam",
+          }
+        ),
+      ],
+      extracted: second,
+    });
+    const reader = readerOf(unique("p"), group);
+
+    await expect(statementsAbout(entity, reader)).resolves.toStrictEqual([
+      "In Rotterdam",
+    ]);
+    await expect(
+      statementsAbout(entity, reader, { asOf: before })
+    ).resolves.toStrictEqual(["Renews 1 March"]);
+  });
+
+  it("leaves today's fact current while a newer one of its lineage starts only next year", async () => {
+    const group = unique("g");
+    const writer = unique("w");
+    const made = await remember(
+      audience(group),
+      [{ key: "c", kind: "person" }],
+      [
+        byWriter(writer, {
+          attribute: "role",
+          value: "CTO",
+          statement: "is CTO",
+        }),
+      ]
+    );
+    const entity = made.entities.c ?? "";
+    const nextYear = new Date(Date.now() + 365 * 86_400_000);
+    await remember(
+      audience(group),
+      [{ key: "c", kind: "person", id: entity }],
+      [
+        byWriter(writer, {
+          attribute: "role",
+          value: "CEO",
+          statement: "is CEO from next year",
+          validFrom: nextYear,
+        }),
+      ]
+    );
+    const reader = readerOf(unique("p"), group);
+
+    await expect(statementsAbout(entity, reader)).resolves.toStrictEqual([
+      "is CTO",
+    ]);
+    await expect(
+      statementsAbout(entity, reader, {
+        asOf: new Date(nextYear.getTime() + 1),
+      })
+    ).resolves.toStrictEqual(["is CEO from next year"]);
+  });
+
+  it("records a person's repeated confirmation once", async () => {
+    const group = unique("g");
+    const made = await remember(
+      audience(group),
+      [{ key: "c", kind: "customer" }],
+      [byWriter(unique("w"), { attribute: "status", value: "active" })]
+    );
+    const reader = readerOf(unique("p"), group);
+    const memory = made.memories[0] ?? "";
+    const outcomes = [
+      await shared().confirmMemory({ memory, reader }),
+      await shared().confirmMemory({ memory, reader }),
+    ];
+    const confirmations = await runInDurableObject(
+      shared(),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            `SELECT count(*) AS count FROM memory_confirmations
+            WHERE memory = (SELECT row FROM memories WHERE id = ?)`,
+            memory
+          )
+          .one().count
+    );
+
+    expect({ outcomes, confirmations }).toStrictEqual({
+      outcomes: ["done", "done"],
+      confirmations: 1,
+    });
+  });
+
+  it("re-indexes memories' words when the word rules are rebuilt", async () => {
+    const group = unique("group");
+    const marker = unique("kiwi").replaceAll("-", "");
+    await remember(
+      audience(group),
+      [customer()],
+      [
+        fact(
+          { kind: "writer", writer: unique("w") },
+          { statement: `Acme ${marker}` }
+        ),
+      ]
+    );
+    const found = async () =>
+      await runInDurableObject(
+        shared(),
+        (_instance, state) =>
+          memoriesByWords(state.storage.sql, {
+            question: marker,
+            reader: readerOf(unique("r"), group),
+            at: Date.now(),
+          }).length
+      );
+    // As an index by older rules would hold it: nothing of the memory.
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM memory_words");
+      state.storage.sql.exec("DELETE FROM memory_stems");
+    });
+    const before = await found();
+    await expect(shared().rebuildWords()).resolves.toBe("done");
+    for (let ticks = 0; ticks < 50; ticks += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+      await tick();
+      // oxlint-disable-next-line no-await-in-loop -- read after each tick
+      const overview = await shared().workOverview();
+      if (overview.words === "current") {
+        break;
+      }
+    }
+
+    expect({ before, after: await found() }).toStrictEqual({
+      before: 0,
+      after: 1,
+    });
   });
 });

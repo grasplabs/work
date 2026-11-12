@@ -8,7 +8,7 @@ import type {
   Identifier,
   Reader,
 } from "./contract.ts";
-import { visibleSql } from "./memories.ts";
+import { canonicalSql, familySql, visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import { foldForSearch } from "./words.ts";
 
@@ -42,31 +42,106 @@ export const foldIdentifier = ({ type, value }: Identifier): string =>
   type === "email" ? value.toLowerCase() : value;
 
 /**
- * The first entity of `kind` holding one of `identifiers`, by any memory,
- * whoever may read it: what an add links to. Its other names stay visible
- * only through their own memories.
+ * An entity the reader may see: a memory they may read mentions it, or
+ * one merged into it.
+ */
+const mentionedSql = (entity: string): string => `(
+  EXISTS (SELECT 1 FROM memories AS m
+    WHERE m.entity IN (${familySql(entity)}) AND ${visibleSql("m")})
+  OR EXISTS (SELECT 1 FROM memories AS m
+    WHERE m.object IN (${familySql(entity)}) AND ${visibleSql("m")})
+)`;
+
+/**
+ * Whether the memory `alias` is read by exactly the set of readers `?3`:
+ * its own set is it, and, resting on a version, so are the version's and
+ * its source's current version's, the version not hidden by an erasure.
+ * So everyone who may read an add with those readers may read it too.
+ */
+const coveredSql = (alias: string): string => `(
+  ${alias}.reader_set = ?3
+  AND (${alias}.version_row IS NULL OR EXISTS (
+    SELECT 1 FROM source_versions AS based
+    JOIN current_versions ON current_versions.source = based.source
+    JOIN source_versions AS current ON current.row = current_versions.version_row
+    WHERE based.row = ${alias}.version_row
+      AND based.row NOT IN (SELECT version_row FROM erasing_versions)
+      AND based.reader_set = ?3 AND current.reader_set = ?3
+  ))
+)`;
+
+/**
+ * The first entity of `kind` holding one of `identifiers` by a memory
+ * read by exactly the set of readers `readerSet` (`coveredSql`), as the
+ * entity it stands for: what an add with those readers links to. An
+ * identifier only a memory others read gave links nothing, so no add
+ * learns that two identifiers are one entity through a memory its readers
+ * may not read: it makes a new entity, and joining the two is a person's
+ * or the linker's to propose (GRA-1740).
  */
 export const linkedBy = (
   sql: SqlStorage,
   kind: EntityKind,
-  identifiers: readonly Identifier[]
+  identifiers: readonly Identifier[],
+  readerSet: number
 ): number | undefined => {
   if (identifiers.length === 0) {
     return undefined;
   }
   const [found] = sql
     .exec<{ row: number | null }>(
-      `SELECT min(entity_names.entity) AS row
+      `SELECT min(stands.row) AS row
       FROM json_each(?2) AS asked
       JOIN entity_names
         ON entity_names.type = asked.value ->> 0
         AND entity_names.folded = asked.value ->> 1
-      JOIN entities ON entities.row = entity_names.entity AND entities.kind = ?1`,
+      JOIN memories AS m ON m.row = entity_names.memory
+      JOIN entities AS stands ON stands.row = ${canonicalSql("entity_names.entity")}
+      WHERE stands.kind = ?1 AND ${coveredSql("m")}`,
       kind,
-      JSON.stringify(identifiers.map((id) => [id.type, foldIdentifier(id)]))
+      JSON.stringify(identifiers.map((id) => [id.type, foldIdentifier(id)])),
+      readerSet
     )
     .toArray();
   return found?.row ?? undefined;
+};
+
+/**
+ * Whether an add may name the entity at `entity` (one no merge points
+ * away from) by its id: `reader` may see it, or, with no reader, a memory
+ * read by exactly the add's set of readers `readerSet` mentions it.
+ */
+export const mayName = (
+  sql: SqlStorage,
+  entity: number,
+  readerSet: number,
+  reader: Reader | undefined
+): boolean => {
+  if (reader !== undefined) {
+    return (
+      sql
+        .exec(
+          `WITH ${readableSql} SELECT 1 WHERE ${mentionedSql("?1")}`,
+          entity,
+          reader.person,
+          JSON.stringify(reader.groups)
+        )
+        .toArray().length > 0
+    );
+  }
+  return (
+    sql
+      .exec(
+        `SELECT 1 FROM memories AS m
+        WHERE (m.entity IN (${familySql("?1")}) OR m.object IN (${familySql("?1")}))
+          AND ${coveredSql("m")}
+        LIMIT 1`,
+        entity,
+        null,
+        readerSet
+      )
+      .toArray().length > 0
+  );
 };
 
 /** Keeps `names` and `identifiers` of the entity at `entity` as the memory at `memory` gave them. */
@@ -90,12 +165,6 @@ export const keepNames = (
   );
 };
 
-/** An entity the reader may see: a memory they may read mentions it. */
-const mentionedSql = (entity: string): string => `(
-  EXISTS (SELECT 1 FROM memories AS m WHERE m.entity = ${entity} AND ${visibleSql("m")})
-  OR EXISTS (SELECT 1 FROM memories AS m WHERE m.object = ${entity} AND ${visibleSql("m")})
-)`;
-
 /**
  * The first memory the reader may read that mentions the entity at
  * `entity`, by row: null when there is none, so they may not see it. What
@@ -104,9 +173,11 @@ const mentionedSql = (entity: string): string => `(
  * a hidden memory stands where its first memory they may read puts it.
  */
 const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
-  SELECT m.row AS first FROM memories AS m WHERE m.entity = ${entity} AND ${visibleSql("m")}
+  SELECT m.row AS first FROM memories AS m
+  WHERE m.entity IN (${familySql(entity)}) AND ${visibleSql("m")}
   UNION ALL
-  SELECT m.row FROM memories AS m WHERE m.object = ${entity} AND ${visibleSql("m")}
+  SELECT m.row FROM memories AS m
+  WHERE m.object IN (${familySql(entity)}) AND ${visibleSql("m")}
 ))`;
 
 /**
@@ -122,9 +193,11 @@ found AS MATERIALIZED (
     ${firstMentionSql("entities.row")} AS first
   FROM entities
   WHERE (?1 IS NULL OR entities.kind = ?1)
+    -- One merged into another is found as that other.
+    AND entities.row NOT IN (SELECT merged FROM entity_merges)
     -- Found through the index of names when one is asked: the first.
     AND (json_array_length(?4) = 0 OR entities.row IN (
-      SELECT entity_names.entity FROM entity_names
+      SELECT ${canonicalSql("entity_names.entity")} FROM entity_names
       WHERE entity_names.type = ?4 ->> '$[0][0]'
         AND entity_names.folded = ?4 ->> '$[0][1]'
     ))
@@ -133,7 +206,7 @@ found AS MATERIALIZED (
       WHERE NOT EXISTS (
         SELECT 1 FROM entity_names
         JOIN memories AS m ON m.row = entity_names.memory
-        WHERE entity_names.entity = entities.row
+        WHERE entity_names.entity IN (${familySql("entities.row")})
           AND entity_names.type = asked.value ->> 0
           AND entity_names.folded = asked.value ->> 1
           AND ${visibleSql("m")}
@@ -151,13 +224,13 @@ LIMIT ?5`;
  */
 const namesSql = `
 WITH ${readableSql}
-SELECT entity_names.entity AS entity, entity_names.type AS type,
+SELECT asked.value AS entity, entity_names.type AS type,
   entity_names.value AS value, entity_names.folded AS folded
 FROM json_each(?1) AS asked
-JOIN entity_names ON entity_names.entity = asked.value
+JOIN entity_names ON entity_names.entity IN (${familySql("asked.value")})
 JOIN memories AS m ON m.row = entity_names.memory
 WHERE ${visibleSql("m")}
-ORDER BY entity_names.entity, m.row, entity_names.rowid`;
+ORDER BY asked.value, m.row, entity_names.rowid`;
 
 /** Entities found, as the reader sees them: with the names they may see. */
 const asSeen = (
@@ -236,8 +309,9 @@ export const findEntities = (
 const oneSql = `
 WITH ${readableSql}
 SELECT entities.row AS row, entities.id AS id, entities.kind AS kind
-FROM entities
-WHERE entities.id = ?1 AND ${mentionedSql("entities.row")}`;
+FROM entities AS named
+JOIN entities ON entities.row = ${canonicalSql("named.row")}
+WHERE named.id = ?1 AND ${mentionedSql("entities.row")}`;
 
 /** An entity, if the reader may see it (contract.ts `readEntity`). */
 export const readEntity = (
