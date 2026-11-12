@@ -7,6 +7,7 @@ import type {
   AgentWake,
   AgentWakeInput,
 } from "@grasp-os/shared/agents";
+import { chatFileMaxBytes } from "@grasp-os/shared/chat";
 import { companyToolClasses } from "@grasp-os/shared/connect";
 import type {
   CompanyToolClass,
@@ -799,6 +800,21 @@ describe("an agent's page", () => {
       said: true,
       kept: true,
     });
+  });
+
+  it("never sends core a file larger than it takes, or of a type it doesn't, and says why", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire", tab: "instructions" });
+    const large = new File(["a"], "large.md");
+    Object.defineProperty(large, "size", { value: chatFileMaxBytes + 1 });
+    await pick(large);
+    const tooLarge = document.body.textContent.includes("at most 10 MB");
+    await pick(new File(["MZ"], "tool.exe"));
+    expect({
+      asked,
+      tooLarge,
+      unsupported: document.body.textContent.includes("Only PDF, Word (.docx)"),
+    }).toStrictEqual({ asked: [], tooLarge: true, unsupported: true });
   });
 
   it("shows someone who isn't the company's admin an agent's documents, with no way to add or remove one", async () => {

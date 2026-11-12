@@ -1,6 +1,11 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import { agentDocumentsMax } from "@grasp-os/shared/agents";
 import type { Agent, AgentDocument } from "@grasp-os/shared/agents";
-import { chatFileTypes } from "@grasp-os/shared/chat";
+import {
+  chatFileMaxBytes,
+  chatFileTypeOf,
+  chatFileTypes,
+} from "@grasp-os/shared/chat";
 import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRef } from "react";
@@ -59,6 +64,15 @@ export const AgentDocuments = ({
       // One after another: core counts each against the most an agent
       // keeps, and the first it refuses says why.
       for (const file of files) {
+        // Refused here as core would, before it is sent at all: a file
+        // past what one message to core holds would drop the connection,
+        // and every call waiting on it, before core could say why.
+        if (chatFileTypeOf(file.name) === undefined) {
+          throw agentErrors.create("agent.file_unsupported");
+        }
+        if (file.size > chatFileMaxBytes) {
+          throw agentErrors.create("agent.file_too_large");
+        }
         // oxlint-disable-next-line no-await-in-loop -- in order, stopping at the first refused
         const bytes = new Uint8Array(await file.arrayBuffer());
         // oxlint-disable-next-line no-await-in-loop -- in order, stopping at the first refused
