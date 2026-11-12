@@ -2630,8 +2630,9 @@ const memoryProbes = {
       await answer(
         name,
         // The moment each page was read at (its `at`, and its cursor's)
-        // differs between calls and says nothing of what is stored:
-        // compared without it.
+        // differs between calls: it moves with every write, a hidden one
+        // too, which tells a reader that some write happened and nothing
+        // of what or for whom (threat model, GRA-1739). Compared without it.
         async () => {
           const { facts, more, next } = await store().listContested({
             reader,

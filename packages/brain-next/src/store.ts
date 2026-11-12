@@ -514,21 +514,25 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * The moment a page is read at, which its cursor carries (`at`,
-   * `cursorAt`): a later page's, its cursor's; one as of a moment, that
-   * moment; a first page's, the moment a read of now is given
-   * (memories.ts `readMoment`): every write made before it is at or before
-   * it, every write after it later (`stampWrite`).
+   * `cursorAt`), and the moment what the store learned is read at
+   * (`learned`): a later page's, its cursor's; a first page's, `asOf` or
+   * the moment a read of now is given (memories.ts `readMoment`), and what
+   * was learned by the earlier of the two: every write made before the
+   * read is at or before it, every write after it later (`stampWrite`),
+   * an `asOf` ahead of it included. The dates a fact is true are judged
+   * at `at`.
    */
   #pageMoments(
-    after: { at: Date } | undefined,
+    after: { at: Date; learned?: Date } | undefined,
     asOf?: Date
-  ): { at: number; cursorAt: number } {
-    const fixed = after?.at ?? asOf;
-    if (fixed !== undefined) {
-      return { at: fixed.getTime(), cursorAt: fixed.getTime() };
+  ): { at: number; cursorAt: number; learned: number } {
+    if (after !== undefined) {
+      const at = after.at.getTime();
+      return { at, cursorAt: at, learned: after.learned?.getTime() ?? at };
     }
-    const at = readMoment(this.ctx.storage.sql);
-    return { at, cursorAt: at };
+    const given = readMoment(this.ctx.storage.sql);
+    const at = asOf?.getTime() ?? given;
+    return { at, cursorAt: at, learned: Math.min(at, given) };
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */

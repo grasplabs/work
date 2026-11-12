@@ -45,8 +45,10 @@ import { termsOf } from "./words.ts";
 // memory it was confirmed over.
 //
 // The statements bind the reader as `readableSql` does (`?2` the person,
-// `?3` their groups), the moment read as of at `?4` (milliseconds; now,
-// unless asked as of one), and the limit at `?5`.
+// `?3` their groups), the moment what the store learned is read at `?4`
+// (milliseconds: the read's moment, or an earlier one asked), the moment
+// the dates a fact is true are judged at `?20` (`validSql`: when unbound,
+// `?4`), and the limit at `?5`.
 
 /**
  * Whether the reader may read version `version` of the source `source`
@@ -82,6 +84,14 @@ export const visibleSql = (alias: string): string => `(
     OR ${versionVisibleSql(`${alias}.source`, `${alias}.version`)})
 )`;
 
+/**
+ * The moment the dates a fact is true are judged at: `?20`, a read as of a
+ * moment ahead of what the store learned; else `?4`, the moment what the
+ * store learned is read at. A statement that binds no `?20` judges both
+ * at `?4`.
+ */
+const validSql = "coalesce(?20, ?4)";
+
 /** When a memory starts to count: when it was learned, or its world start if later. */
 const startSql = (alias: string): string =>
   `max(${alias}.learned_at, coalesce(${alias}.valid_from, ${alias}.learned_at))`;
@@ -90,12 +100,17 @@ const startSql = (alias: string): string =>
  * The newer memories of `alias`'s lineage that end it, by the order of
  * its lineage (a later version's, or a later row of the same), about the
  * same entity and attribute and, for an attribute of many values, the
- * same value, each from when it starts, by `at` (a parameter), and not
- * retired by then: a retired memory ends nothing, so forgetting a newer
+ * same value, each learned by `learned` and started by `valid` (its world
+ * start, or when it was learned), and not retired by `learned`: a retired memory ends nothing, so forgetting a newer
  * value makes the one before current again. None for a memory with no
  * attribute. `visible` keeps to those the reader may read.
  */
-const newerSql = (alias: string, at: string, visible: boolean): string => `
+const newerSql = (
+  alias: string,
+  learned: string,
+  valid: string,
+  visible: boolean
+): string => `
   SELECT ${startSql("newer")} AS at FROM memories AS newer
   WHERE newer.entity = ${alias}.entity
     AND newer.attribute = ${alias}.attribute
@@ -103,8 +118,9 @@ const newerSql = (alias: string, at: string, visible: boolean): string => `
     AND (${alias}.one_value = 1 OR newer.value_key = ${alias}.value_key)
     AND (newer.lineage_order > ${alias}.lineage_order
       OR (newer.lineage_order = ${alias}.lineage_order AND newer.row > ${alias}.row))
-    AND ${startSql("newer")} <= ${at}
-    AND (newer.retired_at IS NULL OR newer.retired_at > ${at})
+    AND newer.learned_at <= ${learned}
+    AND ${startSql("newer")} <= ${valid}
+    AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
     ${visible ? `AND ${visibleSql("newer")}` : ""}`;
 
 /**
@@ -130,7 +146,7 @@ const extractedSql = (alias: string): string => `
  */
 export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
   SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
-  UNION ALL${newerSql("m", "?4", true)}
+  UNION ALL${newerSql("m", "?4", validSql, true)}
   UNION ALL${extractedSql("m")}
 )))`;
 
@@ -255,8 +271,8 @@ seen AS MATERIALIZED (
 judged AS MATERIALIZED (
   SELECT seen.row AS row, seen.ended_at AS ended_at,
     (seen.ended_at IS NULL
-      AND (m.valid_from IS NULL OR m.valid_from <= ?4)
-      AND (m.valid_until IS NULL OR m.valid_until > ?4)) AS is_current
+      AND (m.valid_from IS NULL OR m.valid_from <= ${validSql})
+      AND (m.valid_until IS NULL OR m.valid_until > ${validSql})) AS is_current
   FROM seen JOIN memories AS m ON m.row = seen.row
 )`;
   const select = `
@@ -316,7 +332,11 @@ export const stampWrite = (sql: SqlStorage): number => {
 
 /**
  * The moment a read of now is given: now, or the latest stamp if later,
- * so it sees every write made before it; what its cursor carries.
+ * so it sees every write made before it; what its cursor carries. If the
+ * clock goes back, reads keep to the latest stamp until it catches up:
+ * `learnedAt` can then be ahead of the clock, and the dates a fact is
+ * true are judged at that moment, so one valid a little longer can read
+ * as ended until the clock is past it.
  */
 export const readMoment = (sql: SqlStorage): number =>
   Math.max(Date.now(), latestStamp(sql));
@@ -377,10 +397,17 @@ const memoryOf = (row: MemoryRow): Memory => {
   };
 };
 
-/** Runs a statement over memories with its bindings, as rows. */
-const memoryRows = (
+/** Most bindings before `?20` (`validSql`): `?6` to `?19`. */
+const bindingsBeforeValid = 14;
+
+/**
+ * As `memoryRows`, with the moment the dates a fact is true are judged at
+ * (`?20`), when not `at`.
+ */
+const memoryRowsAt = (
   sql: SqlStorage,
   statement: string,
+  valid: number | null,
   first: SqlStorageValue,
   reader: Reader,
   at: number,
@@ -395,9 +422,25 @@ const memoryRows = (
       JSON.stringify(reader.groups),
       at,
       limit,
-      ...rest
+      ...rest,
+      ...Array.from<null>({ length: bindingsBeforeValid - rest.length }).fill(
+        null
+      ),
+      valid
     )
     .toArray();
+
+/** Runs a statement over memories with its bindings, as rows. */
+const memoryRows = (
+  sql: SqlStorage,
+  statement: string,
+  first: SqlStorageValue,
+  reader: Reader,
+  at: number,
+  limit: number,
+  ...rest: SqlStorageValue[]
+): MemoryRow[] =>
+  memoryRowsAt(sql, statement, null, first, reader, at, limit, ...rest);
 
 /** The row and kind of the entity `id`, or none. */
 export const entityRowOf = (
@@ -448,6 +491,8 @@ export interface MemoriesAsked {
   at: number;
   /** The moment the next page's cursor carries (store.ts `#pageMoments`). */
   cursorAt: number;
+  /** The moment what the store learned is read at: `at`, or earlier. */
+  learned: number;
   history: boolean;
   after?: MemoriesCursor;
   limit: number;
@@ -466,6 +511,7 @@ export const readMemories = (
     attribute,
     at,
     cursorAt,
+    learned,
     history,
     after,
     limit,
@@ -475,12 +521,13 @@ export const readMemories = (
   if (found === undefined) {
     return { memories: [], more: false };
   }
-  const rows = memoryRows(
+  const rows = memoryRowsAt(
     sql,
     aboutSql,
+    at,
     found.row,
     reader,
-    at,
+    learned,
     limit + 1,
     attribute ?? null,
     history ? 1 : 0,
@@ -501,6 +548,7 @@ export const readMemories = (
     more: true,
     next: {
       at: new Date(cursorAt),
+      learned: new Date(learned),
       attribute: last.attribute,
       confirmed: last.confirmed !== null,
       learnedAt: last.learnedAt,
@@ -753,7 +801,7 @@ export const retireMemory = (
       AND (m.valid_from IS NULL OR m.valid_from <= ?5)
       AND (m.valid_until IS NULL OR m.valid_until > ?5)
       AND ${visibleSql("m")}
-      AND NOT EXISTS (${newerSql("m", "?5", true)})`,
+      AND NOT EXISTS (${newerSql("m", "?5", "?5", true)})`,
     ...asked,
     stamp
   );
@@ -832,15 +880,13 @@ export const memoriesByWords = (
   if (telling.length === 0) {
     return [];
   }
-  return sql
-    .exec<MemoryRow & { words: number }>(
-      wordsSql,
-      JSON.stringify(telling),
-      reader.person,
-      JSON.stringify(reader.groups),
-      at,
-      limit
-    )
-    .toArray()
-    .map((row) => ({ ...memoryOf(row), words: row.words }));
+  return memoryRowsAt(
+    sql,
+    wordsSql,
+    null,
+    JSON.stringify(telling),
+    reader,
+    at,
+    limit
+  ).map((row) => ({ ...memoryOf(row), words: Number(row.words) }));
 };

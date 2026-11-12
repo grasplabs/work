@@ -1577,13 +1577,15 @@ export interface Memory {
 
 /**
  * Where a page of `readMemories` ended: the moment the first page was
- * read (`at`: its `asOf`, or then), at which every later page is read
- * too, so nothing changed since skips or repeats an item; and its last
+ * read (`at`: its `asOf`, or then) and the moment what the store learned
+ * was read at (`learned`: the earlier of that and the moment the read was
+ * given), at which every later page is read too; and its last
  * memory's place in the order (its attribute, whether the reader saw it
  * confirmed, when it was learned, its id). The next page starts after it.
  */
 export const memoriesCursorSchema = z.strictObject({
   at: z.date(),
+  learned: z.date(),
   attribute: wellFormedString().min(1).max(64).nullable(),
   confirmed: z.boolean(),
   learnedAt: z.date(),
@@ -2026,11 +2028,30 @@ export interface Brain {
    * answers what it added.
    */
   addMemories: (memories: NewMemories) => Promise<AddedMemories>;
-  /** The memories about an entity the reader may read (`MemoriesRead`). */
+  /**
+   * A page of the memories about an entity the reader may read
+   * (`MemoriesRead`).
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by id. Nothing the reader may not read is ever returned.
+   */
   readMemories: (request: MemoriesRequest) => Promise<MemoriesRead>;
   /**
    * The contested facts the reader may read, those of the entity given or
    * any: never one only memories hidden from the reader would contest.
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by id. Nothing the reader may not read is ever returned.
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
@@ -2054,11 +2075,27 @@ export interface Brain {
   /**
    * The entities the reader may see that match, in the order of the first
    * memory they may read that mentions each.
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by entity id. Nothing the reader may not read is ever returned.
    */
   findEntities: (request: EntitiesRequest) => Promise<EntityPage>;
   /**
    * A page of the names and identifiers of an entity the reader may see
    * (`EntityNamesPage`).
+   *
+   * Pages of one read are read at one moment: a memory write after the
+   * first page (an add, a confirmation, a retire, an extraction mark) is on
+   * none of its later pages, and nothing is repeated, skipped or shown
+   * current that was ended, while who may read the sources is unchanged.
+   * Who may read a source is not held to that moment: a change to it
+   * applies at once, so a page after it can repeat an item or skip one.
+   * Dedupe pages by type and value. Nothing the reader may not read is ever returned.
    */
   readEntityNames: (request: EntityNamesRequest) => Promise<EntityNamesPage>;
   /** An entity, if the reader may see it; null alike when there is none. */

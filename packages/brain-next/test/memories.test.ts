@@ -1734,7 +1734,7 @@ describe("pages, attributes, and a retired newer memory", () => {
     });
   });
 
-  it("pages memories, contested facts and entities on their own order, with nothing skipped or repeated", async () => {
+  it("pages memories, contested facts and entities on their own order, one page after another", async () => {
     const group = unique("g");
     const reader = readerOf(unique("r"), group);
     const statements = Array.from({ length: 5 }, (_, index) => `Note ${index}`);
@@ -2458,9 +2458,16 @@ describe("a person's own store and its erasure", () => {
   });
 });
 
-/** Sets the fixed clock `ms` past a base later than any stamp the store holds. */
+/**
+ * The fixed clock's base: a minute behind the real one when the file
+ * loads, so the stamps a fixed-clock test leaves never run ahead of what
+ * the tests after it write on the real clock.
+ */
+const fixedBase = Date.now() - 60_000;
+
+/** Sets the fixed clock `ms` past its base. */
 const atMs = (ms: number): void => {
-  vi.setSystemTime(new Date(Date.UTC(2030, 0, 1) + ms));
+  vi.setSystemTime(new Date(fixedBase + ms));
 };
 
 /** `run` with the store's own instance, the clock fixed (`atMs`) while it runs. */
@@ -2528,7 +2535,26 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
       });
       atMs(5);
       await instance.confirmMemory({ memory: a.memories[0] ?? "", reader });
-      return await allPages(instance, entity, reader);
+      // A write between pages with no attribute sorts after the cursor:
+      // it is still on no later page.
+      return await allPages(
+        instance,
+        entity,
+        reader,
+        async () =>
+          await instance.addMemories({
+            change: crypto.randomUUID(),
+            access: audience(group),
+            reader,
+            entities: [customer({ id: entity })],
+            memories: [
+              fact(
+                { kind: "writer", writer: unique("w") },
+                { statement: "Late" }
+              ),
+            ],
+          })
+      );
     });
 
     expect(pages).toStrictEqual(["A", "B"]);
@@ -2661,9 +2687,7 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
         change: crypto.randomUUID(),
         access: audience(group),
         entities: [customer()],
-        memories: [
-          fact({ kind: "writer", writer: unique("w") }, { statement: "Early" }),
-        ],
+        memories: [status(unique("w"), "Early")],
       });
       const entity = made.entities.c ?? "";
       atMs(5);
@@ -2672,13 +2696,9 @@ describe("pages of one read, by the store's stamps (contract v10)", () => {
         access: audience(group),
         reader,
         entities: [customer({ id: entity })],
-        memories: [
-          fact(
-            { kind: "writer", writer: unique("w") },
-            { statement: "Before" }
-          ),
-        ],
+        memories: [status(unique("w"), "Before")],
       });
+      // The write after has no attribute, so it sorts after the cursor.
       return await allPages(
         instance,
         entity,
@@ -2859,5 +2879,188 @@ describe("what the shared store keeps", () => {
         extracted: version,
       }),
     ]).toStrictEqual(["refused", "refused"]);
+  });
+});
+
+describe("pages while who may read a source changes (contract v11)", () => {
+  // (d), for a read as of a moment ahead of what the store learned.
+  it("puts on none of the later pages a write made after the first page of a read as of a later moment", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const pages = await withFixedClock(shared(), async (instance) => {
+      atMs(30_000);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [status(unique("w"), "W")],
+      });
+      const entity = made.entities.c ?? "";
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [status(unique("w"), "V")],
+      });
+      const { at: given } = await instance.listContested({ reader, entity });
+      const asOf = new Date(given.getTime() + 100);
+      const first = await instance.readMemories({
+        entity,
+        reader,
+        limit: 1,
+        asOf,
+      });
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [
+          fact(
+            { kind: "writer", writer: unique("w") },
+            { statement: "N, after the first page" }
+          ),
+        ],
+      });
+      const seen = first.memories.map(({ statement }) => statement);
+      let { next } = first;
+      while (next !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- one page after another
+        const page = await instance.readMemories({
+          entity,
+          reader,
+          limit: 1,
+          after: next,
+          asOf,
+        });
+        seen.push(...page.memories.map(({ statement }) => statement));
+        ({ next } = page);
+      }
+      return seen;
+    });
+
+    expect(pages.toSorted((a, b) => a.localeCompare(b))).toStrictEqual([
+      "V",
+      "W",
+    ]);
+  });
+
+  it("may return a memory again on a later page once a source's readers widen between pages, and never one the reader may not read", async () => {
+    const group = unique("g");
+    const other = unique("h");
+    const reader = readerOf(unique("r"), group);
+    const source = unique("s");
+    const first = await addSource("C", audience(group), source);
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [status(unique("w1"), "A")]
+    );
+    const entity = made.entities.c ?? "";
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [
+        status(unique("w2"), "B"),
+        fact(
+          { kind: "source", ...first, quote: "C" },
+          { attribute: "status", value: "C", statement: "C" }
+        ),
+      ],
+      shared(),
+      crypto.randomUUID(),
+      reader
+    );
+    // The source's current version narrowed to another group: C hidden.
+    await addSource("C narrowed", audience(other), source);
+    await shared().confirmMemory({ memory: made.memories[0] ?? "", reader });
+    const page = await shared().readMemories({ entity, reader, limit: 1 });
+    // Between pages, widened again: who may read applies at once.
+    await addSource("C again", audience(group), source);
+    const seen = page.memories.map(({ statement }) => statement);
+    let { next } = page;
+    while (next !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another
+      const later = await shared().readMemories({
+        entity,
+        reader,
+        limit: 1,
+        after: next,
+      });
+      seen.push(...later.memories.map(({ statement }) => statement));
+      ({ next } = later);
+    }
+
+    expect({
+      distinct: [...new Set(seen)].toSorted((a, b) => a.localeCompare(b)),
+      everyReadable: seen.every((statement) =>
+        ["A", "B", "C"].includes(statement)
+      ),
+    }).toStrictEqual({ distinct: ["A", "B", "C"], everyReadable: true });
+  });
+
+  it("may skip a memory on a later page once a source's readers narrow between pages, and never returns what the reader may not read", async () => {
+    const group = unique("g");
+    const other = unique("h");
+    const reader = readerOf(unique("r"), group);
+    const source = unique("s");
+    const first = await addSource("C", audience(group), source);
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [status(unique("w1"), "A")]
+    );
+    const entity = made.entities.c ?? "";
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [status(unique("w2"), "B")],
+      shared(),
+      crypto.randomUUID(),
+      reader
+    );
+    await shared().confirmMemory({
+      memory: made.memories[0] ?? "",
+      reader: readerOf(unique("both"), group, other),
+    });
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [
+        fact(
+          { kind: "source", ...first, quote: "C" },
+          { attribute: "status", value: "C", statement: "C" }
+        ),
+      ],
+      shared(),
+      crypto.randomUUID(),
+      reader
+    );
+    const page = await shared().readMemories({ entity, reader, limit: 1 });
+    // Between pages, narrowed: C is the reader's no more, at once.
+    await addSource("C narrowed", audience(other), source);
+    const seen = page.memories.map(({ statement }) => statement);
+    let { next } = page;
+    while (next !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another
+      const later = await shared().readMemories({
+        entity,
+        reader,
+        limit: 1,
+        after: next,
+      });
+      seen.push(...later.memories.map(({ statement }) => statement));
+      ({ next } = later);
+    }
+    const after = await shared().readMemories({ entity, reader });
+
+    // On a page after the narrowing, C is never returned.
+    expect({
+      laterPages: seen.slice(page.memories.length).includes("C"),
+      freshRead: after.memories
+        .map(({ statement }) => statement)
+        .toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({ laterPages: false, freshRead: ["A", "B"] });
   });
 });
