@@ -952,8 +952,8 @@ describe("a person's own store", () => {
       `${await ownPrefix()}erased`,
     ]);
     await expect(
-      called(own().recall({ question: "Erased", reader: me(), budget: whole }))
-    ).rejects.toThrow(/this store was erased/u);
+      called(own().find({ question: "Erased", reader: me(), budget: whole }))
+    ).resolves.toStrictEqual(nothingFound);
   });
 
   // Threat 6: a first add reads the ledger before anything is made.

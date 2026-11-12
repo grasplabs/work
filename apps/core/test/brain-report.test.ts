@@ -365,12 +365,12 @@ describe("the Brain's report", () => {
         source,
         change: crypto.randomUUID(),
         text: `${marked} is what the board decided about the merger.`,
-        readers: { kind: "owner", personId: person },
+        readers: { kind: "none" },
       });
     }
     await eraseSource(env, {
       source: erased,
-      readers: { kind: "owner", personId: person },
+      readers: { kind: "none" },
       reason: "deleted",
     });
     const { key, id } = await parked(marked);
@@ -440,7 +440,7 @@ describe("the Brain's report", () => {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: Array.from({ length: 400 }, () => marker()).join(" "),
-      readers: { kind: "owner", personId: "someone" },
+      readers: { kind: "none" },
     });
     const after = await reported(bytesOf);
 
@@ -516,18 +516,20 @@ describe("the Brain's actions", () => {
   it("rebuilds the word indexes while recall goes on, once at a time, and records it", async () => {
     const marked = marker();
     const person = `person-${crypto.randomUUID()}`;
+    // A team's, so it is in the shared store, which staff rebuild.
+    const teamId = crypto.randomUUID();
     await addSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: `${marked} sits in the warehouse in Rotterdam.`,
-      readers: { kind: "owner", personId: person },
+      readers: { kind: "team", teamId },
     });
     const recalled = async (): Promise<number> => {
       const { items } = await brainOf(
         inJurisdiction(env, env.BRAIN_STORE)
       ).recall({
         question: marked,
-        reader: { person, groups: [] },
+        reader: { person, groups: [`team:${teamId}`] },
         budget: { tokens: 1000 },
       });
       return items.length;
@@ -764,7 +766,7 @@ describe("the Brain's embedding, as staff see it", () => {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: `${marked} is in the contract with the supplier in Utrecht.`,
-      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+      readers: { kind: "none" },
     });
     const embedders = await testModelEmbedders();
     await embedAll(embedders);
@@ -834,7 +836,7 @@ describe("the Brain's embedding, as staff see it", () => {
         2000,
         " filler"
       ),
-      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+      readers: { kind: "none" },
     });
     const working = await testModelEmbedders();
     // The model passes over the marked passage and embeds nothing else this
@@ -874,7 +876,7 @@ describe("the Brain's embedding, as staff see it", () => {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: "The invoice from the supplier in Zwolle, due in thirty days.",
-      readers: { kind: "owner", personId: `person-${crypto.randomUUID()}` },
+      readers: { kind: "none" },
     });
     const working = await testModelEmbedders();
     const broken: Embedders = {

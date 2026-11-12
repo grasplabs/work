@@ -423,6 +423,9 @@ describe("the cited pack", () => {
   it("cites only versions the reader may read, current or as of a moment, each holding the item's text", async () => {
     const [reader, other] = await Promise.all([person(), person()]);
     const together = await teamOf(reader, other);
+    // A team of the other alone: a source keeps its kind of readers, so
+    // narrowing and widening stay among teams, in the shared store.
+    const theirs = await teamOf(other);
     const topic = word();
     // Rewritten: as of before the rewrite, the first text, cited as v1.
     const rewritten = await addAt(1, `${topic} first draft`, team(together));
@@ -431,9 +434,9 @@ describe("the cited pack", () => {
     // Narrowed away from the reader: never theirs again, then or now.
     const narrowed = await addAt(3, `${topic} narrowed draft`, team(together));
     const beforeNarrowing = hoursIn(3.5);
-    await addAt(4, `${topic} narrowed final`, owner(other), narrowed);
+    await addAt(4, `${topic} narrowed final`, team(theirs), narrowed);
     // Widened to the reader: what came before was never theirs.
-    const widened = await addAt(5, `${topic} widened draft`, owner(other));
+    const widened = await addAt(5, `${topic} widened draft`, team(theirs));
     const beforeWidening = hoursIn(5.5);
     await addAt(6, `${topic} widened final`, team(together), widened);
     // The moment of the last version itself: the bound includes it.

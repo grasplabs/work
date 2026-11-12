@@ -16,6 +16,7 @@ import {
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
 
@@ -73,10 +74,8 @@ const teamOf = async (...members: string[]): Promise<string> => {
   return id;
 };
 
-const owner = (personId: string): SourceReaders => ({
-  kind: "owner",
-  personId,
-});
+/** Readers of `personId` alone, in the shared store, which this file is about. */
+const owner = soleReadersOf;
 
 const team = (teamId: string): SourceReaders => ({ kind: "team", teamId });
 
@@ -285,7 +284,12 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     const secret = word();
     const text = `Offer ${secret}`;
     const add = async () =>
-      await addSource(env, { source, change, text, readers: owner(reader) });
+      await addSource(env, {
+        source,
+        change,
+        text,
+        readers: await owner(reader),
+      });
 
     // Three at once, as retries racing each other, all between the file
     // and the version together; then one after the first reply was lost.
@@ -330,7 +334,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
     // The first add's retry comes late.
     const retried = await addSource(env, {
@@ -361,18 +365,23 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     const change = newChange();
     const secret = word();
     const text = `Notes ${secret}`;
-    await addSource(env, { source, change, text, readers: owner(reader) });
+    await addSource(env, {
+      source,
+      change,
+      text,
+      readers: await owner(reader),
+    });
 
     await expect(
       addSource(env, {
         source,
         change,
         text: `${text} and more`,
-        readers: owner(reader),
+        readers: await owner(reader),
       })
     ).rejects.toThrow(/added before with other text or readers/u);
     await expect(
-      addSource(env, { source, change, text, readers: owner(other) })
+      addSource(env, { source, change, text, readers: await owner(other) })
     ).rejects.toThrow(/added before with other text or readers/u);
     expect({
       reader: await recalledAs(reader, secret),
@@ -395,7 +404,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change,
         text: body,
-        readers: owner(reader),
+        readers: await owner(reader),
       });
 
     const added = await add(first, text);
@@ -425,7 +434,8 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change: newChange(),
         text,
-        readers: owner(reader),
+        // oxlint-disable-next-line no-await-in-loop -- the same team each time
+        readers: await owner(reader),
       });
     }
 
@@ -457,7 +467,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source: upload,
       change: newChange(),
       text: `Upload ${mine}`,
-      readers: owner(reader),
+      readers: await owner(reader),
     });
     // The same id from another producer is another source: it supersedes
     // nothing of the upload's.
@@ -465,7 +475,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source: chat,
       change: newChange(),
       text: `Chat ${theirs}`,
-      readers: owner(reader),
+      readers: await owner(reader),
     });
 
     expect({
@@ -494,7 +504,8 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change: newChange(),
         text,
-        readers: owner(reader),
+        // oxlint-disable-next-line no-await-in-loop -- the same team each time
+        readers: await owner(reader),
       });
     }
 
@@ -526,7 +537,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text: final,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
 
     expect({
@@ -561,7 +572,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text: draft,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
     await addSource(env, {
       source,
@@ -598,14 +609,15 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source,
         change: newChange(),
         text,
-        readers: owner(writer),
+        // oxlint-disable-next-line no-await-in-loop -- the same team each time
+        readers: await owner(writer),
       });
     }
     const again = await addSource(env, {
       source,
       change: newChange(),
       text: draft,
-      readers: owner(writer),
+      readers: await owner(writer),
     });
 
     expect({
@@ -631,13 +643,13 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text,
-      readers: owner(first),
+      readers: await owner(first),
     });
     const added = await addSource(env, {
       source,
       change: newChange(),
       text,
-      readers: owner(second),
+      readers: await owner(second),
     });
 
     expect({
@@ -668,7 +680,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       source,
       change: newChange(),
       text,
-      readers: owner(reader),
+      readers: await owner(reader),
     });
 
     const { items: chunks } = await recallAs(env, reader, {
@@ -695,7 +707,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source: newSource(),
         change: newChange(),
         text: "ﷺ".repeat(count),
-        readers: owner(reader),
+        readers: await owner(reader),
       });
 
     await expect(add(most)).resolves.toMatchObject({ version: 1 });
@@ -719,7 +731,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
         source: on,
         change: key,
         text,
-        readers: owner(reader),
+        readers: await owner(reader),
       });
 
     // Calls, not promises: each is made only when its refusal is awaited,
@@ -781,7 +793,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
           source: source as SourceRef,
           change: newChange(),
           text: secret,
-          readers: owner(reader),
+          readers: await owner(reader),
         })
     );
     for (const add of adds) {
@@ -798,7 +810,8 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
           source: newSource(),
           change,
           text,
-          readers: owner(reader),
+          // oxlint-disable-next-line no-await-in-loop -- the same team each time
+          readers: await owner(reader),
         })
       ).rejects.toThrow(refused);
     }
@@ -823,7 +836,12 @@ describe(
       const secret = word();
       const text = `Contract ${secret}`;
       const add = async () =>
-        await addSource(env, { source, change, text, readers: owner(reader) });
+        await addSource(env, {
+          source,
+          change,
+          text,
+          readers: await owner(reader),
+        });
 
       await crashAfterNextFile();
       await expect(add()).rejects.toThrow(crashed);
@@ -859,7 +877,7 @@ describe(
         source: kept,
         change: newChange(),
         text: keptText,
-        readers: owner(reader),
+        readers: await owner(reader),
       });
       await crashAfterNextFile();
       await expect(
@@ -867,7 +885,7 @@ describe(
           source: lost,
           change: newChange(),
           text: lostText,
-          readers: owner(reader),
+          readers: await owner(reader),
         })
       ).rejects.toThrow(crashed);
 
@@ -904,7 +922,8 @@ describe(
             source: newSource(),
             change: newChange(),
             text,
-            readers: owner(reader),
+            // oxlint-disable-next-line no-await-in-loop -- the same team each time
+            readers: await owner(reader),
           })
         ).rejects.toThrow(crashed);
       }
@@ -940,7 +959,12 @@ describe(
       const change = newChange();
       const text = `Late ${word()}`;
       const add = async () =>
-        await addSource(env, { source, change, text, readers: owner(reader) });
+        await addSource(env, {
+          source,
+          change,
+          text,
+          readers: await owner(reader),
+        });
       await crashAfterNextFile();
       await expect(add()).rejects.toThrow(crashed);
 
@@ -974,7 +998,12 @@ describe(
       const change = newChange();
       const text = `Swept ${word()}`;
       const add = async () =>
-        await addSource(env, { source, change, text, readers: owner(reader) });
+        await addSource(env, {
+          source,
+          change,
+          text,
+          readers: await owner(reader),
+        });
       await crashAfterNextFile();
       await expect(add()).rejects.toThrow(crashed);
 

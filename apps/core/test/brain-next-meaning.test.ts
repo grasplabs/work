@@ -26,8 +26,13 @@ import {
   recallAs,
   workBrain,
 } from "../src/brain-next.ts";
-import type { RecalledPack, SourceRef } from "../src/brain-next.ts";
+import type {
+  RecalledPack,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -107,6 +112,8 @@ const warnedOf = async <T>(
 
 describe("recall by meaning, through core", () => {
   let personId = "";
+  /** The team of the person alone their sources are for. */
+  let readers: SourceReaders = { kind: "none" };
   /** The person's sources, by the Brain's key for each (core's brain-next.ts). */
   const sources = new Map<string, SourceRef>();
 
@@ -117,7 +124,10 @@ describe("recall by meaning, through core", () => {
   const withoutMeaning = async (asked: string): Promise<RecalledPack> => {
     const pack: Pack = await store().recall({
       question: asked,
-      reader: { person: personId, groups: [] },
+      reader: {
+        person: personId,
+        groups: readers.kind === "team" ? [`team:${readers.teamId}`] : [],
+      },
       budget: { tokens: recallBudgetMax },
     });
     return {
@@ -153,6 +163,9 @@ describe("recall by meaning, through core", () => {
       return;
     }
     ({ userId: personId } = await signedInWithRole(idp, "user"));
+    // In the shared store, which core's clock embeds: a person's own store
+    // does its own work (its alarm).
+    readers = await soleReadersOf(personId);
     for (const text of [english, dutch]) {
       const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
       sources.set(`${source.producer}:${source.id}`, source);
@@ -161,7 +174,7 @@ describe("recall by meaning, through core", () => {
         source,
         change: crypto.randomUUID(),
         text,
-        readers: { kind: "owner", personId },
+        readers,
       });
     }
     await embedEverything();
