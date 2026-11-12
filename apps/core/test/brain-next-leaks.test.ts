@@ -261,6 +261,13 @@ describe(
   () => {
     it("has a probe for every member of every surface, and a surface for every module that reaches the Brain", () => {
       const names = new Set<string>(brainSurfaces.map(({ name }) => name));
+      // Core's module and the store are the Brain itself; every module the
+      // lint config lets import core's module names its own surface.
+      const reaching: [string, string][] = [
+        ["apps/core/src/brain-next.ts", "core"],
+        ["BrainStore", "store"],
+        ...Object.entries(brainModules),
+      ];
 
       expect({
         members: Object.fromEntries(
@@ -269,9 +276,7 @@ describe(
             membersOf(module).toSorted(),
           ])
         ),
-        unprobed: Object.entries(brainModules).filter(
-          ([, name]) => !names.has(name)
-        ),
+        unprobed: reaching.filter(([, name]) => !names.has(name)),
       }).toStrictEqual({
         members: Object.fromEntries(
           brainSurfaces.map(({ name, probes }) => [
