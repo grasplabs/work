@@ -33,6 +33,7 @@ CREATE TABLE `memories` (
 	`quote` text,
 	`source` text,
 	`version` integer,
+	`subject` text,
 	`writer` text,
 	`lineage` text NOT NULL,
 	`lineage_order` integer NOT NULL,
@@ -51,6 +52,7 @@ CREATE UNIQUE INDEX `memories_id_unique` ON `memories` (`id`);--> statement-brea
 CREATE INDEX `memories_entity_idx` ON `memories` (`entity`,`attribute`,`lineage`);--> statement-breakpoint
 CREATE INDEX `memories_object_idx` ON `memories` (`object`);--> statement-breakpoint
 CREATE INDEX `memories_version_idx` ON `memories` (`source`,`version`);--> statement-breakpoint
+CREATE INDEX `memories_subject_idx` ON `memories` (`subject`,`version`);--> statement-breakpoint
 CREATE INDEX `memories_readers_idx` ON `memories` (`readers`);--> statement-breakpoint
 CREATE INDEX `memories_only_for_idx` ON `memories` (`only_for`);--> statement-breakpoint
 CREATE TABLE `memory_changes` (
@@ -80,6 +82,7 @@ CREATE INDEX `memory_confirmed_over_memory_idx` ON `memory_confirmed_over` (`mem
 CREATE TABLE `memory_extractions` (
 	`source` text NOT NULL,
 	`version` integer NOT NULL,
+	`subject` text NOT NULL,
 	`lineage` text NOT NULL,
 	`at` integer NOT NULL,
 	`readers` text NOT NULL,
@@ -89,6 +92,7 @@ CREATE TABLE `memory_extractions` (
 --> statement-breakpoint
 CREATE INDEX `memory_extractions_lineage_idx` ON `memory_extractions` (`lineage`,`version`);--> statement-breakpoint
 CREATE INDEX `memory_extractions_readers_idx` ON `memory_extractions` (`readers`);--> statement-breakpoint
+CREATE INDEX `memory_extractions_subject_idx` ON `memory_extractions` (`subject`,`version`);--> statement-breakpoint
 CREATE INDEX `memory_extractions_only_for_idx` ON `memory_extractions` (`only_for`);--> statement-breakpoint
 ALTER TABLE `word_index` ADD `memory_cursor` integer DEFAULT 0 NOT NULL;
 --> statement-breakpoint
@@ -123,7 +127,8 @@ WHEN OLD.`retired_at` IS NOT NULL
 	OR NEW.`value` IS NOT OLD.`value` OR NEW.`value_key` IS NOT OLD.`value_key`
 	OR NEW.`one_value` IS NOT OLD.`one_value` OR NEW.`type` IS NOT OLD.`type`
 	OR NEW.`statement` IS NOT OLD.`statement` OR NEW.`quote` IS NOT OLD.`quote`
-	OR NEW.`source` IS NOT OLD.`source` OR NEW.`version` IS NOT OLD.`version` OR NEW.`writer` IS NOT OLD.`writer`
+	OR NEW.`source` IS NOT OLD.`source` OR NEW.`version` IS NOT OLD.`version`
+	OR NEW.`subject` IS NOT OLD.`subject` OR NEW.`writer` IS NOT OLD.`writer`
 	OR NEW.`lineage` IS NOT OLD.`lineage` OR NEW.`lineage_order` IS NOT OLD.`lineage_order`
 	OR NEW.`speaker` IS NOT OLD.`speaker` OR NEW.`valid_from` IS NOT OLD.`valid_from`
 	OR NEW.`valid_until` IS NOT OLD.`valid_until` OR NEW.`learned_at` IS NOT OLD.`learned_at`

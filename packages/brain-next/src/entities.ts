@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { entityKinds, entityNamesShown } from "./contract.ts";
+import { entityKinds } from "./contract.ts";
 import type {
   EntitiesCursor,
   Entity,
@@ -176,18 +176,19 @@ export const keepNames = (
  */
 const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
   SELECT m.learned_at AS first FROM memories AS m
-  WHERE m.entity = ${entity} AND ${visibleSql("m")}
+  WHERE m.entity = ${entity} AND m.learned_at <= ?9 AND ${visibleSql("m")}
   UNION ALL
   SELECT m.learned_at FROM memories AS m
-  WHERE m.object = ${entity} AND ${visibleSql("m")}
+  WHERE m.object = ${entity} AND m.learned_at <= ?9 AND ${visibleSql("m")}
 ))`;
 
 /**
  * `?1` the kind or null, `?4` the names and identifiers asked (JSON, each
  * `[type, folded]`, every one to be held), `?5` the most to read, `?6` 1
  * to go on after the entity whose place is `?7` (when its first memory
- * the reader may read was learned) and `?8` (its id): the entities the
- * reader may see that hold each, by a memory they may read, in that
+ * the reader may read was learned) and `?8` (its id), `?9` the moment the
+ * first page was read: the entities the reader may see by a memory
+ * learned by then that hold each, by a memory they may read, in that
  * order, then by id.
  */
 // Its cost: by kind alone, every entity of that kind is checked for a
@@ -227,11 +228,9 @@ ORDER BY first, id
 LIMIT ?5`;
 
 /**
- * `?1` the entities asked (JSON rows), `?4` the most of each kind of name
- * to give: each name and identifier of them a memory the reader may read
- * gave, once (as the earliest such memory wrote it), the earliest first,
- * at most `?4` names and `?4` identifiers an entity, each with how many
- * there are of its kind in all.
+ * `?1` the entities asked (JSON rows): each name and identifier of them a
+ * memory the reader may read gave, once (as the earliest such memory
+ * wrote it), the earliest first.
  */
 const namesSql = `
 WITH ${readableSql},
@@ -247,18 +246,10 @@ given AS (
   JOIN entity_names ON entity_names.entity = asked.value
   JOIN memories AS m ON m.row = entity_names.memory
   WHERE ${visibleSql("m")}
-),
-placed AS (
-  SELECT entity, type, value,
-    row_number() OVER (
-      PARTITION BY entity, type = 'name' ORDER BY first, type, folded
-    ) AS place,
-    count(*) OVER (PARTITION BY entity, type = 'name') AS total
-  FROM given WHERE copy = 1
 )
-SELECT entity, type, value, total FROM placed
-WHERE place <= ?4
-ORDER BY entity, place`;
+SELECT entity, type, value FROM given
+WHERE copy = 1
+ORDER BY entity, first, type, folded`;
 
 /** Entities found, as the reader sees them: with the names they may see. */
 const asSeen = (
@@ -273,33 +264,28 @@ const asSeen = (
       kind: kindSchema.parse(kind),
       names: [],
       identifiers: [],
-      nameCount: 0,
-      identifierCount: 0,
     });
   }
   if (seen.size === 0) {
     return [];
   }
   const names = sql
-    .exec<{ entity: number; type: string; value: string; total: number }>(
+    .exec<{ entity: number; type: string; value: string }>(
       namesSql,
       JSON.stringify([...seen.keys()]),
       reader.person,
-      JSON.stringify(reader.groups),
-      entityNamesShown
+      JSON.stringify(reader.groups)
     )
     .toArray();
-  for (const { entity, type, value, total } of names) {
+  for (const { entity, type, value } of names) {
     const into = seen.get(entity);
     if (into === undefined) {
       continue;
     }
     if (type === "name") {
       into.names.push(value);
-      into.nameCount = total;
     } else if (type === "email" || type === "ref") {
       into.identifiers.push({ type, value });
-      into.identifierCount = total;
     }
   }
   return [...seen.values()];
@@ -324,6 +310,7 @@ export const findEntities = (
   sql: SqlStorage,
   { reader, kind, identifier, name, after, limit }: EntitiesAsked
 ): EntityPage => {
+  const at = after?.at.getTime() ?? Date.now();
   const asked = [
     ...(identifier === undefined
       ? []
@@ -340,7 +327,8 @@ export const findEntities = (
       limit + 1,
       after === undefined ? 0 : 1,
       after?.learnedAt.getTime() ?? 0,
-      after?.entity ?? ""
+      after?.entity ?? "",
+      at
     )
     .toArray();
   const entities = asSeen(sql, found.slice(0, limit), reader);
@@ -351,7 +339,11 @@ export const findEntities = (
   return {
     entities,
     more: true,
-    next: { learnedAt: new Date(last.first), entity: last.id },
+    next: {
+      at: new Date(at),
+      learnedAt: new Date(last.first),
+      entity: last.id,
+    },
   };
 };
 

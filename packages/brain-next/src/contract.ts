@@ -1550,11 +1550,14 @@ export interface Memory {
 }
 
 /**
- * Where a page of `readMemories` ended: its last memory's place in the
- * order (its attribute, whether the reader saw it confirmed, when it was
- * learned, its id). The next page starts after it.
+ * Where a page of `readMemories` ended: the moment the first page was
+ * read (`at`: its `asOf`, or then), at which every later page is read
+ * too, so nothing changed since skips or repeats an item; and its last
+ * memory's place in the order (its attribute, whether the reader saw it
+ * confirmed, when it was learned, its id). The next page starts after it.
  */
 export const memoriesCursorSchema = z.strictObject({
+  at: z.date(),
   attribute: wellFormedString().min(1).max(64).nullable(),
   confirmed: z.boolean(),
   learnedAt: z.date(),
@@ -1572,15 +1575,23 @@ export type MemoriesCursor = z.infer<typeof memoriesCursorSchema>;
  * id gets). A page of at most `limit` (a page size, at most
  * `memoriesReadMax`), after `after`.
  */
-export const memoriesRequestSchema = z.strictObject({
-  entity: entityIdSchema,
-  reader: readerSchema,
-  attribute: wellFormedString().min(1).max(64).optional(),
-  asOf: z.date().optional(),
-  history: z.boolean().optional(),
-  after: memoriesCursorSchema.optional(),
-  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
-});
+export const memoriesRequestSchema = z
+  .strictObject({
+    entity: entityIdSchema,
+    reader: readerSchema,
+    attribute: wellFormedString().min(1).max(64).optional(),
+    asOf: z.date().optional(),
+    history: z.boolean().optional(),
+    after: memoriesCursorSchema.optional(),
+    limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+  })
+  .refine(
+    ({ asOf, after }) =>
+      asOf === undefined ||
+      after === undefined ||
+      asOf.getTime() === after.at.getTime(),
+    { message: "Reads as of another moment than its page", path: ["asOf"] }
+  );
 export type MemoriesRequest = z.input<typeof memoriesRequestSchema>;
 
 /**
@@ -1595,11 +1606,13 @@ export interface MemoriesRead {
 }
 
 /**
- * Where a page of `listContested` ended: its last fact's place (when its
- * first memory the reader may read was learned, its entity, its
- * attribute).
+ * Where a page of `listContested` ended: the moment the first page was
+ * read (`at`), at which every later page is read too; and its last fact's
+ * place (when its first memory the reader may read was learned, its
+ * entity, its attribute).
  */
 export const contestedCursorSchema = z.strictObject({
+  at: z.date(),
   learnedAt: z.date(),
   entity: entityIdSchema,
   attribute: wellFormedString().min(1).max(64),
@@ -1658,10 +1671,13 @@ export const confirmRequestSchema = z.strictObject({
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
 
 /**
- * Where a page of `findEntities` ended: its last entity's place (when its
- * first memory the reader may read was learned, its id).
+ * Where a page of `findEntities` ended: the moment the first page was
+ * read (`at`), at which every later page is read too (a memory learned
+ * since neither adds an entity to it nor moves one); and its last entity's
+ * place (when its first memory the reader may read was learned, its id).
  */
 export const entitiesCursorSchema = z.strictObject({
+  at: z.date(),
   learnedAt: z.date(),
   entity: entityIdSchema,
 });
@@ -1706,21 +1722,16 @@ export const entityRequestSchema = z.strictObject({
 });
 export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
-/** Most names, and most identifiers, an `Entity` holds: the earliest. */
-export const entityNamesShown = 20;
-
 /**
  * An entity as a reader sees it: its kind, and the names and identifiers
  * given by memories the reader may read, each once, the earliest first:
- * at most `entityNamesShown` of each, with how many there are in all.
+ * every one of them.
  */
 export interface Entity {
   id: EntityId;
   kind: EntityKind;
   names: string[];
   identifiers: Identifier[];
-  nameCount: number;
-  identifierCount: number;
 }
 
 /**

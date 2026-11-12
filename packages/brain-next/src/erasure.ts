@@ -4,8 +4,13 @@ import type { BrainBucket } from "./bucket.ts";
 import { erasureReasons } from "./contract.ts";
 import type { ErasureReason, ErasuresOverview } from "./contract.ts";
 import { hashOf, releaseVectors } from "./files.ts";
-import { eraseMemoriesOf, eraseMemoriesOn } from "./forget.ts";
-import { readerSetKeyOf } from "./reader-sets.ts";
+import {
+  eraseMemoriesHiddenBy,
+  eraseMemoriesOf,
+  eraseMemoriesOfSource,
+  eraseMemoriesOn,
+} from "./forget.ts";
+import { readerSetKeyOf, rebuildMissingSets } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -1209,4 +1214,39 @@ export const deleteStoreObjects = async (
     }
   }
   return true;
+};
+
+/**
+ * Replays on memories what every erasure the store records covered, as
+ * the store starts, in one transaction: a person's (the memories only
+ * they read, learned up to it, and those on the versions it hid) and a
+ * source's (every memory drawn from it). So an erasure an older release
+ * recorded, which knew no memories (an admin's rollback), reaches them
+ * after the roll forward; one this release applied finds nothing more.
+ * Then the sets of readers an older release dropped, which memories
+ * still name, are made again from their keys: nothing but an erasure
+ * deletes a memory. Each step is an indexed delete per erasure; the
+ * record of erasures grows with them, never with content.
+ */
+export const replayMemoryErasures = (sql: SqlStorage): void => {
+  const sets: number[] = [];
+  const recorded = sql
+    .exec<{ key: string; kind: string; subject: string; erased_at: number }>(
+      "SELECT key, kind, subject, erased_at FROM erasures"
+    )
+    .toArray();
+  for (const { key, kind, subject, erased_at: at } of recorded) {
+    if (kind === "person") {
+      sets.push(
+        ...eraseMemoriesOf(sql, subject, at),
+        ...eraseMemoriesHiddenBy(sql, key)
+      );
+    } else {
+      sets.push(...eraseMemoriesOfSource(sql, subject));
+    }
+  }
+  for (const readerSet of new Set(sets)) {
+    dropUnusedReaderSet(sql, readerSet);
+  }
+  rebuildMissingSets(sql);
 };

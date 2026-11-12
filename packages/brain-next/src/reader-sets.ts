@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
+import { z } from "zod";
 
 import type { Access } from "./contract.ts";
 import { readerSetMembers, readerSets } from "./db/schema.ts";
@@ -103,4 +104,43 @@ export const readerSetOf = (
       .run();
   }
   return id;
+};
+
+/** A set's key, as `keyOf` writes it: its principals, `[kind, id]` each. */
+const keySchema = z.array(z.tuple([z.enum(["person", "group"]), z.string()]));
+
+/**
+ * Makes again each set of readers that memories or extraction marks name
+ * by key and the store no longer holds: what an older release dropped
+ * when it saw nothing else use it (an admin's rollback). A key is the
+ * set's principals, so the set it makes is the one that was. One scan of
+ * the index of keys each names (`memories_readers_idx`,
+ * `memory_extractions_readers_idx`). Run in the caller's transaction.
+ */
+export const rebuildMissingSets = (sql: SqlStorage): void => {
+  const missing = sql
+    .exec<{ readers: string }>(
+      `SELECT readers FROM (
+        SELECT DISTINCT readers FROM memories
+        UNION SELECT DISTINCT readers FROM memory_extractions
+      ) WHERE readers NOT IN (SELECT key FROM reader_sets)`
+    )
+    .toArray();
+  for (const { readers } of missing) {
+    const principals = keySchema.parse(JSON.parse(readers));
+    const { id } = sql
+      .exec<{ id: number }>(
+        "INSERT INTO reader_sets (key) VALUES (?) RETURNING id",
+        readers
+      )
+      .one();
+    for (const [kind, principal] of principals) {
+      sql.exec(
+        "INSERT INTO reader_set_members (reader_set, kind, principal) VALUES (?, ?, ?)",
+        id,
+        kind,
+        principal
+      );
+    }
+  }
 };
