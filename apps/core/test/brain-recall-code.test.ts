@@ -652,14 +652,17 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     )
       .bind(left, ada.userId)
       .run();
-    await eraseSource(env, { source: erased, reason: "deleted" });
-    // The fourth is narrowed to her alone: she may still read it, but
-    // what code reads is what her teams may.
+    await eraseSource(env, {
+      source: erased,
+      readers: { kind: "team", teamId: kept },
+      reason: "deleted",
+    });
+    // The fourth is narrowed to a team she isn't in.
     await addSource(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Route plan: ${narrowedWord} departs at four.`,
-      readers: { kind: "owner", personId: ada.userId },
+      readers: { kind: "team", teamId: left },
     });
     const [afterLeaving, afterErasure, unchanged, afterNarrowing] =
       await Promise.all(
@@ -710,15 +713,19 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
         await Promise.resolve();
       }),
       erased: await sentAfter(async (source) => {
-        await eraseSource(env, { source, reason: "deleted" });
+        await eraseSource(env, {
+          source,
+          readers: { kind: "team", teamId: team },
+          reason: "deleted",
+        });
       }),
-      // Narrowed to her alone: hers to read, no longer her teams'.
+      // Narrowed to a team she isn't in.
       narrowed: await sentAfter(async (source, word) => {
         await addSource(env, {
           source,
           change: crypto.randomUUID(),
           text: `Route plan: ${word} departs at one.`,
-          readers: { kind: "owner", personId: ada.userId },
+          readers: { kind: "team", teamId: await teamOf() },
         });
       }),
     }).toStrictEqual({ unchanged: true, erased: false, narrowed: false });

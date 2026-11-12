@@ -203,6 +203,7 @@
   "@grasp-os/core test/brain-next-leaks.test.ts": 70.3,
   "@grasp-os/core test/brain-next-origins.test.ts": 3.6,
   "@grasp-os/core test/brain-next-pack.test.ts": 2.9,
+  "@grasp-os/core test/brain-next-personal.test.ts": 0.7,
   "@grasp-os/core test/brain-next-random.test.ts": 43.8,
   "@grasp-os/core test/brain-next-sources.test.ts": 3.6,
   "@grasp-os/core test/brain-next-vectors.test.ts": 15.2,

@@ -14,6 +14,7 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
@@ -33,11 +34,12 @@ const person = async (): Promise<string> => {
   return userId;
 };
 
-/** Readable by `personId` alone. */
-const ownedBy = (personId: string): SourceReaders => ({
-  kind: "owner",
-  personId,
-});
+/**
+ * Readable by `personId` alone, in the shared store: the words and their
+ * indexes are the same in a person's own store, and looked at here in
+ * the shared one.
+ */
+const ownedBy = soleReadersOf;
 
 /** Adds `text` as a source of its own, answering its identity. */
 const add = async (
@@ -59,6 +61,7 @@ const recalledAs = async (
   question: string
 ): Promise<SourceRef[]> => {
   const { items: chunks } = await recallAs(env, personId, {
+    personal: true,
     question,
     budget: { tokens: recallBudgetMax },
   });
@@ -133,9 +136,10 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
       `De facturen van maart ${tag} ${filler("leverancier")}`,
       `${filler("verlof")} ${tag}`,
     ];
-    const source = await add(passages.join("\n\n"), ownedBy(reader));
+    const source = await add(passages.join("\n\n"), await ownedBy(reader));
 
     const { items: chunks } = await recallAs(env, reader, {
+      personal: true,
       question: `factuur ${tag}`,
       budget: { tokens: recallBudgetMax },
     });
@@ -161,7 +165,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
       ["Los pedidos llegan el lunes", "pedido"],
     ] as const;
     const added = await Promise.all(
-      pairs.map(async ([text]) => await add(text, ownedBy(reader)))
+      pairs.map(async ([text]) => await add(text, await ownedBy(reader)))
     );
 
     for (const [index, [, question]] of pairs.entries()) {
@@ -177,10 +181,10 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
     const tag = `w${unique()}`;
     // The other form in a shorter passage, which shorter-first alone would
     // put first.
-    const otherForm = await add(`factuur ${tag}`, ownedBy(reader));
+    const otherForm = await add(`factuur ${tag}`, await ownedBy(reader));
     const asAsked = await add(
       `facturen ${tag} met nog wat woorden erbij`,
-      ownedBy(reader)
+      await ownedBy(reader)
     );
     const question = `facturen ${tag}`;
     const before = await recalledAs(reader, question);
@@ -189,7 +193,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
     // More hidden passages than a recall returns, in both forms.
     for (let index = 0; index <= recallLimit; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await add(`factuur facturen ${tag}`, ownedBy(other));
+      await add(`factuur facturen ${tag}`, await ownedBy(other));
     }
 
     await expect(recalledAs(reader, question)).resolves.toStrictEqual(before);
@@ -199,11 +203,11 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
     const reader = await person();
     const common = await add(
       "Wat is het van de en een, wat is het van de en een; the a of and to is",
-      ownedBy(reader)
+      await ownedBy(reader)
     );
     const roster = await add(
       "Het zaterdagrooster: rooster voor de zaterdag, door Anna gemaakt",
-      ownedBy(reader)
+      await ownedBy(reader)
     );
 
     // The passage with every common word of the question comes after the
@@ -220,7 +224,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
 
   it("still counts a word that is a stop word in another language, after the words that matter", async () => {
     const reader = await person();
-    const owned = ownedBy(reader);
+    const owned = await ownedBy(reader);
     // Each pair: the passage the question means, and a shorter one holding
     // only its other word, which shorter-first alone would put first.
     const cases = [
@@ -249,12 +253,15 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
   it("finds what shares only a question's common words after what its other words find, and never what the reader may not read", async () => {
     const [reader, other] = await Promise.all([person(), person()]);
     const tag = `w${unique()}`;
-    const telling = await add(`Laptop ${tag} bestellen`, ownedBy(reader));
+    const telling = await add(`Laptop ${tag} bestellen`, await ownedBy(reader));
     const phrasing = await add(
       "Wie en wat: de servicedesk, voor wie vastloopt",
-      ownedBy(reader)
+      await ownedBy(reader)
     );
-    await add("Wie en wat: de servicedesk, voor wie vastloopt", ownedBy(other));
+    await add(
+      "Wie en wat: de servicedesk, voor wie vastloopt",
+      await ownedBy(other)
+    );
 
     const found = await recalledAs(reader, `Wie helpt bij de laptop ${tag}?`);
 
@@ -263,11 +270,14 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
 
   it("finds ß by ss, ø, æ and œ by their plain letters, and keeps dotless ı apart", async () => {
     const reader = await person();
-    const street = await add("Die Straße ist gesperrt", ownedBy(reader));
-    const windPark = await add("Ørsted bouwt het windpark", ownedBy(reader));
-    const apple = await add("Æblekage til frokost", ownedBy(reader));
-    const heart = await add("Le cœur du projet", ownedBy(reader));
-    const sword = await add("Bir kılıç sattı", ownedBy(reader));
+    const street = await add("Die Straße ist gesperrt", await ownedBy(reader));
+    const windPark = await add(
+      "Ørsted bouwt het windpark",
+      await ownedBy(reader)
+    );
+    const apple = await add("Æblekage til frokost", await ownedBy(reader));
+    const heart = await add("Le cœur du projet", await ownedBy(reader));
+    const sword = await add("Bir kılıç sattı", await ownedBy(reader));
 
     const asked = [
       ["strasse", [street]],
@@ -298,10 +308,10 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
     const longest = `${"y".repeat(64)} `.repeat(sourceTextMaxBytes / 65);
     for (const text of [distinct, longest]) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await add(text, ownedBy(reader));
+      await add(text, await ownedBy(reader));
     }
     const after = `w${unique()}`;
-    const id = await add(`Added after them: ${after}`, ownedBy(reader));
+    const id = await add(`Added after them: ${after}`, await ownedBy(reader));
 
     await expect(recalledAs(reader, after)).resolves.toStrictEqual([id]);
     await expect(
@@ -320,8 +330,8 @@ describe("erasing words", { timeout: 60_000 }, () => {
     // one before it, so a mark rewritten inside or a shared start could
     // hide part of it from the page search.
     const [kept, erased] = [digitsMark(), digitsMark()];
-    await add(`xq${kept}ingen stays`, ownedBy(reader));
-    const goes = await add(`zq${erased}ingen goes`, ownedBy(reader));
+    await add(`xq${kept}ingen stays`, await ownedBy(reader));
+    const goes = await add(`zq${erased}ingen goes`, await ownedBy(reader));
     await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
       true,
       true,
@@ -330,7 +340,11 @@ describe("erasing words", { timeout: 60_000 }, () => {
 
     // Erased (GRA-1729): no search finds its words, and the indexes'
     // pages hold nothing of them, with no compaction.
-    await eraseSource(env, { source: goes, reason: "deleted" });
+    await eraseSource(env, {
+      source: goes,
+      readers: await ownedBy(reader),
+      reason: "deleted",
+    });
     await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
       false,
       false,
@@ -450,13 +464,13 @@ describe(
       const mark = `w${unique()}`;
       const invoices = await add(
         `De facturen van maart ${mark}`,
-        ownedBy(reader)
+        await ownedBy(reader)
       );
       const street = await add(
         `Die Straße ist gesperrt ${mark}`,
-        ownedBy(reader)
+        await ownedBy(reader)
       );
-      await add(`De facturen van april ${mark}`, ownedBy(other));
+      await add(`De facturen van april ${mark}`, await ownedBy(other));
       await toFirstRules([mark]);
 
       const before = {
@@ -488,7 +502,7 @@ describe(
       const reader = await person();
       const mark = `w${unique()}`;
       // "㍿" folds to "株式会社", "℡" to "tel", "Ⓐ" to "a".
-      const symbols = await add(`㍿ ℡ Ⓐ ${mark}`, ownedBy(reader));
+      const symbols = await add(`㍿ ℡ Ⓐ ${mark}`, await ownedBy(reader));
       const questions = ["株式会社", "TEL", "a"];
       const foundBy = async (): Promise<SourceRef[][]> =>
         await Promise.all(
@@ -522,7 +536,7 @@ describe(
         { length: count },
         (_, index) => `${mark}x${index}ingen ${"woord ".repeat(110).trim()}`
       );
-      await add(paragraphs.join("\n\n"), ownedBy(reader));
+      await add(paragraphs.join("\n\n"), await ownedBy(reader));
       await toFirstRules([mark]);
 
       await tick();
@@ -549,6 +563,7 @@ describe(
       });
 
       const { items: chunks } = await recallAs(env, reader, {
+        personal: true,
         question: `${mark}x7ing`,
         budget: { tokens: recallBudgetMax },
       });
