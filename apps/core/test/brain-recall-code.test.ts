@@ -680,34 +680,47 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   it("withholds what a chat's code recalled from its later requests once its person's teams may no longer read it", async () => {
     const { admin, ada } = await company();
     const team = await teamOf(ada);
-    const word = `route${unique().replaceAll(/\W/gu, "")}`;
-    const text = `Route plan: ${word} departs at noon.`;
-    const source = await added(text, { kind: "team", teamId: team });
-    const narrowedText = `Route plan: ${word} returns at five.`;
-    const narrowed = await added(narrowedText, { kind: "team", teamId: team });
-    const { ask, agent, provider } = await chatOf(
-      ada.userId,
-      recallCode(requestOf(word)),
-      says("Read it."),
-      says("Gone.")
-    );
-    await granted(ada, admin, brainGrant(agent));
-    await ask("Where is the route plan?");
-    const before = JSON.stringify(provider.requests.at(-1)?.body);
-    await eraseSource(env, { source, reason: "deleted" });
-    // Narrowed to her alone: hers to read, no longer her teams'.
-    await addSource(env, {
-      source: narrowed,
-      change: crypto.randomUUID(),
-      text: `Route plan: ${word} returns at six.`,
-      readers: { kind: "owner", personId: ada.userId },
-    });
-    await ask("And now?");
-    const after = JSON.stringify(provider.requests.at(-1)?.body);
+    /**
+     * Whether a chat whose code recalled a plan of the team's still sends
+     * it in its next turn, once `change` changed the plan's source. One
+     * chat at a time: the model's replies are the latest chat's.
+     */
+    const sentAfter = async (
+      change: (source: SourceRef, word: string) => Promise<void>
+    ): Promise<boolean> => {
+      const word = `route${unique().replaceAll(/\W/gu, "")}`;
+      const text = `Route plan: ${word} departs at noon.`;
+      const source = await added(text, { kind: "team", teamId: team });
+      const { ask, agent, provider } = await chatOf(
+        ada.userId,
+        recallCode(requestOf(word)),
+        says("Read it."),
+        says("And now.")
+      );
+      await granted(ada, admin, brainGrant(agent));
+      await ask(word);
+      await change(source, word);
+      const before = provider.requests.length;
+      await ask("And now?");
+      return JSON.stringify(provider.requests[before]?.body).includes(text);
+    };
     expect({
-      before: [before.includes(text), before.includes(narrowedText)],
-      after: [after.includes(text), after.includes(narrowedText)],
-    }).toStrictEqual({ before: [true, true], after: [false, false] });
+      unchanged: await sentAfter(async () => {
+        await Promise.resolve();
+      }),
+      erased: await sentAfter(async (source) => {
+        await eraseSource(env, { source, reason: "deleted" });
+      }),
+      // Narrowed to her alone: hers to read, no longer her teams'.
+      narrowed: await sentAfter(async (source, word) => {
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text: `Route plan: ${word} departs at one.`,
+          readers: { kind: "owner", personId: ada.userId },
+        });
+      }),
+    }).toStrictEqual({ unchanged: true, erased: false, narrowed: false });
   });
 
   it("answers nothing when the audit log can't take the recall", async () => {
