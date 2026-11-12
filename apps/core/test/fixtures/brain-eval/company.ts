@@ -32,7 +32,7 @@
  */
 
 /** Bumped with any change to the company, its sources or its questions. */
-export const brainEvalSetVersion = "2026-11-12.1";
+export const brainEvalSetVersion = "2026-11-12.2";
 
 export const brainEvalLanguages = ["en", "nl", "de", "fr", "es"] as const;
 export type BrainEvalLanguage = (typeof brainEvalLanguages)[number];
