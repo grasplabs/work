@@ -1323,12 +1323,15 @@ export class ChatHarness {
           : { ...request.context, make: request.question.make },
       assets: env.ASSETS,
       history: transcript.messages,
-      // Only in a person's own chat, in a turn they started: what they
-      // said there is the only word of theirs it may keep
-      // (agent-remember.ts). A turn nobody started (a wake) has none.
-      ...(request.shared || scope.unattended === true
-        ? {}
-        : { remember: rememberTool(env, scope, request.question.text) }),
+      // Only in a person's own chat in Grasp's app, in a turn they started:
+      // what they said there is the only word of theirs it may keep, and
+      // only Grasp's app shows the notice and its Undo (agent-remember.ts).
+      // A turn nobody started (a wake) has no word of theirs.
+      ...(!request.shared &&
+      scope.unattended !== true &&
+      (scope.via === undefined || scope.via === "web")
+        ? { remember: rememberTool(env, scope, request.question.text) }
+        : {}),
       // Only in a person's own chat, by an agent that may read the brain.
       ...(request.readsBrain && !request.shared
         ? {

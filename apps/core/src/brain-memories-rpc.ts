@@ -38,8 +38,6 @@ export class BrainMemoriesRpc
           {
             person: person.userId,
             actor: actorOf(person),
-            word: { kind: "own" },
-            personal: true,
           },
           memory
         )

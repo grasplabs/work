@@ -33,4 +33,8 @@ export const brainModules = {
   // Remembers, forgets and corrects for a person, and reads entities for
   // them: its own surface, each export probed as the person.
   "apps/core/src/brain-memories.ts": "memories",
+  // The chat's tool that saves what a person says: reads core's
+  // memoryChoices, and hands on nothing it returns beyond what
+  // brain-memories.ts's probes hold.
+  "apps/core/src/agent-remember.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;
