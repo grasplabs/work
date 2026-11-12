@@ -15,6 +15,7 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { publishVersion } from "../src/app-publish.ts";
 import { formSubmissionOf, queueFormSent } from "../src/app-webhook-queue.ts";
+import { addSource } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
@@ -25,6 +26,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
+import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
@@ -868,6 +870,52 @@ describe("erasing a person", () => {
     const text = JSON.stringify(audited);
     expect(text).not.toContain(String(person.person.email));
     expect(text).not.toContain(name);
+  });
+
+  it("waits for the Brain to finish deleting their own store without counting a failure or logging one, and is finished by the clock", async () => {
+    const { admin, person } = await removedPerson();
+    const name = String(person.person.name);
+    // Something of theirs alone in their own store: its erasure waits out
+    // the time an add under way has to write a file.
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: "A note of theirs alone",
+      readers: { kind: "owner", personId: person.userId },
+    });
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
+      logged.push(JSON.stringify(args));
+    });
+    let pending: Awaited<ReturnType<typeof admin.api.members.erase>>;
+    try {
+      pending = await admin.api.members.erase(person.userId, name);
+      // A minute on: their own store is still deleting, as expected.
+      await runMinuteTasks();
+    } finally {
+      spy.mockRestore();
+    }
+    const attempts = await env.DB.prepare(
+      "SELECT attempts FROM person_erasure_areas WHERE user_id = ? AND area = 'brain_sources'"
+    )
+      .bind(person.userId)
+      .first<{ attempts: number }>();
+    await finishedByTheClock(person.userId);
+    const done = await admin.api.members.erasure(person.userId);
+
+    expect({
+      pending: pending.areas.find(({ area }) => area === "brain_sources"),
+      attempts: attempts?.attempts,
+      failedLogged: logged.some((line) =>
+        line.includes("member.erasure_failed")
+      ),
+      done: typeof done.erasure?.completedAt,
+    }).toStrictEqual({
+      pending: { area: "brain_sources", state: "pending" },
+      attempts: 0,
+      failedLogged: false,
+      done: "string",
+    });
   });
 
   it("is finished by the clock once an area failed, however it stopped", async () => {
