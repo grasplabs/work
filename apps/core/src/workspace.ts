@@ -116,6 +116,7 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import { skillsFor } from "./brain-skills.ts";
 import {
   channelText,
   heldWriteRefusal,
@@ -192,7 +193,6 @@ import {
   keepAudience,
 } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
-import { catalog, noteListedSkills } from "./knowledge/catalog.ts";
 import { cited } from "./knowledge/citations.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -2076,7 +2076,7 @@ export class Workspace extends DurableObject<Env> {
   /**
    * What the model reads this turn besides the question: the memory of the
    * person's own chat (the company's files and their USER.md, read now and
-   * recorded as sources), the skills in the chat's Knowledge catalog, and
+   * recorded as sources), the skills it may use, from the Brain, and
    * how to answer on the chat platform it came through, if any.
    */
   async #turnContext(
@@ -2094,35 +2094,13 @@ export class Workspace extends DurableObject<Env> {
       shared ? { type: "channel" } : { type: "own" }
     );
     this.#keepSources(work.chatId, memory.provenance.collectionIds);
-    // The skills listed go into the prompt: a read of their collections,
-    // noted as any Knowledge read is (restricting the chat first were any
-    // sensitive), and carried as the chat's sources like memory.
-    const { collections, skills, listed } = await readAsDelegate(
-      this.env,
-      authority,
-      work,
-      undefined,
-      async (reader) => {
-        const found = await catalog(brainOf(this.env), reader);
-        return {
-          ...found,
-          listed: await noteListedSkills(
-            brainOf(this.env),
-            reader,
-            found.skills
-          ),
-        };
-      }
-    );
-    this.#keepSources(work.chatId, listed.collectionIds);
-    // Recorded as the code's catalog call is: what the agent saw listed.
+    // The skills the chat may use, from the Brain: guidance every member
+    // may read, as the company's instruction file, never a grant
+    // (brain-skills.ts). Recorded as the code's calls are, by count.
+    const skills = await skillsFor(this.env, authority);
     await auditAgentCall(this.env, scope, {
-      method: "knowledge.catalog",
-      detail: {
-        collections: collections.length,
-        skills: skills.length,
-        turn: true,
-      },
+      method: "brain.skills",
+      detail: { skills: skills.length, turn: true },
     });
     const { via } = this.#chat(work.chatId);
     // A chat that came through a chat platform: how to answer there.

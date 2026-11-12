@@ -9,6 +9,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 import blueprintsDigest from "#blueprints-digest";
 
 import { installBuiltinBlueprint } from "./app-blueprints.ts";
+import { installShippedSkills } from "./brain-skills.ts";
 import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
 import { inJurisdiction } from "./durable-objects.ts";
 import { graspSkills, syncGraspSkills } from "./knowledge/grasp-skills.ts";
@@ -20,8 +21,9 @@ import { ensureReleaseContract } from "./workflow-catalog.ts";
 // request: the built-in blueprints
 // (apps/core/blueprints/, embedded by build-blueprints.ts, each installed
 // as a blueprint like any other, app-blueprints.ts), the general catalog
-// contracts (release-contracts.ts), and the Grasp skills
-// (knowledge/grasp-skills.ts). Workers have no deploy hook, so the first
+// contracts (release-contracts.ts), and the Grasp skills, into Knowledge
+// (knowledge/grasp-skills.ts) and the Brain (brain-skills.ts), until the
+// cutover (GRA-1735) leaves the Brain alone. Workers have no deploy hook, so the first
 // request core serves after the router's check starts the install, in the
 // background (`installBuiltinsOnce`), once per isolate.
 //
@@ -86,6 +88,9 @@ export const loadBuiltinRelease = async (): Promise<Release> => {
   const { default: blueprints } = await import("#blueprints");
   return { ...thisRelease, blueprints };
 };
+
+/** A Grasp skill's file, after its folder's name. */
+const skillFile = /\/SKILL\.md$/u;
 
 /** Where the singleton keeps the fingerprint of what it installed. */
 const installedKey = "installed";
@@ -159,6 +164,9 @@ export const fingerprintOf = async (of: ReleaseFingerprint): Promise<string> =>
       blueprints: of.blueprintsDigest,
       contracts: of.contracts,
       skills: of.skills.map(({ path, text }) => ({ path, text })),
+      // The skills go into the Brain too (GRA-1826): a release whose
+      // skills didn't change installs them there once.
+      skillsIn: ["knowledge", "brain"],
     })
   );
 
@@ -179,7 +187,15 @@ export const installBuiltins = async (
   const blueprints = await installBlueprints(env, of.blueprints);
   const contracts = await installContracts(env, of.contracts);
   const skills = await syncGraspSkills(env, of.skills);
-  const complete = blueprints && contracts && skills;
+  // The same skills, by their folder's name (`<name>/SKILL.md`).
+  const brainSkills = await installShippedSkills(
+    env,
+    of.skills.map(({ path, text }) => ({
+      name: path.replace(skillFile, ""),
+      text,
+    }))
+  );
+  const complete = blueprints && contracts && skills && brainSkills;
   if (complete) {
     await storage.put(installedKey, fingerprint);
   }

@@ -16,18 +16,13 @@ import {
 } from "@earendil-works/pi-durable";
 import type { HarnessSettings, JsonObject } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
-import {
-  chatIdSchema,
-  collectionIdSchema,
-  documentIdSchema,
-  workspaceIdSchema,
-} from "@grasp-os/shared/ids";
-import type { CatalogSkill } from "@grasp-os/shared/knowledge";
+import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { AgentApi } from "../src/agent-scope.ts";
 import { instructions, withheldResult } from "../src/agent.ts";
+import type { TurnSkill } from "../src/agent.ts";
 import {
   chatAgent,
   needsRebase,
@@ -60,11 +55,11 @@ const notes: AgentApi = {
   stub: () => env.ASSETS,
 };
 
-/** A skill in the chat's catalog, named `name`. */
-const skill = (name: string): CatalogSkill => ({
-  documentId: documentIdSchema.parse(crypto.randomUUID()),
-  collectionId: collectionIdSchema.parse(crypto.randomUUID()),
+/** A skill the chat may use, named `name`. */
+const skill = (name: string): TurnSkill => ({
+  scope: "company",
   name,
+  version: 1,
   description: `How to do ${name}`,
 });
 
@@ -385,7 +380,7 @@ describe("the chat agent's prompt", () => {
     expect(sections.preamble).toBe(instructions);
     expect(sections.apis).toContain(`- env.notes: ${notes.summary}`);
     expect(sections.skills).toContain(
-      `- expenses (${expenses.documentId}): How to do expenses`
+      "- expenses (company, version 1): How to do expenses"
     );
   });
 
