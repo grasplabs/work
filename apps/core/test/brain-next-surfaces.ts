@@ -727,6 +727,23 @@ const quietModel = async () => {
  * every passage with the passages and the markers in their error, so
  * anything of an error that gets out shows.
  */
+/**
+ * The host's embedders as a probe hands them when embedding is not what it
+ * probes: they run no model, so the store embeds nothing, and embedding's
+ * items, its parked ones as they come back too, settle at once. A probe
+ * whose subject is the queue or its overview ticks with these: ticking
+ * with the failing ones instead (`leakyEmbedders`) would have every tick
+ * walk the whole store onto the queue again and fail every passage, for
+ * no case of its own.
+ */
+const noEmbedders: Embedders = {
+  model: null,
+  embed: async () => {
+    await Promise.resolve();
+    return { kind: "unavailable" };
+  },
+};
+
 const leakyEmbedders = (markers: readonly string[]): Embedders => ({
   model: { name: "probe-model", build: "0" },
   embed: async ({ texts }) => {
@@ -1173,7 +1190,7 @@ export const coreProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, leakyEmbedders(markers));
+        await store().work(quietModel, at, noEmbedders);
       },
       "a marked item worked to parking"
     )),
@@ -2356,7 +2373,7 @@ export const storeProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, leakyEmbedders(markers));
+        await store().work(quietModel, at, noEmbedders);
       },
       "a marked item worked by the store"
     )),
@@ -2364,10 +2381,15 @@ export const storeProbes = {
       sweepTimes().map(
         async (at) =>
           await answer(`a tick as of ${at.toISOString()}`, async () => {
-            await store().work(quietModel, at, leakyEmbedders(markers));
+            await store().work(quietModel, at, noEmbedders);
           })
       )
     )),
+    // One tick with embedders that fail with the passages and the markers
+    // in their error: what embedding's items do with a failure.
+    await answer("a tick whose embedders fail", async () => {
+      await store().work(quietModel, nextDay(), leakyEmbedders(markers));
+    }),
     await answer("a tick at no time", async () => {
       await store().work(
         quietModel,
@@ -2480,14 +2502,17 @@ export const storeProbes = {
     ];
   },
   reembed: async ({ markers }) => [
-    await answer("a re-embed", async () => {
-      await store().reembed();
+    await answer("a re-embed", async () => await store().reembed()),
+    // What a re-embed puts back, worked by embedders that fail with the
+    // passages and the markers in their error.
+    await answer("a tick after a re-embed", async () => {
+      await store().work(quietModel, nextDay(), leakyEmbedders(markers));
     }),
     ...(await workMarked(
       markers,
       async (at) => {
         await store().reembed();
-        await store().work(quietModel, at, leakyEmbedders(markers));
+        await store().work(quietModel, at, noEmbedders);
       },
       "a marked item worked after a re-embed"
     )),
@@ -2496,7 +2521,7 @@ export const storeProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, leakyEmbedders(markers));
+        await store().work(quietModel, at, noEmbedders);
       },
       "a marked item worked to parking"
     )),
