@@ -16,18 +16,10 @@ msgstr "“{action}” bestaat nog niet"
 msgid "“{text}”"
 msgstr "‘{text}’"
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "(company)"
-msgstr "(bedrijf)"
-
 #: src/brain/brain-source-contents.tsx
 msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
 msgstr "(was {before})"
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "(yours)"
-msgstr "(van jou)"
 
 #. placeholder {0}: webhook.dropped
 #: src/apps/app-webhooks.tsx
@@ -2361,10 +2353,6 @@ msgstr "Een beheerder wijzigt die, bij Leden en rollen."
 msgid "An admin connects this for everyone."
 msgstr "Een beheerder koppelt dit voor iedereen."
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "An admin hasn't set up company memory yet."
-msgstr "Een beheerder heeft het bedrijfsgeheugen nog niet ingesteld."
-
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
 msgstr "Een beheerder heeft het lezen van deze gebeurtenissen geweigerd of ingetrokken: hij hoort niets."
@@ -4038,6 +4026,10 @@ msgstr "Bedrijf"
 msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
 msgstr "Company Brain, alleen lezen. Het kan bewijs en open vragen van het Company Brain lezen, uit de collecties die het kreeg en alleen wat de persoon voor wie het werkt ook mag lezen. Het kan nooit naar het Brain schrijven. Elke leesactie wordt vastgelegd"
 
+#: src/routes/_shell.settings.instructions.tsx
+msgid "Company instructions"
+msgstr "Instructies van het bedrijf"
+
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx
 msgid "Completed"
@@ -5435,8 +5427,8 @@ msgid "Everything from ordering from a supplier until their invoice is paid."
 msgstr "Alles van een bestelling bij een leverancier tot zijn factuur is betaald."
 
 #: src/routes/_shell.knowledge.index.tsx
-msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
-msgstr "Alles wat Grasp en zijn agents mogen lezen, in collecties: die van jezelf, van je teams en van je organisatie. Agents lezen een document wanneer ze het nodig hebben en houden de geheugenbestanden altijd voor ogen."
+msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it."
+msgstr "Alles wat Grasp en zijn agents mogen lezen, in collecties: die van jezelf, van je teams en van je organisatie. Agents lezen een document wanneer ze het nodig hebben."
 
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
@@ -6612,6 +6604,10 @@ msgstr "Hoe ze het zouden merken: {notice}."
 msgid "How they would notice: not said yet."
 msgstr "Hoe ze het zouden merken: nog niet gezegd."
 
+#: src/apps/app-settings.tsx
+msgid "How this App is built and what to keep in mind when changing it."
+msgstr "Hoe deze App gebouwd is en waar je op let als je hem verandert."
+
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "Hoe was het om met {who} te praten?"
@@ -6890,8 +6886,15 @@ msgstr "Invoer, als JSON"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
+#: src/apps/app-settings.tsx
+#: src/routes/_shell.settings.instructions.tsx
+#: src/routes/_shell.settings.tsx
 msgid "Instructions"
 msgstr "Instructies"
+
+#: src/apps/app-settings.tsx
+msgid "Instructions for this App"
+msgstr "Instructies voor deze App"
 
 #: src/apps/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -7548,6 +7551,10 @@ msgstr "Laatste run"
 msgid "Last, the numbers and the result."
 msgstr "Tot slot de cijfers en het resultaat."
 
+#: src/routes/_shell.settings.instructions.tsx
+msgid "Lasting facts"
+msgstr "Vaste feiten"
+
 #: src/dashboard/activity.tsx
 msgid "Lately the trail only records its own searches: older events are in the full audit trail."
 msgstr "De audittrail legt de laatste tijd alleen zijn eigen zoekopdrachten vast: oudere gebeurtenissen vind je in de volledige audittrail."
@@ -8042,7 +8049,6 @@ msgstr "leden van het team in {field}"
 #: src/brain/memory-page.tsx
 #: src/labels.ts
 #: src/routes/_shell.brain.tsx
-#: src/routes/_shell.knowledge.index.tsx
 msgid "Memory"
 msgstr "Geheugen"
 
@@ -8661,10 +8667,6 @@ msgstr "Staat niet meer waar het stond"
 #: src/brain/brain-transcript.tsx
 msgid "No matches"
 msgstr "Geen treffers"
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "No memory files are written yet."
-msgstr "Er zijn nog geen geheugenbestanden geschreven."
 
 #: src/onboarding/setup-steps.tsx
 msgid "No Microsoft or Google? A staff list works too."
@@ -9628,6 +9630,10 @@ msgstr "Alleen jij"
 msgid "Only you and your agents read it, until you share it."
 msgstr "Alleen jij en je agents lezen het, tot je het deelt."
 
+#: src/routes/_shell.settings.instructions.tsx
+msgid "Only you and your own chats read it, never a chat others share."
+msgstr "Alleen jij en je eigen chats lezen ze, nooit een chat die je met anderen deelt."
+
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
@@ -10479,6 +10485,10 @@ msgstr "Terugzetten"
 #: src/knowledge/new-document.tsx
 msgid "Put it in folders with a slash, as in handbook/leave."
 msgstr "Zet het in mappen met een schuine streep, zoals in handboek/verlof."
+
+#: src/settings/instruction-file.tsx
+msgid "Put my changes aside"
+msgstr "Mijn wijzigingen opzijzetten"
 
 #: src/dashboard/widget-board.tsx
 msgid "Put one back"
@@ -11703,6 +11713,7 @@ msgstr "Sam ziet, net als iedereen die de App gebruikt, elk record in {table}."
 #: src/brain/goals-editor.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
+#: src/settings/instruction-file.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Opslaan"
@@ -12612,6 +12623,10 @@ msgstr "Iemand die er niet meer is"
 #: src/agents/agent-wakes.tsx
 msgid "Someone no longer in the company"
 msgstr "Iemand die niet meer in het bedrijf zit"
+
+#: src/settings/instruction-file.tsx
+msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."
+msgstr "Iemand heeft dit bestand opgeslagen sinds je begon. Zet je wijzigingen opzij om die versie te zien en breng de jouwe daarna opnieuw aan."
 
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
@@ -13609,6 +13624,10 @@ msgstr "Het Brain van het bedrijf: {percent}% bekend. Donkere stippen zijn wat i
 #: src/agents/agent-page.tsx
 msgid "The company's first agent"
 msgstr "De eerste agent van het bedrijf"
+
+#: src/routes/_shell.settings.instructions.tsx
+msgid "The company’s rules for every agent."
+msgstr "De regels van het bedrijf voor elke agent."
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -15465,6 +15484,10 @@ msgstr "Wat {name} moet weten en hoe hij moet werken, boven op de eigen regels v
 msgid "What <0/> changed"
 msgstr "Wat <0/> veranderde"
 
+#: src/apps/app-settings.tsx
+msgid "What a builder’s chat about this App starts with. Only its builders read and change it."
+msgstr "Waar de chat van een bouwer over deze App mee begint. Alleen de bouwers lezen en veranderen ze."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "What appears on every invoice."
 msgstr "Wat op elke factuur staat."
@@ -15515,9 +15538,13 @@ msgstr "Wat elke rol in Grasp mag. Een admin geeft elk lid de zijne."
 msgid "What each workflow's model calls cost this month, most first, and how often it ran."
 msgstr "Wat de modelaanroepen van elke workflow deze maand kostten, de hoogste eerst, en hoe vaak hij draaide."
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "What every agent has in its context, all the time."
-msgstr "Wat elke agent altijd in zijn context heeft."
+#: src/routes/_shell.settings.instructions.tsx
+msgid "What every agent should know about the company."
+msgstr "Wat elke agent over het bedrijf moet weten."
+
+#: src/routes/_shell.settings.instructions.tsx
+msgid "What every chat in the company starts with. Only admins change them."
+msgstr "Waar elke chat in het bedrijf mee begint. Alleen beheerders veranderen ze."
 
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"
@@ -15844,6 +15871,10 @@ msgstr "Wat jij en je agents onthouden, en wat anderen met je delen, staat hier.
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "Wat je hebt gekozen"
+
+#: src/routes/_shell.settings.instructions.tsx
+msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
+msgstr "Waar jouw chats met Grasp mee beginnen, en alleen die van jou: hoe je graag werkt, waar je verantwoordelijk voor bent."
 
 #: src/apps/app-workspace.tsx
 msgid "What your team sees"
@@ -16688,6 +16719,10 @@ msgstr "Het btw-nummer van je bedrijf, zoals het op facturen staat."
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
 msgstr "Het openbare HTTPS-adres van je endpoint, bijvoorbeeld https://models.example.com/v1."
+
+#: src/routes/_shell.settings.instructions.tsx
+msgid "Your instructions"
+msgstr "Jouw instructies"
 
 #: src/routes/guest.tsx
 msgid "Your message"

@@ -409,10 +409,8 @@ export const collectionsAllowed = async (
     condition:
       and(
         inList(collections.id, granted),
-        // A personal collection is never read under a grant: an App is
-        // shared, and a grant isn't the person's own. What an agent reads
-        // of its person's own collection (their USER.md) it reads as
-        // memory, through `readableForPerson`.
+        // A collection only its owner reads is never read under a grant:
+        // an App is shared, and a grant isn't the person's own.
         ne(collections.access, "me"),
         // Nor one for admins: what the onboarding holds stays with people.
         ne(collections.access, "admins"),

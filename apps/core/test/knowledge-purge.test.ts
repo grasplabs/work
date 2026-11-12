@@ -8,14 +8,11 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
-import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
   apiWith,
   holding,
   lettersOf,
-  newAgent,
   purged,
   rebuildFailingOnce,
   rememberAs,
@@ -24,7 +21,6 @@ import {
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import { storedVersionTexts as versionTexts } from "./knowledge.ts";
-import { withLoweredLimit } from "./memory-limits.ts";
 import {
   auditedDuring,
   openRpc,
@@ -66,218 +62,6 @@ const statementsOf = async (person: Person): Promise<string[]> => {
 /** Whether a statement of the purge's batch writes or deletes records. */
 const writesRecords = (query: string): boolean =>
   /^(?:update|delete from) "brain_memories"/iu.test(query);
-
-describe("a personal purge", setUpTime, () => {
-  it("removes the person's USER.md and every version, from everywhere", async () => {
-    const admin = await personOf("admin");
-    const leaver = await personOf("user");
-    const stays = await personOf("user");
-    const agent = newAgent();
-    const secret = `vanderzwaluw${unique()}`;
-    const work = await newChat(agent);
-    const asLeaver = actingFor(agent, leaver.userId);
-    const asStays = actingFor(agent, stays.userId);
-    const own = { type: "own" } as const;
-    await saveUserMemory(env, asLeaver, work, own, {
-      text: `# About me\nI am ${secret}.`,
-      ifVersion: 0,
-    });
-    await saveUserMemory(env, asLeaver, work, own, {
-      text: `# About me\nI am ${secret}, on leave.`,
-      ifVersion: 1,
-      message: `Learned ${secret} is on leave`,
-    });
-    await saveUserMemory(env, asStays, work, own, {
-      text: `# About me\nI work with ${secret}.`,
-      ifVersion: 0,
-    });
-    const memory = await admin.api.memory.collections();
-    await saveOver(admin, memory.memory ?? "", "MEMORY.md", "# Company");
-    // What each asked the Brain to remember: the leaver's goes, with its
-    // receipt; the one who stays keeps theirs.
-    const remembered = await leaver.api.knowledge.remember(
-      { kind: "fact", text: `I am ${secret}.` },
-      { idempotencyKey: `purge-${unique()}-${unique()}` }
-    );
-    await stays.api.knowledge.remember(
-      { kind: "fact", text: `I work with ${secret}.` },
-      { idempotencyKey: `purge-${unique()}-${unique()}` }
-    );
-    // Cached, keyed by the USER.md's version.
-    const before = await forContext(env, asLeaver, work, own);
-    const { personal } = await leaver.api.memory.collections();
-    const heldBefore = await holding(secret);
-
-    let outcomeOf: Awaited<ReturnType<typeof purged>> | undefined;
-    const input: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    };
-    const events = await auditedDuring(async () => {
-      outcomeOf = await purged(admin, input);
-    });
-
-    const after = await forContext(env, asLeaver, work, own);
-    const staysAfter = await forContext(env, asStays, work, own);
-    const { plan, result } = outcomeOf ?? {};
-    const leaversMemories = await leaver.api.knowledge.memoriesList();
-    const staysMemories = await stays.api.knowledge.memoriesList();
-    expect({
-      plan: {
-        ...plan,
-        token: typeof plan?.token,
-        expiresAt: typeof plan?.expiresAt,
-      },
-      result: { ...result, purgeId: typeof result?.purgeId },
-      before: before.text.includes(secret),
-      after: after.text.includes(secret),
-      afterFiles: after.files.map(({ name }) => name),
-      stays: staysAfter.text.includes(secret),
-      leaversCollection: await outcome(
-        leaver.api.knowledge.listDocuments(personal)
-      ),
-      leaversMemories: leaversMemories.records,
-      leaversReceipt: await outcome(
-        leaver.api.knowledge.receiptsGet({ receiptId: remembered.id })
-      ),
-      staysMemories: staysMemories.records.map(({ statement }) => statement),
-    }).toStrictEqual({
-      plan: {
-        documents: 1,
-        versions: 2,
-        occurrences: 0,
-        inLongerWords: 0,
-        memories: 1,
-        originals: 0,
-        token: "string",
-        expiresAt: "string",
-      },
-      result: {
-        purgeId: "string",
-        documents: 1,
-        versions: 2,
-      },
-      before: true,
-      after: false,
-      afterFiles: ["MEMORY.md"],
-      stays: true,
-      leaversCollection: "knowledge.not_found",
-      leaversMemories: [],
-      leaversReceipt: "brain.not_found",
-      staysMemories: [`I work with ${secret}.`],
-    });
-    // The one who stays still has the name in their own USER.md; the
-    // leaver's text is gone from every table, the index's pages too.
-    expect(heldBefore).toStrictEqual([
-      "BRAIN_OBJECTS",
-      "brain_memories.statement",
-      "brain_memory_words.statement",
-      "brain_memory_words_content.c0",
-      "brain_memory_words_data.block",
-      "search_trigrams.c3",
-      "search_words.text",
-      "search_words_content.c3",
-      "search_words_data.block",
-      "sections.text",
-      "versions.message",
-    ]);
-    const { results: stored } = await env.KNOWLEDGE.prepare(
-      "SELECT document_id AS documentId, payload_key AS key, coalesce(message, '') AS message FROM versions"
-    ).all<{ documentId: string; key: string; message: string }>();
-    const left = await Promise.all(
-      stored.map(async ({ documentId, key, message }) => {
-        const object = await env.BRAIN_OBJECTS.get(key);
-        const text = (await object?.text()) ?? "";
-        return text.includes(secret) || message.includes(secret)
-          ? [documentId]
-          : [];
-      })
-    );
-    expect(left.flat()).toStrictEqual(
-      staysAfter.files
-        .filter(({ name }) => name === "USER.md")
-        .map(({ documentId }) => documentId)
-    );
-    expect({
-      events: events.map(({ action, actor, target, detail }) => ({
-        action,
-        actor,
-        target,
-        detail,
-      })),
-      carriesText: JSON.stringify(events).includes(secret),
-    }).toStrictEqual({
-      events: [
-        {
-          action: "knowledge.purge.prepared",
-          actor: { type: "person", userId: admin.userId },
-          target: { type: "collection", id: personal },
-          detail: {
-            kind: "personal",
-            reason: "offboarding",
-            userId: leaver.userId,
-            documents: 1,
-            versions: 2,
-            memories: 1,
-            receipts: 1,
-          },
-        },
-        {
-          action: "knowledge.purged",
-          actor: { type: "person", userId: admin.userId },
-          target: { type: "collection", id: personal },
-          detail: {
-            purgeId: result?.purgeId,
-            kind: "personal",
-            reason: "offboarding",
-            userId: leaver.userId,
-            documents: 1,
-            versions: 2,
-            memories: 1,
-            receipts: 1,
-          },
-        },
-      ],
-      carriesText: false,
-    });
-  });
-
-  it("leaves nothing of a person whose text was only theirs, and can run again", async () => {
-    const agent = newAgent();
-    const admin = await personOf("admin");
-    const leaver = await personOf("user");
-    const secret = `oudejans${unique()}`;
-    const work = await newChat(agent);
-    await saveUserMemory(
-      env,
-      actingFor(agent, leaver.userId),
-      work,
-      { type: "own" },
-      { text: `# ${secret}\nCall me ${secret}.`, ifVersion: 0 }
-    );
-    const input: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "erasure_request",
-    };
-    const first = await purged(admin, input);
-    const again = await purged(admin, input);
-    expect({
-      first: first.result.documents,
-      again: { ...again.result, purgeId: typeof again.result.purgeId },
-      held: await holding(secret),
-    }).toStrictEqual({
-      first: 1,
-      again: {
-        purgeId: "string",
-        documents: 0,
-        versions: 0,
-      },
-      held: [],
-    });
-  });
-});
 
 describe("a purge of content's memory records", setUpTime, () => {
   it("redacts or deletes every record holding a term, whoever's, audited without the text", async () => {
@@ -778,46 +562,6 @@ describe("a purge whose index cleanup fails", setUpTime, () => {
       heldAfterAgain: [],
     });
   });
-
-  it("says the data is gone and a run again cleans up, for a person", async () => {
-    const agent = newAgent();
-    const admin = await personOf("admin");
-    const leaver = await personOf("user");
-    const secret = `brouwer${unique()}`;
-    await saveUserMemory(
-      env,
-      actingFor(agent, leaver.userId),
-      await newChat(agent),
-      { type: "own" },
-      { text: `# About me\nCall me ${secret}.`, ifVersion: 0 }
-    );
-    const input: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    };
-    const failing = await rebuildFailingOnce(admin);
-    const { token } = await admin.api.knowledge.preparePurge(input);
-    const first = await outcome(failing.knowledge.purge(input, token));
-    const heldAfterFirst = await holding(secret);
-    // The collection is gone already, but the index is cleaned up.
-    const again = await purged(admin, input);
-    const status = await admin.api.knowledge.purgeStatus(again.result.purgeId);
-    expect({
-      first,
-      heldAfterFirst,
-      // The same purge, gone on with (GRA-1122): what it removed in all.
-      again: again.result.documents,
-      status: status.state,
-      heldAfterAgain: await holding(secret),
-    }).toStrictEqual({
-      first: "knowledge.purge_index_pending",
-      heldAfterFirst: ["search_words_data.block"],
-      again: 1,
-      status: "complete",
-      heldAfterAgain: [],
-    });
-  });
 });
 
 describe("purging", setUpTime, () => {
@@ -840,7 +584,6 @@ describe("purging", setUpTime, () => {
   });
 
   it("is only for the client's admins, and never without the token prepared for it", async () => {
-    const agent = newAgent();
     const admin = await personOf("admin");
     const otherAdmin = await personOf("admin");
     const builder = await personOf("builder");
@@ -848,13 +591,6 @@ describe("purging", setUpTime, () => {
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const staffRpc = await openRpc(staffSession);
     const staff = staffRpc.core.authenticate();
-    await saveUserMemory(
-      env,
-      actingFor(agent, user.userId),
-      await newChat(agent),
-      { type: "own" },
-      { text: "# About me", ifVersion: 0 }
-    );
     const input: PurgeInput = {
       type: "personal",
       userId: user.userId,
@@ -976,10 +712,10 @@ describe("purging", setUpTime, () => {
       ],
       expired: "knowledge.purge_expired",
     });
-    // None of those changed anything: the token still purges it all.
+    // None of those changed anything: the token still runs it.
     await expect(
       admin.api.knowledge.purge(input, token)
-    ).resolves.toMatchObject({ documents: 1, versions: 1 });
+    ).resolves.toMatchObject({ documents: 0, versions: 0 });
   });
 
   it("refuses a purge that would leave a document that can't be read, and changes nothing", async () => {
@@ -1019,98 +755,7 @@ describe("purging", setUpTime, () => {
     });
   });
 
-  it("refuses to run a purge that a new version made impossible, before changing anything", async () => {
-    const admin = await personOf("admin");
-    const agent = actingFor(newAgent(), admin.userId);
-    const work = await newChat(agent);
-    const own = { type: "own" } as const;
-    const handbook = await admin.api.knowledge.createCollection({
-      name: "Handbook",
-      access: "everyone",
-    });
-    const kept = await saveOver(
-      admin,
-      handbook.id,
-      "kept.md",
-      "# Kept\nJo stays until the purge is refused."
-    );
-    const first = await saveUserMemory(env, agent, work, own, {
-      text: "# About me\nCall me Jo.",
-      ifVersion: 0,
-    });
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [kept.id, first.id],
-      terms: ["Jo"],
-      reason: "erasure_request",
-    };
-    const { token } = await admin.api.knowledge.preparePurge(input);
-    // Within USER.md's 2,000 tokens, but not once each "Jo" is "(removed)".
-    const long = `# About me\n${"Jo ".repeat(1600)}`;
-    await saveUserMemory(env, agent, work, own, { text: long, ifVersion: 1 });
-    let refused = "";
-    const events = await auditedDuring(async () => {
-      refused = await outcome(admin.api.knowledge.purge(input, token));
-    });
-    expect({
-      refused,
-      events: events.map(({ action }) => action),
-      kept: await versionTexts(kept.id),
-      user: await versionTexts(first.id),
-    }).toStrictEqual({
-      refused: "knowledge.invalid",
-      events: [],
-      kept: ["# Kept\nJo stays until the purge is refused."],
-      user: ["# About me\nCall me Jo.", long],
-    });
-  });
-
-  it("refuses to run a purge of a memory file now over its limit, even when only earlier versions hold a term", async () => {
-    const admin = await personOf("admin");
-    const agent = actingFor(newAgent(), admin.userId);
-    const work = await newChat(agent);
-    const own = { type: "own" } as const;
-    const name = `Mulder${unique()}`;
-    const first = await saveUserMemory(env, agent, work, own, {
-      text: `# About me\nCall me ${name}.`,
-      ifVersion: 0,
-    });
-    const current = `# About me\n${"Something else. ".repeat(20)}`;
-    await saveUserMemory(env, agent, work, own, {
-      text: current,
-      ifVersion: 1,
-    });
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [first.id],
-      terms: [name],
-      reason: "erasure_request",
-    };
-    const { token } = await admin.api.knowledge.preparePurge(input);
-    // The limit lowered since: the current USER.md, which holds no term,
-    // is over it, and a purge would save it again.
-    let refused = "";
-    const events = await withLoweredLimit(
-      "USER.md",
-      10,
-      async () =>
-        await auditedDuring(async () => {
-          refused = await outcome(admin.api.knowledge.purge(input, token));
-        })
-    );
-    expect({
-      refused,
-      events: events.map(({ action }) => action),
-      user: await versionTexts(first.id),
-    }).toStrictEqual({
-      refused: "knowledge.invalid",
-      events: [],
-      user: [`# About me\nCall me ${name}.`, current],
-    });
-  });
-
-  it("refuses documents that don't exist, naming them, when prepared and when run", async () => {
-    const agent = newAgent();
+  it("refuses documents that don't exist, naming them", async () => {
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
@@ -1131,47 +776,14 @@ describe("purging", setUpTime, () => {
         reason: "other",
       })
     );
-    // A document that goes after the purge was prepared: here, with its
-    // owner's Personal collection (the admin's own: another person's is
-    // theirs alone).
-    const user = await saveUserMemory(
-      env,
-      actingFor(agent, admin.userId),
-      await newChat(agent),
-      { type: "own" },
-      { text: "# About me\nCall me Roos.", ifVersion: 0 }
-    );
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [kept.id, user.id],
-      terms: ["Roos"],
-      reason: "other",
-    };
-    const { token } = await admin.api.knowledge.preparePurge(input);
-    await purged(admin, {
-      type: "personal",
-      userId: admin.userId,
-      reason: "offboarding",
-    });
-    let run: unknown;
-    const events = await auditedDuring(async () => {
-      run = await refusal(admin.api.knowledge.purge(input, token));
-    });
     expect({
       prepared,
-      run,
-      events: events.map(({ action }) => action),
       kept: await versionTexts(kept.id),
     }).toMatchObject({
       prepared: {
         code: "knowledge.not_found",
         details: { documentIds: [missing] },
       },
-      run: {
-        code: "knowledge.not_found",
-        details: { documentIds: [user.id] },
-      },
-      events: [],
       kept: ["# Kept\nRoos stays."],
     });
   });

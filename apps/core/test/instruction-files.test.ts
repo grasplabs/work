@@ -8,22 +8,27 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { recallAs } from "../src/brain-next.ts";
+import { addInstructionFile, recallAs } from "../src/brain-next.ts";
 import type { InstructionFile } from "../src/brain-next.ts";
 import {
+  instructionFileToEdit,
   instructionFilesFor,
   saveInstructionFile,
 } from "../src/instruction-files.ts";
 import type { InstructionContext } from "../src/instruction-files.ts";
+import { outlook, requestGranted } from "./apps.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { keptAgent } from "./instruction-saves.ts";
 import {
+  auditedDuring,
   outcome,
   signedInApi,
   signedInWithRole,
   unique,
   whoami,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Instruction files (GRA-1771), from the threat model on the issue: a
 // context gets a file its rule leaves out, above all a person's file in a
@@ -68,7 +73,20 @@ const inWorkflow = (agentId: string, personId: string): Authority =>
     mode: "workflow",
   });
 
-/** Saves `text` to `file` as `by`, with a change of its own. */
+/** The version of `file` now as `by` would read it to edit; 0 for none or unreadable. */
+const versionNow = async (
+  by: Identity | Authority,
+  file: InstructionFile
+): Promise<number> => {
+  try {
+    const now = await instructionFileToEdit(env, by, file);
+    return now?.version ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
+/** Saves `text` to `file` as `by`, from its version now, with a change of its own. */
 const save = async (
   by: Identity,
   file: InstructionFile,
@@ -78,6 +96,7 @@ const save = async (
     file,
     change: crypto.randomUUID(),
     text,
+    after: await versionNow(by, file),
   });
   return version;
 };
@@ -87,10 +106,17 @@ const saveOutcome = async (
   by: Identity | Authority,
   file: InstructionFile,
   text = `x ${unique()}`
-): Promise<string> =>
-  await outcome(
-    saveInstructionFile(env, by, { file, change: crypto.randomUUID(), text })
+): Promise<string> => {
+  const after = await versionNow(by, file);
+  return await outcome(
+    saveInstructionFile(env, by, {
+      file,
+      change: crypto.randomUUID(),
+      text,
+      after,
+    })
   );
+};
 
 /** The texts `authority` gets in `context`, in order. */
 const textsFor = async (
@@ -115,6 +141,19 @@ const markersFor = async (
   );
 };
 
+/** A personal connection of `ownerId`'s: their mailbox, which nobody else reads. */
+const mailboxOf = async (ownerId: string): Promise<string> => {
+  const id = `connection-mailbox-${unique()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?)"
+    )
+    .bind(id, ownerId, now, now)
+    .run();
+  return id;
+};
+
 /** The Brain's store, read directly, as only these tests do. */
 const store = () => env.BRAIN_STORE.getByName("brain");
 
@@ -126,7 +165,10 @@ describe("instruction files", setUpTime, () => {
       builderWithApi(),
     ]);
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
-    const [agentId, otherAgentId] = [newAgentId(), newAgentId()];
+    const [agentId, otherAgentId] = await Promise.all([
+      keptAgent(),
+      keptAgent(),
+    ]);
     const u = unique();
     const markers = {
       companyInstructions: `company instructions ${u}`,
@@ -299,11 +341,14 @@ describe("instruction files", setUpTime, () => {
       file,
       change,
       text: "first",
+      after: 0,
     });
+    // Its answer lost, the same save again, from the same version.
     const retried = await saveInstructionFile(env, person, {
       file,
       change,
       text: "first",
+      after: 0,
     });
     const second = await save(person, file, "second");
 
@@ -330,9 +375,11 @@ describe("instruction files", setUpTime, () => {
     await expect(saveOutcome(person, file, `${atMost}${astral}`)).resolves.toBe(
       "instructions.too_large"
     );
-    await expect(saveOutcome(person, file, " \n ")).resolves.toMatch(
-      /^Error: Refused/u
-    );
+    // Counted as the prompt holds it too, its markup escaped: a few
+    // thousand ampersands are several times as long there.
+    await expect(
+      saveOutcome(person, file, "&".repeat(instructionsMaxLength / 2))
+    ).resolves.toBe("instructions.too_large");
     await expect(
       textsFor(agentFor(newAgentId(), person.userId), { conversation: "own" })
     ).resolves.toContain(atMost);
@@ -348,7 +395,10 @@ describe("instruction files", setUpTime, () => {
     ]);
     const { id: appId } = await builder.api.apps.create({ name: "Desk" });
     const company: InstructionFile = { scope: "company", name: "instructions" };
-    const agent: InstructionFile = { scope: "agent", agentId: newAgentId() };
+    const agent: InstructionFile = {
+      scope: "agent",
+      agentId: await keptAgent(),
+    };
     const app: InstructionFile = { scope: "app", appId };
     const own: InstructionFile = { scope: "person", personId: user.userId };
 
@@ -390,7 +440,7 @@ describe("instruction files", setUpTime, () => {
 
   it("never lets an agent write a file, whoever it acts for, its own person's included", async () => {
     const admin = await member("admin");
-    const agentId = newAgentId();
+    const agentId = await keptAgent();
     const files: InstructionFile[] = [
       { scope: "company", name: "instructions" },
       { scope: "company", name: "facts" },
@@ -462,7 +512,7 @@ describe("instruction files", setUpTime, () => {
     ).resolves.toBe("permission.person_inactive");
   });
 
-  it("gives an App's file only to a person who builds the App, and holds it to the App in the Brain too", async () => {
+  it("gives an App's file only to a person who builds the App, leaves it out for anyone else, and holds it to the App in the Brain too", async () => {
     const [builder, outsider] = await Promise.all([
       builderWithApi(),
       builderWithApi(),
@@ -475,11 +525,11 @@ describe("instruction files", setUpTime, () => {
     await expect(
       textsFor(agentFor(newAgentId(), builder.userId), onApp)
     ).resolves.toContain(marker);
+    // Someone who doesn't build it gets what a chat without an App gets,
+    // as with an App that has no file: no refusal that says it exists.
     await expect(
-      outcome(
-        instructionFilesFor(env, agentFor(newAgentId(), outsider.userId), onApp)
-      )
-    ).resolves.toBe("app.not_found");
+      textsFor(agentFor(newAgentId(), outsider.userId), onApp)
+    ).resolves.not.toContain(marker);
     // A reader of the whole company, who passed no builder check, gets
     // nothing of it from the store itself.
     await expect(
@@ -490,6 +540,80 @@ describe("instruction files", setUpTime, () => {
     ).resolves.toStrictEqual([]);
   });
 
+  it("leaves an App's file out for a builder it was shared with once the App holds data they can't read", async () => {
+    const [owner, shared] = await Promise.all([
+      builderWithApi(),
+      builderWithApi(),
+    ]);
+    const { id: appId } = await owner.api.apps.create({ name: "Desk" });
+    await owner.api.apps.members.add(appId, {
+      type: "person",
+      id: shared.userId,
+      role: "builder",
+    });
+    const marker = `app ${unique()}`;
+    await save(owner.identity, { scope: "app", appId }, marker);
+    const onApp = { conversation: "own", appId } as const;
+    const before = await textsFor(agentFor(newAgentId(), shared.userId), onApp);
+
+    // The App is granted the owner's own mailbox, which the builder it is
+    // shared with can't read: they no longer open the App, nor its file.
+    await requestGranted(idp, owner, {
+      ...outlook(appId, "MAIL"),
+      object: {
+        type: "connection",
+        connectionId: await mailboxOf(owner.userId),
+      },
+    });
+    const after = await textsFor(agentFor(newAgentId(), shared.userId), onApp);
+    const ownerTexts = await textsFor(
+      agentFor(newAgentId(), owner.userId),
+      onApp
+    );
+
+    expect({
+      before: before.includes(marker),
+      after: after.includes(marker),
+      opens: await outcome(shared.api.apps.get(appId)),
+      owner: ownerTexts.includes(marker),
+    }).toStrictEqual({
+      before: true,
+      after: false,
+      opens: "app.unreadable",
+      owner: true,
+    });
+  });
+
+  it("leaves an archived App's file out, as its builders can't change it, and gives it again once it is restored", async () => {
+    const builder = await builderWithApi();
+    const { id: appId } = await builder.api.apps.create({ name: "Desk" });
+    const marker = `app ${unique()}`;
+    await save(builder.identity, { scope: "app", appId }, marker);
+    const onApp = { conversation: "own", appId } as const;
+    const loaded = async () => {
+      const texts = await textsFor(
+        agentFor(newAgentId(), builder.userId),
+        onApp
+      );
+      return texts.includes(marker);
+    };
+
+    const before = await loaded();
+    await builder.api.apps.archive(appId);
+    const archived = await loaded();
+    const edit = await outcome(
+      builder.api.instructions.read({ scope: "app", appId })
+    );
+    await builder.api.apps.restore(appId);
+
+    expect({ before, archived, edit, restored: await loaded() }).toStrictEqual({
+      before: true,
+      archived: false,
+      edit: "app.archived",
+      restored: true,
+    });
+  });
+
   it("never lets recall return an instruction file, shared or a person's", async () => {
     const admin = await member("admin");
     const word = `w${unique()}`;
@@ -497,7 +621,7 @@ describe("instruction files", setUpTime, () => {
     await save(admin, { scope: "company", name: "facts" }, `${word} company`);
     await save(
       admin,
-      { scope: "agent", agentId: newAgentId() },
+      { scope: "agent", agentId: await keptAgent() },
       `${word} agent`
     );
 
@@ -522,9 +646,20 @@ describe("instruction files", setUpTime, () => {
       `:person:${person.userId}`,
       `../person/${person.userId}`,
     ];
+    // No agent is kept under such an ID, so no admin saves one's file;
+    // and were one written to the Brain, its key is its own.
     for (const agentId of shaped) {
       // oxlint-disable-next-line no-await-in-loop -- a few, in order
-      await save(admin, { scope: "agent", agentId }, `agent ${agentId}`);
+      await expect(
+        saveOutcome(admin, { scope: "agent", agentId })
+      ).resolves.toBe("agent.unknown");
+      // oxlint-disable-next-line no-await-in-loop -- a few, in order
+      await addInstructionFile(env, {
+        file: { scope: "agent", agentId },
+        change: crypto.randomUUID(),
+        text: `agent ${agentId}`,
+        after: 0,
+      });
     }
 
     for (const agentId of shaped) {
@@ -571,5 +706,215 @@ describe("instruction files", setUpTime, () => {
     expect(outcomes).toStrictEqual(
       malformed.map(() => "permission.context_invalid")
     );
+  });
+});
+
+type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
+
+/** The version of `file` `api` reads to edit now; 0 for none or refused. */
+const versionAs = async (api: Api, file: InstructionFile): Promise<number> => {
+  try {
+    const now = await api.instructions.read(file);
+    return now?.version ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
+/** How `api`'s save of `text` to `file`, from its version now, ends: "ok" or the refusal's code. */
+const saved = async (api: Api, file: InstructionFile, text: string) => {
+  const after = await versionAs(api, file);
+  return await outcome(
+    api.instructions.save({ file, change: crypto.randomUUID(), text, after })
+  );
+};
+
+/** How `api`'s read of `file` ends: "ok" or the refusal's code. */
+const read = async (api: Api, file: InstructionFile) =>
+  await outcome(api.instructions.read(file));
+
+describe("instruction files, edited from a page", setUpTime, () => {
+  it("lets a person read and save their own file, an admin the company's and an agent's, a builder their App's, and nobody anything else", async () => {
+    const [admin, person, builder] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "builder"),
+    ]);
+    const { id: appId } = await builder.api.apps.create({ name: "Desk" });
+    const u = unique();
+    const own = { scope: "person", personId: person.userId } as const;
+    const company = { scope: "company", name: "instructions" } as const;
+    const agent = { scope: "agent", agentId: await keptAgent() } as const;
+    const app = { scope: "app", appId } as const;
+    const saves = {
+      own: await saved(person.api, own, `Mine ${u}`),
+      company: await saved(admin.api, company, `Company ${u}`),
+      agent: await saved(admin.api, agent, `Agent ${u}`),
+      app: await saved(builder.api, app, `App ${u}`),
+      companyByMember: await saved(person.api, company, "Planted"),
+      agentByMember: await saved(person.api, agent, "Planted"),
+      appByMember: await saved(person.api, app, "Planted"),
+      someoneElsesByAdmin: await saved(admin.api, own, "Planted"),
+      tooLarge: await saved(
+        person.api,
+        own,
+        "x".repeat(instructionsMaxLength + 1)
+      ),
+    };
+    const companyNow = await admin.api.instructions.read(company);
+    const reads = {
+      own: await person.api.instructions.read(own),
+      // Other tests save the company's too: its text, whatever the version.
+      company: companyNow?.text,
+      app: await builder.api.instructions.read(app),
+      neverWritten: await builder.api.instructions.read({
+        scope: "person",
+        personId: builder.userId,
+      }),
+      someoneElsesByAdmin: await read(admin.api, own),
+      companyByMember: await read(person.api, company),
+      appByMember: await read(person.api, app),
+    };
+
+    expect({ saves, reads }).toStrictEqual({
+      saves: {
+        own: "ok",
+        company: "ok",
+        agent: "ok",
+        app: "ok",
+        companyByMember: "role.forbidden",
+        agentByMember: "role.forbidden",
+        appByMember: "app.not_found",
+        someoneElsesByAdmin: "role.forbidden",
+        tooLarge: "instructions.too_large",
+      },
+      reads: {
+        own: { version: 1, text: `Mine ${u}` },
+        company: `Company ${u}`,
+        app: { version: 1, text: `App ${u}` },
+        neverWritten: null,
+        someoneElsesByAdmin: "role.forbidden",
+        companyByMember: "role.forbidden",
+        appByMember: "app.not_found",
+      },
+    });
+  });
+
+  it("records each save, by whom and of which file and version, and never its text", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const text = `Secret rule ${unique()}`;
+    const file = { scope: "company", name: "facts" } as const;
+
+    const events = await auditedDuring(async () => {
+      await admin.api.instructions.save({
+        file,
+        change: crypto.randomUUID(),
+        text,
+        after: await versionAs(admin.api, file),
+      });
+    });
+    const recorded = events.filter(
+      ({ action }) => action === "instructions.saved"
+    );
+
+    expect({
+      saved: recorded.map(({ actor, target, detail }) => ({
+        actor,
+        target,
+        scope: detail.scope,
+        numbered: typeof detail.version,
+      })),
+      carriesText: JSON.stringify(events).includes(text),
+    }).toStrictEqual({
+      saved: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          target: { type: "instructions", id: "company:facts" },
+          scope: "company",
+          numbered: "number",
+        },
+      ],
+      carriesText: false,
+    });
+  });
+
+  it("refuses a save made from a version someone has saved over since, and keeps theirs", async () => {
+    const [ada, ben] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+    ]);
+    const file = { scope: "agent", agentId: await keptAgent() } as const;
+    const first = await ada.api.instructions.save({
+      file,
+      change: crypto.randomUUID(),
+      text: "First.",
+      after: 0,
+    });
+    // Both open it at that version; Ada saves first.
+    const adas = await outcome(
+      ada.api.instructions.save({
+        file,
+        change: crypto.randomUUID(),
+        text: "Ada's.",
+        after: first.version,
+      })
+    );
+    const bens = await outcome(
+      ben.api.instructions.save({
+        file,
+        change: crypto.randomUUID(),
+        text: "Ben's.",
+        after: first.version,
+      })
+    );
+    const now = await ben.api.instructions.read(file);
+
+    expect({ adas, bens, now }).toStrictEqual({
+      adas: "ok",
+      bens: "instructions.changed",
+      now: { version: first.version + 1, text: "Ada's." },
+    });
+  });
+
+  it("empties a file with an empty save, keeping the version before, and loads nothing for it", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = { scope: "person", personId: person.userId } as const;
+    const marker = `Mine ${unique()}`;
+    const first = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: marker,
+      after: 0,
+    });
+    const emptied = await person.api.instructions.save({
+      file: own,
+      change: crypto.randomUUID(),
+      text: "",
+      after: first.version,
+    });
+
+    const loaded = await textsFor(agentFor(newAgentId(), person.userId), {
+      conversation: "own",
+    });
+
+    expect({
+      emptied: emptied.version,
+      read: await person.api.instructions.read(own),
+      loadsTheirs: loaded.some((text) => text === marker || text === ""),
+    }).toStrictEqual({
+      emptied: first.version + 1,
+      read: { version: first.version + 1, text: "" },
+      loadsTheirs: false,
+    });
+  });
+
+  it("keeps no file for an agent the company doesn't have", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const nobody = { scope: "agent", agentId: newAgentId() } as const;
+
+    expect({
+      save: await saved(admin.api, nobody, "Planted"),
+      read: await read(admin.api, nobody),
+    }).toStrictEqual({ save: "agent.unknown", read: "agent.unknown" });
   });
 });

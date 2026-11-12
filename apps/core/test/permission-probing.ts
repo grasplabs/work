@@ -47,6 +47,7 @@ import type {
 } from "./fixtures/permission-probes.ts";
 import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
+import { ownCollectionOf } from "./knowledge.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { SentRequest } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -209,7 +210,7 @@ export interface Company {
 const memoryIdOf = async (
   person: Awaited<ReturnType<typeof signedInApi>>
 ): Promise<string> => {
-  const { personal } = await person.api.memory.collections();
+  const personal = await ownCollectionOf(person);
   const { documents } = await person.api.knowledge.listDocuments(personal, {});
   const memory = documents.find(({ path }) => path === "USER.md");
   if (memory === undefined) {

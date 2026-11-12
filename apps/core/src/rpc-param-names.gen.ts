@@ -248,6 +248,10 @@ export const rpcParamNames: ParamNames = {
     "decline": ["id"],
     "list": [],
   },
+  "InstructionsRpc": {
+    "read": ["file"],
+    "save": ["saved"],
+  },
   "KnowledgeRpc": {
     "backlinks": ["documentId","options"],
     "brainExportStatus": ["exportId"],
@@ -307,9 +311,6 @@ export const rpcParamNames: ParamNames = {
     "setRole": ["userId","role"],
     "teams": [],
     "withdrawInvitation": ["invitationId"],
-  },
-  "MemoryRpc": {
-    "collections": [],
   },
   "ModelsRpc": {
     "settings": [],

@@ -68,8 +68,8 @@ import {
 } from "./transcripts.ts";
 import type { ReadAt } from "./transcripts.ts";
 
-// Saving a document: its frontmatter is read and checked (and a memory
-// file's size, memory-files.ts), its Markdown split into sections and its
+// Saving a document: its frontmatter is read and checked (and anything
+// else the host refuses, its `onWrite`), its Markdown split into sections and its
 // links found, its text stored as an immutable payload in R2
 // (payloads.ts), and then one D1 batch (a transaction) commits the
 // payload, adds the next version, replaces the links, updates the document

@@ -12,7 +12,7 @@ import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
-import { MemoryRpc } from "./knowledge/memory-rpc.ts";
+import { InstructionsRpc } from "./instructions-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
 import { UploadsRpc } from "./knowledge/uploads-rpc.ts";
@@ -59,7 +59,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #brain: BrainRpc;
   readonly #brainSources: BrainSourcesRpc;
   readonly #knowledgeSignals: KnowledgeSignalsRpc;
-  readonly #memory: MemoryRpc;
+  readonly #instructions: InstructionsRpc;
   readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
   readonly #resourceBindings: ResourceBindingsRpc;
@@ -105,7 +105,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#brain = new BrainRpc(env, full);
     this.#brainSources = new BrainSourcesRpc(env, full);
     this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
-    this.#memory = new MemoryRpc(env, full);
+    this.#instructions = new InstructionsRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
@@ -213,8 +213,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#knowledgeSignals;
   }
 
-  get memory(): MemoryRpc {
-    return this.#memory;
+  get instructions(): InstructionsRpc {
+    return this.#instructions;
   }
 
   get uploads(): UploadsRpc {

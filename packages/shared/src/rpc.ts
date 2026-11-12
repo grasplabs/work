@@ -15,10 +15,10 @@ import type { DataPolicyApi } from "./data-policy.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
+import type { InstructionsApi } from "./instruction-files.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
 import type { MembersApi } from "./members.ts";
-import type { MemoryApi } from "./memory.ts";
 import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
@@ -115,8 +115,8 @@ export interface SessionApi {
    * collections the person owns.
    */
   readonly knowledgeSignals: KnowledgeSignalsApi;
-  /** Memory files: the collections that hold them. */
-  readonly memory: MemoryApi;
+  /** Instruction files, for those who may edit each. */
+  readonly instructions: InstructionsApi;
   /**
    * Files uploaded into Knowledge: uploading one, and following its
    * status as its text is extracted.

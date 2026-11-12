@@ -621,11 +621,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * whole: no chunks, no words, so recall never finds it.
    */
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
-    const adding = checked(newInstructionsSchema, source);
+    const { after, ...adding } = checked(newInstructionsSchema, source);
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
-      return await addVersion(this.#sources, adding, { indexed: false });
+      return await addVersion(this.#sources, adding, {
+        indexed: false,
+        ...(after === undefined ? {} : { after }),
+      });
     });
   }
 

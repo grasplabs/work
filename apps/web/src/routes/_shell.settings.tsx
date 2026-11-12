@@ -24,6 +24,7 @@ import {
   CircleHelpIcon,
   CoinsIcon,
   CreditCardIcon,
+  FileTextIcon,
   HistoryIcon,
   KeyRoundIcon,
   PlugIcon,
@@ -60,6 +61,7 @@ type SettingsPath =
   | "/settings/outcomes"
   | "/settings/billing"
   | "/settings/profile"
+  | "/settings/instructions"
   | "/settings/security";
 
 interface SettingsItem {
@@ -147,6 +149,16 @@ const groupsFor = ({
       title: msg`Your account`,
       items: [
         { label: msg`Profile`, to: "/settings/profile", icon: UserRoundIcon },
+        // What their chats start with: Grasp's staff have no chats here.
+        ...(staff
+          ? []
+          : [
+              {
+                label: msg`Instructions`,
+                to: "/settings/instructions" as const,
+                icon: FileTextIcon,
+              },
+            ]),
         { label: msg`Security`, to: "/settings/security", icon: KeyRoundIcon },
       ],
     },

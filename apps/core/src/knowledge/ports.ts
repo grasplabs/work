@@ -74,7 +74,8 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
     isRefusal: (error) => permissionErrors.codeOf(error) !== undefined,
   },
   onWrite: async (write) => {
-    await checkWrite(write);
+    await Promise.resolve();
+    checkWrite(write);
   },
   blobs: env.BRAIN_OBJECTS,
   audit: {

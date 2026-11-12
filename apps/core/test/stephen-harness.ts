@@ -88,6 +88,7 @@ import type {
   StephenTeam,
 } from "./fixtures/stephen-world.ts";
 import type { Idp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -549,14 +550,11 @@ export const setUpStephenCompany = async (
   for (const persona of stephenPersonas) {
     const person = people[persona];
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    const { personal } = await person.api.memory.collections();
-    // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    await person.api.knowledge.saveDocument({
-      collectionId: personal,
-      path: "USER.md",
-      text: stephenMemory(persona, mailbox, suite),
-      ifVersion: 0,
-    });
+    await saveInstructions(
+      person.api,
+      { scope: "person", personId: person.userId },
+      stephenMemory(persona, mailbox, suite)
+    );
     const id = workspaceIdSchema.parse(crypto.randomUUID());
     placed.set(persona, { stub: workspace(env, id), agentId: id });
     for (const key of grantedCollections) {

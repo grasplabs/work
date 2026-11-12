@@ -1,3 +1,4 @@
+import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { and, eq, max } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
@@ -92,6 +93,8 @@ interface Adding {
   readonly readers: string;
   /** Its chunks when it is indexed, each with its text's SHA-256: none when not. */
   readonly chunks: readonly { text: string; hash: string }[];
+  /** The current version it must follow, when its writer said (`newInstructionsSchema`). */
+  readonly after?: number;
 }
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
@@ -193,6 +196,21 @@ const record = (
     return before;
   }
   const { added, hash } = adding;
+  if (adding.after !== undefined) {
+    const current = db
+      .select({ version: sourceVersions.version })
+      .from(currentVersions)
+      .innerJoin(
+        sourceVersions,
+        eq(sourceVersions.row, currentVersions.versionRow)
+      )
+      .where(eq(currentVersions.source, added.source))
+      .get();
+    // A refusal its writer expects, as its code says, not a failure.
+    if ((current?.version ?? 0) !== adding.after) {
+      throw instructionFileErrors.create("instructions.changed");
+    }
+  }
   if (isInDoubt(db, hash)) {
     return undefined;
   }
@@ -291,7 +309,7 @@ const addAgain = "The Brain lost the file while adding it: add it again";
 export const addVersion = async (
   { storage, db, bucket }: SourcesStore,
   added: NewSource,
-  { indexed }: { indexed: boolean }
+  { indexed, after }: { indexed: boolean; after?: number }
 ): Promise<SourceVersionRef> => {
   const soFar = erasuresSoFar(storage.sql);
   const body = encoder.encode(added.text);
@@ -309,6 +327,7 @@ export const addVersion = async (
         hash: await hashOf(encoder.encode(text)),
       }))
     ),
+    ...(after === undefined ? {} : { after }),
   };
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);

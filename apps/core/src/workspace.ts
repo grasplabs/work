@@ -67,6 +67,7 @@ import {
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
@@ -187,6 +188,8 @@ import {
 import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
+import { instructionFilesFor } from "./instruction-files.ts";
+import type { InstructionContext } from "./instruction-files.ts";
 import {
   audienceMaxMembers,
   audienceOf,
@@ -194,7 +197,6 @@ import {
 } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { cited } from "./knowledge/citations.ts";
-import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
@@ -296,6 +298,28 @@ const sharedChatSchema = z.strictObject({
   }),
 });
 export type SharedChat = z.infer<typeof sharedChatSchema>;
+
+/**
+ * Where a chat's agent works, for its instruction files: never a person's
+ * own file where others read the answer (a chat others share); a chat
+ * platform's direct message is the person's, without an App; Grasp's own
+ * chat is theirs, about the App it was made for, if any.
+ */
+const instructionContextOf = (
+  shared: boolean,
+  via: ChatChannel,
+  appId: string | null
+): InstructionContext => {
+  if (shared) {
+    return { conversation: "channel" };
+  }
+  if (via !== "web") {
+    return { conversation: "direct" };
+  }
+  return appId === null
+    ? { conversation: "own" }
+    : { conversation: "own", appId };
+};
 
 /** The title of a chat others share on `platform`. */
 const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
@@ -2074,26 +2098,24 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * What the model reads this turn besides the question: the memory of the
-   * person's own chat (the company's files and their USER.md, read now and
-   * recorded as sources), the skills it may use, from the Brain, and
-   * how to answer on the chat platform it came through, if any.
+   * What the model reads this turn besides the question: the instruction
+   * files of where it works (instruction-files.ts, read now, so an edit
+   * counts from the next turn), the skills it may use, from the Brain,
+   * and how to answer on the chat platform it came through, if any.
    */
   async #turnContext(
     scope: Parameters<typeof auditAgentCall>[1],
-    authority: Parameters<typeof forContext>[1],
+    authority: Authority,
     work: Extract<WorkContext, { type: "chat" }>,
     shared: boolean,
     agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
-    // Never the person's own USER.md where others read the answer.
-    const memory = await forContext(
+    const { via, appId } = this.#chat(work.chatId);
+    const instructions = await instructionFilesFor(
       this.env,
       authority,
-      work,
-      shared ? { type: "channel" } : { type: "own" }
+      instructionContextOf(shared, via, appId)
     );
-    this.#keepSources(work.chatId, memory.provenance.collectionIds);
     // The skills the chat may use, from the Brain: guidance every member
     // may read, as the company's instruction file, never a grant
     // (brain-skills.ts). Recorded as the code's calls are, by count. A
@@ -2117,7 +2139,6 @@ export class Workspace extends DurableObject<Env> {
         ...(unavailable ? { unavailable } : {}),
       },
     });
-    const { via } = this.#chat(work.chatId);
     // A chat that came through a chat platform: how to answer there.
     const channel = via === "web" ? undefined : await channelText();
     // Only who builds reads Grasp's docs, in their own chat: thousands of
@@ -2130,7 +2151,7 @@ export class Workspace extends DurableObject<Env> {
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
     const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
     return {
-      memory,
+      instructions: instructions.map(({ file, text }) => ({ file, text })),
       skills,
       channel,
       builds,

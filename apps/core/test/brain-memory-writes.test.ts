@@ -5,9 +5,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { keepAudience } from "../src/knowledge/access.ts";
 import { sharedChatsOf } from "../src/knowledge/memory-publish.ts";
-import { forContext } from "../src/knowledge/memory.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
-import { actingFor, newChat } from "./contexts.ts";
+import { newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
@@ -77,16 +76,10 @@ const idOf = (receipt: {
   return ref.memoryId;
 };
 
-/** What `person`'s agent reads of memory in a chat of their own. */
-const memoryTextOf = async (person: Person) => {
-  const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
-  const found = await forContext(
-    env,
-    actingFor(agent, person.userId),
-    await newChat(agent),
-    { type: "own" }
-  );
-  return found.text;
+/** The statements `person` recalls for `words`, a line each. */
+const memoryTextOf = async (person: Person, words: string) => {
+  const pack = await person.api.knowledge.recall({ query: words });
+  return pack.items.map(({ statement }) => statement).join("\n");
 };
 
 describe("publishing to the Brain's shared memory", setUpTime, () => {
@@ -145,8 +138,8 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
         )
       ),
     };
-    const adaReads = await memoryTextOf(ada);
-    const benReads = await memoryTextOf(ben);
+    const adaReads = await memoryTextOf(ada, u);
+    const benReads = await memoryTextOf(ben, u);
 
     expect({
       outcomes,
@@ -405,7 +398,7 @@ describe("correcting one's own memory", setUpTime, () => {
     const now = await ada.api.knowledge.memoriesGet({
       memoryId: next.memoryId,
     });
-    const reads = await memoryTextOf(ada);
+    const reads = await memoryTextOf(ada, u);
 
     expect({
       byBen,
@@ -487,7 +480,7 @@ describe("shared memory over time", setUpTime, () => {
       teamByPublisher: await retire(ada, idOf(teamRecord)),
       companyByAdmin: await retire(admin, idOf(company)),
     };
-    const reads = await memoryTextOf(ben);
+    const reads = await memoryTextOf(ben, u);
 
     expect({
       outcomes,
@@ -507,29 +500,7 @@ describe("shared memory over time", setUpTime, () => {
     });
   });
 
-  it("names who published a record that isn't the reader's", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const ada = await signedInApi(idp, "user");
-    const ben = await signedInApi(idp, "user");
-    const team = await newTeam(admin, [ada, ben]);
-    const u = unique();
-    await ada.api.knowledge.memoriesPublish(
-      { scope: "team", scopeId: team, kind: "fact", text: `Team rule ${u}` },
-      { idempotencyKey: key() }
-    );
-
-    const line = (text: string) =>
-      text.split("\n").find((each) => each.includes(`Team rule ${u}`)) ?? "";
-    const forBen = line(await memoryTextOf(ben));
-    const forAda = line(await memoryTextOf(ada));
-
-    expect({
-      ben: forBen.includes(", by "),
-      ada: forAda.includes(", by "),
-    }).toStrictEqual({ ben: true, ada: false });
-  });
-
-  it("drops a record once its audience includes someone who can't read what it rests on, and a chat's records once outsiders join it", async () => {
+  it("drops a record once its audience includes someone who can't read what it rests on", async () => {
     const admin = await signedInApi(idp, "admin");
     const ada = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
@@ -552,60 +523,24 @@ describe("shared memory over time", setUpTime, () => {
       },
       { idempotencyKey: key() }
     );
-    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
-    const shared = await newChat(agent);
-    await keepAudience(env, shared, ada.userId, {
-      members: [ada.userId, ben.userId],
-      outsiders: false,
-    });
-    await ada.api.knowledge.memoriesPublish(
-      {
-        scope: "session",
-        scopeId: shared.chatId,
-        kind: "fact",
-        text: `This chat ${u}`,
-      },
-      { idempotencyKey: key() }
-    );
-    const sharedText = async () => {
-      const found = await forContext(
-        env,
-        actingFor(agent, ada.userId),
-        shared,
-        {
-          type: "own",
-        }
-      );
-      return found.text;
-    };
-    const beforeSession = await holds(sharedText(), `This chat ${u}`);
-    const beforeCas = await holds(memoryTextOf(cas), `Rests on it ${u}`);
+    const beforeCas = await holds(memoryTextOf(cas, u), `Rests on it ${u}`);
     // Cas joins the team, but not the readers of what the record rests on.
     await callAuth("/organization/add-team-member", admin.session, {
       teamId: team,
       userId: cas.userId,
     });
-    const afterCas = await holds(memoryTextOf(cas), `Rests on it ${u}`);
-    const forAda = await holds(memoryTextOf(ada), `Rests on it ${u}`);
-    await keepAudience(env, shared, ada.userId, {
-      members: [ada.userId, ben.userId],
-      outsiders: true,
-    });
-    const afterOutsiders = await holds(sharedText(), `This chat ${u}`);
+    const afterCas = await holds(memoryTextOf(cas, u), `Rests on it ${u}`);
+    const forAda = await holds(memoryTextOf(ada, u), `Rests on it ${u}`);
 
     expect({
-      beforeSession,
       beforeCas,
       afterCas,
       forAda,
-      afterOutsiders,
     }).toStrictEqual({
-      beforeSession: true,
       beforeCas: false,
       // A member of the team, but not of what it rests on: not for her.
       afterCas: false,
       forAda: true,
-      afterOutsiders: false,
     });
   });
 });
@@ -616,7 +551,7 @@ describe("a record whose sources a reader loses", setUpTime, () => {
   // itself. One resting on a collection someone has lost is gone from
   // their next recall and chat, at once, and takes no place among those
   // they may still read, and their next pack is of a new access revision.
-  it("leaves it out of the next recall and chat context at once, in the query, so newer ones they can't read never crowd out an older one they can", async () => {
+  it("leaves it out of the next recall at once, in the query", async () => {
     const admin = await signedInApi(idp, "admin");
     const ada = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
@@ -663,26 +598,15 @@ describe("a record whose sources a reader loses", setUpTime, () => {
       userId: ben.userId,
     });
     const after = await recalled(ben);
-    const context = await memoryTextOf(ben);
-    const forAda = await memoryTextOf(ada);
 
     expect({
       before: before.resting > 0,
       after: after.resting,
       newRevision: after.revision !== before.revision,
-      context: {
-        plain: context.includes(`Plain ${u}`),
-        resting: Array.from({ length: turnMemoryLimits.records + 1 }).some(
-          (_each, index) => context.includes(`Rests ${index} ${u}`)
-        ),
-      },
-      forAda: forAda.includes(`Rests ${turnMemoryLimits.records} ${u}`),
     }).toStrictEqual({
       before: true,
       after: 0,
       newRevision: true,
-      context: { plain: true, resting: false },
-      forAda: true,
     });
   });
 });

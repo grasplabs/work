@@ -460,31 +460,6 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     });
   });
 
-  it("is gone with the person's Personal collection after a personal purge", async () => {
-    const leaver = await signedInApi(idp, "user");
-    const admin = await signedInApi(idp, "admin");
-    const { personal } = await leaver.api.memory.collections();
-    const upload = await uploaded(
-      { api: leaver.api, collectionId: personal },
-      "One to one.vtt",
-      meetingVtt(`Dirk${unique()}`)
-    );
-    const before = await openedOf(leaver.api, upload.documentId);
-    const input: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
-
-    expect({
-      before: before?.turns.length,
-      listed: await listedOf(leaver.api, upload.documentId),
-      opened: await openedOf(leaver.api, upload.documentId),
-    }).toStrictEqual({ before: 3, listed: undefined, opened: null });
-  });
-
   it("is recorded in the audit log by counts and identifiers alone: no event of the upload, listing or opening holds a speaker or a word", async () => {
     const owner = await personWithCollection();
     const name = `Eva${unique()}`;

@@ -165,12 +165,12 @@ export const isOverInstructionsLimit = (text: string): boolean =>
   text.length > instructionsMaxLength;
 
 /**
- * An instruction file's text: some text, at most `instructionsMaxLength`
- * UTF-16 units (`.length`), the one rule for it, which the host checks
- * with too.
+ * An instruction file's text: at most `instructionsMaxLength` UTF-16
+ * units (`.length`), the one rule for it, which the host checks with
+ * too. It may be empty: an emptied file is a version of its own, and
+ * its host loads nothing for it.
  */
 export const instructionsTextSchema = wellFormedString()
-  .regex(/\S/u, { message: "Holds no text" })
   // Not zod's `max`, which counts code points.
   .refine((text) => !isOverInstructionsLimit(text), {
     message: `At most ${instructionsMaxLength} UTF-16 units`,
@@ -180,10 +180,14 @@ export const instructionsTextSchema = wellFormedString()
  * A version of an instruction file to add: a source whose text is
  * `instructionsTextSchema`'s. It is kept whole and versioned like any
  * source, but never cut into chunks or indexed, so recall never finds it:
- * it is read whole (`readCurrent`).
+ * it is read whole (`readCurrent`). With `after`, the version it was
+ * edited from (0 for none): refused with `instructions.changed`, in the
+ * same transaction as the write, when that is no longer the current one,
+ * so no save overwrites another it never saw.
  */
 export const newInstructionsSchema = newSourceSchema.extend({
   text: instructionsTextSchema,
+  after: z.int().min(0).optional(),
 });
 export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 

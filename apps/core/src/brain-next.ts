@@ -65,6 +65,7 @@ import type { Member } from "./auth/identity.ts";
 import { erasureBegun } from "./brain-hand-overs.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { promptTextOf } from "./instructions-text.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
@@ -751,6 +752,7 @@ const newInstructionsSchema = z.strictObject({
   file: instructionFileSchema,
   change: changeSchema,
   text: instructionsTextSchema,
+  after: z.int().min(0).optional(),
 });
 
 /** A version of an instruction file, whole. */
@@ -762,29 +764,40 @@ export interface InstructionFileVersion {
 }
 
 /**
- * Adds `text` as the next version of the instruction file `file`; the one
- * before stays as history. Refused over `instructionsMaxLength` UTF-16
- * units with `instructions.too_large`, and with no text. `change` is as
- * `addSource`'s.
+ * Adds `text` as the next version of the instruction file `file`, after
+ * its version `after` (0 for none) when given; the one before stays as
+ * history.
+ * Refused over `instructionsMaxLength` UTF-16 units, as written or as a
+ * chat's prompt holds it (`promptTextOf`), with `instructions.too_large`, and with `instructions.changed` when `after`
+ * is no longer the current version. Empty text empties the file: a
+ * version of its own, which nothing loads. `change` is as `addSource`'s.
  *
  * For instruction-files.ts only, which checks who may write `file` first:
  * nothing here does.
  */
 export const addInstructionFile = async (
   env: BrainEnv,
-  added: { file: InstructionFile; change: string; text: string }
+  added: { file: InstructionFile; change: string; text: string; after?: number }
 ): Promise<{ file: InstructionFile; version: number }> => {
-  if (typeof added.text === "string" && isOverInstructionsLimit(added.text)) {
+  // Counted as the text and as a chat's prompt holds it, escaped, so the
+  // limit bounds what reaches a model too.
+  if (
+    typeof added.text === "string" &&
+    (isOverInstructionsLimit(added.text) ||
+      isOverInstructionsLimit(promptTextOf(added.text)))
+  ) {
     throw instructionFileErrors.create("instructions.too_large", {
       maxLength: instructionsMaxLength,
     });
   }
-  const { file, change } = checked(newInstructionsSchema, added);
+  const { file, change, after } = checked(newInstructionsSchema, added);
+  // Refused with `instructions.changed` by the store itself, coded.
   const { version } = await brain(env).addInstructions({
     source: instructionKeyOf(file),
     change,
     text: added.text,
     access: instructionAccessOf(file),
+    ...(after === undefined ? {} : { after }),
   });
   return { file, version };
 };

@@ -1726,6 +1726,7 @@ export const instructionProbes = {
             file,
             change: crypto.randomUUID(),
             text: as,
+            after: 0,
           })
       );
     /** One side of the comparison `like`: the refusal of a save. */
@@ -1744,6 +1745,7 @@ export const instructionProbes = {
                 file,
                 change: crypto.randomUUID(),
                 text: "Not the markers",
+                after: 0,
               })
           ),
         about,
@@ -1855,6 +1857,105 @@ export const instructionProbes = {
         text.padEnd(instructionsMaxLength + 1, " x")
       ),
       await save("no text", session, own, " ")
+    );
+    return asked;
+  },
+  // A read to edit is let in by the rule that lets a save in: every
+  // comparison holds what it gives over a hidden file to what it gives
+  // over one no one wrote; then the plain reads, scanned for the markers.
+  instructionFileToEdit: async (probing) => {
+    const { personId, markers, usedApps } = probing;
+    const session = sessionOf(personId);
+    const own: InstructionFile = { scope: "person", personId };
+    const read = async (
+      name: string,
+      by: Identity | Authority,
+      file: unknown
+    ) =>
+      await answer(
+        name,
+        async () => await instructionFiles.instructionFileToEdit(env, by, file)
+      );
+    /** One side of the comparison `like`. */
+    const side = async (
+      like: string,
+      about: "hidden" | "nothing",
+      file: InstructionFile
+    ) =>
+      await answer(
+        `${like}, ${about}`,
+        async () =>
+          await refusalOf(
+            async () =>
+              await instructionFiles.instructionFileToEdit(env, session, file)
+          ),
+        about,
+        like
+      );
+    const asked: Answer[] = [];
+    for (const id of hiddenIdsOf(probing, "person")) {
+      const like = `another person's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", unwrittenFile()),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", { scope: "person", personId: id })
+      );
+    }
+    for (const id of hiddenIdsOf(probing, "agent")) {
+      const like = `an agent's file ${id}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "nothing", {
+          scope: "agent",
+          agentId: `agent-${crypto.randomUUID()}`,
+        }),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await side(like, "hidden", { scope: "agent", agentId: id })
+      );
+    }
+    const noApp = "an App no one made";
+    asked.push(
+      await side(noApp, "nothing", { scope: "app", appId: crypto.randomUUID() })
+    );
+    for (const appId of hiddenAppsOf(probing)) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      asked.push(await side(noApp, "hidden", { scope: "app", appId }));
+    }
+    if (usedApps !== undefined) {
+      const like = "an App they use";
+      asked.push(
+        await side(like, "nothing", {
+          scope: "app",
+          appId: usedApps.withoutFile,
+        }),
+        await side(like, "hidden", { scope: "app", appId: usedApps.withFile })
+      );
+    }
+    for (const [index, file] of probing.hiddenInstructionFiles.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one file at a time
+      asked.push(await read(`hidden file ${index}`, session, file));
+    }
+    asked.push(
+      await read("their own", session, own),
+      await read("the company's", session, {
+        scope: "company",
+        name: "instructions",
+      }),
+      await read("as their agent", readersAgent(personId), own),
+      await read(
+        "as an identity named by the markers",
+        unchecked({ ...session, name: markers.join(""), extra: 1 }),
+        own
+      ),
+      await read("as someone who isn't a member", sessionOf(stranger()), {
+        scope: "person",
+        personId: stranger(),
+      }),
+      await read("a file named by the markers", session, {
+        scope: "person",
+        personId: markers.join(""),
+      })
     );
     return asked;
   },

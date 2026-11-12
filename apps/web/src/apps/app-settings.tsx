@@ -46,6 +46,7 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
+import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import {
   SettingsBody,
   SettingsRow,
@@ -385,6 +386,35 @@ const OwnLink = ({ app }: { app: App }) => {
   );
 };
 
+/** The App's instruction file, as its builders read it to edit. */
+const readAppInstructions = async (session: Session, app: string) =>
+  await session.instructions.read({ scope: "app", appId: app });
+
+/** What chats about the App start with, for its builders to change. */
+const AppInstructions = ({ app }: { app: ViewedApp }) => {
+  const { t } = useLingui();
+  const read = useAppRead(app.id, readAppInstructions);
+  return (
+    <SettingsSection
+      description={t`What a builder’s chat about this App starts with. Only its builders read and change it.`}
+      title={t`Instructions`}
+    >
+      <SettingsBody>
+        <Read read={read}>
+          {(saved) => (
+            <InstructionFileEditor
+              description={t`How this App is built and what to keep in mind when changing it.`}
+              file={{ scope: "app", appId: app.id }}
+              label={t`Instructions for this App`}
+              saved={saved}
+            />
+          )}
+        </Read>
+      </SettingsBody>
+    </SettingsSection>
+  );
+};
+
 /** What only its builders do with the App: copy it, put it away, delete it. */
 const ForBuilders = ({
   app,
@@ -397,6 +427,8 @@ const ForBuilders = ({
   const { currentVersion } = app;
   return (
     <>
+      {/* Archived, it is read-only: its file waits for a restore. */}
+      {app.archived ? null : <AppInstructions app={app} />}
       <SettingsSection
         description={t`Its definition to keep or move, and a blueprint others can start from.`}
         title={t`Copies`}

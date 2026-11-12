@@ -120,27 +120,6 @@ const storedOf = async (claims: Record<string, unknown>) => {
   return { users: users?.count ?? 0, accounts: held?.count ?? 0 };
 };
 
-/** A note `who` keeps in their own Personal collection. */
-const noteOf = async (who: Person, text: string) => {
-  const { personal } = await who.api.memory.collections();
-  return await who.api.knowledge.saveDocument({
-    collectionId: personal,
-    path: `notes/${crypto.randomUUID().slice(0, 8)}.md`,
-    text,
-    ifVersion: 0,
-  });
-};
-
-/** Whether Knowledge still has document `documentId`. */
-const inKnowledge = async (documentId: string): Promise<number> => {
-  const row = await env.KNOWLEDGE.prepare(
-    "SELECT count(*) AS count FROM documents WHERE id = ?"
-  )
-    .bind(documentId)
-    .first<{ count: number }>();
-  return row?.count ?? 0;
-};
-
 /** Whether run `runId` of an independent workflow was asked to stop. */
 const stopAsked = async (runId: string): Promise<boolean> => {
   const row = await env.DB.prepare(
@@ -1022,22 +1001,6 @@ describe("erasing a person", () => {
       ],
       text: false,
     });
-  });
-
-  it("purges what the Brain and Knowledge hold of them, their Personal collection with it, and leaves everyone else's", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const person = await signedInApi(idp, "builder");
-    const other = await signedInApi(idp, "user");
-    const theirs = await noteOf(person, "# Mine\nWhat only I wrote down.");
-    const others = await noteOf(other, "# Theirs\nWhat someone else wrote.");
-    await admin.api.members.remove(person.userId);
-
-    await admin.api.members.erase(person.userId, String(person.person.name));
-
-    expect({
-      theirs: await inKnowledge(theirs.id),
-      others: await inKnowledge(others.id),
-    }).toStrictEqual({ theirs: 0, others: 1 });
   });
 
   it("stops what still runs for them, and takes their decision confirmations, and leaves everyone else's", async () => {

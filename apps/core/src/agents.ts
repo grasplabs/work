@@ -10,8 +10,8 @@ import { agents } from "./db/core/schema.ts";
 // The company's agents, as records. Until now there was one agent for
 // the whole organization, known only by its ID (`chatAgentId` in
 // chats-rpc.ts): admins grant to it, audit events name it, and its
-// memory is kept under it. That agent is the first record here, under
-// the same ID, so every grant, chat and memory path made before agents
+// instruction file is kept under it. That agent is the first record here,
+// under the same ID, so every grant, chat and file made before agents
 // were records still names it.
 //
 // Core keeps a row only for an agent an admin made or changed, as its

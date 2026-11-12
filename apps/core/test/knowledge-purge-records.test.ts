@@ -23,15 +23,11 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { saveUserMemory } from "../src/knowledge/memory.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
-import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
-  newAgent,
   payOwedRebuilds,
   purged,
-  purgesWith,
   rebuildFailingOnce,
   rememberAs,
   saveOver,
@@ -59,8 +55,6 @@ import {
 const idp = mockIdp();
 
 const personOf = async (role: Role) => await signedInApi(idp, role);
-
-const { leaverWith } = purgesWith(idp);
 
 /** Each step of a purge's status, as `step: state` or `step: state: reason`. */
 /** How many rebuilds purge `purgeId` owes: one, or none. */
@@ -572,7 +566,7 @@ describe("a purge's record", setUpTime, () => {
     });
   });
 
-  it("counts what each document step changed, and a person's documents across runs", async () => {
+  it("counts what each document step changed", async () => {
     const admin = await personOf("admin");
     const secret = `jansen${unique()}`;
     const handbook = await admin.api.knowledge.createCollection({
@@ -595,29 +589,6 @@ describe("a purge's record", setUpTime, () => {
     const contentStatus = await admin.api.knowledge.purgeStatus(
       content.result.purgeId
     );
-    const { leaver } = await leaverWith({ "notes.md": "# Notes\nOne." });
-    const input: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    };
-    const failing = await rebuildFailingOnce(admin);
-    const { token } = await admin.api.knowledge.preparePurge(input);
-    await outcome(failing.knowledge.purge(input, token));
-    // Written before the run again, in a Personal collection made anew:
-    // it goes too, and counts.
-    const agent = newAgent();
-    await saveUserMemory(
-      env,
-      actingFor(agent, leaver.userId),
-      await newChat(agent),
-      { type: "own" },
-      { text: "# About me\nTwo.", ifVersion: 0 }
-    );
-    const person = await purged(admin, input);
-    const personStatus = await admin.api.knowledge.purgeStatus(
-      person.result.purgeId
-    );
     // The record holding the term went, though no step counts records.
     const { records: remembered } = await admin.api.knowledge.memoriesList();
     expect({
@@ -625,62 +596,9 @@ describe("a purge's record", setUpTime, () => {
         statement.toLowerCase().includes(secret)
       ),
       document: stepCounts(contentStatus, `document:${document.id}`),
-      records: stepCounts(personStatus, "records"),
-      result: {
-        documents: person.result.documents,
-        versions: person.result.versions,
-      },
     }).toStrictEqual({
       remembered: false,
       document: { documents: 1, versions: 1 },
-      records: { documents: 2, versions: 2 },
-      result: { documents: 2, versions: 2 },
-    });
-  });
-
-  it("finishes an unfinished purge run again whose document another purge deleted meanwhile", async () => {
-    const admin = await personOf("admin");
-    const secret = `meijer${unique()}`;
-    // The admin's own Personal collection: another person's is theirs alone.
-    const { personal } = await admin.api.memory.collections();
-    const named = await saveOver(
-      admin,
-      personal,
-      "people.md",
-      `# People\nWrite to ${secret}.`
-    );
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [named.id],
-      terms: [secret],
-      reason: "other",
-    };
-    const failing = await rebuildFailingOnce(admin);
-    const first = await admin.api.knowledge.preparePurge(input);
-    await outcome(failing.knowledge.purge(input, first.token));
-    // A personal purge deletes the document the first one names.
-    await purged(admin, {
-      type: "personal",
-      userId: admin.userId,
-      reason: "offboarding",
-    });
-    const resumed = await purged(admin, input);
-    const status = await admin.api.knowledge.purgeStatus(
-      resumed.result.purgeId
-    );
-    // Strict as ever for a purge not begun: the document is gone.
-    const other = await outcome(
-      admin.api.knowledge.preparePurge({ ...input, terms: [`${secret}x`] })
-    );
-
-    expect({
-      state: status.state,
-      step: stateOf(status)[`document:${named.id}`],
-      other,
-    }).toStrictEqual({
-      state: "complete",
-      step: "complete",
-      other: "knowledge.not_found",
     });
   });
 
