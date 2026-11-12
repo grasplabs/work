@@ -15732,6 +15732,10 @@ msgstr "Wat het brein bewaart en jij mag lezen, en zoeken daarin zoals je agents
 msgid "What the brain kept of it"
 msgstr "Wat het brein ervan bewaarde"
 
+#: src/settings/erasures.tsx
+msgid "What the Brain took in of their chats, uploads and runs"
+msgstr "Wat het Brain heeft opgenomen uit hun chats, uploads en runs"
+
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."
 msgstr "Wat de aanroepen antwoorden is geen JSON."

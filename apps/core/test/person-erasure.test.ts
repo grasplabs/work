@@ -618,6 +618,7 @@ describe("erasing a person", () => {
           "interview",
           "runs",
           "brain",
+          "brain_sources",
         ],
       },
       erased: {
@@ -632,6 +633,7 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
+          { area: "brain_sources", state: "complete" },
         ],
       },
       name,
@@ -910,6 +912,7 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
+          { area: "brain_sources", state: "complete" },
         ],
       },
       // Nothing of the area went: one statement, or none of it.
@@ -926,6 +929,7 @@ describe("erasing a person", () => {
           { area: "interview", state: "complete" },
           { area: "runs", state: "complete" },
           { area: "brain", state: "complete" },
+          { area: "brain_sources", state: "complete" },
         ],
       },
       accounts: 0,

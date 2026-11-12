@@ -15732,6 +15732,10 @@ msgstr "Was das Gehirn aufbewahrt und Sie lesen dürfen, und die Suche darin, so
 msgid "What the brain kept of it"
 msgstr "Was das Gehirn davon behalten hat"
 
+#: src/settings/erasures.tsx
+msgid "What the Brain took in of their chats, uploads and runs"
+msgstr "Was das Brain aus ihren Chats, Uploads und Ausführungen übernommen hat"
+
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."
 msgstr "Was die Aufrufe antworten, ist kein JSON."

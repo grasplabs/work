@@ -24,7 +24,18 @@ import {
   uploadTypes,
 } from "@grasp-os/shared/uploads";
 import type { Upload, UploadMediaType } from "@grasp-os/shared/uploads";
-import { and, asc, count, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -32,6 +43,7 @@ import { stringify } from "yaml";
 
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { identify, memberRole, teamsOf } from "../auth/identity.ts";
+import { eraseSources, uploadSource } from "../brain-next-origins.ts";
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
 import { routeMember } from "../staff-audit.ts";
@@ -622,23 +634,42 @@ const uploadsOf = (scope: ErasedFiles): SQL =>
 
 /**
  * Forgets the uploads of `scope` and records their originals for deleting,
- * then deletes what it can: one batch, which fails while one of them is
- * claimed for its save (`saving`), as `knowledge.conflict`: running the
- * purge again a moment later forgets it, or finds its text saved.
+ * then deletes what it can. First the new Brain erases what it took in of
+ * the documents they were saved as (brain-next-origins.ts), while their
+ * rows still name them: should that fail, nothing is forgotten, and the
+ * purge fails before it changes a document; running it again erases them
+ * again. Then one batch, which fails while one of them is claimed for its
+ * save (`saving`), or was saved as a document since the Brain was asked,
+ * as `knowledge.conflict`: running the purge again a moment later forgets
+ * it, or finds its text saved.
  */
 const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
   const db = drizzle(env.DB);
   const where = uploadsOf(scope);
   const saving = and(where, eq(uploads.status, "saving"));
+  const saved = await db
+    .selectDistinct({ documentId: uploads.documentId })
+    .from(uploads)
+    .where(and(where, isNotNull(uploads.documentId)));
+  const documentIds = saved.flatMap(({ documentId }) =>
+    documentId === null ? [] : [documentId]
+  );
+  await eraseSources(env, documentIds.map(uploadSource), "deleted");
+  // As one bound value, within D1's bound parameters however many.
+  const savedSince = and(
+    where,
+    isNotNull(uploads.documentId),
+    sql`${uploads.documentId} NOT IN (SELECT value FROM json_each(${JSON.stringify(documentIds)}))`
+  );
   try {
     await db.batch([
-      // Fails the batch while one is being saved: it inserts a cleanup
-      // without a key, which NOT NULL refuses; D1 has no other way to
-      // abort a batch on a condition.
+      // Fails the batch while one is being saved, or was saved since:
+      // it inserts a cleanup without a key, which NOT NULL refuses; D1
+      // has no other way to abort a batch on a condition.
       db
         .insert(uploadCleanups)
         .select(
-          sql`SELECT NULL, NULL, NULL WHERE EXISTS (SELECT 1 FROM ${uploads} WHERE ${saving})`
+          sql`SELECT NULL, NULL, NULL WHERE EXISTS (SELECT 1 FROM ${uploads} WHERE ${or(saving, savedSince)})`
         ),
       db
         .insert(uploadCleanups)
@@ -667,7 +698,7 @@ const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
     const stillSaving = await db
       .select({ id: uploads.id })
       .from(uploads)
-      .where(saving)
+      .where(or(saving, savedSince))
       .get();
     if (stillSaving !== undefined) {
       throw knowledgeErrors.create("knowledge.conflict");

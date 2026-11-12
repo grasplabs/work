@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch } from "../audit-outbox.ts";
+import { eraseSources, runSource } from "../brain-next-origins.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
@@ -233,6 +234,15 @@ const startDetailsRemoved = async (
   if (heldOf.length > 0) {
     await env.CONNECT.dropForEndedRuns({ runs: heldOf });
   }
+  // And what the new Brain took in of their runs (brain-next-origins.ts):
+  // erased before they are marked, so a sweep it fails for marks nothing
+  // and the next erases them again. A hand-over still on its way for one
+  // of them is refused from now on.
+  await eraseSources(
+    env,
+    heldOf.map(({ runId }) => runSource(runId)),
+    "retention"
+  );
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
