@@ -15,9 +15,14 @@ import {
   linkedBy,
   mayName,
 } from "./entities.ts";
-import { erasuresSoFar, isPersonErasedSince, subjectOf } from "./erasure.ts";
+import { subjectOf } from "./erasure.ts";
 import { hashOf } from "./files.ts";
-import { entityRowOf, lineageOfSource, lineageOfWriter } from "./memories.ts";
+import {
+  entityRowOf,
+  lineageOfSource,
+  lineageOfWriter,
+  stampWrite,
+} from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -118,6 +123,8 @@ const planOf = ({ entities, memories }: Adding): Planned[] => {
 export interface RememberStore {
   storage: DurableObjectStorage;
   db: DrizzleSqliteDODatabase;
+  /** Whether it is the shared store, which keeps nothing one person alone may read. */
+  shared: boolean;
 }
 
 const encoder = new TextEncoder();
@@ -125,9 +132,6 @@ const encoder = new TextEncoder();
 /** What a refused repeat of a change says. */
 const otherMemories =
   "The Brain refused it: this change was added before with other memories";
-
-/** What an add for an erased person says, as a source's (sources.ts). */
-const erasedPerson = "The Brain refused it: what this adds was erased";
 
 /**
  * The entities of an add as rows: each known `id` (of its kind), else
@@ -180,16 +184,24 @@ const entityRowsOf = (
   });
 };
 
-/** Whether this store holds the version and no erasure hides it; a refusal (`why`) if not. */
+/**
+ * Whether this store holds the version and no erasure hides it, a refusal
+ * (`why`) if not; in the shared store, a refusal too when one person alone
+ * may read it: what is drawn from it is theirs alone, and lies only in
+ * their own store.
+ */
 const holdVersion = (
-  sql: SqlStorage,
+  { sql, shared }: { sql: SqlStorage; shared: boolean },
   source: string,
   version: number,
   why: string
 ): void => {
   const [found] = sql
-    .exec<{ row: number }>(
-      `SELECT row FROM source_versions
+    .exec<{ alone: number }>(
+      `SELECT (json_array_length(reader_sets.key) = 1
+          AND reader_sets.key ->> '$[0][0]' = 'person') AS alone
+      FROM source_versions
+      JOIN reader_sets ON reader_sets.id = source_versions.reader_set
       WHERE source = ? AND version = ?
         AND row NOT IN (SELECT version_row FROM erasing_versions)`,
       source,
@@ -198,6 +210,11 @@ const holdVersion = (
     .toArray();
   if (found === undefined) {
     throw refused(why);
+  }
+  if (shared && found.alone === 1) {
+    throw refused(
+      "what one person alone may read is kept in that person's own store"
+    );
   }
 };
 
@@ -209,10 +226,11 @@ interface Into {
   ids: readonly string[];
   /** The add's readers, by their set's key (`reader_sets.key`). */
   readers: string;
+  /** Whether the add is to the shared store. */
+  shared: boolean;
   /** Each source the add names, by its SHA-256 as the erasure ledger names it. */
   subjects: ReadonlyMap<string, string>;
   learnedAt: number;
-  onlyFor: string | null;
   memo: WordMemo;
 }
 
@@ -248,7 +266,7 @@ const subjectOfSource = (
 
 /** Where a memory's basis puts it: its version, writer, lineage and place in that lineage. */
 const basisOf = (
-  { sql, subjects }: Into,
+  into: Into,
   basis: NewMemory["basis"],
   index: number
 ): {
@@ -270,7 +288,7 @@ const basisOf = (
     };
   }
   holdVersion(
-    sql,
+    into,
     basis.source,
     basis.version,
     `memory ${index} rests on a version this store doesn't hold`
@@ -278,7 +296,7 @@ const basisOf = (
   return {
     source: basis.source,
     version: basis.version,
-    subject: subjectOfSource(subjects, basis.source),
+    subject: subjectOfSource(into.subjects, basis.source),
     writer: null,
     lineage: lineageOfSource(basis.source),
     order: basis.version,
@@ -321,8 +339,8 @@ const writeMemory = (
       `INSERT INTO memories (id, entity, attribute, object, value, value_key,
         one_value, type, statement, quote, source, version, subject, writer,
         lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
-        readers, only_for)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        readers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING row`,
       id,
       aboutRow,
@@ -344,8 +362,7 @@ const writeMemory = (
       memory.validFrom?.getTime() ?? null,
       memory.validUntil?.getTime() ?? null,
       into.learnedAt,
-      into.readers,
-      into.onlyFor
+      into.readers
     )
     .one();
   indexMemoryWords(sql, row, memory.statement, into.memo);
@@ -362,25 +379,25 @@ const writeMemory = (
 const markExtracted = (
   sql: SqlStorage,
   { source, version }: { source: string; version: number },
-  { learnedAt, readers, onlyFor, subjects }: Into
+  into: Into
 ): void => {
+  const { learnedAt, readers, subjects } = into;
   holdVersion(
-    sql,
+    into,
     source,
     version,
     "it marks extracted a version this store doesn't hold"
   );
   sql.exec(
     `INSERT OR IGNORE INTO memory_extractions
-      (source, version, subject, lineage, at, readers, only_for)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      (source, version, subject, lineage, at, readers)
+    VALUES (?, ?, ?, ?, ?, ?)`,
     source,
     version,
     subjectOfSource(subjects, source),
     lineageOfSource(source),
     learnedAt,
-    readers,
-    onlyFor
+    readers
   );
 };
 
@@ -390,12 +407,11 @@ const markExtracted = (
  * that version's readers too: memories.ts).
  */
 export const addMemories = async (
-  { storage, db }: RememberStore,
+  { storage, db, shared }: RememberStore,
   adding: Adding
 ): Promise<AddedMemories> => {
   const planned = planOf(adding);
   const { sql } = storage;
-  const soFar = erasuresSoFar(sql);
   const key = await hashOf(encoder.encode(adding.change));
   const hash = await hashOf(
     encoder.encode(
@@ -420,10 +436,6 @@ export const addMemories = async (
       )
     )
   );
-  const onlyFor =
-    adding.access.kind === "owner"
-      ? await subjectOf(adding.access.person)
-      : null;
   return storage.transactionSync(() => {
     const [before] = sql
       .exec<{ hash: string; answer: string }>(
@@ -436,11 +448,6 @@ export const addMemories = async (
         throw new Error(otherMemories);
       }
       return answerSchema.parse(JSON.parse(before.answer));
-    }
-    // An add for one person alone that began before their erasure, and
-    // lands after it, may have been missed by it: refused, as a source's.
-    if (onlyFor !== null && isPersonErasedSince(sql, onlyFor, soFar)) {
-      throw new Error(erasedPerson);
     }
     // The set is stored (read sets match readers by it); memories name it
     // by its key alone, never its row id.
@@ -459,9 +466,9 @@ export const addMemories = async (
       rows,
       ids,
       readers,
+      shared,
       subjects,
-      learnedAt: Date.now(),
-      onlyFor,
+      learnedAt: stampWrite(sql),
       memo: new Map(),
     };
     const memories = adding.memories.map((memory, index) =>

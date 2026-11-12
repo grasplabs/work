@@ -12,7 +12,7 @@ import type {
   Identifier,
   Reader,
 } from "./contract.ts";
-import { visibleSql } from "./memories.ts";
+import { readMoment, visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import { foldForSearch } from "./words.ts";
 
@@ -453,5 +453,5 @@ export const readEntity = (
       JSON.stringify(reader.groups)
     )
     .toArray();
-  return asSeen(sql, found, reader, Date.now()).at(0) ?? null;
+  return asSeen(sql, found, reader, readMoment(sql)).at(0) ?? null;
 };

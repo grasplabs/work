@@ -43,7 +43,6 @@ CREATE TABLE `memories` (
 	`learned_at` integer NOT NULL,
 	`retired_at` integer,
 	`readers` text NOT NULL,
-	`only_for` text,
 	FOREIGN KEY (`entity`) REFERENCES `entities`(`row`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`object`) REFERENCES `entities`(`row`) ON UPDATE no action ON DELETE no action
 );
@@ -54,7 +53,6 @@ CREATE INDEX `memories_object_idx` ON `memories` (`object`);--> statement-breakp
 CREATE INDEX `memories_version_idx` ON `memories` (`source`,`version`);--> statement-breakpoint
 CREATE INDEX `memories_subject_idx` ON `memories` (`subject`,`version`);--> statement-breakpoint
 CREATE INDEX `memories_readers_idx` ON `memories` (`readers`);--> statement-breakpoint
-CREATE INDEX `memories_only_for_idx` ON `memories` (`only_for`);--> statement-breakpoint
 CREATE TABLE `memory_changes` (
 	`key` text PRIMARY KEY NOT NULL,
 	`hash` text NOT NULL,
@@ -92,14 +90,18 @@ CREATE TABLE `memory_extractions` (
 	`lineage` text NOT NULL,
 	`at` integer NOT NULL,
 	`readers` text NOT NULL,
-	`only_for` text,
 	PRIMARY KEY(`source`, `version`, `readers`)
 );
 --> statement-breakpoint
 CREATE INDEX `memory_extractions_lineage_idx` ON `memory_extractions` (`lineage`,`version`);--> statement-breakpoint
 CREATE INDEX `memory_extractions_readers_idx` ON `memory_extractions` (`readers`);--> statement-breakpoint
 CREATE INDEX `memory_extractions_subject_idx` ON `memory_extractions` (`subject`,`version`);--> statement-breakpoint
-CREATE INDEX `memory_extractions_only_for_idx` ON `memory_extractions` (`only_for`);--> statement-breakpoint
+CREATE TABLE `memory_stamps` (
+	`id` integer PRIMARY KEY NOT NULL,
+	`latest` integer NOT NULL,
+	CONSTRAINT "memory_stamps_one" CHECK(id = 1)
+);
+--> statement-breakpoint
 ALTER TABLE `word_index` ADD `memory_cursor` integer DEFAULT 0 NOT NULL;
 --> statement-breakpoint
 -- A memory's words and stems, as a chunk's (0005, 0006): its statement
@@ -138,7 +140,7 @@ WHEN OLD.`retired_at` IS NOT NULL
 	OR NEW.`lineage` IS NOT OLD.`lineage` OR NEW.`lineage_order` IS NOT OLD.`lineage_order`
 	OR NEW.`speaker` IS NOT OLD.`speaker` OR NEW.`valid_from` IS NOT OLD.`valid_from`
 	OR NEW.`valid_until` IS NOT OLD.`valid_until` OR NEW.`learned_at` IS NOT OLD.`learned_at`
-	OR NEW.`readers` IS NOT OLD.`readers` OR NEW.`only_for` IS NOT OLD.`only_for`
+	OR NEW.`readers` IS NOT OLD.`readers`
 BEGIN
 	SELECT RAISE(ABORT, 'memories are added, never written over');
 END;

@@ -601,9 +601,7 @@ export const entities = sqliteTable(
  * id); `lineage_order` orders a lineage's memories, the version number
  * for a source's, 0 for a writer's, then `row`. `value_key` is what
  * one-value attributes compare: the value folded, or the related entity's
- * id. `only_for` is the SHA-256 of the one person who alone may read it,
- * as the erasure ledger names them, so a person's erasure finds it, also
- * when replayed after a restore.
+ * id.
  */
 export const memories = sqliteTable(
   "memories",
@@ -647,7 +645,6 @@ export const memories = sqliteTable(
     learnedAt: integer("learned_at").notNull(),
     retiredAt: integer("retired_at"),
     readers: text().notNull(),
-    onlyFor: text("only_for"),
   },
   (table) => [
     index("memories_entity_idx").on(
@@ -659,7 +656,6 @@ export const memories = sqliteTable(
     index("memories_version_idx").on(table.source, table.version),
     index("memories_subject_idx").on(table.subject, table.version),
     index("memories_readers_idx").on(table.readers),
-    index("memories_only_for_idx").on(table.onlyFor),
   ]
 );
 
@@ -730,8 +726,7 @@ export const memoryConfirmedOver = sqliteTable(
  * A version of a source fully extracted (contract.ts `extracted`): every
  * memory of its source's lineage from an earlier version ends at `at`,
  * for readers of both the add that marked it and this version. Deleted
- * with the version, or with the memories of the one person who alone
- * read the add.
+ * with the version.
  */
 export const memoryExtractions = sqliteTable(
   "memory_extractions",
@@ -744,15 +739,12 @@ export const memoryExtractions = sqliteTable(
     at: integer().notNull(),
     /** The add's readers, by their set's key: only they, of the version's, see it end what came before. */
     readers: text().notNull(),
-    /** As `memories.only_for`: the one person who alone read the add, hashed. */
-    onlyFor: text("only_for"),
   },
   (table) => [
     primaryKey({ columns: [table.source, table.version, table.readers] }),
     index("memory_extractions_lineage_idx").on(table.lineage, table.version),
     index("memory_extractions_readers_idx").on(table.readers),
     index("memory_extractions_subject_idx").on(table.subject, table.version),
-    index("memory_extractions_only_for_idx").on(table.onlyFor),
   ]
 );
 
@@ -781,4 +773,18 @@ export const memoryErasureReplay = sqliteTable(
     through: integer().notNull(),
   },
   () => [check("memory_erasure_replay_one", sql.raw("id = 1"))]
+);
+
+/**
+ * The latest moment the store stamped a write of memories with (memories.ts
+ * `stampWrite`): every later write is stamped after it, and a read is
+ * given no moment before it. One row; never lowered, a deletion included.
+ */
+export const memoryStamps = sqliteTable(
+  "memory_stamps",
+  {
+    id: integer().primaryKey(),
+    latest: integer().notNull(),
+  },
+  () => [check("memory_stamps_one", sql.raw("id = 1"))]
 );

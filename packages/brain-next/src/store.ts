@@ -119,6 +119,7 @@ import { listSources, listVersions } from "./listing.ts";
 import {
   confirmMemory,
   listContested,
+  readMoment,
   readMemories,
   retireMemory,
 } from "./memories.ts";
@@ -512,14 +513,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * The moments a page is read at and its cursor carries (`at` and
+   * The moment a page is read at, which its cursor carries (`at`,
    * `cursorAt`): a later page's, its cursor's; one as of a moment, that
-   * moment; a first page's, now, with its cursor a millisecond before, so
-   * no later page sees a write made in the first page's millisecond,
-   * whether before or after it, and a fresh read sees every write. Plain
-   * time: the store keeps no clock of its own.
+   * moment; a first page's, the moment a read of now is given
+   * (memories.ts `readMoment`): every write made before it is at or before
+   * it, every write after it later (`stampWrite`).
    */
-  static #pageMoments(
+  #pageMoments(
     after: { at: Date } | undefined,
     asOf?: Date
   ): { at: number; cursorAt: number } {
@@ -527,8 +527,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (fixed !== undefined) {
       return { at: fixed.getTime(), cursorAt: fixed.getTime() };
     }
-    const now = Date.now();
-    return { at: now, cursorAt: now - 1 };
+    const at = readMoment(this.ctx.storage.sql);
+    return { at, cursorAt: at };
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */
@@ -1441,7 +1441,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await addMemories(
-        { storage: this.ctx.storage, db: this.#db },
+        {
+          storage: this.ctx.storage,
+          db: this.#db,
+          shared: this.#kind.kind === "shared",
+        },
         adding
       );
     });
@@ -1483,7 +1487,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       entity: asked.entity,
       reader: asked.reader,
       ...(attribute === undefined ? {} : { attribute }),
-      ...BrainStore.#pageMoments(asked.after, asked.asOf),
+      ...this.#pageMoments(asked.after, asked.asOf),
       history: asked.history ?? false,
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
@@ -1500,7 +1504,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return listContested(this.ctx.storage.sql, {
       ...(asked.entity === undefined ? {} : { entity: asked.entity }),
       reader: asked.reader,
-      ...BrainStore.#pageMoments(asked.after),
+      ...this.#pageMoments(asked.after),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
@@ -1514,11 +1518,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       if (!(await this.#readable())) {
         return "nothing";
       }
-      return retireMemory(this.ctx.storage.sql, {
-        id: memory,
-        reader,
-        at: Date.now(),
-      });
+      return this.ctx.storage.transactionSync(() =>
+        retireMemory(this.ctx.storage.sql, { id: memory, reader })
+      );
     });
   }
 
@@ -1531,11 +1533,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         return "nothing";
       }
       return this.ctx.storage.transactionSync(() =>
-        confirmMemory(this.ctx.storage.sql, {
-          id: memory,
-          reader,
-          at: Date.now(),
-        })
+        confirmMemory(this.ctx.storage.sql, { id: memory, reader })
       );
     });
   }
@@ -1549,7 +1547,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,
-      ...BrainStore.#pageMoments(asked.after),
+      ...this.#pageMoments(asked.after),
       ...(asked.kind === undefined ? {} : { kind: asked.kind }),
       ...(asked.identifier === undefined
         ? {}
@@ -1570,7 +1568,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return readEntityNames(this.ctx.storage.sql, {
       entity: asked.entity,
       reader: asked.reader,
-      ...BrainStore.#pageMoments(asked.after),
+      ...this.#pageMoments(asked.after),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });

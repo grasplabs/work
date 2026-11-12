@@ -280,6 +280,47 @@ WHERE judged.row IN (SELECT row FROM base) AND ${filter}`;
     : `${tables},\nrows AS (${select}\n)\n${outer}`;
 };
 
+/** The latest stamp a write was given, or 0 before the first. */
+const latestStamp = (sql: SqlStorage): number =>
+  sql
+    .exec<{ latest: number }>("SELECT latest FROM memory_stamps WHERE id = 1")
+    .toArray()
+    .at(0)?.latest ?? 0;
+
+/** The stamp the next write gets (`stampWrite`), not yet kept. */
+const nextStamp = (sql: SqlStorage): number =>
+  Math.max(Date.now(), latestStamp(sql)) + 1;
+
+/** `stamp` kept as the latest a write was given. */
+const keepStamp = (sql: SqlStorage, stamp: number): void => {
+  sql.exec(
+    `INSERT INTO memory_stamps (id, latest) VALUES (1, ?1)
+    ON CONFLICT (id) DO UPDATE SET latest = ?1`,
+    stamp
+  );
+};
+
+/**
+ * Stamps a write of memories (an add's memories, a confirmation, a
+ * retire, an extraction mark), in the caller's transaction: after now, and
+ * after every stamp before it (`memory_stamps`), so a read given a moment
+ * (`readMoment`) never sees a write made after it, in its own millisecond
+ * too, and sees every write made before it. Ahead of the real clock by
+ * at most 1 ms plus the number of writes in the current millisecond.
+ */
+export const stampWrite = (sql: SqlStorage): number => {
+  const stamp = nextStamp(sql);
+  keepStamp(sql, stamp);
+  return stamp;
+};
+
+/**
+ * The moment a read of now is given: now, or the latest stamp if later,
+ * so it sees every write made before it; what its cursor carries.
+ */
+export const readMoment = (sql: SqlStorage): number =>
+  Math.max(Date.now(), latestStamp(sql));
+
 /** The lineage of a writer's memories. */
 export const lineageOfWriter = (writer: string): string => `writer:${writer}`;
 
@@ -629,8 +670,9 @@ const currentOfAttributeSql = memoriesSql({
  */
 export const confirmMemory = (
   sql: SqlStorage,
-  { id, reader, at }: { id: string; reader: Reader; at: number }
+  { id, reader }: { id: string; reader: Reader }
 ): MemoryChangeOutcome => {
+  const at = readMoment(sql);
   const [target] = memoryRows(sql, currentOneSql, id, reader, at, 1);
   if (target === undefined) {
     return "nothing";
@@ -671,7 +713,7 @@ export const confirmMemory = (
       "INSERT INTO memory_confirmations (memory, person, at) VALUES (?, ?, ?) RETURNING row",
       target.row,
       reader.person,
-      at
+      stampWrite(sql)
     )
     .one();
   sql.exec(
@@ -694,27 +736,30 @@ export const confirmMemory = (
  */
 export const retireMemory = (
   sql: SqlStorage,
-  { id, reader, at }: { id: string; reader: Reader; at: number }
+  { id, reader }: { id: string; reader: Reader }
 ): MemoryChangeOutcome => {
   const asked = [
     id,
     reader.person,
     JSON.stringify(reader.groups),
     lineageOfWriter(reader.person),
-    at,
+    readMoment(sql),
   ];
+  const stamp = nextStamp(sql);
   const retired = sql.exec(
     `WITH ${readableSql}
-    UPDATE memories AS m SET retired_at = ?5
+    UPDATE memories AS m SET retired_at = ?6
     WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
       AND (m.valid_from IS NULL OR m.valid_from <= ?5)
       AND (m.valid_until IS NULL OR m.valid_until > ?5)
       AND ${visibleSql("m")}
       AND NOT EXISTS (${newerSql("m", "?5", true)})`,
-    ...asked
+    ...asked,
+    stamp
   );
   retired.toArray();
   if (retired.rowsWritten > 0) {
+    keepStamp(sql, stamp);
     return "done";
   }
   // Retired already, by this writer, and the reader may read it: a retry.

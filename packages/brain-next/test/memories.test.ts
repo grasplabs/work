@@ -909,10 +909,14 @@ describe("erasure", () => {
     await expect(left()).resolves.toBe(0);
   });
 
-  it("deletes the memories drawn from what only an erased person may read, and keeps them gone after a restore", async () => {
+  it("deletes the memories drawn from a source a person's erasure takes whole, and keeps them gone after a restore", async () => {
     const person = unique("person");
     const group = unique("group");
-    const theirs = await addSource("Only Pat's", { kind: "owner", person });
+    // The source's current version is Pat's alone: Pat's erasure takes
+    // the whole source, its team version and what was drawn from it too.
+    const source = unique("doc");
+    const theirs = await addSource("Only Pat's", audience(group), source);
+    await addSource("Pat's now", { kind: "owner", person }, source);
     const { entities } = await remember(
       audience(group),
       [customer({ names: [unique("Private")] })],
@@ -2113,7 +2117,7 @@ describe("what a start replays and rebuilds", () => {
   it("deletes, at start, the memories on a version an older release's person erasure hid", async () => {
     const person = unique("p");
     const group = unique("g");
-    const version = await addSource("Only Pat's", { kind: "owner", person });
+    const version = await addSource("Only Pat's", audience(group));
     const made = await remember(
       audience(group),
       [customer()],
@@ -2283,7 +2287,10 @@ describe("a set dropped without an erasure, a fact's sides, and one millisecond"
   it("erases a memory written in the same millisecond as a read and the person's erasure", async () => {
     const person = unique("p");
     const group = unique("g");
-    const version = await addSource("Only Pat's", { kind: "owner", person });
+    // The source's current version is Pat's alone: Pat's erasure takes it whole.
+    const source = unique("doc");
+    const version = await addSource("Only Pat's", audience(group), source);
+    await addSource("Pat's now", { kind: "owner", person }, source);
     const reader = readerOf(person, group);
     await shared().workOverview();
     const left = await runInDurableObject(
@@ -2415,5 +2422,442 @@ describe("a set dropped without an erasure, a fact's sides, and one millisecond"
       pages: ["One", "Two"],
       fresh: ["Between", "One", "Two"],
     });
+  });
+});
+
+describe("a person's own store and its erasure", () => {
+  it("removes a person's memories when their own store is erased", async () => {
+    const person = unique("p");
+    const store = own(person);
+    const made = await remember(
+      { kind: "owner", person },
+      [customer()],
+      [fact({ kind: "writer", writer: person }, { statement: "Mine" })],
+      store
+    );
+    const before = await statementsAbout(
+      made.entities.c ?? "",
+      readerOf(person),
+      {},
+      store
+    );
+    await store
+      .erasePerson({ person, reason: "person_erased" })
+      .catch(() => {});
+    const held = await runInDurableObject(
+      store,
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM sqlite_master WHERE name = 'memories'"
+          )
+          .one().count
+    );
+
+    expect({ before, held }).toStrictEqual({ before: ["Mine"], held: 0 });
+  });
+});
+
+/** Sets the fixed clock `ms` past a base later than any stamp the store holds. */
+const atMs = (ms: number): void => {
+  vi.setSystemTime(new Date(Date.UTC(2030, 0, 1) + ms));
+};
+
+/** `run` with the store's own instance, the clock fixed (`atMs`) while it runs. */
+const withFixedClock = async <T>(
+  store: Store,
+  run: (instance: BrainStore) => Promise<T>
+): Promise<T> =>
+  await runInDurableObject(store, async (instance: BrainStore) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      return await run(instance);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+/** A read's statements over all its pages of one, in order. */
+const allPages = async (
+  instance: BrainStore,
+  entity: string,
+  reader: Reader,
+  between: () => Promise<unknown> = async () => {
+    await Promise.resolve();
+  }
+): Promise<string[]> => {
+  const first = await instance.readMemories({ entity, reader, limit: 1 });
+  await between();
+  const seen = first.memories.map(({ statement }) => statement);
+  let { next } = first;
+  while (next !== undefined) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page = await instance.readMemories({
+      entity,
+      reader,
+      limit: 1,
+      after: next,
+    });
+    seen.push(...page.memories.map(({ statement }) => statement));
+    ({ next } = page);
+  }
+  return seen;
+};
+
+describe("pages of one read, by the store's stamps (contract v10)", () => {
+  // (a)
+  it("never returns a memory twice across the pages of one read, a confirmation in the first page's millisecond included", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const pages = await withFixedClock(shared(), async (instance) => {
+      atMs(0);
+      const a = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [status(unique("w1"), "A")],
+      });
+      const entity = a.entities.c ?? "";
+      atMs(1);
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [status(unique("w2"), "B")],
+      });
+      atMs(5);
+      await instance.confirmMemory({ memory: a.memories[0] ?? "", reader });
+      return await allPages(instance, entity, reader);
+    });
+
+    expect(pages).toStrictEqual(["A", "B"]);
+  });
+
+  // (b)
+  it("never returns as current on a later page what a newer memory of its lineage ended in the first page's millisecond", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const writer = unique("w");
+    const pages = await withFixedClock(shared(), async (instance) => {
+      atMs(0);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [status(writer, "Old"), status(unique("z"), "Z")],
+      });
+      const entity = made.entities.c ?? "";
+      atMs(5);
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [status(writer, "New")],
+      });
+      return await allPages(instance, entity, reader);
+    });
+
+    expect(pages.toSorted((a, b) => a.localeCompare(b))).toStrictEqual([
+      "New",
+      "Z",
+    ]);
+  });
+
+  // (b)
+  it("never returns as current on a later page a memory retired in the first page's millisecond", async () => {
+    const group = unique("g");
+    const person = unique("r");
+    const reader = readerOf(person, group);
+    const out = await withFixedClock(shared(), async (instance) => {
+      atMs(0);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [status(unique("o"), "Other")],
+      });
+      const entity = made.entities.c ?? "";
+      atMs(1);
+      const mine = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [status(person, "Mine")],
+      });
+      atMs(2);
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [status(unique("t"), "Third")],
+      });
+      atMs(5);
+      const retired = await instance.retireMemory({
+        memory: mine.memories[0] ?? "",
+        reader,
+      });
+      return { retired, pages: await allPages(instance, entity, reader) };
+    });
+
+    expect({
+      retired: out.retired,
+      pages: out.pages.toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      retired: "done",
+      pages: ["Other", "Third"],
+    });
+  });
+
+  // (c)
+  it("reads a contested fact's sides by the documented route in the listing's own millisecond", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const out = await withFixedClock(shared(), async (instance) => {
+      atMs(0);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [status(unique("w1"), "A")],
+      });
+      const entity = made.entities.c ?? "";
+      atMs(5);
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [status(unique("w2"), "B")],
+      });
+      const page = await instance.listContested({ reader, entity });
+      const sides = await instance.readMemories({
+        entity,
+        attribute: "status",
+        reader,
+        asOf: page.at,
+      });
+      return {
+        listed: (page.facts[0]?.memories ?? []).map(
+          ({ statement }) => statement
+        ),
+        sides: sides.memories.map(({ statement }) => statement),
+      };
+    });
+
+    expect(out.sides).toStrictEqual(out.listed);
+  });
+
+  // (d)
+  it("shows on every page a write made before the first page, in its millisecond too, and on none a write made after it", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const pages = await withFixedClock(shared(), async (instance) => {
+      atMs(0);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [
+          fact({ kind: "writer", writer: unique("w") }, { statement: "Early" }),
+        ],
+      });
+      const entity = made.entities.c ?? "";
+      atMs(5);
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [
+          fact(
+            { kind: "writer", writer: unique("w") },
+            { statement: "Before" }
+          ),
+        ],
+      });
+      return await allPages(
+        instance,
+        entity,
+        reader,
+        async () =>
+          await instance.addMemories({
+            change: crypto.randomUUID(),
+            access: audience(group),
+            reader,
+            entities: [customer({ id: entity })],
+            memories: [
+              fact(
+                { kind: "writer", writer: unique("w") },
+                { statement: "After" }
+              ),
+            ],
+          })
+      );
+    });
+
+    expect(pages.toSorted((a, b) => a.localeCompare(b))).toStrictEqual([
+      "Before",
+      "Early",
+    ]);
+  });
+
+  // (e)
+  it("shows a fresh read a write just made in the same millisecond", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const read = await withFixedClock(shared(), async (instance) => {
+      atMs(7);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [
+          fact({ kind: "writer", writer: unique("w") }, { statement: "First" }),
+        ],
+      });
+      const entity = made.entities.c ?? "";
+      await instance.readMemories({ entity, reader });
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id: entity })],
+        memories: [
+          fact(
+            { kind: "writer", writer: unique("w") },
+            { statement: "Just now" }
+          ),
+        ],
+      });
+      const fresh = await instance.readMemories({ entity, reader });
+      return fresh.memories
+        .map(({ statement }) => statement)
+        .toSorted((a, b) => a.localeCompare(b));
+    });
+
+    expect(read).toStrictEqual(["First", "Just now"]);
+  });
+
+  // (f)
+  it("leaves nothing of a person in their own store after a read, an add and their erasure in one millisecond", async () => {
+    const person = unique("p");
+    const store = own(person);
+    await remember(
+      { kind: "owner", person },
+      [customer()],
+      [fact({ kind: "writer", writer: person }, { statement: "Earlier" })],
+      store
+    );
+    await withFixedClock(store, async (instance) => {
+      atMs(9);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "owner", person },
+        entities: [customer()],
+        memories: [
+          fact({ kind: "writer", writer: person }, { statement: "Mine" }),
+        ],
+      });
+      await instance.readMemories({
+        entity: made.entities.c ?? "",
+        reader: readerOf(person),
+      });
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "owner", person },
+        entities: [customer()],
+        memories: [
+          fact({ kind: "writer", writer: person }, { statement: "Also mine" }),
+        ],
+      });
+      await instance
+        .erasePerson({ person, reason: "person_erased" })
+        .catch(() => {});
+    });
+
+    await expect(
+      runInDurableObject(
+        store,
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM sqlite_master WHERE name = 'memories'"
+            )
+            .one().count
+      )
+    ).resolves.toBe(0);
+  });
+
+  // (g)
+  it("keeps its stamps across a restart, so a fresh read after it sees a write stamped ahead of the clock", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const entity = await withFixedClock(shared(), async (instance) => {
+      atMs(20);
+      const made = await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        entities: [customer()],
+        memories: [
+          fact({ kind: "writer", writer: unique("w") }, { statement: "One" }),
+        ],
+      });
+      const id = made.entities.c ?? "";
+      await instance.readMemories({ entity: id, reader });
+      await instance.addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader,
+        entities: [customer({ id })],
+        memories: [
+          fact({ kind: "writer", writer: unique("w") }, { statement: "Two" }),
+        ],
+      });
+      return id;
+    });
+    await kill(shared());
+    const read = await withFixedClock(shared(), async (instance) => {
+      atMs(20);
+      const fresh = await instance.readMemories({ entity, reader });
+      return fresh.memories
+        .map(({ statement }) => statement)
+        .toSorted((a, b) => a.localeCompare(b));
+    });
+
+    expect(read).toStrictEqual(["One", "Two"]);
+  });
+});
+
+describe("what the shared store keeps", () => {
+  it("refuses a memory or an extraction mark drawn from a version one person alone may read", async () => {
+    const person = unique("p");
+    const version = await addSource("Mine alone", { kind: "owner", person });
+    const outcome = async (adding: Parameters<BrainStore["addMemories"]>[0]) =>
+      await shared()
+        .addMemories(adding)
+        .then(
+          () => "added",
+          () => "refused"
+        );
+
+    expect([
+      await outcome({
+        change: crypto.randomUUID(),
+        access: audience(unique("g")),
+        entities: [customer()],
+        memories: [fact({ kind: "source", ...version, quote: "Mine alone" })],
+      }),
+      await outcome({
+        change: crypto.randomUUID(),
+        access: audience(unique("g")),
+        entities: [],
+        memories: [],
+        extracted: version,
+      }),
+    ]).toStrictEqual(["refused", "refused"]);
   });
 });
