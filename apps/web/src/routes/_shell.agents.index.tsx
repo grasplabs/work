@@ -1,5 +1,5 @@
 import type { AgentSettings, AgentWake } from "@grasp-os/shared/agents";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -18,17 +18,27 @@ import { loadFromCore } from "../load-from-core.tsx";
 
 /** What an admin reads of every agent: its reach, its classes and its wake-ups. */
 export const readManaged = async (session: Session): Promise<ManagedAgents> => {
-  const [agents, reach] = await Promise.all([
-    session.connections.agents(),
-    session.connections.stephenReach(),
+  // What each used this month: none when core won't say, and the pages
+  // then show the agents without it. Read beside the agents, not after.
+  const [[agents, reach], [used]] = await Promise.all([
+    Promise.all([
+      session.connections.agents(),
+      session.connections.stephenReach(),
+    ]),
+    Promise.allSettled([session.connections.agentsUsage()]),
   ]);
-  const settings = await Promise.all(
+  // Each other agent's reach and classes: none for one core won't say
+  // them of, as it won't for Grasp's staff.
+  const read = await Promise.allSettled(
     agents
       .slice(1)
       .map(async ({ id }): Promise<[string, AgentSettings]> => [
         id,
         await session.connections.agentSettings(id),
       ])
+  );
+  const settings = read.flatMap((each) =>
+    each.status === "fulfilled" ? [each.value] : []
   );
   // Each agent's wake-ups: none for one core won't say them of.
   const wakes = await Promise.all(
@@ -43,6 +53,12 @@ export const readManaged = async (session: Session): Promise<ManagedAgents> => {
     agents,
     settings: Object.fromEntries(settings),
     wakes: Object.fromEntries(wakes),
+    usage: Object.fromEntries(
+      (used.status === "fulfilled" ? used.value : []).map((usage) => [
+        usage.agentId,
+        usage,
+      ])
+    ),
     teams: reach.teams,
   };
 };
@@ -50,13 +66,18 @@ export const readManaged = async (session: Session): Promise<ManagedAgents> => {
 const AgentsPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Agents` }]} page={page} />;
   }
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
-      <AgentsOverview managed={page.data.managed} usable={page.data.usable} />
+      <AgentsOverview
+        makes={isMemberAdmin(identity)}
+        managed={page.data.managed}
+        usable={page.data.usable}
+      />
     </>
   );
 };
@@ -68,7 +89,8 @@ export const Route = createFileRoute("/_shell/agents/")({
     await loadFromCore(core, async (session) => {
       const [usable, managed] = await Promise.all([
         session.chats.agents(),
-        isMemberAdmin(identity) ? readManaged(session) : undefined,
+        // Admins, Grasp's staff among them, who read and change nothing.
+        isAdmin(identity.role) ? readManaged(session) : undefined,
       ]);
       return { usable, managed };
     }),

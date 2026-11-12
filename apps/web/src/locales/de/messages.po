@@ -189,6 +189,10 @@ msgstr "{attempts, plural, one {# Versuch} other {# Versuche}}"
 msgid "{back} measured return"
 msgstr "{back} gemessener Ertrag"
 
+#: src/agents/agent-page.tsx
+msgid "{before} the month before"
+msgstr "{before} im Monat davor"
+
 #: src/workflows/requests/request-detail.tsx
 msgid "{billed, plural, one {# request} other {# requests}}"
 msgstr "{billed, plural, one {# Anfrage} other {# Anfragen}}"
@@ -1111,6 +1115,10 @@ msgstr "{sources, plural, one {Zeitraubende Arbeit, die sich automatisieren lie�
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
 msgstr "{sources, plural, one {Zeitraubende Arbeit, die sich automatisieren ließe, angesprochen in # Quelle, noch von keinem Team.} other {Zeitraubende Arbeit, die sich automatisieren ließe, angesprochen in # Quellen, noch von keinem Team.}}"
 
+#: src/agents/agents-overview.tsx
+msgid "{spent} this month"
+msgstr "{spent} in diesem Monat"
+
 #: src/onboarding/about-story.tsx
 msgid "{sponsor} gave me the big picture. Now I need the details."
 msgstr "{sponsor} hat mir das große Bild gegeben. Jetzt brauche ich die Details."
@@ -1820,6 +1828,14 @@ msgstr "Zugriff"
 msgctxt "who reaches a table's records"
 msgid "Access"
 msgstr "Zugriff"
+
+#: src/agents/agent-page.tsx
+msgid "Access isn't shown"
+msgstr "Der Zugriff wird nicht angezeigt"
+
+#: src/agents/agents-overview.tsx
+msgid "Access not shown"
+msgstr "Zugriff nicht angezeigt"
 
 #: src/apps/access-view.tsx
 msgid "Access to {name}"
@@ -2791,10 +2807,6 @@ msgstr "Wie es der Code der App festlegt"
 msgid "As the company has it"
 msgstr "Wie im Unternehmen"
 
-#: src/agents/agent-page.tsx
-msgid "As the company's first agent"
-msgstr "Als erster Agent des Unternehmens"
-
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
@@ -2927,6 +2939,10 @@ msgstr "Eine Berechtigung angefragt"
 #: src/dashboard/pile-cards.tsx
 msgid "asked for by the agent, in their chat"
 msgstr "vom Agenten angefragt, in dessen Chat"
+
+#: src/agents/agent-page.tsx
+msgid "Asked it, or it works for them on a schedule"
+msgstr "Haben ihn gefragt, oder er arbeitet nach Zeitplan für sie"
 
 #: src/workflows/go-lives-waiting.tsx
 msgid "Asked on"
@@ -4352,6 +4368,10 @@ msgstr "Korrigieren"
 msgid "Corrected by"
 msgstr "Korrigiert durch"
 
+#: src/agents/agent-page.tsx
+msgid "Cost"
+msgstr "Kosten"
+
 #: src/dashboard/signals.tsx
 #: src/dashboard/widget-board.tsx
 msgid "Could be better"
@@ -5331,6 +5351,11 @@ msgstr "allen, die die App nutzen"
 msgid "Everyone who uses the App"
 msgstr "Alle, die die App nutzen"
 
+#: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
+msgid "Everyone with Grasp"
+msgstr "Alle mit Grasp"
+
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Alle mit der Rolle {name}"
@@ -5772,6 +5797,10 @@ msgstr "Für eine Adresse, die Ihr Unternehmen jemand anderem gegeben hat. Wer s
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Für Admins"
+
+#: src/agents/agent-page.tsx
+msgid "For each app, under Access"
+msgstr "Für jede App, unter Zugriff"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "For each item"
@@ -6718,6 +6747,10 @@ msgstr "Importieren oder exportieren"
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "Legen Sie in {name} einen Service-User an, der die Stamm- und Arbeitsdaten der Mitarbeitenden lesen darf, und fügen Sie hier seine ID und seinen Token ein."
 
+#: src/agents/agent-page.tsx
+msgid "In Grasp's chat. Chat apps are under Access."
+msgstr "Im Chat von Grasp. Chat-Apps stehen unter Zugriff."
+
 #: src/chat/asked-questions.tsx
 msgid "In my own words"
 msgstr "In meinen eigenen Worten"
@@ -7419,6 +7452,10 @@ msgstr "Sprache: {name}"
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Letzte 7 Tage"
+
+#: src/agents/agent-page.tsx
+msgid "Last asked"
+msgstr "Zuletzt gefragt"
 
 #. placeholder {0}: moment(agent.changedAt)
 #: src/agents/agent-page.tsx
@@ -8967,6 +9004,10 @@ msgstr "Nicht mit dem Projekt geteilt"
 msgid "Not shared yet"
 msgstr "Noch nicht geteilt"
 
+#: src/agents/agent-page.tsx
+msgid "Not shown"
+msgstr "Nicht angezeigt"
+
 #: src/workflows/requests/request-parts.tsx
 msgid "Not sorted yet"
 msgstr "Noch nicht zugeordnet"
@@ -8991,6 +9032,7 @@ msgstr "Nicht verifiziert"
 msgid "Not working: the last call, {when}, failed because {why}."
 msgstr "Funktioniert nicht: Der letzte Aufruf am {when} ist fehlgeschlagen, weil {why}."
 
+#: src/agents/agent-page.tsx
 #: src/apps/publish.tsx
 msgid "Not yet"
 msgstr "Noch nicht"
@@ -9446,6 +9488,10 @@ msgstr "Nur wer im Workspace angemeldet ist, öffnet ihn."
 msgid "Only the App's builders"
 msgstr "Nur die Builder der App"
 
+#: src/agents/agent-page.tsx
+msgid "Only the company's own admins see it"
+msgstr "Nur die eigenen Admins des Unternehmens sehen ihn"
+
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Nur der erste Weg"
@@ -9604,10 +9650,6 @@ msgstr "Offene Frage"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Offene Fragen"
-
-#: src/agents/agent-page.tsx
-msgid "Open Settings › Stephen"
-msgstr "Einstellungen › Stephen öffnen"
 
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
@@ -10042,6 +10084,10 @@ msgstr "„{name}“ wird auf zwei Arten gemacht"
 #: src/dashboard/report.ts
 msgid "People heard"
 msgstr "Gehörte Personen"
+
+#: src/agents/agent-page.tsx
+msgid "People it worked for"
+msgstr "Personen, für die er gearbeitet hat"
 
 #: src/workflows/requests/request-who.tsx
 msgid "People one by one are off"
@@ -10950,6 +10996,10 @@ msgstr "Anfragen"
 #: src/workflows/requests/request-detail.tsx
 msgid "Requests over time"
 msgstr "Anfragen im Zeitverlauf"
+
+#: src/agents/agent-page.tsx
+msgid "Requests to a model"
+msgstr "Anfragen an ein Modell"
 
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
@@ -11968,14 +12018,13 @@ msgctxt "a kind of field"
 msgid "Set in code"
 msgstr "Im Code festgelegt"
 
-#: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
-msgid "Set in Settings › Stephen"
-msgstr "Festgelegt in Einstellungen › Stephen"
-
 #: src/routes/_shell.settings.profile.tsx
 msgid "Set in your organization’s directory."
 msgstr "Im Verzeichnis Ihrer Organisation festgelegt."
+
+#: src/agents/agent-page.tsx
+msgid "Set per app"
+msgstr "Pro App festgelegt"
 
 #: src/apps/app-settings.tsx
 msgid "Set the link"
@@ -12022,6 +12071,10 @@ msgstr "Bereiche der Einstellungen"
 #: src/onboarding/review-parts.tsx
 msgid "Settled: {choice}"
 msgstr "Geklärt: {choice}"
+
+#: src/agents/agent-page.tsx
+msgid "Several for one question"
+msgstr "Mehrere für eine Frage"
 
 #: src/apps/app-sharing.tsx
 #: src/apps/publish.tsx
@@ -15883,12 +15936,12 @@ msgid "Who may use {name}"
 msgstr "Wer {name} nutzen darf"
 
 #: src/agents/agent-page.tsx
-msgid "Who may use it"
-msgstr "Wer ihn nutzen darf"
+msgid "Who may use {name} and what it may do couldn't be read. Only the company's own admins see it. If that is you, load the page again."
+msgstr "Wer {name} nutzen darf und was er tun darf, konnte nicht gelesen werden. Nur die eigenen Admins des Unternehmens sehen das. Wenn Sie das sind, laden Sie die Seite neu."
 
 #: src/agents/agent-page.tsx
-msgid "Who may use it, and what it may do"
-msgstr "Wer ihn nutzen darf und was er tun darf"
+msgid "Who may use it"
+msgstr "Wer ihn nutzen darf"
 
 #: src/apps/app-settings.tsx
 msgid "Who opens the App besides you, and as what."
@@ -15921,10 +15974,6 @@ msgstr "Wer ist wer in Ihrem Unternehmen?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "der Person, die die Zeile hinzugefügt hat"
-
-#: src/agents/agent-page.tsx
-msgid "Whom the company's first agent reaches, where, and what it may do in each app is set in one place."
-msgstr "Wen der erste Agent des Unternehmens erreicht, wo, und was er in jeder App tun darf, wird an einer Stelle festgelegt."
 
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx

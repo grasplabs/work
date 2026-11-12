@@ -25,7 +25,7 @@ export const agentErrors = defineErrorFamily({
     "That isn't a wake-up: it needs a schedule that names a time to come, a person of the company, and what to ask.",
   "agent.wake_unknown": "The agent has no such wake-up.",
   "agent.settings_elsewhere":
-    "Who reaches the company's first agent, and what it may do, is set in Settings › Stephen.",
+    "Who reaches the company's first agent, and what it may do, is set on its own page, under Access.",
   "agent.unattended":
     "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
   "agent.busy":

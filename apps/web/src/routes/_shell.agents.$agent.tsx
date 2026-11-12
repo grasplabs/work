@@ -1,19 +1,36 @@
-import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { BotIcon } from "lucide-react";
 
 import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
-import type { AgentTab } from "../agents/agent-page.tsx";
+import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
+import type { Session } from "../core.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore } from "../load-from-core.tsx";
+import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { readManaged } from "./_shell.agents.index.tsx";
 
 // One agent's page (agents/agent-page.tsx), for the company's own admins:
 // anyone else is sent to the Agents page, where their agents open a chat.
 // Its tab is in the address, so a link can lead to an agent's access or
 // its schedule.
+
+/**
+ * The first agent's access, as Settings › Stephen read it: its reach and
+ * the company's classes, with how it is doing and the workflows people
+ * start by asking it, each of those two read on its own so the rest
+ * shows when either can't be.
+ */
+const readFirstAccess = async (session: Session): Promise<FirstAgentAccess> => {
+  const [reach, classes, week, workflows] = await Promise.all([
+    session.connections.stephenReach(),
+    session.connections.toolClasses(),
+    orNull(async () => await session.stephenRequests.week()),
+    orNull(async () => await session.workflowResources.askableWorkflows()),
+  ]);
+  return { reach, classes, week, workflows };
+};
 
 const AgentRoutePage = () => {
   const { t } = useLingui();
@@ -33,7 +50,7 @@ const AgentRoutePage = () => {
       />
     );
   }
-  const { managed, usable, people, models } = page.data;
+  const { managed, usable, people, models, firstAccess } = page.data;
   const agent = managed.agents.find(({ id }) => id === agentId);
   if (agent === undefined) {
     return (
@@ -65,6 +82,8 @@ const AgentRoutePage = () => {
         tab={agentTabOf(tab)}
         teams={managed.teams}
         usable={usable.some(({ id }) => id === agent.id)}
+        usage={managed.usage[agent.id]}
+        firstAccess={firstAccess}
         wakes={managed.wakes[agent.id] ?? []}
       />
     </>
@@ -79,12 +98,13 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
   ): { tab?: AgentTab | undefined } =>
     search.tab === undefined ? {} : { tab: agentTabOf(search.tab) },
   beforeLoad: ({ context: { identity } }) => {
-    if (!isMemberAdmin(identity)) {
+    // Admins, Grasp's staff among them: staff read and change nothing.
+    if (!isAdmin(identity.role)) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/agents", replace: true });
     }
   },
-  loader: async ({ context: { core } }) =>
+  loader: async ({ context: { core }, params }) =>
     await loadFromCore(core, async (session) => {
       const [managed, usable] = await Promise.all([
         readManaged(session),
@@ -101,6 +121,10 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         usable,
         people: listed.status === "fulfilled" ? listed.value : [],
         models: chosen.status === "fulfilled" ? chosen.value : [],
+        firstAccess:
+          params.agent === managed.agents.at(0)?.id
+            ? await readFirstAccess(session)
+            : undefined,
       };
     }),
 });

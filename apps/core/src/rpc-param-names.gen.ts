@@ -164,6 +164,7 @@ export const rpcParamNames: ParamNames = {
     "agentSettings": ["agentId"],
     "agentWakes": ["agentId"],
     "agents": [],
+    "agentsUsage": [],
     "appPointers": [],
     "appRequests": [],
     "catalog": [],
