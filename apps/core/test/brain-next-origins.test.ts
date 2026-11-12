@@ -351,7 +351,8 @@ describe("a person erased", { timeout: 120_000 }, () => {
       completed: "string",
       // Their own store was erased while it wrote: refused as such.
       handed: {
-        error: "Error: The Brain refused it: this store was erased",
+        error:
+          "Error: What this adds was erased: it stays erased, and isn't added.",
       },
       recalled: 0,
       left: nothingLeft,

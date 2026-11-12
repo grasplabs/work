@@ -31,6 +31,7 @@ import type {
   CurrentRequest,
   Embedders,
   ErasureReason,
+  KeyState,
   Finding,
   HandOverRequest,
   HandOvers,
@@ -746,24 +747,26 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Whether this store was ever given `source`, or closed its key
-   * (contract.ts); never, for a person's own store erased whole, which
-   * holds nothing.
+   * What this store has of the key `source` (contract.ts): `free` for a
+   * person's own store erased whole, which holds nothing.
    */
-  async holdsSource(source: SourceId): Promise<boolean> {
+  async keyState(source: SourceId): Promise<KeyState> {
     const key = checked(sourceIdSchema, source);
     if (await this.#erasedWhole()) {
-      return false;
+      return "free";
     }
     await this.#ready();
     if (!this.#schema) {
-      return false;
+      return "free";
+    }
+    if (isErased(this.ctx.storage.sql, await subjectOf(key))) {
+      return "erased";
     }
     const held =
       this.ctx.storage.sql
         .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
         .toArray().length > 0;
-    return held || isErased(this.ctx.storage.sql, await subjectOf(key));
+    return held ? "held" : "free";
   }
 
   /**

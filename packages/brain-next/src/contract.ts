@@ -18,6 +18,9 @@ import { foldForSearch } from "./words.ts";
 /** Most bytes of a source's text (UTF-8), as given and as indexed. */
 export const sourceTextMaxBytes = 1_000_000;
 
+/** What a store has of a key (`Brain.keyState`). */
+export type KeyState = "free" | "held" | "erased";
+
 /**
  * What an add says that an erasure closed: to an erased source, whose key
  * is closed for good, or for a person alone that began before that
@@ -1180,12 +1183,14 @@ export interface Brain {
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
-   * Whether this store was ever given the source `source`: a version of
-   * it, current or history, or an erasure that closed its key. Yes or no
-   * alone, whoever may read it, so for the host only, before it keeps a
-   * source in another store (one person's own): a key lives in one store.
+   * What this store has of the key `source`, whoever may read it: `erased`
+   * when an erasure closed it, `held` when a version of it is kept
+   * (current or history), `free` when it was never given it. For the host
+   * only, before it keeps a source in another store (one person's own):
+   * a key lives in one store. A person's own store erased whole holds
+   * nothing: `free`.
    */
-  holdsSource: (source: SourceId) => Promise<boolean>;
+  keyState: (source: SourceId) => Promise<KeyState>;
   /**
    * The sources whose current version the reader may read, among those
    * whose key starts with one of the prefixes asked: newest first by when

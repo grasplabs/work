@@ -239,53 +239,6 @@ const relayNow = async (): Promise<void> => {
   await relayHandOvers(env);
 };
 
-/** `target`'s `property`, a method called on `target` itself. */
-const forwarded = (target: object, property: string | symbol): unknown => {
-  const value: unknown = Reflect.get(target, property);
-  if (typeof value !== "function") {
-    return value;
-  }
-  return (...args: unknown[]): unknown => {
-    const result: unknown = Reflect.apply(value, target, args);
-    return result;
-  };
-};
-
-/**
- * The Brain's store binding `real`, whose first `eraseSource` fails, as
- * the store out of reach for a moment.
- */
-const eraseFailsOnce = (real: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] => {
-  let failed = false;
-  const stubOf = (stub: object): object =>
-    new Proxy(stub, {
-      get: (target, property) => {
-        if (property === "eraseSource" && !failed) {
-          return async () => {
-            failed = true;
-            await Promise.resolve();
-            throw new Error("The Brain is out of reach");
-          };
-        }
-        return forwarded(target, property);
-      },
-    });
-  const namespaceOf = (namespace: Env["BRAIN_STORE"]): Env["BRAIN_STORE"] =>
-    new Proxy(namespace, {
-      get: (target, property) => {
-        if (property === "jurisdiction") {
-          return (jurisdiction: DurableObjectJurisdiction) =>
-            namespaceOf(target.jurisdiction(jurisdiction));
-        }
-        if (property === "getByName") {
-          return (name: string) => stubOf(target.getByName(name));
-        }
-        return forwarded(target, property);
-      },
-    });
-  return namespaceOf(real);
-};
-
 /** The hand-overs noted and not yet relayed, among `ids`. */
 const notedAmong = async (ids: readonly string[]): Promise<string[]> => {
   const rows = await drizzle(env.DB)
@@ -451,15 +404,15 @@ describe("how a hand-over fails closed", () => {
     });
   });
 
-  it("erases a person's own source whose add landed after their erasure began, also when that erasure failed once and the item is tried again", async () => {
+  it("refuses a person's own source handed over after their erasure began, for good: their own store takes nothing more", async () => {
     const runner = await builder();
     const said = word();
     const id = await endedRun(runner, said);
     const source: SourceRef = { producer: "run", id };
     await relayNow();
     // The person's erasure begins once the hand-over has read their run,
-    // before its add: core's record, then the Brain's erasure. The add
-    // lands after both; the erasure the hand-over then owes fails.
+    // before its add: core's record, then the Brain's erasure, which
+    // erases their own store whole (GRA-1762), so the add can't land.
     await tick(
       {
         ...env,
@@ -477,22 +430,15 @@ describe("how a hand-over fails closed", () => {
             reason: "person_erased",
           });
         }),
-        BRAIN_STORE: eraseFailsOnce(env.BRAIN_STORE),
       },
       later()
     );
-    const landed = await readSourceVersionAs(env, runner.userId, {
-      source,
-      version: 1,
-    });
-    const afterFailure = await outcomesFor(id);
-    // Past the failed attempt's backoff: the producer answers that the
-    // person's erasure has begun, and the key is erased.
+    const afterRefusal = await outcomesFor(id);
     await tick(env, later(2 * 60_000));
 
     expect({
-      landed: landed?.text.includes(said),
-      afterFailure,
+      afterRefusal,
+      // Refused for good: never tried again.
       after: await outcomesFor(id),
       version: await readSourceVersionAs(env, runner.userId, {
         source,
@@ -500,18 +446,11 @@ describe("how a hand-over fails closed", () => {
       }),
       queued: await queuedFor(source),
     }).toStrictEqual({
-      landed: true,
-      // The refusal is recorded before the key is closed; the close
-      // failed, so the item was tried again, and recorded again.
-      afterFailure: [
+      afterRefusal: [
         "brain.source.handover_started",
         "brain.source.handover_refused",
       ],
-      after: [
-        "brain.source.handover_started",
-        "brain.source.handover_refused",
-        "brain.source.handover_refused",
-      ],
+      after: ["brain.source.handover_started", "brain.source.handover_refused"],
       version: null,
       queued: { waiting: false, parked: false },
     });

@@ -3013,12 +3013,9 @@ export const storeProbes = {
   },
   // Whether the store holds a key, for core alone, whoever reads it: yes
   // or no, and nothing of the key or what it holds.
-  holdsSource: async ({ markers, hiddenVersions }) => {
+  keyState: async ({ markers, hiddenVersions }) => {
     const holds = async (name: string, source: unknown) =>
-      await answer(
-        name,
-        async () => await store().holdsSource(unchecked(source))
-      );
+      await answer(name, async () => await store().keyState(unchecked(source)));
     return [
       await holds("a source no one added", keyOf(missingSource())),
       await holds(

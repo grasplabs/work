@@ -26,6 +26,7 @@ import type {
   Brain,
   ErasureReason,
   Embedders,
+  KeyState,
   HandOverPriority,
   HandOverResult,
   HandOvers,
@@ -331,7 +332,15 @@ const ownOr = async <T>(read: () => Promise<T>, missing: T): Promise<T> => {
 
 /** What an add that would narrow a shared source to one person answers. */
 const narrowed =
-  "Refused: a source keeps the readers it was first added for, so one added for more than one person, or one an erasure closed, can't become one person's own: add it as a new source";
+  "Refused: a source keeps the readers it was first added for, so one added for more than one person can't become one person's own: add it as a new source";
+
+/**
+ * The refusal of an add of a key the shared store has (`keyState`): as
+ * erased when an erasure closed it there (`erasedSource`, which
+ * producers take as final), as narrowed when a version of it is kept.
+ */
+const refusalOf = (state: KeyState): Error =>
+  new Error(state === "erased" ? erasedSource : narrowed);
 
 /**
  * `add` run on the store `source` is kept in for `access` (`keptIn`).
@@ -357,15 +366,17 @@ const keptIn = async <T>(
     return await add(brain(env));
   }
   const shared = brain(env);
-  if (await shared.holdsSource(source)) {
-    throw new Error(narrowed);
+  const before = await shared.keyState(source);
+  if (before !== "free") {
+    throw refusalOf(before);
   }
   const own = ownBrain(env, access.person);
   const added = await add(own);
-  if (await shared.holdsSource(source)) {
+  const after = await shared.keyState(source);
+  if (after !== "free") {
     // A clean-up that fails throws its own error: the add failed.
     await own.eraseSource({ source, reason: "deleted" });
-    throw new Error(narrowed);
+    throw refusalOf(after);
   }
   return added;
 };

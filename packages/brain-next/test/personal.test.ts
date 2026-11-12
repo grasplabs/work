@@ -545,10 +545,10 @@ describe("a person's own store", () => {
     await shared().eraseSource({ source: erased.source, reason: "deleted" });
 
     expect({
-      kept: await called(shared().holdsSource(kept.source)),
-      erased: await called(shared().holdsSource(erased.source)),
-      never: await called(shared().holdsSource(`test:${crypto.randomUUID()}`)),
-    }).toStrictEqual({ kept: true, erased: true, never: false });
+      kept: await called(shared().keyState(kept.source)),
+      erased: await called(shared().keyState(erased.source)),
+      never: await called(shared().keyState(`test:${crypto.randomUUID()}`)),
+    }).toStrictEqual({ kept: "held", erased: "erased", never: "free" });
   });
 
   it("keeps nothing anyone but its person may read", async () => {
@@ -903,7 +903,7 @@ describe("a person's own store", () => {
         own().readCurrent({ sources: [kept.source], reader })
       ),
       // It holds nothing, the key it once held included.
-      holds: await called(own().holdsSource(kept.source)),
+      holds: await called(own().keyState(kept.source)),
       // Erasing one of its sources after it: nothing is left to erase.
       sourceErased: await called(
         own().eraseSource({ source: kept.source, reason: "deleted" })
@@ -912,7 +912,7 @@ describe("a person's own store", () => {
       found: nothingFound,
       version: null,
       current: [],
-      holds: false,
+      holds: "free",
       sourceErased: "erased",
     });
     await expect(add(own(), "A late add", theirs())).rejects.toThrow(erased);
@@ -1329,7 +1329,7 @@ const leavingNone = [
   "erasePerson",
   "find",
   "handOver",
-  "holdsSource",
+  "keyState",
   "listSources",
   "listVersions",
   "readCurrent",

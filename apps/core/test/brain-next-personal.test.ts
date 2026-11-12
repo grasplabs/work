@@ -573,7 +573,7 @@ describe("a source whose readers would change kind", () => {
     const theirs: SourceReaders = { kind: "owner", personId: person };
     const text = `Theirs alone ${word}`;
     // The shared store answers the first ask and not the second.
-    const failing = envFailing("brain", "holdsSource", [2]);
+    const failing = envFailing("brain", "keyState", [2]);
     const gate = await holdNextBucketPut(`person:${person}`);
     const adding = outcomeOf(addWith(failing, source, text, theirs));
     await vi.waitFor(
