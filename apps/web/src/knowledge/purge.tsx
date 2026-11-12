@@ -84,9 +84,14 @@ type Stage =
   | { at: "plan"; input: PurgeInput; plan: PurgePlan }
   | { at: "done"; result: PurgeResult };
 
-/** What the plan says the purge would remove, as counts. */
+/**
+ * What the plan says the purge would remove, as counts: of the documents
+ * named, and a person's own memory records for a personal purge. A
+ * content purge also cleans everyone's memory records and Grasp's copies
+ * of people's words, but counts none of them.
+ */
 const PlanCounts = ({
-  plan: { documents, versions, occurrences, memories, hostCopies, originals },
+  plan: { documents, versions, occurrences, memories, originals },
 }: {
   plan: PurgePlan;
 }) => (
@@ -112,20 +117,15 @@ const PlanCounts = ({
         value={occurrences}
       />
     </li>
-    <li>
-      <Plural
-        one="# memory record redacted or deleted"
-        other="# memory records redacted or deleted"
-        value={memories}
-      />
-    </li>
-    <li>
-      <Plural
-        one="# copy outside Knowledge cleaned"
-        other="# copies outside Knowledge cleaned"
-        value={hostCopies}
-      />
-    </li>
+    {memories === undefined ? null : (
+      <li>
+        <Plural
+          one="# memory record redacted or deleted"
+          other="# memory records redacted or deleted"
+          value={memories}
+        />
+      </li>
+    )}
     <li>
       <Plural
         one="# uploaded original deleted"

@@ -354,13 +354,9 @@ const textsOf = ({ name, reading, answer }: OnboardingDocument): string[] => [
  */
 export const documentReadingErasure = (
   env: Env
-): Pick<OnErase, "count" | "rewrite" | "forgetDocuments"> => {
+): Pick<OnErase, "rewrite" | "forgetDocuments"> => {
   const store = onboardingStore(env);
   return {
-    count: async (holds) => {
-      const shared = await store.documents(true);
-      return shared.filter((document) => textsOf(document).some(holds)).length;
-    },
     rewrite: async (by, rewrite) => {
       const shared = await store.documents(true);
       const holding = shared.filter((document) =>

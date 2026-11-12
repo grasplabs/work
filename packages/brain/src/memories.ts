@@ -268,14 +268,6 @@ const recordsPerScanPage = 200;
  */
 const recordsPerEraseBatch = 50;
 
-/** How many of `changes` redact a record, and how many delete one. */
-const erasedCounts = (
-  changes: readonly { now: string | null }[]
-): { redacted: number; deleted: number } => {
-  const deleted = changes.filter(({ now }) => now === null).length;
-  return { redacted: changes.length - deleted, deleted };
-};
-
 interface StatementRow {
   id: string;
   revision: number;
@@ -312,22 +304,6 @@ const scanStatements = async (
 };
 
 /**
- * How many records' statements `holds` is true of, everyone's: those a
- * content purge's terms are in, which it would erase (its plan) or failed
- * to (its check).
- */
-export const countStatements = async <C>(
-  { db }: Brain<C>,
-  holds: (statement: string) => boolean
-): Promise<number> => {
-  let total = 0;
-  await scanStatements(db, (page) => {
-    total += page.filter(({ statement }) => holds(statement)).length;
-  });
-  return total;
-};
-
-/**
  * Erases what a content purge removes from every record's statement,
  * whoever's it is (GRA-1027): `erase` says, for each statement, what it
  * becomes (itself when it holds nothing to remove), or `null` when
@@ -339,14 +315,13 @@ export const countStatements = async <C>(
  *
  * A write is conditional on the revision read, so a record changed since
  * (deleted by a personal purge, say) is left as it is, unrecorded. A
- * record remembered after its page was read isn't reached: the purge's
- * check counts it (`countStatements`), and running the purge again
- * erases it.
+ * record remembered after its page was read isn't reached: running the
+ * purge again erases it. Nothing counts the records a purge's terms are
+ * in (purge.ts): the count would say what people's private records hold.
  *
  * Receipts stay: they hold no text (the request's hash is keyed to the
  * deployment), and a retry of the remember they answer must replay them
- * rather than store the statement again. Returns how many records it
- * redacted and deleted.
+ * rather than store the statement again.
  */
 export const eraseStatements = async <C>(
   brain: Brain<C>,
@@ -355,15 +330,9 @@ export const eraseStatements = async <C>(
   erase: (statement: string) => string | null,
   /** Each change is made only while it holds (a purge's hold, as it runs). */
   holds: () => SQL = () => sql`1`,
-  /**
-   * What each batch carries besides: given what was changed with it, in
-   * all, so far (a purge's hold on its step, and its count).
-   */
-  also: (soFar: {
-    redacted: number;
-    deleted: number;
-  }) => BatchItem<"sqlite">[] = () => []
-): Promise<{ redacted: number; deleted: number }> => {
+  /** What each batch carries besides (a purge's hold on its step). */
+  also: () => BatchItem<"sqlite">[] = () => []
+): Promise<void> => {
   const { db } = brain;
   const changes: { id: string; revision: number; now: string | null }[] = [];
   await scanStatements(db, (page) => {
@@ -435,14 +404,9 @@ export const eraseStatements = async <C>(
     const [first, ...rest] = batch.flatMap(write);
     if (first !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await auditedBatch(brain.ports, db, [
-        first,
-        ...rest,
-        ...also(erasedCounts(changes.slice(0, at + batch.length))),
-      ]);
+      await auditedBatch(brain.ports, db, [first, ...rest, ...also()]);
     }
   }
-  return erasedCounts(changes);
 };
 
 /**

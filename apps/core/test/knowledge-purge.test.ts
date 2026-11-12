@@ -149,7 +149,6 @@ describe("a personal purge", setUpTime, () => {
         occurrences: 0,
         inLongerWords: 0,
         memories: 1,
-        hostCopies: 0,
         originals: 0,
         token: "string",
         expiresAt: "string",
@@ -323,7 +322,6 @@ describe("a purge of content's memory records", setUpTime, () => {
     const colleagues = await colleague.api.knowledge.memoriesList();
     const purgeId = outcomeOf?.result.purgeId;
     expect({
-      planned: outcomeOf?.plan.memories,
       stillFound: outcomeOf?.result.stillFound,
       leavers: leavers.records.map(({ statement, revision }) => ({
         statement,
@@ -349,14 +347,10 @@ describe("a purge of content's memory records", setUpTime, () => {
         .toSorted((one, other) =>
           (one.target?.id ?? "").localeCompare(other.target?.id ?? "")
         ),
-      prepared: events.find(
-        ({ action }) => action === "knowledge.purge.prepared"
-      )?.detail.memories,
       carriesText: JSON.stringify(events)
         .toLowerCase()
         .includes(name.toLowerCase()),
     }).toStrictEqual({
-      planned: 2,
       stillFound: 0,
       leavers: [{ statement: "I report to (removed).", revision: 2 }],
       colleagues: ["I work in payroll."],
@@ -376,7 +370,6 @@ describe("a purge of content's memory records", setUpTime, () => {
           detail: { purgeId, change: "deleted", revision: 1 },
         },
       ].toSorted((one, other) => one.target.id.localeCompare(other.target.id)),
-      prepared: 2,
       carriesText: false,
     });
   });
@@ -443,7 +436,7 @@ describe("a purge of content's memory records", setUpTime, () => {
     });
   });
 
-  it("reports a record remembered after it read them, which a run again erases", async () => {
+  it("leaves a record remembered after it read them to a run again, which erases it", async () => {
     const admin = await personOf("admin");
     const teammate = await personOf("user");
     const name = `Smit${unique()}`;
@@ -481,19 +474,17 @@ describe("a purge of content's memory records", setUpTime, () => {
       reason: "erasure_request",
     };
     const plan = await racing.knowledge.preparePurge(input);
-    const first = await racing.knowledge.purge(input, plan.token);
+    await racing.knowledge.purge(input, plan.token);
     const afterRace = await statementsOf(teammate);
     const again = await purged(admin, input);
     expect({
       raced,
-      stillFound: first.stillFound,
       afterRace,
       again: again.result.stillFound,
       memories: await statementsOf(teammate),
       held: await holding(name),
     }).toStrictEqual({
       raced: true,
-      stillFound: 1,
       afterRace: ["(removed) approves leave.", `Thank ${name}.`].toSorted(),
       again: 0,
       memories: ["(removed) approves leave.", "Thank (removed)."].toSorted(),
@@ -521,18 +512,16 @@ describe("a purge of content's memory records", setUpTime, () => {
     await rememberAs(teammate, `Ask ${term.toUpperCase()} first.`);
     await rememberAs(teammate, `I met ${decomposed} today.`);
     // Typed decomposed as a term too: the same word.
-    const { plan, result } = await purged(admin, {
+    const { result } = await purged(admin, {
       type: "content",
       documentIds: [document.id],
       terms: [decomposed],
       reason: "erasure_request",
     });
     expect({
-      planned: plan.memories,
       stillFound: result.stillFound,
       memories: await statementsOf(teammate),
     }).toStrictEqual({
-      planned: 3,
       stillFound: 0,
       memories: [
         "Ask (removed) first.",
@@ -542,7 +531,7 @@ describe("a purge of content's memory records", setUpTime, () => {
     });
   });
 
-  it("counts the forms it leaves on purpose, as the index would find them, in its plan and its check", async () => {
+  it("leaves in memory records the forms it leaves on purpose, though the index would find them", async () => {
     const admin = await personOf("admin");
     const teammate = await personOf("user");
     const suffix = unique();
@@ -570,21 +559,19 @@ describe("a purge of content's memory records", setUpTime, () => {
       await rememberAs(teammate, text);
     }
     await rememberAs(teammate, `Ask ${term} first.`);
-    // Inside a longer word: another token, never counted.
+    // Inside a longer word: another token.
     await rememberAs(teammate, `Ask Renes${suffix}x first.`);
-    const { plan, result } = await purged(admin, {
+    const { result } = await purged(admin, {
       type: "content",
       documentIds: [document.id],
       terms: [term, pair],
       reason: "erasure_request",
     });
     expect({
-      planned: plan.memories,
       stillFound: result.stillFound,
       memories: await statementsOf(teammate),
     }).toStrictEqual({
-      planned: 4,
-      stillFound: 3,
+      stillFound: 0,
       memories: [
         ...left,
         "Ask (removed) first.",
@@ -593,7 +580,7 @@ describe("a purge of content's memory records", setUpTime, () => {
     });
   });
 
-  it("leaves a record changed between its read and its batch, unrecorded, and reports it", async () => {
+  it("leaves a record changed between its read and its batch, unrecorded", async () => {
     const admin = await personOf("admin");
     const teammate = await personOf("user");
     const other = await personOf("user");
@@ -636,14 +623,12 @@ describe("a purge of content's memory records", setUpTime, () => {
       terms: [name],
       reason: "erasure_request",
     };
-    let stillFound: number | undefined;
     const events = await auditedDuring(async () => {
       const plan = await racing.knowledge.preparePurge(input);
-      ({ stillFound } = await racing.knowledge.purge(input, plan.token));
+      await racing.knowledge.purge(input, plan.token);
     });
     expect({
       changed,
-      stillFound,
       teammate: await statementsOf(teammate),
       other: await statementsOf(other),
       events: events.filter(
@@ -651,14 +636,13 @@ describe("a purge of content's memory records", setUpTime, () => {
       ).length,
     }).toStrictEqual({
       changed: true,
-      stillFound: 1,
       teammate: [`${name} approves leave. Again.`],
       other: ["Ask (removed)."],
       events: 1,
     });
   });
 
-  it("counts what it removes, where the index's tokens differ: a script without spaces, an emoji, a final sigma", async () => {
+  it("removes a term where the index's tokens differ: a script without spaces, an emoji, a final sigma", async () => {
     const admin = await personOf("admin");
     const teammate = await personOf("user");
     const tag = unique();
@@ -679,7 +663,7 @@ describe("a purge of content's memory records", setUpTime, () => {
       teammate,
       `Ask X${tag}\u039F\u0394\u03A5\u03A3\u03A3\u0395\u03A5\u03A3 now`
     );
-    const { plan, result } = await purged(admin, {
+    const { result } = await purged(admin, {
       type: "content",
       documentIds: [document.id],
       terms: [
@@ -690,11 +674,9 @@ describe("a purge of content's memory records", setUpTime, () => {
       reason: "erasure_request",
     });
     expect({
-      planned: plan.memories,
       stillFound: result.stillFound,
       memories: await statementsOf(teammate),
     }).toStrictEqual({
-      planned: 3,
       stillFound: 0,
       memories: [
         "(removed)\u3055\u3093\u306B\u805E\u304F",
@@ -704,7 +686,7 @@ describe("a purge of content's memory records", setUpTime, () => {
     });
   });
 
-  it("reports a record in a script without spaces remembered after it read them", async () => {
+  it("leaves to a run again a record in a script without spaces remembered after it read them", async () => {
     const admin = await personOf("admin");
     const teammate = await personOf("user");
     const cjk = `\u7530\u4E2D${unique()}`;
@@ -740,14 +722,12 @@ describe("a purge of content's memory records", setUpTime, () => {
       reason: "erasure_request",
     };
     const plan = await racing.knowledge.preparePurge(input);
-    const first = await racing.knowledge.purge(input, plan.token);
+    await racing.knowledge.purge(input, plan.token);
     expect({
       raced,
-      stillFound: first.stillFound,
       memories: await statementsOf(teammate),
     }).toStrictEqual({
       raced: true,
-      stillFound: 1,
       memories: [
         "(removed)\u3055\u3093\u306B\u805E\u304F",
         `${cjk}\u3055\u3093\u306B\u611F\u8B1D`,

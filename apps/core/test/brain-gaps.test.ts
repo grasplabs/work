@@ -820,12 +820,10 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
     );
 
     expect({
-      planned: contentPlan.hostCopies,
       contentAnswer: afterContent?.answer,
       answeredBy: afterPersonal?.answeredBy,
       answer: afterPersonal?.answer,
     }).toStrictEqual({
-      planned: 1,
       contentAnswer: `Ask ${purgedMarker}, she knows.`,
       answeredBy: undefined,
       answer: `Ask ${purgedMarker}, she knows.`,

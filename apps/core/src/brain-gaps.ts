@@ -411,22 +411,6 @@ export const redactGapAnswer = async (
 };
 
 /**
- * How many gap answers `holds` is true of: those a content purge's terms
- * are in, which it would rewrite (its plan) or failed to (its check).
- */
-const countGapAnswers = async (
-  env: Env,
-  holds: (text: string) => boolean
-): Promise<number> => {
-  const answered = await drizzle(env.DB)
-    .select({ answer: brainGapStates.answer })
-    .from(brainGapStates)
-    .where(isNotNull(brainGapStates.answer));
-  return answered.filter(({ answer }) => answer !== null && holds(answer))
-    .length;
-};
-
-/**
  * Rewrites every gap answer with `rewrite` (a content purge's: its terms
  * replaced), as `person`; an answer it leaves as it is isn't written.
  * Returns how many it rewrote.
@@ -502,8 +486,7 @@ const eraseGapAnswerer = async (
  */
 export const gapAnswerErasure = (
   env: Env
-): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
-  count: async (holds) => await countGapAnswers(env, holds),
+): Pick<OnErase, "rewrite" | "forgetActor"> => ({
   rewrite: async (by, rewrite) => {
     await rewriteGapAnswers(env, auditActorSchema.parse(by.actor), rewrite);
   },

@@ -694,23 +694,15 @@ describe(
       const named = await share(admin, `named-${unique()}.docx`, other);
       const holding = await share(admin, `holding-${unique()}.docx`, word);
       const kept = await share(admin, `kept-${unique()}.docx`, sentinelOf());
-      const plan = await admin.knowledge.preparePurge({
-        type: "content",
-        documentIds: [named.document],
-        terms: [word],
-        reason: "erasure_request",
-      });
       await purge(admin, [named.document], [word]);
       const documents = await admin.onboarding.documents();
       const listed = new Set(documents.map(({ id }) => id));
       expect({
-        hostCopies: plan.hostCopies,
         named: listed.has(named.upload),
         holding: listed.has(holding.upload),
         kept: listed.has(kept.upload),
         left: await storeTablesWith(word),
       }).toStrictEqual({
-        hostCopies: 1,
         named: false,
         holding: false,
         kept: true,

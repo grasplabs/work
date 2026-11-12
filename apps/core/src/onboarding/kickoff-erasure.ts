@@ -14,13 +14,9 @@ import { onboardingStore } from "./store.ts";
  */
 export const kickoffErasure = (
   env: Env
-): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => {
+): Pick<OnErase, "rewrite" | "forgetActor"> => {
   const store = onboardingStore(env);
   return {
-    count: async (holds) => {
-      const texts = await store.kickoffTexts();
-      return texts.some(holds) ? 1 : 0;
-    },
     rewrite: async (by, rewrite) => {
       // First: a save whose reading began before now is refused from here
       // on; one saved already is in the kickoff read next.

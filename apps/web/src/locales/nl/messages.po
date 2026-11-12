@@ -577,10 +577,6 @@ msgstr "{hidden, plural, one {Nog # tonen} other {Nog # tonen}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} op {resource}"
 
-#: src/knowledge/purge.tsx
-msgid "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
-msgstr "{hostCopies, plural, one {# kopie buiten Kennis opgeschoond} other {# kopieën buiten Kennis opgeschoond}}"
-
 #: src/brain/thinking/use-thinking.ts
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
 msgstr "{hours, plural, one {# uur per week in alles wat Grasp kan tellen} other {# uur per week in alles wat Grasp kan tellen}}"

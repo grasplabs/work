@@ -260,7 +260,6 @@ export const newCollection = async (
 
 /** A host's copies of nothing: a purge reaches only the Brain's own. */
 export const noCopies: OnErase = {
-  count: async () => await Promise.resolve(0),
   rewrite: async () => {
     await Promise.resolve();
   },

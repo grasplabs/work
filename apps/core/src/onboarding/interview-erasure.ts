@@ -205,20 +205,9 @@ const rewriteOne = async (
  */
 export const interviewErasure = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
-): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => {
+): Pick<OnErase, "rewrite" | "forgetActor"> => {
   const store = onboardingStore(env);
   return {
-    count: async (holds) => {
-      let holding = 0;
-      for (const person of await store.interviewPeople()) {
-        // oxlint-disable-next-line no-await-in-loop -- one interview after another
-        const stored = await store.interviewStored(person);
-        if (wordsIn(stored).some(holds)) {
-          holding += 1;
-        }
-      }
-      return holding;
-    },
     rewrite: async (by, rewrite) => {
       const actor = auditActorSchema.parse(by.actor);
       for (const person of await store.interviewPeople()) {
@@ -246,22 +235,9 @@ export const interviewErasure = (
  */
 export const drawingErasure = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
-): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => {
+): Pick<OnErase, "rewrite" | "forgetActor"> => {
   const store = onboardingStore(env);
   return {
-    count: async (holds) => {
-      const { drawings, differences, teams, works } =
-        await store.drawingsSaid();
-      return (
-        drawings.filter(({ drawn }) => holds(drawn)).length +
-        differences.filter(({ way, other }) => [way, other].some(holds))
-          .length +
-        teams.filter(({ does }) => holds(does)).length +
-        works.filter(({ name, local, one, many }) =>
-          [name, local, one, many].some(holds)
-        ).length
-      );
-    },
     rewrite: async (by, rewrite) => {
       const { drawings, differences, teams, works } =
         await store.drawingsSaid();

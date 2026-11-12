@@ -1293,16 +1293,6 @@ const changedBody = (
   return mapWords(value, "", typeIn(value), change);
 };
 
-/** Whether a stored record's words hold what `holds` looks for. */
-const bodyHolds = (body: string, holds: (text: string) => boolean): boolean => {
-  let found = false;
-  changedBody(body, (text) => {
-    found ||= holds(text);
-    return text;
-  });
-  return found;
-};
-
 /** Records one batch of a purge rewrites: two statements each. */
 const recordsPerPurgeBatch = 40;
 
@@ -1362,17 +1352,6 @@ const rewriteRecords = async (
   }
 };
 
-/** How many records' words `holds` is true of. */
-const countRecords = async (
-  env: Env,
-  holds: (text: string) => boolean
-): Promise<number> => {
-  const rows = await drizzle(env.DB)
-    .select({ body: brainRecords.body })
-    .from(brainRecords);
-  return rows.filter(({ body }) => bodyHolds(body, holds)).length;
-};
-
 /**
  * The Playbook's records as a Knowledge purge reaches them: their words
  * are people's too, so a content purge rewrites them. No record names
@@ -1380,8 +1359,7 @@ const countRecords = async (
  */
 export const brainRecordErasure = (
   env: Env
-): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
-  count: async (holds) => await countRecords(env, holds),
+): Pick<OnErase, "rewrite" | "forgetActor"> => ({
   rewrite: async (by, rewrite) => {
     await rewriteRecords(env, auditActorSchema.parse(by.actor), rewrite);
   },
