@@ -154,6 +154,17 @@ describe("an organization's brain", () => {
 });
 
 /** The Brain as a core reports it: a parked item, a store of `bytes`, a ledger through. */
+/** Totals of people's own stores while none holds anything. */
+const noOwnStores = {
+  stores: 0,
+  waiting: 0,
+  oldestWaitingAt: null,
+  parked: 0,
+  failing: 0,
+  notRebuilt: 0,
+  nearLimit: 0,
+};
+
 const brainReport = (bytes: number): BrainReport => ({
   now: "2026-11-12T10:00:00.000Z",
   queue: {
@@ -215,15 +226,7 @@ const brainReport = (bytes: number): BrainReport => ({
     },
     withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
   },
-  ownStores: {
-    stores: 0,
-    waiting: 0,
-    oldestWaitingAt: null,
-    parked: 0,
-    failing: 0,
-    notRebuilt: 0,
-    nearLimit: 0,
-  },
+  ownStores: noOwnStores,
 });
 
 /** A read of a client's Brain from its core, as the section's server function makes it. */
@@ -651,7 +654,7 @@ describe("how an organization's Brain is doing", () => {
     calm.core.admin = heardSnapshot("Calm");
     calm.core.brain = {
       ...report,
-      ownStores: { ...report.ownStores, stores: 1 },
+      ownStores: { ...noOwnStores, stores: 1 },
     };
     acme.core.brain = {
       ...report,
@@ -695,5 +698,26 @@ describe("how an organization's Brain is doing", () => {
       one: true,
       calm: false,
     });
+  });
+
+  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, and says they aren't available yet", async () => {
+    const older = await liveClient();
+    older.core.admin = heardSnapshot("Older");
+    const { ownStores: _left, ...report } = brainReport(1_000_000);
+    older.core.brain = report;
+
+    const { status, html } = await page(
+      `/organizations/${older.clientId}/brain`
+    );
+    const own = textOf(ownStoresPartOf(html));
+
+    expect({
+      status,
+      rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      notYet: own.includes(
+        "This client’s release doesn’t report people’s own stores yet."
+      ),
+      totals: own.includes("Waiting"),
+    }).toStrictEqual({ status: 200, rest: true, notYet: true, totals: false });
   });
 });

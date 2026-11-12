@@ -701,12 +701,23 @@ const Steps = ({ report }: { report: BrainReport }) => {
 const OwnStores = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
   const own = report.ownStores;
+  const description =
+    "What one person alone may read is kept in a store of their own, which runs its own upkeep. Totals across them only: never which person.";
+  if (own === undefined) {
+    // A core of an older release, on a slower channel, doesn't send them.
+    return (
+      <Section description={description} title="People's own stores">
+        <SectionRow label="Not available yet">
+          <span>
+            This client’s release doesn’t report people’s own stores yet.
+          </span>
+        </SectionRow>
+      </Section>
+    );
+  }
   const people = `${whole(own.stores)} ${plural(own.stores, "person", "people")}`;
   return (
-    <Section
-      description="What one person alone may read is kept in a store of their own, which runs its own upkeep. Totals across them only: never which person."
-      title="People's own stores"
-    >
+    <Section description={description} title="People's own stores">
       <SectionRow
         description="Stores holding anything, as their own upkeep last found them."
         label="Stores"

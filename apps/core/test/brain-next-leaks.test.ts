@@ -1169,10 +1169,12 @@ describe(
         `person-${crypto.randomUUID()}`,
         `person-${crypto.randomUUID()}`,
       ];
-      // An overview as a store reports it, with `waiting` items and `parked`.
+      // An overview as a store that holds something reports it, with
+      // `waiting` items and `parked` (one holding nothing has no row).
       const base = await ownStoreOf(first).workOverview();
       const holding = (waiting: number, parked: number) => ({
         ...base,
+        holding: true,
         waiting:
           waiting === 0
             ? []
@@ -1185,6 +1187,7 @@ describe(
               ],
         parkedCount: parked,
       });
+      const before = await ownTotals();
       await reportAs(first, holding(5, 2));
       await reportAs(second, holding(0, 0));
       const oneHoldsAll = await ownTotals();
@@ -1196,7 +1199,17 @@ describe(
         await erasePerson(env, { personId: person, reason: "person_erased" });
       }
 
-      expect(theOtherHoldsAll).toStrictEqual(oneHoldsAll);
+      expect({
+        added: {
+          stores: oneHoldsAll.stores - before.stores,
+          waiting: oneHoldsAll.waiting - before.waiting,
+          parked: oneHoldsAll.parked - before.parked,
+        },
+        same: theOtherHoldsAll,
+      }).toStrictEqual({
+        added: { stores: 2, waiting: 5, parked: 2 },
+        same: oneHoldsAll,
+      });
     });
   }
 );

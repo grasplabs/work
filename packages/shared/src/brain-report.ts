@@ -239,24 +239,28 @@ export const brainReportSchema = z.object({
    * People's own stores (what one person alone may read), as each last
    * told core of itself when its tick ended: totals across them only,
    * never a store, a person or anything a store holds. `recall` above is
-   * the shared store's, which every recall searches.
+   * the shared store's, which every recall searches. Core always sends
+   * it; optional only so the admin reads a core of an older release (one
+   * on a slower channel) and shows the rest of its report.
    */
-  ownStores: z.object({
-    /** Stores that hold anything, as their own work last found them. */
-    stores: count,
-    /** Items waiting in their queues. */
-    waiting: count,
-    /** When the item waiting longest across them was added; null while none waits. */
-    oldestWaitingAt: isoTime.nullable(),
-    /** Items parked in their queues. */
-    parked: count,
-    /** Stores whose last tick failed a step, whose queue is paused, or whose ledger isn't read through. */
-    failing: count,
-    /** Stores whose rebuild for the shipped model isn't done. */
-    notRebuilt: count,
-    /** Stores near what one object holds. */
-    nearLimit: count,
-  }),
+  ownStores: z
+    .object({
+      /** Stores that hold anything, as their own work last found them. */
+      stores: count,
+      /** Items waiting in their queues. */
+      waiting: count,
+      /** When the item waiting longest across them was added; null while none waits. */
+      oldestWaitingAt: isoTime.nullable(),
+      /** Items parked in their queues. */
+      parked: count,
+      /** Stores whose last tick failed a step, whose queue is paused, or whose ledger isn't read through. */
+      failing: count,
+      /** Stores whose rebuild for the shipped model isn't done. */
+      notRebuilt: count,
+      /** Stores near what one object holds. */
+      nearLimit: count,
+    })
+    .optional(),
 });
 export type BrainReport = z.infer<typeof brainReportSchema>;
 

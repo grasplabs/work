@@ -1880,7 +1880,7 @@ const recallOf = (recall: WorkOverview["recall"]): BrainReport["recall"] =>
  */
 export const brainStaffReport = async (
   env: BrainEnv & Pick<Env, "DB">
-): Promise<BrainReport> => {
+): Promise<BrainReport & Required<Pick<BrainReport, "ownStores">>> => {
   const [overview, own] = await Promise.all([
     brain(env).workOverview(),
     ownStoresTotals(env),
