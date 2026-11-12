@@ -479,6 +479,9 @@ describe("recall, as staff see it", () => {
       readers: { kind: "owner", personId: userId },
     });
     const before = await reported(recallCountsOf);
+    if (before === null) {
+      throw new Error("The report held no recall counts.");
+    }
 
     const whole = { tokens: 4000 };
     // Words alone (a marker is an ID, so it would be an exact part too).
@@ -500,15 +503,12 @@ describe("recall, as staff see it", () => {
         text.includes(each)
       ),
     }).toStrictEqual({
-      after:
-        before === null
-          ? null
-          : {
-              words: [(before.words[0] ?? 0) + 2, before.words[1]],
-              exact: [(before.exact[0] ?? 0) + 1, before.exact[1]],
-              meaning: before.meaning,
-              without: before.without,
-            },
+      after: {
+        words: [(before.words[0] ?? 0) + 2, before.words[1]],
+        exact: [(before.exact[0] ?? 0) + 1, before.exact[1]],
+        meaning: before.meaning,
+        without: before.without,
+      },
       content: [],
     });
   });
