@@ -26,6 +26,7 @@ import {
 } from "./fixtures/brain-eval/set.ts";
 import type { Returned } from "./fixtures/brain-eval/set.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 
 // The Brain evaluation (GRA-1726), on request only: scripts/brain-eval.ts
 // runs it and reports (`vp run brain:eval`). It puts the evaluation's
@@ -79,7 +80,7 @@ const embedEverything = async (): Promise<string | null> => {
   for (let tick = 0; tick < embeddingTicksMost; tick += 1) {
     at += 60 * 60 * 1000;
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
-    await workBrain(env, new Date(at));
+    await workBrain(env, new Date(at), noProducers);
     // oxlint-disable-next-line no-await-in-loop -- read after each tick
     const { embedding } = await brainWorkOverview(env);
     if (

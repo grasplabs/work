@@ -18,6 +18,7 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
 
 // Sources kept whole and versioned (GRA-1723), through core's functions
@@ -891,13 +892,17 @@ describe(
 
       // Within an add's time, the sweep leaves the file for the add, even
       // when its caller's clock runs ahead.
-      await workBrain(env, new Date());
-      await workBrain(env, new Date(Date.now() + fileGraceMs + 60_000));
+      await workBrain(env, new Date(), noProducers);
+      await workBrain(
+        env,
+        new Date(Date.now() + fileGraceMs + 60_000),
+        noProducers
+      );
       const withinTime = await fileOf(lostText);
       later(fileGraceMs + 1);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       // Late or twice is harmless.
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       const pastTime = {
         file: await fileOf(lostText),
         count: await countOn(lostText),
@@ -930,17 +935,17 @@ describe(
 
       later(fileGraceMs + 1);
       const restore = await refuseDeleting(stuckText);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       restore();
       const afterRefusal = {
         stuck: await fileOf(stuckText),
         free: await fileOf(freeText),
       };
       // Noted afresh: it waits a grace before it is tried again.
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       const sameTick = await fileOf(stuckText);
       later(fileGraceMs + 1);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
 
       expect({
         afterRefusal,
@@ -978,7 +983,7 @@ describe(
       await vi.waitFor(() => {
         expect(gate.reached).toBeTruthy();
       });
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       gate.released = true;
 
       expect({
@@ -1015,7 +1020,7 @@ describe(
         expect(gate.reached).toBeTruthy();
       });
       later(fileGraceMs + 60_000);
-      await workBrain(env, new Date());
+      await workBrain(env, new Date(), noProducers);
       gate.released = true;
       const outcome = await stalled;
       expect("error" in outcome ? String(outcome.error) : "added").toMatch(

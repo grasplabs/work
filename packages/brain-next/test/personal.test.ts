@@ -10,6 +10,7 @@ import type {
   Access,
   AskModel,
   Embedders,
+  HandOvers,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -1171,9 +1172,25 @@ const noModel: Embedders = {
   },
 };
 
+/**
+ * No side of hand-overs: a person's own store never queues one, so a tick
+ * of it is given one that hands nothing over.
+ */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+    return { kind: "nothing" };
+  },
+};
+
 /** A tick of this test's person's store, as its alarm runs one with no model. */
 const tick = async (): Promise<void> => {
-  await own().work(quietAsk, new Date(), noModel);
+  await own().work({
+    ask: quietAsk,
+    at: new Date(),
+    embedders: noModel,
+    handOvers: noHandOvers,
+  });
 };
 
 /** Runs `change` in this test's person's store, in its own storage. */
@@ -1303,10 +1320,15 @@ const leavingWork: Record<string, () => Promise<void>> = {
   },
 };
 
-/** The methods that only read, or take work away (`erasePerson` erases it all). */
+/**
+ * The methods that only read, or take work away (`erasePerson` erases it
+ * all), or that a person's own store refuses (`handOver`: the shared
+ * store's alone).
+ */
 const leavingNone = [
   "erasePerson",
   "find",
+  "handOver",
   "holdsSource",
   "listSources",
   "listVersions",

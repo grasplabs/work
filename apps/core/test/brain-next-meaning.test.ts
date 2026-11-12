@@ -36,6 +36,7 @@ import type {
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // Recall by meaning through core (GRA-1769), with the embed package's
@@ -82,7 +83,7 @@ const embedEverything = async (): Promise<void> => {
   for (let tick = 0; tick < 50; tick += 1) {
     at += 60 * 60 * 1000;
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
-    await workBrain(env, new Date(at));
+    await workBrain(env, new Date(at), noProducers);
     // oxlint-disable-next-line no-await-in-loop -- read after each tick
     const { embedding } = await brainWorkOverview(env);
     if (

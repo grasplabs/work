@@ -26,6 +26,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
+import { noteHandOvers } from "./brain-hand-overs.ts";
 import { auditOutbox } from "./db/core/schema.ts";
 import { isRemovedAppRefusal } from "./db/d1.ts";
 
@@ -43,6 +44,10 @@ import { isRemovedAppRefusal } from "./db/d1.ts";
 // wait on the log; the clock drains all three every minute,
 // connect's over RPC, which is how connect's events reach the log at all
 // (connect can't reach core).
+//
+// Core's own events also note what core hands over to the new Brain
+// (brain-hand-overs.ts): before they leave the outbox, and a drain that
+// can't note them keeps them for the next.
 
 /** Most batches one clock drain of an outbox appends: 5,000 events. */
 const drainMaxBatches = 50;
@@ -68,6 +73,12 @@ interface Outbox {
    * logged, and never keeps the events from the log.
    */
   appended?: (events: readonly AuditEvent[]) => Promise<void>;
+  /**
+   * What must be done with the events the log now has before they leave
+   * the outbox: one that fails keeps them in it for the next drain, which
+   * does it again, so it must do the same thing twice over.
+   */
+  required?: (events: readonly AuditEvent[]) => Promise<void>;
 }
 
 /**
@@ -106,6 +117,17 @@ const databaseOutbox = (
         )
         .bind(...ids),
     ]);
+  },
+});
+
+/**
+ * Core's own outbox, whose events note what core hands over to the new
+ * Brain (`noteHandOvers`) before they leave it.
+ */
+const coreOutbox = (env: OutboxEnv): Outbox => ({
+  ...databaseOutbox("core", env.DB),
+  required: async (events) => {
+    await noteHandOvers(env, events);
   },
 });
 
@@ -286,10 +308,12 @@ const drainBatch = async (
       }
     }
     ({ appended } = result);
-    await handOver(
-      outbox,
-      events.filter(({ id }) => rowOf.has(id))
-    );
+    const kept = events.filter(({ id }) => rowOf.has(id));
+    if (kept.length > 0) {
+      // Not caught: the events stay in the outbox until it is done.
+      await outbox.required?.(kept);
+    }
+    await handOver(outbox, kept);
   }
   // The chain records what leaves it out before it is moved aside.
   const gaps = await Promise.all(
@@ -399,7 +423,7 @@ export const drainAuditOutboxes = async (
 ): Promise<number> => {
   const counts = await Promise.all(
     [
-      databaseOutbox("core", env.DB),
+      coreOutbox(env),
       databaseOutbox("knowledge", env.KNOWLEDGE),
       connectOutbox(env, connectAppended),
     ].map(async (outbox) => await drainLogged(env, outbox, drainMaxBatches))
@@ -408,7 +432,7 @@ export const drainAuditOutboxes = async (
 };
 
 /** What draining core's own outboxes needs. */
-export type OutboxEnv = AuditLogEnv & Pick<Env, "KNOWLEDGE">;
+export type OutboxEnv = AuditLogEnv & Pick<Env, "DB" | "KNOWLEDGE">;
 
 /** Core's or Knowledge's database, as `drizzle` gives it: with its binding. */
 type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
@@ -421,7 +445,13 @@ type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
  */
 const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
   const name = db.$client === env.KNOWLEDGE ? "knowledge" : "core";
-  waitUntil(drainLogged(env, databaseOutbox(name, db.$client), 1));
+  waitUntil(
+    drainLogged(
+      env,
+      name === "core" ? coreOutbox(env) : databaseOutbox(name, db.$client),
+      1
+    )
+  );
 };
 
 /**
