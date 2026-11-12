@@ -570,8 +570,6 @@ describe("who may read a memory", () => {
           kind: "person",
           names: ["Anna"],
           identifiers: [{ type: "email", value: email }],
-          nameCount: 1,
-          identifierCount: 1,
         },
       ],
       more: false,
@@ -855,9 +853,11 @@ describe("ending a memory", () => {
     await expect(
       statementsAbout(entities.c ?? "", reader)
     ).resolves.toStrictEqual(["Sourced"]);
-    await expect(
-      statementsAbout(entities.c ?? "", reader, { history: true })
-    ).resolves.toStrictEqual(["Sourced", "Mine"]);
+    // Both were learned in one add: compared without their order.
+    const history = await statementsAbout(entities.c ?? "", reader, {
+      history: true,
+    });
+    expect(history.toSorted()).toStrictEqual(["Mine", "Sourced"]);
   });
 });
 
@@ -1843,7 +1843,7 @@ describe("pages, attributes, and a retired newer memory", () => {
     });
   });
 
-  it("gives at most twenty names of an entity, with how many there are", async () => {
+  it("gives every name of an entity the reader may see, past what one add may give", async () => {
     const group = unique("g");
     const names = Array.from(
       { length: 25 },
@@ -1875,12 +1875,7 @@ describe("pages, attributes, and a retired newer memory", () => {
       reader: readerOf(unique("r"), group),
     });
 
-    expect({ shown: seen?.names.length, count: seen?.nameCount }).toStrictEqual(
-      {
-        shown: 20,
-        count: 25,
-      }
-    );
+    expect(seen?.names).toStrictEqual(names);
   });
 
   it("refuses a read under an attribute no kind lists, or the entity's kind lacks, and answers an unseen entity as an unknown one", async () => {
@@ -1905,5 +1900,163 @@ describe("pages, attributes, and a retired newer memory", () => {
       await read("role", readerOf(unique("stranger"))),
       await read("renewal_date", readerOf(unique("r"), group)),
     ]).toStrictEqual(["refused", "refused", 0, 0]);
+  });
+});
+
+/** A short wait, so memories added after it are learned later. */
+const later = async (): Promise<void> => {
+  await scheduler.wait(5);
+};
+
+/** A writer's memory of a customer's status. */
+const status = (writer: string, value: string): NewMemory =>
+  fact(
+    { kind: "writer", writer },
+    { attribute: "status", value, statement: value }
+  );
+
+describe("pages read at one moment, and what a start replays", () => {
+  it("returns every memory once across pages though a confirmation lands between them", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [status(unique("w1"), "A")]
+    );
+    const entity = made.entities.c ?? "";
+    await later();
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [status(unique("w2"), "B")]
+    );
+    const first = await shared().readMemories({ entity, reader, limit: 1 });
+    await shared().confirmMemory({ memory: made.memories[0] ?? "", reader });
+    const second = await shared().readMemories({
+      entity,
+      reader,
+      limit: 10,
+      ...(first.next === undefined ? {} : { after: first.next }),
+    });
+
+    expect(
+      [...first.memories, ...second.memories]
+        .map(({ statement }) => statement)
+        .toSorted()
+    ).toStrictEqual(["A", "B"]);
+  });
+
+  it("returns every memory once across pages though a new rival lands between them", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("r"), group);
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [status(unique("w1"), "A")]
+    );
+    const entity = made.entities.c ?? "";
+    await later();
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [status(unique("w2"), "B")]
+    );
+    await shared().confirmMemory({ memory: made.memories[0] ?? "", reader });
+    const first = await shared().readMemories({ entity, reader, limit: 1 });
+    await later();
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [status(unique("w3"), "C")]
+    );
+    const second = await shared().readMemories({
+      entity,
+      reader,
+      limit: 10,
+      ...(first.next === undefined ? {} : { after: first.next }),
+    });
+
+    expect(
+      [...first.memories, ...second.memories].map(({ statement }) => statement)
+    ).toStrictEqual(["A", "B"]);
+  });
+
+  // Threat 10: an erasure an older release recorded reaches memories after the roll forward.
+  it("applies to a person's memories, at start, an erasure of them an older release recorded", async () => {
+    const person = unique("p");
+    const made = await remember(
+      { kind: "owner", person },
+      [customer({ names: [unique("Secret")] })],
+      [fact({ kind: "writer", writer: person }, { statement: "Private note" })]
+    );
+    // As the older release records a person's erasure: it knows no memories.
+    await runInDurableObject(shared(), async (_instance, state) => {
+      const subject = [
+        ...new Uint8Array(
+          await crypto.subtle.digest(
+            "SHA-256",
+            new TextEncoder().encode(person)
+          )
+        ),
+      ]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      state.storage.sql.exec(
+        `INSERT INTO erasures (key, kind, subject, reason, erased_at, confirmed)
+        VALUES (?, 'person', ?, 'person_erased', ?, 1)`,
+        `zz-${crypto.randomUUID()}`,
+        subject,
+        Date.now()
+      );
+    });
+    await kill(shared());
+
+    await expect(
+      statementsAbout(made.entities.c ?? "", readerOf(person))
+    ).resolves.toStrictEqual([]);
+  });
+
+  // Threat 10: nothing but an erasure deletes a memory, whatever an older release dropped.
+  it("keeps a person's own memories when an older release dropped their set of readers", async () => {
+    const person = unique("p");
+    const theirs: Access = { kind: "owner", person };
+    const doc = unique("doc");
+    await shared().addInstructions({
+      source: doc,
+      change: crypto.randomUUID(),
+      text: "Mine",
+      access: theirs,
+    });
+    const made = await remember(
+      theirs,
+      [customer()],
+      [fact({ kind: "writer", writer: person }, { statement: "My own note" })]
+    );
+    // As the older release erases `doc`: its version goes, and its set,
+    // which it sees nothing else use.
+    await runInDurableObject(shared(), (_instance, state) => {
+      const { sql } = state.storage;
+      state.storage.transactionSync(() => {
+        sql.exec("PRAGMA defer_foreign_keys = ON");
+        const { set, row } = sql
+          .exec<{ set: number; row: number }>(
+            `SELECT reader_set AS "set", row FROM source_versions WHERE source = ?`,
+            doc
+          )
+          .one();
+        sql.exec("DELETE FROM current_versions WHERE source = ?", doc);
+        sql.exec("DELETE FROM source_changes WHERE source = ?", doc);
+        sql.exec("DELETE FROM chunks WHERE version_row = ?", row);
+        sql.exec("DELETE FROM source_versions WHERE row = ?", row);
+        sql.exec("DELETE FROM reader_set_members WHERE reader_set = ?", set);
+        sql.exec("DELETE FROM reader_sets WHERE id = ?", set);
+      });
+    });
+    await kill(shared());
+
+    await expect(
+      statementsAbout(made.entities.c ?? "", readerOf(person))
+    ).resolves.toStrictEqual(["My own note"]);
   });
 });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cc73a726-13f6-44dc-a92c-20144af31761",
+  "id": "23f2ebdf-be0c-4bcb-bbbd-50adec002d80",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -680,6 +680,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "writer": {
           "name": "writer",
           "type": "text",
@@ -779,6 +786,14 @@
           "name": "memories_version_idx",
           "columns": [
             "source",
+            "version"
+          ],
+          "isUnique": false
+        },
+        "memories_subject_idx": {
+          "name": "memories_subject_idx",
+          "columns": [
+            "subject",
             "version"
           ],
           "isUnique": false
@@ -1005,6 +1020,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "lineage": {
           "name": "lineage",
           "type": "text",
@@ -1047,6 +1069,14 @@
           "name": "memory_extractions_readers_idx",
           "columns": [
             "readers"
+          ],
+          "isUnique": false
+        },
+        "memory_extractions_subject_idx": {
+          "name": "memory_extractions_subject_idx",
+          "columns": [
+            "subject",
+            "version"
           ],
           "isUnique": false
         },

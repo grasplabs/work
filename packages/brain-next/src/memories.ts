@@ -411,8 +411,10 @@ export interface MemoriesAsked {
  */
 export const readMemories = (
   sql: SqlStorage,
-  { entity, reader, attribute, at, history, after, limit }: MemoriesAsked
+  { entity, reader, attribute, at: asked, history, after, limit }: MemoriesAsked
 ): MemoriesRead => {
+  // Every page of one read is read at the moment of its first.
+  const at = after?.at.getTime() ?? asked;
   const found = entityRowOf(sql, entity);
   if (found === undefined) {
     return { memories: [], more: false };
@@ -442,6 +444,7 @@ export const readMemories = (
     memories,
     more: true,
     next: {
+      at: new Date(at),
       attribute: last.attribute,
       confirmed: last.confirmed !== null,
       learnedAt: last.learnedAt,
@@ -499,7 +502,7 @@ export const listContested = (
   {
     entity,
     reader,
-    at,
+    at: asked,
     after,
     limit,
   }: {
@@ -510,6 +513,8 @@ export const listContested = (
     limit: number;
   }
 ): ContestedPage => {
+  // Every page of one listing is read at the moment of its first.
+  const at = after?.at.getTime() ?? asked;
   let entityRow: number | null = null;
   if (entity !== undefined) {
     const found = entityRowOf(sql, entity);
@@ -555,6 +560,7 @@ export const listContested = (
     facts: page,
     more: true,
     next: {
+      at: new Date(at),
       learnedAt: new Date(last.first),
       entity: last.about,
       attribute: last.attribute,
@@ -716,7 +722,7 @@ matched AS MATERIALIZED (
   columns: ", matched.words AS words",
   filter: "judged.is_current = 1",
   order: `matched.words DESC, matched.exact DESC, confirmation IS NULL,
-  m.learned_at DESC, m.row DESC`,
+  m.learned_at DESC, m.id DESC`,
 });
 
 /** A memory the words way found, with how many of the question's telling words it holds. */
