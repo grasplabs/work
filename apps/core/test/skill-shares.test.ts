@@ -23,6 +23,7 @@ import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { actingFor } from "./contexts.ts";
+import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -191,18 +192,67 @@ const sharedStoreFailing = (method: string): Env => {
 const refused = async () =>
   await Promise.reject(new Error("Out of reach, for the test"));
 
+/**
+ * Core's env whose shared store runs `before` once, ahead of the first
+ * `addInstructions` it is asked: something that lands while an add is on
+ * its way.
+ */
+const sharedStoreBefore = (before: () => Promise<unknown>): Env => {
+  let ran = false;
+  const binding = env.BRAIN_STORE;
+  const getByName = (named: string) => {
+    const stub = binding.getByName(named);
+    if (named !== "brain") {
+      return stub;
+    }
+    return new Proxy(stub, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          if (property === "addInstructions" && !ran) {
+            ran = true;
+            await before();
+          }
+          const answered: unknown = await Reflect.apply(value, target, args);
+          return answered;
+        };
+      },
+    });
+  };
+  return {
+    ...env,
+    BRAIN_STORE: new Proxy(binding, {
+      get: (target, property): unknown =>
+        property === "getByName" ? getByName : Reflect.get(target, property),
+    }),
+  };
+};
+
 /** Core's env with its database refusing what `refuses` picks, as one out of reach would. */
 const databaseRefusing = (refuses: {
   sql?: RegExp;
   batches?: boolean;
 }): Env => {
   const database = env.DB;
+  /** The statements refused, alone or in a batch. */
+  const refusedStatements = new WeakSet<object>();
   return {
     ...env,
     DB: new Proxy(database, {
       get: (target, property): unknown => {
-        if (property === "batch" && refuses.batches === true) {
-          return refused;
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (
+              refuses.batches === true ||
+              statements.some((statement) => refusedStatements.has(statement))
+            ) {
+              return await refused();
+            }
+            return await target.batch(statements);
+          };
         }
         if (property === "prepare" && refuses.sql !== undefined) {
           const { sql } = refuses;
@@ -217,6 +267,7 @@ const databaseRefusing = (refuses: {
               first: refused,
               raw: refused,
             };
+            refusedStatements.add(statement);
             return statement;
           };
         }
@@ -763,7 +814,7 @@ describe("writing and sharing skills", setUpTime, () => {
       x: "ok",
       y: "ok",
       company: [1],
-      events: ["skill.share.approved"],
+      events: ["skill.share.approved", "skill.share.added"],
     });
   });
 
@@ -791,7 +842,9 @@ describe("writing and sharing skills", setUpTime, () => {
       ["skill.share.declined", false],
       ["skill.share.requested", false],
       ["skill.share.approved", false],
+      ["skill.share.added", false],
       ["skill.retired", false],
+      ["skill.retire_done", false],
     ]);
   });
 
@@ -826,7 +879,11 @@ describe("writing and sharing skills", setUpTime, () => {
       failed: "Error: Out of reach, for the test",
       memberUses: [],
       finished: ["approved", 1],
-      events: ["skill.share.approved", "skill.share.approve_failed"],
+      events: [
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.added",
+      ],
       memberUsesAfter: [["company", name]],
     });
   });
@@ -853,18 +910,17 @@ describe("writing and sharing skills", setUpTime, () => {
     const page = await overviewOf(admin.api);
 
     expect({
-      // Drizzle names the query that failed: the version's write.
-      failed: failed.startsWith('Error: Failed query: update "skill_shares"'),
+      failed,
       finished: [finished.status, finished.version],
       company: page.company
         .filter((skill) => skill.name === name)
         .map(({ version }) => version),
       events: await skillEventsAfter(head),
     }).toStrictEqual({
-      failed: true,
+      failed: "Error: Out of reach, for the test",
       finished: ["approved", 1],
       company: [1],
-      events: ["skill.share.approved"],
+      events: ["skill.share.approved", "skill.share.added"],
     });
   });
 
@@ -896,7 +952,7 @@ describe("writing and sharing skills", setUpTime, () => {
     });
   });
 
-  it("refuses to finish an approval a later approval of the same name overtook, keeping the newer text", async () => {
+  it("refuses to finish an approval a later approval of the same name overtook, keeping the newer text, and says so to its asker", async () => {
     const [author, other, admin, member] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -907,6 +963,7 @@ describe("writing and sharing skills", setUpTime, () => {
     const older = await author.api.skills.save(skillText(name, "Older"));
     const olderShare = await author.api.skills.share(name, older.version);
     const deciding = await admin.api.whoami();
+    const head = await logHead();
     // Approved, but its add never landed.
     await outcome(
       approveShare(
@@ -915,23 +972,164 @@ describe("writing and sharing skills", setUpTime, () => {
         olderShare.id
       )
     );
+    const stuck = await overviewOf(author.api);
     const newer = await other.api.skills.save(skillText(name, "Newer"));
     const newerShare = await other.api.skills.share(name, newer.version);
     await admin.api.skills.approve(newerShare.id);
 
     const stale = await outcome(admin.api.skills.approve(olderShare.id));
     const page = await overviewOf(member.api);
+    const after = await overviewOf(author.api);
+    const statesOf = (overview: SkillsOverview) =>
+      overview.shares
+        .filter((share) => share.id === olderShare.id)
+        .map(({ status, version }) => [status, version]);
+
+    expect({
+      stuck: statesOf(stuck),
+      stale,
+      after: statesOf(after),
+      company: page.company
+        .filter((skill) => skill.name === name)
+        .map(({ description }) => description),
+      waiting: page.requests,
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      stuck: [["approved", null]],
+      stale: "skills.superseded",
+      after: [["superseded", null]],
+      company: ["Newer"],
+      waiting: null,
+      events: [
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.share.superseded",
+      ],
+    });
+  });
+
+  it("puts a newer approval's text back on top when an older add lands after it", async () => {
+    const [author, other, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("close-the-shop");
+    const older = await author.api.skills.save(skillText(name, "Older"));
+    const olderShare = await author.api.skills.share(name, older.version);
+    const newer = await other.api.skills.save(skillText(name, "Newer"));
+    const newerShare = await other.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // The older approval's add is on its way when the newer one is
+    // approved and added in full.
+    const stale = await outcome(
+      approveShare(
+        sharedStoreBefore(
+          async () => await admin.api.skills.approve(newerShare.id)
+        ),
+        deciding,
+        olderShare.id
+      )
+    );
+    const page = await overviewOf(member.api);
+    const asker = await overviewOf(author.api);
 
     expect({
       stale,
       company: page.company
         .filter((skill) => skill.name === name)
         .map(({ description }) => description),
-      waiting: page.requests,
+      memberUses: await usable(member.userId, false, [name]),
+      older: asker.shares
+        .filter((share) => share.id === olderShare.id)
+        .map(({ status }) => status),
+      events: await skillEventsAfter(head),
     }).toStrictEqual({
       stale: "skills.superseded",
       company: ["Newer"],
-      waiting: null,
+      memberUses: [["company", name]],
+      older: ["superseded"],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.share.superseded",
+      ],
+    });
+  });
+
+  it("leaves a decision with no outcome when its attempt stops between the decision and the add", async () => {
+    const [author, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const name = nameOf("weigh-parcels");
+    const saved = await author.api.skills.save(skillText(name, "Weigh"));
+    const share = await author.api.skills.share(name, saved.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+    // Nothing after the decision gets through: not the add, not its
+    // outcome, as a Worker stopped half-way.
+    const stopped = {
+      ...sharedStoreFailing("addInstructions"),
+      AUDIT_LOG: failingAuditLog(),
+    };
+
+    await outcome(approveShare(stopped, deciding, share.id));
+
+    await expect(skillEventsAfter(head)).resolves.toStrictEqual([
+      "skill.share.approved",
+    ]);
+  });
+
+  it("retires again after a retirement whose Brain write failed, auditing each attempt's outcome", async () => {
+    const [author, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("shut-down");
+    const saved = await author.api.skills.save(skillText(name, "Shut"));
+    const share = await author.api.skills.share(name, saved.version);
+    await admin.api.skills.approve(share.id);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    const failed = await outcome(
+      retireSkill(sharedStoreFailing("addInstructions"), deciding, name)
+    );
+    const page = await overviewOf(admin.api);
+    const memberUses = await usable(member.userId, false, [name]);
+    const again = await outcome(admin.api.skills.retire(name));
+    const { events } = await eventsAfterWithHead(head);
+
+    expect({
+      failed,
+      listed: page.company.filter((skill) => skill.name === name).length,
+      memberUses,
+      again,
+      after: await usable(member.userId, false, [name]),
+      events: events
+        .filter(({ action }) => action.startsWith("skill."))
+        .map(({ action, detail }) => [action, detail]),
+    }).toStrictEqual({
+      failed: "Error: Out of reach, for the test",
+      listed: 1,
+      memberUses: [["company", name]],
+      again: "ok",
+      after: [],
+      events: [
+        ["skill.retired", {}],
+        ["skill.retire_failed", {}],
+        ["skill.retired", {}],
+        ["skill.retire_done", { version: 1 }],
+      ],
     });
   });
 

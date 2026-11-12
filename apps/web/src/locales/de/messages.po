@@ -1577,6 +1577,10 @@ msgstr "Ein JSON-Wert"
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Eine Wissenssuche aus {about} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
 
+#: src/brain/skills-page.tsx
+msgid "A later approval of this name was added instead."
+msgstr "Stattdessen wurde eine spätere Freigabe mit diesem Namen hinzugefügt."
+
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
 msgid "A lesson"
@@ -2722,6 +2726,10 @@ msgstr "Genehmigt in {left} s"
 #: src/activity/audit-words.ts
 msgid "Approved packages"
 msgstr "Pakete genehmigt"
+
+#: src/brain/skills-page.tsx
+msgid "Approved, but not added to the company's skills yet."
+msgstr "Freigegeben, aber noch nicht zu den Skills des Unternehmens hinzugefügt."
 
 #: src/brain/skills-page.tsx
 msgid "Approved, not added yet: approve it again"

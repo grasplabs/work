@@ -29,8 +29,17 @@ export interface SkillText {
   text: string;
 }
 
-/** Where a share of a skill stands: waiting for an admin, approved, or declined. */
-export type SkillShareStatus = "pending" | "approved" | "declined";
+/**
+ * Where a share of a skill stands: waiting for an admin; approved (added
+ * once its `version` is set); declined; or superseded, approved but a
+ * later approval of the same name came first, so its text isn't the
+ * company's.
+ */
+export type SkillShareStatus =
+  | "pending"
+  | "approved"
+  | "declined"
+  | "superseded";
 
 /** A person's ask to share one of their own skills with the company. */
 export interface SkillShare {

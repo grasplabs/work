@@ -155,14 +155,20 @@ const typeRules: readonly {
   { action: "admin.snapshot.read", type: "read" },
   { action: "admin.kickoff.read", type: "read" },
   { action: "knowledge.search", type: "read" },
-  // A person asking to share a skill, an admin approving it (once its
-  // text is the company's) or declining it, an approval whose add failed,
-  // and a company skill retired
-  // (GRA-1754): by the share's ID or the skill's name, never its text.
+  // Sharing a skill with the company (GRA-1754), by the share's ID or the
+  // skill's name, never its text. A person asking; an admin's decision
+  // (approving or declining) and, after approving, its outcome: added
+  // (with the version), failed, or superseded by a later approval. An
+  // admin's retirement of a company skill, and its outcome: done (with
+  // the version retired) or failed. A decision without an outcome is one
+  // whose attempt stopped half-way.
   { action: "skill.share.requested", type: "action" },
+  { action: "skill.share.added", type: "action" },
   { action: "skill.share.approve_failed", type: "action" },
+  { action: "skill.share.superseded", type: "action" },
   { action: "skill.share", type: "decision" },
   { action: "skill.retired", type: "config" },
+  { action: "skill.retire_done", type: "config" },
   { action: "skill.retire_failed", type: "action" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },

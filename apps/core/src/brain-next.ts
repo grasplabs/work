@@ -1552,7 +1552,8 @@ export const addCompanySkill = async (
  * Retires the company's skill `name` as the admin `adminId`: its current
  * text becomes a new version nobody reads (`retiredGroup`), so no member
  * lists, selects or reads it from then on, and every version stays in the
- * store as history. `change` as `addCompanySkill`'s. False when the
+ * store as history. `change` as `addCompanySkill`'s. Answers the version
+ * it retired, as the Brain read it just before the write; null when the
  * company has no such skill live (none, or retired already). An approved
  * share of the name makes it live again.
  */
@@ -1560,7 +1561,7 @@ export const retireCompanySkill = async (
   env: BrainEnv & Pick<Env, "DB">,
   adminId: string,
   retired: { name: string; change: string }
-): Promise<boolean> => {
+): Promise<number | null> => {
   const reader = await skillAdminOf(env, adminId);
   const skill = skillErrors.parse("skills.invalid", skillSchema, {
     scope: "company",
@@ -1574,7 +1575,7 @@ export const retireCompanySkill = async (
   const source = skillKeyOf(skill);
   const [current] = await brain(env).readCurrent({ sources: [source], reader });
   if (current === undefined) {
-    return false;
+    return null;
   }
   await brain(env).addInstructions({
     source,
@@ -1582,7 +1583,7 @@ export const retireCompanySkill = async (
     text: current.text,
     access: { kind: "audience", group: retiredGroup },
   });
-  return true;
+  return current.version;
 };
 
 /**

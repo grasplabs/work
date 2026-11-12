@@ -13,7 +13,7 @@ import type {
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, gt, isNull, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, not, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -357,40 +357,129 @@ export const shareOwnSkill = async (
 };
 
 /**
+ * Writes `entry`, an outcome, straight to the log: a failure to is logged
+ * by `failed`, never thrown, so it hides nothing the caller throws.
+ */
+const sayOutcome = async (
+  env: Env,
+  entry: AuditEntry,
+  failed: string
+): Promise<void> => {
+  try {
+    await appendAuditEvent(env, entry);
+  } catch (error) {
+    log.error(failed, errorFields(error));
+  }
+};
+
+/** That a share approved after `share`, of the same name, exists, as SQL. */
+const laterApprovalOf = (share: Pick<ShareRow, "id" | "name" | "decidedAt">) =>
+  sql`EXISTS (
+    SELECT 1 FROM ${skillShares} later
+    WHERE later.name = ${share.name}
+      AND later.status = 'approved'
+      AND later.id <> ${share.id}
+      AND later.decided_at > ${share.decidedAt?.getTime() ?? 0}
+  )`;
+
+/**
  * Whether a later approval of the same name than `share`'s overtook it:
- * then finishing `share` now would write its older text over the newer.
+ * then adding `share`'s text now would write the older text over the newer.
  */
 const overtaken = async (
   env: Env,
   share: Pick<ShareRow, "id" | "name" | "decidedAt">
 ): Promise<boolean> => {
-  if (share.decidedAt === null) {
-    return false;
-  }
-  const [later] = await drizzle(env.DB)
-    .select({ id: skillShares.id })
+  const [row] = await drizzle(env.DB)
+    .select({ overtaken: sql<number>`${laterApprovalOf(share)}` })
+    .from(sql`(SELECT 1)`);
+  return row?.overtaken === 1;
+};
+
+/**
+ * Marks `share` superseded, its text dropped, with its outcome
+ * (`skill.share.superseded`), once: while it is still approved and not
+ * added.
+ */
+const supersede = async (
+  env: Env,
+  by: Identity,
+  share: Pick<ShareRow, "id">
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(skillShares)
+      .set({ status: "superseded", text: null })
+      .where(
+        and(
+          eq(skillShares.id, share.id),
+          eq(skillShares.status, "approved"),
+          isNull(skillShares.version)
+        )
+      ),
+    outboxedIfChanged(db, shareEntry(by, "superseded", share.id)),
+  ]);
+};
+
+/**
+ * After `share`'s text landed in the Brain although a later approval of
+ * the same name exists: puts the latest approval's text back on top
+ * (under a change of its own, which adds nothing when it is current
+ * already), so an older text never stays over a newer approval.
+ */
+const restoreNewest = async (
+  env: Env,
+  by: Identity,
+  share: Pick<ShareRow, "id" | "name">
+): Promise<void> => {
+  const [newest] = await drizzle(env.DB)
+    .select({ text: skillShares.text, version: skillShares.version })
     .from(skillShares)
     .where(
       and(
         eq(skillShares.name, share.name),
         eq(skillShares.status, "approved"),
-        ne(skillShares.id, share.id),
-        gt(skillShares.decidedAt, share.decidedAt)
+        ne(skillShares.id, share.id)
       )
     )
+    .orderBy(desc(skillShares.decidedAt), desc(skillShares.id))
     .limit(1);
-  return later !== undefined;
+  if (newest === undefined) {
+    return;
+  }
+  // Waiting for its add, it holds its text; added, the Brain does.
+  let { text } = newest;
+  if (text === null && newest.version !== null) {
+    const added = await readSkillAs(env, by.userId, {
+      scope: "company",
+      name: share.name,
+      version: newest.version,
+    });
+    text = added?.text ?? null;
+  }
+  if (text === null) {
+    return;
+  }
+  await addCompanySkill(env, by.userId, {
+    name: share.name,
+    change: `restore:${share.id}`,
+    text,
+  });
 };
 
 /**
- * Approves the share `id` as the admin `by`: records the decision with
- * its one audit event, adds its text as the next version of the company's
- * skill of its name, then records that version and drops the text. A
- * share approved before whose add didn't finish is finished, auditing
- * nothing again; one a later approval of the same name overtook meanwhile
- * is refused (`skills.superseded`) and its text dropped. A failed add is
- * audited (`skill.share.approve_failed`) and thrown. `skills.not_found`
- * for a share there isn't or that was declined or replaced.
+ * Approves the share `id` as the admin `by`, as a pair of audit events:
+ * the decision (`skill.share.approved`), written with the decision before
+ * anything reaches the Brain, and its outcome, one per attempt:
+ * `skill.share.added` with the version, written with the version on the
+ * row; `skill.share.approve_failed` when the add fails (approving again
+ * finishes it, without a second decision); or `skill.share.superseded`
+ * when a later approval of the same name came first (the share's status
+ * says so, and the newer text stays on top). A decision with no outcome
+ * is one whose attempt stopped half-way: approving again finishes it.
+ * `skills.not_found` for a share there isn't or that was declined or
+ * replaced; `skills.superseded` for one superseded.
  */
 export const approveShare = async (
   env: Env,
@@ -419,6 +508,9 @@ export const approveShare = async (
   }
   // As it is now: approved by this call or one before, or not at all.
   const decided = await shareById(env, row.id);
+  if (decided.status === "superseded") {
+    throw skillErrors.create("skills.superseded");
+  }
   if (decided.status !== "approved" || decided.text === null) {
     if (decided.status === "approved") {
       return shareOf(decided);
@@ -426,10 +518,7 @@ export const approveShare = async (
     throw skillErrors.create("skills.not_found");
   }
   if (await overtaken(env, decided)) {
-    await db
-      .update(skillShares)
-      .set({ text: null })
-      .where(and(eq(skillShares.id, decided.id), isNull(skillShares.version)));
+    await supersede(env, by, decided);
     throw skillErrors.create("skills.superseded");
   }
   let version: number;
@@ -440,27 +529,40 @@ export const approveShare = async (
       text: decided.text,
     }));
   } catch (error) {
-    // The decision stands, and its outcome is said: not added yet.
-    // Approving it again finishes it. A failure to say so never hides
-    // the add's own error.
-    try {
-      await appendAuditEvent(env, shareEntry(by, "approve_failed", decided.id));
-    } catch (auditError) {
-      log.error("skills.approve_failed_unaudited", errorFields(auditError));
-    }
+    await sayOutcome(
+      env,
+      shareEntry(by, "approve_failed", decided.id),
+      "skills.approve_failed_unaudited"
+    );
     throw error;
   }
-  await db
-    .update(skillShares)
-    .set({ version, text: null })
-    .where(
-      and(
-        eq(skillShares.id, decided.id),
-        eq(skillShares.status, "approved"),
-        isNull(skillShares.version)
-      )
-    );
-  return shareOf(await shareById(env, decided.id));
+  // The version and its outcome, in one step, only while no later
+  // approval of the name exists: one that came in meanwhile is checked
+  // in the same statement, so this add is never recorded as the
+  // company's over a newer one.
+  await auditedBatch(env, db, [
+    db
+      .update(skillShares)
+      .set({ version, text: null })
+      .where(
+        and(
+          eq(skillShares.id, decided.id),
+          eq(skillShares.status, "approved"),
+          isNull(skillShares.version),
+          not(laterApprovalOf(decided))
+        )
+      ),
+    outboxedIfChanged(db, shareEntry(by, "added", decided.id, { version })),
+  ]);
+  const recorded = await shareById(env, decided.id);
+  if (recorded.status === "approved" && recorded.version === null) {
+    // Overtaken while this add was on its way: the newer text goes back
+    // on top, and this one is superseded.
+    await restoreNewest(env, by, decided);
+    await supersede(env, by, decided);
+    throw skillErrors.create("skills.superseded");
+  }
+  return shareOf(recorded);
 };
 
 /**
@@ -498,11 +600,12 @@ export const declineShare = async (
 
 /**
  * Retires the company's skill `name` as the admin `by`: nobody lists,
- * selects or reads it from then on, and its versions stay as history.
- * Audited (`skill.retired`) before the Brain write, so a retirement is
- * never unaudited; one whose write then fails is audited
- * `skill.retire_failed` and thrown. `skills.not_found` when the company
- * has no such skill live.
+ * selects or reads it from then on, and its versions stay as history. A
+ * pair of audit events: the decision (`skill.retired`), written before the
+ * Brain write, so nothing is retired unaudited, and its outcome:
+ * `skill.retire_done` with the version the Brain retired, or
+ * `skill.retire_failed`. `skills.not_found` when the company has no such
+ * skill live.
  */
 export const retireSkill = async (
   env: Env,
@@ -518,39 +621,40 @@ export const retireSkill = async (
   if (live === null) {
     throw skillErrors.create("skills.not_found");
   }
-  const target = { type: "company_skill", id: named };
+  const entry = (action: string, detail: Record<string, number> = {}) => ({
+    actor: actorOf(by),
+    action,
+    target: { type: "company_skill", id: named },
+    detail,
+  });
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: actorOf(by),
-      action: "skill.retired",
-      target,
-      detail: { version: live.version },
-    }),
-  ]);
-  let retired = false;
+  await auditedBatch(env, db, [outboxed(db, entry("skill.retired"))]);
+  let retired: number | null;
   try {
     retired = await retireCompanySkill(env, by.userId, {
       name: named,
       change: crypto.randomUUID(),
     });
-  } finally {
-    if (!retired) {
-      try {
-        await appendAuditEvent(env, {
-          actor: actorOf(by),
-          action: "skill.retire_failed",
-          target,
-        });
-      } catch (auditError) {
-        log.error("skills.retire_failed_unaudited", errorFields(auditError));
-      }
-    }
+  } catch (error) {
+    await sayOutcome(
+      env,
+      entry("skill.retire_failed"),
+      "skills.retire_failed_unaudited"
+    );
+    throw error;
   }
-  if (!retired) {
+  if (retired === null) {
     // Retired by someone else between the read and the write.
+    await sayOutcome(
+      env,
+      entry("skill.retire_failed"),
+      "skills.retire_failed_unaudited"
+    );
     throw skillErrors.create("skills.not_found");
   }
+  await auditedBatch(env, db, [
+    outboxed(db, entry("skill.retire_done", { version: retired })),
+  ]);
 };
 
 /**

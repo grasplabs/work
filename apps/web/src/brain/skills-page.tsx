@@ -88,26 +88,51 @@ description: When to use it, in one sentence.
 The steps.
 `;
 
+/**
+ * Where the person's share stands, as its row says: waiting; approved and
+ * added (only then shared with the company); approved but not added yet;
+ * superseded by a later approval of the same name; or declined.
+ */
 const ShareStatus = ({ share }: { share: SkillShare }) => {
-  if (share.status === "pending") {
-    return (
-      <Badge variant="attention">
-        <Trans>Waiting for an admin</Trans>
-      </Badge>
-    );
+  switch (share.status) {
+    case "pending": {
+      return (
+        <Badge variant="attention">
+          <Trans>Waiting for an admin</Trans>
+        </Badge>
+      );
+    }
+    case "declined": {
+      return (
+        <Badge variant="outline">
+          <Trans>Declined</Trans>
+        </Badge>
+      );
+    }
+    case "superseded": {
+      return (
+        <Badge variant="outline">
+          <Trans>A later approval of this name was added instead.</Trans>
+        </Badge>
+      );
+    }
+    case "approved": {
+      return share.version === null ? (
+        <Badge variant="attention">
+          <Trans>
+            Approved, but not added to the company&apos;s skills yet.
+          </Trans>
+        </Badge>
+      ) : (
+        <Badge variant="passed">
+          <Trans>Shared with the company</Trans>
+        </Badge>
+      );
+    }
+    default: {
+      return null;
+    }
   }
-  if (share.status === "declined") {
-    return (
-      <Badge variant="outline">
-        <Trans>Declined</Trans>
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="passed">
-      <Trans>Shared with the company</Trans>
-    </Badge>
-  );
 };
 
 /** Asks before something that can't be undone. */
@@ -236,7 +261,6 @@ const ShareRequest = ({
       <CardContent>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{name}</span>
-
           {request.status === "approved" ? (
             <Badge variant="attention">
               <Trans>Approved, not added yet: approve it again</Trans>

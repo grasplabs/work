@@ -3428,6 +3428,8 @@ export const appRequests = sqliteTable(
  * under a new ID, so an approval of the old one is refused. `version` is
  * the company skill's version an approval made, set once the Brain took
  * it: an approved row without one is finished by approving it again.
+ * `superseded`: approved, but a later approval of the same name came
+ * first, so its text was never added (or was put back under the newer).
  */
 export const skillShares = sqliteTable(
   "skill_shares",
@@ -3437,7 +3439,9 @@ export const skillShares = sqliteTable(
     text: text(),
     requestedBy: text("requested_by").notNull(),
     requestedAt: timestamp("requested_at").notNull(),
-    status: text({ enum: ["pending", "approved", "declined"] }).notNull(),
+    status: text({
+      enum: ["pending", "approved", "declined", "superseded"],
+    }).notNull(),
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at"),
     version: integer(),

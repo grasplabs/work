@@ -75,12 +75,15 @@ const shareOf = (name: string): SkillShare => ({
 const shown = async ({
   admin,
   refusal,
+  existing = [],
 }: {
   admin: boolean;
   refusal?: string;
+  /** The person's shares already there. */
+  existing?: SkillShare[];
 }) => {
   const calls: string[] = [];
-  const shares: SkillShare[] = [];
+  const shares: SkillShare[] = [...existing];
   let requests = [request];
   const skills = {
     overview: async (): Promise<SkillsOverview> => {
@@ -165,6 +168,12 @@ const click = async (label: string): Promise<void> => {
   await settle();
 };
 
+/** The badge on the person's share of `name`. */
+const stateOf = (name: string): string | null | undefined =>
+  [...document.querySelectorAll("li")]
+    .find((item) => item.textContent?.startsWith(name))
+    ?.querySelector('[data-slot="badge"]')?.textContent;
+
 describe("the skills page", () => {
   afterEach(() => {
     act(() => {
@@ -233,5 +242,42 @@ describe("the skills page", () => {
     expect(document.body.textContent).toContain(
       "That isn't a task or a skill."
     );
+  });
+
+  it("tells the asker where each share stands, as its row says", async () => {
+    const at = (
+      name: string,
+      status: SkillShare["status"],
+      version: number | null
+    ) => ({
+      ...shareOf(name),
+      id: `share-${name}`,
+      status,
+      version,
+    });
+    await shown({
+      admin: false,
+      existing: [
+        at("waiting", "pending", null),
+        at("added", "approved", 3),
+        at("stuck", "approved", null),
+        at("overtaken", "superseded", null),
+        at("refused", "declined", null),
+      ],
+    });
+
+    expect({
+      waiting: stateOf("waiting"),
+      added: stateOf("added"),
+      stuck: stateOf("stuck"),
+      overtaken: stateOf("overtaken"),
+      refused: stateOf("refused"),
+    }).toStrictEqual({
+      waiting: "Waiting for an admin",
+      added: "Shared with the company",
+      stuck: "Approved, but not added to the company's skills yet.",
+      overtaken: "A later approval of this name was added instead.",
+      refused: "Declined",
+    });
   });
 });

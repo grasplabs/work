@@ -1577,6 +1577,10 @@ msgstr "Een JSON-waarde"
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Een zoekopdracht in Kennis vanuit {about} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
 
+#: src/brain/skills-page.tsx
+msgid "A later approval of this name was added instead."
+msgstr "In plaats daarvan is een latere goedkeuring met deze naam toegevoegd."
+
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
 msgid "A lesson"
@@ -2722,6 +2726,10 @@ msgstr "Goedgekeurd over {left} s"
 #: src/activity/audit-words.ts
 msgid "Approved packages"
 msgstr "Pakketten goedgekeurd"
+
+#: src/brain/skills-page.tsx
+msgid "Approved, but not added to the company's skills yet."
+msgstr "Goedgekeurd, maar nog niet toegevoegd aan de skills van het bedrijf."
 
 #: src/brain/skills-page.tsx
 msgid "Approved, not added yet: approve it again"
