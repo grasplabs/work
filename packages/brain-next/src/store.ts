@@ -12,6 +12,7 @@ import {
   confirmRequestSchema,
   contestedRequestSchema,
   entitiesRequestSchema,
+  entityNamesRequestSchema,
   entityRequestSchema,
   memoriesRequestSchema,
   newMemoriesSchema,
@@ -40,6 +41,8 @@ import type {
   ContestedRequest,
   EntitiesRequest,
   Entity,
+  EntityNamesPage,
+  EntityNamesRequest,
   EntityPage,
   EntityRequest,
   MemoriesRead,
@@ -84,7 +87,7 @@ import {
   embeddingStep,
   reembed,
 } from "./embedding.ts";
-import { findEntities, readEntity } from "./entities.ts";
+import { findEntities, readEntity, readEntityNames } from "./entities.ts";
 import {
   confirmPending,
   deleteStoreObjects,
@@ -503,6 +506,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   #refuseNoOnes(): never {
     this.ctx.abort(noOnes);
     throw new Error(noOnes);
+  }
+
+  /**
+   * The latest moment this instance gave a read to page from (`#readMoment`):
+   * every write after it is stamped past it (`#writeMoment`), so no later
+   * page of that read sees what was written after its first.
+   */
+  #issuedAt = 0;
+
+  /** The moment a first page is read at: `asOf`, or now, kept as issued. */
+  #readMoment(asOf?: Date): number {
+    if (asOf !== undefined) {
+      return asOf.getTime();
+    }
+    const now = Date.now();
+    this.#issuedAt = Math.max(this.#issuedAt, now);
+    return now;
+  }
+
+  /** The moment a write is stamped at: now, past every moment issued to a read. */
+  #writeMoment(): number {
+    return Math.max(Date.now(), this.#issuedAt + 1);
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */
@@ -972,6 +997,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         embedders,
         bucket: this.#bucket,
         contextTokens,
+        learnedAt: () => this.#writeMoment(),
         ...(handOvers === undefined || this.#kind.kind !== "shared"
           ? {}
           : {
@@ -1428,7 +1454,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#readyToWrite();
       return await addMemories(
         { storage: this.ctx.storage, db: this.#db },
-        adding
+        adding,
+        () => this.#writeMoment()
       );
     });
   }
@@ -1469,7 +1496,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       entity: asked.entity,
       reader: asked.reader,
       ...(attribute === undefined ? {} : { attribute }),
-      at: (asked.asOf ?? new Date()).getTime(),
+      at: asked.after?.at.getTime() ?? this.#readMoment(asked.asOf),
       history: asked.history ?? false,
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
@@ -1481,12 +1508,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const asked = checked(contestedRequestSchema, request);
     this.#mayRead(asked.reader);
     if (!(await this.#readable())) {
-      return { facts: [], more: false };
+      return { facts: [], at: asked.after?.at ?? new Date(), more: false };
     }
     return listContested(this.ctx.storage.sql, {
       ...(asked.entity === undefined ? {} : { entity: asked.entity }),
       reader: asked.reader,
-      at: Date.now(),
+      at: asked.after?.at.getTime() ?? this.#readMoment(),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
@@ -1503,7 +1530,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return retireMemory(this.ctx.storage.sql, {
         id: memory,
         reader,
-        at: Date.now(),
+        at: this.#writeMoment(),
       });
     });
   }
@@ -1520,7 +1547,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         confirmMemory(this.ctx.storage.sql, {
           id: memory,
           reader,
-          at: Date.now(),
+          at: this.#writeMoment(),
         })
       );
     });
@@ -1535,11 +1562,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,
+      at: asked.after?.at.getTime() ?? this.#readMoment(),
       ...(asked.kind === undefined ? {} : { kind: asked.kind }),
       ...(asked.identifier === undefined
         ? {}
         : { identifier: asked.identifier }),
       ...(asked.name === undefined ? {} : { name: asked.name }),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
+  }
+
+  /** A page of the names and identifiers of an entity the reader may see (entities.ts). */
+  async readEntityNames(request: EntityNamesRequest): Promise<EntityNamesPage> {
+    const asked = checked(entityNamesRequestSchema, request);
+    this.#mayRead(asked.reader);
+    if (!(await this.#readable())) {
+      return { names: [], more: false };
+    }
+    return readEntityNames(this.ctx.storage.sql, {
+      entity: asked.entity,
+      reader: asked.reader,
+      at: asked.after?.at.getTime() ?? this.#readMoment(),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });

@@ -4,6 +4,8 @@ import { entityKinds } from "./contract.ts";
 import type {
   EntitiesCursor,
   Entity,
+  EntityNamesCursor,
+  EntityNamesPage,
   EntityPage,
   EntityId,
   EntityKind,
@@ -28,6 +30,9 @@ import { foldForSearch } from "./words.ts";
 
 /** An entity's kind as stored. */
 const kindSchema = z.enum(entityKinds);
+
+/** A name's type as stored. */
+const nameTypeSchema = z.enum(["name", "email", "ref"]);
 
 /** Runs of white space, as one. */
 const spaces = /\s+/gu;
@@ -217,6 +222,7 @@ found AS MATERIALIZED (
         WHERE entity_names.entity = entities.row
           AND entity_names.type = asked.value ->> 0
           AND entity_names.folded = asked.value ->> 1
+          AND m.learned_at <= ?9
           AND ${visibleSql("m")}
       )
     )
@@ -228,72 +234,149 @@ ORDER BY first, id
 LIMIT ?5`;
 
 /**
- * `?1` the entities asked (JSON rows): each name and identifier of them a
- * memory the reader may read gave, once (as the earliest such memory
- * wrote it), the earliest first.
+ * `?1` the entities asked (JSON rows): each one's earliest name a memory
+ * the reader may read gave (by when that memory was learned, then its
+ * id), or null.
  */
-const namesSql = `
-WITH ${readableSql},
-given AS (
-  SELECT asked.value AS entity, entity_names.type AS type,
-    entity_names.value AS value, entity_names.folded AS folded,
-    m.row AS first,
-    row_number() OVER (
-      PARTITION BY asked.value, entity_names.type, entity_names.folded
-      ORDER BY m.row, entity_names.rowid
-    ) AS copy
-  FROM json_each(?1) AS asked
-  JOIN entity_names ON entity_names.entity = asked.value
+const firstNameSql = `
+WITH ${readableSql}
+SELECT asked.value AS entity, (
+  SELECT entity_names.value FROM entity_names
   JOIN memories AS m ON m.row = entity_names.memory
-  WHERE ${visibleSql("m")}
-)
-SELECT entity, type, value FROM given
-WHERE copy = 1
-ORDER BY entity, first, type, folded`;
+  WHERE entity_names.entity = asked.value AND entity_names.type = 'name'
+    AND ${visibleSql("m")}
+  ORDER BY m.learned_at, m.id, entity_names.folded
+  LIMIT 1
+) AS name
+FROM json_each(?1) AS asked`;
 
-/** Entities found, as the reader sees them: with the names they may see. */
+/** Entities found, as the reader sees them: with the earliest name they may see. */
 const asSeen = (
   sql: SqlStorage,
   found: readonly { row: number; id: string; kind: string }[],
   reader: Reader
 ): Entity[] => {
-  const seen = new Map<number, Entity>();
-  for (const { row, id, kind } of found) {
-    seen.set(row, {
-      id,
-      kind: kindSchema.parse(kind),
-      names: [],
-      identifiers: [],
-    });
-  }
-  if (seen.size === 0) {
+  if (found.length === 0) {
     return [];
   }
-  const names = sql
-    .exec<{ entity: number; type: string; value: string }>(
-      namesSql,
-      JSON.stringify([...seen.keys()]),
+  const names = new Map(
+    sql
+      .exec<{ entity: number; name: string | null }>(
+        firstNameSql,
+        JSON.stringify(found.map(({ row }) => row)),
+        reader.person,
+        JSON.stringify(reader.groups)
+      )
+      .toArray()
+      .map(({ entity, name }) => [entity, name])
+  );
+  return found.map(({ row, id, kind }) => ({
+    id,
+    kind: kindSchema.parse(kind),
+    name: names.get(row) ?? null,
+  }));
+};
+
+/**
+ * `?1` the entity's row, `?4` the moment read at, `?5` 1 to go on after
+ * the name whose place is `?6` (when the first memory that gave it was
+ * learned), `?7` (that memory's id), `?8` (its type) and `?9` (folded),
+ * `?10` the most to read: each name and identifier of the entity a
+ * memory the reader may read, learned by then, gave, once, as the first
+ * such memory wrote it, in that order.
+ */
+const namesPageSql = `
+WITH ${readableSql},
+given AS (
+  SELECT entity_names.type AS type, entity_names.value AS value,
+    entity_names.folded AS folded, m.learned_at AS learned, m.id AS memory,
+    row_number() OVER (
+      PARTITION BY entity_names.type, entity_names.folded
+      ORDER BY m.learned_at, m.id
+    ) AS copy
+  FROM entity_names
+  JOIN memories AS m ON m.row = entity_names.memory
+  WHERE entity_names.entity = ?1 AND m.learned_at <= ?4 AND ${visibleSql("m")}
+)
+SELECT type, value, folded, learned, memory FROM given
+WHERE copy = 1
+  AND (?5 = 0 OR learned > ?6 OR (learned = ?6 AND (
+    memory > ?7 OR (memory = ?7 AND (
+      type > ?8 OR (type = ?8 AND folded > ?9)
+    ))
+  )))
+ORDER BY learned, memory, type, folded
+LIMIT ?10`;
+
+/** What a page of an entity's names asks (contract.ts `EntityNamesRequest`, checked). */
+export interface EntityNamesAsked {
+  entity: EntityId;
+  reader: Reader;
+  at: number;
+  after?: EntityNamesCursor;
+  limit: number;
+}
+
+/**
+ * A page of the names and identifiers of an entity the reader may see
+ * (contract.ts `readEntityNames`): one more is read than asked, to tell
+ * whether more follow. An entity they may not see has none they may read.
+ */
+export const readEntityNames = (
+  sql: SqlStorage,
+  { entity, reader, at, after, limit }: EntityNamesAsked
+): EntityNamesPage => {
+  const [found] = sql
+    .exec<{ row: number }>("SELECT row FROM entities WHERE id = ?", entity)
+    .toArray();
+  if (found === undefined) {
+    return { names: [], more: false };
+  }
+  const rows = sql
+    .exec<{
+      type: string;
+      value: string;
+      folded: string;
+      learned: number;
+      memory: string;
+    }>(
+      namesPageSql,
+      found.row,
       reader.person,
-      JSON.stringify(reader.groups)
+      JSON.stringify(reader.groups),
+      at,
+      after === undefined ? 0 : 1,
+      after?.learnedAt.getTime() ?? 0,
+      after?.memory ?? "",
+      after?.type ?? "",
+      after?.folded ?? "",
+      limit + 1
     )
     .toArray();
-  for (const { entity, type, value } of names) {
-    const into = seen.get(entity);
-    if (into === undefined) {
-      continue;
-    }
-    if (type === "name") {
-      into.names.push(value);
-    } else if (type === "email" || type === "ref") {
-      into.identifiers.push({ type, value });
-    }
+  const names = rows
+    .slice(0, limit)
+    .map(({ type, value }) => ({ type: nameTypeSchema.parse(type), value }));
+  const last = rows.at(limit - 1);
+  if (rows.length <= limit || last === undefined) {
+    return { names, more: false };
   }
-  return [...seen.values()];
+  return {
+    names,
+    more: true,
+    next: {
+      at: new Date(at),
+      learnedAt: new Date(last.learned),
+      memory: last.memory,
+      type: nameTypeSchema.parse(last.type),
+      folded: last.folded,
+    },
+  };
 };
 
 /** What a find of entities asks (contract.ts `EntitiesRequest`, checked). */
 export interface EntitiesAsked {
   reader: Reader;
+  at: number;
   kind?: EntityKind;
   identifier?: Identifier;
   name?: string;
@@ -308,9 +391,8 @@ export interface EntitiesAsked {
  */
 export const findEntities = (
   sql: SqlStorage,
-  { reader, kind, identifier, name, after, limit }: EntitiesAsked
+  { reader, at, kind, identifier, name, after, limit }: EntitiesAsked
 ): EntityPage => {
-  const at = after?.at.getTime() ?? Date.now();
   const asked = [
     ...(identifier === undefined
       ? []

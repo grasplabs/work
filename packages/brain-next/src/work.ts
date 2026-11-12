@@ -248,6 +248,11 @@ export interface WorkContext {
    */
   contextTokens: number | null;
   /**
+   * The moment a write of the item is stamped at: the store's own, past
+   * every moment it gave a read to page from (store.ts `#writeMoment`).
+   */
+  learnedAt: () => number;
+  /**
    * The host's side of hand-overs (contract.ts `HandOvers`): the shared
    * store's tick only, as hand-overs are queued there alone.
    */
@@ -260,6 +265,13 @@ export interface WorkContext {
    * throws.
    */
   again: (progress: number) => void;
+  /**
+   * Keeps `payload` (its kind's, checked) as what the item carries from
+   * now on, on disk before it returns: a later attempt of the item, after
+   * a failure or the store stopping, runs with it. For what a run must not
+   * do twice: a model's answer it is part-way through writing, say.
+   */
+  keep: (payload: unknown) => void;
   /** Aborted once the item's time is up: end then, by throwing. */
   signal: AbortSignal;
 }
@@ -273,6 +285,8 @@ export interface WorkHost {
   embedders: Embedders;
   bucket: BrainBucket;
   contextTokens: number | null;
+  /** The store's moment for a write (`WorkContext.learnedAt`). */
+  learnedAt: () => number;
   /** The shared store's tick only (`WorkContext.handOvers`). */
   handOvers?: HandOvers;
 }
@@ -369,7 +383,12 @@ export const defineWork = <Payload>(
       if (!parsed.success) {
         throw new WorkError("invalid_payload");
       }
-      await definition.run(parsed.data, context);
+      await definition.run(parsed.data, {
+        ...context,
+        keep: (next) => {
+          context.keep(JSON.stringify(definition.payload.parse(next)));
+        },
+      });
     },
   });
   return definition;
@@ -1170,9 +1189,19 @@ const runItem = async (
         signal,
         bucket: host.bucket,
         contextTokens: host.contextTokens,
+        learnedAt: host.learnedAt,
         handOvers: host.handOvers,
         again: (progress) => {
           again = { progress };
+        },
+        // The payload as JSON, from `defineWork`'s check: on this attempt's
+        // own row alone, never one an erasure or a newer item replaced.
+        keep: (payload) => {
+          drizzle(storage)
+            .update(workItems)
+            .set({ payload: String(payload) })
+            .where(claimedRow(item))
+            .run();
         },
         ask: async (request) =>
           await askWithin(

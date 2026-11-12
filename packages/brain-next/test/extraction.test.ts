@@ -11,6 +11,8 @@ import type {
   Embedders,
   EntitiesCursor,
   Entity,
+  EntityName,
+  EntityNamesCursor,
   Extract,
   HandOvers,
   Memory,
@@ -194,6 +196,55 @@ const entitiesNamed = async (reader: Reader, name: string) => {
   } while (after !== undefined);
   return all;
 };
+
+/** Every name and identifier of `entity` `reader` may see, page after page. */
+const namesOf = async (
+  entity: string,
+  reader: Reader
+): Promise<EntityName[]> => {
+  const all: EntityName[] = [];
+  let after: EntityNamesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- page after page
+    const page = await shared().readEntityNames({
+      entity,
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    all.push(...page.names);
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return all;
+};
+
+/** The names of the customers `reader` may see whose name starts with `prefix`, page after page. */
+const customersOf = async (
+  reader: Reader,
+  prefix: string
+): Promise<string[]> => {
+  const found: string[] = [];
+  let after: EntitiesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- page after page
+    const page = await shared().findEntities({
+      reader,
+      kind: "customer",
+      ...(after === undefined ? {} : { after }),
+    });
+    found.push(...page.entities.flatMap(({ name }) => name ?? []));
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return found.filter((name) => name.startsWith(prefix));
+};
+
+/** `text`'s SHA-256, as hex. */
+const sha256 = async (text: string): Promise<string> =>
+  Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+    ),
+    (byte) => byte.toString(16).padStart(2, "0")
+  ).join("");
 
 /** Every memory about `entity` `reader` may read, ended ones too with `history`, page after page. */
 const memoriesAbout = async (
@@ -959,8 +1010,9 @@ describe("extracting memories", () => {
     await tick();
     const reader = { person: unique("p"), groups: [group] };
     const [entity] = await entitiesNamed(reader, name);
+    const names = entity === undefined ? [] : await namesOf(entity.id, reader);
 
-    expect(entity?.identifiers).toStrictEqual([
+    expect(names.filter(({ type }) => type === "email")).toStrictEqual([
       { type: "email", value: `Ann@${domain}` },
     ]);
   });
@@ -1016,7 +1068,7 @@ describe("extracting memories", () => {
         kind: "customer",
         ...(after === undefined ? {} : { after }),
       });
-      found.push(...page.entities.flatMap(({ names }) => names));
+      found.push(...page.entities.flatMap(({ name }) => name ?? []));
       after = page.more ? page.next : undefined;
     } while (after !== undefined);
 
@@ -1233,9 +1285,12 @@ describe("extracting memories", () => {
     const reader = { person: unique("p"), groups: [group] };
     const [entity] = await entitiesNamed(reader, names[0] ?? "");
     const read = await readAs(reader, names[0] ?? "");
+    const kept = entity === undefined ? [] : await namesOf(entity.id, reader);
 
     expect({
-      names: entity?.names.toSorted((a, b) => a.localeCompare(b)),
+      names: kept
+        .map(({ value }) => value)
+        .toSorted((a, b) => a.localeCompare(b)),
       read: read.map(({ value }) => value),
     }).toStrictEqual({
       names: names.slice(0, 20).toSorted((a, b) => a.localeCompare(b)),
@@ -1249,5 +1304,86 @@ describe("extracting memories", () => {
         extract: fromOutside({ saidAt: new Date(-1) }),
       })
     ).rejects.toThrow("saidAt");
+  });
+
+  it("writes the rest of a piece's adds without asking again when the store stopped after the first", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const prefix = unique("Acct");
+    // Enough kept memories, each about its own entity, for two adds.
+    const count = 150;
+    const nameOf = (index: number) => `${prefix}x${index}`;
+    let asked = 0;
+    answers.set(token, (request) => {
+      if (request.purpose === "brain.extract") {
+        asked += 1;
+      }
+      return answering({
+        entities: Array.from({ length: count }, (_, index) => ({
+          key: `e${index}`,
+          kind: "customer",
+          names: [nameOf(index)],
+        })),
+        memories: Array.from({ length: count }, (_, index) => ({
+          about: `e${index}`,
+          attribute: "status",
+          value: "active",
+          type: "fact",
+          // Worded otherwise on every call: a second call would show.
+          statement: `${nameOf(index)} is active (${asked}).`,
+          quote: `${nameOf(index)} is active`,
+        })),
+      })(request);
+    });
+    const text = `${token}: ${Array.from(
+      { length: count },
+      (_, index) => `${nameOf(index)} is active.`
+    ).join(" ")}`;
+    const source = unique("doc");
+    // The store stops after the piece's first add: its second add's key
+    // is held by another change, so that add is refused and the item
+    // fails, as a stop between the two would leave it.
+    const pieceKey = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
+    const second = await sha256(`${pieceKey}:1`);
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO memory_changes (key, hash, answer) VALUES (?, 'other', '{}')",
+        second
+      );
+    });
+    await added(text, audience(group), { extract: fromOutside(), source });
+    await tick();
+    const reader = { person: unique("p"), groups: [group] };
+    const firstRun = await customersOf(reader, prefix);
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM memory_changes WHERE key = ?",
+        second
+      );
+    });
+    // Past the failure's wait: the rerun.
+    await tick(2);
+    const [first] = await entitiesNamed(reader, nameOf(0));
+    const [last] = await entitiesNamed(reader, nameOf(count - 1));
+    const memoriesOfFirst =
+      first === undefined ? [] : await memoriesAbout(first.id, reader, true);
+    const memoriesOfLast =
+      last === undefined ? [] : await memoriesAbout(last.id, reader, true);
+    const customers = await customersOf(reader, prefix);
+
+    expect({
+      firstRun: firstRun.length,
+      asked,
+      customers: customers.length,
+      // Each memory once, as the first run worded it.
+      first: memoriesOfFirst.map(({ statement }) => statement),
+      last: memoriesOfLast.map(({ statement }) => statement),
+    }).toStrictEqual({
+      firstRun: 100,
+      asked: 1,
+      customers: count,
+      first: [`${nameOf(0)} is active (1).`],
+      last: [`${nameOf(count - 1)} is active (1).`],
+    });
   });
 });

@@ -1316,6 +1316,7 @@ const leavingNone = [
   "listVersions",
   "readCurrent",
   "readEntity",
+  "readEntityNames",
   "readMemories",
   "readVersion",
   "recall",

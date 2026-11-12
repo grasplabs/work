@@ -103,6 +103,19 @@ const payloadSchema = z.strictObject({
   saidAt: z.int().nonnegative(),
   timeZone: z.string().min(1),
   priority: z.enum(workPriorities),
+  /**
+   * What a run of this piece kept, in its adds, recorded before its first
+   * add (`WorkContext.keep`): a rerun writes these and asks the model
+   * nothing. Each memory as JSON, its end as milliseconds.
+   */
+  kept: z
+    .array(
+      z.strictObject({
+        entities: z.array(newEntitySchema),
+        memories: z.array(z.record(z.string(), z.unknown())),
+      })
+    )
+    .optional(),
 });
 type Payload = z.infer<typeof payloadSchema>;
 
@@ -616,13 +629,6 @@ const changeOf = async (
 ): Promise<string> =>
   `extract:${await hashOf(encoder.encode(JSON.stringify([source, version, from])))}`;
 
-/** The change key of an add of a piece past its first: the piece's key and the add's content. */
-const changeOfContent = async (
-  change: string,
-  adding: Candidates
-): Promise<string> =>
-  `${change}:${await hashOf(encoder.encode(JSON.stringify(adding)))}`;
-
 /**
  * Whether the memories of change `change` were added already: remember.ts
  * keeps each change's key as its SHA-256, so a second run spends no call.
@@ -755,15 +761,90 @@ const addsOf = (entities: NewEntity[], memories: NewMemory[]): Candidates[] => {
   return adds;
 };
 
-/** Adds `adding`, checked whole by the store's own schema, as an add through the store is. */
+/**
+ * Adds `adding`, checked whole by the store's own schema and stamped at
+ * the store's moment for a write, as an add through the store is.
+ */
 const add = async (
-  storage: DurableObjectStorage,
+  { storage, learnedAt }: WorkContext,
   adding: z.input<typeof newMemoriesSchema>
 ): Promise<void> => {
   await addMemories(
     { storage, db: drizzle(storage) },
-    newMemoriesSchema.parse(adding)
+    newMemoriesSchema.parse(adding),
+    learnedAt
   );
+};
+
+/** `payload` without what a run of its piece kept: for the next piece. */
+const withoutKept = ({ kept: _kept, ...payload }: Payload): Payload => payload;
+
+/** An add as the item keeps it: its memories' ends as milliseconds. */
+const keptJsonOf = ({ entities, memories }: Candidates) => ({
+  entities,
+  memories: memories.map(({ validUntil, ...memory }) => ({
+    ...memory,
+    ...(validUntil === undefined ? {} : { validUntil: validUntil.getTime() }),
+  })),
+});
+
+/** The adds an item kept (`keptJsonOf`), as an add takes them again. */
+const keptOf = (kept: NonNullable<Payload["kept"]>): Candidates[] =>
+  kept.map(({ entities, memories }) => ({
+    entities,
+    memories: memories.map((memory) =>
+      newMemorySchema.parse({
+        ...memory,
+        ...(typeof memory.validUntil === "number"
+          ? { validUntil: new Date(memory.validUntil) }
+          : {}),
+      })
+    ),
+  }));
+
+/**
+ * What the model draws from `piece`, as code and the checker keep it, in
+ * as many adds as the contract's bounds take: none when nothing was kept,
+ * but on the last piece, whose add says the version is extracted.
+ */
+const drawn = async (
+  context: WorkContext,
+  payload: Payload,
+  piece: Piece
+): Promise<Candidates[]> => {
+  const { version, from } = payload;
+  const seen: Seen = {
+    words: sequenceOf(piece.text),
+    emails: emailsOf(piece.text),
+  };
+  const drawing: Drawing = {
+    source: payload.source,
+    version,
+    speaker: payload.speaker,
+    timeZone: payload.timeZone,
+    said: dayOf(new Date(payload.saidAt), payload.timeZone),
+  };
+  const proposed = candidatesOf(
+    seen,
+    drawing,
+    await context.ask({ system: proposeInstructions, input: piece.text })
+  );
+  const candidates = keeping(proposed.entities, proposed.memories);
+  const kept =
+    candidates.memories.length === 0
+      ? candidates
+      : await supportedOf(context, piece.text, drawing, candidates);
+  // One event for the piece: counts alone, nothing of the text.
+  log.info("brain.extract", {
+    version,
+    from,
+    proposed: proposed.proposed,
+    quoted: candidates.memories.length,
+    supported: kept.memories.length,
+  });
+  return kept.memories.length > 0 || piece.last
+    ? addsOf(kept.entities, kept.memories)
+    : [];
 };
 
 const extractWork: WorkDefinition<Payload> = defineWork({
@@ -789,72 +870,37 @@ const extractWork: WorkDefinition<Payload> = defineWork({
     }
     const piece = pieceOf(whole, from, pieceTokensOf(context.contextTokens));
     const change = await changeOf(source, version, from);
-    // This piece's add landed before (the store stopped before the item
-    // settled): only the next piece is left to put on the queue.
-    if (!(await addedBefore(sql, change))) {
-      const seen: Seen = {
-        words: sequenceOf(piece.text),
-        emails: emailsOf(piece.text),
-      };
-      const drawing: Drawing = {
-        source,
-        version,
-        speaker: payload.speaker,
-        timeZone: payload.timeZone,
-        said: dayOf(new Date(payload.saidAt), payload.timeZone),
-      };
-      const proposed = candidatesOf(
-        seen,
-        drawing,
-        await context.ask({ system: proposeInstructions, input: piece.text })
-      );
-      const candidates = keeping(proposed.entities, proposed.memories);
-      const kept =
-        candidates.memories.length === 0
-          ? candidates
-          : await supportedOf(context, piece.text, drawing, candidates);
-      // One event for the piece: counts alone, nothing of the text.
-      log.info("brain.extract", {
-        version,
-        from,
-        proposed: proposed.proposed,
-        quoted: candidates.memories.length,
-        supported: kept.memories.length,
+    // A rerun of a piece whose adds began: what the first run kept, as it
+    // kept it; else, a piece whose add landed (an item put on the queue
+    // again): nothing left but the next piece; else the model's.
+    let adds = payload.kept === undefined ? undefined : keptOf(payload.kept);
+    if (adds === undefined && !(await addedBefore(sql, change))) {
+      adds = await drawn(context, payload, piece);
+      if (adds.length > 1) {
+        // More than one add: what is to be written is kept with the item
+        // first, so a store that stops between two of them writes the
+        // rest on the rerun, never a second wording of the same facts.
+        context.keep({ ...payload, kept: adds.map(keptJsonOf) });
+      }
+    }
+    // Asked again after the calls: a newer version or an erasure (its
+    // versions erasing, then gone) may have landed meanwhile. (A version's
+    // readers never change.)
+    if (adds !== undefined && currentOf(sql, source, version) === undefined) {
+      return;
+    }
+    for (const [index, adding] of (adds ?? []).entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one add after another, in order
+      await add(context, {
+        change: index === 0 ? change : `${change}:${index}`,
+        access: accessOfKey(found.readers),
+        ...adding,
+        // The version's mark with its last piece's last add, after all of
+        // the piece's memories.
+        ...(piece.last && index === (adds ?? []).length - 1
+          ? { extracted: { source, version } }
+          : {}),
       });
-      // Asked again after the calls: a newer version or an erasure (its
-      // versions erasing, then gone) may have landed meanwhile. (A
-      // version's readers never change.)
-      if (currentOf(sql, source, version) === undefined) {
-        return;
-      }
-      // A piece with nothing kept adds nothing, but the last: its add says
-      // the version is extracted. More than one add holds: the others go
-      // first, each under a key of its own content, and the first add,
-      // under the piece's key, last, as the piece's mark of done. A store
-      // that stops between them runs the piece again: an add of the same
-      // content answers what it added; one the model now words otherwise
-      // is added beside it.
-      if (kept.memories.length > 0 || piece.last) {
-        const [first, ...others] = addsOf(kept.entities, kept.memories);
-        const keys = await Promise.all(
-          others.map(async (other) => await changeOfContent(change, other))
-        );
-        for (const [index, other] of others.entries()) {
-          // oxlint-disable-next-line no-await-in-loop -- one add after another
-          await add(storage, {
-            change: keys[index] ?? change,
-            access,
-            ...other,
-          });
-        }
-        await add(storage, {
-          change,
-          access,
-          entities: first?.entities ?? [],
-          memories: first?.memories ?? [],
-          ...(piece.last ? { extracted: { source, version } } : {}),
-        });
-      }
     }
     // The next piece, while the version is still current: checked and put
     // on the queue in one synchronous step, so it never replaces a newer
@@ -862,7 +908,7 @@ const extractWork: WorkDefinition<Payload> = defineWork({
     if (!piece.last && currentOf(sql, source, version) !== undefined) {
       enqueueWork(storage, extractWork, {
         key: source,
-        payload: { ...payload, from: piece.next },
+        payload: { ...withoutKept(payload), from: piece.next },
         priority: payload.priority,
       });
     }

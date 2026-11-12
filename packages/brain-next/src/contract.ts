@@ -1743,19 +1743,29 @@ export type ContestedRequest = z.input<typeof contestedRequestSchema>;
  */
 export interface ContestedPage {
   facts: ContestedFact[];
+  /** The moment the page was read at: what a fact's sides are read as of. */
+  at: Date;
   more: boolean;
   next?: ContestedCursor;
 }
 
+/** Most sides of a contested fact a listing gives with it. */
+export const factSidesShown = 10;
+
 /**
  * A contested fact: an entity's one-value attribute for which the reader
  * may read current memories of more than one lineage saying different
- * things; each with its source, confirmed first, then the newest.
+ * things; its first `factSidesShown`, each with its source, in
+ * `readMemories`' order (confirmed first, then the newest), and whether
+ * more follow. All of them are `readMemories({ entity: about, attribute,
+ * reader, asOf: page.at })`, paged as it pages, from the first again: for
+ * a one-value attribute its current memories are exactly the sides.
  */
 export interface ContestedFact {
   about: EntityId;
   attribute: string;
   memories: Memory[];
+  more: boolean;
 }
 
 /**
@@ -1828,15 +1838,61 @@ export const entityRequestSchema = z.strictObject({
 export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
 /**
- * An entity as a reader sees it: its kind, and the names and identifiers
- * given by memories the reader may read, each once, the earliest first:
- * every one of them.
+ * An entity as a reader sees it: its kind, and its earliest name a memory
+ * the reader may read gave (by when that memory was learned, then its
+ * id), or null. Every name and identifier they may see is read a page at
+ * a time (`readEntityNames`).
  */
 export interface Entity {
   id: EntityId;
   kind: EntityKind;
-  names: string[];
-  identifiers: Identifier[];
+  name: string | null;
+}
+
+/** A name or an exact identifier of an entity, as a memory gave it. */
+export interface EntityName {
+  type: "name" | "email" | "ref";
+  value: string;
+}
+
+/**
+ * Where a page of `readEntityNames` ended: the moment the first page was
+ * read (`at`), at which every later page is read too; and its last name's
+ * place (when the first memory the reader may read that gave it was
+ * learned, that memory's id, its type and its folded form).
+ */
+export const entityNamesCursorSchema = z.strictObject({
+  at: z.date(),
+  learnedAt: z.date(),
+  memory: memoryIdSchema,
+  type: z.enum(["name", "email", "ref"]),
+  folded: wellFormedString().max(1000),
+});
+export type EntityNamesCursor = z.infer<typeof entityNamesCursorSchema>;
+
+/**
+ * The names and identifiers of an entity to read, for a reader: a page of
+ * at most `limit`, after `after`.
+ */
+export const entityNamesRequestSchema = z.strictObject({
+  entity: entityIdSchema,
+  reader: readerSchema,
+  after: entityNamesCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type EntityNamesRequest = z.input<typeof entityNamesRequestSchema>;
+
+/**
+ * A page of every name and identifier of an entity a memory the reader
+ * may read gave, each once, in the order of that first memory (learned,
+ * then id), then type, then folded form; whether more follow, and where to
+ * go on from. None for an entity the reader may not see, as for one no
+ * one added.
+ */
+export interface EntityNamesPage {
+  names: EntityName[];
+  more: boolean;
+  next?: EntityNamesCursor;
 }
 
 /**
@@ -2079,6 +2135,11 @@ export interface Brain {
    * memory they may read that mentions each.
    */
   findEntities: (request: EntitiesRequest) => Promise<EntityPage>;
+  /**
+   * A page of the names and identifiers of an entity the reader may see
+   * (`EntityNamesPage`).
+   */
+  readEntityNames: (request: EntityNamesRequest) => Promise<EntityNamesPage>;
   /** An entity, if the reader may see it; null alike when there is none. */
   readEntity: (request: EntityRequest) => Promise<Entity | null>;
 }
