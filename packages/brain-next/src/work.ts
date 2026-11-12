@@ -8,21 +8,25 @@ import type { z } from "zod";
 import type { BrainBucket } from "./bucket.ts";
 import {
   modelReplySchema,
+  modelRoles,
   modelTimeoutMaxMs,
   parkedListed,
   sourceIdMaxLength,
   wellFormedString,
   workErrors,
+  workPriorities,
 } from "./contract.ts";
 import type {
   AskModel,
   EmbedModel,
   EmbedReply,
   Embedders,
+  ModelRole,
   ModelTrouble,
   OverdueWork,
   WorkErrorCode,
   WorkOverview,
+  WorkPriority,
 } from "./contract.ts";
 import { workItems, workModelBucket } from "./db/schema.ts";
 import { WorkError } from "./work-error.ts";
@@ -115,20 +119,8 @@ export { WorkError } from "./work-error.ts";
 // now) with the real time since the tick began added. Backoffs, pauses,
 // returns from parking and the bucket go by it.
 
-/** The classes of work, the first first: an item of a class runs before any of the next. */
-export const workPriorities = [
-  /** What someone just asked about. */
-  "asked",
-  /** What people upload on purpose. */
-  "upload",
-  /** Conversations, meetings and runs. */
-  "conversation",
-  /** Recent documents. */
-  "recent",
-  /** Old documents and archives, which may never reach the front. */
-  "archive",
-] as const;
-export type WorkPriority = (typeof workPriorities)[number];
+export { workPriorities } from "./contract.ts";
+export type { WorkPriority } from "./contract.ts";
 
 /** Most items under way at once, across every tick. */
 export const workAtOnce = 4;
@@ -210,6 +202,23 @@ export const workRequestMaxLength = 1_000_000;
 const kindPattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/u;
 const kindMaxLength = 48;
 
+/**
+ * A model call as a handler asks it: its instructions and its one
+ * message; for a kind that makes calls of more than one kind, which step
+ * this is (a lowercase word: the call's purpose is `brain.<kind>.<step>`,
+ * else `brain.<kind>`); and which of the host's models (careful, unless
+ * said).
+ */
+export interface AskRequest {
+  system: string;
+  input: string;
+  step?: string;
+  role?: ModelRole;
+}
+
+/** A step's name: one lowercase word. */
+const stepPattern = /^[a-z][a-z0-9_]{0,31}$/u;
+
 /** What a handler may use while it runs an item. */
 export interface WorkContext {
   /** The store's storage, to read what the item is about and write what it made. */
@@ -220,7 +229,7 @@ export interface WorkContext {
    * `WorkError` for the item's own failures, and `WorkWaitsError` while the
    * queue is paused: let both through.
    */
-  ask: (request: { system: string; input: string }) => Promise<string>;
+  ask: (request: AskRequest) => Promise<string>;
   /**
    * The host's embedders: the model they run now (null while none ships),
    * and `embed`, which embeds passages with it in what is left of the
@@ -947,12 +956,16 @@ const askWithin = async (
   state: WorkState,
   ask: AskModel,
   kind: string,
-  request: { system: string; input: string },
+  { system, input, step, role = "careful" }: AskRequest,
   attempt: Attempt
 ): Promise<string> => {
   const { now, signal, deadline } = attempt;
   signal.throwIfAborted();
-  if (!sendable(request)) {
+  if (
+    !sendable({ system, input }) ||
+    (step !== undefined && !stepPattern.test(step)) ||
+    !modelRoles.includes(role)
+  ) {
     throw new WorkError("invalid_request");
   }
   if (attempt.calls >= workCallsMax) {
@@ -964,8 +977,10 @@ const askWithin = async (
   let reply: unknown = undefined;
   try {
     reply = await ask({
-      purpose: `brain.${kind}`,
-      ...request,
+      purpose: step === undefined ? `brain.${kind}` : `brain.${kind}.${step}`,
+      role,
+      system,
+      input,
       timeoutMs: Math.max(1, left - Math.min(1000, Math.floor(left / 10))),
     });
   } catch {

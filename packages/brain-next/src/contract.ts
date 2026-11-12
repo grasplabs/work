@@ -119,9 +119,70 @@ export const accessSchema = z.discriminatedUnion("kind", [
 ]);
 export type Access = z.infer<typeof accessSchema>;
 
+/** The classes of work, the first first: an item of a class runs before any of the next. */
+export const workPriorities = [
+  /** What someone just asked about. */
+  "asked",
+  /** What people upload on purpose. */
+  "upload",
+  /** Conversations, meetings and runs. */
+  "conversation",
+  /** Recent documents. */
+  "recent",
+  /** Old documents and archives, which may never reach the front. */
+  "archive",
+] as const;
+export type WorkPriority = (typeof workPriorities)[number];
+
+/**
+ * Whose word a memory is: an internal person's (`person`, as the host
+ * names them: the one who said it, or who confirmed it), an outside
+ * party's (a customer's mail, a supplier's document), an agent's (`agent`,
+ * as the host names it) or the system's.
+ */
+export const speakerSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("internal"), person: principalSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agent: principalSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+export type Speaker = z.infer<typeof speakerSchema>;
+
+/** Whether `timeZone` is a time zone the runtime knows (IANA, as `Intl` takes it). */
+const isTimeZone = (timeZone: string): boolean => {
+  try {
+    // Throws a RangeError for a zone it doesn't know.
+    return (
+      new Intl.DateTimeFormat("en", { timeZone }).resolvedOptions().timeZone !==
+      ""
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Memories to draw from a version as it is added (extraction.ts): whose
+ * words its text is (`speaker`, a `Speaker`: the host's to say, never a
+ * model's), when they were said (`saidAt`), in which time zone their
+ * relative dates count ("next Friday"), and which class of work the
+ * drawing takes (`workPriorities`). A version added without it is kept
+ * and found, and no memory is drawn from it.
+ */
+export const extractSchema = z.strictObject({
+  speaker: speakerSchema,
+  saidAt: z.date(),
+  timeZone: z.string().min(1).max(64).refine(isTimeZone, {
+    message: "Is no time zone",
+  }),
+  priority: z.enum(workPriorities),
+});
+export type Extract = z.infer<typeof extractSchema>;
+
 /**
  * A version of a source to add: which source, the change it is, its text,
- * and who may read this version.
+ * who may read this version, and, to draw memories from it, whose words
+ * it is (`extract`).
  */
 export const newSourceSchema = z.strictObject({
   source: sourceIdSchema,
@@ -140,6 +201,7 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
+  extract: extractSchema.optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
 
@@ -165,9 +227,11 @@ export const instructionsTextSchema = wellFormedString()
  * source, but never cut into chunks or indexed, so recall never finds it:
  * it is read whole (`readCurrent`).
  */
-export const newInstructionsSchema = newSourceSchema.extend({
-  text: instructionsTextSchema,
-});
+export const newInstructionsSchema = newSourceSchema
+  .omit({ extract: true })
+  .extend({
+    text: instructionsTextSchema,
+  });
 export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
 /**
@@ -558,14 +622,23 @@ export interface SourceVersion extends SourceVersionRef {
 }
 
 /**
+ * Which of the host's models a call asks for: its careful one, or its
+ * quick one, cheaper, for a check (the host's model roles).
+ */
+export const modelRoles = ["careful", "quick"] as const;
+export type ModelRole = (typeof modelRoles)[number];
+
+/**
  * A model call the Brain's background work asks its host to make, through
- * the host's model gateway: what the call is for (`brain.<kind of work>`),
- * its instructions, its one message, and how long it may take: what is
- * left of its item's time, less a moment. The host cancels the call when
- * that is over, and says so (`timed_out`).
+ * the host's model gateway: what the call is for (`brain.<kind of work>`,
+ * and `.<step>` for a kind that makes calls of more than one kind), which
+ * of its models, its instructions, its one message, and how long it may
+ * take: what is left of its item's time, less a moment. The host cancels
+ * the call when that is over, and says so (`timed_out`).
  */
 export interface ModelRequest {
   purpose: string;
+  role: ModelRole;
   system: string;
   input: string;
   timeoutMs: number;
@@ -635,6 +708,7 @@ export const workErrors = {
   erased: "What it works on was erased.",
   embedder_unavailable: "The embedder gave no vectors for it.",
   no_progress: "It asked to go on without having done any of its work.",
+  invalid_answer: "The model's answer isn't what its work takes.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
 
@@ -1210,20 +1284,6 @@ export const memoryTypes = [
   "instruction",
 ] as const;
 export type MemoryType = (typeof memoryTypes)[number];
-
-/**
- * Whose word a memory is: an internal person's (`person`, as the host
- * names them: the one who said it, or who confirmed it), an outside
- * party's (a customer's mail, a supplier's document), an agent's (`agent`,
- * as the host names it) or the system's.
- */
-export const speakerSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("internal"), person: principalSchema }),
-  z.strictObject({ kind: z.literal("outside") }),
-  z.strictObject({ kind: z.literal("agent"), agent: principalSchema }),
-  z.strictObject({ kind: z.literal("system") }),
-]);
-export type Speaker = z.infer<typeof speakerSchema>;
 
 /** Most memories one add takes, and most entities. */
 export const memoriesPerAddMax = 100;

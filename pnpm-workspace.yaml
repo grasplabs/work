@@ -124,6 +124,11 @@ catalog:
   # (core's src/dependencies/peers.ts): npm's own range rules.
   semver: 7.8.5
   "@types/semver": 7.8.0
+  # Calendar arithmetic for the dates a memory names ("next Friday"), in
+  # the Brain (packages/brain-next extraction): the Temporal standard,
+  # which workerd doesn't have yet. Its implementation alone, never put on
+  # the global.
+  temporal-polyfill: 1.0.8
   zod: 4.6.7
   # The types of Standard Schema, which the SDK's value schemas implement.
   "@standard-schema/spec": 1.1.0

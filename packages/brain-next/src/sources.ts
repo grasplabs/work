@@ -27,6 +27,7 @@ import {
   keepSubject,
   subjectOf,
 } from "./erasure.ts";
+import { enqueueExtraction } from "./extraction.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -244,6 +245,11 @@ const record = (
     // Embedded through the queue, put on it with the chunks: no crash
     // leaves chunks that are never embedded.
     enqueueEmbedding(storage, added.source, version);
+    // Memories drawn from it the same way, when its producer said whose
+    // words it is.
+    if (added.extract !== undefined) {
+      enqueueExtraction(storage, added.source, version, added.extract);
+    }
   }
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })

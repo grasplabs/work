@@ -11,6 +11,7 @@ import {
   wellFormedString,
   modelWaitMaxSeconds,
   storeBytesMax,
+  workPriorities,
 } from "@grasp-os/brain-next/contract";
 import type {
   Access,
@@ -24,6 +25,7 @@ import type {
   Reader,
   RecallRequest,
   SourceId,
+  Speaker,
   StepFailure,
   WayCounts,
   WorkOverview,
@@ -56,6 +58,7 @@ import type { Member } from "./auth/identity.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { organizationTimeZone } from "./organization.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
 // people or teams: core names them as principals, a person by their user
@@ -191,11 +194,59 @@ const sourceRefOf = (key: SourceId): SourceRef => {
 /** A change's key, from its producer: see `addSource`. */
 const changeSchema = producerIdSchema(sourceIdMaxLength);
 
+/**
+ * Whose words a source's text is, as core names them: a person of the
+ * company speaking for themselves (or an admin), an outside party (a
+ * customer's mail, a supplier's document), an agent, or the system. A
+ * producer that can't say for sure says the least trusted one: only a
+ * person's own words become preferences or instructions.
+ */
+const saidBySchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("person"), personId: idSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agentId: idSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+
+/**
+ * To draw memories from a version as it is added: whose words it is, when
+ * they were said (what "next Friday" counts from, in the organization's
+ * time zone), and which class of the Brain's work it takes.
+ */
+const saidSchema = z.strictObject({
+  by: saidBySchema,
+  at: z.date(),
+  priority: z.enum(workPriorities),
+});
+export type Said = z.infer<typeof saidSchema>;
+
+/** `by` as the Brain names whose word something is. */
+const speakerOf = (by: Said["by"]): Speaker => {
+  switch (by.kind) {
+    case "person": {
+      return { kind: "internal", person: by.personId };
+    }
+    case "agent": {
+      return { kind: "agent", agent: by.agentId };
+    }
+    case "outside": {
+      return { kind: "outside" };
+    }
+    case "system": {
+      return { kind: "system" };
+    }
+    default: {
+      throw new Error("Unknown speaker");
+    }
+  }
+};
+
 const newSourceSchema = z.strictObject({
   source: sourceRefSchema,
   change: changeSchema,
   text: wellFormedString(),
   readers: sourceReadersSchema,
+  said: saidSchema.optional(),
 });
 
 /** A question as the Brain takes one (`recallRequestSchema`). */
@@ -317,22 +368,42 @@ const readerOf = async (
  * its kind (an upload's id is seen by those who can see the upload), so
  * a producer checks that whoever asks for the change may change that
  * source before it calls this; the Brain can't tell.
+ *
+ * With `said`, the Brain also draws memories from the version on its work
+ * queue, in `said.priority`'s class: whose words it is (`said.by`, the
+ * producer's to know: a person's own words are the only ones that become
+ * preferences or instructions) and when they were said. Without it, the
+ * version is kept and found, and nothing is drawn from it.
  */
 export const addSource = async (
-  env: BrainEnv,
+  env: BrainEnv & Pick<Env, "DB">,
   added: {
     source: SourceRef;
     change: string;
     text: string;
     readers: SourceReaders;
+    said?: Said;
   }
 ): Promise<SourceVersionRef> => {
-  const { source, change, text, readers } = checked(newSourceSchema, added);
+  const { source, change, text, readers, said } = checked(
+    newSourceSchema,
+    added
+  );
   const { version } = await brain(env).addSource({
     source: sourceKeyOf(source),
     change,
     text,
     access: accessOf(readers),
+    ...(said === undefined
+      ? {}
+      : {
+          extract: {
+            speaker: speakerOf(said.by),
+            saidAt: said.at,
+            timeZone: await organizationTimeZone(env.DB),
+            priority: said.priority,
+          },
+        }),
   });
   return { source, version };
 };
@@ -870,11 +941,13 @@ const waitOf = (error: unknown): ModelReply => {
  */
 const askModel =
   (env: Env): AskModel =>
-  async ({ purpose, system, input, timeoutMs }) => {
+  async ({ purpose, role, system, input, timeoutMs }) => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const { text } = await models(env).call({
-        model: modelForRole(await modelSettings(env), "careful"),
+        model: modelForRole(await modelSettings(env), role),
+        // A check asks the quick model to think little: the cheaper call.
+        ...(role === "quick" ? { effort: "low" as const } : {}),
         system,
         input,
         purpose,

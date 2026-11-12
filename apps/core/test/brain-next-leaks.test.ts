@@ -21,10 +21,12 @@ import {
 } from "../src/brain-next.ts";
 import type {
   InstructionFile,
+  Said,
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { published } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
@@ -57,6 +59,17 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 // nobody may read.
 
 const idp = mockIdp();
+
+/** The Brain's one store, as the test reads what extraction drew. */
+const brainStore = () =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** Words said now by `by`, to draw memories from first. */
+const saidNow = (by: Said["by"]): Said => ({
+  by,
+  at: new Date(),
+  priority: "asked",
+});
 
 /** A word nothing else holds. */
 const markerWord = (): string => `m${crypto.randomUUID().replaceAll("-", "")}`;
@@ -634,6 +647,154 @@ describe(
         leftFinds: [],
         holderAppFile: true,
         outsiderOpens: "opens it",
+      });
+    });
+
+    it("gives a reader nothing a model drew from what they may not read, and prompts a model with one version's text at a time", async () => {
+      // Extraction sends restricted text to a model on purpose, so the
+      // rule for prompts is: no marker in a prompt made for a reader who
+      // may not read it. An extraction prompt is made for its version's
+      // readers alone, so it may hold that version's marker and no other.
+      // The model tells everything it is shown, and more: every marker it
+      // saw as names, statements, quotes and values, and every other
+      // marker as names it never saw.
+      const [{ userId: holder }, { userId: outsider }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const secretTeam = await newTeam(holder);
+      const ownTeam = await newTeam(outsider);
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "the holder's own words": markerWord(),
+        "a team's source the outsider isn't in": markerWord(),
+        "a source nobody is known to read": markerWord(),
+      };
+      const all = Object.values(markers);
+      const provider = await answeringProvider((requests) => {
+        const body = JSON.stringify(requests.at(-1)?.body);
+        if (body.includes("You check statements")) {
+          return {
+            text: JSON.stringify({
+              supported: Array.from({ length: 10 }, (_, index) => index),
+            }),
+            inputTokens: 10,
+            outputTokens: 10,
+          };
+        }
+        const shown = all.filter((marker) => body.includes(marker));
+        return {
+          text: JSON.stringify({
+            entities: [
+              { key: "c", kind: "customer", names: [...shown, ...all] },
+              { key: "p", kind: "person", names: shown },
+            ],
+            memories: shown.flatMap((marker) => [
+              {
+                about: "c",
+                attribute: "status",
+                value: marker,
+                type: "fact",
+                statement: `Customer ${marker} is active`,
+                quote: `Customer ${marker} is active`,
+              },
+              {
+                about: "p",
+                type: "instruction",
+                statement: `Always ask ${marker}`,
+                quote: `Always ask ${marker}`,
+              },
+            ]),
+          }),
+          inputTokens: 10,
+          outputTokens: 10,
+        };
+      });
+      const textOfMarker = (marker: string) =>
+        `${sharedWord}: Customer ${marker} is active. Always ask ${marker}.`;
+      const addSaid = async (
+        marker: string,
+        readers: SourceReaders,
+        by: Said["by"]
+      ): Promise<SourceRef> => {
+        const source = newSource();
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text: textOfMarker(marker),
+          readers,
+          said: saidNow(by),
+        });
+        return source;
+      };
+      const own = await addSaid(
+        markers["the holder's own words"],
+        { kind: "owner", personId: holder },
+        { kind: "person", personId: holder }
+      );
+      const team = await addSaid(
+        markers["a team's source the outsider isn't in"],
+        { kind: "team", teamId: secretTeam },
+        { kind: "outside" }
+      );
+      const none = await addSaid(
+        markers["a source nobody is known to read"],
+        { kind: "none" },
+        { kind: "outside" }
+      );
+      // The outsider's own, drawn from too.
+      await addSaid(
+        `own${unique()}`,
+        { kind: "team", teamId: ownTeam },
+        { kind: "outside" }
+      );
+      await workBrain(env, new Date());
+
+      // Drawn for those who may read them: the test holds only if the
+      // model's memories exist.
+      const holderReads: number[] = [];
+      for (const name of [
+        markers["the holder's own words"],
+        markers["a team's source the outsider isn't in"],
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one name at a time
+        const found = await brainStore().findEntities({
+          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          name,
+        });
+        holderReads.push(found.length);
+      }
+      const prompts = provider.requests.map(({ body }) =>
+        all.filter((marker) => JSON.stringify(body).includes(marker))
+      );
+      const findings = await findingsOf(
+        "the outsider, after extraction",
+        {
+          personId: outsider,
+          reader: { person: outsider, groups: [`team:${ownTeam}`] },
+          sharedWord,
+          markers: all,
+          hiddenVersions: everyVersionOf(own, team, none),
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        markers
+      );
+
+      expect({
+        holderReads,
+        // Every version was drawn from: two calls each, but the
+        // outsider's own, where the model proposed nothing to check.
+        promptCount: prompts.length,
+        mixed: prompts.filter((held) => held.length > 1),
+        findings,
+      }).toStrictEqual({
+        // The customer, and the person: from the holder's own words only,
+        // as an instruction is only ever a person's own word.
+        holderReads: [2, 1],
+        promptCount: 7,
+        mixed: [],
+        findings: [],
       });
     });
 
