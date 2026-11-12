@@ -26,6 +26,9 @@ export class BrainStore extends Store {
         },
       },
       contextTokens: null,
+      report: async () => {
+        await Promise.resolve();
+      },
     };
   };
 }

@@ -2,7 +2,9 @@ import {
   exactCandidatesMax,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
+import type { WorkOverview } from "@grasp-os/brain-next/contract";
 import { authoritySchema } from "@grasp-os/shared/permissions";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -15,6 +17,8 @@ import { memberOf } from "../src/auth/identity.ts";
 import {
   addInstructionFile,
   addSource,
+  alarmHostOf,
+  brainStaffReport,
   eraseSource,
   erasePerson,
   recallAs,
@@ -265,6 +269,25 @@ const addressedBy = async <T>(
     byId.mockRestore();
   }
 };
+
+/** Reports `overview` as `person`'s own store's alarm does when its tick ends. */
+const reportAs = async (
+  person: string,
+  overview: WorkOverview
+): Promise<void> => {
+  const host = await alarmHostOf(env, `person:${person}`);
+  await host.report(overview);
+};
+
+/** Staff's totals of people's own stores. */
+const ownTotals = async () => {
+  const { ownStores } = await brainStaffReport(env);
+  return ownStores;
+};
+
+/** `person`'s own store, as core names it. */
+const ownStoreOf = (person: string) =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`);
 
 const join = async (teamId: string, userId: string): Promise<void> => {
   await drizzle(env.DB)
@@ -1253,6 +1276,104 @@ describe(
         // The runner does find theirs.
         runner: runnerFinds.length,
       }).toStrictEqual({ findings: [], runner: 1 });
+    });
+
+    it("never wakes or addresses one person's own store for another's activity, their store's own work or staff's report", async () => {
+      const [{ userId: holder }, { userId: other }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const sharedWord = `s${unique()}`;
+      await add(`Holder's own ${sharedWord}`, {
+        kind: "owner",
+        personId: holder,
+      });
+      const holderAlarm = async () =>
+        await runInDurableObject(
+          ownStoreOf(holder),
+          async (_store, state) => await state.storage.getAlarm()
+        );
+      const before = await holderAlarm();
+
+      const { names } = await addressedBy(async () => {
+        // The other person's own source, kept, erased (work for their
+        // store's alarm), recalled, their alarm run, the clock's tick of
+        // the shared store, staff's report, and their erasure.
+        const theirs = await add(`Other's own ${sharedWord}`, {
+          kind: "owner",
+          personId: other,
+        });
+        await textsFor(other, sharedWord);
+        await eraseSource(env, {
+          source: theirs,
+          readers: { kind: "owner", personId: other },
+          reason: "deleted",
+        });
+        await runDurableObjectAlarm(ownStoreOf(other));
+        await workBrain(env, new Date(), noProducers);
+        await brainStaffReport(env);
+        await Promise.allSettled([
+          erasePerson(env, { personId: other, reason: "person_erased" }),
+        ]);
+      });
+
+      expect({
+        holdersStoreAddressed: names.includes(`person:${holder}`),
+        othersStoreAddressed: names.includes(`person:${other}`),
+        holdersAlarm: await holderAlarm(),
+      }).toStrictEqual({
+        holdersStoreAddressed: false,
+        othersStoreAddressed: true,
+        holdersAlarm: before,
+      });
+    });
+
+    it("tells staff the same totals of people's own stores whoever of them holds what", async () => {
+      const [first, second] = [
+        `person-${crypto.randomUUID()}`,
+        `person-${crypto.randomUUID()}`,
+      ];
+      // An overview as a store that holds something reports it, with
+      // `waiting` items and `parked` (one holding nothing has no row).
+      const base = await ownStoreOf(first).workOverview();
+      const holding = (waiting: number, parked: number) => ({
+        ...base,
+        holding: true,
+        waiting:
+          waiting === 0
+            ? []
+            : [
+                {
+                  kind: "embed",
+                  count: waiting,
+                  oldestAddedAt: new Date(1_000_000),
+                },
+              ],
+        parkedCount: parked,
+      });
+      const before = await ownTotals();
+      await reportAs(first, holding(5, 2));
+      await reportAs(second, holding(0, 0));
+      const oneHoldsAll = await ownTotals();
+      await reportAs(first, holding(0, 0));
+      await reportAs(second, holding(5, 2));
+      const theOtherHoldsAll = await ownTotals();
+      for (const person of [first, second]) {
+        // oxlint-disable-next-line no-await-in-loop -- one person at a time
+        await erasePerson(env, { personId: person, reason: "person_erased" });
+      }
+
+      expect({
+        added: {
+          stores: oneHoldsAll.stores - before.stores,
+          waiting: oneHoldsAll.waiting - before.waiting,
+          parked: oneHoldsAll.parked - before.parked,
+        },
+        same: theOtherHoldsAll,
+      }).toStrictEqual({
+        added: { stores: 2, waiting: 5, parked: 2 },
+        same: oneHoldsAll,
+      });
     });
   }
 );

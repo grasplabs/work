@@ -1338,6 +1338,7 @@ export const workOverview = (
   | "stepsFailed"
   | "erasing"
   | "sourcesWithoutCurrent"
+  | "holding"
   | "ledgerReplay"
   | "embedding"
   | "storeBytes"
