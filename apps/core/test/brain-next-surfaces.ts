@@ -70,6 +70,7 @@ import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
+import { BrainMemoriesRpc } from "../src/brain-memories-rpc.ts";
 import * as brainMemories from "../src/brain-memories.ts";
 import * as coreBrain from "../src/brain-next.ts";
 import type {
@@ -4132,6 +4133,61 @@ export const sourcesProbes = {
   ],
 } satisfies Record<"list" | "versions" | "read" | "search", Probe>;
 
+/** The memories' RPC for `personId`, signed in as a member. */
+const memoriesAs = (personId: string): BrainMemoriesRpc =>
+  new BrainMemoriesRpc(
+    env,
+    async () => await Promise.resolve(sessionOf(personId))
+  );
+
+/**
+ * The chat's undo of a saved memory (brain-memories-rpc.ts, as
+ * `session.brainMemories`), as the signed-in person, with what a page
+ * could send instead.
+ */
+export const memoriesRpcProbes = {
+  forget: async (probing) => {
+    const { personId, markers } = probing;
+    const [fixture, others] = await Promise.all([
+      memoryFixture(probing),
+      othersOwnMemory(markers),
+    ]);
+    const forget = async (
+      name: string,
+      memory: unknown,
+      about?: Answer["about"],
+      as = personId
+    ) =>
+      await answer(
+        name,
+        async () => await memoriesAs(as).forget(unchecked(memory)),
+        about
+      );
+    return [
+      await forget("a memory no one saved", crypto.randomUUID(), "nothing"),
+      await forget("a hidden memory", fixture.hiddenMemory, "hidden"),
+      await forget(
+        "a memory in someone else's own store",
+        others.memory,
+        "hidden"
+      ),
+      await forget(
+        "the reader's memory of another writer",
+        fixture.seenMemory,
+        "hidden"
+      ),
+      await forget(
+        "as someone who isn't a member",
+        others.memory,
+        undefined,
+        stranger()
+      ),
+      await forget("an id of the markers", markers.join("")),
+      await forget("not an id", { memory: markers }),
+    ];
+  },
+} satisfies Record<"forget", Probe>;
+
 /** One way into the Brain: a module, or the store's class, and its probes. */
 interface Surface {
   name: string;
@@ -4154,6 +4210,7 @@ export const brainSurfaces = [
   { name: "store", module: BrainStore, probes: storeProbes },
   { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
   { name: "memories", module: brainMemories, probes: memoriesProbes },
+  { name: "memoriesRpc", module: BrainMemoriesRpc, probes: memoriesRpcProbes },
 ] as const satisfies readonly Surface[];
 
 /**

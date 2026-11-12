@@ -12,6 +12,13 @@ import { definitionToolNames } from "@grasp-os/shared/chat";
 export const showThinkingName = "show_thinking";
 
 /**
+ * The tool by which the agent keeps what a person says in their own chat
+ * (agent-remember.ts), as its stored calls and results name it: the chat
+ * shows each call as a line, with a notice of what was saved.
+ */
+export const rememberName = "remember";
+
+/**
  * The agent's tools for what it does most (agent-tools.ts) and its docs
  * tools (agent-docs.ts), as their stored calls name them: the chat shows
  * each call as one line.
@@ -27,6 +34,7 @@ export const dedicatedToolNames = [
   "editWorkflow",
   "searchDocs",
   "readDocs",
+  rememberName,
 ] as const;
 
 export type DedicatedToolName = (typeof dedicatedToolNames)[number];

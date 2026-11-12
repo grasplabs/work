@@ -32,6 +32,9 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
+/** The memories the page undid, by id, in order. */
+const forgotten: string[] = [];
+
 const asked: ChatMessage = {
   id: 1,
   role: "user",
@@ -56,9 +59,17 @@ const thread = async (
     withSession: async <T,>(
       action: (session: {
         brain: { thinking: () => Promise<ThinkingGround> };
+        brainMemories: { forget: (memory: string) => Promise<"done"> };
       }) => Promise<T>
     ): Promise<T> =>
       await action({
+        brainMemories: {
+          forget: async (memory) => {
+            await Promise.resolve();
+            forgotten.push(memory);
+            return "done";
+          },
+        },
         brain: {
           thinking: async () => {
             await Promise.resolve();
@@ -149,6 +160,68 @@ describe(ChatThread, () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    forgotten.length = 0;
+  });
+
+  it("says under a call of remember what Grasp will remember, in the person's words, and undoes it there", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const memory = "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Acme renews on 1 March" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: { memory, statement: "Acme renews on 1 March" },
+      },
+    ]);
+    const shown = document.body.textContent;
+    const undo = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Undo"
+    );
+    await act(async () => {
+      undo?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Grasp no longer remembers this."
+      );
+    });
+
+    expect({
+      line: shown.includes("Saved to your memory"),
+      notice: shown.includes("Grasp will remember: Acme renews on 1 March"),
+      forgotten,
+      undoLeft: [...document.querySelectorAll("button")].some(
+        (button) => button.textContent === "Undo"
+      ),
+    }).toStrictEqual({
+      line: true,
+      notice: true,
+      forgotten: [memory],
+      undoLeft: false,
+    });
   });
 
   it("streams what the model thinks, open under Thinking, before it says a word", async () => {

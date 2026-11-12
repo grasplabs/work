@@ -6271,6 +6271,10 @@ msgstr "Grasp may use {app} only through the tools you allowed."
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
 msgstr "Grasp never sends it again. Nothing is changed or undone on {connection}."
 
+#: src/chat/saved-memory.tsx
+msgid "Grasp no longer remembers this."
+msgstr "Grasp no longer remembers this."
+
 #: src/brain/brain-log.tsx
 msgid "Grasp noticed it did not know"
 msgstr "Grasp noticed it did not know"
@@ -6337,6 +6341,10 @@ msgstr "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp was updated while this page was open. Try again to load the new version."
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember: {statement}"
+msgstr "Grasp will remember: {statement}"
 
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -11769,9 +11777,17 @@ msgstr "Saved just now"
 msgid "Saved on {date}"
 msgstr "Saved on {date}"
 
+#: src/chat/thread.tsx
+msgid "Saved to your memory"
+msgstr "Saved to your memory"
+
 #: src/workflows/resource-params.tsx
 msgid "Saved."
 msgstr "Saved."
+
+#: src/chat/thread.tsx
+msgid "Saving to your memory"
+msgstr "Saving to your memory"
 
 #: src/interview/composer.tsx
 msgid "Saving…"
@@ -14814,6 +14830,7 @@ msgid "Under way"
 msgstr "Under way"
 
 #: src/apps/publish.tsx
+#: src/chat/saved-memory.tsx
 msgid "Undo"
 msgstr "Undo"
 

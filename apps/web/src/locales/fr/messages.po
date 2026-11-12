@@ -6271,6 +6271,10 @@ msgstr "Grasp ne peut utiliser {app} qu’avec les outils que vous avez autoris�
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
 msgstr "Grasp ne l'envoie plus jamais. Rien n'est modifié ni annulé sur {connection}."
 
+#: src/chat/saved-memory.tsx
+msgid "Grasp no longer remembers this."
+msgstr "Grasp ne retient plus ceci."
+
 #: src/brain/brain-log.tsx
 msgid "Grasp noticed it did not know"
 msgstr "Grasp a remarqué qu’il ne le savait pas"
@@ -6337,6 +6341,10 @@ msgstr "Grasp transcrit les entretiens avec {whereItRuns}, avec la propre clé d
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp a été mis à jour pendant que cette page était ouverte. Réessayez pour charger la nouvelle version."
+
+#: src/chat/saved-memory.tsx
+msgid "Grasp will remember: {statement}"
+msgstr "Grasp retiendra : {statement}"
 
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -11769,9 +11777,17 @@ msgstr "Enregistré à l’instant"
 msgid "Saved on {date}"
 msgstr "Enregistré le {date}"
 
+#: src/chat/thread.tsx
+msgid "Saved to your memory"
+msgstr "Enregistré dans votre mémoire"
+
 #: src/workflows/resource-params.tsx
 msgid "Saved."
 msgstr "Enregistré."
+
+#: src/chat/thread.tsx
+msgid "Saving to your memory"
+msgstr "Enregistrement dans votre mémoire"
 
 #: src/interview/composer.tsx
 msgid "Saving…"
@@ -14814,6 +14830,7 @@ msgid "Under way"
 msgstr "En cours"
 
 #: src/apps/publish.tsx
+#: src/chat/saved-memory.tsx
 msgid "Undo"
 msgstr "Annuler"
 
