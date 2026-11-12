@@ -32,7 +32,7 @@ export { ChatState } from "@grasp-os/chat/state";
 export { ChatSession } from "./chat-session.ts";
 // The Brain's store, registered here: the one import of it in core
 // (src/brain-next.ts reaches it through its contract).
-export { BrainStore } from "@grasp-os/brain-next/store";
+export { BrainStore } from "./brain-store.ts";
 export { WorkflowRuns } from "./workflows/run-object.ts";
 export { Workspace } from "./workspace.ts";
 
