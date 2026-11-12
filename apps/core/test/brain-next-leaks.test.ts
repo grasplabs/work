@@ -214,12 +214,24 @@ const findingsOf = async (
 const addressedBy = async <T>(
   run: () => Promise<T>
 ): Promise<{ value: T; names: string[] }> => {
-  const spy = vi.spyOn(env.BRAIN_STORE, "getByName");
+  const binding = env.BRAIN_STORE;
+  const byName = vi.spyOn(binding, "getByName");
+  const idsByName = vi.spyOn(binding, "idFromName");
+  const byId = vi.spyOn(binding, "get");
   try {
     const value = await run();
-    return { value, names: spy.mock.calls.map(([name]) => name) };
+    return {
+      value,
+      names: [
+        ...byName.mock.calls.map(([name]) => name),
+        ...idsByName.mock.calls.map(([name]) => name),
+        ...byId.mock.calls.map(([id]) => id.name ?? `id:${String(id)}`),
+      ],
+    };
   } finally {
-    spy.mockRestore();
+    byName.mockRestore();
+    idsByName.mockRestore();
+    byId.mockRestore();
   }
 };
 
@@ -340,6 +352,7 @@ describe(
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
+        "a source narrowed to the holder alone": markerWord(),
         "the holder's instruction file": markerWord(),
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
@@ -350,6 +363,7 @@ describe(
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
         "a source narrowed away from the outsider": narrowedMarker,
+        "a source narrowed to the holder alone": toHolderMarker,
         "the holder's instruction file": holderFileMarker,
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
@@ -511,6 +525,21 @@ describe(
         { kind: "team", teamId: holdersTeam },
         narrowedId
       );
+      // First for the outsider's own team, then narrowed to the holder
+      // alone: refused, as a source keeps the kind of readers it was first
+      // added with, so the version for the holder alone is kept nowhere.
+      const toHolder = await add("Shared plan for the quarter", {
+        kind: "team",
+        teamId: ownTeam,
+      });
+      const narrowedToHolder = await add(
+        `Plan for the holder ${sharedWord} ${toHolderMarker}`,
+        { kind: "owner", personId: holder },
+        toHolder
+      ).then(
+        () => "added",
+        () => "refused"
+      );
 
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
@@ -556,9 +585,13 @@ describe(
           teamMarker,
           noneMarker,
           narrowedMarker,
+          toHolderMarker,
           ...instructionMarkers,
         ],
-        hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
+        hiddenVersions: [
+          ...everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
+          { source: toHolder, version: 2 },
+        ],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         usedApps,
         instructionGroups,
@@ -585,6 +618,7 @@ describe(
             ownerMarker,
             noneMarker,
             narrowedMarker,
+            toHolderMarker,
             ...instructionMarkers,
           ],
           hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
@@ -679,6 +713,7 @@ describe(
             ownerMarker,
             noneMarker,
             narrowedMarker,
+            toHolderMarker,
             ...instructionMarkers,
           ],
           hiddenVersions: everyVersionOf(...ownerIds, noneId, narrowedId),
@@ -701,6 +736,7 @@ describe(
             teamMarker,
             noneMarker,
             narrowedMarker,
+            toHolderMarker,
             ...instructionMarkers,
           ],
           hiddenVersions: everyVersionOf(
@@ -762,6 +798,7 @@ describe(
           ...asAdmin,
           ...prompted,
         ],
+        narrowedToHolder,
         holdersStoreAddressed: addressed.includes(`person:${holder}`),
         // The binding was watched: the shared store and the outsider's own
         // were addressed through it.
@@ -777,6 +814,7 @@ describe(
         outsiderOpens,
       }).toStrictEqual({
         findings: [],
+        narrowedToHolder: "refused",
         holdersStoreAddressed: false,
         othersAddressed: [true, true],
         outsiderFinds: [handbook],

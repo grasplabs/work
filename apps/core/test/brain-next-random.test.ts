@@ -1,3 +1,4 @@
+import { packAcross } from "@grasp-os/brain-next/across";
 import {
   brainOf,
   personalBrainOf,
@@ -81,8 +82,10 @@ import { testBinding } from "./test-env.ts";
 //   shared store returns its chunks of current versions the reader may
 //   read, nearest the question by cosine, ties to the chunk added first,
 //   at most `vectorLimit`, each with its cosine. A recall by meaning
-//   is asked of the shared store alone: across stores, a tie in cosine
-//   goes by each store's own rows. The vectors are +1 and -1 alone with a centre of
+//   packs both stores, where a tie in cosine goes to the older version
+//   whichever store holds it: each version is added at a millisecond of
+//   its own, so the order added is the order by time. The vectors are +1
+//   and -1 alone with a centre of
 //   zeros, where the store's 1-bit order is the cosine's and its 8-bit
 //   codes are whole, so the answer is exact however many it re-scores.
 //
@@ -812,6 +815,9 @@ const scenario = (people: readonly string[], seed: number) => {
       );
     }
     addOrder.set(version, addOrder.size);
+    // The next version is added a millisecond later at least, so a tie in
+    // cosine goes by the order added, in a store or across them.
+    await scheduler.wait(2);
   };
 
   /** Each chunk of a current version, as the store names it. */
@@ -1006,10 +1012,15 @@ const scenario = (people: readonly string[], seed: number) => {
         vector,
       },
     };
-    // The shared store alone: across stores, chunks of the same cosine
-    // are ordered by each store's own rows, which no brute force can
-    // know, so packing both by meaning is left to the package's tests.
-    const pack = await brainStore().recall(request);
+    // Both stores asked, and packed, as core's recall does.
+    const pack = packAcross(
+      question,
+      recallBudgetMax,
+      await Promise.all([
+        brainStore().find(request),
+        ownStore(personId(person)).find(request),
+      ])
+    );
     return {
       ...pack,
       // Each source as the plan names it; one the plan doesn't know as
@@ -1040,7 +1051,7 @@ const scenario = (people: readonly string[], seed: number) => {
     const meant =
       vector === undefined
         ? []
-        : nearest(person, vector, recallLimit, true).map(
+        : nearest(person, vector, recallLimit).map(
             ({ planned: source, version, chunk }) => ({
               name: `s${source.index} v${version.version} c${chunk.position}`,
               planned: source,
@@ -1055,11 +1066,8 @@ const scenario = (people: readonly string[], seed: number) => {
     // Each word as the question first wrote it.
     const written = (token: Token): string =>
       writtenAs[asked.indexOf(token)] ?? wordOf(token);
-    // By meaning, of the shared store alone (`recallOf`).
     const expected = packOf(
-      vector === undefined
-        ? planned
-        : planned.filter((source) => ownerOf(source) === undefined),
+      planned,
       person,
       membership,
       asked,

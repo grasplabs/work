@@ -1001,6 +1001,13 @@ export interface Brain {
    */
   readCurrent: (request: CurrentRequest) => Promise<SourceVersion[]>;
   /**
+   * Whether this store was ever given the source `source`: a version of
+   * it, current or history, or an erasure that closed its key. Yes or no
+   * alone, whoever may read it, so for the host only, before it keeps a
+   * source in another store (one person's own): a key lives in one store.
+   */
+  holdsSource: (source: SourceId) => Promise<boolean>;
+  /**
    * One tick of the host's clock, at `at`, the host's time now. First it
    * deletes one batch of what erasures hid and haven't deleted yet. Then
    * it removes one batch of what adds that never finished left (files no

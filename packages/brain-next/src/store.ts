@@ -15,6 +15,7 @@ import {
   storeKindOf,
   recallRequestSchema,
   sourceErasureSchema,
+  sourceIdSchema,
   vectorSearchSchema,
   vectorsToPutSchema,
   versionRequestSchema,
@@ -34,6 +35,7 @@ import type {
   RecallRequest,
   Pack,
   SourceErasure,
+  SourceId,
   SourceVersion,
   SourceVersionRef,
   StaffActionOutcome,
@@ -58,8 +60,10 @@ import {
   erasuresOverview,
   erasureDue,
   erasuresUnfinished,
+  isErased,
   isStoreErased,
   storeErasedAt,
+  subjectOf,
   keepMissingSubjects,
   ledgerPrefix,
   readLedgerStart,
@@ -707,6 +711,20 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return (await this.#readable())
       ? await readCurrent(this.#sources, asked)
       : [];
+  }
+
+  /** Whether this store was ever given `source`, or closed its key (contract.ts). */
+  async holdsSource(source: SourceId): Promise<boolean> {
+    const key = checked(sourceIdSchema, source);
+    await this.#ready();
+    if (!this.#schema) {
+      return false;
+    }
+    const held =
+      this.ctx.storage.sql
+        .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
+        .toArray().length > 0;
+    return held || isErased(this.ctx.storage.sql, await subjectOf(key));
   }
 
   /**

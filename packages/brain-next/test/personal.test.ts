@@ -1247,6 +1247,7 @@ const leavingWork: Record<string, () => Promise<void>> = {
 const leavingNone = [
   "erasePerson",
   "find",
+  "holdsSource",
   "readCurrent",
   "readVersion",
   "recall",

@@ -26,7 +26,7 @@ import type {
 } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { ageOwnErasure } from "./brain-next-own-store.ts";
+import { ageOwnErasure, breakOwnStore } from "./brain-next-own-store.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -115,6 +115,19 @@ const textsFor = async (
   return items.map(({ text }) => text);
 };
 
+/** The text of `wanted` as `personId` reads it through core: null if not. */
+const historyAs = async (
+  personId: string,
+  wanted: { source: SourceRef; version: number }
+): Promise<string | null> => {
+  const read = await readSourceVersionAs(env, personId, wanted);
+  return read?.text ?? null;
+};
+
+/** What `promise` was refused with, or `answered`. */
+const outcomeOf = async (promise: Promise<unknown>): Promise<string> =>
+  await promise.then(() => "answered", String);
+
 /**
  * The names of the Brain's stores core addressed while `run` ran, and
  * what it returned: through the binding itself.
@@ -122,12 +135,24 @@ const textsFor = async (
 const addressedBy = async <T>(
   run: () => Promise<T>
 ): Promise<{ value: T; names: string[] }> => {
-  const spy = vi.spyOn(env.BRAIN_STORE, "getByName");
+  const binding = env.BRAIN_STORE;
+  const byName = vi.spyOn(binding, "getByName");
+  const idsByName = vi.spyOn(binding, "idFromName");
+  const byId = vi.spyOn(binding, "get");
   try {
     const value = await run();
-    return { value, names: spy.mock.calls.map(([name]) => name) };
+    return {
+      value,
+      names: [
+        ...byName.mock.calls.map(([name]) => name),
+        ...idsByName.mock.calls.map(([name]) => name),
+        ...byId.mock.calls.map(([id]) => id.name ?? `id:${String(id)}`),
+      ],
+    };
   } finally {
-    spy.mockRestore();
+    byName.mockRestore();
+    idsByName.mockRestore();
+    byId.mockRestore();
   }
 };
 
@@ -319,7 +344,166 @@ describe("what one person alone may read, in their own store", () => {
   });
 });
 
+describe("a source whose readers would change kind", () => {
+  it("is refused when a shared source would become one person's own, and keeps nothing of it", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    await add(source, `The team's draft ${word}`, {
+      kind: "team",
+      teamId: team,
+    });
+
+    const narrowing = await outcomeOf(
+      add(source, `Theirs alone ${word}`, { kind: "owner", personId: person })
+    );
+    const theirsAlone = await own(person).readCurrent({
+      sources: [keyOf(source)],
+      reader: { person, groups: [] },
+    });
+
+    expect({
+      narrowing: narrowing.includes("keeps the kind of readers"),
+      namesTheKey: narrowing.includes(source.id),
+      colleague: await textsFor(colleague, word, true),
+      person: await textsFor(person, word, true),
+      theirsAlone,
+    }).toStrictEqual({
+      narrowing: true,
+      namesTheKey: false,
+      colleague: [`The team's draft ${word}`],
+      person: [`The team's draft ${word}`],
+      theirsAlone: [],
+    });
+  });
+
+  it("is erased in the shared store whatever readers its erasure names, its key closed there", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const source = newSource();
+    await add(source, `The team's draft ${word}`, {
+      kind: "team",
+      teamId: team,
+    });
+
+    // Named by readers the producer thinks it has now: its own person.
+    await eraseSource(env, {
+      source,
+      readers: { kind: "owner", personId: person },
+      reason: "deleted",
+    });
+
+    expect({
+      colleague: await textsFor(colleague, word, true),
+      read: await readSourceVersionAs(env, colleague, { source, version: 1 }),
+      addedAgain: await add(source, "Back again", {
+        kind: "team",
+        teamId: team,
+      }).then(
+        () => "added",
+        () => "refused"
+      ),
+    }).toStrictEqual({ colleague: [], read: null, addedAgain: "refused" });
+  });
+
+  it("widened from one person's own to a team, keeps its private version readable to that person alone until their erasure", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const [draft, final] = [markerWord(), markerWord()];
+    const source = newSource();
+    // The producers' rule is never to widen a source: this is what holds
+    // when one does anyway. Each store then numbers its own versions.
+    await add(source, `Their own draft ${draft}`, {
+      kind: "owner",
+      personId: person,
+    });
+    await add(source, `The team's final ${final}`, {
+      kind: "team",
+      teamId: team,
+    });
+    const before = {
+      theirs: await textsFor(person, draft, true),
+      colleagues: await textsFor(colleague, draft, true),
+    };
+
+    // Erased as the team's: the shared copy goes, theirs stays theirs.
+    await eraseSource(env, {
+      source,
+      readers: { kind: "team", teamId: team },
+      reason: "deleted",
+    });
+    const afterSharedErasure = {
+      theirs: await textsFor(person, draft, true),
+      final: await textsFor(colleague, final, true),
+    };
+    const erasing = { personId: person, reason: "person_erased" } as const;
+    await Promise.allSettled([erasePerson(env, erasing)]);
+    await ageOwnErasure(person);
+    await erasePerson(env, erasing);
+
+    expect({
+      before,
+      afterSharedErasure,
+      afterTheirErasure: await textsFor(person, draft, true),
+    }).toStrictEqual({
+      before: { theirs: [`Their own draft ${draft}`], colleagues: [] },
+      afterSharedErasure: { theirs: [`Their own draft ${draft}`], final: [] },
+      afterTheirErasure: [],
+    });
+  });
+});
+
+describe("a person's own store failing", () => {
+  it("leaves shared history readable to them and others' recall whole, and fails only their own recall that reads it", async () => {
+    const [person, colleague] = await Promise.all([member(), member()]);
+    const team = await teamOf(person, colleague);
+    const word = markerWord();
+    const teamNote = newSource();
+    await add(teamNote, `The team's note ${word}`, {
+      kind: "team",
+      teamId: team,
+    });
+    await add(newSource(), `Their own ${word}`, {
+      kind: "owner",
+      personId: person,
+    });
+    const broken = await breakOwnStore(person);
+    try {
+      expect({
+        history: await historyAs(person, { source: teamNote, version: 1 }),
+        asApp: await textsFor(person, word, false),
+        colleague: await textsFor(colleague, word, true),
+        own: await outcomeOf(textsFor(person, word, true)),
+      }).toStrictEqual({
+        history: `The team's note ${word}`,
+        asApp: [`The team's note ${word}`],
+        colleague: [`The team's note ${word}`],
+        own: "Error: The Brain can't read its erasure ledger yet, so it answers nothing: try again shortly",
+      });
+    } finally {
+      await broken.heal();
+    }
+  });
+});
+
 describe("erasing a person", () => {
+  it("as a withdrawal leaves their own store answering and taking adds", async () => {
+    const person = await member();
+    const word = markerWord();
+    const readers: SourceReaders = { kind: "owner", personId: person };
+    await add(newSource(), `Their own ${word}`, readers);
+
+    await erasePerson(env, { personId: person, reason: "withdrawn" });
+    await add(newSource(), `Added after ${word}`, readers);
+
+    const found = await textsFor(person, word, true);
+    expect(found.toSorted()).toStrictEqual(
+      [`Added after ${word}`, `Their own ${word}`].toSorted()
+    );
+  });
+
   it("erases their own store whole after the shared store, stays pending while it is still deleting, and then answers them as nothing does", async () => {
     const person = await member();
     const team = await teamOf(person);
