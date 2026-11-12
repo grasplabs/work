@@ -11,12 +11,13 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { analysisPurpose, analysisWaitMs } from "../src/turn-recall.ts";
+import { analysisPurpose, turnRecallMethod } from "../src/turn-recall.ts";
 import { chatOf, says, toolResults } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
-import { allEvents } from "./audit-events.ts";
+import { allEvents, loggedEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  answeringProvider,
   fakeProvider,
   recallAnalysisReplies,
   recallAnalysisRequests,
@@ -146,46 +147,110 @@ const eventsOf = async (
   return await mine();
 };
 
+/** The audit events of the recall before a question in chat `chatId`. */
+const recallsIn = (events: readonly AuditEvent[], chatId: string) =>
+  events.filter(
+    ({ action, detail }) =>
+      action === "agent.call" &&
+      detail.method === turnRecallMethod &&
+      detail.chat === chatId
+  );
+
+/** Whether a warning named `name` was logged in `calls`, the spy's calls. */
+const warned = (calls: readonly unknown[], name: string): boolean =>
+  JSON.stringify(calls).includes(name);
+
 describe("the recall before a chat's question", setUpTime, () => {
-  it("hands the model what the question finds at once, without waiting for the analysis, and lets the analysis go", async () => {
+  it("hands the model what the question finds without waiting for the analysis, a word nothing holds beside it too, and lets the analysis go", async () => {
     const depot = word();
     const fact = `Depot ${depot} opens at seven`;
-    const chat = await recallingChat(says("Seven."), says("Noted."));
+    const chat = await recallingChat(
+      says("Seven."),
+      says("Still seven."),
+      says("No idea.")
+    );
     await added(fact, owner(chat.personId));
     // The analysis held, each turn: it never answers until let go of.
-    recallAnalysisReplies.push({ hang: true }, { hang: true });
-    /** How long the turn asking `question` took. */
-    const timed = async (question: string) => {
-      const started = Date.now();
-      const reply = await chat.ask(question);
-      return { reply, tookMs: Date.now() - started };
+    recallAnalysisReplies.push({ hang: true }, { hang: true }, { hang: true });
+    const warnings = vi.spyOn(console, "warn");
+    /** What asking `question` handed over, and whether it waited on the analysis. */
+    const asked = async (question: string) => {
+      const before = {
+        requests: chat.provider.requests.length,
+        warnings: warnings.mock.calls.length,
+      };
+      await chat.ask(question);
+      return {
+        recalled:
+          recallIn(chat.provider.requests[before.requests]?.body)?.includes(
+            fact
+          ) ?? false,
+        // Waited on and given up on: logged as late.
+        waited: warned(
+          warnings.mock.calls.slice(before.warnings),
+          "chat.recall_analysis_late"
+        ),
+      };
     };
+    try {
+      const found = await asked(`When does depot ${depot} open?`);
+      const besideUnknown = await asked(
+        `When does depot ${depot} open on ${word()} days?`
+      );
+      // The contrast: a question that finds nothing waits, to its bound.
+      const thin = await asked(`Who keeps the ${word()} keys?`);
 
-    // Answered, with what the question found, though the analysis never did.
-    const found = await timed(`When does depot ${depot} open?`);
-    // A thin question waits for it, as long as its bound: the yardstick.
-    const thin = await timed(`Who keeps the ${word()} keys?`);
-
-    const [request] = chat.provider.requests;
-    expect({
-      answer: found.reply.answer,
-      recalled: recallIn(request?.body)?.includes(fact),
-      analyses: recallAnalysisRequests.length,
-      // Not held up by the analysis: well inside the thin turn's wait.
-      heldUp: found.tookMs > thin.tookMs - analysisWaitMs / 2,
-    }).toStrictEqual({
-      answer: "Seven.",
-      recalled: true,
-      analyses: 2,
-      heldUp: false,
-    });
-    // Asked alongside, and let go of once the recall ended.
+      expect({
+        found,
+        besideUnknown,
+        thin,
+        analyses: recallAnalysisRequests.length,
+      }).toStrictEqual({
+        found: { recalled: true, waited: false },
+        besideUnknown: { recalled: true, waited: false },
+        thin: { recalled: false, waited: true },
+        analyses: 3,
+      });
+    } finally {
+      warnings.mockRestore();
+    }
+    // Asked alongside, and let go of once each recall ended.
     await vi.waitFor(
       () => {
-        expect(recallAnalysisRequests[0]?.signal.aborted).toBeTruthy();
+        expect(
+          recallAnalysisRequests.every(({ signal }) => signal.aborted)
+        ).toBeTruthy();
       },
       { timeout: 5000, interval: 20 }
     );
+  });
+
+  it("records the recall in the audit log, by how many versions it hands over and never what they say, before the model gets any of it", async () => {
+    const depot = word();
+    const fact = `Depot ${depot} opens at seven`;
+    const chat = await recallingChat();
+    await added(fact, owner(chat.personId));
+    // The log as it stood when the model was first asked, straight from
+    // it: what an outbox still holds isn't in it.
+    let logged: Promise<AuditEvent[]> | undefined;
+    await answeringProvider(() => {
+      logged ??= loggedEvents();
+      return says("Seven.");
+    });
+
+    await chat.ask(`When does depot ${depot} open?`);
+
+    const recalls = recallsIn((await logged) ?? [], chat.chat.id);
+    expect({
+      recalls: recalls.map(({ detail }) => ({
+        versions: detail.versions,
+        outcome: detail.outcome,
+      })),
+      saysWhat: JSON.stringify(recalls).includes(depot),
+    }).toStrictEqual({
+      recalls: [{ versions: 1, outcome: "ok" }],
+      saysWhat: false,
+    });
   });
 
   it("finds what a follow-up with a pronoun means through the second pass", async () => {
@@ -249,25 +314,20 @@ describe("the recall before a chat's question", setUpTime, () => {
   });
 
   it("hands over exactly what the first pass found when the analysis fails, is slow, or says nothing", async () => {
-    const depot = word();
-    const fact = `Depot ${depot} opens at seven`;
-    // Thin: "shut" is in nothing the person may read, so the analysis is
-    // waited for, and a second pass would run on what it says.
-    const question = `When does depot ${depot} shut?`;
     const decoy = word();
+    // Thin: none of its words is in anything the person may read, so the
+    // analysis is waited for, and a second pass would run on what it says.
+    const question = "When does that one shut?";
     // One person's sources, asked of in a new chat of theirs each time.
     const { userId } = await signedInWithRole(idp, "user");
-    await added(fact, owner(userId));
     await added(`Warehouse ${decoy} locks at nine`, owner(userId));
     /** What one chat's recall handed over, with its analysis answering `reply`. */
     const recalledWith = async (reply: ProviderReply) => {
-      const chat = await recallingChatOf(userId, says("At seven."));
+      const chat = await recallingChatOf(userId, says("At nine."));
       recallAnalysisReplies.push(reply);
-      const started = Date.now();
       await chat.ask(question);
       return {
         recalled: recallIn(chat.provider.requests[0]?.body),
-        tookMs: Date.now() - started,
         analysis: recallAnalysisRequests.at(-1),
       };
     };
@@ -277,22 +337,21 @@ describe("the recall before a chat's question", setUpTime, () => {
       errorType: "api_error",
     });
     const slow = await recalledWith({ hang: true });
-    // Had it answered in time, it would have found the decoy.
+    // Had the others answered in time with words, they would have found it.
     const steered = await recalledWith(analysed(`warehouse ${decoy}`));
 
     expect({
-      first: alone.recalled?.includes(fact),
+      first: alone.recalled?.includes(decoy),
       failing: failing.recalled,
       slow: slow.recalled,
       steered: steered.recalled?.includes(decoy),
     }).toStrictEqual({
-      first: true,
+      first: false,
       failing: alone.recalled,
       slow: alone.recalled,
       steered: true,
     });
-    // The slow one waited no longer than its bound, and was let go of.
-    expect(slow.tookMs).toBeGreaterThanOrEqual(analysisWaitMs);
+    // The slow one was let go of.
     await vi.waitFor(
       () => {
         expect(slow.analysis?.signal.aborted).toBeTruthy();
@@ -476,12 +535,22 @@ describe("what the recall before a question may reach", setUpTime, () => {
     const events = await eventsOf(erased.agent.agentId, (all) =>
       all.some(({ action }) => action === "chat.history_withheld")
     );
-    expect(
-      events
-        .filter(({ action }) => action === "chat.history_withheld")
-        .map(({ detail }) => detail.source)
-    ).toStrictEqual([
-      `brain-version:${JSON.stringify(["upload", erased.source.id, 1])}`,
-    ]);
+    const withheld = events.filter(
+      ({ action }) => action === "chat.history_withheld"
+    );
+    expect({
+      sources: withheld.map(({ detail }) => detail.source),
+      // Each withheld after the recall that read it was in the log.
+      recordedBefore: withheld.every(
+        (event) =>
+          recallsIn(events.slice(0, events.indexOf(event)), erased.chat.id)
+            .length > 0
+      ),
+    }).toStrictEqual({
+      sources: [
+        `brain-version:${JSON.stringify(["upload", erased.source.id, 1])}`,
+      ],
+      recordedBefore: true,
+    });
   });
 });

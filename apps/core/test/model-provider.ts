@@ -147,17 +147,23 @@ const running = new Set<() => void>();
 
 /**
  * Replies to the analysis alongside a chat's recall before its question
- * (src/turn-recall.ts), in the order a test queued them once its provider
- * started, apart from every provider's script; once none is left, nothing
- * to look up. Each request of it that reached the provider is kept in
- * `recallAnalysisRequests`. Both start empty with each provider.
+ * (src/turn-recall.ts), the current provider's, in the order a test queued
+ * them after starting it, apart from its script; once none is left,
+ * nothing to look up. Each request of it that reached the current
+ * provider is kept in `recallAnalysisRequests`. Both are emptied whenever
+ * a provider starts (`answeringProvider`, `fakeProvider`), so what a test
+ * counts there is its own provider's alone.
  */
 export const recallAnalysisReplies: ProviderReply[] = [];
 
-/** Every request of a recall's analysis that reached the provider, oldest first. */
+/** Every request of a recall's analysis that reached the current provider, oldest first. */
 export const recallAnalysisRequests: SentRequest[] = [];
 
-/** Stops every bridge still looking (test/start-each-file.ts, at a file's end). */
+/**
+ * Stops every bridge still looking, and empties the analysis's replies
+ * and requests: when a provider starts (`answeringProvider`), and at a
+ * file's end (test/start-each-file.ts).
+ */
 export const stopModelProviders = (): void => {
   for (const stop of running) {
     stop();

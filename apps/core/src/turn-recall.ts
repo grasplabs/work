@@ -6,9 +6,18 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { z } from "zod";
 
-import { chatAuthority, chatContext, recordRunReads } from "./agent-scope.ts";
+import {
+  agentCallEntry,
+  auditToolCall,
+  chatAuthority,
+  chatContext,
+  endedBy,
+  recordRunReads,
+  recordToolCall,
+} from "./agent-scope.ts";
 import { textOf } from "./agent.ts";
 import type { CodeTurn } from "./agent.ts";
+import { appendAuditEvent } from "./audit-outbox.ts";
 import { mergeRecalled, recallAs } from "./brain-next.ts";
 import type { RecalledPack } from "./brain-next.ts";
 import { questionText } from "./chat-agent.ts";
@@ -32,7 +41,9 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 //
 // The recall is a run of the chat, as a dedicated tool's call is
 // (agent-tools.ts): opened, its reads pinned with it (the agent's `brain`
-// grant, and each version it hands over, `brainVersionRead`), closed. So
+// grant, and each version it hands over, `brainVersionRead`), recorded in
+// the audit log as the agent's call (`brain.recall`, how many versions it
+// hands over: never what they say) before anything is handed over, closed. So
 // the chat shows it as a step ("Searched the brain for …"), and once the
 // person may no longer read a version or the agent lost its grant, its
 // result is withheld from every later request (history-access.ts). What
@@ -72,6 +83,9 @@ const analysisAnswerTokens = 200;
 
 /** The tool the chat shows the recall as: the brain's own search. */
 export const turnRecallTool = "searchBrain";
+
+/** The method the audit log records the recall as, a call of the agent's. */
+export const turnRecallMethod = "brain.recall";
 
 const analysisInstructions = `You prepare a search of a company's knowledge for the latest message of a chat.
 
@@ -183,11 +197,11 @@ const analyse = async (
 
 /**
  * Whether `pack` is thin: nothing in it was found by the question's own
- * words or exact parts, or a part of the question is held by nothing the
- * person may read (`notFound`).
+ * words or exact parts. A question with a word nothing holds but an item
+ * found is not: waiting on the analysis for every unknown word would hold
+ * up nearly every turn.
  */
 export const isThin = (pack: RecalledPack): boolean =>
-  pack.notFound.length > 0 ||
   !pack.items.some(({ found }) => found === "exact" || found === "words");
 
 /** The time left of `ms` after `started`, never less than none. */
@@ -283,9 +297,11 @@ export const recallForTurn = async (
   question: string
 ): Promise<TurnRecall | undefined> => {
   const query = question.trim().slice(0, queryMaxLength);
-  // `recallAs` reads all the asker may read, their own sources too. Until
-  // it can leave those out (GRA-1762: `personal: conversation === "own"`
-  // in `recalled`), a shared conversation recalls nothing.
+  // A shared conversation recalls nothing, and must keep recalling
+  // nothing once `recallAs` can leave a person's own store out (GRA-1762):
+  // `personal: false` still reads what the asker's teams may read, and the
+  // others in the conversation may not be in those teams. Only a recall as
+  // every reader at once could hand them anything.
   if (query === "" || recalling.conversation === "shared") {
     return undefined;
   }
@@ -307,20 +323,36 @@ export const recallForTurn = async (
     analysis.abort();
     throw error;
   }
+  const scope = { ...turn.scope, runId };
   let status: CodeRunStatus = "crashed";
   let result: string | undefined;
   let failure = "The recall failed.";
   try {
     const pack = await recalled(recalling, query, analysed);
+    const versions = [
+      ...new Set(pack.items.map((item) => brainVersionRead(item))),
+    ];
     // Pinned with the run before it is handed over: a run revoked or
     // ended meanwhile records nothing and hands over nothing.
-    await recordRunReads(env, { ...turn.scope, runId }, [
-      brainGrantRead,
-      ...pack.items.map((item) => brainVersionRead(item)),
-    ]);
+    await recordRunReads(env, scope, [brainGrantRead, ...versions]);
+    const call = {
+      method: turnRecallMethod,
+      detail: { versions: versions.length },
+    };
+    // In the log before the model gets any of it: straight to it, so a
+    // log that doesn't take it fails the recall, and nothing is handed over.
+    await appendAuditEvent(env, agentCallEntry(scope, call));
+    await recordToolCall(env, scope, call);
     result = JSON.stringify(forModel(pack));
     status = "completed";
   } catch (error) {
+    // However it ended, its outcome: through the outbox, which never fails.
+    await auditToolCall(
+      env,
+      scope,
+      { method: turnRecallMethod },
+      endedBy(error)
+    );
     // Why it failed, never what it read: the turn goes on without it.
     status = isTimeout(error) ? "wall_expired" : "threw";
     if (isTimeout(error)) {
