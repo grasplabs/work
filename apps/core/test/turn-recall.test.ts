@@ -336,6 +336,20 @@ describe("the recall before a chat's question", setUpTime, () => {
     );
   });
 
+  it("searches as much of a long question as the Brain takes: an ID past its first 500 characters is found", async () => {
+    const invoice = word();
+    const chat = await recallingChat(says("Paid."));
+    await added(`Invoice ${invoice} was paid on 3 March`, owner(chat.personId));
+    const padding = "Some context about our month end close. ".repeat(14);
+
+    await chat.ask(`${padding}What is the status of invoice ${invoice}?`);
+
+    expect({
+      past500: padding.length > 500,
+      found: recallIn(chat.provider.requests[0]?.body)?.includes(invoice),
+    }).toStrictEqual({ past500: true, found: true });
+  });
+
   it("records the recall in the audit log, with its run and how many versions it hands over and never what they say, before the model gets any of it", async () => {
     const depot = word();
     const fact = `Depot ${depot} opens at seven`;
@@ -468,6 +482,10 @@ describe("the recall before a chat's question", setUpTime, () => {
     const steered = await recalledWith(analysed(`warehouse ${decoy}`));
     // Half a pair in its words: mended, not refused by the Brain.
     const malformed = await recalledWith(analysed(`warehouse ${decoy} \uD800`));
+    // Longer than the Brain takes: cut as a question is, not dropped.
+    const overlong = await recalledWith(
+      analysed(`warehouse ${decoy} ${"and more ".repeat(300)}`)
+    );
 
     expect({
       first: alone.recalled?.includes(decoy),
@@ -475,12 +493,14 @@ describe("the recall before a chat's question", setUpTime, () => {
       slow: slow.recalled,
       steered: steered.recalled?.includes(decoy),
       malformed: malformed.recalled?.includes(decoy),
+      overlong: overlong.recalled?.includes(decoy),
     }).toStrictEqual({
       first: false,
       failing: alone.recalled,
       slow: alone.recalled,
       steered: true,
       malformed: true,
+      overlong: true,
     });
     // The slow one was let go of.
     await vi.waitFor(

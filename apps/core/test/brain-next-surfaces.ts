@@ -1678,6 +1678,13 @@ export const coreProbes = {
       ),
     ];
   },
+  // A number, the longest question recall takes: the same for everyone.
+  recallQuestionMaxLength: async () => [
+    await answer(
+      "the longest question",
+      async () => await Promise.resolve(coreBrain.recallQuestionMaxLength)
+    ),
+  ],
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */
