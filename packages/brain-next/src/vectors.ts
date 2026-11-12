@@ -455,15 +455,15 @@ export interface DroppingModel {
   empty: boolean;
 }
 
+/** A build other than `?1` (the host's), which `dropVectorsStep` drops. */
+export const replacedModels = "name <> ?1";
+
 /**
  * Removes up to `blocks` blocks of codes, with their marks, and up to
  * `blockSize` tail codes, of the first model kept that isn't `keep`: a
  * build the host no longer runs. Run it in one transaction; null when
  * every model kept is `keep`. Its row stays until `forgetModel`.
  */
-/** A build other than `?1` (the host's), which `dropVectorsStep` drops. */
-export const replacedModels = "name <> ?1";
-
 export const dropVectorsStep = (
   sql: SqlStorage,
   keep: string,
