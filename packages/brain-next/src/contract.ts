@@ -26,8 +26,14 @@ export const readerGroupsMax = 1000;
 /** Most characters of a principal's ID. */
 export const principalMaxLength = 256;
 
-/** Most chunks one recall returns. */
+/**
+ * Most chunks each way of a recall ranks (words, exact): a pack holds at
+ * most this many of each, fewer when its budget is spent.
+ */
 export const recallLimit = 10;
+
+/** Most tokens a pack may be asked to fill. */
+export const recallBudgetMax = 32_000;
 
 /** Most characters of a source's identity, and of a change's key. */
 export const sourceIdMaxLength = 256;
@@ -155,10 +161,16 @@ export const readerSchema = z.strictObject({
 });
 export type Reader = z.infer<typeof readerSchema>;
 
-/** A recall: a question, in the reader's words, and the reader. */
+/**
+ * A recall: a question, in the reader's words, the reader, how many tokens
+ * the pack may hold (`tokensOf`), and, to read the past, the moment the
+ * sources are read as of: what each was then.
+ */
 export const recallRequestSchema = z.strictObject({
   question: wellFormedString().max(questionMaxLength),
   reader: readerSchema,
+  budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
+  asOf: z.date().optional(),
 });
 export type RecallRequest = z.infer<typeof recallRequestSchema>;
 
@@ -168,15 +180,81 @@ export interface SourceVersionRef {
   version: number;
 }
 
-/** A chunk a recall found: a passage of a source's current version. */
-export interface RecalledChunk extends SourceVersionRef {
+/**
+ * How recall found a chunk: as the question wrote one of its IDs, dates,
+ * quoted phrases or names (`exact`); by its telling words in any form
+ * (`words`); or by its commonest words alone (`stop words`), which say
+ * little: a chunk found so is no answer by itself.
+ */
+export type FoundBy = "exact" | "words" | "stop words";
+
+/**
+ * An item of a pack: a passage of a version of a source, cited by the
+ * source, the version and the passage's place in it (from 0, the same
+ * for every read of that version), with its text: the part of the passage
+ * that best answers the question, or the whole passage (`whole`) when the
+ * budget allowed.
+ */
+export interface PackItem extends SourceVersionRef {
+  position: number;
   text: string;
+  whole: boolean;
+  found: FoundBy;
 }
 
-/** What a recall found the reader may read, best first. */
-export interface Recalled {
-  chunks: RecalledChunk[];
+/**
+ * What a recall found the reader may read, best first, within its budget;
+ * the parts of the question no passage the reader may read holds
+ * (`notFound`: its words, folded, and its IDs, dates and quoted phrases as
+ * written), and whether the budget left out or shortened any passage
+ * found (`truncated`).
+ */
+export interface Pack {
+  items: PackItem[];
+  notFound: string[];
+  truncated: boolean;
 }
+
+/**
+ * The tokens `text` counts as in a pack's budget: a stated estimate, the
+ * Brain's own, since it knows no model. One token for every three bytes
+ * of ASCII and for every two bytes of anything else (UTF-8), rounded up.
+ * Above what the tokenizers of today's models give prose in the five
+ * languages (about four characters a token in English, three and a half in
+ * Dutch and German) and accented letters, and at or above them for text in
+ * other scripts (a Chinese character, three bytes, counts as one and a
+ * half). Text that is mostly symbols or digits may count higher on a real
+ * tokenizer.
+ */
+export const tokensOf = (text: string): number => {
+  let ascii = 0;
+  let other = 0;
+  for (const character of text) {
+    const point = character.codePointAt(0) ?? 0;
+    if (point < 0x80) {
+      ascii += 1;
+    } else if (point < 0x8_00) {
+      other += 2;
+    } else if (point < 0x1_00_00) {
+      other += 3;
+    } else {
+      other += 4;
+    }
+  }
+  return Math.ceil((2 * ascii + 3 * other) / 6);
+};
+
+/**
+ * The tokens an item takes of a pack's budget: its text and its citation
+ * (source, version and place), each by `tokensOf`.
+ */
+export const packItemTokens = ({
+  source,
+  version,
+  position,
+  text,
+}: PackItem): number =>
+  tokensOf(text) + tokensOf(`${source} ${version} ${position}`);
 
 /** A version to read whole, and who reads it. */
 export const versionRequestSchema = z.strictObject({
@@ -520,14 +598,26 @@ export interface Brain {
    */
   addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
   /**
-   * The chunks of current versions the reader may read that hold the
-   * question's words in any of their forms, best first: those holding
-   * more of them, then more of its commonest words (the stop words of
-   * English, Dutch, German, French and Spanish), then more of them as
-   * asked, then shorter, then newer. Chunks holding only its commonest
-   * words come last, and only when the others are fewer than the limit.
+   * A pack of what the reader may read for the question, within its
+   * budget. Two ways search at once, each among the passages of the
+   * versions the reader may read: words (those holding the question's
+   * telling words in any of their forms, best first: more of them, then
+   * more of its commonest words, the stop words of English, Dutch, German,
+   * French and Spanish, then more of them as asked, then shorter, then
+   * newer; passages holding only its commonest words after them, and only
+   * when the others are fewer than the limit), and exact (those holding
+   * its IDs, dates, quoted phrases and names as written: more of them,
+   * then shorter, then newer). The two lists are fused by rank and packed
+   * to the budget: each passage's best part first, then whole passages.
+   *
+   * The versions searched are the current ones; as of a moment, each
+   * source's version current then, only if the reader is among that
+   * version's readers and among the current version's now (as
+   * `readVersion`): so narrowing a source hides its past from recall too.
+   * Nothing in a pack (its items, their order, what was not found, being
+   * cut short) depends on what the reader may not read.
    */
-  recall: (request: RecallRequest) => Promise<Recalled>;
+  recall: (request: RecallRequest) => Promise<Pack>;
   /**
    * A version of a source, current or history, whole as it was added, for
    * a reader among that version's readers and the source's current

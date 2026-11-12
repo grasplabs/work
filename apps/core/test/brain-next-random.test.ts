@@ -1,4 +1,8 @@
-import { brainOf, recallLimit } from "@grasp-os/brain-next/contract";
+import {
+  brainOf,
+  recallBudgetMax,
+  recallLimit,
+} from "@grasp-os/brain-next/contract";
 import type { ChunkRef, FoundChunk } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
@@ -41,8 +45,22 @@ import { testBinding } from "./test-env.ts";
 //   telling words in the very form asked, then the shorter, then (in one
 //   version) the earlier in it. When they are fewer than `recallLimit`,
 //   the readable chunks holding only its stop words follow: more of them
-//   first, then as above. At most `recallLimit`, and nothing else in the
-//   answer. A version replaced by a newer one is never in it.
+//   first, then as above. At most `recallLimit`. A version replaced by a
+//   newer one is never in it.
+// - Exact (GRA-1728): every word of the question with a digit is an ID
+//   (its letters and digits, as the vocabulary has them). The chunks of
+//   current versions the reader may read that hold one as written, those
+//   holding more of them first, then in the words list's order, then the
+//   shorter; at most `recallLimit`.
+//   No question here has a quoted phrase, a date or a name.
+// - The pack (GRA-1728): the exact list and the words list fused by
+//   reciprocal rank (1 / (60 + rank), summed; ties to the better rank,
+//   then to the exact list), each chunk whole at the largest budget,
+//   found "exact" when the exact list holds it, else by its words or its
+//   stop words alone. Not found: the IDs no readable current chunk holds,
+//   as written, then the telling words none holds in any form, folded,
+//   but the IDs' own words: so, here, only the stop words of a question
+//   of stop words alone. Never cut short.
 // - History: a version, whole, to a person among its readers and among
 //   the current version's readers, with the teams they are in now; to
 //   anyone else exactly what a source no one added answers (null).
@@ -245,9 +263,11 @@ const currentOf = ({ versions }: Planned): Version => {
  */
 const vocabulary = (seed: number) => {
   // From the seed, so a failure that turns on the words comes back with it.
-  const prefix = `r${Math.floor(seededRandom(seed)() * 2 ** 32)
+  // A digit first, so every root's word is an ID (the exact way).
+  const prefix = `r1${Math.floor(seededRandom(seed)() * 2 ** 32)
     .toString(16)
-    .padStart(8, "0")}`;
+    .padStart(8, "0")
+    .slice(1)}`;
   return (token: Token): string =>
     isStop(token)
       ? token.slice(stopPrefix.length)
@@ -422,6 +442,153 @@ const expectedOf = (
           )
       : [];
   return [...first, ...after].slice(0, recallLimit);
+};
+
+/** How the pack says a chunk was found. */
+type FoundBy = "exact" | "words" | "stop words";
+
+/** A chunk the pack expects, by the list or lists that hold it. */
+interface Packed extends ExpectedChunk {
+  found: FoundBy;
+}
+
+/**
+ * The chunks of current versions `person` may read holding the question's
+ * IDs as written: those holding more of them first, then in the order of
+ * `byWords` (the words list), then the shorter, at most `recallLimit`; and
+ * which IDs any of them holds.
+ */
+const exactOf = (
+  planned: readonly Planned[],
+  person: number,
+  membership: Membership,
+  ids: readonly Token[],
+  byWords: readonly ExpectedChunk[]
+): { chunks: ExpectedChunk[]; held: Set<Token> } => {
+  const rankOf = (name: string): number => {
+    const rank = byWords.findIndex((chunk) => chunk.name === name);
+    return rank === -1 ? recallLimit : rank;
+  };
+  const held = new Set<Token>();
+  const chunks = planned
+    .flatMap((source) => {
+      const version = currentOf(source);
+      if (!isAmong(version.readers, person, membership)) {
+        return [];
+      }
+      return version.paragraphs.map((words, position) => {
+        const holding = ids.filter((id) => words.includes(id));
+        for (const id of holding) {
+          held.add(id);
+        }
+        return {
+          name: `s${source.index} v${version.version} c${position}`,
+          planned: source,
+          version,
+          position,
+          length: version.lengths[position] ?? 0,
+          telling: holding.length,
+          stops: 0,
+          exact: holding.length,
+        };
+      });
+    })
+    .filter(({ exact }) => exact > 0)
+    .toSorted(
+      (a, b) =>
+        b.exact - a.exact ||
+        rankOf(a.name) - rankOf(b.name) ||
+        a.length - b.length
+    )
+    .slice(0, recallLimit);
+  return { chunks, held };
+};
+
+/** Reciprocal rank fusion's constant: the store's. */
+const fusionK = 60;
+
+/** `lists`, fused by reciprocal rank (the store's rule, above). */
+const fused = (
+  lists: readonly (readonly { chunk: ExpectedChunk; found: FoundBy }[])[]
+): Packed[] => {
+  const scored = new Map<
+    string,
+    { chunk: Packed; score: number; best: number; list: number }
+  >();
+  for (const [list, ranked] of lists.entries()) {
+    for (const [index, { chunk, found }] of ranked.entries()) {
+      const rank = index + 1;
+      const known = scored.get(chunk.name);
+      if (known === undefined) {
+        scored.set(chunk.name, {
+          chunk: { ...chunk, found },
+          score: 1 / (fusionK + rank),
+          best: rank,
+          list,
+        });
+      } else {
+        known.score += 1 / (fusionK + rank);
+        if (rank < known.best) {
+          known.best = rank;
+          known.list = list;
+        }
+      }
+    }
+  }
+  return [...scored.values()]
+    .toSorted((a, b) => b.score - a.score || a.best - b.best || a.list - b.list)
+    .map(({ chunk }) => chunk);
+};
+
+/**
+ * The pack `person` gets for `asked`, written as the question wrote each
+ * word (`written`): the fused chunks, and what was not found.
+ */
+const packOf = (
+  planned: readonly Planned[],
+  person: number,
+  membership: Membership,
+  asked: readonly Token[],
+  written: (token: Token) => string,
+  wordOf: (token: Token) => string
+): { chunks: Packed[]; notFound: string[] } => {
+  // The IDs, each once, in the question's order: every root's word.
+  const ids = [...new Set(asked.filter((token) => !isStop(token)))];
+  const byWords = expectedOf(planned, person, membership, asked);
+  const exact = exactOf(planned, person, membership, ids, byWords);
+  const chunks = fused([
+    exact.chunks.map((chunk) => ({ chunk, found: "exact" as const })),
+    byWords.map((chunk) => ({
+      chunk,
+      found: chunk.telling > 0 ? ("words" as const) : ("stop words" as const),
+    })),
+  ]);
+  const missing = ids.filter((id) => !exact.held.has(id));
+  // The telling words, each once, in the question's order; a question of
+  // stop words alone is all telling.
+  const distinct = [...new Set(asked)];
+  const telling = distinct.some((token) => !isStop(token))
+    ? distinct.filter((token) => !isStop(token))
+    : distinct;
+  const readable = planned.flatMap((source) => {
+    const version = currentOf(source);
+    return isAmong(version.readers, person, membership)
+      ? version.paragraphs
+      : [];
+  });
+  return {
+    chunks,
+    notFound: [
+      ...missing.map(written),
+      ...telling
+        .filter(
+          (token) =>
+            !ids.includes(token) &&
+            !readable.some((words) => holds(words, [token]))
+        )
+        .map(wordOf),
+    ],
+  };
 };
 
 /** What one recall broke, if anything: by chunk, then the whole answer. */
@@ -707,25 +874,44 @@ const scenario = (people: readonly string[], seed: number) => {
       ? draws.tokens(3, 1)
       : draws.tokens(4, 0.35);
     // Sometimes in capitals: search reads a word whatever its case.
-    const question = asked
-      .map((token) =>
-        draws.chance(0.2) ? wordOf(token).toUpperCase() : wordOf(token)
-      )
-      .join(" ");
-    const answer = await recallAs(env, personId(person), question);
-    const expected = expectedOf(planned, person, membership, asked);
+    const writtenAs = asked.map((token) =>
+      draws.chance(0.2) ? wordOf(token).toUpperCase() : wordOf(token)
+    );
+    const question = writtenAs.join(" ");
+    const answer = await recallAs(env, personId(person), {
+      question,
+      budget: { tokens: recallBudgetMax },
+    });
+    // Each word as the question first wrote it.
+    const written = (token: Token): string =>
+      writtenAs[asked.indexOf(token)] ?? wordOf(token);
+    const expected = packOf(
+      planned,
+      person,
+      membership,
+      asked,
+      written,
+      wordOf
+    );
     const problems = problemsOf({
-      got: answer.chunks.map(({ source, version, text }) =>
+      got: answer.items.map(({ source, version, text }) =>
         nameOf(source, version, text)
       ),
-      expected: expected.map(({ name }) => name),
+      expected: expected.chunks.map(({ name }) => name),
       answer,
       expectedAnswer: {
-        chunks: expected.map(({ planned: source, version, position }) => ({
-          source: source.source,
-          version: version.version,
-          text: paragraphOf(version, position, wordOf),
-        })),
+        items: expected.chunks.map(
+          ({ planned: source, version, position, found }) => ({
+            source: source.source,
+            version: version.version,
+            position,
+            text: paragraphOf(version, position, wordOf),
+            whole: true,
+            found,
+          })
+        ),
+        notFound: expected.notFound,
+        truncated: false,
       },
     });
     if (problems.length === 0) {

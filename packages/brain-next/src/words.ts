@@ -290,10 +290,11 @@ const anyOf = (words: readonly string[]): string =>
  * written; `forms` finds it or any of its stems, asked of `chunk_words`
  * (a chunk's word is one of them) and of `chunk_stems` (one of them is
  * among a chunk's word's stems). So a chunk's word matches when the two
- * share a stem, or one is the other's stem. Built here from quoted words
- * alone, so nothing of FTS5's query syntax comes from the question.
+ * share a stem, or one is the other's stem (`holdsTerm`). Built here from
+ * quoted words alone, so nothing of FTS5's query syntax comes from the
+ * question. `word` and `stems` are the word itself, folded, and its stems.
  */
-export interface Term {
+export interface Term extends Word {
   exact: string;
   forms: string;
 }
@@ -316,6 +317,8 @@ export const termsOf = (question: string): Terms => {
   const asked = telling.length > 0 ? telling : words;
   return {
     telling: asked.slice(0, maxTerms).map(({ word, stems }) => ({
+      word,
+      stems,
       exact: anyOf([word]),
       forms: anyOf([word, ...stems]),
     })),
@@ -328,6 +331,35 @@ export const termsOf = (question: string): Terms => {
         : [],
   };
 };
+
+/**
+ * Whether `words` (a text's, `wordsOf`) hold `term` in one of its forms,
+ * as the word indexes match it: the same word, a word among its stems, a
+ * word whose stems hold it, or a shared stem.
+ */
+export const holdsTerm = (words: readonly Word[], term: Word): boolean => {
+  const forms = new Set([term.word, ...term.stems]);
+  return words.some(
+    ({ word, stems }) =>
+      forms.has(word) || stems.some((stem) => forms.has(stem))
+  );
+};
+
+/** Whether `word`, folded, is a stop word of one of the five languages. */
+export const isStopWord = (word: string): boolean => stopWords.has(word);
+
+/**
+ * `text`'s words in order, folded, repeats kept: what an exact match
+ * compares, a question's phrase against a chunk's text (exact.ts).
+ */
+export const sequenceOf = (text: string): string[] =>
+  (foldForSearch(text.normalize("NFKC")).match(wordPattern) ?? []).filter(
+    (word) => letterOrDigit.test(word)
+  );
+
+/** `words` as one FTS5 query: all of them, each a quoted word. */
+export const allOf = (words: readonly string[]): string =>
+  [...new Set(words)].map((word) => `"${word}"`).join(" AND ");
 
 /**
  * Indexes the words of the chunk at `row`, in the caller's transaction.

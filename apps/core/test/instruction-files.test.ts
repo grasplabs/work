@@ -1,4 +1,7 @@
-import { instructionsMaxLength } from "@grasp-os/brain-next/contract";
+import {
+  instructionsMaxLength,
+  recallBudgetMax,
+} from "@grasp-os/brain-next/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -498,9 +501,12 @@ describe("instruction files", setUpTime, () => {
       `${word} agent`
     );
 
-    await expect(recallAs(env, admin.userId, word)).resolves.toStrictEqual({
-      chunks: [],
-    });
+    await expect(
+      recallAs(env, admin.userId, {
+        question: word,
+        budget: { tokens: recallBudgetMax },
+      })
+    ).resolves.toStrictEqual({ items: [], notFound: [word], truncated: false });
   });
 
   it("keeps scopes apart however an ID is shaped", async () => {

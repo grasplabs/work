@@ -27,6 +27,7 @@ import {
   modelNameMaxLength,
   questionMaxLength,
   readerGroupsMax,
+  recallBudgetMax,
   sourceTextMaxBytes,
   vectorSearchLimitMax,
   vectorsPerPutMax,
@@ -108,6 +109,12 @@ export interface Probing {
    * holding them must still find no instruction file, as none is indexed.
    */
   instructionGroups: readonly string[];
+  /**
+   * Moments a recall asks as of besides the first and now: when a marked
+   * version the reader could read then was its source's current one, so
+   * "as of" is held to what they may read now.
+   */
+  moments?: readonly Date[];
 }
 
 /** One call a probe made, and what came back. */
@@ -268,49 +275,171 @@ const markedText = (markers: readonly string[]): string =>
 const oversizedText = (markers: readonly string[]): string =>
   markedText(markers).padEnd(sourceTextMaxBytes + 1, " x");
 
-/** A question a reader asks, and what it asks of. */
-interface Question {
+/**
+ * A marker's twin: a word of the same length and the same kinds of
+ * character (digits for digits, letters for letters), which no source
+ * holds. A question asked with the twins in place of the markers is the
+ * question as it would be asked of a store where the marked sources don't
+ * exist: its pack must be the same, but for the words themselves.
+ */
+const twinOf = (marker: string): string =>
+  `u${Array.from(marker.slice(1), (character: string) =>
+    /\d/u.test(character)
+      ? String((Number(character) + 5) % 10)
+      : String.fromCodePoint((character.codePointAt(0) ?? 0) + 6)
+  ).join("")}`;
+
+/** A question built on words: the markers, or their twins. */
+interface Asked {
   name: string;
-  text: string;
-  about?: Answer["about"];
+  text: (words: readonly string[]) => string;
+  budget?: number;
+  asOf?: Date;
 }
 
+/** What a pack is asked for in a probe. */
+interface PackAsk {
+  question: string;
+  budget: { tokens: number };
+  asOf?: Date;
+}
+
+/** The first of `words`. */
+const first = (words: readonly string[]): string => words[0] ?? "";
+
 /**
- * Questions a reader asks: by the markers, as search syntax and as a
- * prefix (only what they may not read); by a word nothing holds; by the
- * shared word (found: their own source); by both; empty; and past the
- * longest question (refused).
+ * Questions on the markers, each asked again of their twins (`twinOf`):
+ * the markers alone, as search syntax, a prefix of one, one inside an ID,
+ * two quoted as a phrase, beside a date, beside the shared word (which
+ * finds the reader's own source) at budgets that cut it short and one that
+ * doesn't, and as of each of `moments`.
  */
-const questionsOf = ({
-  sharedWord,
-  unknownWord,
-  markers,
-}: Probing): Question[] => {
-  const hidden = markers.join(" ");
-  const [first = ""] = markers;
+const askedOf = (
+  { sharedWord }: Probing,
+  moments: readonly Date[]
+): Asked[] => {
+  const withShared = (words: readonly string[]): string =>
+    `${sharedWord} ${words.join(" ")}`;
   return [
-    { name: "the markers", text: hidden, about: "hidden" },
+    { name: "the markers", text: (words) => words.join(" ") },
     {
       name: "the markers as search syntax",
-      text: `${first}* OR "${hidden}" NEAR(${hidden}) text:${first} ^${first}`,
-      about: "hidden",
+      text: (words) =>
+        `${first(words)}* OR "${words.join(" ")}" NEAR(${words.join(" ")}) text:${first(words)} ^${first(words)}`,
     },
-    { name: "a marker's prefix", text: first.slice(0, -1), about: "hidden" },
-    { name: "a word nothing holds", text: unknownWord, about: "nothing" },
-    { name: "the shared word", text: sharedWord },
+    { name: "a marker's prefix", text: (words) => first(words).slice(0, -1) },
+    { name: "a marker in an ID", text: (words) => `INV-${first(words)}-2026` },
     {
-      name: "the shared word and the markers",
-      text: `${sharedWord} ${hidden}`,
+      name: "two markers quoted",
+      text: (words) => `"${words.slice(0, 2).join(" ")}"`,
     },
-    { name: "nothing", text: "" },
     {
-      name: "too long a question",
-      text: `${hidden} `
-        .repeat(questionMaxLength)
-        .slice(0, questionMaxLength + 1),
+      name: "the markers and a date",
+      text: (words) => `${words.join(" ")} 14 maart 2026`,
     },
+    { name: "the shared word and the markers", text: withShared },
+    ...[1, 40].map((tokens) => ({
+      name: `the shared word and the markers in ${tokens} tokens`,
+      text: withShared,
+      budget: tokens,
+    })),
+    ...moments.flatMap((asOf) => [
+      {
+        name: `the markers as of ${asOf.toISOString()}`,
+        text: (words: readonly string[]) => words.join(" "),
+        asOf,
+      },
+      {
+        name: `the shared word and the markers as of ${asOf.toISOString()}`,
+        text: withShared,
+        asOf,
+      },
+    ]),
   ];
 };
+
+/**
+ * `answered` with every `words` (markers or twins, and their prefixes) in
+ * its pack's `notFound` written as its place in the list: the question's
+ * own words, echoed back, so a pack asked of the markers compares with
+ * one asked of their twins. Nothing else of the answer is touched: a
+ * marker anywhere else is still found.
+ */
+const echoesHidden = (answered: Answer, words: readonly string[]): Answer => {
+  const { got } = answered;
+  if (
+    !("value" in got) ||
+    typeof got.value !== "object" ||
+    got.value === null
+  ) {
+    return answered;
+  }
+  const value: object = got.value;
+  const notFound: unknown = Reflect.get(value, "notFound");
+  if (!Array.isArray(notFound)) {
+    return answered;
+  }
+  const named = [
+    ...words.map((word, index) => [word, `{${index}}`] as const),
+    ...words.map((word, index) => [word.slice(0, -1), `{${index}-}`] as const),
+  ];
+  const echoed = notFound.map((entry: unknown) => {
+    if (typeof entry !== "string") {
+      return entry;
+    }
+    let text = entry.toLowerCase();
+    for (const [word, name] of named) {
+      text = text.replaceAll(word, name);
+    }
+    return text;
+  });
+  return { ...answered, got: { value: { ...value, notFound: echoed } } };
+};
+
+/**
+ * Asks `ask` every question of `askedOf`, of the markers (`hidden`) and of
+ * their twins (`nothing`), each pair compared by its name.
+ */
+const askedOfMarkers = async (
+  probing: Probing,
+  moments: readonly Date[],
+  ask: (asking: PackAsk) => Promise<unknown>
+): Promise<Answer[]> => {
+  const twins = probing.markers.map(twinOf);
+  const asked: Answer[] = [];
+  for (const { name, text, budget, asOf } of askedOf(probing, moments)) {
+    for (const [about, words] of [
+      ["hidden", probing.markers],
+      ["nothing", twins],
+    ] as const) {
+      const asking: PackAsk = {
+        question: text(words),
+        budget: { tokens: budget ?? recallBudgetMax },
+        ...(asOf === undefined ? {} : { asOf }),
+      };
+      // oxlint-disable-next-line no-await-in-loop -- one question at a time
+      const answered = await answer(
+        `${name}${about === "nothing" ? ", of twins" : ""}`,
+        async () => await ask(asking),
+        about,
+        name
+      );
+      asked.push(echoesHidden(answered, words));
+    }
+  }
+  return asked;
+};
+
+/**
+ * The moments a probe asks as of: before anything was added, the
+ * reader's own (`Probing.moments`: when a marked version was current and
+ * the reader among its readers), and now.
+ */
+const momentsOf = (probing: Probing): Date[] => [
+  new Date(0),
+  ...(probing.moments ?? []),
+  new Date(),
+];
 
 /** The Brain's store, as the harness reaches it: by its contract. */
 const store = (): Brain => brainOf(inJurisdiction(env, env.BRAIN_STORE));
@@ -707,24 +836,51 @@ export const coreProbes = {
     return asked;
   },
   recallAs: async (probing) => {
-    const asked: Answer[] = [];
-    for (const { name, text, about } of questionsOf(probing)) {
-      // oxlint-disable-next-line no-await-in-loop -- one question at a time
-      const answered = await answer(
-        name,
-        async () => await coreBrain.recallAs(env, probing.personId, text),
-        about
-      );
-      asked.push(answered);
-    }
-    asked.push(
+    const recall = async (asking: PackAsk) =>
+      await coreBrain.recallAs(env, probing.personId, asking);
+    const hidden = probing.markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), recall)),
+      await answer(
+        "the shared word",
+        async () =>
+          await recall({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "nothing",
+        async () => await recall({ question: "", budget: whole })
+      ),
+      await answer(
+        "too long a question",
+        async () =>
+          await recall({
+            question: `${hidden} `
+              .repeat(questionMaxLength)
+              .slice(0, questionMaxLength + 1),
+            budget: whole,
+          })
+      ),
+      await answer(
+        "no tokens",
+        async () => await recall({ question: hidden, budget: { tokens: 0 } })
+      ),
+      await answer(
+        "a moment named by the markers",
+        async () =>
+          await recall(
+            unchecked({ question: hidden, budget: whole, asOf: hidden })
+          )
+      ),
       await answer(
         "the markers, as someone who isn't a member",
         async () =>
-          await coreBrain.recallAs(env, stranger(), probing.markers.join(" "))
-      )
-    );
-    return asked;
+          await coreBrain.recallAs(env, stranger(), {
+            question: hidden,
+            budget: whole,
+          })
+      ),
+    ];
   },
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
@@ -1518,77 +1674,113 @@ export const storeProbes = {
   },
   recall: async (probing) => {
     const { reader, markers } = probing;
-    const recall = async (
-      name: string,
-      question: string,
-      as: Reader = reader,
-      about?: Answer["about"]
-    ) =>
-      await answer(
-        name,
-        async () => await store().recall({ question, reader: as }),
-        about
-      );
-    const asked: Answer[] = [];
-    for (const { name, text, about } of questionsOf(probing)) {
-      // oxlint-disable-next-line no-await-in-loop -- one question at a time
-      const answered = await recall(name, text, reader, about);
-      asked.push(answered);
-    }
+    const recall = async (asking: PackAsk, as: Reader = reader) =>
+      await store().recall({ ...asking, reader: as });
     const hidden = markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
     // As a reader holding the groups instruction files are written for:
-    // their markers must find what words nothing holds find, as no
-    // instruction file is indexed.
+    // their markers must find what their twins find, as no instruction file
+    // is indexed.
     const withInstructionGroups: Reader = {
       ...reader,
       groups: [...reader.groups, ...probing.instructionGroups],
     };
     const like = "with the instruction files' groups";
-    asked.push(
+    const withGroups = await askedOfMarkers(
+      probing,
+      [],
+      async (asking) => await recall(asking, withInstructionGroups)
+    );
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), recall)),
+      ...withGroups.map((answered) => ({
+        ...answered,
+        call: `${like}: ${answered.call}`,
+        like: `${like}: ${answered.like ?? ""}`,
+      })),
       await answer(
-        `${like}: a word nothing holds`,
+        "the shared word",
         async () =>
-          await store().recall({
-            question: probing.unknownWord,
-            reader: withInstructionGroups,
-          }),
+          await recall({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
         "nothing",
-        like
+        async () => await recall({ question: "", budget: whole })
       ),
       await answer(
-        `${like}: the markers`,
+        "too long a question",
         async () =>
-          await store().recall({
-            question: hidden,
-            reader: withInstructionGroups,
-          }),
-        "hidden",
-        like
+          await recall({
+            question: `${hidden} `
+              .repeat(questionMaxLength)
+              .slice(0, questionMaxLength + 1),
+            budget: whole,
+          })
       ),
-      await recall("too many groups", hidden, {
-        ...reader,
-        groups: Array.from({ length: readerGroupsMax + 1 }, () =>
-          markers.join("")
-        ),
-      }),
-      await recall("too long a person", hidden, {
-        ...reader,
-        person: hidden.repeat(300),
-      }),
-      await recall(
+      await answer(
+        "too many groups",
+        async () =>
+          await recall(
+            { question: hidden, budget: whole },
+            {
+              ...reader,
+              groups: Array.from({ length: readerGroupsMax + 1 }, () =>
+                markers.join("")
+              ),
+            }
+          )
+      ),
+      await answer(
+        "too long a person",
+        async () =>
+          await recall(
+            { question: hidden, budget: whole },
+            { ...reader, person: hidden.repeat(300) }
+          )
+      ),
+      await answer(
         "a reader with an unknown field",
-        hidden,
-        unchecked({ ...reader, extra: hidden })
+        async () =>
+          await recall(
+            { question: hidden, budget: whole },
+            unchecked({ ...reader, extra: hidden })
+          )
       ),
       await answer(
         "a request with an unknown field",
         async () =>
           await store().recall(
-            unchecked({ question: hidden, reader, extra: hidden })
+            unchecked({
+              question: hidden,
+              reader,
+              budget: whole,
+              extra: hidden,
+            })
           )
-      )
-    );
-    return asked;
+      ),
+      await answer(
+        "a budget past the most",
+        async () =>
+          await recall({
+            question: hidden,
+            budget: { tokens: recallBudgetMax + 1 },
+          })
+      ),
+      await answer(
+        "a budget of the markers",
+        async () =>
+          await recall(
+            unchecked({ question: hidden, budget: { tokens: hidden } })
+          )
+      ),
+      await answer(
+        "a moment named by the markers",
+        async () =>
+          await recall(
+            unchecked({ question: hidden, budget: whole, asOf: hidden })
+          )
+      ),
+    ];
   },
   // A put has no reader: what it may never do is widen who reads a chunk.
   // Codes put for every hidden version's chunk, at the question itself,

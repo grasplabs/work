@@ -1,3 +1,4 @@
+import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import { DurableObject, env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -257,8 +258,11 @@ const textsFor = async (
   personId: string,
   question: string
 ): Promise<string[]> => {
-  const { chunks } = await recallAs(env, personId, question);
-  return chunks.map(({ text }) => text);
+  const { items } = await recallAs(env, personId, {
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return items.map(({ text }) => text);
 };
 
 /**
@@ -454,6 +458,10 @@ describe(
         `Draft plan ${sharedWord} ${narrowedMarker}`,
         { kind: "team", teamId: ownTeam }
       );
+      // While the draft was current: as of then, the outsider was among
+      // its readers, and is still, but not among the current version's.
+      const whileDraft = new Date();
+      await scheduler.wait(5);
       await add(
         `Final plan ${sharedWord}`,
         { kind: "owner", personId: holder },
@@ -487,6 +495,7 @@ describe(
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
         usedApps,
         instructionGroups,
+        moments: [whileDraft],
       });
       const first = await findingsOf(
         "the outsider",
@@ -546,6 +555,7 @@ describe(
           // they build.
           hiddenInstructionFiles: [agentFile, appFile],
           instructionGroups,
+          moments: [whileDraft],
         },
         {
           "a source nobody is known to read": noneMarker,

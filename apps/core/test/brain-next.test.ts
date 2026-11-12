@@ -1,6 +1,7 @@
 import {
   questionMaxLength,
   readerGroupsMax,
+  recallBudgetMax,
   recallLimit,
   sourceTextMaxBytes,
 } from "@grasp-os/brain-next/contract";
@@ -100,7 +101,10 @@ const recalledAs = async (
   personId: string,
   question: string
 ): Promise<SourceRef[]> => {
-  const { chunks } = await recallAs(env, personId, question);
+  const { items: chunks } = await recallAs(env, personId, {
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
   return chunks.map(({ source }) => source);
 };
 
@@ -383,7 +387,12 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       const asGiven = personId as string;
       // oxlint-disable-next-line no-await-in-loop -- one person at a time
-      await expect(recallAs(env, asGiven, "anything")).rejects.toThrow(refused);
+      await expect(
+        recallAs(env, asGiven, {
+          question: "anything",
+          budget: { tokens: recallBudgetMax },
+        })
+      ).rejects.toThrow(refused);
     }
   });
 

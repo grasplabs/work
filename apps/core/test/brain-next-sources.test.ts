@@ -1,4 +1,7 @@
-import { sourceTextMaxBytes } from "@grasp-os/brain-next/contract";
+import {
+  recallBudgetMax,
+  sourceTextMaxBytes,
+} from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -79,7 +82,10 @@ const team = (teamId: string): SourceReaders => ({ kind: "team", teamId });
 
 /** What `personId` recalls for `question`: each chunk's source and version. */
 const recalledAs = async (personId: string, question: string) => {
-  const { chunks } = await recallAs(env, personId, question);
+  const { items: chunks } = await recallAs(env, personId, {
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
   return chunks.map(({ source, version }) => ({ source, version }));
 };
 
@@ -664,7 +670,10 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       readers: owner(reader),
     });
 
-    const { chunks } = await recallAs(env, reader, secret);
+    const { items: chunks } = await recallAs(env, reader, {
+      question: secret,
+      budget: { tokens: recallBudgetMax },
+    });
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatchObject({ source, version: 1 });
     expect(chunks[0]?.text.endsWith(last)).toBeTruthy();
@@ -717,7 +726,11 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       async () => await add(lone),
       async () => await add("text", { producer: "upload", id: "id \uDC00" }),
       async () => await add("text", newSource(), "change \uD800"),
-      async () => await recallAs(env, reader, "question \uD800"),
+      async () =>
+        await recallAs(env, reader, {
+          question: "question \uD800",
+          budget: { tokens: recallBudgetMax },
+        }),
       async () =>
         await readSourceVersionAs(env, reader, {
           source: { producer: "upload", id: "id \uDC00" },
