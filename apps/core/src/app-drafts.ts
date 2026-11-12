@@ -4,7 +4,7 @@ import type {
   AppDraftPoint,
 } from "@grasp-os/shared/app-drafts";
 import { appErrors } from "@grasp-os/shared/apps";
-import type { AuditDetailValue } from "@grasp-os/shared/audit";
+import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import type { ChatWork } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -704,11 +704,14 @@ export const emptyDraft = async (
  * draft as the live version), each only while `live` (SQL) holds: what
  * the publish adds to the batch that makes it live (apps.ts,
  * `makeCurrent`), so the draft is emptied with it or not at all, and
- * never keeps changes the live version has. With `discards`, a roll back
- * that drops the draft's unpublished changes, audited as `by`'s discard.
- * A write that landed on the draft since `revision` keeps it as it is,
- * over the version it was based on, its work kept: the next publish takes
- * it over the version live (`rebasedOnto`, app-publish.ts).
+ * never keeps changes the live version has. A publish of the draft: a
+ * write that landed on the draft since `revision` keeps it as it is, over
+ * the version it was based on, its work kept, which the publish then moves
+ * onto the version live (`rebaseDraft`). A roll back (`rollsBack`): a
+ * write since fails the whole batch (`app_drafts.revision` NULL), so
+ * nothing goes live that would leave a draft over a newer version, whose
+ * every change would read as the draft's; with `discards`, it drops the
+ * draft's unpublished changes, audited as `by`'s discard.
  */
 export const emptiedWhenLive = async (
   db: CoreDb,
@@ -718,12 +721,14 @@ export const emptiedWhenLive = async (
     base,
     by,
     at,
+    rollsBack,
     discards,
   }: {
     revision: number;
     base: number;
     by: Pick<Acting, "userId" | "staff" | "actor">;
     at: Date;
+    rollsBack: boolean;
     discards: boolean;
   },
   live: SQL
@@ -744,12 +749,14 @@ export const emptiedWhenLive = async (
         target: appDrafts.appId,
         set: {
           base,
-          revision: revision + 1,
+          revision: rollsBack
+            ? sql`CASE WHEN ${appDrafts.revision} = ${revision} THEN ${revision + 1} END`
+            : revision + 1,
           definition: null,
           updatedAt: at,
           updatedBy: by.userId,
         },
-        setWhere: eq(appDrafts.revision, revision),
+        setWhere: rollsBack ? undefined : eq(appDrafts.revision, revision),
       }),
     db.delete(appDraftFiles).where(and(eq(appDraftFiles.appId, app), emptied)),
     // Numbered in the statement, after whichever point landed last, in
@@ -935,6 +942,48 @@ export const readPoint = async (
 };
 
 /**
+ * Replaces App `app`'s draft over `revision`, which `by` read, with
+ * `draft` whole, as its next point (`restoredFrom` the point it came
+ * from, if any), audited with `entry` for that point's number:
+ * `app.conflict` when the draft moved since. Answers the point.
+ */
+const replaceDraft = async (
+  env: Env,
+  by: Acting,
+  app: AppId,
+  { draft, revision }: { draft: Draft; revision: number },
+  restoredFrom: number | undefined,
+  entry: (point: number) => AuditEntry
+): Promise<AppDraftPoint> => {
+  const db = drizzle(env.DB);
+  const createdAt = new Date();
+  const kept = await keepPoint(
+    db,
+    app,
+    { ...draft, revision: revision + 1 },
+    revision,
+    {
+      personId: by.userId,
+      chatId: null,
+      turnId: null,
+      callId: null,
+      ...(restoredFrom === undefined ? {} : { restoredFrom }),
+    },
+    createdAt
+  );
+  await writeOver(env, db, app, by, [
+    draftRow(db, app, draft, revision, by, createdAt),
+    db.delete(appDraftFiles).where(eq(appDraftFiles.appId, app)),
+    ...Object.entries(draft.changes).map(([path, content]) =>
+      db.insert(appDraftFiles).values({ appId: app, path, content })
+    ),
+    ...kept.statements,
+    outboxed(db, entry(kept.row.number)),
+  ]);
+  return toPoint(kept.row);
+};
+
+/**
  * Makes undo point `number` of App `app`'s draft the draft again, over
  * `revision`, which `by` read, as its next point, audited as theirs: no
  * point is changed. A point from before a publish or a roll back comes
@@ -948,41 +997,71 @@ export const restorePoint = async (
   number: unknown,
   revision: number
 ): Promise<AppDraftPoint> => {
-  const db = drizzle(env.DB);
   const { point, draft: held } = await readPoint(env, app, number);
   const draft = await rebasedOnto(env, app, held, await liveBase(env, app));
-  const restored: Draft = { ...draft, revision: revision + 1 };
-  const createdAt = new Date();
-  const kept = await keepPoint(
-    db,
+  return await replaceDraft(
+    env,
+    by,
     app,
-    restored,
-    revision,
-    {
-      personId: by.userId,
-      chatId: null,
-      turnId: null,
-      callId: null,
-      restoredFrom: point.number,
-    },
-    createdAt
-  );
-  await writeOver(env, db, app, by, [
-    draftRow(db, app, draft, revision, by, createdAt),
-    db.delete(appDraftFiles).where(eq(appDraftFiles.appId, app)),
-    ...Object.entries(draft.changes).map(([path, content]) =>
-      db.insert(appDraftFiles).values({ appId: app, path, content })
-    ),
-    ...kept.statements,
-    outboxed(
-      db,
+    { draft, revision },
+    point.number,
+    (kept) =>
       changeEntry(by, "app.draft.restored", app, {
-        point: kept.row.number,
+        point: kept,
         restoredFrom: point.number,
       })
-    ),
-  ]);
-  return toPoint(kept.row);
+  );
+};
+
+/** How often `rebaseDraft` reads the draft again after another write. */
+const rebaseTries = 3;
+
+/**
+ * Moves App `app`'s draft onto the version live once a write left it over
+ * an older one, as a write that landed while a publish went live does
+ * (`emptiedWhenLive`): the same files, as changes over the version live
+ * (`rebasedOnto`), as a point of `by`'s, audited as theirs. So the stored
+ * draft says what is still unshared. Read again after a write meanwhile,
+ * a few times; one left over the older version still publishes as it
+ * reads (app-publish.ts).
+ */
+export const rebaseDraft = async (
+  env: Env,
+  by: Acting,
+  app: AppId
+): Promise<void> => {
+  for (let tried = 0; tried < rebaseTries; tried += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read again after each try
+    const [stored, live] = await Promise.all([
+      readDraft(env, app),
+      liveBase(env, app),
+    ]);
+    if (!changesAnything(stored) || stored.base === live) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one try at a time
+    const draft = await rebasedOnto(env, app, stored, live);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one try at a time
+      await replaceDraft(
+        env,
+        by,
+        app,
+        { draft, revision: stored.revision },
+        undefined,
+        () =>
+          changeEntry(by, "app.draft.defined", app, {
+            revision: stored.revision + 1,
+            base: live,
+          })
+      );
+      return;
+    } catch (error) {
+      if (appErrors.codeOf(error) !== "app.conflict") {
+        throw error;
+      }
+    }
+  }
 };
 
 /**

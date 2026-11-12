@@ -17,6 +17,7 @@ import {
   emptiedWhenLive,
   emptyDraft,
   liveBase,
+  rebaseDraft,
   rebasedOnto,
 } from "./app-drafts.ts";
 import { sealedEvidence, sealRelease } from "./app-releases.ts";
@@ -37,6 +38,7 @@ import {
 } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { appVersions } from "./db/core/schema.ts";
+import { notNullFailed } from "./db/d1.ts";
 import { requireMigrationEvidence } from "./migration-run.ts";
 
 // Publishing an App (spec 8, 16, 22, GRA-1665): one step, run by one of
@@ -89,12 +91,15 @@ import { requireMigrationEvidence } from "./migration-run.ts";
 //   the batch that makes it live (app-drafts.ts, `emptiedWhenLive`), so
 //   it never keeps changes the live version has; a write that landed
 //   meanwhile keeps the draft as it is, over the version it read, and
-//   the next publish takes it over the version live as it reads
-//   (`rebasedOnto`), so that write is neither lost nor a dead end. A draft
-//   is committed only over the version live, exactly as checked, so
-//   nothing discarded, rolled back or failed comes back. A
-//   roll back moves the draft onto the version it makes live, discarding
-//   its unpublished changes only over the revision the builder read.
+//   the publish then moves it onto the version live, the same files
+//   (`rebaseDraft`; the next publish takes it so as it reads otherwise,
+//   `rebasedOnto`), so that write is neither lost nor a dead end. A
+//   draft is committed only over the version live, exactly as checked,
+//   so nothing discarded, rolled back or failed comes back. A roll back
+//   moves the draft onto the version it makes live, only over the
+//   revision it read, in the batch that makes it live: a write meanwhile
+//   refuses the roll back (`app.conflict`), as a draft over the newer
+//   version would carry all of it back as its own changes.
 // - Someone without the right: only the App's builders publish
 //   (`editableApp`, and again in `makeCurrent` and `sealRelease`); made
 //   current by someone who couldn't grant the App's permissions, its
@@ -218,8 +223,9 @@ const publish = async (
 };
 
 /**
- * What empties the draft at `revision` over `version` with the publish;
- * with `discards`, a roll back dropping its unpublished changes.
+ * What empties the draft at `revision` over `version` with the publish
+ * (`emptiedWhenLive`): a roll back's only over that revision
+ * (`rollsBack`), with `discards` dropping its unpublished changes.
  */
 const draftEmptied =
   (
@@ -229,14 +235,20 @@ const draftEmptied =
     {
       version,
       revision,
+      rollsBack,
       discards,
-    }: { version: number; revision: number; discards: boolean }
+    }: {
+      version: number;
+      revision: number;
+      rollsBack: boolean;
+      discards: boolean;
+    }
   ) =>
   async (live: SQL) =>
     await emptiedWhenLive(
       drizzle(env.DB),
       app,
-      { revision, base: version, by, at: new Date(), discards },
+      { revision, base: version, by, at: new Date(), rollsBack, discards },
       live
     );
 
@@ -313,10 +325,13 @@ export const publishDraft = async (
     draftEmptied(env, by, found.id, {
       version,
       revision: draft.revision,
+      rollsBack: false,
       discards: false,
     })
   );
   await draftRevised(env, found.id);
+  // A write that landed meanwhile left the draft over the version before.
+  await rebaseDraft(env, by, found.id);
   return live;
 };
 
@@ -329,7 +344,9 @@ export const publishDraft = async (
  * audited, with the batch that makes it live: what a builder confirms
  * rolling back, over `revision`, the draft's revision they read
  * (`app.conflict` once it moved since, or when it has changes and none
- * was given). A version live already only resets the draft.
+ * was given), and only while the draft is still at the revision read
+ * here (`app.conflict` for a write meanwhile). A version live already
+ * only resets the draft.
  */
 export const publishVersion = async (
   env: Env,
@@ -371,20 +388,30 @@ export const publishVersion = async (
   if (!(await isPublished(env, found.id, row.version))) {
     await publish(env, by, found.id, row.version);
   }
-  const live = await makeCurrent(
-    env,
-    by,
-    found.id,
-    row.version,
-    basedOn,
-    resets
-      ? draftEmptied(env, by, found.id, {
-          version: row.version,
-          revision: draft.revision,
-          discards,
-        })
-      : undefined
-  );
+  let live: App;
+  try {
+    live = await makeCurrent(
+      env,
+      by,
+      found.id,
+      row.version,
+      basedOn,
+      resets
+        ? draftEmptied(env, by, found.id, {
+            version: row.version,
+            revision: draft.revision,
+            rollsBack: true,
+            discards,
+          })
+        : undefined
+    );
+  } catch (error) {
+    // The draft moved since it was read: rolled back over nothing.
+    if (notNullFailed(error, "app_drafts.revision")) {
+      throw appErrors.create("app.conflict");
+    }
+    throw error;
+  }
   if (resets) {
     await draftRevised(env, found.id);
   }

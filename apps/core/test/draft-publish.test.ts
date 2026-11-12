@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { readDraft, saveDraft } from "../src/app-drafts.ts";
-import { sourceParts, testApp } from "./app-definitions.ts";
+import { commitApp, sourceParts, testApp } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { agentWriting } from "./draft-writers.ts";
@@ -126,6 +126,19 @@ export default appTest(schema, {
   },
 });
 `;
+
+/** Waits until `query`, over `app`, finds a row: at most 30 seconds. */
+const until = async (query: string, app: AppId): Promise<void> => {
+  const by = Date.now() + 30_000;
+  // oxlint-disable-next-line no-await-in-loop -- polled until it does
+  while ((await env.DB.prepare(query).bind(app).first()) === null) {
+    if (Date.now() > by) {
+      throw new Error(`Never found: ${query}`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- polled until it does
+    await scheduler.wait(5);
+  }
+};
 
 /** A Notes App of spec 8's layout, with its App tests in `suite`. */
 const notesWithTests = (suite: string): TestApp =>
@@ -525,17 +538,10 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
 
     const going = builder.api.apps.drafts.publish(app, revision, "One");
     // Once version 2 is committed, before it goes live, an agent writes.
-    while (
-      // oxlint-disable-next-line no-await-in-loop -- polled until it is
-      (await env.DB.prepare(
-        "SELECT 1 FROM app_versions WHERE app_id = ? AND version = 2"
-      )
-        .bind(app)
-        .first()) === null
-    ) {
-      // oxlint-disable-next-line no-await-in-loop -- polled until it is
-      await scheduler.wait(5);
-    }
+    await until(
+      "SELECT 1 FROM app_versions WHERE app_id = ? AND version = 2",
+      app
+    );
     await saveDraft(
       env,
       app,
@@ -545,6 +551,10 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     );
     await going;
     const left = await builder.api.apps.drafts.get(app);
+    const points = await builder.api.apps.drafts.points(app);
+    const raced = points.find(
+      ({ chatId: by, touched }) => by === chatId && touched.includes("later.md")
+    );
     const live = await builder.api.apps.drafts.publish(
       app,
       left.revision,
@@ -554,18 +564,81 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     const files = await builder.api.apps.files.read(app, 3);
     const version = await builder.api.apps.versions.get(app, 3);
     expect({
+      raced: raced?.base,
       left: { base: left.base, changed: left.changed },
       live: live.currentVersion,
       parent: version.parent,
       notes: files["notes.md"],
       later: files["later.md"],
     }).toStrictEqual({
-      // The write landed over version 1, which publishing 2 couldn't empty.
-      left: { base: 1, changed: ["later.md", "notes.md"] },
+      // The write landed over version 1, which publishing 2 couldn't
+      // empty: the draft is moved onto 2, only the write left unshared.
+      raced: 1,
+      left: { base: 2, changed: ["later.md"] },
       live: 3,
       parent: 2,
       notes: "One\n",
       later: "Two\n",
+    });
+  });
+
+  it("refuses a roll back a write lands during, bringing nothing back, and rolls back once read again", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appOf(builder);
+    await publishing(builder, app, notesWithTests(aSecondsSuite));
+    // Version 2, committed and never published: rolling back to it seals
+    // and tests it first, which takes a second.
+    await commitApp(
+      builder.api.apps.files,
+      app,
+      { "notes.md": "Old\n" },
+      "Old"
+    );
+    await publishing(builder, app, { "notes.md": "Three\n" });
+    const { revision } = await builder.api.apps.drafts.get(app);
+    const { id: chatId } = await builder.api.chats.forApp(app);
+    const writer = await agentWriting(builder, chatId);
+
+    const rolling = outcome(
+      builder.api.apps.versions.publish(app, 2, revision, 3)
+    );
+    // Once version 2 is sealed, before it goes live, an agent writes.
+    await until(
+      "SELECT 1 FROM sdk_release_manifests WHERE app_id = ? AND version = 2",
+      app
+    );
+    await saveDraft(
+      env,
+      app,
+      await readDraft(env, app),
+      { changes: { "later.md": "Later\n" }, unchanged: [] },
+      writer
+    );
+    const refused = await rolling;
+    const kept = await builder.api.apps.drafts.get(app);
+    const liveAfterRefusal = await liveOf(builder, app);
+    // Read again, the builder rolls back over the draft as it is now.
+    const retried = await builder.api.apps.versions.publish(
+      app,
+      2,
+      kept.revision,
+      3
+    );
+    const after = await builder.api.apps.drafts.get(app);
+
+    expect({
+      refused,
+      liveAfterRefusal,
+      kept: { base: kept.base, changed: kept.changed },
+      retried: retried.currentVersion,
+      after: { base: after.base, changed: after.changed },
+    }).toStrictEqual({
+      refused: "app.conflict",
+      liveAfterRefusal: 3,
+      kept: { base: 3, changed: ["later.md"] },
+      retried: 2,
+      // Over version 2, with nothing of version 3 as its own changes.
+      after: { base: 2, changed: [] },
     });
   });
 
