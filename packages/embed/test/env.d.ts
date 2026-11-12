@@ -4,6 +4,7 @@ import type {
   FloatEmbedder,
   Int8Embedder,
   PairsEmbedder,
+  TrappingEmbedder,
 } from "./worker.ts";
 
 declare global {
@@ -15,6 +16,7 @@ declare global {
       DOT: DurableObjectNamespace<DotEmbedder>;
       PAIRS: DurableObjectNamespace<PairsEmbedder>;
       CUSTOM: DurableObjectNamespace<CustomEmbedder>;
+      TRAPPING: DurableObjectNamespace<TrappingEmbedder>;
     }
   }
 }

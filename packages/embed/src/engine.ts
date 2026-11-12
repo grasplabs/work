@@ -1,3 +1,4 @@
+// oxlint-disable max-classes-per-file -- the engine, and the error it refuses a text with
 /**
  * The host side of embed.wasm (rust/): one instance of the module with one
  * model in its memory. It knows nothing of where the model's files are
@@ -83,6 +84,14 @@ const fitting = (load: () => number): number => {
 
 /** Whitespace as the tokenizer's lstrip reads it (Rust's `char::is_whitespace`: Unicode White_Space). */
 const whitespace = /\p{White_Space}/gu;
+
+/**
+ * Why `tokenize` refused a text: it is past the module's text buffer, and
+ * cutting it there could change its tokens. The caller cuts it first.
+ */
+export class TextTooLongError extends RangeError {
+  override name = "TextTooLongError";
+}
 
 /** The bytes one row of the token table takes in `format`. */
 export const rowBytes = (format: RowFormat, dim: number): number =>
@@ -196,7 +205,7 @@ export class Engine {
       this.encoder.encode(text.slice(0, read).replaceAll(whitespace, ""))
         .byteLength < this.certainlyOver
     ) {
-      throw new RangeError(
+      throw new TextTooLongError(
         "The text is longer than the embedder's 256 KiB text buffer, and cutting it there could change its tokens. Cut it before embedding."
       );
     }
@@ -225,13 +234,16 @@ export class Engine {
     for (const [i, id] of ids.entries()) {
       const row = found.get(id);
       if (row?.byteLength !== size) {
-        throw new Error(`The token table has no row for token ${id}.`);
+        // Nothing of the text in the message, not even a token's ID.
+        throw new Error(
+          "The token table lacks a row the text needs, or has one of the wrong width."
+        );
       }
       memory.set(row, base + i * size);
     }
     const out = this.exports.forward(ids.length, rowFormatCodes[format]);
     if (out === 0) {
-      throw new Error(`The encoder can't run on ${ids.length} tokens.`);
+      throw new Error("The encoder can't run on the text's tokens.");
     }
     return new Float32Array(this.exports.memory.buffer, out, this.dim).slice();
   }

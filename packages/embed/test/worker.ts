@@ -3,6 +3,7 @@
 // fixtures/ (scripts/make-fixture.py), in their float and int8 forms, and
 // with each integer kernel forced.
 import { Embedder } from "../src/embedder.ts";
+import type { Loaded } from "../src/embedder.ts";
 import type { Kernel, RunningKernel } from "../src/engine.ts";
 import type { EmbedModel } from "../src/model-files.ts";
 import deepFiles from "./fixtures/deep/files.json";
@@ -77,6 +78,47 @@ export class DotEmbedder extends Embedder {
 export class PairsEmbedder extends Embedder {
   protected override readonly model = int8Model;
   protected override readonly kernel: Kernel = "pairs";
+}
+
+/** A text holding this word makes a `TrappingEmbedder`'s module trap as it runs the encoder. */
+export const trapWord = "kerneltrap";
+/** A text holding this word ends a `TrappingEmbedder`'s object as it reaches it. */
+export const abortWord = "objectabort";
+
+/**
+ * An embedder of the int8 model that breaks on certain texts: its module
+ * traps on a text holding `trapWord`, as a kernel that fails does, and its
+ * object ends on one holding `abortWord`, as one that runs out of memory
+ * does. Every other text runs as in any embedder.
+ */
+export class TrappingEmbedder extends Embedder {
+  protected override readonly model = int8Model;
+  private readonly broken = new WeakSet<object>();
+
+  protected override async loaded(): Promise<Loaded> {
+    const loaded = await super.loaded();
+    const { engine } = loaded;
+    if (!this.broken.has(engine)) {
+      this.broken.add(engine);
+      const tokenize = engine.tokenize.bind(engine);
+      const embed = engine.embed.bind(engine);
+      let trapNext = false;
+      engine.tokenize = (text) => {
+        if (text.includes(abortWord)) {
+          this.ctx.abort("Ended by the test");
+        }
+        trapNext = text.includes(trapWord);
+        return tokenize(text);
+      };
+      engine.embed = (...args) => {
+        if (trapNext) {
+          throw new WebAssembly.RuntimeError("unreachable");
+        }
+        return embed(...args);
+      };
+    }
+    return loaded;
+  }
 }
 
 export default {
