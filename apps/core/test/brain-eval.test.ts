@@ -124,6 +124,7 @@ describe("the Brain evaluation", () => {
       const started = performance.now();
       // oxlint-disable-next-line no-await-in-loop -- timed one at a time
       const recalled = await recallAs(env, idIn(people, asker), {
+        personal: true,
         question: question.question,
         // The most a pack may hold, so every item is its whole chunk: the
         // evaluation scores the order the pack ranks passages in.

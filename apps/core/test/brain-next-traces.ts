@@ -125,14 +125,17 @@ export const tickUntilErased = async (most = 10): Promise<number> => {
 /**
  * Has the store's next write to its bucket go through `put`, given the
  * store's state and the write itself; its own bucket is back after it.
+ * The shared store's, or the one named `name` (a person's own).
  */
 export const nextBucketPut = async (
   put: (
     state: DurableObjectState,
     write: () => Promise<unknown>
-  ) => Promise<unknown>
+  ) => Promise<unknown>,
+  name = "brain"
 ): Promise<void> => {
-  await runInDurableObject(store(), (instance, state) => {
+  const stub = inJurisdiction(env, env.BRAIN_STORE).getByName(name);
+  await runInDurableObject(stub, (instance, state) => {
     const objectEnv: unknown = Reflect.get(instance, "env");
     if (typeof objectEnv !== "object" || objectEnv === null) {
       throw new TypeError("The store has no env");
@@ -140,6 +143,7 @@ export const nextBucketPut = async (
     const bucket = env.BRAIN_OBJECTS;
     const once = {
       get: async (key: string) => await bucket.get(key),
+      head: async (key: string) => await bucket.head(key),
       list: async (options: R2ListOptions) => await bucket.list(options),
       delete: async (keys: string | string[]) => {
         await bucket.delete(keys);
@@ -165,7 +169,7 @@ export const nextBucketPut = async (
  * the test releases it: `reached` once it is there. Flags, not a promise,
  * since workerd won't let one request wait on another's.
  */
-export const holdNextBucketPut = async () => {
+export const holdNextBucketPut = async (name = "brain") => {
   const gate = { reached: false, released: false };
   await nextBucketPut(async (_state, write) => {
     gate.reached = true;
@@ -174,7 +178,7 @@ export const holdNextBucketPut = async () => {
       await scheduler.wait(10);
     }
     return await write();
-  });
+  }, name);
   return gate;
 };
 
