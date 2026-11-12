@@ -212,6 +212,7 @@ describe("the Brain evaluation against a real model", () => {
       const recalled = await recallAs(env, idIn(people, asker), {
         question: question.question,
         budget: { tokens: packTokens },
+        personal: true,
       });
       const pack = recalled.items
         .map(({ source, text }) => sourceBlock(source.id, text))
