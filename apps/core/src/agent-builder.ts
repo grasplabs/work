@@ -10,6 +10,7 @@ import {
 import type { Identity } from "@grasp-os/shared/rpc";
 import { appClassAudienceSchema } from "@grasp-os/shared/stephen-reach";
 import { and, asc, eq, ne, or, sql } from "drizzle-orm";
+import type { SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { agentOfRow, firstAgentId, readAgent } from "./agents.ts";
@@ -119,6 +120,18 @@ const namedOnce = async (write: () => Promise<unknown>): Promise<void> => {
     throw error;
   }
 };
+
+/**
+ * Holds a write of an agent's row off one an admin deleted. Every change
+ * reads the agent first and refuses a deleted one, but a delete can land
+ * between that read and the write: the write then changes nothing, and
+ * records nothing, so a deleted agent never comes back.
+ */
+const notDeleted = sql`${agents.state} IS NOT 'deleted'`;
+
+/** The same for a write of another table's row of the agent `agentId`. */
+const keptAgent = (agentId: SQLWrapper) =>
+  sql`NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agentId} AND ${agents.state} = 'deleted')`;
 
 /** Whether `said` is what `agent` already is. */
 const unchanged = (agent: Agent, said: AgentSaid): boolean =>
@@ -288,13 +301,18 @@ export const changeAgent = async (
           .onConflictDoUpdate({
             target: agents.id,
             set: { ...named, ...by },
-            setWhere: or(
-              sql`${agents.name} IS NOT ${changed.name}`,
-              sql`${agents.face} IS NOT ${changed.face}`,
-              sql`${agents.job} IS NOT ${changed.job}`,
-              sql`${agents.instructions} IS NOT ${changed.instructions}`,
-              sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
-              sql`${agents.model} IS NOT ${changed.model}`
+            // Never one deleted since it was read: it stays deleted, and
+            // its name stays free.
+            setWhere: and(
+              notDeleted,
+              or(
+                sql`${agents.name} IS NOT ${changed.name}`,
+                sql`${agents.face} IS NOT ${changed.face}`,
+                sql`${agents.job} IS NOT ${changed.job}`,
+                sql`${agents.instructions} IS NOT ${changed.instructions}`,
+                sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
+                sql`${agents.model} IS NOT ${changed.model}`
+              )
             ),
           }),
         outboxedIfChanged(db, {
@@ -351,7 +369,8 @@ export const setAgentPaused = async (
       .onConflictDoUpdate({
         target: agents.id,
         set: { state, ...by },
-        setWhere: sql`${agents.state} IS NOT ${state}`,
+        // Never one deleted since it was read: it stays deleted.
+        setWhere: and(notDeleted, sql`${agents.state} IS NOT ${state}`),
       }),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
@@ -487,10 +506,13 @@ export const setAgentReach = async (
       .onConflictDoUpdate({
         target: agentReach.agentId,
         set: { on, ...stored, ...by },
-        setWhere: or(
-          sql`${agentReach.on} IS NOT ${on}`,
-          sql`${agentReach.who} IS NOT ${stored.who}`,
-          sql`${agentReach.teams} IS NOT ${stored.teams}`
+        setWhere: and(
+          keptAgent(agentReach.agentId),
+          or(
+            sql`${agentReach.on} IS NOT ${on}`,
+            sql`${agentReach.who} IS NOT ${stored.who}`,
+            sql`${agentReach.teams} IS NOT ${stored.teams}`
+          )
         ),
       }),
     outboxedIfChanged(db, {
@@ -539,9 +561,12 @@ export const setAgentToolClass = async (
       .onConflictDoUpdate({
         target: [agentToolClasses.agentId, agentToolClasses.toolClass],
         set: { who, teams: stored.teams, ...by },
-        setWhere: or(
-          sql`${agentToolClasses.who} IS NOT ${who}`,
-          sql`${agentToolClasses.teams} IS NOT ${stored.teams}`
+        setWhere: and(
+          keptAgent(agentToolClasses.agentId),
+          or(
+            sql`${agentToolClasses.who} IS NOT ${who}`,
+            sql`${agentToolClasses.teams} IS NOT ${stored.teams}`
+          )
         ),
       }),
     outboxedIfChanged(db, {

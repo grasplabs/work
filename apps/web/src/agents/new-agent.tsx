@@ -6,11 +6,21 @@ import { Page, PageHeading } from "../frame/page.tsx";
 import { SettingsSection } from "../settings/settings-parts.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentForm } from "./agent-form.tsx";
+import type { Typed } from "./agent-form.tsx";
 
 // A new agent, for the company's admins: its name, what it is for, its
 // picture, its model and its instructions, said once. Core makes it on, reaching nobody and with
 // nothing it may do (agent-builder.ts), so the page it then opens is the
 // agent's Access tab: an agent nobody may ask is not yet any use.
+
+/** A new agent before anything is said of it. */
+const blank: Typed = {
+  name: "",
+  job: "",
+  instructions: "",
+  face: "stephen",
+  model: null,
+};
 
 /** The page a new agent is made on; `models`, the ones the organization chose. */
 export const NewAgent = ({ models }: { models: readonly string[] }) => {
@@ -34,15 +44,11 @@ export const NewAgent = ({ models }: { models: readonly string[] }) => {
       >
         <AgentForm
           can={!busy}
-          initial={{
-            name: "",
-            job: "",
-            instructions: "",
-            face: "stephen",
-            model: null,
-          }}
+          initial={blank}
           models={models}
-          onSave={async (typed) => {
+          onSave={async (said) => {
+            // Every part is this form's, so all are said.
+            const typed = { ...blank, ...said };
             await run(async (session) => {
               const made = await session.connections.makeAgent({
                 ...typed,

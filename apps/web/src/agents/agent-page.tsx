@@ -344,10 +344,13 @@ export const AgentPage = ({
     face: agent.face,
     model: agent.model,
   };
-  const save = async (next: typeof typed): Promise<void> => {
+  // What a card says, over the agent as core has it now: a card saves its
+  // own parts and never what another card saved since it was shown.
+  const save = async (said: Partial<typeof typed>): Promise<void> => {
     await change(async (session) => {
       await session.connections.changeAgent(agent.id, {
-        ...next,
+        ...typed,
+        ...said,
         modelRole: agent.modelRole,
       });
     });
