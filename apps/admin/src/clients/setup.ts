@@ -52,16 +52,6 @@ export interface SetupSealedSecret {
   setAt: Date;
 }
 
-/** What staff did to the client by hand, as the audit log recorded it. */
-export interface SetupEvent {
-  id: string;
-  at: Date;
-  actor: string;
-  action: string;
-  target: string | null;
-  detail: string | null;
-}
-
 /** A client's own Grasp, as the Setup section shows it. */
 export interface ClientSetup {
   provisioning: ProvisioningView;
@@ -122,8 +112,6 @@ export interface ClientSetup {
     error: string | null;
     startedAt: Date;
   } | null;
-  /** What staff did to it by hand, the newest first. */
-  done: SetupEvent[];
   /**
    * Everything the audit log keeps of it, the newest first: staff's
    * changes and its provisioning and deploys, the latest
@@ -131,24 +119,6 @@ export interface ClientSetup {
    */
   history: HistoryEntry[];
 }
-
-/** What staff do to a client by hand, as its audit log names it. */
-const byHand: ReadonlySet<string> = new Set([
-  "client.create",
-  "client.place",
-  "client.provision_placed",
-  "client.channel",
-  "client.pin",
-  "client.unpin",
-  "client.rotate_secrets",
-  "client.sign_in",
-  "client.sealed_secret",
-  "client.teams_bot",
-  "client.staff_window",
-  "client.apply_settings",
-  "client.stripe_customer",
-  "client.attio_company",
-]);
 
 const workersOf = async (
   db: AdminDatabase,
@@ -311,9 +281,6 @@ export const getClientSetup = async (
       listed.releases.length > setupReleaseLimit || listed.older !== null,
     target: target?.releaseId ?? null,
     deploy,
-    done: history.filter(
-      ({ actor, action }) => actor !== "system" && byHand.has(action)
-    ),
     history,
   };
 };

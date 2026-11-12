@@ -1,7 +1,7 @@
 /**
  * What Grasp keeps of the interviews at one company, ported from the
- * prototype (grasplabs/prototype `components/admin/org-data.tsx`): what is
- * kept and what never is, who had their interview deleted, and what the
+ * prototype (grasplabs/prototype `components/admin/org-data.tsx`): how much
+ * is kept, who had their interview deleted, and what the
  * company itself gets to see. Every figure is the model's (`keptOf`,
  * `companySees`); nothing anyone said is shown, only names and numbers.
  *
@@ -27,9 +27,8 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import type { ReactNode } from "react";
 
-import { Section } from "./section.tsx";
+import { Section, SectionRow } from "./section.tsx";
 
 const percent = new Intl.NumberFormat("en", {
   style: "percent",
@@ -51,38 +50,14 @@ const conversationWords: Record<OrgState["conversation"], string> = {
   read: "Read by Stephen",
 };
 
-/** One thing that is kept or not: what it is and why on the left, how much of it on the right. */
-const Kept = ({
-  label,
-  what,
-  children,
-}: {
-  label: string;
-  what: string;
-  children: ReactNode;
-}) => (
-  <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-1 border-t px-5 py-3">
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <span>{label}</span>
-      <p className="text-muted-foreground">{what}</p>
-    </div>
-    <span className="tabular-nums">{children}</span>
-  </div>
-);
-
+/** What is kept, as counts: the fixed rules people are told (no voice is kept) aren't repeated for every company. */
 const WhatIsKept = ({ view }: { view: AdminView }) => {
   // Counted up to the day the view is on, which runs on past the interviews' close.
   const kept = keptOf(view, view.asOf);
   const { conversation } = view.state;
   return (
-    <Section
-      description="As people are told before their interview starts."
-      title="What is kept"
-    >
-      <Kept
-        label="The first conversation"
-        what="With the sponsor, word for word. It is what the research and Stephen’s first questions start from."
-      >
+    <Section title="What is kept">
+      <SectionRow label="The first conversation">
         <span
           className={
             conversation === "none" ? "text-muted-foreground" : undefined
@@ -90,31 +65,18 @@ const WhatIsKept = ({ view }: { view: AdminView }) => {
         >
           {conversationWords[conversation]}
         </span>
-      </Kept>
-      <Kept
-        label="Interviews people agreed to"
-        what="Their words are kept, and what they said counts."
+      </SectionRow>
+      <SectionRow label="Interviews people agreed to">
+        <span className="tabular-nums">{kept.agreed}</span>
+      </SectionRow>
+      <SectionRow label="Interviews that stopped halfway">
+        <span className="tabular-nums">{kept.halfway}</span>
+      </SectionRow>
+      <SectionRow
+        label={`Can still be deleted, for ${DELETE_DAYS} days after the interview`}
       >
-        {kept.agreed}
-      </Kept>
-      <Kept
-        label="Interviews that stopped halfway"
-        what="Kept, so the link carries on where they stopped. Nothing in them counts."
-      >
-        {kept.halfway}
-      </Kept>
-      <Kept
-        label="Anyone’s voice"
-        what="What is said is written out, and the sound is gone."
-      >
-        Never kept
-      </Kept>
-      <Kept
-        label="Can still be deleted"
-        what={`For ${DELETE_DAYS} days after their interview, the person can ask.`}
-      >
-        {kept.deletable}
-      </Kept>
+        <span className="tabular-nums">{kept.deletable}</span>
+      </SectionRow>
     </Section>
   );
 };

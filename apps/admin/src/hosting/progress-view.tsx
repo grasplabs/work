@@ -1,8 +1,8 @@
 /**
  * An organization being set up, on its Setup (src/hosting/progress.ts):
  * one calm line per thing that happens, its state, and how long it has
- * taken; once live, where to open it and who is invited. Codes and the
- * technical part only under each line's Details.
+ * taken. Once live it is one line, its steps and who is invited folded
+ * under it. Codes and the technical part only under each line's Details.
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -87,12 +87,8 @@ const Line = ({ line }: { line: ProgressLine }) => (
   </li>
 );
 
-/** What it all comes to, in a sentence. */
+/** What it all comes to while it isn't ready, in a sentence. */
 const headline = (progress: ProvisioningProgress, now: Date): string => {
-  const host = progress.hostname ?? "its address";
-  if (progress.state === "ready") {
-    return `Ready: open ${host}`;
-  }
   if (progress.state === "needs_attention") {
     return "Stopped: it needs a look";
   }
@@ -101,8 +97,41 @@ const headline = (progress: ProvisioningProgress, now: Date): string => {
       ? "Waiting for its own install"
       : "Waiting to start";
   }
-  return `Setting up ${host} (${durationOf(progress.startedAt, now)} so far)`;
+  return `Setting up ${progress.hostname ?? "its address"} (${durationOf(progress.startedAt, now)} so far)`;
 };
+
+const Steps = ({ progress }: { progress: ProvisioningProgress }) => (
+  <ol className="flex flex-col" aria-label="Steps">
+    {progress.lines.map((line) => (
+      <Line key={line.id} line={line} />
+    ))}
+  </ol>
+);
+
+/** Set up and live: one line, its steps and who is invited under it for who opens them. */
+const Ready = ({ progress }: { progress: ProvisioningProgress }) => (
+  <Collapsible>
+    <Section
+      action={
+        <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
+          Show its steps
+        </CollapsibleTrigger>
+      }
+      title="Set up: every step is done"
+    >
+      <CollapsibleContent>
+        <div className="flex flex-col gap-3 border-t px-5 py-4">
+          {progress.admins.length === 0 ? null : (
+            <p className="text-muted-foreground text-sm">
+              {`Invited: ${progress.admins.join(", ")}. They become admins when they first sign in.`}
+            </p>
+          )}
+          <Steps progress={progress} />
+        </div>
+      </CollapsibleContent>
+    </Section>
+  </Collapsible>
+);
 
 /**
  * Its progress; `children`, what staff do about it once it stopped (its
@@ -115,44 +144,17 @@ export const ProvisioningProgressView = ({
   progress: ProvisioningProgress;
   children?: ReactNode;
 }) => {
-  const now = new Date();
+  if (progress.state === "ready") {
+    return <Ready progress={progress} />;
+  }
   return (
     <Section
-      description={
-        progress.readyAt === null
-          ? (progress.notice ??
-            "Each step runs by itself, and is tried again if it fails.")
-          : `Took ${durationOf(progress.startedAt, progress.readyAt)}.`
-      }
-      title={headline(progress, now)}
+      description={progress.notice ?? undefined}
+      title={headline(progress, new Date())}
     >
       <div className="flex flex-col gap-3 border-t px-5 py-4">
         {progress.state === "needs_attention" ? children : null}
-        {progress.state === "ready" && progress.hostname !== null ? (
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Button
-              nativeButton={false}
-              render={
-                <a
-                  aria-label={`Open ${progress.hostname}`}
-                  href={`https://${progress.hostname}`}
-                  rel="noopener"
-                  target="_blank"
-                />
-              }
-            >
-              {`Open ${progress.hostname}`}
-            </Button>
-            <span className="text-muted-foreground">
-              {`Invited: ${progress.admins.join(", ")}. They become admins when they first sign in.`}
-            </span>
-          </div>
-        ) : null}
-        <ol className="flex flex-col" aria-label="Steps">
-          {progress.lines.map((line) => (
-            <Line key={line.id} line={line} />
-          ))}
-        </ol>
+        <Steps progress={progress} />
         {progress.code === null ? null : (
           <Collapsible>
             <CollapsibleTrigger render={<Button size="sm" variant="link" />}>

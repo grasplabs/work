@@ -182,7 +182,7 @@ const interviewingSnapshot = (): AdminSnapshot => {
 describe("an organization's interviews", () => {
   useStoreSecrets({ deployer: token });
 
-  it("shows every team, everyone by name, every interview, and how Stephen and Claire did, in numbers only", async () => {
+  it("shows every team, everyone by name with their interview’s numbers, and how Stephen and Claire did, in numbers only", async () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();
     acme.core.admin = snapshot;
@@ -193,10 +193,9 @@ describe("an organization's interviews", () => {
 
     const teams = await page(base);
     const people = await page(`${base}?tab=people`);
-    const transcripts = await page(`${base}?tab=transcripts`);
     const interviewers = await page(`${base}?tab=interviewers`);
     const setup = await page(`${base}?tab=setup`);
-    const pages = [teams, people, transcripts, interviewers, setup];
+    const pages = [teams, people, interviewers, setup];
 
     expect({
       statuses: pages.map((each) => each.status),
@@ -219,27 +218,17 @@ describe("an organization's interviews", () => {
           "Invited",
           "Dan Mol",
           "Talking now",
-        ]),
-        transcripts: missingIn(transcripts.html, [
-          "Ana Smit",
-          "Ben Vos",
-          "Stopped at: Step by step",
-          "Dan Mol",
-          "Talking now",
-          "the admin is sent none of it, so no transcript is read here",
+          // Each interview's minutes and what was agreed to, beside its person.
+          "Minutes",
+          "Facts agreed",
+          ">0 of 2<",
+          "What anyone said stays in the company’s own Grasp.",
         ]),
         interviewers: missingIn(interviewers.html, [
           "What people thought of it",
           "1 of 1 said how it was",
           "5.0 of 5",
           "1 of 3",
-          "23 minutes in all",
-          "Who people chose",
-          "Stephen",
-          "Claire",
-          "1 interview stopped halfway and was not picked up again.",
-          "Up to 10 minutes",
-          "11–15 minutes",
         ]),
         setup: missingIn(setup.html, [
           "How Stephen and Claire are set up here",
@@ -248,8 +237,6 @@ describe("an organization's interviews", () => {
         ]),
       },
       // Nothing anyone said, and no link's code, on any tab.
-      // Dan is talking now: he stopped nowhere.
-      danStopped: transcripts.html.includes("Stopped at: Your story"),
       leaked: pages.flatMap((each) =>
         [said, fact, linkCode].filter((text) => each.html.includes(text))
       ),
@@ -257,15 +244,13 @@ describe("an organization's interviews", () => {
         each.html.includes("This section isn’t in the admin yet.")
       ),
     }).toStrictEqual({
-      statuses: [200, 200, 200, 200, 200],
+      statuses: [200, 200, 200, 200],
       missing: {
         teams: [],
         people: [],
-        transcripts: [],
         interviewers: [],
         setup: [],
       },
-      danStopped: false,
       leaked: [],
       toCome: false,
     });
@@ -277,45 +262,19 @@ describe("an organization's interviews", () => {
     const base = `/organizations/${acme.clientId}/interviews`;
 
     const teams = await page(base);
-    const transcripts = await page(`${base}?tab=transcripts`);
     const interviewers = await page(`${base}?tab=interviewers`);
 
     expect([
       teams.html.includes(
-        "Nobody is known here yet. The people come with the company’s own list."
-      ),
-      transcripts.html.includes(
-        "No interviews yet. They start once the company has told its team."
+        "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding."
       ),
       interviewers.html.includes(
         "No interviews yet. They start once the company has told its team."
       ),
-    ]).toStrictEqual([true, true, true]);
+    ]).toStrictEqual([true, true]);
   });
 
-  it("counts someone who left at the read-back, before agreeing, where people stop", async () => {
-    const acme = await liveClient();
-    const snapshot = interviewingSnapshot();
-    acme.core.admin = {
-      ...snapshot,
-      interviews: snapshot.interviews.map((interview) =>
-        interview.person === "p-ben"
-          ? { ...interview, phase: "readback", stoppedAt: "readback" }
-          : interview
-      ),
-    };
-
-    const { html } = await page(
-      `/organizations/${acme.clientId}/interviews?tab=interviewers`
-    );
-    const start = html.indexOf('aria-label="Where people stop"');
-    const stops =
-      start === -1 ? "" : html.slice(start, html.indexOf("</ul>", start));
-
-    expect(stops.includes("Reading it back")).toBeTruthy();
-  });
-
-  it("gives no share of voice or of what was left in while no interview is finished", async () => {
+  it("counts nobody as finished while no interview is agreed to", async () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();
     // Only Ben, who stopped halfway, and Dan, who is talking now, have started.
@@ -335,19 +294,10 @@ describe("an organization's interviews", () => {
         : html.slice(start, html.indexOf("</div>", start));
     };
 
+    // Its ring says the share too: none of the two who started.
     expect(
-      ["Finished", "Left in", "By voice"].map((label) => ({
-        label,
-        shown: [">0 of 2<", ">–<", ">0%<"].filter((text) =>
-          figureOf(label).includes(text)
-        ),
-      }))
-    ).toStrictEqual([
-      // Its ring says the share too: none of the two who started.
-      { label: "Finished", shown: [">0 of 2<", ">0%<"] },
-      { label: "Left in", shown: [">–<"] },
-      { label: "By voice", shown: [">–<"] },
-    ]);
+      [">0 of 2<", ">0%<"].filter((text) => figureOf("Finished").includes(text))
+    ).toStrictEqual([">0 of 2<", ">0%<"]);
   });
 
   it("measures Stephen across every organization in the Lab, each opening its interviewers, never with what anyone said", async () => {

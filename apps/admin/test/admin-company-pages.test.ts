@@ -67,33 +67,25 @@ const sectionOf = (html: string, title: string): string => {
 };
 
 describe("the company pages, in the admin", () => {
-  it("lists every organization with its own platform still to read from its account, and a way to add one", async () => {
+  it("lists every organization, and a way to add one", async () => {
     const live = await recordClient("active");
 
-    // The live column is read after the page shows (test/client-grid.test.ts).
     const { status, html } = await page("/");
 
     expect({
       status,
       listed: html.includes(`href="/organizations/${live.id}"`),
-      column: html.includes("Its platform"),
-      reading: html.includes("Reading…"),
       add: html.includes('href="/new-organization"'),
-    }).toStrictEqual({
-      status: 200,
-      listed: true,
-      column: true,
-      reading: true,
-      add: true,
-    });
+    }).toStrictEqual({ status: 200, listed: true, add: true });
   });
 
-  it("shows a company just added its setting up step by step, and its Hosting folded away with nothing to choose", async () => {
+  it("shows a company just added its setting up step by step, and its Hosting under its settings with nothing to choose", async () => {
     await importedRelease("feat(core): newest of all");
     const client = await recordClient();
 
     const { status, html } = await setupOf(client.id);
-    const hosting = sectionOf(html, "Hosting");
+    const settings = await setupOf(client.id, "settings");
+    const hosting = sectionOf(settings.html, "Hosting");
 
     expect({
       status,
@@ -102,15 +94,15 @@ describe("the company pages, in the admin", () => {
         "Installing Grasp",
         "Inviting admins",
       ].every((line) => html.includes(line)),
-      folded: hosting.includes("Show hosting details"),
+      onStatus: html.includes('aria-label="Hosting"'),
       place: hosting.includes("Place and start provisioning"),
       release: hosting.includes('id="hosting-release"'),
       where: hosting.includes("Grasp Cloud, data kept in the EU"),
-      account: html.includes("Account id"),
+      account: settings.html.includes("Account id"),
     }).toStrictEqual({
       status: 200,
       steps: true,
-      folded: true,
+      onStatus: false,
       place: false,
       release: false,
       where: true,
@@ -150,7 +142,10 @@ describe("the company pages, in the admin", () => {
       ],
       givenUp: html.includes("Stopped: it needs a look"),
       code: html.includes("probe_unanswered"),
-      resume: sectionOf(html, "Hosting").includes("Retry now"),
+      // Beside why it stopped, above its steps.
+      resume: html
+        .slice(0, html.indexOf('aria-label="Steps"'))
+        .includes("Retry now"),
     }).toStrictEqual({
       stopped: [false, true, true],
       givenUp: true,
@@ -284,7 +279,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("shows an active company nothing left to set up, and reads its account's numbers once the page shows", async () => {
+  it("shows an active company nothing left to set up, and nothing of its account's numbers before they are read", async () => {
     const client = await recordClient("active");
 
     const { status, html } = await setupOf(client.id);
@@ -293,14 +288,12 @@ describe("the company pages, in the admin", () => {
       status,
       settingUp: html.includes('aria-label="Setting it up"'),
       resume: html.includes("Resume"),
-      numbers: sectionOf(html, "Its platform in numbers").includes(
-        "Reading its account…"
-      ),
+      numbers: html.includes("Its platform in numbers"),
     }).toStrictEqual({
       status: 200,
       settingUp: false,
       resume: false,
-      numbers: true,
+      numbers: false,
     });
   });
 
@@ -342,8 +335,8 @@ describe("the company pages, in the admin", () => {
       rotate: sectionOf(settings.html, "Its secrets").includes(
         "Rotate secrets"
       ),
-      history: ["client.sign_in", "client.create"].map((action) =>
-        history.includes(action)
+      history: ["Changed how its people sign in.", "Added it."].map((words) =>
+        history.includes(words)
       ),
     }).toStrictEqual({
       statuses: [200, 200, 200],

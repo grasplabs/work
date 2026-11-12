@@ -183,22 +183,18 @@ const stepOf = (steps: string, title: string): string => {
     : steps.slice(steps.lastIndexOf("<a", at), steps.indexOf("</a>", at));
 };
 
-/** The card of the team named `name` on the organization's page. */
-const cardOf = (html: string, name: string): string => {
+/** The row of the team named `name` among the interviews' teams. */
+const teamRowOf = (html: string, name: string): string => {
   const at = html.indexOf(`aria-label="Open ${name}"`);
   return at === -1
     ? ""
     : html.slice(html.lastIndexOf("<li", at), html.indexOf("</li>", at));
 };
 
-/** The button that changes what was agreed, held while the team is told. */
-const changeAgreed =
-  /<button[^>]*disabled=""[^>]*>(?:<[^>]*>)*Change what was agreed/u;
-
 describe("an organization's onboarding in the admin", () => {
   useStoreSecrets({ deployer: token });
 
-  it("opens the steps on the one the organization is at, each saying where it stands, and the open one underneath", async () => {
+  it("lists the steps, each saying where it stands, opens the one that is next here, and sends those another section shows there", async () => {
     const base = await liveClient(bakery());
 
     const { status, html } = await page(`${base}/steps`);
@@ -206,98 +202,52 @@ describe("an organization's onboarding in the admin", () => {
 
     expect({
       status,
-      // Operations's lead hasn't talked: the first step not done.
-      current: stepOf(steps, "Team leads").includes('aria-current="page"'),
-      // Only the open step is marked, and it is where the steps open by themselves.
+      // Operations's lead hasn't talked, which Interviews shows: Grasp opens is next here.
+      current: stepOf(steps, "Grasp opens").includes('aria-current="page"'),
+      // Only the open step is marked.
       marked: steps.split("aria-current=").length - 1,
-      opensLeads: stepOf(steps, "Team leads").includes(`href="${base}/steps"`),
-      lines: [
-        // Core says it was read, not what it brought: nothing is claimed complete.
-        ">Read<",
-        "Everything is in place",
-        "1 of 2 talked",
-        "Day 9 of 14. 1 of 3 talked",
-        "62% known. It opens at 80%",
-      ].map((line) => steps.includes(line)),
       statuses: [
         stepOf(steps, "Agreed").includes(": Done"),
         stepOf(steps, "Interviews").includes(": Now"),
         stepOf(steps, "Grasp opens").includes(": Later"),
       ],
-      // Each step opens itself underneath.
-      opensAgreed: stepOf(steps, "Agreed").includes(
-        `href="${base}/steps?stage=agreed"`
+      // What was agreed is the Contract's; the leads and the interviews are Interviews'.
+      elsewhere: [
+        stepOf(steps, "Agreed").includes(`href="${base}/details?tab=contract"`),
+        stepOf(steps, "Team leads").includes(
+          `href="${base}/interviews?tab=people"`
+        ),
+        stepOf(steps, "Interviews").includes(`href="${base}/interviews"`),
+      ],
+      // The others open themselves underneath.
+      opensResearch: stepOf(steps, "Research").includes(
+        `href="${base}/steps?stage=research"`
       ),
-      leads: [
-        "Lisa de Vries",
-        // Ann is away, so only Tom got a link.
-        "Talked on 5 Oct 2026. 1 colleague got a link.",
-        "Otto Smit",
-        "Opened. The team waits for this interview.",
-        "1 lead can still be reminded, once each.",
-      ].map((text) => html.includes(text)),
-      // Staff note the one reminder from here, once someone gave it.
-      remind: html.includes("Mark 1 lead reminded"),
       complete: html.includes("nothing is missing"),
     }).toStrictEqual({
       status: 200,
       current: true,
       marked: 1,
-      opensLeads: true,
-      lines: [true, true, true, true, true],
       statuses: [true, true, true],
-      opensAgreed: true,
-      leads: [true, true, true, true, true],
-      remind: true,
+      elsewhere: [true, true, true],
+      opensResearch: true,
       complete: false,
     });
   });
 
-  it("opens the step a link names, with what staff can do there and what can't be done from the admin said so", async () => {
+  it("opens the step a link names, with what staff can do there", async () => {
     const base = await liveClient(bakery());
 
-    const agreed = await page(`${base}/steps?stage=agreed`);
-    const interviews = await page(`${base}/steps?stage=interviews`);
     const opens = await page(`${base}/steps?stage=open`);
     const conversation = await page(`${base}/steps?stage=conversation`);
     const unknown = await page(`${base}/steps?stage=nothing`);
 
     expect({
-      agreed: {
-        current: stepOf(stepsOf(agreed.html), "Agreed").includes(
-          'aria-current="page"'
-        ),
-        states: [
-          "Signed",
-          "Signed off",
-          "No works council",
-          "Interviews can start.",
-          "The team is told, so this stays as it was agreed.",
-        ].map((text) => agreed.html.includes(text)),
-        // Staff keep what was agreed from here, until the team is told.
-        change: changeAgreed.test(agreed.html),
-      },
-      interviews: {
-        shown: [
-          "Day 9 of 14. The link closes on 19 Oct 2026.",
-          "are talking right now",
-          // Operations's people wait for Otto; Sales has nobody left to remind.
-          "Waits for Otto’s list",
-          "Everyone by name",
-          `href="${base}/interviews"`,
-          "1 person can still be reminded, once each.",
-          "Mark 1 person reminded",
-        ].map((text) => interviews.html.includes(text)),
-        // Logistics takes no part, so it isn't among the teams talking.
-        logistics: interviews.html.includes(">Logistics<"),
-      },
       opens: {
         known: [
           "62%",
           "Opens at 80%",
           "Not enough is known yet. It can open once it is past 80%.",
-          // Core counts the whole, and sends no share of each source.
-          "The company’s own Grasp counts what is known and sends the whole",
           // Grasp's switches beside its go: the share, the go, the interviews.
           "How much has to be known before it opens",
           "Pause the interviews",
@@ -305,26 +255,22 @@ describe("an organization's onboarding in the admin", () => {
         ].map((text) => opens.html.includes(text)),
         go: opens.html.includes("Open Grasp for"),
       },
-      conversation: [
-        "Stephen has read it. What it brought stays in the company’s own Grasp.",
-        "What was said stays in the company’s own Grasp: the admin never shows it.",
-      ].map((text) => conversation.html.includes(text)),
-      // A step that isn't one opens the one the organization is at.
-      unknown: stepOf(stepsOf(unknown.html), "Team leads").includes(
+      conversation: {
+        current: stepOf(
+          stepsOf(conversation.html),
+          "First conversation"
+        ).includes('aria-current="page"'),
+        read: conversation.html.includes(
+          "Stephen has read it. What it brought stays in the company’s own Grasp."
+        ),
+      },
+      // A step that isn't one opens where the steps open by themselves.
+      unknown: stepOf(stepsOf(unknown.html), "Grasp opens").includes(
         'aria-current="page"'
       ),
     }).toStrictEqual({
-      agreed: {
-        current: true,
-        states: [true, true, true, true, true],
-        change: true,
-      },
-      interviews: {
-        shown: [true, true, true, true, true, true, true],
-        logistics: false,
-      },
-      opens: { known: [true, true, true, true, true, true, true], go: false },
-      conversation: [true, true],
+      opens: { known: [true, true, true, true, true, true], go: false },
+      conversation: { current: true, read: true },
       unknown: true,
     });
   });
@@ -334,14 +280,9 @@ describe("an organization's onboarding in the admin", () => {
     const plan = snapshot.plan ?? { start: "2026-10-05", days: 14 };
     const base = await liveClient({ ...snapshot, plan: { ...plan, days: 21 } });
 
-    const { html } = await page(`${base}/steps?stage=interviews`);
+    const { html } = await page(`${base}/steps`);
 
-    expect(
-      [
-        "Day 9 of 21. 1 of 3 talked",
-        "Day 9 of 21. The link closes on 26 Oct 2026.",
-      ].map((text) => html.includes(text))
-    ).toStrictEqual([true, true]);
+    expect(html).toContain("Day 9 of 21");
   });
 
   it("says a team's links are out only once a colleague's link went out, not when its lead talked", async () => {
@@ -359,120 +300,95 @@ describe("an organization's onboarding in the admin", () => {
       ),
     });
 
-    const leads = await page(`${base}/steps?stage=leads`);
-    const sales = await page(`${base}/organization?team=sales`);
+    const sales = await page(`${base}/interviews?team=sales`);
 
-    expect({
-      lead: [
-        "Talked on 5 Oct 2026. None of their colleagues has a link yet.",
-        "colleague got a link",
-      ].map((text) => leads.html.includes(text)),
-      team: ["No links out yet", "Links out since"].map((text) =>
+    expect(
+      ["No links out yet", "Links out since"].map((text) =>
         sales.html.includes(text)
-      ),
-    }).toStrictEqual({ lead: [true, false], team: [true, false] });
+      )
+    ).toStrictEqual([true, false]);
   });
 
   it("says the interviews are paused while the company has paused them", async () => {
     const base = await liveClient({ ...bakery(), paused: true });
 
-    const agreed = await page(`${base}/steps?stage=agreed`);
-    const interviews = await page(`${base}/steps?stage=interviews`);
-    const paused =
-      "The company has paused its interviews: nobody can open or go on with one until it resumes them.";
+    const opens = await page(`${base}/steps?stage=open`);
 
-    expect({
-      agreed: [paused, "Interviews can start."].map((text) =>
-        agreed.html.includes(text)
-      ),
-      interviews: interviews.html.includes(paused),
-    }).toStrictEqual({ agreed: [true, false], interviews: true });
+    expect(opens.html).toContain(
+      "The company has paused its interviews: nobody can open or go on with one until it resumes them."
+    );
   });
 
-  it("opens a company that has nothing yet on what is agreed, with its first conversation still to come", async () => {
+  it("opens a company that has nothing yet on its first conversation, still to come", async () => {
     const base = await liveClient(emptyAdminSnapshot("Bakkerij Noord"));
 
     const { html } = await page(`${base}/steps`);
-    const conversation = await page(`${base}/steps?stage=conversation`);
     const research = await page(`${base}/steps?stage=research`);
-    const interviews = await page(`${base}/steps?stage=interviews`);
 
     expect({
-      // Grasp waits on the agreements: the first step in its hands.
-      current: stepOf(stepsOf(html), "Agreed").includes('aria-current="page"'),
-      conversation: [
-        "Not brought in yet",
-        "Nothing yet. Once the transcript is in, Stephen reads it",
-      ].map((text) => conversation.html.includes(text)),
+      // Grasp brings the first conversation in: the first step here in its hands.
+      current: stepOf(stepsOf(html), "First conversation").includes(
+        'aria-current="page"'
+      ),
+      conversation: html.includes(
+        "Once the transcript is in, Stephen reads it"
+      ),
       research: [
         "It starts once Stephen has read the first conversation",
         "Company register",
         "Not looked up yet",
       ].map((text) => research.html.includes(text)),
-      interviews: interviews.html.includes(
-        "Nobody has a link yet. They go out once everything is agreed and the company has told its team."
-      ),
     }).toStrictEqual({
       current: true,
-      conversation: [true, true],
+      conversation: true,
       research: [true, true, true],
-      interviews: true,
     });
   });
 
-  it("shows the company's teams as cards with their figures, leads and what needs a look", async () => {
+  it("lists the company's teams where its interviews are, each with where it stands, opening the team, and short enough to need no search", async () => {
     const base = await liveClient(bakery());
 
-    const { status, html } = await page(`${base}/organization`);
-    const sales = cardOf(html, "Sales");
-    const operations = cardOf(html, "Operations");
-    const logistics = cardOf(html, "Logistics");
+    const { status, html } = await page(`${base}/interviews`);
+    const sales = teamRowOf(html, "Sales");
+    const operations = teamRowOf(html, "Operations");
+    const logistics = teamRowOf(html, "Logistics");
 
     expect({
       status,
-      source: html.includes("The list as the company’s admin shared it."),
-      figures: [
-        "2 take part",
-        "1 of 3 asked have talked",
-        "Named by each team’s lead",
-      ].map((text) => html.includes(text)),
-      filters: ["Take part", "Left out"].map((text) => html.includes(text)),
+      standing: html.includes("Where everyone stands"),
+      // Three teams are read whole: nothing to search or narrow them with.
+      search: html.includes("Find a team or a person"),
       sales: [
-        "Sells bread to shops",
-        "3 people",
         "Lisa de Vries",
-        "Team lead, has talked",
         "1 of 2 talked",
-        `href="${base}/organization?team=sales"`,
+        `href="${base}/interviews?team=sales"`,
       ].map((text) => sales.includes(text)),
-      operations: [
-        "Otto Smit",
-        "Team lead</span>",
-        "Waits for Otto to talk first.",
-      ].map((text) => operations.includes(text)),
+      operations: ["Waits for Otto to talk first"].map((text) =>
+        operations.includes(text)
+      ),
       logistics: [
-        "No team lead named",
         "Does not take part",
-        // Nothing to ask it in with.
-        "<button",
+        // Asked in from its row, while the interviews run.
+        "Ask Logistics in",
       ].map((text) => logistics.includes(text)),
     }).toStrictEqual({
       status: 200,
-      source: true,
-      figures: [true, true, true],
-      filters: [true, true],
-      sales: [true, true, true, true, true, true],
-      operations: [true, true, true],
-      logistics: [true, true, false],
+      standing: true,
+      search: false,
+      sales: [true, true, true],
+      operations: [true],
+      logistics: [true, true],
     });
   });
 
   it("opens one team whole: its lead, everyone in it with their titles and links, and its work still to be named", async () => {
     const base = await liveClient(bakery());
 
-    const sales = await page(`${base}/organization?team=sales`);
-    const logistics = await page(`${base}/organization?team=7`);
-    const unknown = await page(`${base}/organization?team=bakery`);
+    const sales = await page(`${base}/interviews?team=sales`);
+    const logistics = await page(`${base}/interviews?team=7`);
+    const unknown = await page(`${base}/interviews?team=bakery`);
+    // The teams' old address leads to where they are now, its team with it.
+    const old = await pageAt(`${base}/organization?team=sales`);
 
     expect({
       sales: [
@@ -487,7 +403,7 @@ describe("an organization's onboarding in the admin", () => {
         "Away",
         "Fewer than 5: the company never sees this team’s numbers apart.",
         "Its lead names the team’s work in their interview",
-        `href="${base}/organization"`,
+        `href="${base}/interviews"`,
       ].map((text) => sales.html.includes(text)),
       logistics: [
         "Does not take part in the interviews",
@@ -495,6 +411,7 @@ describe("an organization's onboarding in the admin", () => {
       ].map((text) => logistics.html.includes(text)),
       // A team the company doesn't have: all of them.
       unknown: unknown.html.includes('aria-label="Open Sales"'),
+      old: old.html.includes("Sales</h2>"),
       // Where a person's link stands is still read out on a phone, where it isn't shown.
       phone: [
         sales.html.includes('class="max-sm:sr-only">Talking now'),
@@ -505,19 +422,20 @@ describe("an organization's onboarding in the admin", () => {
       logistics: [true, true],
       phone: [true, false],
       unknown: true,
+      old: true,
     });
   });
 
   it("says nothing is on the list yet before the company shares it", async () => {
     const base = await liveClient(emptyAdminSnapshot("Bakkerij Noord"));
 
-    const { html } = await page(`${base}/organization`);
+    const { html } = await page(`${base}/interviews`);
 
     expect({
       empty: html.includes(
         "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding."
       ),
-      cards: html.includes('aria-label="Open '),
-    }).toStrictEqual({ empty: true, cards: false });
+      teams: html.includes('aria-label="Open '),
+    }).toStrictEqual({ empty: true, teams: false });
   });
 });

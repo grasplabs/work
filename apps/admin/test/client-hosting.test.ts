@@ -625,7 +625,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       .set({ status: "active" })
       .where(eq(clients.id, clientId));
 
-    const live = await page(`/organizations/${clientId}/setup`, caller);
+    const live = await page(
+      `/organizations/${clientId}/setup?tab=settings`,
+      caller
+    );
     const refused = await Promise.all([
       callServerFn(offboardPlacedClientFn, { clientId }, { email: null }).then(
         () => "answered",
@@ -649,7 +652,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     );
     // Offboarded, its page says so and nothing more, pointing to Platform's
     // Offboarded page, where its deletion is.
-    const gone = await page(`/organizations/${clientId}/setup`, caller);
+    const gone = await page(
+      `/organizations/${clientId}/setup?tab=settings`,
+      caller
+    );
     const after = await page("/platform/offboarded", caller);
     const listed = offboardedOf(after.html, clientId);
 
