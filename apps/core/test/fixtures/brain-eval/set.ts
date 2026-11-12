@@ -19,6 +19,7 @@ import type {
 } from "./company.ts";
 import { crossLongQuestions } from "./cross-long.ts";
 import { crossQuestions } from "./cross.ts";
+import { dateQuestions, dateSources } from "./dates.ts";
 import { deLongQuestions, deLongSources } from "./de-long.ts";
 import { deQuestions, deSources } from "./de.ts";
 import { enLongQuestions, enLongSources } from "./en-long.ts";
@@ -68,6 +69,7 @@ export const brainEvalSet: BrainEvalSet = {
     ...deLongSources,
     ...frLongSources,
     ...esLongSources,
+    ...dateSources,
   ],
   questions: [
     ...nlQuestions,
@@ -83,6 +85,7 @@ export const brainEvalSet: BrainEvalSet = {
     ...frLongQuestions,
     ...esLongQuestions,
     ...crossLongQuestions,
+    ...dateQuestions,
   ],
   teams: brainEvalTeams,
   defaultAsker: brainEvalDefaultAsker,
