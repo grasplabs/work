@@ -3,17 +3,14 @@ import type {
   Card,
   CardAttribute,
   CardRelation,
-  Entity,
   EntityId,
   EntityKind,
   Memory,
   Reader,
 } from "./contract.ts";
 import { asSeen, mentionedSql } from "./entities.ts";
-import { familyOf, standingOf } from "./joins.ts";
 import { entityRowOf, readMemories } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
-import { isWritersOwn } from "./writers-own.ts";
 
 // An entity's card (contract.ts `Card`): a view, built when a reader asks
 // for it from the memories they may read, never stored. Its memories are
@@ -23,11 +20,6 @@ import { isWritersOwn } from "./writers-own.ts";
 // (entities.ts `asSeen`). So two readers with different access see
 // different cards, and a reader sees the card a store without what is
 // hidden from them would show.
-//
-// Entities the reader joined (joins.ts) are one card for them: the one
-// they were joined into, with the names and memories of each, and a
-// relation between two of them is no relation of the card's. For anyone
-// else, each is a card of its own.
 
 /** `?1` the entities' rows (JSON): those a memory the reader may read mentions. */
 const seenSql = `
@@ -57,61 +49,6 @@ const seenOf = (
     )
     .toArray();
 
-/**
- * The entity standing at `row` for the reader, as they see it: its id and
- * kind, with the names and identifiers of it and of each entity they
- * joined into it, each once; or none when they may see none of them.
- */
-const standingEntity = (
-  sql: SqlStorage,
-  reader: Reader,
-  row: number
-): { entity: Entity; family: number[] } | undefined => {
-  const family = familyOf(sql, reader, row);
-  const seen = seenOf(sql, reader, family);
-  const [standing] = sql
-    .exec<{ id: string; kind: string }>(
-      "SELECT id, kind FROM entities WHERE row = ?",
-      row
-    )
-    .toArray();
-  if (seen.length === 0 || standing === undefined) {
-    return undefined;
-  }
-  const [first] = asSeen(
-    sql,
-    [{ row, id: standing.id, kind: standing.kind }],
-    reader
-  );
-  if (first === undefined) {
-    return undefined;
-  }
-  const keys = new Set([
-    ...first.names.map((name) => `name ${name}`),
-    ...first.identifiers.map(({ type, value }) => `${type} ${value}`),
-  ]);
-  for (const other of asSeen(
-    sql,
-    seen.filter((one) => one.row !== row),
-    reader
-  )) {
-    for (const name of other.names) {
-      if (!keys.has(`name ${name}`)) {
-        keys.add(`name ${name}`);
-        first.names.push(name);
-      }
-    }
-    for (const identifier of other.identifiers) {
-      const key = `${identifier.type} ${identifier.value}`;
-      if (!keys.has(key)) {
-        keys.add(key);
-        first.identifiers.push(identifier);
-      }
-    }
-  }
-  return { entity: first, family };
-};
-
 /** Memories in a card's order: by attribute (none last), confirmed first, newest first. */
 const byCardOrder = (a: Memory, b: Memory): number =>
   Number(a.attribute === null) - Number(b.attribute === null) ||
@@ -131,54 +68,34 @@ export const readCard = (
   if (found === undefined) {
     return null;
   }
-  const standing =
-    standingOf(sql, reader, [found.row]).get(found.row) ?? found.row;
-  const card = standingEntity(sql, reader, standing);
+  const [card] = asSeen(sql, seenOf(sql, reader, [found.row]), reader);
   if (card === undefined) {
     return null;
   }
-  const ids = new Map(
-    sql
-      .exec<{ row: number; id: string }>(
-        "SELECT row, id FROM entities WHERE row IN (SELECT value FROM json_each(?))",
-        JSON.stringify(card.family)
-      )
-      .toArray()
-      .map(({ row, id }) => [id, row])
-  );
-  const read = new Map<string, Memory>();
-  for (const id of ids.keys()) {
-    for (const memory of readMemories(sql, {
-      entity: id,
-      reader,
-      at,
-      history: false,
-      limit: cardMemoriesMax + 1,
-    })) {
-      // An instruction is its writer's own (writers-own.ts).
-      if (isWritersOwn(memory, reader)) {
-        read.set(memory.id, memory);
-      }
-    }
-  }
-  const memories = [...read.values()].toSorted(byCardOrder);
+  const memories = readMemories(sql, {
+    entity: card.id,
+    reader,
+    at,
+    history: false,
+    limit: cardMemoriesMax + 1,
+  }).toSorted(byCardOrder);
   const kept = memories.slice(0, cardMemoriesMax);
-  const order = attributeOrder(card.entity.kind);
+  const order = attributeOrder(card.kind);
   const attributes = new Map<string, CardAttribute>();
   const relations: {
     memory: Memory;
     side: CardRelation["side"];
-    other: string;
+    other: EntityId;
   }[] = [];
   const notes: Memory[] = [];
   for (const memory of kept) {
     if (memory.object !== null) {
-      const side = ids.has(memory.about) ? "about" : "object";
-      const other = side === "about" ? memory.object : memory.about;
-      // A relation between two entities the reader joined is no relation.
-      if (!ids.has(other)) {
-        relations.push({ memory, side, other });
-      }
+      const side = memory.about === card.id ? "about" : "object";
+      relations.push({
+        memory,
+        side,
+        other: side === "about" ? memory.object : memory.about,
+      });
     } else if (memory.attribute === null) {
       notes.push(memory);
     } else {
@@ -192,26 +109,22 @@ export const readCard = (
       attributes.set(memory.attribute, held);
     }
   }
-  // Each related entity as the reader sees it, as it stands for them.
-  const otherRows = new Map(
-    sql
-      .exec<{ row: number; id: string }>(
-        "SELECT row, id FROM entities WHERE id IN (SELECT value FROM json_each(?))",
-        JSON.stringify([...new Set(relations.map(({ other }) => other))])
-      )
-      .toArray()
-      .map(({ row, id }) => [id, row])
+  // Each related entity as the reader sees it: a memory they may read,
+  // the relation, mentions it, so only its names are checked.
+  const others = new Map(
+    asSeen(
+      sql,
+      sql
+        .exec<{ row: number; id: string; kind: string }>(
+          "SELECT row, id, kind FROM entities WHERE id IN (SELECT value FROM json_each(?))",
+          JSON.stringify([...new Set(relations.map(({ other }) => other))])
+        )
+        .toArray(),
+      reader
+    ).map((other) => [other.id, other])
   );
-  const standings = standingOf(sql, reader, [...otherRows.values()]);
-  const others = new Map<string, Entity>();
-  for (const [id, row] of otherRows) {
-    const seen = standingEntity(sql, reader, standings.get(row) ?? row);
-    if (seen !== undefined) {
-      others.set(id, seen.entity);
-    }
-  }
   return {
-    entity: card.entity,
+    entity: card,
     attributes: [...attributes.values()].toSorted(
       (a, b) =>
         (order.get(a.attribute) ?? order.size) -

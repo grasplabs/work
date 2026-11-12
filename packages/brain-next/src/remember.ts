@@ -17,7 +17,7 @@ import {
 } from "./entities.ts";
 import { erasuresSoFar, isPersonErasedSince, subjectOf } from "./erasure.ts";
 import { hashOf } from "./files.ts";
-import { linkedByName, proposeFor } from "./linking.ts";
+import { linkedByName } from "./linking.ts";
 import { entityRowOf, lineageOfSource, lineageOfWriter } from "./memories.ts";
 import { readerSetOf } from "./reader-sets.ts";
 import { indexMemoryWords } from "./words.ts";
@@ -135,13 +135,12 @@ const erasedPerson = "The Brain refused it: what this adds was erased";
  * the first holding one of its identifiers, or another entity of the add
  * with one of them, else, given no identifier, the one entity of its kind
  * holding one of its names by memories of exactly the add's readers
- * (linking.ts `linkedByName`), else a new one (in `made`).
+ * (linking.ts `linkedByName`), else a new one.
  */
 const entityRowsOf = (
   sql: SqlStorage,
   { entities, reader }: Adding,
-  readerSet: number,
-  made: Set<number>
+  readerSet: number
 ): number[] => {
   const linked = new Map<string, number>();
   return entities.map((entity, index) => {
@@ -171,16 +170,13 @@ const entityRowsOf = (
       }
       ({ row } = known);
     }
-    if (row === undefined) {
-      ({ row } = sql
-        .exec<{ row: number }>(
-          "INSERT INTO entities (id, kind) VALUES (?, ?) RETURNING row",
-          crypto.randomUUID(),
-          entity.kind
-        )
-        .one());
-      made.add(row);
-    }
+    row ??= sql
+      .exec<{ row: number }>(
+        "INSERT INTO entities (id, kind) VALUES (?, ?) RETURNING row",
+        crypto.randomUUID(),
+        entity.kind
+      )
+      .one().row;
     for (const key of keys) {
       if (!linked.has(key)) {
         linked.set(key, row);
@@ -415,8 +411,7 @@ export const addMemories = async (
       throw new Error(erasedPerson);
     }
     const readerSet = readerSetOf(db, adding.access);
-    const made = new Set<number>();
-    const rows = entityRowsOf(sql, adding, readerSet, made);
+    const rows = entityRowsOf(sql, adding, readerSet);
     const ids = rows.map(
       (row) =>
         sql
@@ -436,10 +431,6 @@ export const addMemories = async (
     const memories = adding.memories.map((memory, index) =>
       writeMemory(into, memory, planned[index], index)
     );
-    // A likely match of a new entity's names is a proposal, never a link.
-    for (const row of made) {
-      proposeFor(sql, row);
-    }
     if (adding.extracted !== undefined) {
       markExtracted(sql, adding.extracted, into);
     }

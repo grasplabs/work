@@ -22,16 +22,6 @@ const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
     "DELETE FROM entity_names WHERE memory IN (SELECT value FROM json_each(?))",
     listed
   );
-  // Proposals name the memories whose names matched: they go with
-  // either, with each person's decision on them.
-  const proposals = `SELECT row FROM entity_proposals
-    WHERE memory IN (SELECT value FROM json_each(?1))
-      OR candidate_memory IN (SELECT value FROM json_each(?1))`;
-  sql.exec(
-    `DELETE FROM entity_proposal_decisions WHERE proposal IN (${proposals})`,
-    listed
-  );
-  sql.exec(`DELETE FROM entity_proposals WHERE row IN (${proposals})`, listed);
   sql.exec(
     `DELETE FROM memory_confirmed_over
     WHERE memory IN (SELECT value FROM json_each(?1))
@@ -50,17 +40,9 @@ const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
   );
   const orphans = `SELECT touched.value FROM json_each(?1) AS touched
     WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
-      AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
-      AND NOT EXISTS (
-        SELECT 1 FROM member_entities WHERE member_entities.entity = touched.value
-      )`;
+      AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)`;
   const affected = JSON.stringify(
     touched.flatMap(({ entity }) => entity ?? [])
-  );
-  // A person's joins go with either entity they join.
-  sql.exec(
-    `DELETE FROM entity_joins WHERE merged IN (${orphans}) OR into_entity IN (${orphans})`,
-    affected
   );
   sql.exec(`DELETE FROM entities WHERE row IN (${orphans})`, affected);
   return [...new Set(touched.map(({ reader_set: readerSet }) => readerSet))];
@@ -133,34 +115,4 @@ export const eraseMemoriesOf = (
         .map(({ row }) => row)
     ),
   ];
-};
-
-/**
- * Deletes what the person the ledger names `subject` linked and joined:
- * their member link, and their entity with it once no memory mentions
- * it; their decisions on proposals and the joins those made. An erasure,
- * or its replay after a restore, leaves nothing that ties them to an
- * entity.
- */
-export const eraseLinksOf = (sql: SqlStorage, subject: string): void => {
-  sql.exec("DELETE FROM entity_joins WHERE only_for = ?", subject);
-  sql.exec("DELETE FROM entity_proposal_decisions WHERE only_for = ?", subject);
-  const affected = JSON.stringify(
-    sql
-      .exec<{ entity: number }>(
-        "DELETE FROM member_entities WHERE subject = ? RETURNING entity",
-        subject
-      )
-      .toArray()
-      .map(({ entity }) => entity)
-  );
-  // As `deleteMemories` deletes an entity no memory mentions any more.
-  const orphans = `SELECT linked.value FROM json_each(?1) AS linked
-    WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = linked.value)
-      AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = linked.value)`;
-  sql.exec(
-    `DELETE FROM entity_joins WHERE merged IN (${orphans}) OR into_entity IN (${orphans})`,
-    affected
-  );
-  sql.exec(`DELETE FROM entities WHERE row IN (${orphans})`, affected);
 };

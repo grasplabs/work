@@ -25,7 +25,7 @@ import type {
   Pack,
   PackItem,
   PackMemory,
-  Proposal,
+  ProposalPage,
   Reader,
   RecallRequest,
   SourceId,
@@ -54,13 +54,10 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
-import { users } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
@@ -510,68 +507,22 @@ export const entityCardAs = async (
 };
 
 /**
- * The open proposals that two entities are one that the member
- * `personId` may see: both names that matched are theirs to read. Of one
- * entity, if given.
+ * A page of the proposals that the entity `entity` may be one with
+ * another, as the member `personId` may see them, worked out now from
+ * the names they may read (the Brain's `listProposals`): after the
+ * candidate `after`. Refused once they are no longer a member. Accepting
+ * one is GRA-1835's.
  */
 export const entityProposalsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  { entity }: { entity?: EntityId } = {}
-): Promise<Proposal[]> =>
+  { entity, after }: { entity: EntityId; after?: EntityId }
+): Promise<ProposalPage> =>
   await brain(env).listProposals({
+    entity: checked(entityIdSchema, entity),
     reader: await readerOf(env, personId),
-    ...(entity === undefined
-      ? {}
-      : { entity: checked(entityIdSchema, entity) }),
+    ...(after === undefined ? {} : { after: checked(entityIdSchema, after) }),
   });
-
-/**
- * The member `personId` accepts or declines a proposal they may see:
- * accepted, the two entities read as one. `nothing` alike when there is
- * none, they may not see it, or it was decided.
- */
-export const decideEntityProposalAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  { proposal, accept }: { proposal: string; accept: boolean }
-): Promise<"done" | "nothing"> =>
-  await brain(env).decideProposal({
-    proposal: checked(entityIdSchema, proposal),
-    reader: await readerOf(env, personId),
-    accept: checked(z.boolean(), accept),
-  });
-
-/**
- * Links the member `personId` to their person entity in the Brain, after
- * a sign-in core verified: by the email core's own records hold for them,
- * only when it is verified, never by anything a caller hands in. Nothing
- * else writes the link (the Brain's `linkMember`). Once per member.
- */
-export const linkMemberAtSignIn = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string
-): Promise<void> => {
-  const member = await memberOf(env.DB, checked(idSchema, personId));
-  if (member === undefined) {
-    return;
-  }
-  const [user] = await drizzle(env.DB)
-    .select({ email: users.email, verified: users.emailVerified })
-    .from(users)
-    .where(eq(users.id, member.userId));
-  if (user === undefined || !user.verified) {
-    return;
-  }
-  await brain(env).linkMember({ member: member.userId, email: user.email });
-};
-
-/** The member `personId`'s own person entity, if linked and they may see it. */
-export const memberEntityAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string
-): Promise<EntityId | null> =>
-  await brain(env).memberEntity({ reader: await readerOf(env, personId) });
 
 /**
  * Version `version` of `source`, current or history, whole, for the

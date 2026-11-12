@@ -9,12 +9,7 @@
 // the pack is taken again: the pack of a store without them, then with
 // them. They must be byte for byte the same.
 import { packMemoryTokens } from "@grasp-os/brain-next/contract";
-import type {
-  NewEntity,
-  NewMemory,
-  Pack,
-  Reader,
-} from "@grasp-os/brain-next/contract";
+import type { Pack, Reader } from "@grasp-os/brain-next/contract";
 import { describe, expect, it } from "vite-plus/test";
 
 import { hubRelationsMax } from "../src/recall-memories.ts";
@@ -59,44 +54,6 @@ const statementsOf = (pack: Pack): string[] =>
   pack.memories.map(({ statement }) => statement);
 
 describe("recall through memories", () => {
-  // Threat part 2, 6: a join is stepped through for its person alone.
-  it("steps through two entities a person joined, for them alone", async () => {
-    const group = unique("team");
-    const [ann, bob] = [
-      readerOf(unique("ann"), group),
-      readerOf(unique("bob"), group),
-    ];
-    const name = word();
-    await remember(
-      audience(group),
-      [{ key: "c", kind: "customer", names: [`${name} Holding`] }],
-      [fact("c", `${name} Holding signed the contract`)]
-    );
-    const short = await remember(
-      audience(group),
-      [{ key: "c", kind: "customer", names: [name] }],
-      [fact("c", `${name} called about delivery`, {}, "someone")]
-    );
-    const entity = short.entities.c ?? "";
-    const bobBefore = await byEntitiesOf(bob, name);
-    const [proposal] = await shared().listProposals({ reader: ann, entity });
-    await shared().decideProposal({
-      proposal: proposal?.id ?? "",
-      reader: ann,
-      accept: true,
-    });
-    const annFound = await byEntitiesOf(ann, name);
-    const bobAfter = await byEntitiesOf(bob, name);
-
-    expect({ annFound: annFound.toSorted(), bobAfter }).toStrictEqual({
-      annFound: [
-        `${name} Holding signed the contract`,
-        `${name} called about delivery`,
-      ].toSorted(),
-      bobAfter: bobBefore,
-    });
-  });
-
   // GRA-1742's first criterion: the supplier, without the word.
   it("finds the supplier a named person relates to, without the word in it", async () => {
     const group = unique("team");
@@ -333,6 +290,76 @@ describe("recall through memories", () => {
     );
   });
 
+  // A packed memory holding a word or a quoted part has it found.
+  it("says a word or quoted part a packed memory holds was found", async () => {
+    const group = unique("g");
+    const [x, y, absent] = [word(), word(), word()];
+    await remember(
+      audience(group),
+      [{ key: "c", kind: "customer", names: [word()] }],
+      [fact("c", `The code is ${x} ${y} today`)]
+    );
+    const pack = await recallAs(
+      readerOf(unique("ann"), group),
+      `"${x} ${y}" ${absent}`
+    );
+
+    expect({
+      memories: statementsOf(pack),
+      notFound: pack.notFound,
+    }).toStrictEqual({
+      memories: [`The code is ${x} ${y} today`],
+      notFound: [absent],
+    });
+  });
+
+  // GRA-1742's third criterion: a hub counts current relations only.
+  it("counts a hub by its current relations alone, not those ended", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const tool = word();
+    const owners = Array.from({ length: hubRelationsMax }, () => word());
+    const users = Array.from({ length: hubRelationsMax - 1 }, () => word());
+    const people = [...owners, ...users];
+    // One writer names each owner in turn: each new owner ends the one
+    // before, so of the owners one is current; with the users, the tool has
+    // exactly `hubRelationsMax` current relations.
+    await remember(
+      audience(group),
+      [
+        { key: "t", kind: "tool", names: [tool] },
+        ...people.map((one, index) => ({
+          key: `p${index}`,
+          kind: "person" as const,
+          names: [one],
+        })),
+      ],
+      [
+        ...owners.map((one, index) =>
+          fact(
+            "t",
+            `${one} owns the tool`,
+            {
+              attribute: "owner",
+              object: `p${index}`,
+            },
+            "registry"
+          )
+        ),
+        ...users.map((one, index) =>
+          fact(`p${owners.length + index}`, `${one} uses the tool`, {
+            attribute: "owns",
+            object: "t",
+          })
+        ),
+      ]
+    );
+    // A hub's relations are never found; this tool's current ones are.
+    await expect(
+      byEntitiesOf(reader, `who looks after ${tool}`)
+    ).resolves.toContain(`${users.at(-1) ?? ""} uses the tool`);
+  });
+
   // "As of" reads the memories' two clocks.
   it("reads memories as they were believed and true as of a moment", async () => {
     const group = unique("team");
@@ -356,135 +383,87 @@ describe("recall through memories", () => {
   });
 });
 
-/** A seeded generator: the same draws for the same seed. */
-const drawsOf = (seed: number) => {
-  let state = seed;
-  return (bound: number): number => {
-    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
-    return state % bound;
-  };
-};
+describe("recall through memories, hidden versus absent", () => {
+  // Threat 5: a reader's pack and finding, then hidden memories, names,
+  // relations and contested values added on the same entities and words,
+  // enough to make a hub of the named person if they counted; the second
+  // answers must be byte for byte the first.
+  it("gives a reader the pack of a store without what is hidden from them", async () => {
+    const [seen, hiddenGroup] = [unique("seen"), unique("hidden")];
+    const reader = readerOf(unique("ann"), seen);
+    const [person, supplier, topic] = [word(), word(), word()];
+    const { entities } = await remember(
+      audience(seen),
+      [
+        { key: "p", kind: "person", names: [person] },
+        { key: "s", kind: "supplier", names: [supplier] },
+      ],
+      [
+        fact(
+          "p",
+          `${person} buys ${topic}`,
+          { attribute: "role", value: "Buyer" },
+          "crm"
+        ),
+        fact("p", `${person} orders from them`, {
+          attribute: "owns",
+          object: "s",
+        }),
+        fact("s", `Deliveries of ${topic} arrive on Tuesday`),
+      ]
+    );
+    const question = `what does ${person} buy, ${topic}`;
+    const ask = async () => ({
+      pack: await recallAs(reader, question),
+      found: await shared().find({
+        question,
+        reader,
+        budget: { tokens: 20_000 },
+      }),
+    });
+    const before = await ask();
+    const others = Array.from({ length: hubRelationsMax + 1 }, () => word());
+    await remember(
+      audience(hiddenGroup),
+      [
+        {
+          key: "p",
+          id: entities.p ?? "",
+          kind: "person",
+          names: [`${person} Secret`],
+        },
+        { key: "s", id: entities.s ?? "", kind: "supplier", names: [supplier] },
+        ...others.map((one, index) => ({
+          key: `o${index}`,
+          kind: "supplier" as const,
+          names: [one],
+        })),
+      ],
+      [
+        fact(
+          "p",
+          `${person} buys ${topic} in secret`,
+          { attribute: "role", value: "Spy" },
+          "other"
+        ),
+        fact("s", `${topic} from ${supplier} is late`),
+        ...others.map((one, index) =>
+          fact("p", `${person} also buys ${topic} from ${one}`, {
+            attribute: "owns",
+            object: `o${index}`,
+          })
+        ),
+      ],
+      readerOf(unique("maker"), seen, hiddenGroup)
+    );
 
-describe("recall through memories, at random", () => {
-  // Threat 5: from a seed, a reader's entities, facts and relations; asked
-  // a few questions; then hidden memories, names, relations and contested
-  // values are added on the same entities and words. Every pack must stay
-  // byte for byte what it was. And the entities way returns exactly the
-  // current memories a brute-force walk of two steps finds, when they fit.
-  it.each([1, 2, 3, 4, 5])(
-    "gives a reader the pack of a store without what is hidden from them (seed %i)",
-    async (seed) => {
-      const draw = drawsOf(seed);
-      const group = unique("team");
-      const reader = readerOf(unique("ann"), group);
-      const names = Array.from({ length: 5 }, () => word());
-      const topic = word();
-      const entities: NewEntity[] = names.map((name, index) => ({
-        key: `e${index}`,
-        kind: "person",
-        names: [name],
-      }));
-      const relations: [number, number][] = [];
-      const memories: NewMemory[] = names.map((name, index) =>
-        fact(`e${index}`, `${name} talks about ${topic} ${draw(1000)}`)
-      );
-      for (let index = 0; index < 4; index += 1) {
-        const [from, to] = [draw(names.length), draw(names.length)];
-        if (from !== to) {
-          relations.push([from, to]);
-          memories.push(
-            fact(
-              `e${from}`,
-              `${names[from]} works with ${names[to]}`,
-              {
-                attribute: "manager",
-                object: `e${to}`,
-              },
-              `w${index}`
-            )
-          );
-        }
-      }
-      const added = await remember(audience(group), entities, memories);
-      const questions = [
-        topic,
-        names[0] ?? "",
-        `${names[draw(names.length)]} and ${topic}`,
-      ];
-      const before = await Promise.all(
-        questions.map(async (question) => await recallAs(reader, question))
-      );
-
-      // Brute force: the entities named by the first question's name, two
-      // steps along the readable relations, every current memory about them.
-      const reach = new Map<number, number>([[0, 0]]);
-      for (let step = 1; step <= 2; step += 1) {
-        for (const [from, to] of relations) {
-          for (const [a, b] of [
-            [from, to],
-            [to, from],
-          ] as const) {
-            if (reach.get(a) === step - 1 && !reach.has(b)) {
-              reach.set(b, step);
-            }
-          }
-        }
-      }
-      const expected = memories
-        .filter(
-          ({ about, object }) =>
-            reach.has(Number(about.slice(1))) ||
-            (object !== undefined && reach.has(Number(object.slice(1))))
-        )
-        .map(({ statement }) => statement)
-        .toSorted();
-      const reached = await byEntitiesOf(reader, names[0] ?? "");
-      expect(reached.toSorted()).toStrictEqual(expected);
-
-      const hiddenGroup = unique("hidden");
-      const hidden = audience(hiddenGroup);
-      const others = Array.from({ length: 3 }, () => word());
-      await remember(
-        hidden,
-        [
-          ...names.map((name, index) => ({
-            key: `e${index}`,
-            id: added.entities[`e${index}`] ?? "",
-            kind: "person" as const,
-            names: [name, `${name} ${word()}`],
-          })),
-          ...others.map((name, index) => ({
-            key: `o${index}`,
-            kind: "person" as const,
-            names: [name],
-          })),
-        ],
-        [
-          ...names.map((name, index) =>
-            fact(`e${index}`, `${name} hides ${topic} ${draw(1000)}`, {
-              attribute: "role",
-              value: word(),
-            })
-          ),
-          ...others.map((_, index) =>
-            fact(
-              `e${draw(names.length)}`,
-              `${topic} hidden link ${index}`,
-              {
-                attribute: "manager",
-                object: `o${index}`,
-              },
-              `h${index}`
-            )
-          ),
-        ],
-        readerOf(unique("maker"), group, hiddenGroup)
-      );
-      const after = await Promise.all(
-        questions.map(async (question) => await recallAs(reader, question))
-      );
-
-      expect(after).toStrictEqual(before);
-    }
-  );
+    await expect(ask()).resolves.toStrictEqual(before);
+    expect(statementsOf(before.pack).toSorted()).toStrictEqual(
+      [
+        `${person} buys ${topic}`,
+        `${person} orders from them`,
+        `Deliveries of ${topic} arrive on Tuesday`,
+      ].toSorted()
+    );
+  });
 });

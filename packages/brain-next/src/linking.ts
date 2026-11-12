@@ -1,72 +1,31 @@
-import type {
-  Entity,
-  EntityId,
-  EntityKind,
-  MemoryChangeOutcome,
-  Proposal,
-  Reader,
-} from "./contract.ts";
-import {
-  asSeen,
-  coveredSql,
-  foldIdentifier,
-  foldName,
-  mentionedSql,
-} from "./entities.ts";
-import { familyOf, joinedSql, standingOf } from "./joins.ts";
-import { entityRowOf, visibleSql } from "./memories.ts";
+import type { EntityKind, Proposal, ProposalPage, Reader } from "./contract.ts";
+import { asSeen, coveredSql, foldName } from "./entities.ts";
+import { visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 
-// Linking entities (contract.ts "Cards, proposals and the member link").
+// Linking entities (contract.ts "Cards and proposals").
 //
 // An add links an entity on exact evidence: its known id or an exact
 // identifier (remember.ts), or an exact name (`linkedByName`) only where
 // one entity of its kind alone holds that name through memories read by
 // exactly the add's readers (entities.ts `coveredSql`), so no link is
-// decided on what other readers hold. Short of that, a likely match is a proposal (`proposeFor`): the
-// same name held by another entity, or one name whose words are all
-// among the other's, whole. A proposal names the two memories that gave
-// the names that matched, and is seen and decided only by a reader who
-// may read both: so it shows them no name they can't read, and a
-// proposal they can't see answers as one never made. Accepting one is
-// a person's act, recorded with who and when; the two entities then
-// read as one (the base's aliases), and nothing is written over.
+// decided on what other readers hold.
 //
-// The member link (`member_entities`) is written by `linkMember` alone,
-// for a sign-in the host verified: no add, extraction, proposal or merge
-// writes or moves it, so finding a name or an email in a document never
-// makes one. It grants nothing: who may read is the host's to say.
-
-/** Most proposals one new entity's names make. */
-export const proposalsPerEntityMax = 20;
-
-/** Runs of white space. */
-const spaces = /\s+/u;
-
-/** The words of a folded name. */
-const wordsOf = (folded: string): string[] =>
-  folded.split(spaces).filter((word) => word.length > 0);
-
-/**
- * Whether two folded names are a likely match: the same, or every word
- * of the shorter is a word of the longer.
- */
-const likelyMatch = (a: string, b: string): boolean => {
-  if (a === b) {
-    return true;
-  }
-  const [shorter, longer] =
-    wordsOf(a).length <= wordsOf(b).length
-      ? [wordsOf(a), new Set(wordsOf(b))]
-      : [wordsOf(b), new Set(wordsOf(a))];
-  return shorter.length > 0 && shorter.every((word) => longer.has(word));
-};
+// Short of that, a likely match is a proposal, never a link: worked out
+// when a reader asks (`listProposals`), from the names they may read
+// alone, and never stored. Two entities of one kind are a likely match
+// when a name of one, as a memory the reader may read gave it, has all
+// its words among the words of a name of the other, whole. Every name
+// either side holds is read through the reader's check in the same
+// statement, before anything is counted, ordered or paged, so a name or
+// an entity hidden from the reader never adds, removes or moves a
+// proposal; and an add does no work for it.
 
 /**
  * The entity of `kind` an add's entity links to by an exact name, given
- * no identifier: the one entity of that kind (as it stands: merges read
- * as one) holding one of `names` through a memory read by exactly the
- * add's set of readers (`readerSet`), or none when none or several do.
+ * no identifier: the one entity of that kind holding one of `names`
+ * through a memory read by exactly the add's set of readers
+ * (`readerSet`), or none when none or several do.
  */
 export const linkedByName = (
   sql: SqlStorage,
@@ -77,15 +36,16 @@ export const linkedByName = (
   if (names.length === 0) {
     return undefined;
   }
+  // Two rows are enough to tell one entity from several.
   const found = sql
     .exec<{ entity: number }>(
-      `SELECT DISTINCT stands.row AS entity
+      `SELECT DISTINCT entity_names.entity AS entity
       FROM json_each(?2) AS asked
       JOIN entity_names
         ON entity_names.type = 'name' AND entity_names.folded = asked.value
       JOIN memories AS m ON m.row = entity_names.memory
-      JOIN entities AS stands ON stands.row = entity_names.entity
-      WHERE stands.kind = ?1 AND ${coveredSql("m")}
+      JOIN entities ON entities.row = entity_names.entity
+      WHERE entities.kind = ?1 AND ${coveredSql("m")}
       LIMIT 2`,
       kind,
       JSON.stringify(names.map((name) => foldName(name))),
@@ -96,356 +56,136 @@ export const linkedByName = (
 };
 
 /**
- * Proposals for the entity at `entity`, new in an add: each other entity
- * of its kind holding a name that likely matches one of its own (above),
- * through any memory, at most `proposalsPerEntityMax`, none for a pair
- * already proposed. Run in the add's transaction, after its names are
- * kept.
- */
-export const proposeFor = (sql: SqlStorage, entity: number): void => {
-  const own = sql
-    .exec<{ memory: number; value: string; folded: string; kind: string }>(
-      `SELECT entity_names.memory AS memory, entity_names.value AS value,
-        entity_names.folded AS folded, entities.kind AS kind
-      FROM entity_names JOIN entities ON entities.row = entity_names.entity
-      WHERE entity_names.entity = ? AND entity_names.type = 'name'
-      ORDER BY entity_names.memory`,
-      entity
-    )
-    .toArray();
-  const proposed = new Set<number>();
-  for (const name of own) {
-    if (proposed.size >= proposalsPerEntityMax) {
-      return;
-    }
-    const candidates = sql
-      .exec<{ entity: number; memory: number; value: string; folded: string }>(
-        `SELECT stands.row AS entity, min(entity_names.memory) AS memory,
-          entity_names.value AS value, entity_names.folded AS folded
-        FROM entity_names
-        JOIN entities AS stands ON stands.row = entity_names.entity
-        WHERE stands.kind = ?1 AND entity_names.type = 'name'
-          AND stands.row != ?2
-          AND EXISTS (SELECT 1 FROM json_each(?3) AS word
-            WHERE instr(' ' || entity_names.folded || ' ', ' ' || word.value || ' ') > 0)
-          AND NOT EXISTS (SELECT 1 FROM entity_proposals AS p
-            WHERE (p.entity = ?2 AND p.candidate = stands.row)
-              OR (p.entity = stands.row AND p.candidate = ?2))
-        GROUP BY stands.row, entity_names.folded
-        ORDER BY stands.row
-        LIMIT 200`,
-        name.kind,
-        entity,
-        JSON.stringify(wordsOf(name.folded))
-      )
-      .toArray();
-    for (const candidate of candidates) {
-      if (
-        proposed.size >= proposalsPerEntityMax ||
-        proposed.has(candidate.entity) ||
-        !likelyMatch(name.folded, candidate.folded)
-      ) {
-        continue;
-      }
-      proposed.add(candidate.entity);
-      sql.exec(
-        `INSERT INTO entity_proposals (id, entity, candidate, memory,
-          candidate_memory, name, candidate_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        crypto.randomUUID(),
-        entity,
-        candidate.entity,
-        name.memory,
-        candidate.memory,
-        name.value,
-        candidate.value
-      );
-    }
-  }
-};
-
-/**
- * `?1` the entity's row or null, `?4` the proposal's id or null, `?5` the
- * most: the open proposals whose two memories the reader may read, of
- * two entities that don't yet stand as one, each as it stands, the
- * earliest first.
+ * `?1` the entity's id, `?4` the candidate id to page after (or null),
+ * `?5` how many: the entities of its kind the reader may see whose name,
+ * as a memory they may read gave it, likely matches a name of the asked
+ * entity they may read (one name's words all among the other's, whole),
+ * by id, each with the pair of names that matched first by the names
+ * themselves. A folded name is words with single spaces between them
+ * (entities.ts `foldName`), so its words are its spaces' pieces.
  */
 const proposalsSql = `
 WITH ${readableSql},
-open AS (
-  SELECT p.row AS row, p.id AS id, ${joinedSql("p.entity")} AS entity,
-    ${joinedSql("p.candidate")} AS candidate, p.name AS name,
-    p.candidate_name AS candidate_name, p.memory AS memory,
-    p.candidate_memory AS candidate_memory
-  FROM entity_proposals AS p
-  WHERE (?4 IS NULL OR p.id = ?4)
-    AND NOT EXISTS (SELECT 1 FROM entity_proposal_decisions AS decided
-      WHERE decided.proposal = p.row
-        AND decided.reader_set IN (SELECT reader_set FROM readable))
+asked AS (SELECT row, kind FROM entities WHERE id = ?1),
+own AS MATERIALIZED (
+  SELECT n.folded AS folded, min(n.value) AS value
+  FROM entity_names AS n
+  JOIN memories AS m ON m.row = n.memory
+  WHERE n.entity = (SELECT row FROM asked) AND n.type = 'name'
+    AND ${visibleSql("m")}
+  GROUP BY n.folded
+),
+split(name, word, rest) AS (
+  SELECT folded, '', folded || ' ' FROM own
+  UNION ALL
+  SELECT name, substr(rest, 1, instr(rest, ' ') - 1),
+    substr(rest, instr(rest, ' ') + 1)
+  FROM split WHERE rest != ''
+),
+own_words AS MATERIALIZED (
+  SELECT DISTINCT name, word FROM split WHERE word != ''
+),
+own_sizes AS (SELECT name, count(*) AS words FROM own_words GROUP BY name),
+others AS MATERIALIZED (
+  SELECT e.row AS row, e.id AS id, e.kind AS kind, n.folded AS folded,
+    min(n.value) AS value
+  FROM entity_names AS n
+  JOIN entities AS e ON e.row = n.entity
+  JOIN memories AS m ON m.row = n.memory
+  WHERE n.type = 'name' AND e.kind = (SELECT kind FROM asked)
+    AND e.row != (SELECT row FROM asked)
+    AND ${visibleSql("m")}
+  GROUP BY e.row, n.folded
+),
+shared AS (
+  SELECT others.row AS row, others.id AS id, others.kind AS kind,
+    others.folded AS folded, others.value AS value, own_words.name AS name,
+    count(*) AS words
+  FROM others
+  JOIN own_words
+    ON instr(' ' || others.folded || ' ', ' ' || own_words.word || ' ') > 0
+  GROUP BY others.row, others.folded, own_words.name
+),
+matched AS (
+  SELECT shared.row AS row, shared.id AS id, shared.kind AS kind,
+    shared.value AS other_name, own.value AS name,
+    row_number() OVER (
+      PARTITION BY shared.row ORDER BY own.value, shared.value
+    ) AS place
+  FROM shared
+  JOIN own_sizes ON own_sizes.name = shared.name
+  JOIN own ON own.folded = shared.name
+  WHERE shared.words = own_sizes.words
+    OR shared.words = length(shared.folded)
+      - length(replace(shared.folded, ' ', '')) + 1
 )
-SELECT p.row AS row, p.id AS id, p.entity AS entity, p.candidate AS candidate,
-  p.name AS name, p.candidate_name AS candidate_name
-FROM open AS p
-JOIN memories AS m ON m.row = p.memory
-JOIN memories AS c ON c.row = p.candidate_memory
-WHERE p.entity != p.candidate
-  AND (?1 IS NULL OR p.entity = ?1 OR p.candidate = ?1)
-  AND ${visibleSql("m")} AND ${visibleSql("c")}
-ORDER BY p.row
+SELECT row, id, kind, name, other_name FROM matched
+WHERE place = 1 AND (?4 IS NULL OR id > ?4)
+ORDER BY id
 LIMIT ?5`;
 
 /** A proposal as `proposalsSql` returns it. */
 interface ProposalRow extends Record<string, SqlStorageValue> {
   row: number;
   id: string;
-  entity: number;
-  candidate: number;
+  kind: string;
   name: string;
-  candidate_name: string;
+  other_name: string;
 }
 
-/** Runs `proposalsSql` as `reader`. */
-const proposalRows = (
+/**
+ * A page of the proposals the reader may see for the entity `entity`
+ * (contract.ts `listProposals`): after the candidate `after`, at most
+ * `limit`, and whether more follow.
+ */
+export const listProposals = (
   sql: SqlStorage,
-  reader: Reader,
   {
     entity,
-    id,
+    reader,
+    after,
     limit,
-  }: { entity: number | null; id: string | null; limit: number }
-): ProposalRow[] =>
-  sql
+  }: { entity: string; reader: Reader; after?: string; limit: number }
+): ProposalPage => {
+  const rows = sql
     .exec<ProposalRow>(
       proposalsSql,
       entity,
       reader.person,
       JSON.stringify(reader.groups),
-      id,
-      limit
+      after ?? null,
+      limit + 1
     )
     .toArray();
-
-/** The open proposals the reader may see (contract.ts `listProposals`). */
-export const listProposals = (
-  sql: SqlStorage,
-  {
-    reader,
-    entity,
-    limit,
-  }: { reader: Reader; entity?: EntityId; limit: number }
-): Proposal[] => {
-  let entityRow: number | null = null;
-  if (entity !== undefined) {
-    const found = entityRowOf(sql, entity);
-    if (found === undefined) {
-      return [];
-    }
-    entityRow =
-      standingOf(sql, reader, [found.row]).get(found.row) ?? found.row;
-  }
-  const rows = proposalRows(sql, reader, {
-    entity: entityRow,
-    id: null,
-    limit,
-  });
-  const held = sql
-    .exec<{ row: number; id: string; kind: string }>(
-      "SELECT row, id, kind FROM entities WHERE row IN (SELECT value FROM json_each(?))",
-      JSON.stringify([
-        ...new Set(rows.flatMap((row) => [row.entity, row.candidate])),
-      ])
+  const page = rows.slice(0, limit);
+  const [asked] =
+    page.length === 0
+      ? []
+      : sql
+          .exec<{ row: number; id: string; kind: string }>(
+            "SELECT row, id, kind FROM entities WHERE id = ?",
+            entity
+          )
+          .toArray();
+  // The asked entity and each candidate, with the names the reader may see.
+  const seen = new Map(
+    asSeen(sql, [...(asked === undefined ? [] : [asked]), ...page], reader).map(
+      (one) => [one.id, one]
     )
-    .toArray();
-  const seen = new Map(asSeen(sql, held, reader).map((one) => [one.id, one]));
-  const entities = new Map<number, Entity>();
-  for (const { row, id: entityId } of held) {
-    const one = seen.get(entityId);
-    if (one !== undefined) {
-      entities.set(row, one);
-    }
-  }
-  return rows.flatMap((row) => {
-    const one = entities.get(row.entity);
-    const other = entities.get(row.candidate);
-    return one === undefined || other === undefined
+  );
+  const own = seen.get(entity);
+  const proposals: Proposal[] = page.flatMap((row) => {
+    const candidate = seen.get(row.id);
+    return own === undefined || candidate === undefined
       ? []
       : [
           {
-            id: row.id,
-            entity: one,
-            candidate: other,
+            entity: own,
+            candidate,
             name: row.name,
-            candidateName: row.candidate_name,
+            candidateName: row.other_name,
           },
         ];
   });
+  return { proposals, more: rows.length > limit };
 };
-
-/** Who a join is for: the accepting person's own set of readers, and their hash. */
-export interface JoinedFor {
-  readerSet: number;
-  onlyFor: string;
-}
-
-/**
- * Makes the entity at `from` read as the one at `into` (each as it
- * stands for the person) for `joinedFor`'s readers alone, and those
- * joined into `from` for them now into `into`: no join of theirs points
- * at one joined itself. No memory changes.
- */
-const joinInto = (
-  sql: SqlStorage,
-  { from, into, at }: { from: number; into: number; at: number },
-  { readerSet, onlyFor }: JoinedFor
-): void => {
-  sql.exec(
-    "UPDATE entity_joins SET into_entity = ? WHERE into_entity = ? AND reader_set = ?",
-    into,
-    from,
-    readerSet
-  );
-  sql.exec(
-    `INSERT INTO entity_joins (merged, into_entity, reader_set, only_for, at)
-    VALUES (?, ?, ?, ?, ?)`,
-    from,
-    into,
-    readerSet,
-    onlyFor,
-    at
-  );
-};
-
-/** Whether the entity standing at `row` for `reader`, or one joined into it, has a member link. */
-const isMemberEntity = (
-  sql: SqlStorage,
-  reader: Reader,
-  row: number
-): boolean =>
-  sql
-    .exec(
-      "SELECT 1 FROM member_entities WHERE entity IN (SELECT value FROM json_each(?))",
-      JSON.stringify(familyOf(sql, reader, row))
-    )
-    .toArray().length > 0;
-
-/**
- * The reader accepts or declines the proposal `id` for themselves
- * (contract.ts `decideProposal`): one they may see that they haven't
- * decided. Accepted, the newer entity reads as the candidate for them
- * alone (`joinInto`, `joinedFor`: their own set of readers), unless only
- * the newer has a member link: then the candidate reads as it, so a
- * member link never moves; two member links are two people, and are
- * never joined. Run in one transaction.
- */
-export const decideProposal = (
-  sql: SqlStorage,
-  {
-    id,
-    reader,
-    accept,
-    at,
-  }: { id: string; reader: Reader; accept: boolean; at: number },
-  joinedFor: JoinedFor
-): MemoryChangeOutcome => {
-  const [proposal] = proposalRows(sql, reader, { entity: null, id, limit: 1 });
-  if (proposal === undefined) {
-    return "nothing";
-  }
-  if (accept) {
-    const entityLinked = isMemberEntity(sql, reader, proposal.entity);
-    const candidateLinked = isMemberEntity(sql, reader, proposal.candidate);
-    if (entityLinked && candidateLinked) {
-      return "nothing";
-    }
-    joinInto(
-      sql,
-      entityLinked
-        ? { from: proposal.candidate, into: proposal.entity, at }
-        : { from: proposal.entity, into: proposal.candidate, at },
-      joinedFor
-    );
-  }
-  sql.exec(
-    `INSERT INTO entity_proposal_decisions (proposal, reader_set, only_for, accepted, at)
-    VALUES (?, ?, ?, ?, ?)`,
-    proposal.row,
-    joinedFor.readerSet,
-    joinedFor.onlyFor,
-    accept ? 1 : 0,
-    at
-  );
-  return "done";
-};
-/**
- * Links `member` to their person entity at a verified sign-in, once: the
- * first person entity holding `email` as an identifier, or a new one with
- * no memory (seen by nobody until a memory names it). A member linked
- * already keeps their link. Run in one transaction.
- */
-export const linkMember = (
-  sql: SqlStorage,
-  {
-    member,
-    subject,
-    email,
-    at,
-  }: { member: string; subject: string; email: string; at: number }
-): void => {
-  const folded = foldIdentifier({ type: "email", value: email });
-  const known = sql
-    .exec("SELECT 1 FROM member_entities WHERE member = ?", member)
-    .toArray();
-  if (known.length > 0) {
-    return;
-  }
-  const [held] = sql
-    .exec<{ entity: number }>(
-      `SELECT min(stands.row) AS entity FROM entity_names
-      JOIN entities AS stands
-        ON stands.row = entity_names.entity
-        AND stands.kind = 'person'
-      WHERE entity_names.type = 'email' AND entity_names.folded = ?
-        AND stands.row NOT IN (SELECT entity FROM member_entities)`,
-      folded
-    )
-    .toArray();
-  const entity =
-    held?.entity ??
-    sql
-      .exec<{ row: number }>(
-        "INSERT INTO entities (id, kind) VALUES (?, 'person') RETURNING row",
-        crypto.randomUUID()
-      )
-      .one().row;
-  sql.exec(
-    `INSERT INTO member_entities (member, subject, entity, email, linked_at)
-    VALUES (?, ?, ?, ?, ?)`,
-    member,
-    subject,
-    entity,
-    folded,
-    at
-  );
-};
-
-/** `?1` the member: their entity, if a memory the reader may read mentions it. */
-const memberEntitySql = `
-WITH ${readableSql}
-SELECT entities.id AS id FROM member_entities
-JOIN entities ON entities.row = ${joinedSql("member_entities.entity")}
-WHERE member_entities.member = ?1 AND ${mentionedSql("entities.row")}`;
-
-/** The reader's own person entity, if linked and they may see it. */
-export const memberEntity = (
-  sql: SqlStorage,
-  reader: Reader
-): EntityId | null =>
-  sql
-    .exec<{ id: string }>(
-      memberEntitySql,
-      reader.person,
-      reader.person,
-      JSON.stringify(reader.groups)
-    )
-    .toArray()
-    .at(0)?.id ?? null;

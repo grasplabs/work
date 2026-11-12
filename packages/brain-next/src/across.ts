@@ -11,7 +11,8 @@ import { exactsOf, foundIn } from "./exact.ts";
 import { byBytes, byNearness } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Entry } from "./pack.ts";
-import { sequenceOf, termsOf } from "./words.ts";
+import { holdsTerm, sequenceOf, termsOf, wordsOf } from "./words.ts";
+import type { WordMemo } from "./words.ts";
 
 // A recall's pack from what one store or several found (`Finding`, each a
 // store's `find`): the stores a reader may read from are searched apart,
@@ -252,9 +253,9 @@ const memoriesOf = (
  * per store, each `find` of the same request) found: the stores' lists
  * merged per way, fused by rank (the exact parts' first on a tie, in the
  * question's order, then words, then meaning) and packed, with the parts
- * of the question no store found by words or exact: its exact parts, but
- * those capped, then its telling words, but those of its IDs. The same
- * pack, for one finding, as recall.ts has always made.
+ * of the question no store found by words or exact and no packed memory
+ * holds: its exact parts, but those capped, then its telling words, but
+ * those of its IDs. The same pack, for one finding, as one store makes.
  */
 export const packAcross = (
   question: string,
@@ -277,18 +278,8 @@ export const packAcross = (
       )
     )
   );
-  const notFound = [
-    ...exacts
-      .filter((_, index) => !exact.parts.has(index) && !exact.capped.has(index))
-      .map(({ asked: part }) => part),
-    ...terms.telling
-      .filter(
-        ({ word }, index) => !words.terms.has(index) && !standing.has(word)
-      )
-      .map(({ word }) => word),
-  ];
   const memories = memoriesOf(findings);
-  return packOf(
+  const pack = packOf(
     fuse([
       ...exact.lists,
       words.found,
@@ -298,6 +289,36 @@ export const packAcross = (
     ]),
     { terms: terms.telling, exacts },
     budget,
-    notFound
+    []
   );
+  // What a packed memory holds, as packed (its statement, and its quote
+  // when the budget gave it), was found too.
+  const memo: WordMemo = new Map();
+  const held = pack.memories.map(({ statement, quote }) => {
+    const text = quote === null ? statement : `${statement}\n${quote}`;
+    return { sequence: sequenceOf(text), words: wordsOf(text, memo) };
+  });
+  const every = exacts.map((_, index) => index);
+  const partsHeld = new Set(
+    held.flatMap(({ sequence }) => foundIn(sequence, exacts, every))
+  );
+  const notFound = [
+    ...exacts
+      .filter(
+        (_, index) =>
+          !exact.parts.has(index) &&
+          !exact.capped.has(index) &&
+          !partsHeld.has(index)
+      )
+      .map(({ asked: part }) => part),
+    ...terms.telling
+      .filter(
+        (term, index) =>
+          !words.terms.has(index) &&
+          !standing.has(term.word) &&
+          !held.some((memory) => holdsTerm(memory.words, term))
+      )
+      .map(({ word }) => word),
+  ];
+  return { ...pack, notFound };
 };

@@ -21,7 +21,7 @@ import { nearChunks } from "./vectors.ts";
 import { termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
 
-// Recall: two ways at once, fused by rank into a pack (pack.ts). Words,
+// Recall: several ways at once, fused by rank into a pack (pack.ts). Words,
 // in one statement that finds, checks and ranks, and a second for the
 // stop words alone when the first finds little; exact, in one statement
 // that finds the chunks holding every word of an exact part, whose order
@@ -29,8 +29,11 @@ import type { Terms } from "./words.ts";
 // question's vector: meaning, the vector way's scan (vectors.ts), with
 // the access check inside it. The host embeds the question before it
 // calls, so what a store finds is one synchronous read of one snapshot
-// (`find`). Each way's lists are then merged, checked and fused across
-// every store recalled from, one or several (across.ts `packAcross`).
+// (`find`). In the same read, the memories the reader may read: by their
+// own words (with the words way), and along the entities the question
+// names (recall-memories.ts). Each way's lists are then merged, checked
+// and fused across every store recalled from, one or several (across.ts
+// `packAcross`).
 //
 // It searches the chunks of each source's current version (a version is
 // current once `current_versions` points at it, set in the transaction

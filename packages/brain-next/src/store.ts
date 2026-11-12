@@ -9,9 +9,6 @@ import type { BrainBucket } from "./bucket.ts";
 import { readCard } from "./cards.ts";
 import {
   cardRequestSchema,
-  memberEntityRequestSchema,
-  memberLinkSchema,
-  proposalDecisionSchema,
   proposalsRequestSchema,
   confirmRequestSchema,
   contestedRequestSchema,
@@ -37,11 +34,7 @@ import {
 import type {
   Card,
   CardRequest,
-  EntityId,
-  MemberEntityRequest,
-  MemberLink,
-  Proposal,
-  ProposalDecision,
+  ProposalPage,
   ProposalsRequest,
   AddedMemories,
   ConfirmRequest,
@@ -100,7 +93,6 @@ import {
   erasuresUnfinished,
   isStoreErased,
   storeErasedAt,
-  subjectOf,
   keepMissingSubjects,
   ledgerPrefix,
   readLedgerStart,
@@ -117,12 +109,7 @@ import {
   sweepFiles,
   vectorsPrefix,
 } from "./files.ts";
-import {
-  decideProposal,
-  linkMember,
-  listProposals,
-  memberEntity,
-} from "./linking.ts";
+import { listProposals } from "./linking.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   confirmMemory,
@@ -130,7 +117,6 @@ import {
   readMemories,
   retireMemory,
 } from "./memories.ts";
-import { readerSetOf } from "./reader-sets.ts";
 import {
   countingInto,
   countWithoutMeaning,
@@ -1474,76 +1460,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       : null;
   }
 
-  /** The open proposals the reader may see (linking.ts). */
-  async listProposals(request: ProposalsRequest): Promise<Proposal[]> {
+  /** A page of the proposals for an entity the reader may see (linking.ts). */
+  async listProposals(request: ProposalsRequest): Promise<ProposalPage> {
     const asked = checked(proposalsRequestSchema, request);
     this.#mayRead(asked.reader);
     if (!(await this.#readable())) {
-      return [];
+      return { proposals: [], more: false };
     }
     return listProposals(this.ctx.storage.sql, {
+      entity: asked.entity,
       reader: asked.reader,
-      ...(asked.entity === undefined ? {} : { entity: asked.entity }),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
-  }
-
-  /** The reader accepts or declines a proposal they may see (linking.ts). */
-  async decideProposal(
-    request: ProposalDecision
-  ): Promise<MemoryChangeOutcome> {
-    const { proposal, reader, accept } = checked(
-      proposalDecisionSchema,
-      request
-    );
-    this.#mayRead(reader);
-    // A join is the person's own: for their own set of readers alone.
-    const onlyFor = await subjectOf(reader.person);
-    return await this.#changing(async () => {
-      if (!(await this.#readable())) {
-        return "nothing";
-      }
-      return this.ctx.storage.transactionSync(() =>
-        decideProposal(
-          this.ctx.storage.sql,
-          { id: proposal, reader, accept, at: Date.now() },
-          {
-            readerSet: readerSetOf(this.#db, {
-              kind: "owner",
-              person: reader.person,
-            }),
-            onlyFor,
-          }
-        )
-      );
-    });
-  }
-
-  /** Records a member's verified sign-in: their person entity, once (linking.ts). */
-  async linkMember(link: MemberLink): Promise<void> {
-    const { member, email } = checked(memberLinkSchema, link);
-    this.#mayRead({ person: member, groups: [] });
-    const subject = await subjectOf(member);
-    await this.#changing(async () => {
-      await this.#readyToWrite();
-      this.ctx.storage.transactionSync(() => {
-        linkMember(this.ctx.storage.sql, {
-          member,
-          subject,
-          email,
-          at: Date.now(),
-        });
-      });
-    });
-  }
-
-  /** The reader's own person entity, if linked and they may see it (linking.ts). */
-  async memberEntity(request: MemberEntityRequest): Promise<EntityId | null> {
-    const { reader } = checked(memberEntityRequestSchema, request);
-    this.#mayRead(reader);
-    return (await this.#readable())
-      ? memberEntity(this.ctx.storage.sql, reader)
-      : null;
   }
 
   /** One block repacked, in its own transaction: true when more are left. */

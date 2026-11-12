@@ -1016,16 +1016,20 @@ const recallFixture = async (probing: Probing): Promise<MemoryFixture> => {
 };
 
 /**
- * A proposal the reader may not see: a hidden entity whose name likely
- * matches their own "Plain" customer (its words among the other's), and
- * one they may see, between two entities of theirs.
+ * The proposal probes' fixture: the memory fixture, and two customers of
+ * the reader's whose names likely match ("Seen <word>" and "Seen <word>
+ * Holding"), with a third name that matches them only in a memory the
+ * reader may not read, every marker in it. Asked for the first, a
+ * reader's proposals must name the second alone.
  */
-const proposalFixture = async (probing: Probing) => {
+const proposalFixture = async (
+  probing: Probing
+): Promise<MemoryFixture & { own: string }> => {
   const { reader, markers } = probing;
   const fixture = await memoryFixture(probing);
-  const own = (name: string) => ({
+  const named = (name: string, access: Access) => ({
     change: crypto.randomUUID(),
-    access: { kind: "owner", person: reader.person } as const,
+    access,
     entities: [{ key: "c", kind: "customer" as const, names: [name] }],
     memories: [
       {
@@ -1037,29 +1041,17 @@ const proposalFixture = async (probing: Probing) => {
       },
     ],
   });
+  const mine: Access = { kind: "owner", person: reader.person };
   const word = crypto.randomUUID().slice(0, 8);
-  await store().addMemories(own(`Seen ${word}`));
-  await store().addMemories(own(`Seen ${word} Holding`));
-  await store().addMemories({
-    change: crypto.randomUUID(),
-    access: { kind: "audience", group: stranger() },
-    entities: [
-      { key: "c", kind: "customer", names: [`Plain ${markedText(markers)}`] },
-    ],
-    memories: [
-      {
-        about: "c",
-        type: "fact",
-        statement: markedText(markers),
-        speaker: { kind: "system" },
-        basis: { kind: "writer", writer: stranger() },
-      },
-    ],
-  });
-  const hidden = await store().listProposals({
-    reader: { person: stranger(), groups: [] },
-  });
-  return { fixture, hidden };
+  const own = await store().addMemories(named(`Seen ${word}`, mine));
+  await store().addMemories(named(`Seen ${word} Holding`, mine));
+  await store().addMemories(
+    named(`Seen ${word} ${markedText(markers)}`, {
+      kind: "audience",
+      group: stranger(),
+    })
+  );
+  return { ...fixture, own: own.entities.c ?? "" };
 };
 
 /** One probe per export of core's brain-next.ts. */
@@ -1644,78 +1636,35 @@ export const coreProbes = {
     ];
   },
   entityProposalsAs: async (probing) => {
-    const { fixture } = await proposalFixture(probing);
-    return [
-      await answer(
-        "any",
-        async () => await coreBrain.entityProposalsAs(env, probing.personId)
-      ),
-      await answer(
-        "an entity only hidden memories name",
-        async () =>
-          await coreBrain.entityProposalsAs(env, probing.personId, {
-            entity: fixture.hidden,
-          }),
-        "hidden"
-      ),
-      await answer(
-        "an entity no one added",
-        async () =>
-          await coreBrain.entityProposalsAs(env, probing.personId, {
-            entity: crypto.randomUUID(),
-          }),
-        "nothing"
-      ),
-    ];
-  },
-  decideEntityProposalAs: async (probing) => {
-    const { hidden } = await proposalFixture(probing);
-    const decide = async (
+    const fixture = await proposalFixture(probing);
+    const list = async (
       name: string,
-      proposal: string,
-      about?: Answer["about"]
+      entity: string,
+      about?: Answer["about"],
+      after?: string
     ) =>
       await answer(
         name,
         async () =>
-          await coreBrain.decideEntityProposalAs(env, probing.personId, {
-            proposal,
-            accept: true,
+          await coreBrain.entityProposalsAs(env, probing.personId, {
+            entity,
+            ...(after === undefined ? {} : { after: unchecked(after) }),
           }),
         about
       );
     return [
-      await decide("a proposal no one made", crypto.randomUUID(), "nothing"),
-      ...(await Promise.all(
-        hidden.map(
-          async ({ id }) => await decide("a hidden proposal", id, "hidden")
-        )
-      )),
-      await decide("an id of markers", probing.markers.join("")),
-    ];
-  },
-  // No reader: core reads the email from its own records.
-  linkMemberAtSignIn: async (probing) => [
-    await answer("the reader", async () => {
-      await coreBrain.linkMemberAtSignIn(env, probing.personId);
-    }),
-    await answer("someone who isn't a member", async () => {
-      await coreBrain.linkMemberAtSignIn(env, stranger());
-    }),
-    await answer("an id of markers", async () => {
-      await coreBrain.linkMemberAtSignIn(env, probing.markers.join(""));
-    }),
-  ],
-  memberEntityAs: async (probing) => {
-    await recallFixture(probing);
-    return [
-      await answer(
-        "the reader",
-        async () => await coreBrain.memberEntityAs(env, probing.personId)
+      await list("an entity no one added", crypto.randomUUID(), "nothing"),
+      await list(
+        "an entity only hidden memories name",
+        fixture.hidden,
+        "hidden"
       ),
-      await answer(
-        "someone who isn't a member",
-        async () => await coreBrain.memberEntityAs(env, stranger())
+      await list("the reader's own, which a hidden name matches", fixture.own),
+      await list(
+        "after an id of markers",
+        fixture.own,
+        undefined,
+        probing.markers.join("")
       ),
     ];
   },
@@ -2750,108 +2699,36 @@ const linkingProbes = {
   },
   listProposals: async (probing) => {
     const { reader } = probing;
-    const { fixture } = await proposalFixture(probing);
-    return [
-      await answer("any", async () => await store().listProposals({ reader })),
-      await answer(
-        "an entity only hidden memories name",
-        async () =>
-          await store().listProposals({ reader, entity: fixture.hidden }),
-        "hidden"
-      ),
-      await answer(
-        "an entity no one added",
-        async () =>
-          await store().listProposals({ reader, entity: crypto.randomUUID() }),
-        "nothing"
-      ),
-      await answer(
-        "the reader's own, which a hidden name matches",
-        async () =>
-          await store().listProposals({ reader, entity: fixture.seen })
-      ),
-    ];
-  },
-  decideProposal: async (probing) => {
-    const { reader } = probing;
-    await proposalFixture(probing);
-    const hiddenProposals = await store().listProposals({
-      reader: { person: stranger(), groups: [] },
-    });
-    const decide = async (
+    const fixture = await proposalFixture(probing);
+    const list = async (
       name: string,
-      proposal: string,
-      accept: boolean,
-      about?: Answer["about"]
+      entity: string,
+      about?: Answer["about"],
+      after?: string
     ) =>
       await answer(
         name,
-        async () => await store().decideProposal({ proposal, reader, accept }),
+        async () =>
+          await store().listProposals({
+            entity,
+            reader,
+            ...(after === undefined ? {} : { after: unchecked(after) }),
+          }),
         about
       );
-    const [own] = await store().listProposals({ reader });
     return [
-      await decide(
-        "a proposal no one made",
-        crypto.randomUUID(),
-        true,
-        "nothing"
-      ),
-      ...(await Promise.all(
-        hiddenProposals.map(
-          async (hidden) =>
-            await decide("a hidden proposal", hidden.id, true, "hidden")
-        )
-      )),
-      await decide(
-        "a proposal named by the markers",
-        unchecked(probing.markers.join("")),
-        true
-      ),
-      ...(own === undefined
-        ? []
-        : [
-            await decide("the reader's own", own.id, false),
-            await decide("the reader's own, decided", own.id, true),
-          ]),
-    ];
-  },
-  // No reader: what it answers, logs or sends must hold no marker.
-  linkMember: async ({ markers }) => [
-    await answer("a member with an email of markers", async () => {
-      await store().linkMember({
-        member: stranger(),
-        email: `${markers[0] ?? "x"}@hidden.test`,
-      });
-    }),
-    await answer("an email that isn't one", async () => {
-      await store().linkMember(
-        unchecked({ member: stranger(), email: markers.join(" ") })
-      );
-    }),
-  ],
-  memberEntity: async (probing) => {
-    const { reader, markers } = probing;
-    await recallFixture(probing);
-    // Linked by the email only a hidden memory gives: the reader may not
-    // see the entity, so it answers as for a member never linked.
-    await store().linkMember({
-      member: reader.person,
-      email: `${markers[0] ?? "x"}@hidden.test`,
-    });
-    return [
-      await answer(
-        "the reader, linked to an entity only hidden memories name",
-        async () => await store().memberEntity({ reader }),
+      await list("an entity no one added", crypto.randomUUID(), "nothing"),
+      await list(
+        "an entity only hidden memories name",
+        fixture.hidden,
         "hidden"
       ),
-      await answer(
-        "someone never linked",
-        async () =>
-          await store().memberEntity({
-            reader: { person: stranger(), groups: [] },
-          }),
-        "nothing"
+      await list("the reader's own, which a hidden name matches", fixture.own),
+      await list(
+        "after an id of markers",
+        fixture.own,
+        undefined,
+        probing.markers.join("")
       ),
     ];
   },

@@ -1279,14 +1279,14 @@ export type MemoryId = z.infer<typeof memoryIdSchema>;
  * access: who may read anything is the host's to say, never an email in
  * a memory.
  */
-/** An email address, as an identifier or a verified sign-in gives it. */
-export const emailSchema = wellFormedString()
-  .min(3)
-  .max(320)
-  .regex(/^[^\s@]+@[^\s@]+$/u);
-
 export const identifierSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("email"), value: emailSchema }),
+  z.strictObject({
+    type: z.literal("email"),
+    value: wellFormedString()
+      .min(3)
+      .max(320)
+      .regex(/^[^\s@]+@[^\s@]+$/u),
+  }),
   z.strictObject({
     type: z.literal("ref"),
     value: wellFormedString()
@@ -1594,7 +1594,7 @@ export interface Entity {
  */
 export type MemoryChangeOutcome = "done" | "nothing";
 
-// Cards, proposals and the member link (cards.ts, linking.ts).
+// Cards and proposals (cards.ts, linking.ts).
 //
 // An entity's card is a view, built for each reader when asked, from the
 // memories that reader may read: never stored, so nothing has to be kept
@@ -1602,22 +1602,12 @@ export type MemoryChangeOutcome = "done" | "nothing";
 //
 // An add links an entity on exact evidence (contract `NewEntity`): its
 // known id, an exact identifier, or else an exact name, only where one
-// entity of its kind alone holds that name through memories of the same
-// set of readers as the add (so a link is never decided on what other
-// readers hold). A likely match short of that (the same name held by
-// several, or one name's words all among the other's) becomes a
-// proposal: never a merge until a person accepts it. A proposal is seen
-// only by a reader who may read both memories whose names matched, and
-// each person decides it for themselves. A person who accepts one reads
-// the two entities as one from then on, in cards, proposals and recall;
-// nobody else does (a join is derived, readable by its person alone).
-//
-// The member link ties a member of the deployment to their person
-// entity. It is written only by `linkMember`, which the host calls for a
-// person whose sign-in it verified, with their verified email: never by
-// an add, an extraction, a proposal or a merge, so finding a name or an
-// email in a document never makes or moves one. It grants no access:
-// who may read anything is the host's to say.
+// entity of its kind alone holds that name through memories read by
+// exactly the add's readers (so a link is never decided on what other
+// readers hold). A likely match short of that (one name's words all among
+// the other's, whole) is a proposal, never a link: worked out when a
+// reader asks, from the names they may read alone, never stored.
+// Accepting one is not built here (GRA-1835).
 
 /** Most entities one card lists as related, and most memories it is built from. */
 export const cardMemoriesMax = memoriesReadMax;
@@ -1669,58 +1659,36 @@ export interface Card {
   truncated: boolean;
 }
 
-/** A proposal's id: the store's own. */
-export const proposalIdSchema = z.uuid();
-export type ProposalId = z.infer<typeof proposalIdSchema>;
-
-/** Proposals to list for a reader: about one entity, or any. */
+/**
+ * Proposals to list for a reader: those for one entity, a page at a
+ * time, after the candidate `after` (the last of the page before).
+ */
 export const proposalsRequestSchema = z.strictObject({
+  entity: entityIdSchema,
   reader: readerSchema,
-  entity: entityIdSchema.optional(),
+  after: entityIdSchema.optional(),
   limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
 });
 export type ProposalsRequest = z.input<typeof proposalsRequestSchema>;
 
 /**
- * A proposal that two entities are one: the newer (`entity`) and the one
- * it may be (`candidate`), each as the reader sees it, with the names
- * that matched, as the memories the reader may read gave them.
+ * A proposal that two entities may be one: the entity asked about
+ * (`entity`) and one it may be (`candidate`), each as the reader sees
+ * it, with the names that matched, as memories the reader may read gave
+ * them.
  */
 export interface Proposal {
-  id: ProposalId;
   entity: Entity;
   candidate: Entity;
   name: string;
   candidateName: string;
 }
 
-/**
- * A reader's answer to a proposal, for themselves alone: accept (the
- * two entities read as one for them, as the candidate, unless only the
- * other has a member link; both ids name it) or decline.
- */
-export const proposalDecisionSchema = z.strictObject({
-  proposal: proposalIdSchema,
-  reader: readerSchema,
-  accept: z.boolean(),
-});
-export type ProposalDecision = z.infer<typeof proposalDecisionSchema>;
-
-/**
- * A member's verified sign-in, as the host records it in the Brain: the
- * member (as the host names them) and the email their sign-in verified.
- */
-export const memberLinkSchema = z.strictObject({
-  member: principalSchema,
-  email: emailSchema,
-});
-export type MemberLink = z.infer<typeof memberLinkSchema>;
-
-/** A member asking which entity is theirs. */
-export const memberEntityRequestSchema = z.strictObject({
-  reader: readerSchema,
-});
-export type MemberEntityRequest = z.infer<typeof memberEntityRequestSchema>;
+/** A page of proposals, by the candidate's id, and whether more follow. */
+export interface ProposalPage {
+  proposals: Proposal[];
+  more: boolean;
+}
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).
 
@@ -2040,22 +2008,12 @@ export interface Brain {
    * for one nobody holds.
    */
   readCard: (request: CardRequest) => Promise<Card | null>;
-  /** The open proposals the reader may see: both matching names theirs to read. */
-  listProposals: (request: ProposalsRequest) => Promise<Proposal[]>;
   /**
-   * Accepts or declines, for the reader alone, a proposal they may see
-   * and haven't decided: `nothing` alike when there is none, they may not
-   * see it, they decided it, or it would join two members.
+   * A page of the proposals for an entity the reader may see, worked out
+   * now from the names they may read: an entity they may not see has
+   * none, alike for one nobody holds.
    */
-  decideProposal: (request: ProposalDecision) => Promise<MemoryChangeOutcome>;
-  /**
-   * Records a member's verified sign-in: links the member to the person
-   * entity holding their verified email, or a new one, once. For the
-   * host, after it verified the sign-in; nothing else writes the link.
-   */
-  linkMember: (link: MemberLink) => Promise<void>;
-  /** The reader's own person entity, if linked and they may see it. */
-  memberEntity: (request: MemberEntityRequest) => Promise<EntityId | null>;
+  listProposals: (request: ProposalsRequest) => Promise<ProposalPage>;
 }
 
 /** The shared store's name: everything readable by more than one person. */
