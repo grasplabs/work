@@ -5,8 +5,8 @@
 // answers each from what the person may read alone, as if nothing else
 // existed.
 
-/** Who added a source: an upload, a chat, a workflow run. */
-export type BrainSourceProducer = "upload" | "chat" | "run";
+/** Who added a source: a Knowledge document, an upload, a chat, a workflow run. */
+export type BrainSourceProducer = "document" | "upload" | "chat" | "run";
 
 /** A source, as its producer names it. */
 export interface BrainSourceRef {

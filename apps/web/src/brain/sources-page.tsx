@@ -82,6 +82,7 @@ const keyOf = ({ producer, id }: BrainSourceRef): string => `${producer}:${id}`;
 const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
   const { t } = useLingui();
   const label = {
+    document: t({ message: "Document", context: "a source of the Brain" }),
     upload: t({ message: "Upload", context: "a source of the Brain" }),
     chat: t({ message: "Chat", context: "a source of the Brain" }),
     run: t({ message: "Workflow run", context: "a source of the Brain" }),
