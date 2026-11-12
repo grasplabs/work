@@ -368,7 +368,11 @@ describe("the Brain's report", () => {
         readers: { kind: "owner", personId: person },
       });
     }
-    await eraseSource(env, { source: erased, reason: "deleted" });
+    await eraseSource(env, {
+      source: erased,
+      readers: { kind: "owner", personId: person },
+      reason: "deleted",
+    });
     const { key, id } = await parked(marked);
 
     const reads: Awaited<ReturnType<typeof readReport>>[] = [];
@@ -582,6 +586,7 @@ describe("the Brain's actions while it reads its erasure ledger", () => {
     const backup = await copyOfStore();
     await eraseSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
+      readers: { kind: "none" },
       reason: "deleted",
     });
     const last = await runInDurableObject(storeObject(), (_store, state) =>

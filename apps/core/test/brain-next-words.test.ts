@@ -58,6 +58,7 @@ const recalledAs = async (
   question: string
 ): Promise<SourceRef[]> => {
   const { items: chunks } = await recallAs(env, personId, {
+    personal: true,
     question,
     budget: { tokens: recallBudgetMax },
   });
@@ -135,6 +136,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
     const source = await add(passages.join("\n\n"), ownedBy(reader));
 
     const { items: chunks } = await recallAs(env, reader, {
+      personal: true,
       question: `factuur ${tag}`,
       budget: { tokens: recallBudgetMax },
     });
@@ -329,7 +331,11 @@ describe("erasing words", { timeout: 60_000 }, () => {
 
     // Erased (GRA-1729): no search finds its words, and the indexes'
     // pages hold nothing of them, with no compaction.
-    await eraseSource(env, { source: goes, reason: "deleted" });
+    await eraseSource(env, {
+      source: goes,
+      readers: ownedBy(reader),
+      reason: "deleted",
+    });
     await expect(indexesFind(`zq${erased}`)).resolves.toStrictEqual([
       false,
       false,
@@ -548,6 +554,7 @@ describe(
       });
 
       const { items: chunks } = await recallAs(env, reader, {
+        personal: true,
         question: `${mark}x7ing`,
         budget: { tokens: recallBudgetMax },
       });

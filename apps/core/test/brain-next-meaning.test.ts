@@ -134,6 +134,7 @@ describe("recall by meaning, through core", () => {
     await warnedOf(
       async () =>
         await recallAs(env, personId, {
+          personal: true,
           question: asked,
           budget: { tokens: recallBudgetMax },
         })
@@ -234,6 +235,7 @@ describe("recall by meaning, through core", () => {
     const { value, warned } = await warnedOf(
       async () =>
         await recallAs(env, personId, {
+          personal: true,
           question: withWords,
           budget: { tokens: recallBudgetMax },
           asOf: new Date(),

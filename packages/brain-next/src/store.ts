@@ -490,6 +490,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
+   * As `#ready`, for a read by a reader `#mayRead` let through: whether
+   * the store holds anything to read. A person's own store erased whole
+   * holds nothing, and answers as a store that never held anything does:
+   * its person reads after their erasure what nothing gives.
+   */
+  async #readable(): Promise<boolean> {
+    if (await this.#erasedWhole()) {
+      return false;
+    }
+    await this.#ready();
+    return this.#schema;
+  }
+
+  /** Whether this is a person's own store erased whole, once its ledger step is taken. */
+  async #erasedWhole(): Promise<boolean> {
+    if (this.#kind.kind !== "person") {
+      return false;
+    }
+    await this.#ledgerStep();
+    return this.#erased;
+  }
+
+  /**
    * As `#ready`, for a call that writes: a person's own store whose schema
    * was never made makes it first, while it takes nothing else.
    */
@@ -571,8 +594,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async recall(request: RecallRequest): Promise<Pack> {
     const asked = checked(recallRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#ready();
-    return this.#schema
+    return (await this.#readable())
       ? recall(this.ctx.storage.sql, asked)
       : packAcross(asked.question, asked.budget.tokens, [nothingFound]);
   }
@@ -581,33 +603,41 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async find(request: RecallRequest): Promise<Finding> {
     const asked = checked(recallRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#ready();
-    return this.#schema ? find(this.ctx.storage.sql, asked) : nothingFound;
+    return (await this.#readable())
+      ? find(this.ctx.storage.sql, asked)
+      : nothingFound;
   }
 
   /** A version, current or history, whole: if the reader may read it. */
   async readVersion(request: VersionRequest): Promise<SourceVersion | null> {
     const asked = checked(versionRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#ready();
-    return this.#schema ? await readVersion(this.#sources, asked) : null;
+    return (await this.#readable())
+      ? await readVersion(this.#sources, asked)
+      : null;
   }
 
   /** The current versions of sources, whole: those the reader may read. */
   async readCurrent(request: CurrentRequest): Promise<SourceVersion[]> {
     const asked = checked(currentRequestSchema, request);
     this.#mayRead(asked.reader);
-    await this.#ready();
-    return this.#schema ? await readCurrent(this.#sources, asked) : [];
+    return (await this.#readable())
+      ? await readCurrent(this.#sources, asked)
+      : [];
   }
 
   /**
    * Erases a source for good (erasure.ts): recorded in the ledger and
    * hidden before it returns, deleted by its tick if not at once. Work
-   * under way on it is stopped (work.ts `stopWorkOn`).
+   * under way on it is stopped (work.ts `stopWorkOn`). A person's own
+   * store erased whole holds nothing to erase: done, so a caller erasing
+   * that person's sources after them isn't held pending for good.
    */
   async eraseSource(request: SourceErasure): Promise<void> {
     const { source, reason } = checked(sourceErasureSchema, request);
+    if (await this.#erasedWhole()) {
+      return;
+    }
     await this.#readyToWrite();
     await erase(this.#erasures, "source", source, reason, (sources) => {
       stopWorkOn(this.#work, sources);
@@ -1059,8 +1089,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async searchVectors(request: VectorSearch): Promise<VectorsFound> {
     const asked = checked(vectorSearchSchema, request);
     this.#mayRead(asked.reader);
-    await this.#ready();
-    return this.#schema
+    return (await this.#readable())
       ? searchVectors(this.ctx.storage.sql, asked)
       : { chunks: [] };
   }

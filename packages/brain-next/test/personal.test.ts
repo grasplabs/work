@@ -536,14 +536,32 @@ describe("a person's own store", () => {
   });
 
   // Threat 6: an erased store comes back by a late add.
-  it("once erased whole, refuses every call, a late add after a restart included, and makes nothing", async () => {
-    await add(own(), "Before the erasure", theirs());
+  it("once erased whole, answers its person as a store holding nothing does, refuses every add, a late add after a restart included, and makes nothing", async () => {
+    const kept = await add(own(), "Before the erasure", theirs());
     await own().erasePerson({ person, reason: "person_erased" });
     const erased = /this store was erased/u;
+    const reader = me();
 
-    await expect(
-      called(own().recall({ question: "Before", reader: me(), budget: whole }))
-    ).rejects.toThrow(erased);
+    expect({
+      found: await called(
+        own().find({ question: "Before", reader, budget: whole })
+      ),
+      version: await called(
+        own().readVersion({ source: kept.source, version: 1, reader })
+      ),
+      current: await called(
+        own().readCurrent({ sources: [kept.source], reader })
+      ),
+      // Erasing one of its sources after it: nothing is left to erase.
+      sourceErased: await called(
+        own().eraseSource({ source: kept.source, reason: "deleted" })
+      ).then(() => "erased"),
+    }).toStrictEqual({
+      found: nothingFound,
+      version: null,
+      current: [],
+      sourceErased: "erased",
+    });
     await expect(add(own(), "A late add", theirs())).rejects.toThrow(erased);
     await kill(own());
     await expect(add(own(), "A later add", theirs())).rejects.toThrow(erased);
@@ -558,8 +576,8 @@ describe("a person's own store", () => {
 
     await restore(own(), backup);
     await expect(
-      called(own().recall({ question: "Before", reader: me(), budget: whole }))
-    ).rejects.toThrow(/this store was erased/u);
+      called(own().find({ question: "Before", reader: me(), budget: whole }))
+    ).resolves.toStrictEqual(nothingFound);
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
 
     // Erasing again is safe, and keeps only the record of it.
@@ -609,10 +627,10 @@ describe("a person's own store", () => {
     await expect(
       keysUnder(`${await ownPrefix()}sources/`)
     ).resolves.toHaveLength(1);
-    // Erased already: it answers nothing meanwhile.
+    // Erased already: it finds nothing meanwhile.
     await expect(
-      called(own().recall({ question: "Theirs", reader: me(), budget: whole }))
-    ).rejects.toThrow(/this store was erased/u);
+      called(own().find({ question: "Theirs", reader: me(), budget: whole }))
+    ).resolves.toStrictEqual(nothingFound);
     await heal();
 
     await own().erasePerson({ person, reason: "person_erased" });

@@ -103,6 +103,7 @@ const packFor = async (
   { tokens = recallBudgetMax, asOf }: { tokens?: number; asOf?: Date } = {}
 ): Promise<RecalledPack> =>
   await recallAs(env, personId, {
+    personal: true,
     question,
     budget: { tokens },
     ...(asOf === undefined ? {} : { asOf }),

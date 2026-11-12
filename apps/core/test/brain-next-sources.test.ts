@@ -83,6 +83,7 @@ const team = (teamId: string): SourceReaders => ({ kind: "team", teamId });
 /** What `personId` recalls for `question`: each chunk's source and version. */
 const recalledAs = async (personId: string, question: string) => {
   const { items: chunks } = await recallAs(env, personId, {
+    personal: true,
     question,
     budget: { tokens: recallBudgetMax },
   });
@@ -671,6 +672,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     });
 
     const { items: chunks } = await recallAs(env, reader, {
+      personal: true,
       question: secret,
       budget: { tokens: recallBudgetMax },
     });
@@ -728,6 +730,7 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
       async () => await add("text", newSource(), "change \uD800"),
       async () =>
         await recallAs(env, reader, {
+          personal: true,
           question: "question \uD800",
           budget: { tokens: recallBudgetMax },
         }),

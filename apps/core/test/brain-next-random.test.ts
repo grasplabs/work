@@ -1,5 +1,6 @@
 import {
   brainOf,
+  personalBrainOf,
   recallBudgetMax,
   recallLimit,
 } from "@grasp-os/brain-next/contract";
@@ -32,6 +33,13 @@ import { testBinding } from "./test-env.ts";
 // took its place, they may not move the order, and no field may tell
 // that they exist. A membership change counts from the very next recall:
 // the person it changed asks at once.
+//
+// What one person alone may read is in their own store and the rest in
+// the shared one (core's brain-next.ts), so each scenario's content is
+// split over the two, and a person's recall packs both: it must still be
+// exactly the answer one store holding everything gives. A source keeps
+// its kind of readers, as producers do: a person's own stays theirs, and
+// a shared one stays shared, to a team or to nobody.
 //
 // The brute-force answers are the specification, written once; the
 // issues that change ranking (stemming, exact matches, vectors) change it
@@ -69,10 +77,12 @@ import { testBinding } from "./test-env.ts";
 //   the current version's readers, with the teams they are in now; to
 //   anyone else exactly what a source no one added answers (null).
 // - Vectors: every chunk of a current version holds a vector of its own,
-//   put through the store as the queue will; a search returns the chunks
-//   of current versions the reader may read, nearest the question by
-//   cosine, ties to the chunk added first, at most `vectorLimit`, each
-//   with its cosine. The vectors are +1 and -1 alone with a centre of
+//   put through the store holding it as the queue will; a search of the
+//   shared store returns its chunks of current versions the reader may
+//   read, nearest the question by cosine, ties to the chunk added first,
+//   at most `vectorLimit`, each with its cosine. A recall by meaning
+//   is asked of the shared store alone: across stores, a tie in cosine
+//   goes by each store's own rows. The vectors are +1 and -1 alone with a centre of
 //   zeros, where the store's 1-bit order is the cosine's and its 8-bit
 //   codes are whole, so the answer is exact however many it re-scores.
 //
@@ -161,8 +171,12 @@ const vectorDimensions = 64;
 /** Most chunks a vector search returns here. */
 const vectorLimit = 10;
 
-/** The Brain's store, by its contract: the vector way has no core function yet. */
+/** The Brain's shared store, by its contract: the vector way has no core function yet. */
 const brainStore = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** `personId`'s own store, by its contract, as core names it. */
+const ownStore = (personId: string) =>
+  personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), personId);
 
 /** A chunk's place, as a key. */
 const placeKey = ({ source, version, position }: ChunkRef): string =>
@@ -347,6 +361,24 @@ const isAmong = (
 /** Whether `words` hold one of the asked words, in any of its forms. */
 const holds = (words: readonly Token[], asked: readonly Token[]): boolean =>
   asked.some((token) => words.some((word) => rootOf(word) === rootOf(token)));
+
+/**
+ * Draws who may read a later version of a source `before` could read: a
+ * source keeps its kind of readers, so one person's own stays theirs, and
+ * a shared one is drawn again among the shared kinds.
+ */
+const drawLaterReaders = (
+  draws: Draws,
+  teamCount: number,
+  before: Readers
+): Readers => {
+  if (before.kind === "owner") {
+    return before;
+  }
+  return draws.chance(0.8)
+    ? { kind: "team", team: draws.below(teamCount) }
+    : { kind: "none" };
+};
 
 /** Draws who may read a version: mostly a person or a team, sometimes nobody. */
 const drawReaders = (draws: Draws, teamCount: number): Readers => {
@@ -691,6 +723,12 @@ const scenario = (people: readonly string[], seed: number) => {
     return readers;
   };
 
+  /** The person whose own store `source` is in, or none for the shared one. */
+  const ownerOf = (source: Planned): string | undefined => {
+    const readers = source.versions[0]?.readers;
+    return readers?.kind === "owner" ? personId(readers.person) : undefined;
+  };
+
   /** Puts `person` in `team` or takes them out, in core's records. */
   const toggle = async (person: number, team: number): Promise<void> => {
     const key = memberKey(person, team);
@@ -793,19 +831,28 @@ const scenario = (people: readonly string[], seed: number) => {
 
   /** Puts a vector for each current chunk without one, as the queue will. */
   const putVectors = async (): Promise<void> => {
-    const fresh = currentChunks()
-      .filter(({ chunk }) => !vectors.has(placeKey(chunk)))
-      .map(({ chunk }) => {
-        const vector = signs();
-        vectors.set(placeKey(chunk), vector);
-        return { chunk, vector };
-      });
-    for (let first = 0; first < fresh.length; first += 256) {
-      // oxlint-disable-next-line no-await-in-loop -- one put at a time
-      await brainStore().putVectors({
-        model: vectorModel,
-        vectors: fresh.slice(first, first + 256),
-      });
+    // Each store's chunks, put in the store that holds them.
+    const byStore = Map.groupBy(
+      currentChunks()
+        .filter(({ chunk }) => !vectors.has(placeKey(chunk)))
+        .map(({ planned: source, chunk }) => {
+          const vector = signs();
+          vectors.set(placeKey(chunk), vector);
+          return { owner: ownerOf(source), chunk, vector };
+        }),
+      ({ owner }) => owner
+    );
+    for (const [owner, fresh] of byStore) {
+      const store = owner === undefined ? brainStore() : ownStore(owner);
+      for (let first = 0; first < fresh.length; first += 256) {
+        // oxlint-disable-next-line no-await-in-loop -- one put at a time
+        await store.putVectors({
+          model: vectorModel,
+          vectors: fresh
+            .slice(first, first + 256)
+            .map(({ chunk, vector }) => ({ chunk, vector })),
+        });
+      }
     }
   };
 
@@ -840,7 +887,13 @@ const scenario = (people: readonly string[], seed: number) => {
           version: before.version + 1,
           ...(change === 1
             ? {}
-            : { readers: drawReaders(draws, teamIds.length) }),
+            : {
+                readers: drawLaterReaders(
+                  draws,
+                  teamIds.length,
+                  before.readers
+                ),
+              }),
           ...(change === 0 ? {} : drawText()),
         };
         // The same readers drawn again, the text kept: no change at all,
@@ -894,15 +947,25 @@ const scenario = (people: readonly string[], seed: number) => {
   /**
    * The current chunks `person` may read nearest `question`, by cosine,
    * ties to the chunk added first, at most `limit`, each with its cosine.
+   * With `sharedOnly`, the shared store's alone.
    */
-  const nearest = (person: number, question: number[], limit: number) => {
+  const nearest = (
+    person: number,
+    question: number[],
+    limit: number,
+    sharedOnly = false
+  ) => {
     const cosineOf = (chunk: ChunkRef): number =>
       (vectors.get(placeKey(chunk)) ?? []).reduce(
         (sum, value, index) => sum + value * (question[index] ?? 0),
         0
       ) / vectorDimensions;
     return currentChunks()
-      .filter(({ version }) => isAmong(version.readers, person, membership))
+      .filter(
+        ({ planned: source, version }) =>
+          isAmong(version.readers, person, membership) &&
+          !(sharedOnly && ownerOf(source) !== undefined)
+      )
       .map((each) => ({ ...each, score: cosineOf(each.chunk) }))
       .toSorted(
         (a, b) =>
@@ -925,12 +988,13 @@ const scenario = (people: readonly string[], seed: number) => {
   ) => {
     if (vector === undefined) {
       return await recallAs(env, personId(person), {
+        personal: true,
         question,
         budget: { tokens: recallBudgetMax },
       });
     }
     const at = vectorModel.name.lastIndexOf("@");
-    const pack = await brainStore().recall({
+    const request = {
       question,
       reader: { person: personId(person), groups: groupsOf(person) },
       budget: { tokens: recallBudgetMax },
@@ -941,7 +1005,11 @@ const scenario = (people: readonly string[], seed: number) => {
         },
         vector,
       },
-    });
+    };
+    // The shared store alone: across stores, chunks of the same cosine
+    // are ordered by each store's own rows, which no brute force can
+    // know, so packing both by meaning is left to the package's tests.
+    const pack = await brainStore().recall(request);
     return {
       ...pack,
       // Each source as the plan names it; one the plan doesn't know as
@@ -972,7 +1040,7 @@ const scenario = (people: readonly string[], seed: number) => {
     const meant =
       vector === undefined
         ? []
-        : nearest(person, vector, recallLimit).map(
+        : nearest(person, vector, recallLimit, true).map(
             ({ planned: source, version, chunk }) => ({
               name: `s${source.index} v${version.version} c${chunk.position}`,
               planned: source,
@@ -987,8 +1055,11 @@ const scenario = (people: readonly string[], seed: number) => {
     // Each word as the question first wrote it.
     const written = (token: Token): string =>
       writtenAs[asked.indexOf(token)] ?? wordOf(token);
+    // By meaning, of the shared store alone (`recallOf`).
     const expected = packOf(
-      planned,
+      vector === undefined
+        ? planned
+        : planned.filter((source) => ownerOf(source) === undefined),
       person,
       membership,
       asked,
@@ -1093,8 +1164,8 @@ const scenario = (people: readonly string[], seed: number) => {
   };
 
   /**
-   * Searches by a vector as `person` once; what went wrong. The answer:
-   * the current chunks they may read, by cosine, ties to the chunk added
+   * Searches the shared store by a vector as `person` once; what went
+   * wrong. The answer: the current chunks there they may read, by cosine, ties to the chunk added
    * first, at most `vectorLimit`, each with its cosine.
    */
   const askVectors = async (
@@ -1102,13 +1173,15 @@ const scenario = (people: readonly string[], seed: number) => {
     person: number
   ): Promise<string[]> => {
     const question = signs();
+    // The shared store's search alone: what one person alone may read is
+    // searched in their own store, within its recall.
     const { chunks } = await brainStore().searchVectors({
       model: vectorModel.name,
       vector: question,
       reader: { person: personId(person), groups: groupsOf(person) },
       limit: vectorLimit,
     });
-    const expected = nearest(person, question, vectorLimit);
+    const expected = nearest(person, question, vectorLimit, true);
     const described = (found: FoundChunk): string =>
       `${placeKey(found)} ${roundedScore(found.score)}`;
     const got = chunks.map(described);
