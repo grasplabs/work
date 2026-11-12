@@ -734,7 +734,10 @@ const testModelEmbedders = async (): Promise<Embedders> => {
   };
 };
 
-/** Ticks the store with `embedders` until its rebuild for their model is done. */
+/**
+ * Ticks the store with `embedders` until its rebuild for their model is
+ * done, at most 50 ticks; fails saying so past that.
+ */
 const embedAll = async (embedders: Embedders): Promise<void> => {
   const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
   for (let ticks = 0; ticks < 50; ticks += 1) {
@@ -746,6 +749,7 @@ const embedAll = async (embedders: Embedders): Promise<void> => {
       return;
     }
   }
+  throw new Error("The rebuild wasn't done after 50 ticks");
 };
 
 describe("the Brain's embedding, as staff see it", () => {
@@ -876,11 +880,20 @@ describe("the Brain's embedding, as staff see it", () => {
       },
     };
     const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
-    for (let attempt = 0; attempt <= workAttemptsMax; attempt += 1) {
+    // A rebuild under way for the model, its items failing until they park.
+    // Each tick is a day after the last, so a parked item also comes back
+    // and fails again: ticked until the overview shows one parked, as how
+    // many items a tick runs depends on the machine's load, at most 20
+    // ticks.
+    await brain.work(quietModel, nextDay(), broken);
+    await brain.reembed();
+    let { embedding: whileBroken } = await brainWorkOverview(env);
+    for (let round = 0; round < 20 && whileBroken.parked === 0; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one tick after another, past each backoff
       await brain.work(quietModel, nextDay(), broken);
+      // oxlint-disable-next-line no-await-in-loop -- looked at after each tick
+      ({ embedding: whileBroken } = await brainWorkOverview(env));
     }
-    const { embedding: whileBroken } = await brainWorkOverview(env);
     const answered = await answerTo({ type: "reembed" });
     await embedAll(working);
     const { embedding: mended } = await brainWorkOverview(env);
