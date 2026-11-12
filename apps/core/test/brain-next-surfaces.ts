@@ -2621,11 +2621,15 @@ const memoryProbes = {
     ) =>
       await answer(
         name,
-        async () =>
-          await store().listContested({
+        // The moment each page was read at differs between calls and says
+        // nothing of what is stored: compared without it.
+        async () => {
+          const { facts, more } = await store().listContested({
             reader,
             ...(entity === null ? {} : { entity }),
-          }),
+          });
+          return { facts, more };
+        },
         about
       );
     return [
