@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import {
   chatAskLimits,
   chatAskSchema,
@@ -9,7 +10,6 @@ import {
   chatPlanSchema,
 } from "@grasp-os/shared/chat";
 import type { ChatAsk, ChatMake, ChatPlan } from "@grasp-os/shared/chat";
-import { searchQueryMaxLength } from "@grasp-os/shared/knowledge";
 import type { Memory } from "@grasp-os/shared/memory";
 import type { Role } from "@grasp-os/shared/roles";
 import { z } from "zod";
@@ -814,7 +814,9 @@ export const recallFor = async (
   question: string,
   signal?: AbortSignal
 ): Promise<Recall | undefined> => {
-  const asked = question.trim().slice(0, searchQueryMaxLength);
+  // As the Brain takes a question: cut to the most it takes, and
+  // well-formed, as half a pair cut there is a string it refuses.
+  const asked = question.trim().slice(0, brainQuestionMaxLength).toWellFormed();
   if (asked === "") {
     return undefined;
   }

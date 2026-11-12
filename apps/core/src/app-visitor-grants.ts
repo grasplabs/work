@@ -4,11 +4,13 @@ import {
 } from "@grasp-os/shared/app-visitors";
 import type { AppVisitorGrants } from "@grasp-os/shared/app-visitors";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { requireNoBrainSource } from "./app-provenance.ts";
 import { loadRelease } from "./app-releases.ts";
 import { editableApp } from "./apps.ts";
 import {
@@ -154,6 +156,9 @@ export const setAppVisitorGrants = async (
   const version = found.currentVersion;
   if (version === null) {
     throw appVisitorErrors.create("visitor.invalid");
+  }
+  if (parsed.data.length > 0) {
+    await requireNoBrainSource(env, appIdSchema.parse(found.id));
   }
   const release = await loadRelease(env, found.id, version);
   const wanted = [...new Set(parsed.data)].toSorted();

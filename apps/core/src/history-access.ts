@@ -85,22 +85,23 @@ const brainDocumentOf = (source: string): PinnedVersion | undefined => {
   return { collectionId, documentId, version, text };
 };
 
-// What a chat's recall before a question read of the new Brain
-// (turn-recall.ts) is pinned too: each version it handed over, by its
-// source as its producer names it and its number. A version never changes
-// and an erased source's key is never added again, so a pin means the same
-// text for as long as it is kept; it is withheld once the person may no
-// longer read that version (`readableVersionsAs`), and with the agent's
-// `brain` grant (`brainGrantRead`).
+// What a chat's code recalled (`env.brain.recall`, agent-brain.ts) is
+// pinned too: each version it handed over, by its source as its producer
+// names it and its number. A version never changes and an erased source's
+// key is never added again, so a pin means the same text for as long as
+// it is kept. Code reads as the person's teams alone (brain-recall.ts), so
+// it is checked as they read it, and withheld once their teams may no
+// longer read it, even if the person alone still may, and with the
+// agent's `brain` grant (`brainGrantRead`).
 
-const brainVersionPrefix = "brain-version:";
+const brainTeamVersionPrefix = "brain-team-version:";
 
-/** The source a version the new Brain handed a run is recorded as. */
-export const brainVersionRead = ({
+/** The source a version code's recall handed a run is recorded as. */
+export const brainTeamVersionRead = ({
   source,
   version,
 }: SourceVersionRef): string =>
-  `${brainVersionPrefix}${JSON.stringify([source.producer, source.id, version])}`;
+  `${brainTeamVersionPrefix}${JSON.stringify([source.producer, source.id, version])}`;
 
 const brainVersionSchema = z.tuple([
   z.string().min(1),
@@ -108,14 +109,14 @@ const brainVersionSchema = z.tuple([
   z.int().min(1),
 ]);
 
-/** The version a `brainVersionRead` source names, if it is one. */
-const brainVersionOf = (source: string): SourceVersionRef | undefined => {
-  if (!source.startsWith(brainVersionPrefix)) {
+/** The version a `brainTeamVersionRead` source names, if it is one. */
+const brainTeamVersionOf = (source: string): SourceVersionRef | undefined => {
+  if (!source.startsWith(brainTeamVersionPrefix)) {
     return undefined;
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(source.slice(brainVersionPrefix.length));
+    parsed = JSON.parse(source.slice(brainTeamVersionPrefix.length));
   } catch {
     return undefined;
   }
@@ -131,45 +132,9 @@ const brainVersionOf = (source: string): SourceVersionRef | undefined => {
 };
 
 /**
- * Of the new Brain's versions in `sources`, those the person may still
- * read, in one read of the Brain per 500 (`readableVersionsAs`).
- */
-const readableBrainVersions = async (
-  env: Env,
-  scope: Omit<AgentScope, "runId">,
-  sources: readonly string[]
-): Promise<string[]> => {
-  const pins = sources.flatMap((source) => {
-    const pin = brainVersionOf(source);
-    return pin === undefined ? [] : [{ source, pin }];
-  });
-  if (pins.length === 0) {
-    return [];
-  }
-  const versions = await readableVersionsAs(
-    env,
-    scope.personId,
-    pins.map(({ pin }) => pin)
-  );
-  const readable = new Set(versions.map((ref) => brainVersionRead(ref)));
-  return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
-};
-
-// What a chat's code recalled (`env.brain.recall`, agent-brain.ts) is
-// pinned the same way under a prefix of its own: code reads as the
-// person's teams alone (brain-recall.ts), so it is checked as they read
-// it, and withheld once their teams may no longer read it, even if the
-// person alone still may.
-
-const brainTeamVersionPrefix = "brain-team-version:";
-
-/** The source a version code's recall handed a run is recorded as. */
-export const brainTeamVersionRead = (ref: SourceVersionRef): string =>
-  `${brainTeamVersionPrefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`;
-
-/**
  * Of the versions code's recall handed over in `sources`, those the
- * person's teams may still read (`readableVersionsAs`, not `personal`).
+ * person's teams may still read (`readableVersionsAs`, not `personal`),
+ * in one read of the Brain per 500.
  */
 const readableBrainTeamVersions = async (
   env: Env,
@@ -177,11 +142,7 @@ const readableBrainTeamVersions = async (
   sources: readonly string[]
 ): Promise<string[]> => {
   const pins = sources.flatMap((source) => {
-    const pin = source.startsWith(brainTeamVersionPrefix)
-      ? brainVersionOf(
-          `${brainVersionPrefix}${source.slice(brainTeamVersionPrefix.length)}`
-        )
-      : undefined;
+    const pin = brainTeamVersionOf(source);
     return pin === undefined ? [] : [{ source, pin }];
   });
   if (pins.length === 0) {
@@ -472,11 +433,10 @@ export const readableSources = async (
     })
     .from(collections)
     .where(inList(collections.id, sourceIds));
-  const [apps, connections, brain, versions, teamVersions] = await Promise.all([
+  const [apps, connections, brain, teamVersions] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
     readableBrain(env, scope, sourceIds),
-    readableBrainVersions(env, scope, sourceIds),
     readableBrainTeamVersions(env, scope, sourceIds),
   ]);
   return new Set([
@@ -484,7 +444,6 @@ export const readableSources = async (
     ...apps,
     ...connections,
     ...brain,
-    ...versions,
     ...teamVersions,
   ]);
 };

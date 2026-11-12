@@ -1,4 +1,5 @@
 import { collections } from "@grasp-os/brain/schema";
+import { appErrors } from "@grasp-os/shared/apps";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -580,6 +581,29 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
       unresolved: [],
     }
   );
+};
+
+/** How the sources name the platform's `brain`: an App that recalls it. */
+export const brainSource = sourceId("platform", "brain");
+
+/**
+ * Refuses, as `app.share_unreadable` naming `brainSource`, letting anyone
+ * but its owner and admins into App `app` when it recalls the Brain, as
+ * its sources say (directly, or through a workflow it starts or follows):
+ * visitors from outside the organization, who read what its functions
+ * answer them, as much as people it is shared with.
+ */
+export const requireNoBrainSource = async (
+  env: Env,
+  app: AppId
+): Promise<void> => {
+  const { unresolved } = await sourcesOf(env, app);
+  if (unresolved.includes(brainSource)) {
+    throw appErrors.create("app.share_unreadable", {
+      sources: [brainSource],
+      people: [],
+    });
+  }
 };
 
 /** Whether an App has read from anything at all. */

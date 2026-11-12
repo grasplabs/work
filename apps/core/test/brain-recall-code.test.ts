@@ -14,6 +14,8 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
+import { setAppVisitorGrants } from "../src/app-visitor-grants.ts";
+import { setAppVisitors } from "../src/app-visitors.ts";
 import { appFor } from "../src/apps.ts";
 import { addSource, eraseSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
@@ -30,8 +32,10 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { readWorkflowState } from "../src/workflow-state.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
@@ -469,7 +473,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     expect(JSON.stringify(events)).not.toContain(word);
   });
 
-  it("reads as the person the call is for: its owner and an admin each get what they may read, and nobody it is shared with gets anything", async () => {
+  it("answers an App's recall for its owner alone: an admin using it is refused the recall, and someone it is shared with the App", async () => {
     const { word, admin, ada, uma } = await company();
     const app = await askOf(ada, []);
     const permissionId = await granted(
@@ -494,11 +498,11 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     const asks = { question: word, tokens: 800 };
     expect({
       ada: textsOf(await askedOf(app, ada, asks)),
-      admin: textsOf(await askedOf(app, admin, asks)),
+      admin: await askedOf(app, admin, asks),
       uma: await askedOf(app, uma, asks),
     }).toStrictEqual({
       ada: [`Ada's team: ${word} is planned in March.`],
-      admin: [`Payroll only: ${word} is paid at the usual rate.`],
+      admin: { failed: "permission.unavailable" },
       uma: { failed: "app.unreadable" },
     });
   });
@@ -995,6 +999,155 @@ describe("what an App recalls and keeps", setUpTime, () => {
       shared: "done",
       grant: "permission.invalid",
       umaReads: [],
+    });
+  });
+
+  it("keeps nothing of an admin's teams where the owner reads it: an admin using the App is refused the recall", async () => {
+    const { word, admin, ada } = await company();
+    const app = await keepOf(ada);
+    const permissionId = await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: app.app }),
+      app.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: app.app,
+      alias: "brain",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+    // The admin uses Ada's App, as admins may any App.
+    const keptByAdmin = await calledOf(app, admin, "notes.keep", {
+      question: word,
+    });
+    expect({
+      keptByAdmin,
+      seenByAda: await calledOf(app, ada, "notes.list", {}),
+    }).toStrictEqual({
+      // The function host's word for a refused permission.
+      keptByAdmin: { failed: "permission.unavailable" },
+      seenByAda: [],
+    });
+  });
+
+  it("lets no visitor into an App that recalls the Brain, and gives the Brain to no App that lets visitors in", async () => {
+    const { admin, ada } = await company();
+    const visitors = [{ kind: "address", value: "visitor@example.com" }];
+    const recalling = await keepOf(ada);
+    await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: recalling.app }),
+      recalling.release.manifest.resourceVersion
+    );
+    const visited = await keepOf(ada);
+    const listed = await doneOr(
+      async () => await setAppVisitors(env, ada, visited.app, visitors)
+    );
+    const asked = await requestPermission(
+      env,
+      ada,
+      brainGrant({ type: "app", appId: visited.app }),
+      rolesOf(ada)
+    );
+    expect({
+      visitors: await doneOr(
+        async () => await setAppVisitors(env, ada, recalling.app, visitors)
+      ),
+      visitorFunctions: await doneOr(
+        async () =>
+          await setAppVisitorGrants(env, ada, recalling.app, ["notes.list"])
+      ),
+      // Taking every visitor off stays possible.
+      noVisitors: await doneOr(
+        async () => await setAppVisitors(env, ada, recalling.app, [])
+      ),
+      listed,
+      grantToVisited: await doneOr(
+        async () =>
+          await grantPermission(env, admin, asked.id, {
+            version: visited.release.manifest.resourceVersion,
+          })
+      ),
+    }).toStrictEqual({
+      visitors: "app.share_unreadable",
+      visitorFunctions: "app.share_unreadable",
+      noVisitors: "done",
+      listed: "done",
+      grantToVisited: "permission.invalid",
+    });
+  });
+});
+
+describe("what a workflow run recalls", setUpTime, () => {
+  it("never reaches the workflow's other runs or its builders: a run that recalled keeps no state", async () => {
+    const { word, admin, uma } = await company();
+    const bob = await person("builder");
+    const ben = await person("user");
+    const key = `brain-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "brain" });
+    const workflow = await createWorkflowResource(env, bob, `keep-${unique()}`);
+    await publishWorkflowVersion(env, bob, workflow.id, {
+      definition: JSON.stringify({
+        $schema: workflowSchemaUrl,
+        args: {
+          kind: "object",
+          fields: { question: { kind: "string" }, tokens: { kind: "number" } },
+        },
+        returns: packDescriptor,
+        state: { kept: { ...packDescriptor, optional: true } },
+        result: { $expr: "state.kept ?? recalled" },
+        permissions: { brain: { docs: { contract: key } } },
+        steps: [
+          {
+            id: "recalled",
+            type: "call",
+            brain: "docs",
+            action: "recall",
+            args: {
+              question: { $expr: "args.question" },
+              budget: { tokens: { $expr: "args.tokens" } },
+            },
+            state: { kept: { $expr: "output" } },
+          },
+        ],
+      }),
+      basedOn: null,
+    });
+    const permissionId = await granted(
+      bob,
+      admin,
+      brainGrant({ type: "workflow", workflowId: workflow.id })
+    );
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "docs",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+    for (const member of [uma, ben]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await shareWorkflowResource(env, bob, workflow.id, {
+        type: "person",
+        id: member.userId,
+        role: "user",
+      });
+    }
+    const asks = { question: word, tokens: 800 };
+    const ranForUma = await ranOf(uma, workflow.id, asks);
+    const ranForBen = await ranOf(ben, workflow.id, asks);
+    const { entries } = await readWorkflowState(env, bob, workflow.id);
+    const umaTeam = `Uma's team: ${word} is planned in June.`;
+    expect({
+      uma: ranForUma,
+      benGetsUmasTeam: JSON.stringify(ranForBen).includes(umaTeam),
+      bobSees: JSON.stringify(entries).includes(umaTeam),
+    }).toStrictEqual({
+      // Its state write is refused (`workflow.state_restricted`) after its
+      // recall, which the run host reports as a failure after an effect.
+      uma: { failed: "workflow.failed_after_effect" },
+      benGetsUmasTeam: false,
+      bobSees: false,
     });
   });
 });

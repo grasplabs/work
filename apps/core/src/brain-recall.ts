@@ -5,9 +5,12 @@ import { functionErrors } from "@grasp-os/shared/functions";
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { codeRecallOf, recallAs } from "./brain-next.ts";
+import { apps } from "./db/core/schema.ts";
 import { authorize } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -32,6 +35,13 @@ import { authorize } from "./permissions.ts";
 //   the Brain filters by those inside its own search, so a pack never
 //   holds more than they may read, and never what only they may read
 //   (GRA-1762), whoever the code hands it to.
+// - An App keeps what it recalls where its owner reads it (its data, its
+//   Pages), and an App can't yet be told what of it each reader may see.
+//   So an App's recall is answered only for its owner: a call that acts
+//   for anyone else, an admin using the App included, is refused the
+//   recall (`permission.denied`), whatever else the App answers them.
+//   This is the gate whatever sharing does (app-provenance.ts keeps an
+//   App that recalls unshared too, `platform:brain`).
 // - Nothing of the question or the pack is in a refusal, a log line or
 //   the audit event, which is kept, answered or refused, before the call
 //   returns. What is refused before a call gets here (an App's operation
@@ -64,6 +74,28 @@ export interface RecallCaller {
 /** Whether `input` is a recall as code asks for one (`BrainRecall`). */
 export const isBrainRecall = (input: unknown): boolean =>
   codeRecallOf(input) !== undefined;
+
+/**
+ * Refuses an App's recall for anyone but the App's owner, as
+ * `permission.denied`: what an App recalls it may keep where its owner
+ * reads it. Any other target (a run, a chat) recalls for its own person.
+ */
+const requireAppOwner = async (
+  env: Env,
+  caller: RecallCaller
+): Promise<void> => {
+  if (caller.target?.type !== "app") {
+    return;
+  }
+  const app = await drizzle(env.DB)
+    .select({ owner: apps.ownerId })
+    .from(apps)
+    .where(eq(apps.id, caller.target.id))
+    .get();
+  if (app?.owner !== caller.authority.onBehalfOf) {
+    throw permissionErrors.create("permission.denied", { action: "brain" });
+  }
+};
 
 /** `error` in the function host's words, which carry nothing of the call. */
 const inHostWords = (error: unknown): unknown => {
@@ -112,6 +144,7 @@ export const recallFor = async (
       caller.permissionId,
       caller.context
     );
+    await requireAppOwner(env, caller);
     // From what the person's teams may read alone, never what only they
     // may: nothing code sends can change it.
     const pack: BrainPack = await recallAs(env, caller.authority.onBehalfOf, {

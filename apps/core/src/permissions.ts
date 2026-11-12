@@ -79,6 +79,7 @@ import type { Grantee } from "./data-policy.ts";
 import {
   appMembers,
   apps,
+  appVisitorEntries,
   appVersions,
   auditOutbox,
   permissions,
@@ -1285,11 +1286,11 @@ const requireServedFunction = async (env: Env, row: Row): Promise<void> => {
 };
 
 /**
- * Refuses the platform's `brain` to an App that is shared with anyone: an
- * App that recalls the Brain is its owner's alone for now, since what it
- * keeps of a recall can't be placed (app-provenance.ts, `platform:brain`).
- * Sharing it once granted is refused there, and so is every call of
- * someone it is shared with.
+ * Refuses the platform's `brain` to an App that is shared with anyone or
+ * lets visitors in: an App that recalls the Brain is its owner's alone for
+ * now, since what it keeps of a recall can't be placed (app-provenance.ts,
+ * `platform:brain`). Sharing it or letting visitors in once granted is
+ * refused there, and so is every call of someone it is shared with.
  */
 const requireUnsharedForBrain = async (env: Env, row: Row): Promise<void> => {
   if (
@@ -1299,15 +1300,23 @@ const requireUnsharedForBrain = async (env: Env, row: Row): Promise<void> => {
   ) {
     return;
   }
-  const shared = await drizzle(env.DB)
-    .select({ appId: appMembers.appId })
-    .from(appMembers)
-    .where(eq(appMembers.appId, row.subjectId))
-    .get();
-  if (shared !== undefined) {
+  const db = drizzle(env.DB);
+  const [shared, visited] = await Promise.all([
+    db
+      .select({ appId: appMembers.appId })
+      .from(appMembers)
+      .where(eq(appMembers.appId, row.subjectId))
+      .get(),
+    db
+      .select({ appId: appVisitorEntries.appId })
+      .from(appVisitorEntries)
+      .where(eq(appVisitorEntries.appId, row.subjectId))
+      .get(),
+  ]);
+  if (shared !== undefined || visited !== undefined) {
     throw permissionErrors.create("permission.invalid", {
       issues: [
-        "An App that recalls the Brain can't be shared yet, and this App is shared: take its people and teams off it first.",
+        "An App that recalls the Brain can't be shared yet, and this App is shared or lets visitors in: take its people, teams and visitors off it first.",
       ],
     });
   }

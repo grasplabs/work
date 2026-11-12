@@ -45,6 +45,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { openToUsersSql } from "./app-access.ts";
 import { callVisitorFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
+import { requireNoBrainSource } from "./app-provenance.ts";
 import { grantHeld } from "./app-visitor-grants.ts";
 import { editableApp, toApp } from "./apps.ts";
 import {
@@ -196,6 +197,9 @@ export const setAppVisitors = async (
     throw appVisitorErrors.create("visitor.invalid");
   }
   const found = await editableApp(env, by, app);
+  if (parsed.data.length > 0) {
+    await requireNoBrainSource(env, appIdSchema.parse(found.id));
+  }
   const wanted = [
     ...new Map(
       parsed.data.map((entry) => [`${entry.kind}:${entry.value}`, entry])
