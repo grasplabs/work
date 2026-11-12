@@ -1,6 +1,7 @@
 import { exactCandidatesMax, recallLimit } from "./contract.ts";
 import type {
   FoundBy,
+  FoundMemory,
   FoundPassage,
   Finding,
   OrderedPassage,
@@ -9,7 +10,7 @@ import type {
 import { exactsOf, foundIn } from "./exact.ts";
 import { byBytes, byNearness } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
-import type { Found } from "./pack.ts";
+import type { Entry } from "./pack.ts";
 import { sequenceOf, termsOf } from "./words.ts";
 
 // A recall's pack from what one store or several found (`Finding`, each a
@@ -74,16 +75,20 @@ const allOf = <T extends FoundPassage>(
     }))
   );
 
-/** `passage` as an item of a way's list (pack.ts), found by `how`. */
+/** `passage` as an entry of a way's list (pack.ts), found by `how`. */
 const foundAs = (
   { row, source, version, position, text }: FoundPassage,
   how: FoundBy
-): Found => ({ row, source, version, position, text, found: how });
+): Entry => ({
+  kind: "passage",
+  key: `passage ${row}`,
+  passage: { row, source, version, position, text, found: how },
+});
 
 /** The words way's list, best first, and the telling terms it found. */
 const byWords = (
   findings: readonly Finding[]
-): { found: Found[]; terms: Set<number> } => {
+): { found: Entry[]; terms: Set<number> } => {
   const telling = allOf(findings, ({ words }) => words)
     .toSorted(
       (a, b) =>
@@ -113,7 +118,7 @@ const byExact = (
   findings: readonly Finding[],
   exacts: ReturnType<typeof exactsOf>,
   byWordsRank: ReadonlyMap<number, number>
-): { lists: Found[][]; parts: Set<number>; capped: Set<number> } => {
+): { lists: Entry[][]; parts: Set<number>; capped: Set<number> } => {
   const candidates = allOf(findings, ({ exact }) => exact);
   const capped = new Set(findings.flatMap((finding) => finding.capped));
   // Each part's first `exactCandidatesMax` of all stores, as one store's
@@ -164,11 +169,83 @@ const byExact = (
 };
 
 /** The meaning way's list: the nearest of all stores, by cosine. */
-const byMeaning = (findings: readonly Finding[]): Found[] =>
+const byMeaning = (findings: readonly Finding[]): Entry[] =>
   allOf(findings, ({ meaning }) => meaning)
     .toSorted((a, b) => byNearness(a, b) || a.store - b.store)
     .slice(0, recallLimit)
     .map((passage) => foundAs(passage, "meaning"));
+
+/** A memory of the store `store`, as merged. */
+type MemoryOf = FoundMemory & { store: number };
+
+/** A memory's key in the fused lists: its store's and its id. */
+const memoryKeyOf = ({ store, id }: MemoryOf): string =>
+  `memory ${store} ${id}`;
+
+/** After a way's own order: confirmed first, then newer, then by store and row. */
+const byMemory = (a: MemoryOf, b: MemoryOf): number =>
+  Number(a.confirmed === null) - Number(b.confirmed === null) ||
+  b.learnedAt.getTime() - a.learnedAt.getTime() ||
+  a.store - b.store ||
+  b.row - a.row;
+
+/**
+ * The memory ways' lists, merged over the stores as one store's
+ * statements order them (memories.ts, recall-memories.ts): by words, more
+ * of the question's telling words first, then more as written; along
+ * entities, the nearest step first; each then as `byMemory`, the first
+ * `recallLimit` of all. A contested memory carries the other sides its
+ * store found (an entity is one store's: sides are never across stores).
+ */
+const memoriesOf = (
+  findings: readonly Finding[]
+): { words: Entry[]; entities: Entry[] } => {
+  const tagged = (pick: (memories: Finding["memories"]) => FoundMemory[]) =>
+    findings.flatMap((finding, store) =>
+      pick(finding.memories).map((memory) => ({ ...memory, store }))
+    );
+  const all = [
+    ...tagged(({ words }) => words),
+    ...tagged(({ entities }) => entities),
+    ...tagged(({ rivals }) => rivals),
+  ];
+  const rivalsOf = (memory: MemoryOf) =>
+    memory.contested
+      ? all
+          .filter(
+            (other) =>
+              other.store === memory.store &&
+              other.id !== memory.id &&
+              other.contested &&
+              other.about === memory.about &&
+              other.attribute === memory.attribute
+          )
+          .filter(
+            (other, index, list) =>
+              list.findIndex(({ id }) => id === other.id) === index
+          )
+          .map((other) => ({ key: memoryKeyOf(other), memory: other }))
+      : [];
+  const entryOf = (memory: MemoryOf, found: "words" | "entities"): Entry => ({
+    kind: "memory",
+    key: memoryKeyOf(memory),
+    memory,
+    found,
+    rivals: rivalsOf(memory),
+  });
+  return {
+    words: tagged(({ words }) => words)
+      .toSorted(
+        (a, b) => b.words - a.words || b.exact - a.exact || byMemory(a, b)
+      )
+      .slice(0, recallLimit)
+      .map((memory) => entryOf(memory, "words")),
+    entities: tagged(({ entities }) => entities)
+      .toSorted((a, b) => a.step - b.step || byMemory(a, b))
+      .slice(0, recallLimit)
+      .map((memory) => entryOf(memory, "entities")),
+  };
+};
 
 /**
  * The pack for `question` within `budget` tokens from what `findings` (one
@@ -194,7 +271,11 @@ export const packAcross = (
   const exact = byExact(
     findings,
     exacts,
-    new Map(words.found.map(({ row }, rank) => [row, rank]))
+    new Map(
+      words.found.flatMap((entry, rank) =>
+        entry.kind === "passage" ? [[entry.passage.row, rank]] : []
+      )
+    )
   );
   const notFound = [
     ...exacts
@@ -206,8 +287,15 @@ export const packAcross = (
       )
       .map(({ word }) => word),
   ];
+  const memories = memoriesOf(findings);
   return packOf(
-    fuse([...exact.lists, words.found, byMeaning(findings)]),
+    fuse([
+      ...exact.lists,
+      words.found,
+      memories.words,
+      memories.entities,
+      byMeaning(findings),
+    ]),
     { terms: terms.telling, exacts },
     budget,
     notFound

@@ -111,6 +111,7 @@ const stepWords: Record<BrainStep, string> = {
 const wayWords: Record<BrainSearchWay, string> = {
   words: "Words",
   exact: "Exact parts",
+  entities: "Entities",
   meaning: "Meaning",
 };
 

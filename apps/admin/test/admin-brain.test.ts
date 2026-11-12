@@ -211,6 +211,7 @@ const brainReport = (bytes: number): BrainReport => ({
     ways: {
       words: { recalls: 40, failed: 0 },
       exact: { recalls: 8, failed: 0 },
+      entities: { recalls: 0, failed: 0 },
       meaning: { recalls: 0, failed: 0 },
     },
     withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
@@ -588,6 +589,7 @@ describe("how an organization's Brain is doing", () => {
         ways: {
           words: { recalls: 40, failed: 0 },
           exact: { recalls: 8, failed: 0 },
+          entities: { recalls: 0, failed: 0 },
           meaning: { recalls: 30, failed: 2 },
         },
         withoutMeaning: { timed_out: 3, failed: 0, refused: 1, unusable: 0 },

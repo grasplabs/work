@@ -1013,6 +1013,10 @@ const scenario = (people: readonly string[], seed: number) => {
             found,
           })
         ),
+        // No memories in these scenarios: those are tested at random in
+        // the store (packages/brain-next entities-recall.test.ts).
+        memories: [],
+        contested: [],
         notFound: expected.notFound,
         truncated: false,
       },

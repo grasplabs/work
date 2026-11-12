@@ -116,7 +116,12 @@ export type BrainStep = (typeof brainSteps)[number];
  * the store's overview names (core's brain-next.ts holds the two to the
  * same keys, as the steps).
  */
-export const brainSearchWays = ["words", "exact", "meaning"] as const;
+export const brainSearchWays = [
+  "words",
+  "exact",
+  "entities",
+  "meaning",
+] as const;
 export type BrainSearchWay = (typeof brainSearchWays)[number];
 
 /**

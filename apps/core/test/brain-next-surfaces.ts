@@ -1292,6 +1292,7 @@ export const coreProbes = {
     return asked;
   },
   recallAs: async (probing) => {
+    await recallFixture(probing);
     const recall = async (asking: PackAsk) =>
       await coreBrain.recallAs(env, probing.personId, asking);
     const hidden = probing.markers.join(" ");
@@ -1302,6 +1303,10 @@ export const coreProbes = {
         "the shared word",
         async () =>
           await recall({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await recall({ question: "Plain", budget: whole })
       ),
       await answer(
         "nothing",
@@ -2980,10 +2985,15 @@ export const storeProbes = {
   // What recall finds before it is packed: the same questions, answered
   // as lists with their order keys, must hold no marker either.
   find: async (probing) => {
+    await recallFixture(probing);
     const find = async (asking: PackAsk) =>
       await store().find({ ...asking, reader: probing.reader });
     const whole = { tokens: recallBudgetMax };
     return [
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await find({ question: "Plain", budget: whole })
+      ),
       ...(await askedOfMarkers(probing, momentsOf(probing), find)),
       await answer(
         "the shared word",
@@ -2997,6 +3007,7 @@ export const storeProbes = {
   },
   recall: async (probing) => {
     const { reader, markers } = probing;
+    await recallFixture(probing);
     const recall = async (asking: PackAsk, as: Reader = reader) =>
       await store().recall({ ...asking, reader: as });
     const hidden = markers.join(" ");
@@ -3064,6 +3075,10 @@ export const storeProbes = {
         "the shared word",
         async () =>
           await recall({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await recall({ question: "Plain", budget: whole })
       ),
       await answer(
         "nothing",

@@ -336,6 +336,7 @@ const nothingFound = {
   exact: [],
   capped: [],
   meaning: [],
+  memories: { words: [], entities: [], rivals: [] },
 };
 
 /** When `store`'s alarm is set for, if it is. */

@@ -259,6 +259,7 @@ const nothingFound: Finding = {
   exact: [],
   capped: [],
   meaning: [],
+  memories: { words: [], entities: [], rivals: [] },
 };
 
 const encoder = new TextEncoder();

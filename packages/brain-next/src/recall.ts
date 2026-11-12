@@ -15,6 +15,8 @@ import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { readableSql } from "./reader-sets.ts";
 import type { WayRunner } from "./recall-counts.ts";
+import { findMemories, memoriesByTheirWords } from "./recall-memories.ts";
+import type { Reached } from "./recall-memories.ts";
 import { nearChunks } from "./vectors.ts";
 import { termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
@@ -437,10 +439,25 @@ export const find = (
   const exacts = exactsOf(question);
   const terms = termsOf(question);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  const words =
+  // Memories are read as of the moment asked, or now: their two clocks
+  // say what was believed and true then (recall-memories.ts).
+  const memoriesAt = asOf?.getTime() ?? Date.now();
+  const {
+    memoryWords,
+    ...words
+  }: Pick<Finding, "words" | "stopWords" | "terms"> & {
+    memoryWords: Reached[];
+  } =
     terms.telling.length === 0
-      ? { words: [], stopWords: [], terms: [] }
-      : way("words", () => byWords(sql, terms, reader, at));
+      ? { words: [], stopWords: [], terms: [], memoryWords: [] }
+      : way("words", () => ({
+          ...byWords(sql, terms, reader, at),
+          memoryWords: memoriesByTheirWords(sql, {
+            question,
+            reader,
+            at: memoriesAt,
+          }),
+        }));
   const exact =
     exacts.length === 0
       ? { exact: [], capped: [] }
@@ -451,7 +468,12 @@ export const find = (
     asOf !== undefined
       ? []
       : way("meaning", () => byMeaning(sql, meaning, reader));
-  return { ...words, ...exact, meaning: meant };
+  const memories = findMemories(
+    sql,
+    { question, reader, at: memoriesAt, words: memoryWords },
+    way
+  );
+  return { ...words, ...exact, meaning: meant, memories };
 };
 
 /**

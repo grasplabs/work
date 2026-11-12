@@ -24,6 +24,7 @@ import type {
   Memory,
   Pack,
   PackItem,
+  PackMemory,
   Proposal,
   Reader,
   RecallRequest,
@@ -246,9 +247,15 @@ export interface RecalledItem extends Omit<PackItem, "source"> {
   source: SourceRef;
 }
 
+/** A memory of a pack, citing its source as its producer named it. */
+export interface RecalledMemory extends Omit<PackMemory, "source"> {
+  source: SourceVersionRef | null;
+}
+
 /** A pack, as recall answers (`recallAs`). */
-export interface RecalledPack extends Omit<Pack, "items"> {
+export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
   items: RecalledItem[];
+  memories: RecalledMemory[];
 }
 
 /** A memory, citing its source as its producer named it. */
@@ -438,7 +445,9 @@ export const recallAs = async (
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
-  const { items, notFound, truncated } = await brain(env).recall({
+  const { items, memories, contested, notFound, truncated } = await brain(
+    env
+  ).recall({
     question,
     reader,
     budget,
@@ -454,6 +463,11 @@ export const recallAs = async (
       whole,
       found,
     })),
+    memories: memories.map((memory) => ({
+      ...memory,
+      source: versionRefOf(memory.source),
+    })),
+    contested,
     notFound,
     truncated,
   };

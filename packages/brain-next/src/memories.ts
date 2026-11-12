@@ -146,7 +146,7 @@ const confirmationSql = `(
 )`;
 
 /** A memory as the statements below return it. */
-interface MemoryRow extends Record<string, SqlStorageValue> {
+export interface MemoryRow extends Record<string, SqlStorageValue> {
   row: number;
   entity_row: number;
   id: string;
@@ -161,6 +161,7 @@ interface MemoryRow extends Record<string, SqlStorageValue> {
   quote: string | null;
   source: string | null;
   version: number | null;
+  version_row: number | null;
   writer: string | null;
   speaker: string;
   valid_from: number | null;
@@ -173,7 +174,7 @@ interface MemoryRow extends Record<string, SqlStorageValue> {
 }
 
 /** What a statement over memories is made of (`memoriesSql`). */
-interface MemoriesQuery {
+export interface MemoriesQuery {
   /** Common tables the others use, after `readable`. */
   prelude?: string;
   /** The memories asked about, as rows (`row`). */
@@ -204,7 +205,7 @@ interface MemoriesQuery {
  * one-value attribute) are judged with them, and returned only if asked
  * about too.
  */
-const memoriesSql = ({
+export const memoriesSql = ({
   prelude,
   base,
   filter,
@@ -243,7 +244,7 @@ SELECT m.row AS row, about.row AS entity_row, m.id AS id, about.id AS about,
   m.attribute AS attribute, object.id AS object, m.value AS value,
   m.value_key AS value_key, m.lineage AS lineage, m.type AS type,
   m.statement AS statement, m.quote AS quote, based.source AS source,
-  based.version AS version, m.writer AS writer, m.speaker AS speaker,
+  based.version AS version, m.version_row AS version_row, m.writer AS writer, m.speaker AS speaker,
   m.valid_from AS valid_from, m.valid_until AS valid_until,
   m.learned_at AS learned_at, judged.ended_at AS ended_at,
   judged.is_current AS is_current,
@@ -287,7 +288,7 @@ const confirmationOf = (
 };
 
 /** `row` as the contract's `Memory`. */
-const memoryOf = (row: MemoryRow): Memory => {
+export const memoryOf = (row: MemoryRow): Memory => {
   const confirmed = confirmationOf(row.confirmation);
   return {
     id: row.id,
@@ -317,7 +318,7 @@ const memoryOf = (row: MemoryRow): Memory => {
 };
 
 /** Runs a statement over memories with its bindings, as rows. */
-const memoryRows = (
+export const memoryRows = (
   sql: SqlStorage,
   statement: string,
   first: SqlStorageValue,
@@ -604,15 +605,22 @@ matched AS MATERIALIZED (
 )`,
   base: "SELECT row FROM matched",
   joins: "\nJOIN matched ON matched.row = m.row",
-  columns: ", matched.words AS words",
+  columns: ", matched.words AS words, matched.exact AS exact",
   filter: "judged.is_current = 1",
   order: `matched.words DESC, matched.exact DESC, confirmation IS NULL,
   m.learned_at DESC, m.row DESC`,
 });
 
-/** A memory the words way found, with how many of the question's telling words it holds. */
+/**
+ * A memory the words way found: how many of the question's telling words
+ * it holds in any form and as written, and its row and its version's row
+ * in this store.
+ */
 export interface MemoryFound extends Memory {
   words: number;
+  exact: number;
+  row: number;
+  versionRow: number | null;
 }
 
 /**
@@ -638,7 +646,7 @@ export const memoriesByWords = (
     return [];
   }
   return sql
-    .exec<MemoryRow & { words: number }>(
+    .exec<MemoryRow & { words: number; exact: number }>(
       wordsSql,
       JSON.stringify(telling),
       reader.person,
@@ -647,5 +655,11 @@ export const memoriesByWords = (
       limit
     )
     .toArray()
-    .map((row) => ({ ...memoryOf(row), words: row.words }));
+    .map((row) => ({
+      ...memoryOf(row),
+      words: row.words,
+      exact: row.exact,
+      row: row.row,
+      versionRow: row.version_row,
+    }));
 };

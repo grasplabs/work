@@ -530,6 +530,8 @@ describe("the cited pack", () => {
           found: "words",
         },
       ],
+      memories: [],
+      contested: [],
       // A date is words: found apart, or not, as any word.
       notFound: [
         `${hidden} plan`,

@@ -265,9 +265,10 @@ export type RecallRequest = z.infer<typeof recallRequestSchema>;
 
 /**
  * The ways recall searches by (`Brain.recall`): words (its stop words
- * included), exact parts and meaning.
+ * included, over passages and memories), exact parts, the entities the
+ * question names and their relations, and meaning.
  */
-export const searchWays = ["words", "exact", "meaning"] as const;
+export const searchWays = ["words", "exact", "entities", "meaning"] as const;
 export type SearchWay = (typeof searchWays)[number];
 
 /**
@@ -334,6 +335,13 @@ export interface PackItem extends SourceVersionRef {
  */
 export interface Pack {
   items: PackItem[];
+  /**
+   * The memories found, best first, by the same fused order as `items`
+   * and from the same budget (contract.ts `PackMemory`).
+   */
+  memories: PackMemory[];
+  /** The contested facts among `memories`, each with every side packed. */
+  contested: PackContested[];
   notFound: string[];
   truncated: boolean;
 }
@@ -394,6 +402,17 @@ export interface Finding {
    * cosine and when their version was added, which ties are ordered by.
    */
   meaning: (FoundPassage & { score: number; addedAt: number })[];
+  /**
+   * The memories found: by their statement's words, best first, at most
+   * `recallLimit`; along the relations of the entities the question
+   * names, nearest first, at most `recallLimit`; and the other current
+   * sides of each contested one found.
+   */
+  memories: {
+    words: FoundMemory[];
+    entities: FoundMemory[];
+    rivals: FoundMemory[];
+  };
 }
 
 /** An ASCII letter or the space: a third of a token each (`tokensOf`). */
@@ -1681,6 +1700,92 @@ export const memberEntityRequestSchema = z.strictObject({
   reader: readerSchema,
 });
 export type MemberEntityRequest = z.infer<typeof memberEntityRequestSchema>;
+
+// Memories in a recall's pack (recall-memories.ts, pack.ts).
+
+/**
+ * How recall found a memory: by its statement's words (`words`), or along
+ * the relations of an entity the question names (`entities`), at most two
+ * steps; or as another side of a contested fact it found (`contested`).
+ */
+export type MemoryFoundBy = "words" | "entities" | "contested";
+
+/**
+ * A memory one store found for a recall: its row in that store and what
+ * its way orders it by, as the way's statement gave them; its passage
+ * around its quote (`context`: the chunk of its version holding the
+ * quote, or none), and for the entities way how many steps from an
+ * entity the question names (0 to 2).
+ */
+export interface FoundMemory extends Memory {
+  row: number;
+  words: number;
+  exact: number;
+  step: number;
+  context: { position: number; text: string } | null;
+}
+
+/**
+ * A memory in a pack: its stable id and what it is about, its statement,
+ * its source (or writer) to cite, whose word it is, its dates; its quote
+ * and the passage around it (`context`) when the budget allowed (null
+ * otherwise, or when it has none), whether it is contested, and how it
+ * was found.
+ */
+export interface PackMemory {
+  memory: MemoryId;
+  about: EntityId;
+  attribute: string | null;
+  object: EntityId | null;
+  /**
+   * What it says, as a kind. An instruction is in a pack only for its
+   * writer, as their own (`writer` is the reader): a consumer presents it
+   * as an instruction only in that person's own chats.
+   */
+  type: MemoryType;
+  statement: string;
+  quote: string | null;
+  context: { position: number; text: string } | null;
+  source: SourceVersionRef | null;
+  writer: string | null;
+  speaker: Speaker;
+  validFrom: Date | null;
+  validUntil: Date | null;
+  learnedAt: Date;
+  contested: boolean;
+  confirmed: boolean;
+  found: MemoryFoundBy;
+}
+
+/**
+ * A contested fact in a pack: an entity's attribute for which the pack
+ * holds current memories of more than one lineage saying different
+ * things, by their ids, each in `memories`.
+ */
+export interface PackContested {
+  about: EntityId;
+  attribute: string;
+  memories: MemoryId[];
+}
+
+/**
+ * The tokens a memory takes of a pack's budget: its statement, quote and
+ * context as held, and its citation (its id and source or writer).
+ */
+export const packMemoryTokens = ({
+  memory,
+  statement,
+  quote,
+  context,
+  source,
+  writer,
+}: PackMemory): number =>
+  tokensOf(statement) +
+  tokensOf(quote ?? "") +
+  tokensOf(context?.text ?? "") +
+  tokensOf(
+    `${memory} ${source === null ? (writer ?? "") : `${source.source} ${source.version}`}`
+  );
 
 /** The Brain, as its host calls it. */
 export interface Brain {
