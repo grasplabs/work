@@ -28,6 +28,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import type { z } from "zod";
+
 import { parseModelRef } from "../apps/core/src/model-catalog.ts";
 import {
   answeringPassageOf,
@@ -35,7 +37,6 @@ import {
   everythingBudgetOf,
   everythingCapOf,
   everythingFor,
-  judgedAnswerTokensMax,
   packTokens,
   questionTokensMax,
 } from "../apps/core/test/fixtures/brain-eval/everything.ts";
@@ -52,6 +53,7 @@ import {
   modelResultSchema,
   modelRunEndSchema,
   modelRunInfoSchema,
+  keptAs,
   summarizeModelRun,
 } from "./brain-eval-model-scoring.ts";
 
@@ -103,20 +105,23 @@ const budgetOf = (question: (typeof questions)[number]): number =>
     cap ?? Number.POSITIVE_INFINITY
   );
 
-const tightest = Math.min(...questions.map(budgetOf));
-if (!(tightest > 0)) {
-  fail(
-    `${model}'s window (${contextWindow} tokens), or the cut, leaves no room for "everything"`
-  );
-}
+/**
+ * `question`'s "everything", as the run builds it: refused, as the run
+ * refuses it (`everythingFor`), when the window or the cut leaves no room.
+ */
+const everythingOf = (question: (typeof questions)[number]) => {
+  try {
+    return everythingFor(sources, askerOf(question), budgetOf(question));
+  } catch (error) {
+    return fail(
+      `${model} (window ${contextWindow} tokens): ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+};
 
 // What a run would send: every question's "everything", as the run builds it.
 const planned = questions.map((question) => {
-  const everything = everythingFor(
-    sources,
-    askerOf(question),
-    budgetOf(question)
-  );
+  const everything = everythingOf(question);
   return {
     everything,
     tokens: questionTokensMax(
@@ -136,7 +141,7 @@ const mostUsd = costOf(most, cost);
 const plan = [
   `Brain evaluation against a model · set ${brainEvalSet.version} · ${questions.length} questions over ${sources.length} sources`,
   `Model: ${model} (window ${contextWindow} tokens; list price $${cost.input} / $${cost.output} per million input / output tokens), also the judge.`,
-  `Each question: the model answers from the Brain's recall pack (at most ${packTokens} tokens) and from everything the asker may read, newest first, cut at ${cap === null ? "the model's window" : `${cap} tokens`} (${Math.min(...sizes)} to ${Math.max(...sizes)} tokens; cut for ${planned.filter(({ everything }) => everything.cut).length} questions). The pack arm's recall searches by words and exact parts only: the run embeds no passage. The judge checks each answer to a question with an answer against the passage that answers it, reading at most ${judgedAnswerTokensMax} tokens of it.`,
+  `Each question: the model answers from the Brain's recall pack (at most ${packTokens} tokens) and from everything the asker may read, newest first, cut at ${cap === null ? "the model's window" : `${cap} tokens`} (${Math.min(...sizes)} to ${Math.max(...sizes)} tokens; cut for ${planned.filter(({ everything }) => everything.cut).length} questions). The pack arm's recall searches by words and exact parts only: the run embeds no passage. The judge checks each answer to a question with an answer against the passage that answers it.`,
   `At most ${most.input} input and ${most.output} output tokens (the Brain's token count, above a real tokenizer's; every output at its limit): at most $${mostUsd.toFixed(2)} at list price for every question.`,
 ].join("\n");
 
@@ -172,45 +177,64 @@ const run = spawnSync(
 );
 const output = `${run.stdout}${run.stderr}`;
 
-const linesAfter = (marker: string): unknown[] =>
-  output.split("\n").flatMap((line): unknown[] => {
+/**
+ * What the run printed after `marker`, a JSON value a line, parsed by
+ * `schema`: a line a crash cut short is left out, never the whole run.
+ */
+const linesAfter = <T>(marker: string, schema: z.ZodType<T>): T[] =>
+  output.split("\n").flatMap((line): T[] => {
     const at = line.indexOf(`${marker} `);
-    return at === -1 ? [] : [JSON.parse(line.slice(at + marker.length + 1))];
+    if (at === -1) {
+      return [];
+    }
+    try {
+      const parsed = schema.safeParse(
+        JSON.parse(line.slice(at + marker.length + 1))
+      );
+      return parsed.success ? [parsed.data] : [];
+    } catch {
+      return [];
+    }
   });
 
-const [info] = linesAfter("BRAIN_EVAL_MODEL_RUN").map((line) =>
-  modelRunInfoSchema.parse(line)
-);
-const [end] = linesAfter("BRAIN_EVAL_MODEL_END").map((line) =>
-  modelRunEndSchema.parse(line)
-);
-const results = linesAfter("BRAIN_EVAL_MODEL_RESULT").map((line) =>
-  modelResultSchema.parse(line)
-);
-if (info === undefined || end === undefined || results.length !== end.asked) {
-  process.stderr.write(`${output.split("\n").slice(-60).join("\n")}\n`);
-  fail("The run did not finish: see its output above. Nothing was kept.");
+const [info] = linesAfter("BRAIN_EVAL_MODEL_RUN", modelRunInfoSchema);
+const [printedEnd] = linesAfter("BRAIN_EVAL_MODEL_END", modelRunEndSchema);
+const results = linesAfter("BRAIN_EVAL_MODEL_RESULT", modelResultSchema);
+const tail = `${output.split("\n").slice(-60).join("\n")}\n`;
+if (info === undefined || (printedEnd === undefined && results.length === 0)) {
+  process.stderr.write(tail);
+  fail(
+    "The run did not finish: see its output above. Nothing was asked, so nothing was kept."
+  );
 }
+// What was asked is kept, since it was paid for: marked failed when the
+// run failed, was cut off before its end line or leaked, and partial when
+// it stopped at its budget (`keptAs`).
 const summary = summarizeModelRun(results, cost);
+const { end, failed, partial, suffix } = keptAs(
+  run.status,
+  printedEnd,
+  results,
+  summary.leaks.length
+);
 process.stdout.write(`${modelReport(summary, end, questions.length)}\n`);
-// What was asked is kept even when the run failed (a provider's error part
-// of the way, a leak), marked so, since it was paid for.
-const passed = run.status === 0 && !end.failed && summary.leaks.length === 0;
 const out = path.join(root, ".brain-eval");
 mkdirSync(out, { recursive: true });
 const at = new Date().toISOString();
 const file = path.join(
   out,
-  `model-${at.replaceAll(":", "-")}-${sha.slice(0, 8)}${passed ? "" : "-failed"}.json`
+  `model-${at.replaceAll(":", "-")}-${sha.slice(0, 8)}${suffix}.json`
 );
 writeFileSync(
   file,
-  `${JSON.stringify({ identity: { info, sha, at }, failed: !passed, end, results, summary }, null, 2)}\n`
+  `${JSON.stringify({ identity: { info, sha, at }, failed, partial, end, results, summary }, null, 2)}\n`
 );
-if (!passed) {
+if (failed) {
   process.stderr.write(
-    `\n${run.status === 0 ? "" : `${output.split("\n").slice(-60).join("\n")}\n`}The run failed, or an answer held what its asker may not read: see above.\n`
+    `\n${run.status === 0 ? "" : tail}The run failed, was cut off, or an answer held what its asker may not read: see above.\n`
   );
 }
-process.stdout.write(`\nResult${passed ? "" : ", marked failed"}: ${file}\n`);
-process.exit(passed ? 0 : 1);
+process.stdout.write(
+  `\nResult${suffix === "" ? "" : `, marked ${suffix.slice(1)}`}: ${file}\n`
+);
+process.exit(failed ? 1 : 0);

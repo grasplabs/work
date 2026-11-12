@@ -112,8 +112,11 @@ export const modelRunEndSchema = z.object({
   stoppedAtBudget: z.boolean(),
   /** A call failed (a provider's error, a refused context): the results are those asked before. */
   failed: z.boolean(),
-  /** What core recorded the run spent, in US dollars. */
-  spentUsd: z.number().nonnegative(),
+  /**
+   * What core recorded the run spent, in US dollars; null when the run
+   * died before it said (the script keeps its results all the same).
+   */
+  spentUsd: z.number().nonnegative().nullable(),
 });
 export type ModelRunEnd = z.infer<typeof modelRunEndSchema>;
 
@@ -257,10 +260,52 @@ const dollars = (usd: number): string => `$${usd.toFixed(2)}`;
 const costLine = (arm: string, cost: ArmCost): string =>
   `${arm}: ${cost.inputTokens} input and ${cost.outputTokens} output tokens, ${dollars(cost.usd)} at list price`;
 
+/** How a run's results are kept: as passed, `-partial` or `-failed`. */
+export interface Kept {
+  /** How it ended: as it printed, or, cut off before it said, as failed. */
+  end: ModelRunEnd;
+  failed: boolean;
+  /** Stopped at its budget: a sample of each group, not the whole set. */
+  partial: boolean;
+  /** What the result file's name ends with, before `.json`. */
+  suffix: "" | "-partial" | "-failed";
+}
+
+/**
+ * How a run's results are kept, since they were paid for whatever
+ * happened: failed when it exited otherwise than 0, a call failed, it was
+ * cut off before its end line (a timeout, workerd gone: then its results
+ * are what it printed, and what it spent is unknown), or an answer leaked;
+ * partial when it stopped at its budget.
+ */
+export const keptAs = (
+  exited: number | null,
+  printed: ModelRunEnd | undefined,
+  results: readonly ModelResult[],
+  leaks: number
+): Kept => {
+  const end = printed ?? {
+    asked: results.length,
+    stoppedAtBudget: false,
+    failed: true,
+    spentUsd: null,
+  };
+  const failed =
+    exited !== 0 || end.failed || results.length !== end.asked || leaks > 0;
+  const partial = end.stoppedAtBudget;
+  let suffix: Kept["suffix"] = "";
+  if (failed) {
+    suffix = "-failed";
+  } else if (partial) {
+    suffix = "-partial";
+  }
+  return { end, failed, partial, suffix };
+};
+
 /** How the run ended, in a line. */
 const endLine = (end: ModelRunEnd, questions: number): string => {
   if (end.failed) {
-    return `FAILED after ${end.asked} of ${questions} questions: a call failed (see the run's output). The results above are those asked before it.`;
+    return `FAILED after ${end.asked} of ${questions} questions: a call failed, or the run was cut off (see the run's output). The results above are those asked before it.`;
   }
   return end.stoppedAtBudget
     ? `STOPPED AT THE BUDGET after ${end.asked} of ${questions} questions (asked in a seeded order, so each group is a sample).`
@@ -283,7 +328,7 @@ export const modelReport = (
     `Right: a question with an answer when the judge (the same model) found it correct against the passage that answers it; one with no answer, or with its answer hidden from the asker, when the model said it isn't there. ± and Δ [95%]: seeded bootstrap over questions. "pack vs everything": exact sign test (McNemar) on the questions only one arm got right, at p < 0.05, each group on its own.`,
     `"everything" was cut at its budget for ${summary.cut} of ${end.asked} questions.`,
     endLine(end, questions),
-    `Cost, ${costLine("pack", summary.cost.pack)}; ${costLine("everything", summary.cost.everything)}. Core recorded ${dollars(end.spentUsd)} spent.`,
+    `Cost, ${costLine("pack", summary.cost.pack)}; ${costLine("everything", summary.cost.everything)}. ${end.spentUsd === null ? "What core recorded as spent is unknown: the run died before it said; the provider's own usage says." : `Core recorded ${dollars(end.spentUsd)} spent.`}`,
     summary.leaks.length === 0
       ? "Leaks: none. No answer held what its asker may not read."
       : `LEAKS in ${summary.leaks.length} answers: ${summary.leaks.map(({ id, arm, leaks }) => `${id} (${arm}: ${leaks.length})`).join("; ")}`,

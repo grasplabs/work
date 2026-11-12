@@ -76,19 +76,15 @@ export interface Everything {
 }
 
 /**
- * The longest start of `text` that `count` puts at most at `tokens`: by
- * halves, since the count only grows with the text.
+ * The longest start of `text` whose block, under `key`, takes at most
+ * `tokens`: by halves, since `tokensOf` only grows with the text.
  */
-const startWithin = (
-  text: string,
-  tokens: number,
-  count: (start: string) => number
-): string => {
+const cutTo = (key: string, text: string, tokens: number): string => {
   let low = 0;
   let high = text.length;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
-    if (count(text.slice(0, middle)) <= tokens) {
+    if (tokensOf(sourceBlock(key, text.slice(0, middle))) <= tokens) {
       low = middle;
     } else {
       high = middle - 1;
@@ -96,13 +92,6 @@ const startWithin = (
   }
   return text.slice(0, low);
 };
-
-/**
- * The longest start of `text` whose block, under `key`, takes at most
- * `tokens`: by halves, since `tokensOf` only grows with the text.
- */
-const cutTo = (key: string, text: string, tokens: number): string =>
-  startWithin(text, tokens, (start) => tokensOf(sourceBlock(key, start)));
 
 /**
  * Everything `asker` may read of `sources` (in the set's order, oldest
@@ -181,20 +170,6 @@ export const answeringPassageOf = (
   );
 };
 
-/**
- * The most of an answer the judge reads, counted as everything else in
- * the bound is (`tokensOf`): an answer is bounded by the model in real
- * tokens, which `tokensOf` counts several times over (a 1,024-token
- * English answer is about 4,000), so the judge reads at most this much of
- * it, whatever the tokenizer, and the bound holds. Far past the one or two
- * sentences asked for.
- */
-export const judgedAnswerTokensMax = 4 * outputTokensMax;
-
-/** The answer as the judge reads it: cut at {@link judgedAnswerTokensMax}. */
-export const judgedAnswerOf = (answer: string): string =>
-  startWithin(answer, judgedAnswerTokensMax, (text) => tokensOf(text));
-
 /** Input and output tokens. */
 export interface Tokens {
   input: number;
@@ -217,12 +192,15 @@ export const questionTokensMax = (
     tokensOf(answerSystem) + tokensOf(answerInput(question.question, ""));
   const answers = 2;
   const verdicts = question.expects.kind === "answer" ? 2 : 0;
-  // `tokensOf` of a joined text is at most the sum of its parts', so the
-  // answer the judge reads adds at most its own cap.
+  // The answer the judge reads back is the model's own output, at most
+  // `outputTokensMax` in the provider's own tokens: that term is in
+  // provider tokens, as the budget check reads spend (what core recorded of
+  // the provider's usage). The rest is counted by `tokensOf`, which counts
+  // more than a real tokenizer does for prose.
   const judged =
     tokensOf(judgeSystem) +
     tokensOf(judgeInput(question.question, passage, "")) +
-    judgedAnswerTokensMax;
+    outputTokensMax;
   return {
     input: 2 * asked + everything + packTokens + verdicts * judged,
     output: (answers + verdicts) * outputTokensMax,

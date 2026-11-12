@@ -18,7 +18,6 @@ import {
   everythingFor,
   judgeInput,
   judgeSystem,
-  judgedAnswerOf,
   judgedCorrect,
   outputTokensMax,
   packTokens,
@@ -140,7 +139,7 @@ const answerAndJudge = async (
     const verdict = await ask(
       "brain.eval.judge",
       judgeSystem,
-      judgeInput(question.question, passage, judgedAnswerOf(answered.text))
+      judgeInput(question.question, passage, answered.text)
     );
     correct = judgedCorrect(verdict.text);
     input += verdict.input;
@@ -223,10 +222,20 @@ describe("the Brain evaluation against a real model", () => {
           );
         }
       }
-      const [fromPack, fromEverything] = await Promise.all([
+      // Both arms settle before either's failure is thrown, so the run ends
+      // only once nothing it started still spends.
+      const [packed, given] = await Promise.allSettled([
         answerAndJudge(question, "pack", pack, passage),
         answerAndJudge(question, "everything", everything.text, passage),
       ]);
+      if (packed.status === "rejected") {
+        throw packed.reason;
+      }
+      if (given.status === "rejected") {
+        throw given.reason;
+      }
+      const fromPack = packed.value;
+      const fromEverything = given.value;
       for (const [arm, result] of [
         ["pack", fromPack],
         ["everything", fromEverything],

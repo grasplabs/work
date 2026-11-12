@@ -10,7 +10,6 @@ import {
   everythingFor,
   judgeInput,
   judgeSystem,
-  judgedAnswerOf,
   judgedCorrect,
   outputTokensMax,
   packTokens,
@@ -32,7 +31,11 @@ import {
 // (fixtures/brain-eval/set.ts): the repository's root depends on no package.
 // oxlint-disable-next-line no-restricted-imports -- see above
 import { tokensOf } from "../packages/brain-next/src/contract.ts";
-import { modelReport, summarizeModelRun } from "./brain-eval-model-scoring.ts";
+import {
+  keptAs,
+  modelReport,
+  summarizeModelRun,
+} from "./brain-eval-model-scoring.ts";
 import type { ModelResult } from "./brain-eval-model-scoring.ts";
 
 // The Brain evaluation's run against a model (GRA-1813), its pure parts:
@@ -130,14 +133,6 @@ describe("everything the asker may read", () => {
   });
 });
 
-/**
- * An answer longer than any a model gives within its output limit: past
- * {@link outputTokensMax} real tokens of plain English many times over.
- */
-const longest = "The answer is in the handbook, section 4.2. ".repeat(
-  outputTokensMax
-);
-
 describe("the most a question can cost", () => {
   it("covers what both answers and both verdicts send and get back", () => {
     const short = questions.filter(
@@ -149,12 +144,13 @@ describe("the most a question can cost", () => {
       const most = questionTokensMax(question, everything.tokens, passage);
       // What the run sends at most: both answers with their contexts (the
       // pack at its budget), and both verdicts, each with the passage and
-      // the longest answer a model gives, as the judge reads it.
+      // the model's answer read back at its limit, `outputTokensMax` of the
+      // provider's own tokens, which the provider counts as it does the
+      // spend the budget is checked against.
       const verdict =
         tokensOf(judgeSystem) +
-        tokensOf(
-          judgeInput(question.question, passage, judgedAnswerOf(longest))
-        );
+        tokensOf(judgeInput(question.question, passage, "")) +
+        outputTokensMax;
       const sent =
         tokensOf(answerSystem) +
         tokensOf(answerInput(question.question, everything.text)) +
@@ -343,9 +339,46 @@ describe("scoring the run", () => {
 
     expect({
       failed: text.includes(
-        "FAILED after 1 of 10 questions: a call failed (see the run's output). The results above are those asked before it."
+        "FAILED after 1 of 10 questions: a call failed, or the run was cut off (see the run's output). The results above are those asked before it."
       ),
       counted: /^All answerable\s+1\s/mu.test(text),
     }).toStrictEqual({ failed: true, counted: true });
+  });
+
+  it("keeps what a run cut off before its end line printed, marked failed, its spend unknown", () => {
+    const printed = [result("a", true, true), result("b", false, true)];
+
+    const kept = keptAs(null, undefined, printed, 0);
+
+    expect(kept).toStrictEqual({
+      end: { asked: 2, stoppedAtBudget: false, failed: true, spentUsd: null },
+      failed: true,
+      partial: false,
+      suffix: "-failed",
+    });
+  });
+
+  it("keeps a run stopped at its budget as partial, and a whole one as it is", () => {
+    const printed = [result("a", true, true)];
+    const stopped = {
+      asked: 1,
+      stoppedAtBudget: true,
+      failed: false,
+      spentUsd: 1,
+    };
+    const whole = {
+      asked: 1,
+      stoppedAtBudget: false,
+      failed: false,
+      spentUsd: 1,
+    };
+
+    expect([
+      keptAs(0, stopped, printed, 0).suffix,
+      keptAs(0, stopped, printed, 0).partial,
+      keptAs(0, whole, printed, 0).suffix,
+      keptAs(0, whole, printed, 1).suffix,
+      keptAs(0, { ...whole, asked: 2 }, printed, 0).suffix,
+    ]).toStrictEqual(["-partial", true, "", "-failed", "-failed"]);
   });
 });
