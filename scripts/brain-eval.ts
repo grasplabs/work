@@ -27,7 +27,7 @@
  * so it never becomes the baseline.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -37,6 +37,7 @@ import {
   comparable,
   compareRuns,
   evalArgs,
+  lastRunIn,
   latencyTargetsMs,
   questionResultSchema,
   report,
@@ -108,13 +109,6 @@ const uncutSchema = z.object({
 /** The last lines of the run's output. */
 const tailOf = (output: string): string =>
   output.split("\n").slice(-60).join("\n");
-
-/** The newest earlier run in `dir`, if there is one. */
-const lastRunIn = (dir: string): string | undefined =>
-  readdirSync(dir)
-    .filter((name) => name.endsWith(".json"))
-    .toSorted()
-    .at(-1);
 
 const { ok, output } = runInWorkerd();
 const [info] = linesAfter(output, "BRAIN_EVAL_RUN").map((line) =>
