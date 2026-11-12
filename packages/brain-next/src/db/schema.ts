@@ -596,24 +596,6 @@ export const entities = sqliteTable(
 );
 
 /**
- * An entity merged into another (`into`, never itself merged): every
- * statement reads the two as one, under `into`, so no memory is ever
- * re-pointed. Written by the linker (GRA-1740); none yet.
- */
-export const entityMerges = sqliteTable(
-  "entity_merges",
-  {
-    merged: integer()
-      .primaryKey()
-      .references(() => entities.row),
-    into: integer("into_entity")
-      .notNull()
-      .references(() => entities.row),
-  },
-  (table) => [index("entity_merges_into_idx").on(table.into)]
-);
-
-/**
  * A memory (contract.ts `Memory`). Its lineage is the source it rests on
  * (`source:` and the source's key) or its writer (`writer:` and their
  * id); `lineage_order` orders a lineage's memories, the version number
@@ -736,18 +718,26 @@ export const memoryConfirmedOver = sqliteTable(
 /**
  * A version of a source fully extracted (contract.ts `extracted`): every
  * memory of its source's lineage from an earlier version ends at `at`,
- * for readers who may read this version. Deleted with the version.
+ * for readers of both the add that marked it and this version. Deleted
+ * with the version, or with the memories of the one person who alone
+ * read the add.
  */
 export const memoryExtractions = sqliteTable(
   "memory_extractions",
   {
-    versionRow: integer("version_row").primaryKey(),
+    versionRow: integer("version_row").notNull(),
     lineage: text().notNull(),
     version: integer().notNull(),
     at: integer().notNull(),
+    /** The add's set of readers: only they, of the version's, see it end what came before. */
+    readerSet: integer("reader_set").notNull(),
+    /** As `memories.only_for`: the one person who alone read the add, hashed. */
+    onlyFor: text("only_for"),
   },
   (table) => [
+    primaryKey({ columns: [table.versionRow, table.readerSet] }),
     index("memory_extractions_lineage_idx").on(table.lineage, table.version),
+    index("memory_extractions_only_for_idx").on(table.onlyFor),
   ]
 );
 
