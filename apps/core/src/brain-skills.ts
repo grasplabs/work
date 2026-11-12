@@ -16,10 +16,10 @@ import type { ShippedSkill } from "./shipped-skills.ts";
 
 export type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 
-// Skills in the Brain (GRA-1826), as chats, Apps and workflows read them:
-// Grasp's own, which each release ships and installs here, and the
-// company's shared ones. This file holds the rules; brain-next.ts names
-// them for the Brain.
+// Skills in the Brain (GRA-1826, GRA-1754), as chats, Apps and workflows
+// read them: Grasp's own, which each release ships and installs here, the
+// company's shared ones, and a person's own. This file holds the rules;
+// brain-next.ts names them for the Brain.
 //
 // - Who reads: the person the code acts for, while a member, through the
 //   Brain's own reader check. A skill is guidance every member may read,
@@ -27,16 +27,20 @@ export type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 //   or code does after reading it is checked against its own grants.
 // - Which: Grasp's skills only by the names this release ships (one a
 //   release dropped stays in the Brain as history, never selected or
-//   read), and a company skill of the same name in its place, as the
-//   company's adapted copy.
+//   read), a company skill of the same name in its place, as the
+//   company's adapted copy, and the person's own of that name in place of
+//   either, for them alone.
+// - A person's own skills only where what they shape reaches that person
+//   alone (`SkillsReach`): their own chat. A chat others share gets
+//   Grasp's and the company's, and their own store is never addressed.
 // - Selection: the skills whose name or description shares the task's
 //   telling words, as recall's words way matches them, best first, a
 //   few; none when none does. No model call.
 // - A pin: each skill comes at its version, and a read takes that version,
 //   so a release changing the text mid-task changes nothing the task read.
-// - Writing: only the release's install, here. The company's shared skills
-//   come in through an approved publish (GRA-1754), which doesn't exist
-//   yet; until then the Brain holds Grasp's alone.
+// - Writing: Grasp's by the release's install, here; the company's only by
+//   an admin's approval of a person's share, and a person's own by that
+//   person alone, both in skill-shares.ts. Agents only read.
 
 /**
  * Puts each of `skills` (this release's, unless a test passes others) into
@@ -76,25 +80,47 @@ const shippedNames: ReadonlySet<string> = new Set(
 );
 
 /**
+ * Where the skills read shape what reaches the person alone (their own
+ * chat): then their own skills come too. Anywhere else (a chat others
+ * share) only Grasp's and the company's, and their own store is never
+ * addressed.
+ */
+export interface SkillsReach {
+  personal: boolean;
+}
+
+/** Which of a skill's sources wins a name: the person's, the company's, Grasp's. */
+const rank: Record<SkillCardAt["scope"], number> = {
+  person: 0,
+  company: 1,
+  grasp: 2,
+};
+
+/**
  * The skills the code `by` acts with may use, by name: Grasp's this
- * release ships and the company's, a company skill in place of Grasp's of
- * the same name. Refused with `permission.person_inactive` once the person
- * it acts for is no longer a member.
+ * release ships, the company's, and, with `personal`, the person's own,
+ * one per name: the person's own in place of the company's, and the
+ * company's in place of Grasp's, as each one's adapted copy. Refused with
+ * `permission.person_inactive` once the person it acts for is no longer a
+ * member.
  */
 export const skillsFor = async (
   env: Env,
-  by: Authority
+  by: Authority,
+  { personal }: SkillsReach
 ): Promise<SkillCardAt[]> => {
-  const listed = await listSkillsAs(env, personOf(by));
-  const company = new Set(
-    listed.filter(({ scope }) => scope === "company").map(({ name }) => name)
+  const listed = await listSkillsAs(env, personOf(by), { personal });
+  const usable = listed.filter(
+    ({ scope, name }) => scope !== "grasp" || shippedNames.has(name)
   );
-  return listed
-    .filter(
-      ({ scope, name }) =>
-        scope === "company" || (shippedNames.has(name) && !company.has(name))
-    )
-    .toSorted((a, b) => a.name.localeCompare(b.name));
+  const byName = new Map<string, SkillCardAt>();
+  for (const skill of usable) {
+    const held = byName.get(skill.name);
+    if (held === undefined || rank[skill.scope] < rank[held.scope]) {
+      byName.set(skill.name, skill);
+    }
+  }
+  return [...byName.values()].toSorted((a, b) => a.name.localeCompare(b.name));
 };
 
 /** A task, in the asker's words, as a question to the Brain is. */
@@ -111,17 +137,18 @@ const taskSchema = z.strictObject({
 export const selectSkillsFor = async (
   env: Env,
   by: Authority,
+  reach: SkillsReach,
   input: unknown
 ): Promise<SkillCardAt[]> => {
   const { task } = skillErrors.parse("skills.invalid", taskSchema, input);
-  return selectSkills(task, await skillsFor(env, by));
+  return selectSkills(task, await skillsFor(env, by, reach));
 };
 
 const skillAtSchema = z.strictObject({
   // As a listing or a selection gives it: what else it carries (its
   // description) is left out.
   skill: z.object({
-    scope: z.enum(["grasp", "company"]),
+    scope: z.enum(["grasp", "company", "person"]),
     name: z.string(),
     version: z.int().positive(),
   }),
@@ -131,16 +158,23 @@ const skillAtSchema = z.strictObject({
  * The skill `input.skill` at exactly its version, whole, as a selection
  * pinned it: its text is guidance, never a grant. `skills.not_found`,
  * alike, for a skill or version there isn't, one the person may no longer
- * read, and one of Grasp's this release doesn't ship; `skills.invalid`
- * for input that isn't a skill at a version.
+ * read, one of Grasp's this release doesn't ship, and, without
+ * `personal`, any of the person's own (which is only ever theirs: another
+ * person's is never found); `skills.invalid` for input that isn't a skill
+ * at a version.
  */
 export const readSkillFor = async (
   env: Env,
   by: Authority,
+  { personal }: SkillsReach,
   input: unknown
 ): Promise<SkillVersion> => {
   const { skill } = skillErrors.parse("skills.invalid", skillAtSchema, input);
   const wanted: SkillAt = skill;
+  if (wanted.scope === "person" && !personal) {
+    // Their own store is never addressed here.
+    throw skillErrors.create("skills.not_found");
+  }
   // Read first, so the person's membership is checked alike for every
   // skill named.
   const read = await readSkillAs(env, personOf(by), wanted);

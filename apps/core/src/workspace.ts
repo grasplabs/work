@@ -2097,7 +2097,8 @@ export class Workspace extends DurableObject<Env> {
     // The skills the chat may use, from the Brain: guidance every member
     // may read, as the company's instruction file, never a grant
     // (brain-skills.ts). Recorded as the code's calls are, by count.
-    const skills = await skillsFor(this.env, authority);
+    // Their own skills only in their own chat, which reaches them alone.
+    const skills = await skillsFor(this.env, authority, { personal: !shared });
     await auditAgentCall(this.env, scope, {
       method: "brain.skills",
       detail: { skills: skills.length, turn: true },

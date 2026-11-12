@@ -24,6 +24,7 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import { selectSkillsFor } from "../src/brain-skills.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { published } from "./apps.ts";
@@ -365,6 +366,7 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "the holder's own skill": markerWord(),
       };
       const {
         "the holder's own source": ownerMarker,
@@ -376,6 +378,7 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's own skill": holderSkillMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -431,6 +434,26 @@ describe(
         appFileMarker,
         usedAppFileMarker,
       ];
+      // The holder's own skill, named by its marker, written and asked to
+      // be shared on the holder's own session: theirs alone, and the share
+      // waits on admins, which the outsider isn't.
+      const holderSkill = await holderApi.api.skills.save(
+        `---\nname: ${holderSkillMarker}\ndescription: How to ${sharedWord} ${holderSkillMarker}\n---\nSteps ${sharedWord} ${holderSkillMarker}`
+      );
+      await holderApi.api.skills.share(holderSkill.name, holderSkill.version);
+      // The holder's own chat lists it, and selects it for a task of it.
+      await expect(
+        selectSkillsFor(
+          env,
+          authoritySchema.parse({
+            subject: { type: "agent", agentId: `agent-${unique()}` },
+            onBehalfOf: holder,
+            mode: "interactive",
+          }),
+          { personal: true },
+          { task: holderSkillMarker }
+        )
+      ).resolves.toMatchObject([{ scope: "person", name: holderSkillMarker }]);
       // No recall ever finds an instruction file, a reader's own included.
       const inRecall = {
         "the holder's instruction file": holderFileMarker,
@@ -595,9 +618,11 @@ describe(
           narrowedMarker,
           toHolderMarker,
           ...instructionMarkers,
+          holderSkillMarker,
         ],
         hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId, narrowedId),
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
+        hiddenSkills: [holderSkillMarker],
         usedApps,
         instructionGroups,
         moments: [whileDraft],

@@ -78,6 +78,7 @@ import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
+import * as skillShares from "../src/skill-shares.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 
 /** The reader a probe calls as, and what they may not see. */
@@ -128,6 +129,12 @@ export interface Probing {
    * holding them must still find no instruction file, as none is indexed.
    */
   instructionGroups: readonly string[];
+  /**
+   * Names of skills someone else wrote for themselves, each a marker,
+   * in their own store (brain-next.ts): each asked of as the reader's own
+   * must answer exactly as its twin, a skill no one wrote.
+   */
+  hiddenSkills?: readonly string[];
   /**
    * Moments a recall asks as of besides the first and now: when a marked
    * version the reader could read then was its source's current one, so
@@ -602,6 +609,34 @@ const readersAgent = (personId: string): Authority =>
     onBehalfOf: personId,
     mode: "interactive",
   });
+
+/**
+ * `call` for each of someone else's own skills (`hidden`, each a marker)
+ * and for its twin, a skill no one wrote: each pair compared, so the
+ * hidden one must answer exactly as its twin.
+ */
+const pairedOverSkills = async (
+  hidden: readonly string[] | undefined,
+  call: (name: string) => Promise<unknown>
+): Promise<Answer[]> => {
+  const ask = async (like: string, name: string, about: Answer["about"]) =>
+    await answer(like, async () => await call(name), about, like);
+  const answers: Answer[] = [];
+  for (const [index, name] of (hidden ?? []).entries()) {
+    const like = `someone else's own skill ${index}`;
+    const pair = [
+      [name, "hidden"],
+      [twinOf(name), "nothing"],
+    ] as const;
+    // One call site for both, so a stack differs in nothing but what was
+    // asked.
+    for (const [asked, about] of pair) {
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      answers.push(await ask(like, asked, about));
+    }
+  }
+  return answers;
+};
 
 /** The code of `error`, as a comparison holds it. */
 const codeOf = (error: unknown): unknown =>
@@ -1488,19 +1523,25 @@ export const coreProbes = {
       }),
     ];
   },
-  listSkillsAs: async ({ personId }) => [
+  listSkillsAs: async ({ personId, personal }) => [
     await answer(
       "the reader's skills",
-      async () => await coreBrain.listSkillsAs(env, personId)
+      async () => await coreBrain.listSkillsAs(env, personId, { personal })
+    ),
+    await answer(
+      "the reader's skills, without their own",
+      async () =>
+        await coreBrain.listSkillsAs(env, personId, { personal: false })
     ),
     await answer(
       "as someone who isn't a member",
-      async () => await coreBrain.listSkillsAs(env, stranger())
+      async () =>
+        await coreBrain.listSkillsAs(env, stranger(), { personal: true })
     ),
   ],
   // A skill is read by its own key alone: no producer's source is under
   // the skills' kind, so no hidden source can be named as one.
-  readSkillAs: async ({ personId, markers }) => {
+  readSkillAs: async ({ personId, markers, hiddenSkills }) => {
     const read = async (name: string, wanted: unknown) =>
       await answer(
         name,
@@ -1532,8 +1573,148 @@ export const coreProbes = {
             version: 1,
           })
       ),
+      ...(await pairedOverSkills(
+        hiddenSkills,
+        async (name) =>
+          await coreBrain.readSkillAs(env, personId, {
+            scope: "person",
+            name,
+            version: 1,
+          })
+      )),
     ];
   },
+  // Each of someone else's own skills, asked of as the reader's own,
+  // answers as one no one wrote: the reader's own store is the only one
+  // asked.
+  readCurrentSkillAs: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "a skill never written",
+      async () =>
+        await coreBrain.readCurrentSkillAs(env, personId, {
+          scope: "person",
+          name: "unwritten",
+        })
+    ),
+    await answer(
+      "a company skill of the markers",
+      async () =>
+        await coreBrain.readCurrentSkillAs(env, personId, {
+          scope: "company",
+          name: markers.join("-"),
+        })
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await coreBrain.readCurrentSkillAs(env, stranger(), {
+          scope: "person",
+          name: "unwritten",
+        })
+    ),
+    ...(await pairedOverSkills(
+      hiddenSkills,
+      async (name) =>
+        await coreBrain.readCurrentSkillAs(env, personId, {
+          scope: "person",
+          name,
+        })
+    )),
+  ],
+  // Writes the reader's own store only: refusals holding the markers, and
+  // one skill of the reader's that holds none.
+  addOwnSkill: async ({ personId, markers }) => {
+    const text = markedText(markers);
+    const add = async (name: string, written: unknown) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.addOwnSkill(env, personId, {
+            change: crypto.randomUUID(),
+            text: unchecked(written),
+          })
+      );
+    const plain = `probe-${crypto.randomUUID()}`;
+    return [
+      await add(
+        "a skill of the reader's own",
+        `---\nname: ${plain}\ndescription: A probe.\n---\nSteps.`
+      ),
+      await add("text with no card", text),
+      await add(
+        "a name of the markers",
+        `---\nname: ${markers.join(" ")}\ndescription: ${text}\n---\n${text}`
+      ),
+      await add(
+        "too much text",
+        `---\nname: ${plain}\ndescription: x\n---\n${text}`.padEnd(
+          instructionsMaxLength + 1,
+          " x"
+        )
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await coreBrain.addOwnSkill(env, stranger(), {
+            change: crypto.randomUUID(),
+            text: `---\nname: ${plain}\ndescription: A probe.\n---\nSteps.`,
+          })
+      ),
+    ];
+  },
+  // Erases in the reader's own store alone: someone else's of the same
+  // name is untouched, and answers as one no one wrote.
+  eraseOwnSkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer("a skill never written", async () => {
+      await coreBrain.eraseOwnSkill(env, personId, "unwritten");
+    }),
+    await answer("a name of the markers", async () => {
+      await coreBrain.eraseOwnSkill(env, personId, markers.join(" "));
+    }),
+    await answer("as someone who isn't a member", async () => {
+      await coreBrain.eraseOwnSkill(env, stranger(), "unwritten");
+    }),
+    ...(await pairedOverSkills(hiddenSkills, async (name) => {
+      await coreBrain.eraseOwnSkill(env, personId, name);
+      return await coreBrain.listSkillsAs(env, personId, { personal: true });
+    })),
+  ],
+  // Retires only a company skill the reader may read: a name of the
+  // markers, or someone's own skill's name, is none.
+  retireCompanySkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "a skill never written",
+      async () =>
+        await coreBrain.retireCompanySkill(env, personId, {
+          name: "unwritten",
+          change: crypto.randomUUID(),
+        })
+    ),
+    await answer(
+      "a name of the markers",
+      async () =>
+        await coreBrain.retireCompanySkill(env, personId, {
+          name: markers.join("-"),
+          change: crypto.randomUUID(),
+        })
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await coreBrain.retireCompanySkill(env, stranger(), {
+          name: "unwritten",
+          change: crypto.randomUUID(),
+        })
+    ),
+    ...(await pairedOverSkills(
+      hiddenSkills,
+      async (name) =>
+        await coreBrain.retireCompanySkill(env, personId, {
+          name,
+          change: crypto.randomUUID(),
+        })
+    )),
+  ],
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */
@@ -1858,23 +2039,36 @@ export const skillProbes = {
       ),
     ];
   },
-  skillsFor: async ({ personId }) => [
+  skillsFor: async ({ personId, personal }) => [
     await answer(
       "the reader's agent",
-      async () => await brainSkills.skillsFor(env, readersAgent(personId))
+      async () =>
+        await brainSkills.skillsFor(env, readersAgent(personId), { personal })
+    ),
+    await answer(
+      "the reader's agent in a chat others share",
+      async () =>
+        await brainSkills.skillsFor(env, readersAgent(personId), {
+          personal: false,
+        })
     ),
     await answer(
       "an agent of someone who isn't a member",
-      async () => await brainSkills.skillsFor(env, readersAgent(stranger()))
+      async () =>
+        await brainSkills.skillsFor(env, readersAgent(stranger()), {
+          personal,
+        })
     ),
     await answer(
       "no authority",
       async () =>
-        await brainSkills.skillsFor(env, unchecked({ onBehalfOf: personId }))
+        await brainSkills.skillsFor(env, unchecked({ onBehalfOf: personId }), {
+          personal,
+        })
     ),
   ],
   // A task of the markers finds what one of their twins does: nothing.
-  selectSkillsFor: async ({ personId, markers, sharedWord }) => {
+  selectSkillsFor: async ({ personId, personal, markers, sharedWord }) => {
     const select = async (
       name: string,
       task: unknown,
@@ -1884,7 +2078,12 @@ export const skillProbes = {
       await answer(
         name,
         async () =>
-          await brainSkills.selectSkillsFor(env, readersAgent(personId), task),
+          await brainSkills.selectSkillsFor(
+            env,
+            readersAgent(personId),
+            { personal },
+            task
+          ),
         about,
         like
       );
@@ -1920,21 +2119,32 @@ export const skillProbes = {
       await answer(
         "as someone who isn't a member",
         async () =>
-          await brainSkills.selectSkillsFor(env, readersAgent(stranger()), {
-            task: markers.join(" "),
-          })
+          await brainSkills.selectSkillsFor(
+            env,
+            readersAgent(stranger()),
+            { personal },
+            { task: markers.join(" ") }
+          )
       ),
     ];
   },
-  readSkillFor: async ({ personId, markers }) => {
+  readSkillFor: async ({ personId, personal, markers, hiddenSkills }) => {
     const read = async (name: string, skill: unknown) =>
       await answer(
         name,
         async () =>
-          await brainSkills.readSkillFor(env, readersAgent(personId), { skill })
+          await brainSkills.readSkillFor(
+            env,
+            readersAgent(personId),
+            { personal },
+            { skill }
+          )
       );
     await brainSkills.installShippedSkills(env);
-    const [shipped] = await brainSkills.skillsFor(env, readersAgent(personId));
+    const usable = await brainSkills.skillsFor(env, readersAgent(personId), {
+      personal: false,
+    });
+    const shipped = usable.find(({ scope }) => scope === "grasp");
     return [
       await read("a skill the release ships", shipped),
       await read("a skill never written", {
@@ -1960,10 +2170,23 @@ export const skillProbes = {
       await answer(
         "as someone who isn't a member",
         async () =>
-          await brainSkills.readSkillFor(env, readersAgent(stranger()), {
-            skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
-          })
+          await brainSkills.readSkillFor(
+            env,
+            readersAgent(stranger()),
+            { personal },
+            { skill: { scope: "grasp", name: "draw-a-workflow", version: 1 } }
+          )
       ),
+      ...(await pairedOverSkills(
+        hiddenSkills,
+        async (name) =>
+          await brainSkills.readSkillFor(
+            env,
+            readersAgent(personId),
+            { personal },
+            { skill: { scope: "person", name, version: 1 } }
+          )
+      )),
     ];
   },
 } satisfies Record<SkillMember, Probe>;
@@ -3345,6 +3568,255 @@ export const storeProbes = {
   ],
 } satisfies Record<StoreMember, Probe>;
 
+/** A `SKILL.md` named `name`, holding no marker. */
+const plainSkillText = (name: string): string =>
+  `---\nname: ${name}\ndescription: A probe.\n---\nSteps.`;
+
+/** `personId` signed in as one of the organization's admins. */
+const adminSessionOf = (personId: string): Identity => ({
+  ...sessionOf(personId),
+  role: "admin",
+});
+
+/** A new skill of `personId`'s own, holding no marker: its name. */
+const plainOwnSkill = async (personId: string): Promise<string> => {
+  const { name } = await skillShares.saveOwnSkill(
+    env,
+    sessionOf(personId),
+    plainSkillText(`probe-${crypto.randomUUID()}`)
+  );
+  return name;
+};
+
+/** A share of a new skill of `personId`'s own, holding no marker: its ID. */
+const plainShare = async (personId: string): Promise<string> => {
+  const { id } = await skillShares.shareOwnSkill(
+    env,
+    sessionOf(personId),
+    await plainOwnSkill(personId),
+    1
+  );
+  return id;
+};
+
+/** Each export of core's skill-shares.ts. */
+type ShareMember = keyof typeof skillShares;
+
+/**
+ * Writing and sharing skills (skill-shares.ts), as the signed-in reader,
+ * who is no admin: someone else's own skills answer as ones no one wrote,
+ * shares wait on admins alone, and what is written lands in the reader's
+ * own store only. Nothing here writes a marker anywhere the reader reads.
+ */
+export const shareProbes = {
+  skillsOverview: async ({ personId }) => [
+    await answer(
+      "the reader's skills and shares",
+      async () => await skillShares.skillsOverview(env, sessionOf(personId))
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () => await skillShares.skillsOverview(env, sessionOf(stranger()))
+    ),
+  ],
+  readSkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "the reader's own",
+      async () =>
+        await skillShares.readSkill(
+          env,
+          sessionOf(personId),
+          "own",
+          await plainOwnSkill(personId)
+        )
+    ),
+    await answer(
+      "a company skill of the markers",
+      async () =>
+        await skillShares.readSkill(
+          env,
+          sessionOf(personId),
+          "company",
+          markers.join("-")
+        )
+    ),
+    await answer(
+      "a scope of the markers",
+      async () =>
+        await skillShares.readSkill(
+          env,
+          sessionOf(personId),
+          markers.join(""),
+          "unwritten"
+        )
+    ),
+    ...(await pairedOverSkills(
+      hiddenSkills,
+      async (name) =>
+        await skillShares.readSkill(env, sessionOf(personId), "own", name)
+    )),
+  ],
+  saveOwnSkill: async ({ personId, markers }) => {
+    const text = markedText(markers);
+    return [
+      await answer(
+        "a skill of the reader's own",
+        async () =>
+          await skillShares.saveOwnSkill(
+            env,
+            sessionOf(personId),
+            plainSkillText(`probe-${crypto.randomUUID()}`)
+          )
+      ),
+      await answer(
+        "text with no card",
+        async () =>
+          await skillShares.saveOwnSkill(env, sessionOf(personId), text)
+      ),
+      await answer(
+        "not text",
+        async () =>
+          await skillShares.saveOwnSkill(env, sessionOf(personId), markers)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () =>
+          await skillShares.saveOwnSkill(
+            env,
+            sessionOf(stranger()),
+            plainSkillText("unwritten")
+          )
+      ),
+    ];
+  },
+  removeOwnSkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer("a skill never written", async () => {
+      await skillShares.removeOwnSkill(env, sessionOf(personId), "unwritten");
+    }),
+    await answer("a name of the markers", async () => {
+      await skillShares.removeOwnSkill(
+        env,
+        sessionOf(personId),
+        markers.join(" ")
+      );
+    }),
+    ...(await pairedOverSkills(hiddenSkills, async (name) => {
+      await skillShares.removeOwnSkill(env, sessionOf(personId), name);
+      return await skillShares.skillsOverview(env, sessionOf(personId));
+    })),
+  ],
+  shareOwnSkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "the reader's own",
+      async () =>
+        await skillShares.shareOwnSkill(
+          env,
+          sessionOf(personId),
+          await plainOwnSkill(personId),
+          1
+        )
+    ),
+    await answer(
+      "a name of the markers",
+      async () =>
+        await skillShares.shareOwnSkill(
+          env,
+          sessionOf(personId),
+          markers.join(" "),
+          1
+        )
+    ),
+    ...(await pairedOverSkills(
+      hiddenSkills,
+      async (name) =>
+        await skillShares.shareOwnSkill(env, sessionOf(personId), name, 1)
+    )),
+  ],
+  // Deciding is an admin's: the reader is refused, for a share there is
+  // and one there isn't alike; as an admin, the reader's own share holding
+  // no marker is approved.
+  approveShare: async ({ personId, markers }) => [
+    await answer(
+      "the reader's share",
+      async () =>
+        await skillShares.approveShare(
+          env,
+          sessionOf(personId),
+          await plainShare(personId)
+        )
+    ),
+    await answer(
+      "a share of the markers",
+      async () =>
+        await skillShares.approveShare(
+          env,
+          adminSessionOf(personId),
+          markers.join("")
+        )
+    ),
+    await answer(
+      "the reader's share, as an admin",
+      async () =>
+        await skillShares.approveShare(
+          env,
+          adminSessionOf(personId),
+          await plainShare(personId)
+        )
+    ),
+  ],
+  declineShare: async ({ personId, markers }) => [
+    await answer(
+      "a share of the markers",
+      async () =>
+        await skillShares.declineShare(
+          env,
+          adminSessionOf(personId),
+          markers.join("")
+        )
+    ),
+    await answer(
+      "the reader's share, as an admin",
+      async () =>
+        await skillShares.declineShare(
+          env,
+          adminSessionOf(personId),
+          await plainShare(personId)
+        )
+    ),
+  ],
+  retireSkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer("a company skill holding no marker, as an admin", async () => {
+      const approved = await skillShares.approveShare(
+        env,
+        adminSessionOf(personId),
+        await plainShare(personId)
+      );
+      await skillShares.retireSkill(
+        env,
+        adminSessionOf(personId),
+        approved.name
+      );
+      return approved;
+    }),
+    await answer("a name of the markers", async () => {
+      await skillShares.retireSkill(
+        env,
+        adminSessionOf(personId),
+        markers.join("-")
+      );
+    }),
+    ...(await pairedOverSkills(hiddenSkills, async (name) => {
+      await skillShares.retireSkill(env, adminSessionOf(personId), name);
+    })),
+  ],
+  waitingShares: async ({ personId }) => [
+    await answer(
+      "what waits on the reader",
+      async () => await skillShares.waitingShares(env, sessionOf(personId))
+    ),
+  ],
+} satisfies Record<ShareMember, Probe>;
+
 /** The Sources page's RPC for `personId`, signed in as a member. */
 const sourcesAs = (personId: string): BrainSourcesRpc =>
   new BrainSourcesRpc(
@@ -3522,6 +3994,7 @@ export const brainSurfaces = [
   { name: "skills", module: brainSkills, probes: skillProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
   { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
+  { name: "shares", module: skillShares, probes: shareProbes },
 ] as const satisfies readonly Surface[];
 
 /**

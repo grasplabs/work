@@ -36,6 +36,7 @@ import type { PermissionsRpc } from "./permissions-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import type { SkillsRpc } from "./skills-rpc.ts";
 import type { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 import type { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
 import type { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
@@ -50,7 +51,8 @@ import type { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 // and apps to approve wait on the organization's own admins, never Grasp
 // staff; a connection on whoever may sign in to it again; a version up
 // for review on the member who answers for its App; a workflow's version
-// asked to go live on its owner, else the organization's admins. Not
+// asked to go live on its owner, else the organization's admins; a share
+// of a skill on the organization's admins. Not
 // audited: reading
 // it shows a person what they may already see, as the parts do.
 
@@ -68,6 +70,8 @@ export interface WaitingSources {
   lifecycles: WorkflowLifecycleRpc;
   /** Independent workflows' bindings that wait on an admin (`workflowResources.pendingBindings`). */
   bindings: Pick<WorkflowResourcesRpc, "pendingBindings">;
+  /** Shares of skills that wait for an admin (`skills.waiting`). */
+  skills: Pick<SkillsRpc, "waiting">;
 }
 
 /** Who reads the feed: whom each item is for follows from it. */
@@ -393,6 +397,25 @@ const parts: Parts = {
         waitsOn: forMe,
         verdicts: ["confirm", "decline"],
         start,
+      })),
+    };
+  },
+  // Shares of skills that wait on the organization's own admins, decided
+  // on the skills page, where their text is read.
+  skillShares: async ({ skills }, { admin }) => {
+    if (!admin) {
+      return { items: [] };
+    }
+    const waiting = await skills.waiting();
+    return {
+      items: waiting.map((share) => ({
+        kind: "skillShare",
+        id: `skillShare:${share.id}`,
+        at: share.requestedAt,
+        urgent: false,
+        waitsOn: { type: "admin" },
+        verdicts: [],
+        share,
       })),
     };
   },

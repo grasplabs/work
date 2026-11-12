@@ -53,6 +53,7 @@ import {
   sessions,
   stephenRequestCards,
   stephenRequests,
+  skillShares,
   stephenSummaries,
   stephenSummaryReaders,
   teamMembers,
@@ -267,6 +268,9 @@ const brain: ErasureStep = {
       userId,
       reason: "erasure_request" as const,
     };
+    // Their asks to share a skill, with the text a waiting one holds; a
+    // company skill an approval made stays the company's.
+    await db.delete(skillShares).where(eq(skillShares.requestedBy, userId));
     const onErase = coreErasure(env);
     const plan = await preparePurge(brainOf(env), by, input, onErase);
     await purge(brainOf(env), by, input, plan.token, onErase);

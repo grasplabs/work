@@ -136,6 +136,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.agent_places": { company: "settings an admin changed" },
   "core.agent_tool_classes": { company: "settings an admin changed" },
   "core.app_requests": { company: "Apps they asked Grasp for" },
+  // Their asks to share a skill: a waiting one holds their text.
+  "core.skill_shares": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },
   "core.notifications": { erased: "channels" },
   // What they asked Stephen, with where their weekly summary stood.
@@ -543,6 +545,7 @@ export const reviewedPersonColumns: Readonly<
   "core.app_members": ["added_by", "member_id", "member_type"],
   "core.app_pointers": ["changed_by"],
   "core.app_requests": ["requested_by"],
+  "core.skill_shares": ["decided_by", "requested_by"],
   "core.app_resource_bindings": ["approved_by", "revoked_by"],
   "core.app_test_decisions": ["decided_by", "recipients"],
   "core.app_test_runs": ["deciders", "principal"],

@@ -142,6 +142,13 @@ const typeRules: readonly {
   // (GRA-1080): their IDs and evidence, never a name.
   { action: "brain.entity_match", type: "decision" },
   { action: "knowledge.search", type: "read" },
+  // A person asking to share a skill, an admin approving or declining it,
+  // its text added as the company's, and a company skill retired
+  // (GRA-1754): by the share's ID or the skill's name, never its text.
+  { action: "skill.share.requested", type: "action" },
+  { action: "skill.share.published", type: "action" },
+  { action: "skill.share", type: "decision" },
+  { action: "skill.retired", type: "config" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
   { action: "knowledge.read", type: "read" },

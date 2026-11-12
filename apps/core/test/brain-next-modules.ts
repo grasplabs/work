@@ -26,4 +26,7 @@ export const brainModules = {
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.
   "apps/core/src/brain-sources-rpc.ts": "sources",
+  // Writing and sharing skills (GRA-1754): its own surface, each export
+  // probed as the signed-in person.
+  "apps/core/src/skill-shares.ts": "shares",
 } as const satisfies Readonly<Record<string, string>>;

@@ -3419,6 +3419,38 @@ export const appRequests = sqliteTable(
 );
 
 /**
+ * A person's ask to share one of their own skills with the company, and
+ * an admin's decision on it (skill-shares.ts, GRA-1754). `text` is the
+ * exact `SKILL.md` they asked to share, kept only while it waits: the
+ * admin approves that text and nothing else, and the decision clears it
+ * (approved, it is the company's skill in the Brain; declined, it is
+ * gone). At most one waits per person and name: asking again replaces it
+ * under a new ID, so an approval of the old one is refused. `version` is
+ * the company skill's version an approval made, set once the Brain took
+ * it: an approved row without one is finished by approving it again.
+ */
+export const skillShares = sqliteTable(
+  "skill_shares",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    text: text(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    status: text({ enum: ["pending", "approved", "declined"] }).notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    version: integer(),
+  },
+  (table) => [
+    uniqueIndex("skill_shares_pending_idx")
+      .on(table.requestedBy, table.name)
+      .where(sql`status = 'pending'`),
+    index("skill_shares_status_idx").on(table.status, table.requestedAt),
+  ]
+);
+
+/**
  * Each computation of the improvement signals (src/signals.ts), one a UTC
  * day: `started_at` claims it, `finished_at` is set once all its signals
  * are written. The signals people read are those of the finished one
