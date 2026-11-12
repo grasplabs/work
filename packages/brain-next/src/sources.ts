@@ -4,6 +4,7 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
+import { restoringNow } from "./contract.ts";
 import type {
   CurrentRequest,
   NewSource,
@@ -37,7 +38,7 @@ import {
   noteWrite,
 } from "./files.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
-import { isRestoring, restoringNow } from "./restoring.ts";
+import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";

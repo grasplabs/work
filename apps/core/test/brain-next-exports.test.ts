@@ -1,3 +1,5 @@
+import { brainExportErrors } from "@grasp-os/shared/brain-exports";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -7,6 +9,7 @@ import {
   brainRestorePath,
 } from "../src/brain-next-exports.ts";
 import { addSource, workBrain } from "../src/brain-next.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -243,6 +246,57 @@ describe(
         shared: all.includes(shared),
         theirs: all.includes(theirs),
       }).toStrictEqual({ shared: true, theirs: false });
+    });
+
+    it("answers an export started, and an add made, while a restore runs with a code of their own: a conflict, never an error of core's (review round 2)", async () => {
+      const admin = await signedInWithRole(idp, "admin");
+      const store = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+      const restoring = crypto.randomUUID();
+      // A restore under way, as the store records one.
+      await runInDurableObject(store, (_instance, state) => {
+        state.storage.sql.exec(
+          `INSERT INTO restores (export, manifest, checked, part, restored, state, started_at)
+          VALUES (?, '{}', 0, 0, 0, 'running', ?)`,
+          restoring,
+          Date.now()
+        );
+      });
+      try {
+        const started = await request(admin.session, brainExportsPath, {
+          method: "POST",
+          body: { scope: "company" },
+        });
+        const { code } = z
+          .object({ code: z.string() })
+          .parse(await started.json());
+        let added: string | undefined;
+        try {
+          await addSource(env, {
+            source: { producer: "upload", id: crypto.randomUUID() },
+            change: "1",
+            text: "words while it restores",
+            readers: { kind: "team", teamId: crypto.randomUUID() },
+          });
+        } catch (error) {
+          added = brainExportErrors.codeOf(error);
+        }
+        expect({
+          status: started.status,
+          code,
+          added,
+        }).toStrictEqual({
+          status: 409,
+          code: "brain.export_refused",
+          added: "brain.restoring",
+        });
+      } finally {
+        await runInDurableObject(store, (_instance, state) => {
+          state.storage.sql.exec(
+            "DELETE FROM restores WHERE export = ?",
+            restoring
+          );
+        });
+      }
     });
   }
 );

@@ -251,6 +251,32 @@ const putBack = async (store: Store, copy: Copy): Promise<void> => {
 
 const company: ExportScope = { kind: "company" };
 
+/** Ticks the shared store until the restore of `id` is no longer running: at most 10 ticks. */
+const restoreSettled = async (id: string) => {
+  for (let ticks = 0; ticks < 10; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick(shared());
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const status = await shared().restoreStatus(id);
+    if (status?.state !== "running") {
+      return status;
+    }
+  }
+  throw new Error("The restore was still running after 10 ticks");
+};
+
+/** How many versions the shared store holds. */
+const versionsHeld = async (): Promise<number> =>
+  await runInDurableObject(
+    shared(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM source_versions"
+        )
+        .one().count
+  );
+
 describe("exports and restores", () => {
   /** The shared store as it was before any test added to it: empty. */
   let emptyShared: Copy = [];
@@ -358,43 +384,100 @@ describe("exports and restores", () => {
       ).rejects.toThrow("this store answers only the person whose it is");
     });
 
-    it("is never served once an erasure lands after it started, and its files are deleted (threats 6, 11)", async () => {
+    it("is stale only once it holds what was erased: then never served, and its files deleted; an erasure of anything else leaves it be (threats 6, 11)", async () => {
       const kept = `test:${unique()}`;
       const erased = `test:${unique()}`;
+      const unrelated = `test:${unique()}`;
       const group = `team:${unique()}`;
       await add(shared(), kept, "kept words", team(group));
       await add(shared(), erased, "erased words", team(group));
       const { id: done } = await shared().startExport(company, "test");
       await settled(shared(), done, company);
-      // Started, not yet written: the erasure lands before its first part.
+      // Retention erases what the export doesn't hold: it stays.
+      await add(shared(), unrelated, "unrelated words", team(group));
+      await shared().eraseSource({ source: unrelated, reason: "retention" });
+      await tick(shared());
+      const afterUnrelated = await shared().exportStatus({
+        id: done,
+        scope: company,
+      });
+      // Started, not yet written: the erasure lands before its first part,
+      // so it never holds what was erased, and carries on.
       const { id: writing } = await shared().startExport(company, "test");
 
       await shared().eraseSource({ source: erased, reason: "deleted" });
 
-      for (const id of [done, writing]) {
-        // oxlint-disable-next-line no-await-in-loop -- one export at a time
-        await expect(
-          shared().exportStatus({ id, scope: company })
-        ).resolves.toMatchObject({ state: "erased", files: [] });
-        // oxlint-disable-next-line no-await-in-loop -- one export at a time
-        await expect(
-          shared().exportFile({ id, scope: company, file: "manifest.json" })
-        ).resolves.toBeNull();
-      }
+      const doneNow = await shared().exportStatus({ id: done, scope: company });
+      const served = await shared().exportFile({
+        id: done,
+        scope: company,
+        file: "manifest.json",
+      });
+      await settled(shared(), writing, company);
+      const written = of(await linesOf(shared(), writing, company), [
+        kept,
+        erased,
+      ]).map(({ source }) => source);
       await tick(shared());
       await tick(shared());
-      expect([
-        ...(await keysUnder(`exports/${done}/`)),
-        ...(await keysUnder(`exports/${writing}/`)),
-      ]).toStrictEqual([]);
-      // The next export holds what is left, without what was erased.
-      const { id: next } = await shared().startExport(company, "test");
-      await settled(shared(), next, company);
-      expect(
-        of(await linesOf(shared(), next, company), [kept, erased]).map(
-          ({ source }) => source
-        )
-      ).toStrictEqual([kept]);
+      expect({
+        afterUnrelated: afterUnrelated?.state,
+        doneNow: doneNow?.state,
+        served,
+        written,
+        doneFiles: await keysUnder(`exports/${done}/`),
+      }).toStrictEqual({
+        afterUnrelated: "done",
+        doneNow: "erased",
+        served: null,
+        written: [kept],
+        doneFiles: [],
+      });
+    });
+
+    it("is replaced by a newer one of its scope, and kept no longer than its time (review round 2)", async () => {
+      await add(
+        shared(),
+        `test:${unique()}`,
+        "words",
+        team(`team:${unique()}`)
+      );
+      const { id: older } = await shared().startExport(company, "test");
+      await settled(shared(), older, company);
+      const { id: newer } = await shared().startExport(company, "test");
+      await settled(shared(), newer, company);
+      await tick(shared());
+      const replaced = await shared().exportStatus({
+        id: older,
+        scope: company,
+      });
+      const olderFiles = await keysUnder(`exports/${older}/`);
+
+      // Done eight days ago, as time passing would.
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE exports SET finished_at = ? WHERE id = ?",
+          Date.now() - 8 * 24 * 60 * 60_000,
+          newer
+        );
+      });
+      await tick(shared());
+      await tick(shared());
+      const pastItsTime = await shared().exportStatus({
+        id: newer,
+        scope: company,
+      });
+      expect({
+        replaced: replaced?.state,
+        olderFiles,
+        pastItsTime: pastItsTime?.state,
+        newerFiles: await keysUnder(`exports/${newer}/`),
+      }).toStrictEqual({
+        replaced: "expired",
+        olderFiles: [],
+        pastItsTime: "expired",
+        newerFiles: [],
+      });
     });
 
     it("goes on after the store restarts", async () => {
@@ -480,6 +563,37 @@ describe("exports and restores", () => {
           })
         )
       ).rejects.toThrow("this store answers only the person whose it is");
+    });
+
+    it("is erased with the person, and their erasure leaves the company's export be (review round 2)", async () => {
+      const person = unique();
+      await add(shared(), `test:${unique()}`, "only theirs", alone(person));
+      await add(
+        shared(),
+        `test:${unique()}`,
+        "the team's",
+        team(`team:${unique()}`)
+      );
+      const scope: ExportScope = { kind: "person", person };
+      const { id: theirs } = await shared().startExport(scope, "test");
+      await settled(shared(), theirs, scope);
+      const { id: companys } = await shared().startExport(company, "test");
+      await settled(shared(), companys, company);
+
+      await shared().erasePerson({ person, reason: "person_erased" });
+      await tick(shared());
+      await tick(shared());
+
+      const theirsNow = await shared().exportStatus({ id: theirs, scope });
+      const companyNow = await shared().exportStatus({
+        id: companys,
+        scope: company,
+      });
+      expect({
+        theirs: theirsNow?.state,
+        theirFiles: await keysUnder(`exports/${theirs}/`),
+        company: companyNow?.state,
+      }).toStrictEqual({ theirs: "erased", theirFiles: [], company: "done" });
     });
 
     it("goes with their store when they are erased", async () => {
@@ -723,16 +837,6 @@ describe("exports and restores", () => {
         // oxlint-disable-next-line no-await-in-loop -- a tick at a time
         await tick(shared());
       }
-      const versionsHeld = async () =>
-        await runInDurableObject(
-          shared(),
-          (_instance, state) =>
-            state.storage.sql
-              .exec<{ count: number }>(
-                "SELECT count(*) AS count FROM source_versions"
-              )
-              .one().count
-        );
       expect({
         status: await shared().restoreStatus(id),
         held: await versionsHeld(),
@@ -789,11 +893,11 @@ describe("exports and restores", () => {
       await settled(shared(), next, company);
     });
 
-    it("refuses another deployment's export, and fails on a file that names a skill (review round 1, Lows)", async () => {
+    it("refuses another deployment's export (review round 1, Lows)", async () => {
       await add(
         shared(),
-        `skill:${unique()}`,
-        "a skill",
+        `test:${unique()}`,
+        "words",
         team(`team:${unique()}`)
       );
       const { id } = await shared().startExport(company, "test");
@@ -803,16 +907,114 @@ describe("exports and restores", () => {
       await expect(
         called(shared().startRestore(id, "elsewhere"))
       ).rejects.toThrow("no whole company export of this deployment");
-      await shared().startRestore(id, "test");
-      for (let ticks = 0; ticks < 5; ticks += 1) {
+    });
+
+    it("after a storage loss, deletes an export made before an erasure, and keeps and restores one made after it (review round 2, P1)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const kept = `test:${unique()}`;
+      const gone = `test:${unique()}`;
+      await add(shared(), kept, "kept words", team(group));
+      await add(shared(), gone, "gone words", team(group));
+      const { id: before } = await shared().startExport(company, "test");
+      await settled(shared(), before, company);
+      await shared().eraseSource({ source: gone, reason: "deleted" });
+      await tick(shared());
+      const { id: after } = await shared().startExport(company, "test");
+      await settled(shared(), after, company);
+
+      await putBack(shared(), emptyShared);
+      for (let ticks = 0; ticks < 3; ticks += 1) {
         // oxlint-disable-next-line no-await-in-loop -- a tick at a time
         await tick(shared());
       }
-      await expect(shared().restoreStatus(id)).resolves.toStrictEqual({
-        export: id,
-        state: "failed",
-        restored: 0,
+      const afterKeys = await keysUnder(`exports/${after}/`);
+      await shared().startRestore(after, "test");
+      const status = await restoreSettled(after);
+      const current = await shared().readCurrent({
+        sources: [kept, gone],
+        reader: readerOf(unique(), [group]),
       });
+      expect({
+        beforeKeys: await keysUnder(`exports/${before}/`),
+        afterKept: afterKeys.length > 0,
+        status: status?.state,
+        current: current.map(({ text }) => text),
+      }).toStrictEqual({
+        beforeKeys: [],
+        afterKept: true,
+        status: "done",
+        current: ["kept words"],
+      });
+    });
+
+    it("starts a failed restore again from the same export, whatever erasure landed meanwhile, and finishes it (review round 2, P2)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const sources = Array.from({ length: 60 }, () => `test:${unique()}`);
+      for (const source of sources) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await add(shared(), source, `words of ${source}`, team(group));
+      }
+      const { id } = await shared().startExport(company, "test");
+      await settled(shared(), id, company);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      // An unrelated erasure lands while it runs.
+      await shared().eraseSource({
+        source: `test:${unique()}`,
+        reason: "retention",
+      });
+      // Checked whole; then the second part is lost before it is written.
+      await runInDurableObject(shared(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE restores SET checked = 2 WHERE export = ?",
+          id
+        );
+      });
+      const lost = `exports/${id}/part-0001.jsonl`;
+      const object = await env.BRAIN_OBJECTS.get(lost);
+      const body = (await object?.text()) ?? "";
+      await env.BRAIN_OBJECTS.delete(lost);
+      const failed = await restoreSettled(id);
+      const filesKept = await keysUnder(`exports/${id}/`);
+
+      await env.BRAIN_OBJECTS.put(lost, body);
+      const again = await shared().startRestore(id, "test");
+      const done = await restoreSettled(id);
+      expect({
+        failed: failed?.state,
+        filesKept: filesKept.length,
+        again: again.state,
+        done: done?.state,
+        held: await versionsHeld(),
+      }).toStrictEqual({
+        failed: "failed",
+        filesKept: 2,
+        again: "running",
+        done: "done",
+        held: 60,
+      });
+    });
+
+    it("exports and restores a source under any key the store takes as a document, and refuses an export while it runs (review round 2, P3 and P4)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      await add(shared(), `test:${unique()}`, "a document", team(group));
+      await add(shared(), `skill:${unique()}`, "a shared skill", team(group));
+      const { id } = await shared().startExport(company, "test");
+      const exported = await settled(shared(), id, company);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      await expect(
+        called(shared().startExport(company, "test"))
+      ).rejects.toThrow("restoring an export");
+      const status = await restoreSettled(id);
+      expect({
+        exported: exported?.versions,
+        restore: status?.state,
+        held: await versionsHeld(),
+      }).toStrictEqual({ exported: 2, restore: "done", held: 2 });
     });
 
     it("refuses a person's export, and a person's own store refuses any (threat 4)", async () => {

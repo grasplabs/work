@@ -13,6 +13,7 @@ import {
   wellFormedString,
   modelWaitMaxSeconds,
   refusalPrefix,
+  restoringNow,
   storeBytesMax,
 } from "@grasp-os/brain-next/contract";
 import type {
@@ -86,6 +87,22 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // a source nobody can reach would be added without a word. Every string is
 // well-formed (the Brain's own rule, `wellFormedString`), so no two become
 // one once encoded.
+
+/**
+ * `add`, its refusal while the Brain restores an export (contract.ts
+ * `restoringNow`) answered as `brain.restoring`: a code a producer makes
+ * the add again for, later, as after any failure of an add.
+ */
+const whileNotRestoring = async <T>(add: () => Promise<T>): Promise<T> => {
+  try {
+    return await add();
+  } catch (error) {
+    if (error instanceof Error && error.message === restoringNow) {
+      throw brainExportErrors.create("brain.restoring");
+    }
+    throw error;
+  }
+};
 
 /** A team's group name starts with this; the rest is the team's ID. */
 const teamPrefix = "team:";
@@ -335,12 +352,15 @@ export const addSource = async (
   }
 ): Promise<SourceVersionRef> => {
   const { source, change, text, readers } = checked(newSourceSchema, added);
-  const { version } = await brain(env).addSource({
-    source: sourceKeyOf(source),
-    change,
-    text,
-    access: accessOf(readers),
-  });
+  const { version } = await whileNotRestoring(
+    async () =>
+      await brain(env).addSource({
+        source: sourceKeyOf(source),
+        change,
+        text,
+        access: accessOf(readers),
+      })
+  );
   return { source, version };
 };
 
@@ -676,7 +696,9 @@ type ExportEnv = Pick<
 /**
  * The deployment an export is of, as its manifest names it: the client
  * the admin deployed, or `local` where none is set (local development and
- * on-prem, a deployment of its own). A restore refuses another's.
+ * on-prem, a deployment of its own). A restore refuses another's. On-prem
+ * every install is `local`, so there the check tells little: an export
+ * moved from one install's bucket to another's would pass it.
  */
 const deploymentOf = (env: Pick<Env, "CLIENT_ID">): string =>
   env.CLIENT_ID ?? "local";
@@ -700,11 +722,19 @@ export const startBrainExport = async (
   if (asking.kind === "person") {
     await readerOf(env, asking.personId);
   }
-  const { id } = await brain(env).startExport(
-    scopeOf(asking),
-    deploymentOf(env)
-  );
-  return [{ store: "shared", id }];
+  try {
+    const { id } = await brain(env).startExport(
+      scopeOf(asking),
+      deploymentOf(env)
+    );
+    return [{ store: "shared", id }];
+  } catch (error) {
+    // Refused for the state the Brain is in (a restore runs).
+    if (error instanceof Error && error.message.startsWith(refusalPrefix)) {
+      throw brainExportErrors.create("brain.export_refused");
+    }
+    throw error;
+  }
 };
 
 /** Where `asker`'s export `ref` is: null for any other, alike. */
@@ -892,12 +922,15 @@ export const addInstructionFile = async (
     });
   }
   const { file, change } = checked(newInstructionsSchema, added);
-  const { version } = await brain(env).addInstructions({
-    source: instructionKeyOf(file),
-    change,
-    text: added.text,
-    access: instructionAccessOf(file),
-  });
+  const { version } = await whileNotRestoring(
+    async () =>
+      await brain(env).addInstructions({
+        source: instructionKeyOf(file),
+        change,
+        text: added.text,
+        access: instructionAccessOf(file),
+      })
+  );
   return { file, version };
 };
 

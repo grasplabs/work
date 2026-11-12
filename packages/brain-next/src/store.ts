@@ -14,6 +14,7 @@ import {
   exportIdSchema,
   exportRequestSchema,
   exportScopeSchema,
+  instructionsPrefix,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -87,7 +88,7 @@ import type { ErasureStore } from "./erasure.ts";
 import {
   exportFile,
   exportStatus,
-  exportsDue,
+  exportsDueAt,
   exportsPrefix,
   exportsStep,
   personKeyOf,
@@ -204,6 +205,16 @@ const notTheirsAlone =
 /** What a person's own store answers a restore: restores go into the shared store. */
 const sharedOnly =
   "The Brain refused it: a restore goes only into the shared store";
+
+/**
+ * What an add answers under the wrong kind of key (contract.ts
+ * `instructionsPrefix`): instruction files are never indexed, and nothing
+ * indexed is one.
+ */
+const notInstructions =
+  "The Brain refused it: an instruction file is added with addInstructions";
+const onlyInstructions =
+  "The Brain refused it: addInstructions takes only an instruction file's key";
 
 /** What a store whose name says no one's answers every call. */
 const noOnes =
@@ -625,6 +636,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async addSource(source: NewSource): Promise<SourceVersionRef> {
     const adding = checked(newSourceSchema, source);
+    if (adding.source.startsWith(instructionsPrefix)) {
+      throw new Error(notInstructions);
+    }
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
@@ -638,6 +652,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
     const adding = checked(newInstructionsSchema, source);
+    if (!adding.source.startsWith(instructionsPrefix)) {
+      throw new Error(onlyInstructions);
+    }
     this.#mayKeep(adding.access);
     return await this.#changing(async () => {
       await this.#readyToWrite();
@@ -911,7 +928,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#repack(tickAt);
     this.#reindex(tickAt);
     this.#embedding(tickAt, embedders.model);
-    this.#exports();
+    this.#exports(tickAt);
     await workTick(
       this.ctx.storage,
       this.#work,
@@ -993,11 +1010,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * - words.ts `wordsRebuilding`: word indexes behind their rules;
    * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
    *   still to remove;
-   * - exports.ts `exportsDue`: an export an erasure made stale, an export
-   *   or a restore whose item of the queue is parked for good or gone, or
-   *   a sweep of export files the store has no record of, due since an
-   *   erasure (writing an export, restoring one, deleting files and the
-   *   sweep are items of the queue, which `queueDueAt` covers);
+   * - exports.ts `exportsDueAt`: at once for an export an erasure made
+   *   stale, an export or a restore whose item of the queue is parked for
+   *   good or gone, or a sweep of export files the store has no record of,
+   *   due since an erasure; else when the first done export is past its
+   *   time (writing an export, restoring one, deleting files and the sweep
+   *   are items of the queue, which `queueDueAt` covers);
    * - work.ts `queueDueAt`: an item of the queue, due or coming back from
    *   parked, once the queue's pause is over.
    *
@@ -1011,8 +1029,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       erasureDue(sql) ||
       repackDue(sql) ||
       wordsRebuilding(sql) ||
-      embeddingDue(storage) ||
-      exportsDue(sql)
+      embeddingDue(storage)
     ) {
       return now;
     }
@@ -1020,6 +1037,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const due = [
       sweep === null ? null : Math.max(sweep, this.#sweepAfter),
       queueDueAt(storage),
+      exportsDueAt(sql, now),
     ].filter((at) => at !== null);
     return due.length === 0 ? null : Math.min(...due);
   }
@@ -1120,9 +1138,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * next tick (`#nextWorkAt`), and meanwhile a stale export is served to
    * no one (`exportFile` asks itself).
    */
-  #exports(): void {
+  #exports(at: Date): void {
     try {
-      exportsStep(this.ctx.storage);
+      exportsStep(this.ctx.storage, at.getTime());
     } catch {
       // Nothing of the error is kept.
     }

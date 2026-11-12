@@ -947,6 +947,20 @@ export type ExportScope = z.infer<typeof exportScopeSchema>;
 export const refusalPrefix = "The Brain refused it:";
 
 /**
+ * What an add answers while a restore runs (restoring.ts): a refusal to
+ * make again shortly, once the restore is done, as a producer makes an add
+ * again after any failure.
+ */
+export const restoringNow = `${refusalPrefix} it is restoring an export, so it adds nothing until that is done: add it again shortly`;
+
+/**
+ * What an instruction file's key starts with, and only its key:
+ * `addInstructions` takes only such keys, and `addSource` none, so an
+ * instruction file is never indexed and nothing indexed is one.
+ */
+export const instructionsPrefix = "instructions:";
+
+/**
  * The deployment an export is of, as the host names it: its manifest says
  * so, and a restore refuses another deployment's export.
  */
@@ -975,18 +989,22 @@ export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
 
 /**
  * Where an export is: being written; done, with its files (the manifest
- * first); failed (a file it was to read was gone: its files deleted); or erased, as an
- * erasure recorded after it started made it stale and its files are
- * deleted: start a new one.
+ * first); failed (a file it was to read was gone: its files deleted);
+ * erased, as an erasure since it started took something it holds, and its
+ * files are deleted; or expired, kept its time (`exportKeptMs`) or
+ * replaced by a newer one of its scope, its files deleted. Start a new one.
  */
 export interface ExportStatus {
   id: string;
-  state: "writing" | "done" | "failed" | "erased";
+  state: "writing" | "done" | "failed" | "erased" | "expired";
   /** Versions written so far. */
   versions: number;
   /** Its files, once done: none before. */
   files: string[];
 }
+
+/** How long a done export is kept: 7 days, unless a newer one of its scope is done first. */
+export const exportKeptMs = 7 * 24 * 60 * 60_000;
 
 /** Where a restore of a company export is, and how many versions it restored. */
 export interface RestoreStatus {

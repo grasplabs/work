@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5bfefe7a-1069-4e36-aca6-476677841373",
+  "id": "fd61de9a-8ea4-4925-b992-4e250eb77085",
   "prevId": "a79a35ba-85e1-4b64-95cd-76853d22786d",
   "tables": {
     "chunks": {
@@ -455,6 +455,52 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "export_sources": {
+      "name": "export_sources",
+      "columns": {
+        "export": {
+          "name": "export",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "export_sources_export_exports_id_fk": {
+          "name": "export_sources_export_exports_id_fk",
+          "tableFrom": "export_sources",
+          "tableTo": "exports",
+          "columnsFrom": [
+            "export"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "export_sources_export_subject_pk": {
+          "columns": [
+            "export",
+            "subject"
+          ],
+          "name": "export_sources_export_subject_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "export_sweep": {
       "name": "export_sweep",
       "columns": {
@@ -543,9 +589,9 @@
           "notNull": true,
           "autoincrement": false
         },
-        "erasure_mark": {
-          "name": "erasure_mark",
-          "type": "integer",
+        "ledger_mark": {
+          "name": "ledger_mark",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -591,7 +637,7 @@
           "name": "exports_state_idx",
           "columns": [
             "state",
-            "erasure_mark"
+            "finished_at"
           ],
           "isUnique": false
         }

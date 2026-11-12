@@ -578,9 +578,11 @@ export const unembeddable = sqliteTable(
 /**
  * An export: whose (`scope`, and for a person the SHA-256 of their id, as
  * the erasure ledger names them: no plain id outlives an erasure of them),
- * how far it has come, and where the store's record of erasures was when it
- * started (`erasureMark`): any erasure recorded after that makes it stale,
- * and its files are deleted (exports.ts).
+ * how far it has come, and where the erasure ledger was when it started
+ * (`ledgerMark`, the key of the last entry the store had applied): an
+ * erasure past it of a source the export holds (`export_sources`), or of
+ * the person whose export it is, makes it stale, and its files are deleted
+ * (exports.ts).
  */
 export const exportsTable = sqliteTable(
   "exports",
@@ -597,8 +599,11 @@ export const exportsTable = sqliteTable(
     upTo: integer("up_to").notNull(),
     /** The last version's row written to a part. */
     cursor: integer().notNull(),
-    erasureMark: integer("erasure_mark").notNull(),
-    state: text({ enum: ["writing", "done", "failed", "erased"] }).notNull(),
+    /** The key of the last erasure the store had applied as it started: "" for none. */
+    ledgerMark: text("ledger_mark").notNull(),
+    state: text({
+      enum: ["writing", "done", "failed", "erased", "expired"],
+    }).notNull(),
     /** Parts written, and the versions in them. */
     parts: integer().notNull(),
     versions: integer().notNull(),
@@ -606,10 +611,25 @@ export const exportsTable = sqliteTable(
     finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
   },
   (table) => [
-    // What runs or stands, for the tick's check of erasures since.
-    index("exports_state_idx").on(table.state, table.erasureMark),
+    index("exports_state_idx").on(table.state, table.finishedAt),
     check("exports_scope", sql`${table.scope} IN ('company', 'person')`),
   ]
+);
+
+/**
+ * The sources an export holds, by their keys as the erasure ledger names
+ * them (SHA-256): recorded with each part, so an erasure of one of them
+ * makes exactly the exports that hold it stale.
+ */
+export const exportSources = sqliteTable(
+  "export_sources",
+  {
+    export: text()
+      .notNull()
+      .references(() => exportsTable.id),
+    subject: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.export, table.subject] })]
 );
 
 /** A part of an export, as written: its SHA-256 and how many versions it holds. */
@@ -649,9 +669,10 @@ export const restores = sqliteTable("restores", {
 /**
  * The sweep of export files the store has no record of (exports.ts
  * `sweepWork`): the last erasure (`erasures.rowid`) it was started for, and
- * where its listing of `exports/` goes on (null once it is through). One
- * row at most. A store whose rows were lost, or rolled back, replays its
- * ledger into `erasures` past it, so the sweep is due again.
+ * where its listing of `exports/` goes on (null once it is through), saved
+ * after each export it checks. One row at most. A store whose rows were
+ * lost, or rolled back, replays its ledger into `erasures` past it, so the
+ * sweep is due again.
  */
 export const exportSweep = sqliteTable(
   "export_sweep",

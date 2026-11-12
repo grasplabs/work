@@ -6,6 +6,7 @@ import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
 import {
   changeKeySchema,
+  instructionsPrefix,
   newSourceSchema,
   refusalPrefix,
   sourceIdSchema,
@@ -13,14 +14,15 @@ import {
 } from "./contract.ts";
 import type { RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
-import { erasuresSoFar, isErased, keepSubject, subjectOf } from "./erasure.ts";
+import { isErased, keepSubject, subjectOf } from "./erasure.ts";
 import {
   exportKeyOf,
   exportLineSchema,
+  isStale,
   manifestFile,
   manifestSchema,
+  recordExportSources,
   recordRestoredExport,
-  settleRestoredExport,
 } from "./exports.ts";
 import type { ExportLine, Manifest } from "./exports.ts";
 import {
@@ -44,11 +46,12 @@ import type { WorkContext } from "./work.ts";
 // 1. Checking, before anything is written: each part's size, SHA-256 and
 //    count against the manifest, and each line by the contract's own rules
 //    for a source, its text and its readers, and by what a company export
-//    holds: readers a group names (never one person, never no one), no key
-//    of a skill, and an instruction file (`instructions:`, never indexed)
-//    only as itself, so a file can't make a document into one, nor one into
-//    a document. A part that fails any of these fails the restore, and
-//    nothing of the export is written.
+//    holds: readers a group names (never one person, never no one), and an
+//    instruction file (`instructions:`, never indexed) only as itself, as
+//    the store takes them (store.ts), so a file can't make a document into
+//    one, nor one into a document. A part that fails any of these fails the
+//    restore, and nothing of the export is written. The sources each part
+//    holds are recorded for the export as it is checked (exports.ts).
 // 2. Writing: every version as it was (its number, when it was added, its
 //    readers, its change keys, whether it was current, indexed as it was).
 //
@@ -65,11 +68,18 @@ import type { WorkContext } from "./work.ts";
 // there, and it counts only the versions it wrote. A version already there
 // (written by a run the store stopped part-way) is passed over, so a run
 // repeated finds what the last one wrote and ends the same, and a failed
-// restore can be started again. It fails rather than fill the store past
-// its quota (contract.ts `storeBytesMax`). Its export is recorded as one the
-// store has (exports.ts `recordRestoredExport`), so a later erasure deletes
-// its files; and when an erasure the store holds came after the export
-// started, its files are deleted as the restore ends.
+// restore can always be started again from the same export, whose files
+// are never deleted while its restore runs or failed. It fails rather than
+// fill the store past its quota (contract.ts `storeBytesMax`). Its export
+// is recorded as one the store has (exports.ts `recordRestoredExport`), so
+// an erasure of what it holds deletes its files once the restore is done.
+//
+// While it runs or once it failed part-way, the store answers from what it
+// holds so far, each row checked for its reader as always: a half-restored
+// store shows less, never more. A restored source whose current version the
+// ledger left out keeps its history, which no one can read without a
+// current version (sources.ts `readVersion`); the overview counts such
+// sources (`sourcesWithoutCurrent`).
 
 /** What a restore refuses to start, and why: each a refusal (contract.ts `refusalPrefix`). */
 const refusals = {
@@ -124,6 +134,7 @@ const refusalOf = (sql: SqlStorage, id: string): string | undefined => {
   ) {
     return refusals.running;
   }
+  // A failed restore of `id` starts again, whatever it wrote.
   if (rowOf(sql, id)?.state === "failed") {
     return undefined;
   }
@@ -134,23 +145,25 @@ const refusalOf = (sql: SqlStorage, id: string): string | undefined => {
 
 /**
  * Whether this store's own record of export `id` says it may not be
- * restored: a person's, not done, or made stale by an erasure since. An
+ * restored: a person's, not done, or holding what an erasure took. An
  * export it has no record of (its record lost with the store's storage) is
  * checked by the ledger alone, version by version.
  */
 const unrestorable = (sql: SqlStorage, id: string): boolean => {
+  // Its own failed restore holds it as it was: it starts again.
+  if (rowOf(sql, id)?.state === "failed") {
+    return false;
+  }
   const row = sql
-    .exec<{ scope: string; state: string; erasure_mark: number }>(
-      "SELECT scope, state, erasure_mark FROM exports WHERE id = ?",
+    .exec<{ scope: string; state: string }>(
+      "SELECT scope, state FROM exports WHERE id = ?",
       id
     )
     .toArray()
     .at(0);
   return (
     row !== undefined &&
-    (row.scope !== "company" ||
-      row.state !== "done" ||
-      erasuresSoFar(sql) > row.erasure_mark)
+    (row.scope !== "company" || row.state !== "done" || isStale(sql, id))
   );
 };
 
@@ -198,8 +211,7 @@ const lineSchema = exportLineSchema.superRefine((line, context) => {
     !sourceIdSchema.safeParse(line.source).success ||
     !z.array(changeKeySchema).safeParse(line.changes).success ||
     line.access.kind !== "audience" ||
-    line.source.startsWith("skill:") ||
-    line.source.startsWith("instructions:") === line.indexed
+    line.source.startsWith(instructionsPrefix) === line.indexed
   ) {
     context.addIssue({ code: "custom", message: "Not a version to restore" });
   }
@@ -372,11 +384,7 @@ const restoreVersion = async (
   });
 };
 
-/**
- * The restore's state set to `state`, once it is still running, and its
- * export's record settled (exports.ts `settleRestoredExport`). In the
- * caller's transaction.
- */
+/** The restore's state set to `state`, once it is still running. In the caller's transaction. */
 const settle = (
   sql: SqlStorage,
   id: string,
@@ -389,7 +397,6 @@ const settle = (
     Date.now(),
     id
   );
-  settleRestoredExport(sql, id);
 };
 
 /** The restore's state settled in a transaction of its own. */
@@ -431,7 +438,11 @@ const restorePart = async (
     return;
   }
   if (checking) {
+    const subjects = await Promise.all(
+      [...new Set(lines.map(({ source }) => source))].map(subjectOf)
+    );
     storage.transactionSync(() => {
+      recordExportSources(sql, id, subjects);
       sql.exec(
         `UPDATE restores SET checked = checked + 1
         WHERE export = ? AND checked = ? AND state = 'running'`,

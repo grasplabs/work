@@ -8,6 +8,13 @@ CREATE TABLE `export_parts` (
 	FOREIGN KEY (`export`) REFERENCES `exports`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE TABLE `export_sources` (
+	`export` text NOT NULL,
+	`subject` text NOT NULL,
+	PRIMARY KEY(`export`, `subject`),
+	FOREIGN KEY (`export`) REFERENCES `exports`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `export_sweep` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`through` integer NOT NULL,
@@ -23,7 +30,7 @@ CREATE TABLE `exports` (
 	`reader_set` integer,
 	`up_to` integer NOT NULL,
 	`cursor` integer NOT NULL,
-	`erasure_mark` integer NOT NULL,
+	`ledger_mark` text NOT NULL,
 	`state` text NOT NULL,
 	`parts` integer NOT NULL,
 	`versions` integer NOT NULL,
@@ -32,7 +39,7 @@ CREATE TABLE `exports` (
 	CONSTRAINT "exports_scope" CHECK("exports"."scope" IN ('company', 'person'))
 );
 --> statement-breakpoint
-CREATE INDEX `exports_state_idx` ON `exports` (`state`,`erasure_mark`);--> statement-breakpoint
+CREATE INDEX `exports_state_idx` ON `exports` (`state`,`finished_at`);--> statement-breakpoint
 CREATE TABLE `restores` (
 	`export` text PRIMARY KEY NOT NULL,
 	`manifest` text NOT NULL,

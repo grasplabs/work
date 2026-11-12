@@ -192,25 +192,40 @@ const startExport = async (
   if (asker === undefined) {
     return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
   }
-  const exports = await audited(
-    env,
-    (step, outcome) =>
-      entryOf(person, `brain.export.${step}`, requestId, {
-        scope: asked.scope,
-        ...(outcome === undefined ? {} : { outcome }),
-      }),
-    async () => await startBrainExport(env, asker)
-  );
-  return answer(
-    asked.scope === "own"
+  let exports: Awaited<ReturnType<typeof startBrainExport>>;
+  try {
+    exports = await audited(
+      env,
+      (step, outcome) =>
+        entryOf(person, `brain.export.${step}`, requestId, {
+          scope: asked.scope,
+          ...(outcome === undefined ? {} : { outcome }),
+        }),
+      async () => await startBrainExport(env, asker)
+    );
+  } catch (error) {
+    // Refused for the state the Brain is in: a conflict.
+    if (brainExportErrors.codeOf(error) === "brain.export_refused") {
+      return errorResponse(
+        409,
+        brainExportErrors.create("brain.export_refused"),
+        requestId
+      );
+    }
+    throw error;
+  }
+  return answer({
+    exports,
+    // How long it is kept (the Brain's `exportKeptMs`), said plainly.
+    kept: "An export is kept for 7 days after it is done, or until a newer one is done.",
+    ...(asked.scope === "own"
       ? {
-          exports,
           // Said plainly, as the export holds it (core's brain-next.ts).
           holds:
             "What the company's Brain holds that only you may read. What your own space in the Brain holds is not in this export yet.",
         }
-      : { exports }
-  );
+      : {}),
+  });
 };
 
 /** Where an export of the signed-in person's is, or one of its files. */
