@@ -28,8 +28,13 @@ import type { WayRunner } from "./recall-counts.ts";
 //   are found, but it is never stepped through, so one entity related to
 //   almost everything neither floods the pack nor slows recall. The
 //   memories about the entities reached come nearest first: those about a
-//   named entity (its facts and its relations), then one step on, then
-//   two; at most `recallLimit`, the contract's bound on each way's list.
+//   named entity (its facts and its relations), then one step on (theirs,
+//   but those of the step before), then the own facts of those two steps
+//   out; at most `recallLimit`, the contract's bound on each way's list.
+//   Each step is read with the room the list has left, and none further
+//   once it is full: nearer steps always rank first, so what a fuller
+//   walk would add never reaches the list. A relation of a hub counts at
+//   the step of the entity at its other end.
 //
 // And, for each memory found that is contested, the other current sides
 // the reader may read, so the pack carries both with their sources.
@@ -43,8 +48,10 @@ import type { WayRunner } from "./recall-counts.ts";
 
 /**
  * Most current relations the reader may read before an entity is a hub,
- * not stepped through (GRA-1742: "a cap on entities that are connected
- * to almost everything").
+ * not stepped through. GRA-1742 asks for "a cap on entities that are
+ * connected to almost everything"; the number is ours, chosen here: well
+ * above the relations a person, customer or supplier usually has, well
+ * below a company-wide tool or team. Measure before moving it.
  */
 export const hubRelationsMax = 25;
 
@@ -157,28 +164,31 @@ const stepSql = memoriesSql({
 });
 
 /**
- * `?1` the entities reached (JSON, each `[row, step, hub]`), `?5` the
- * most: the current memories the reader may read about them, the nearest
- * step first (a relation counts at the nearer of its two ends), then
- * confirmed, then the newest. A hub's own facts, never its relations.
+ * `?1` one step of the walk (JSON: `here`, each `[row, whole]`, and
+ * `before`, rows), `?5` the room left: the current memories the reader
+ * may read about the entities of this step, confirmed first, then the
+ * newest. Of an entity read `whole`, its facts and its relations; of
+ * another (a hub, or one on the last step), its own facts alone. Those
+ * on an entity of an earlier step read whole are left out: that step
+ * gave them already.
  */
-const reachedSql = memoriesSql({
-  prelude: `reached AS MATERIALIZED (
-  SELECT value ->> 0 AS entity, value ->> 1 AS step, value ->> 2 AS hub
-  FROM json_each(?1)
+const stepReadSql = memoriesSql({
+  prelude: `here AS MATERIALIZED (
+  SELECT value ->> 0 AS entity, value ->> 1 AS whole
+  FROM json_each(?1, '$.here')
+),
+before AS MATERIALIZED (
+  SELECT value AS entity FROM json_each(?1, '$.before')
 )`,
-  base: `SELECT m.row FROM reached JOIN memories AS m ON m.entity = reached.entity
-    WHERE reached.hub = 0 OR m.object IS NULL
-    UNION SELECT m.row FROM reached JOIN memories AS m ON m.object = reached.entity
-    WHERE reached.hub = 0`,
-  filter: "judged.is_current = 1",
-  columns: `, (SELECT min(reached.step) FROM reached
-    WHERE reached.entity IN (m.entity, m.object)) AS step`,
-  order: `step, confirmation IS NULL, m.learned_at DESC, m.id DESC`,
+  base: `SELECT m.row FROM here JOIN memories AS m ON m.entity = here.entity
+    WHERE here.whole = 1 OR m.object IS NULL
+    UNION SELECT m.row FROM here JOIN memories AS m ON m.object = here.entity
+    WHERE here.whole = 1`,
+  filter: `judged.is_current = 1
+    AND m.entity NOT IN (SELECT entity FROM before)
+    AND (m.object IS NULL OR m.object NOT IN (SELECT entity FROM before))`,
+  order: "confirmation IS NULL, m.learned_at DESC, m.id DESC",
 });
-
-/** A memory row of the entities way, with its step. */
-type ReachedRow = MemoryRow & { step: number };
 
 /** How a memory is ordered and placed: what `FoundMemory` adds to `Memory`. */
 const foundOf = (
@@ -224,6 +234,26 @@ const run = <T extends Record<string, SqlStorageValue>>(
     )
     .toArray();
 
+/** The entities of `frontier` that are hubs for the reader as of `at`. */
+const hubsOf = (
+  sql: SqlStorage,
+  frontier: readonly number[],
+  reader: Reader,
+  at: number
+): Set<number> =>
+  new Set(
+    run<{ entity: number; relations: number }>(
+      sql,
+      hubCountSql,
+      JSON.stringify(frontier),
+      reader,
+      at,
+      hubRelationsMax + 1
+    )
+      .filter(({ relations }) => relations > hubRelationsMax)
+      .map(({ entity }) => entity)
+  );
+
 /**
  * The entities way: the memories about the entities the question names
  * and those one or two steps along their relations, nearest first, at
@@ -250,50 +280,58 @@ const byEntities = (
   if (named.length === 0) {
     return [];
   }
-  const reached = new Map<number, { step: number; hub: boolean }>();
+  // One step at a time, nearest first, each read with the room the list
+  // has left: the nearer steps always rank first, so once they fill it,
+  // what lies further is never read.
+  const found: Reached[] = [];
+  const reached = new Set<number>();
+  const before: number[] = [];
   let frontier = named.map(({ entity }) => entity);
-  for (let step = 0; frontier.length > 0; step += 1) {
-    const hubs = new Set(
-      run<{ entity: number; relations: number }>(
+  for (let step = 0; ; step += 1) {
+    for (const entity of frontier) {
+      reached.add(entity);
+    }
+    // The last step gives its entities' own facts alone: whether one is a
+    // hub doesn't matter there, so it isn't counted.
+    const last = step === stepsMax;
+    const hubs = last ? new Set<number>() : hubsOf(sql, frontier, reader, at);
+    const whole = last ? [] : frontier.filter((entity) => !hubs.has(entity));
+    const wholeSet = new Set(whole);
+    found.push(
+      ...run<MemoryRow>(
         sql,
-        hubCountSql,
-        JSON.stringify(frontier),
+        stepReadSql,
+        JSON.stringify({
+          here: frontier.map((entity) => [
+            entity,
+            wholeSet.has(entity) ? 1 : 0,
+          ]),
+          before,
+        }),
         reader,
         at,
-        hubRelationsMax + 1
-      )
-        .filter(({ relations }) => relations > hubRelationsMax)
-        .map(({ entity }) => entity)
+        recallLimit - found.length
+      ).map((row) => foundOf(row, { step }))
     );
-    for (const entity of frontier) {
-      reached.set(entity, { step, hub: hubs.has(entity) });
+    if (found.length >= recallLimit || whole.length === 0) {
+      return found;
     }
-    const through = frontier.filter((entity) => !hubs.has(entity));
-    if (step === stepsMax || through.length === 0) {
-      break;
-    }
+    before.push(...whole);
     const next = new Set<number>();
     for (const { entity_end: from, object_end: to } of run<
       MemoryRow & { entity_end: number; object_end: number }
-    >(sql, stepSql, JSON.stringify(through), reader, at, -1)) {
+    >(sql, stepSql, JSON.stringify(whole), reader, at, -1)) {
       for (const end of [from, to]) {
         if (!reached.has(end)) {
           next.add(end);
         }
       }
     }
+    if (next.size === 0) {
+      return found;
+    }
     frontier = [...next];
   }
-  return run<ReachedRow>(
-    sql,
-    reachedSql,
-    JSON.stringify(
-      [...reached].map(([entity, { step, hub }]) => [entity, step, hub ? 1 : 0])
-    ),
-    reader,
-    at,
-    recallLimit
-  ).map((row) => foundOf(row, { step: row.step }));
 };
 
 /**

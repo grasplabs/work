@@ -8,12 +8,14 @@
 // not read are added (memories, names, relations, contested values), and
 // the pack is taken again: the pack of a store without them, then with
 // them. They must be byte for byte the same.
-import { packMemoryTokens } from "@grasp-os/brain-next/contract";
+import { packMemoryTokens, recallLimit } from "@grasp-os/brain-next/contract";
 import type { Pack, Reader } from "@grasp-os/brain-next/contract";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { hubRelationsMax } from "../src/recall-memories.ts";
+import { readMoment } from "../src/memories.ts";
+import { findMemories, hubRelationsMax } from "../src/recall-memories.ts";
 import {
   audience,
   fact,
@@ -356,12 +358,18 @@ describe("recall through memories", () => {
         ),
       ]
     );
-    // A hub's relations are never found; this tool's current ones are.
+    // Not a hub: the list is filled with the tool's current relations
+    // alone (a hub's relations are never found), none of an owner ended.
+    const current = new Set([
+      `${owners.at(-1) ?? ""} owns the tool`,
+      ...users.map((one) => `${one} uses the tool`),
+    ]);
     const found = await byEntitiesOf(reader, `who looks after ${tool}`);
-    const usersFound = found.filter((statement) =>
-      users.some((one) => statement === `${one} uses the tool`)
-    );
-    expect(usersFound.length).toBeGreaterThan(0);
+
+    expect({
+      count: found.length,
+      unknown: found.filter((statement) => !current.has(statement)),
+    }).toStrictEqual({ count: recallLimit, unknown: [] });
   });
 
   // "As of" reads the memories' two clocks.
@@ -469,5 +477,109 @@ describe("recall through memories, hidden versus absent", () => {
         `Deliveries of ${topic} arrive on Tuesday`,
       ].toSorted()
     );
+  });
+});
+
+describe("recall through memories, step by step", () => {
+  // Nearer steps fill the list, so what lies two steps out is never
+  // read: the statements the store executes show no read of that step,
+  // and adding far entities' facts between two asks changes nothing.
+  it("reads no entity two steps out once the nearer steps fill the list", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const seed = `${word()} ${word()}`;
+    const mids = Array.from({ length: 3 }, () => word());
+    const fars = mids.map(() => word());
+    const { entities } = await remember(
+      audience(group),
+      [
+        { key: "s", kind: "person", names: [seed] },
+        ...mids.map((one, index) => ({
+          key: `m${index}`,
+          kind: "customer" as const,
+          names: [one],
+        })),
+        ...fars.map((one, index) => ({
+          key: `f${index}`,
+          kind: "person" as const,
+          names: [one],
+        })),
+      ],
+      [
+        ...mids.map((one, index) =>
+          fact("s", `${seed} looks after ${one}`, {
+            attribute: "owns",
+            object: `m${index}`,
+          })
+        ),
+        ...mids.flatMap((one, index) => [
+          ...[1, 2, 3].map((note) => fact(`m${index}`, `${one} note ${note}`)),
+          fact(`m${index}`, `${one} is reached through ${fars[index]}`, {
+            attribute: "contact",
+            object: `f${index}`,
+          }),
+        ]),
+      ]
+    );
+    // The reads of a step the store runs: the statements reading one
+    // step's memories (recall-memories.ts, `here` of a step), each as the
+    // store executes it. (The rows they read are no measure here: every
+    // statement judging memories reads a share of the whole table.)
+    const ask = async () =>
+      await runInDurableObject(shared(), (_instance, state) => {
+        let steps = 0;
+        const counted = new Proxy(state.storage.sql, {
+          get: (target, key): unknown => {
+            if (key !== "exec") {
+              const value: unknown = Reflect.get(target, key, target);
+              return value;
+            }
+            return (...args: Parameters<SqlStorage["exec"]>) => {
+              if (args[0].includes("'$.here'")) {
+                steps += 1;
+              }
+              return target.exec(...args);
+            };
+          },
+        });
+        const found = findMemories(
+          counted,
+          {
+            question: seed,
+            reader,
+            at: readMoment(state.storage.sql),
+            words: [],
+          },
+          (_way, run) => run()
+        );
+        return {
+          statements: found.entities.map(({ statement }) => statement),
+          steps,
+        };
+      });
+    const before = await ask();
+    await remember(
+      audience(group),
+      fars.map((one, index) => ({
+        key: `f${index}`,
+        id: entities[`f${index}`] ?? "",
+        kind: "person" as const,
+        names: [],
+      })),
+      fars.flatMap((one, index) =>
+        Array.from({ length: 20 }, (_, note) =>
+          fact(`f${index}`, `${one} far note ${note}`)
+        )
+      )
+    );
+    const after = await ask();
+
+    // Two steps read (the named entity, then one on), and the same
+    // answer: the step holding the far facts was never read.
+    expect(after).toStrictEqual(before);
+    expect({
+      found: before.statements.length,
+      steps: before.steps,
+    }).toStrictEqual({ found: recallLimit, steps: 2 });
   });
 });
