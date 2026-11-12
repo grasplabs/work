@@ -1,5 +1,5 @@
 import type { Project } from "@grasp-os/shared/projects";
-import { Button } from "@grasp-os/ui/components/button";
+import { buttonVariants } from "@grasp-os/ui/components/button";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Tooltip,
@@ -106,9 +106,17 @@ export const ItemSwitch = ({
   </nav>
 );
 
+/** What dresses a switch's link as one of its buttons, and marks the one the page is at. */
+export interface SwitchLinkLook {
+  className: string;
+  "aria-current": "page" | undefined;
+}
+
 /**
- * One of a switch's links (`render`, a router's `<Link>`): its icon and
- * label, raised while it is where the page is. Where the bar is narrow
+ * One of a switch's links (`renderLink`, a router's `<Link>` given its
+ * look):
+ * its icon and label, raised while it is where the page is. A link, so
+ * announced as one, only dressed as a button. Where the bar is narrow
  * (`@max-6xl/bar`) it is its icon alone, its label its tooltip: the views
  * give way first, so the item's name and its main action keep their words.
  */
@@ -116,27 +124,25 @@ export const ItemSwitchLink = ({
   current,
   label,
   icon,
-  render,
+  renderLink,
   children,
 }: {
   current: boolean;
   label: string;
   icon: ReactNode;
-  render: ReactElement;
+  renderLink: (look: SwitchLinkLook) => ReactElement;
   /** Anything after the label, as a count. */
   children?: ReactNode;
 }) => (
   <Tooltip>
     <TooltipTrigger
-      render={
-        <Button
-          aria-current={current ? "page" : undefined}
-          nativeButton={false}
-          render={render}
-          size="sm"
-          variant={current ? "outline" : "ghost"}
-        />
-      }
+      render={renderLink({
+        className: buttonVariants({
+          size: "sm",
+          variant: current ? "outline" : "ghost",
+        }),
+        "aria-current": current ? "page" : undefined,
+      })}
     >
       {icon}
       <span className="@max-6xl/bar:sr-only">{label}</span>

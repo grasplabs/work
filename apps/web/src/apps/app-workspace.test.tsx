@@ -2223,7 +2223,39 @@ describe(AppWorkspace, () => {
         fakeApps({ currentVersion: null }).apps,
         identityOf(false),
         `chat-${state}`,
-        async () => await Promise.resolve(watching()),
+        // Grasp's turn after the Build it that made the App, over.
+        async (_chat, _after, received) => {
+          received({
+            messages: [
+              {
+                id: 1,
+                role: "user",
+                text: "Build it",
+                built: {
+                  app: { id: "invoice-desk", name: "Invoices" },
+                  plan: "plan-1",
+                },
+                at: "2026-10-20T08:00:00.000Z",
+              },
+              {
+                id: 2,
+                role: "assistant",
+                text: "Invoices is set up.",
+                citations: [],
+                code: [],
+                tools: [],
+                end: "done",
+                at: "2026-10-20T08:01:00.000Z",
+              },
+            ],
+            partial: null,
+            running: false,
+            stopped: null,
+            held: 0,
+            worked: 1,
+          });
+          return await Promise.resolve(watching());
+        },
         undefined,
         async () => await Promise.resolve(draftOf("invoice-desk")),
         undefined,

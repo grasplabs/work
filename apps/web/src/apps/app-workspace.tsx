@@ -46,6 +46,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
+import { answeredAfterBuild } from "../chat/build-answered.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
 import { ErrorText } from "../error-text.tsx";
@@ -160,8 +161,9 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
           icon={<Icon data-icon="inline-start" />}
           key={each}
           label={labels[each]}
-          render={
+          renderLink={(look) => (
             <Link
+              {...look}
               params={{ app }}
               replace
               search={(held) => ({
@@ -171,7 +173,7 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
               })}
               to="/apps/$app"
             />
-          }
+          )}
         />
       ))}
     </ItemSwitch>
@@ -913,17 +915,23 @@ interface FrameAt {
  * made shows, or, its preview failed at the draft's revision, a calm
  * "isn't ready yet" with Try again. Running once, it stays ready: a later
  * change that breaks it shows as any change does. Never waiting on what
- * may not come: nothing but Grasp's own turn holds the setting-up screen.
+ * may not come: nothing but Grasp's own turn holds the setting-up screen,
+ * and only once Grasp's turn after its Build it ended (`built`) does it
+ * say it isn't ready: a builder's own first steps (a table in Data) are
+ * theirs to go on with.
  */
 const useSetUp = ({
   app,
   shown,
   busy,
+  built,
   revision,
 }: {
   app: App;
   shown: ReadOnlyShown | undefined;
   busy: boolean;
+  /** Whether Grasp answered after the Build it that made the App. */
+  built: boolean;
   revision: number;
 }): {
   setUp: SetUp;
@@ -943,7 +951,8 @@ const useSetUp = ({
   if (fresh && busy) {
     return { setUp: "setting-up", onFrame };
   }
-  const failed = fresh && ours?.state === "failed" && ours.at === revision;
+  const failed =
+    fresh && built && ours?.state === "failed" && ours.at === revision;
   return { setUp: failed ? "failed" : "ready", onFrame };
 };
 
@@ -961,6 +970,8 @@ const useAppChat = (app: string) => {
     chatId: ours ? chat.chatId : undefined,
     running,
     busy: running || (ours && chat.view.checking),
+    built:
+      ours && answeredAfterBuild(chat.view.messages, { kind: "app", id: app }),
     draftChanges: chat.view.worked,
   };
 };
@@ -986,6 +997,21 @@ const useReadAgainOnceBuilt = (running: boolean, draftChanges: number) => {
 };
 
 /**
+ * Reads the App again once its draft moved onto another version than the
+ * one the page read live (`base`): a builder elsewhere published, or rolled
+ * back, so the page shows what is live now, as a fresh load would.
+ */
+const useReadAgainOnNewBase = (app: App, base: number | null | undefined) => {
+  const router = useRouter();
+  const live = app.currentVersion;
+  useEffect(() => {
+    if (base !== undefined && base !== live) {
+      void router.invalidate();
+    }
+  }, [router, base, live]);
+};
+
+/**
  * The workspace with the App's chat (`chatId`, once found) beside it, and
  * the App's draft previewed.
  */
@@ -1006,13 +1032,14 @@ const Building = ({
   section: AppSettingsSection | undefined;
   identity: Identity;
 }) => {
-  const { chatId, running, busy, draftChanges } = useAppChat(app.id);
+  const { chatId, running, busy, built, draftChanges } = useAppChat(app.id);
   const { draft, reread } = useAppDraft(app.id, draftChanges);
   const changing = hasChanges(draft);
   // Each reset of the test data in Data starts the preview afresh on it,
   // without the alert that it didn't fit.
   const [resets, setResets] = useState(0);
   useReadAgainOnceBuilt(running, draftChanges);
+  useReadAgainOnNewBase(app, draft?.base);
   // Whom it is shared with: who uses it, and whom Share adds to.
   const membersRead = useAppRead(app.id, readMembers);
   const members = membersRead?.state === "ready" ? membersRead.data : undefined;
@@ -1020,6 +1047,7 @@ const Building = ({
     app,
     shown,
     busy,
+    built,
     revision: draft?.revision ?? 0,
   });
   const settingUp = setUp !== "ready";

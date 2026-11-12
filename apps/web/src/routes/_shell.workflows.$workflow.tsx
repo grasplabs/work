@@ -25,6 +25,7 @@ import {
 import { HistoryIcon, SettingsIcon, WorkflowIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { answeredAfterBuild } from "../chat/build-answered.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
 import { slotOf } from "../chat/chat-subject.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
@@ -164,8 +165,10 @@ const laterOf = (a: string | null, b: string | null): string | null => {
  * Where a new workflow Build it made stands, for its builders: being set
  * up while Grasp's agent draws its first draft in the chat beside it,
  * until a draft passes (its checkpoint); not set up once the agent's turn
- * ended here without one. Any other workflow, one with a version or a
- * draft that passed, is ready.
+ * ended without one: seen ending here, or answered after the Build it
+ * that made it, so a turn over before the page came, or a reload, lands
+ * there too. Any other workflow, one with a version or a draft that
+ * passed, is ready.
  */
 const useSetUp = (
   resource: WorkflowResource,
@@ -192,7 +195,16 @@ const useSetUp = (
   if (busy) {
     return { setUp: "setting-up", called };
   }
-  return { setUp: worked === resource.id ? "failed" : "ready", called };
+  const answered =
+    ours &&
+    answeredAfterBuild(chat.view.messages, {
+      kind: "workflow",
+      id: resource.id,
+    });
+  return {
+    setUp: answered || worked === resource.id ? "failed" : "ready",
+    called,
+  };
 };
 
 /** Its builders' chat about it, docked beside the page, which draws its Flow. */
@@ -251,14 +263,15 @@ const ViewSwitch = ({
           icon={<Icon data-icon="inline-start" />}
           key={each}
           label={label}
-          render={
+          renderLink={(look) => (
             <Link
+              {...look}
               params={{ workflow }}
               replace
               search={(held) => ({ project: held.project, view: each })}
               to="/workflows/$workflow"
             />
-          }
+          )}
         >
           {each === "runs" ? <ListedCount count={runs} of="runs" /> : null}
         </ItemSwitchLink>
@@ -476,6 +489,9 @@ const WorkflowResourceView = ({
                 workflow={resource.id}
               />
               <StartIndependentRun
+                // Read again for each version that goes live: what Run
+                // starts, and that there is one to start at all.
+                key={resource.currentVersion ?? "none"}
                 onFiles={() => {
                   settingsAt("files");
                 }}

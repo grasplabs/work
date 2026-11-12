@@ -90,7 +90,12 @@ export const AppsOverview = ({
   return (
     <Page wide>
       <PageHeading
-        action={builds ? <MakeSomethingLink kind="app" /> : undefined}
+        // One Make something a page: with no Apps yet, the empty state's.
+        action={
+          builds && apps.length > 0 ? (
+            <MakeSomethingLink kind="app" />
+          ) : undefined
+        }
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
