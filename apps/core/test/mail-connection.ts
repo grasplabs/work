@@ -127,6 +127,20 @@ export const mailConnection = async (
       const response = await providers().fetch(mailControlUrl(name));
       return mailServerStateSchema.parse(await response.json());
     },
+    /** Lists `tools` (MCP tool definitions) from now on. */
+    serves: async (listed: unknown[]) => {
+      await providers().fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify({ list: listed }),
+      });
+    },
+    /** Answers each tool with its MCP tool result from now on, these alone. */
+    answers: async (results: Record<string, unknown>) => {
+      await providers().fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify({ answers: results }),
+      });
+    },
     /** Answers `tool` with `result` (an MCP tool result) from now on. */
     answer: async (tool: string, result: unknown) => {
       await providers().fetch(mailControlUrl(name), {

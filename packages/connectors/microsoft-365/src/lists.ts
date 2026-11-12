@@ -246,8 +246,7 @@ const listItems = defineTool({
         items: value.map((item) => itemOf(item, columns)),
         nextPage: nextPageOf(nextLink),
       },
-      // An item's ID is unique in its list only.
-      provenance: value.map(({ id }) => `${list}/${id}`),
+      provenance: value.map(({ id }) => id),
     };
   },
 });

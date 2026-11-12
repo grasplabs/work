@@ -177,14 +177,7 @@ export type EgressKind = (typeof egressKind)[keyof typeof egressKind];
 /** Most resource IDs one call may report reading. */
 export const maxProvenanceItems = 1000;
 
-/**
- * The IDs of the resources a call read, as a tool reports them. An ID is
- * unique within a connection: it names one item, and every tool that names
- * it read that item's content. A part read on its own gets an ID of its
- * own (`<message>/<attachment>`, `<list>/<item>`, a table's or a sheet's
- * page), never its whole's. Core keeps what a read names, item by item,
- * in the Brain (GRA-1730).
- */
+/** The IDs of the resources a call read, as a tool reports them. */
 export const provenanceSchema = z
   .array(z.string().min(1).max(auditIdentifierMaxLength))
   .max(maxProvenanceItems);

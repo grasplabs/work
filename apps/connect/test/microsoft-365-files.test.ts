@@ -412,10 +412,7 @@ describe("the Microsoft 365 connector's list tools", () => {
     const ids = Array.from({ length: contractCount }, (_, index) => index + 1)
       .filter((n) => n % 4 === 3 && n >= 20)
       .map(String);
-    // Named in their list: an item's ID is unique there only.
-    expect(result.provenance).toStrictEqual(
-      ids.map((id) => `${contractsList}/${id}`)
-    );
+    expect(result.provenance).toStrictEqual(ids);
     expect(result.output).toMatchObject({
       site: financeSite,
       list: contractsList,
@@ -683,8 +680,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
         rows: [{ row: 0, values: northwind }],
         nextStart: 1,
       },
-      // This page of this table: a part of the workbook of its own.
-      provenance: [`${register}/${supplierTable}/0`],
+      provenance: [register],
     });
     await expect(
       outputOf(onRegister(connection, "excel.listRows", { start: 1 }))

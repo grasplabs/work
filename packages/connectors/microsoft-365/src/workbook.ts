@@ -381,8 +381,7 @@ const listRows = defineTool({
         rows,
         nextStart: end < body.values.length ? end : null,
       },
-      // This page of this table, not the workbook: each is its own part.
-      provenance: [`${workbook}/${name}/${start}`],
+      provenance: [workbook],
     };
   },
 });

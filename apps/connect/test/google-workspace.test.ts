@@ -1571,8 +1571,7 @@ describe("the Google Workspace connector's Sheets tools", () => {
         rows: sheetRows[first],
         more: false,
       },
-      // This range of this sheet: a part of the spreadsheet of its own.
-      provenance: [`${fileIds.sheet}/'${first}'!1:201`],
+      provenance: [fileIds.sheet],
     });
     // Drive's metadata first, which says its drive; then Sheets: the
     // spreadsheet's sheets, then the first rows of the first, one more

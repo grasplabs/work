@@ -34,20 +34,21 @@ import { nativeClasses } from "./tool-classes.ts";
 //   another mailbox), are kept by nothing yet: a copy readable by its
 //   person alone would outlive their access at the source. They come back
 //   with native sync, which brings each item's readers.
-// - One source per item and tool, in the person's own store (owner
-//   content): the item's part of the output (the one object that names
-//   it, or the whole output when the read named one item), credentials
-//   redacted (`redact`); never the call's input. When the output can't be
-//   split by item, nothing of the call is kept. No cap of its own: the
-//   Brain's own limit on a source refuses what is past it, and that item
-//   fails. Outside text is content: a captured source is never an
-//   instruction file.
+// - Only a read of one item (its provenance names exactly one), kept
+//   whole as that item's source for the tool, in the person's own store
+//   (owner content), credentials redacted (`redact`); never the call's
+//   input. A list or a search (several items) is not kept: a snippet
+//   beside the full copy is noise in recall, and every changed summary
+//   would be a version. Nor is a file read (`contentAs`'s base64): bytes
+//   are no text to find, and past the Brain's limit they would fail each
+//   time. No cap of its own: the Brain's own limit on a source refuses
+//   what is past it, and the item fails. Outside text is content: a
+//   captured source is never an instruction file.
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
-//   IDs and counts alone (items, kept, failed, skipped): kept when an item
-//   was, failed when none was and one failed, skipped otherwise (with the
-//   reason when the whole call was). An item whose key an erasure closed
-//   is skipped, not failed: that refusal is final and expected.
+//   IDs and counts alone (items, kept, failed, skipped, adding up to
+//   items): kept, failed, or skipped with the reason (`shared`, `reach`,
+//   `list`, `file`, `erased`).
 
 type CaptureEvent =
   | "brain.capture.kept"
@@ -73,58 +74,21 @@ const audited = async (
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/**
- * Each item `ids` names, with its part of `output` (JSON text): the whole
- * output when it names one item; otherwise the one object in it whose
- * `id` is the item's, as connectors list what they read. Undefined when
- * an item has no such object, or more than one, or the output isn't JSON:
- * then the output can't be split by item.
- */
-const itemsOf = (
-  output: string,
-  ids: readonly string[]
-): Map<string, string> | undefined => {
-  const named = new Set(ids);
-  if (named.size === 1) {
-    return new Map([...named].map((id) => [id, output]));
-  }
+/** Whether `output` is a file's bytes as base64 (`contentAs`'s answer). */
+const isFileAnswer = (output: string): boolean => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
   } catch {
-    return undefined;
+    return false;
   }
-  const found = new Map<string, unknown[]>();
-  // Every value, by a stack: an output can nest deeper than a call stack.
-  const stack: unknown[] = [parsed];
-  while (stack.length > 0) {
-    const value = stack.pop();
-    if (Array.isArray(value)) {
-      const items: unknown[] = value;
-      stack.push(...items);
-    } else if (isObject(value)) {
-      const { id } = value;
-      if (typeof id === "string" && named.has(id)) {
-        found.set(id, [...(found.get(id) ?? []), value]);
-      }
-      stack.push(...Object.values(value));
-    }
-  }
-  const items = new Map<string, string>();
-  for (const id of named) {
-    const objects = found.get(id) ?? [];
-    if (objects.length !== 1) {
-      return undefined;
-    }
-    items.set(id, JSON.stringify(objects[0]));
-  }
-  return items;
+  return isObject(parsed) && parsed.encoding === "base64";
 };
 
 /** What a call's capture ended in: its event and the event's detail. */
 type Ended = [CaptureEvent, Record<string, string | number>];
 
-/** A whole call skipped for `reason`: each of its `items` skipped. */
+/** A call skipped for `reason`: each of its `items` skipped. */
 const skippedAll = (reason: string, items: number): Ended => [
   "brain.capture.skipped",
   { reason, items, kept: 0, failed: 0, skipped: items },
@@ -156,66 +120,41 @@ const captured = async (
   if (classOf(owner, action) !== "read-own") {
     return skippedAll("reach", named);
   }
-  const items = itemsOf(result.output, result.provenance);
-  if (items === undefined) {
-    return skippedAll("unsplittable", named);
+  const [itemId] = result.provenance;
+  if (named !== 1 || itemId === undefined) {
+    return skippedAll("list", named);
   }
-  let kept = 0;
-  let failed = 0;
-  let skipped = 0;
-  for (const [itemId, part] of items) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one item at a time
-      const id = await captureIdOf(
-        connectionId,
-        scope.personId,
-        action,
-        itemId
-      );
-      // Owner content: core's Brain module keeps it in the person's own
-      // store, never the shared one.
-      // oxlint-disable-next-line no-await-in-loop -- one item at a time
-      await addSource(env, {
-        source: { producer: "capture", id },
-        // A change of its own each time: the same text again is the
-        // current version (the Brain's rule), so reading an unchanged item
-        // adds nothing, and an item that changed back is a version again.
-        change: crypto.randomUUID(),
-        text: redact(part),
-        readers: { kind: "owner", personId: scope.personId },
-      });
-      kept += 1;
-    } catch (error) {
-      if (brainSourceErrors.codeOf(error) === "brain.source_erased") {
-        // Its key closed by an erasure, or the person's store erased.
-        skipped += 1;
-      } else {
-        // Refused by the Brain (a text past its limit) or unreachable:
-        // this item is not kept, the others go on.
-        log.warn("brain.capture.item_failed", {
-          connectionId,
-          chatId: scope.chatId,
-          ...errorFields(error),
-        });
-        failed += 1;
-      }
+  if (isFileAnswer(result.output)) {
+    return skippedAll("file", 1);
+  }
+  const id = await captureIdOf(connectionId, scope.personId, action, itemId);
+  try {
+    // Owner content: core's Brain module keeps it in the person's own
+    // store, never the shared one.
+    await addSource(env, {
+      source: { producer: "capture", id },
+      // A change of its own each time: the same text again is the current
+      // version (the Brain's rule), so reading an unchanged item adds
+      // nothing, and an item that changed back is a version again.
+      change: crypto.randomUUID(),
+      text: redact(result.output),
+      readers: { kind: "owner", personId: scope.personId },
+    });
+  } catch (error) {
+    if (brainSourceErrors.codeOf(error) === "brain.source_erased") {
+      // Its key closed by an erasure, or the person's store erased: final.
+      return skippedAll("erased", 1);
     }
+    throw error;
   }
-  const counts = { items: items.size, kept, failed, skipped };
-  if (kept > 0) {
-    return ["brain.capture.kept", counts];
-  }
-  return [
-    failed > 0 ? "brain.capture.failed" : "brain.capture.skipped",
-    counts,
-  ];
+  return ["brain.capture.kept", { items: 1, kept: 1, failed: 0, skipped: 0 }];
 };
 
 /**
- * Keeps each item the chat's agent read with the tool `action` through
+ * Keeps the item the chat's agent read with the tool `action` through
  * `connectionId` (`result`) as a source its person alone may read, if
- * connect said it may be kept, the connection is that person's own, and
- * the tool reaches their own things. For `waitUntil`: never
+ * connect said it may be kept, the connection is that person's own, the
+ * tool reaches their own things, and the read names one item, not a file. For `waitUntil`: never
  * throws.
  */
 export const captureRead = async (
@@ -232,7 +171,8 @@ export const captureRead = async (
   try {
     ended = await captured(env, scope, connectionId, action, result);
   } catch (error) {
-    // Before any item was added (connect unreachable, say): each failed.
+    // Connect unreachable, or the Brain refused the item (a text past its
+    // limit) or couldn't be reached: each item failed.
     log.warn("brain.capture.failed", {
       connectionId,
       chatId: scope.chatId,

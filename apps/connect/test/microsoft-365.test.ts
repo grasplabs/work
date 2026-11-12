@@ -561,8 +561,7 @@ describe("the Microsoft 365 connector's mail tools", () => {
         encoding: "base64",
         content: pdfBase64,
       },
-      // A part of the message, named apart from it.
-      provenance: [`${messageId(invoices, 1)}/${pdfAttachmentId}`],
+      provenance: [messageId(invoices, 1)],
     });
     const refusals = await Promise.all(
       [

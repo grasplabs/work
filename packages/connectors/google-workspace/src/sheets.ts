@@ -225,8 +225,7 @@ const readSheet = defineTool({
         rows: all.slice(0, limit),
         more: all.length > limit,
       },
-      // This range of this sheet, not the spreadsheet: each is its own part.
-      provenance: [`${id}/${range}`],
+      provenance: [id],
     };
   },
 });
