@@ -103,6 +103,7 @@ const allComplete = [
   "interview",
   "runs",
   "brain",
+  "brain_sources",
 ].map((area) => ({ area, state: "complete" }));
 
 describe("what admins see of erasures", () => {

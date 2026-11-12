@@ -28,4 +28,10 @@ export const brainModules = {
   // restore functions, whose probes hold what they return, as they return
   // it.
   "apps/core/src/brain-next-exports.ts": "core",
+  // Erases the sources of runs past their retention with core's
+  // eraseSource, and answers nothing of it.
+  "apps/core/src/brain-next-origins.ts": "core",
+  // Erases what an erased person alone may read with core's erasePerson,
+  // and answers nothing of it.
+  "apps/core/src/person-erasure.ts": "core",
 } as const satisfies Readonly<Record<string, string>>;
