@@ -400,7 +400,8 @@ export const indexWords = (
   const { words, stems } = indexedOf(text, memo);
   sql.exec("INSERT INTO chunk_words (rowid, text) VALUES (?, ?)", row, words);
   sql.exec("INSERT INTO chunk_stems (rowid, stems) VALUES (?, ?)", row, stems);
-  // And the calendar days it writes, each once (dates.ts).
+  // And the calendar days it writes, each once (dates.ts): a date written
+  // inside an ID ("INV-2026-03-14-7") is the ID's, and stores no day.
   for (const date of datesIn(text)) {
     for (const day of date.days) {
       sql.exec(

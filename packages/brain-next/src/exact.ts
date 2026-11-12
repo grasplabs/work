@@ -1,5 +1,6 @@
 import { datesIn } from "./dates.ts";
 import type { Day } from "./dates.ts";
+import { idWord, isId } from "./ids.ts";
 import { allOf, sequenceOf } from "./words.ts";
 
 // The exact way of recall: the parts of a question that must be found as
@@ -15,16 +16,15 @@ import { allOf, sequenceOf } from "./words.ts";
 //    two, "See PO-17." and "(PO-17)" are PO-17), holding a letter and at
 //    least two digits (PO-17, A12, INV-2024-0042, TK-5531, CN-2026-118),
 //    or a run of five digits or more (12345, 06-12345678): a reference.
-//    Everything else is words, which the words way finds: dates and times
-//    in digits (2026-03-14, 09:30, 14:00-15:00), amounts, decimals and
+//    Everything else is words, which the words way finds: times in digits
+//    (09:30, 14:00-15:00), amounts, decimals and
 //    fractions (1.250,00, 12.5, 1/2), numbers under five digits (2026,
 //    4400), and words with one digit (2e, 3rd, 9am, A4, Q3, MP3, v2). As
 //    IDs, each would get a list of its own and crowd out the passage that
 //    writes it otherwise ("14 maart 2026", "tweede kwartaal"). Known and
 //    accepted, the rule unchanged: v2.1, 4x4 and COVID-19 are IDs (names
 //    of a kind), and so are a compact date (20260314, not one of the
-//    date forms of dates.ts; a timestamp such as 2026-03-14T09:00:00Z is
-//    one, so it is a date and no ID) and an amount with five
+//    date forms of dates.ts) and an amount with five
 //    digits in a row (€1250000). Such a token is found only as written,
 //    and is reported in `notFound` when no passage the reader may read
 //    writes it that way. #4521 is not an ID (four digits: found as a
@@ -32,13 +32,16 @@ import { allOf, sequenceOf } from "./words.ts";
 //    PO 17 and PO/17 match each other), but written as one word it is
 //    another word: PO17 doesn't match PO-17, nor A12 A-12.
 //
-// Dates (found however a source writes them) wait for a parser at
-// indexing (GRA-1798); names are left to the words way, since no rule
-// tells a name from a sentence's first word or a run of German nouns.
+// Names are left to the words way, since no rule tells a name from a
+// sentence's first word or a run of German nouns.
 //
 // A phrase is read first and is then no longer there for the IDs; nor is a
-// date (dates.ts), which recall matches by the days passages write, so a
-// timestamp is a date and not two IDs.
+// date (dates.ts), which recall matches by the days passages write. What
+// is a date and what an ID is one rule, the same in a question and where
+// a passage is indexed (dates.ts `datesIn`): text that is exactly a date
+// form, an ISO timestamp included (2026-03-14T09:00:00Z), is a date and no
+// ID; a longer word that merely holds one (INV-2026-03-14-7,
+// report-2026-03-14.pdf, PO-2026-03-01) is an ID and no date.
 //
 // What the word index holds of a chunk is its distinct words, so it finds
 // the chunks holding every word of a part (`query`), and the order is
@@ -71,24 +74,8 @@ export interface Exact {
 /** Most exact parts and dates of a question that count, together. */
 const maxExacts = 8;
 
-/** Fewest digits in a row that make a word an ID: a reference, not a year. */
-const referenceDigits = 5;
-
-/** Fewest digits that make a word with a letter an ID. */
-const idDigits = 2;
-
 /** A pair of double quotes of any kind, and what they hold. */
 const quoted = /["“”„«»](?<inner>[^"“”„«»]+)["“”„«»]/gu;
-
-/**
- * A word that may be an ID: letters and digits, with - / . or _ between
- * them, one at a time. Anything else around or between ends it.
- */
-const idWord = /[\p{L}\p{N}]+(?:[-/._][\p{L}\p{N}]+)*/gu;
-
-const digits = /\p{N}/gu;
-const letter = /\p{L}/u;
-const reference = new RegExp(`\\p{N}{${referenceDigits}}`, "u");
 
 /** An exact part, or none when it holds no word. */
 const exactOf = (
@@ -105,11 +92,6 @@ const exactOf = (
         near: `"${words.join(" ")}"`,
         kind,
       };
-
-/** Whether a word, as the question wrote it, is an ID (rule 2). */
-const isId = (word: string): boolean =>
-  (letter.test(word) && (word.match(digits) ?? []).length >= idDigits) ||
-  reference.test(word);
 
 /** The IDs among `text`'s words, in order (rule 2). */
 const idsOf = (text: string): { at: number; exact: Exact }[] =>

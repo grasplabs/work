@@ -54,6 +54,8 @@ describe("the dates a text writes", () => {
       ["Kickoff 1 March 2026, 14 people came", [["2026-3-1"]]],
       ["on 3 March 2026 14 orders shipped", [["2026-3-3"]]],
       ["4 May 2026 12th floor", [["2026-5-4"]]],
+      // An ISO date wins over a reading that would borrow its year.
+      ["on 14 March, 2026-03-15", [["0-3-14"], ["2026-3-15"]]],
       // Accepted: a long name beside a number is a date.
       ["3 mars bars", [["0-3-3"]]],
       ["Mars 3", [["0-3-3"]]],
@@ -75,6 +77,11 @@ describe("the dates a text writes", () => {
         "next Tuesday",
         "from 1 to 14 March",
         "20260314",
+        // A date inside an ID is the ID's.
+        "INV-2026-03-14-7",
+        "report-2026-03-14.pdf",
+        "backup-2026-03-14",
+        "PO-2026-03-01",
         // A short name with no year beside it.
         "ago 12",
         "a week ago 3 orders",

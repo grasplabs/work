@@ -55,10 +55,12 @@ import { testBinding } from "./test-env.ts";
 //   No question here has a quoted phrase.
 // - Dates (GRA-1798): a paragraph now and then writes one of two days in
 //   one of three forms (`dateForms`); a question now and then asks one as
-//   ISO. A day's words are words like any. For each day asked, a list: the
-//   chunks of current versions the reader may read writing that day in
-//   any form that the words list doesn't hold, the shorter first; at most
-//   `recallLimit`.
+//   ISO. A day's words are words like any. For each day asked, a list:
+//   when the question has telling words besides its days' own, the chunks
+//   of current versions the reader may read writing that day in any form
+//   that hold one of them, more of them first, then in the words list's
+//   order, then the shorter; when it has none, those writing it that the
+//   words list doesn't hold, the shorter first; at most `recallLimit`.
 // - The pack (GRA-1728): the ID lists, the words list and the day lists
 //   fused by reciprocal rank (1 / (60 + rank), summed; ties to the better
 //   rank, then to the list given first), each chunk whole at the largest
@@ -653,12 +655,23 @@ const packOf = (
   const byWords = expectedOf(planned, person, membership, askedWords);
   const exact = exactOf(planned, person, membership, ids, byWords);
   const inWords = new Set(byWords.map(({ name }) => name));
-  // A day's list: the readable paragraphs writing it that the words list
-  // doesn't hold, shortest first.
+  const rankOf = (name: string): number => {
+    const rank = byWords.findIndex((chunk) => chunk.name === name);
+    return rank === -1 ? recallLimit : rank;
+  };
+  // The question's telling words besides its days' own.
+  const others = [...new Set(askedWords)].filter(
+    (token) => !isStop(token) && !ofDays.has(token)
+  );
+  // A day's list: with other telling words, the readable paragraphs
+  // writing it that hold one of them, more of them first, then in the
+  // words list's order, then the shorter; with none, those writing it that
+  // the words list doesn't hold, the shorter first.
   const dateLists = days.map((day) =>
     readable
       .filter(({ words }) => words.some((word) => dayOf(word) === day))
-      .map(({ source, version, position }) => ({
+      .map(({ source, version, position, words }) => ({
+        held: others.filter((token) => holds(expanded(words), [token])).length,
         name: `s${source.index} v${version.version} c${position}`,
         planned: source,
         version,
@@ -668,9 +681,18 @@ const packOf = (
         stops: 0,
         exact: 0,
       }))
-      .filter(({ name }) => !inWords.has(name))
-      .toSorted((a, b) => a.length - b.length)
+      .filter(({ name, held }) =>
+        others.length > 0 ? held > 0 : !inWords.has(name)
+      )
+      .toSorted((a, b) =>
+        others.length > 0
+          ? b.held - a.held ||
+            rankOf(a.name) - rankOf(b.name) ||
+            a.length - b.length
+          : a.length - b.length
+      )
       .slice(0, recallLimit)
+      .map(({ held: _held, ...chunk }) => chunk)
   );
   const chunks = fused([
     ...exact.lists.map((list) =>

@@ -6,7 +6,9 @@ import type { BrainEvalQuestion, BrainEvalSource } from "./company.ts";
 // ("mid-April 2028", "week 11", "12.5.28", "T1 2028", "14/3/28") while
 // another passage writes that day inside it; a day several sources
 // write, one answering; a numbered timeline; a question with a date and
-// an ID beside a passage writing only the day.
+// an ID beside a passage writing only the day; and (set 2026-11-12.3) an
+// answer the words rank second, beside a short passage writing nothing
+// but the day.
 //
 // Dates (GRA-1798): notices in each of the five languages, each writing
 // its day the way that language writes it (a month's name, an ordinal, day
@@ -16,6 +18,78 @@ import type { BrainEvalQuestion, BrainEvalSource } from "./company.ts";
 // part ("2027", and a day's number).
 
 export const dateSources: readonly BrainEvalSource[] = [
+  {
+    key: "en-date-inspection",
+    language: "en",
+    readers: { team: "everyone" },
+    text: "The north dock forklift inspection is on 22/11/2028.",
+  },
+  {
+    key: "en-date-inspection-report",
+    language: "en",
+    readers: { team: "everyone" },
+    text: "Forklift inspection, north dock: November 2028 report.",
+  },
+  {
+    key: "en-date-lunch",
+    language: "en",
+    readers: { team: "everyone" },
+    text: "Lunch on 22/11/2028.",
+  },
+  {
+    key: "nl-date-keuring",
+    language: "nl",
+    readers: { team: "everyone" },
+    text: "De keuring van de heftrucks bij dock noord is op 6-12-2028.",
+  },
+  {
+    key: "nl-date-keuring-rapport",
+    language: "nl",
+    readers: { team: "everyone" },
+    text: "Keuring heftrucks dock noord: rapport december 2028. Dank.",
+  },
+  {
+    key: "nl-date-borrel",
+    language: "nl",
+    readers: { team: "everyone" },
+    text: "Borrel op 6/12/2028. Dank.",
+  },
+  {
+    key: "de-date-pruefung",
+    language: "de",
+    readers: { team: "everyone" },
+    text: "Die Prüfung der Stapler am Nordtor ist am 14.11.2028.",
+  },
+  {
+    key: "de-date-pruefung-bericht",
+    language: "de",
+    readers: { team: "everyone" },
+    text: "Prüfung Stapler Nordtor: Bericht November 2028.",
+  },
+  {
+    key: "de-date-grillfest",
+    language: "de",
+    readers: { team: "everyone" },
+    text: "Grillfest am 14.11.2028.",
+  },
+  {
+    key: "es-date-inspeccion",
+    language: "es",
+    readers: { team: "everyone" },
+    text: "La inspección de las carretillas del muelle norte es el 9/10/2028.",
+  },
+  {
+    key: "es-date-inspeccion-informe",
+    language: "es",
+    readers: { team: "everyone" },
+    text: "Inspección carretillas muelle norte: informe octubre 2028. Gracias.",
+  },
+  {
+    key: "es-date-comida",
+    language: "es",
+    readers: { team: "everyone" },
+    text: "Comida el 9/10/2028. Gracias.",
+  },
   {
     key: "en-date-forklift",
     language: "en",
@@ -32,7 +106,7 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "nl-date-archief",
     language: "nl",
     readers: { team: "everyone" },
-    text: "De verhuizing van het archief schuift naar week 11 van 2028. Dank.",
+    text: "De verhuizing van het archief schuift naar week 11 van 2028. Dank. Dank.",
   },
   {
     key: "nl-date-notulen",
@@ -50,31 +124,31 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "de-date-protokoll",
     language: "de",
     readers: { team: "everyone" },
-    text: "Protokoll vom 12. Mai 2028: keine Punkte zur Kantine.",
+    text: "Protokoll vom 12. Mai 2028: keine Punkte zur Kantine. Gruß, HR.",
   },
   {
     key: "fr-date-paie",
     language: "fr",
     readers: { team: "everyone" },
-    text: "Le nouvel outil de paie sera déployé au T1 2028, d'abord pour Lyon.",
+    text: "Le nouvel outil de paie sera déployé au T1 2028, d'abord pour Lyon. Merci.",
   },
   {
     key: "fr-date-compte-rendu",
     language: "fr",
     readers: { team: "everyone" },
-    text: "Compte rendu du 10 février 2028 : rien sur les congés.",
+    text: "Compte rendu du 10 février 2028 : rien sur les congés. Merci beaucoup.",
   },
   {
     key: "es-date-uniformes",
     language: "es",
     readers: { team: "everyone" },
-    text: "La entrega de los nuevos uniformes se retrasa hasta el 14/3/28.",
+    text: "La entrega de los nuevos uniformes se retrasa hasta el 14/3/28. Muchas gracias.",
   },
   {
     key: "es-date-acta",
     language: "es",
     readers: { team: "everyone" },
-    text: "Acta del 14 de marzo de 2028: sin novedades en el aparcamiento. Gracias.",
+    text: "Acta del 14 de marzo de 2028: sin novedades en el aparcamiento. Gracias. Gracias.",
   },
   {
     key: "en-date-parking",
@@ -110,7 +184,7 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "nl-date-brandoefening",
     language: "nl",
     readers: { team: "everyone" },
-    text: "Op 3 oktober 2028 is de brandoefening voor alle verdiepingen. Bedankt.",
+    text: "Op 3 oktober 2028 is de brandoefening voor alle verdiepingen. Bedankt. Dank.",
   },
   {
     key: "de-date-werkstor",
@@ -146,13 +220,13 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "fr-date-wifi",
     language: "fr",
     readers: { team: "everyone" },
-    text: "Le 5 avril 2028, le réseau wifi sera coupé le matin.",
+    text: "Le 5 avril 2028, le réseau wifi sera coupé le matin. Merci de votre compréhension.",
   },
   {
     key: "es-date-agua",
     language: "es",
     readers: { team: "everyone" },
-    text: "El 9 de mayo de 2028 se corta el agua en la nave. Gracias.",
+    text: "El 9 de mayo de 2028 se corta el agua en la nave. Gracias. Gracias a todos.",
   },
   {
     key: "es-date-cena",
@@ -212,31 +286,31 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "nl-date-factuur",
     language: "nl",
     readers: { team: "everyone" },
-    text: "Factuur FAC-2028-0412 voor het dakonderhoud vervalt op 28 april 2028. Dank.",
+    text: "Factuur FAC-2028-0412 voor het dakonderhoud vervalt op 28 april 2028. Dank. Bedankt.",
   },
   {
     key: "nl-date-betaalrun",
     language: "nl",
     readers: { team: "everyone" },
-    text: "Op 28 april 2028 is de betaalrun voor alle leveranciers. Vriendelijke groet.",
+    text: "Op 28 april 2028 is de betaalrun voor alle leveranciers. Vriendelijke groet. Bedankt.",
   },
   {
     key: "de-date-bestellung",
     language: "de",
     readers: { team: "everyone" },
-    text: "Bestellung BE-2028-771 für Paletten wird am 15. Juli 2028 geliefert. Vielen Dank.",
+    text: "Bestellung BE-2028-771 für Paletten wird am 15. Juli 2028 geliefert. Vielen Dank. Danke.",
   },
   {
     key: "de-date-wareneingang",
     language: "de",
     readers: { team: "everyone" },
-    text: "Am 15. Juli 2028 ist Inventur im Wareneingang. Vielen Dank.",
+    text: "Am 15. Juli 2028 ist Inventur im Wareneingang. Vielen Dank. Danke für Ihr Verständnis.",
   },
   {
     key: "fr-date-ticket",
     language: "fr",
     readers: { team: "everyone" },
-    text: "Le ticket TK-2028-330 sur l'imprimante sera traité le 21 août 2028. Merci.",
+    text: "Le ticket TK-2028-330 sur l'imprimante sera traité le 21 août 2028. Merci. Merci beaucoup.",
   },
   {
     key: "fr-date-informatique",
@@ -248,7 +322,7 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "es-date-pedido",
     language: "es",
     readers: { team: "everyone" },
-    text: "El pedido PED-2028-559 de cajas llega el 18 de octubre de 2028. Muchas gracias.",
+    text: "El pedido PED-2028-559 de cajas llega el 18 de octubre de 2028. Muchas gracias. Muchas gracias.",
   },
   {
     key: "es-date-inventario",
@@ -284,7 +358,7 @@ export const dateSources: readonly BrainEvalSource[] = [
     key: "nl-date-kantine",
     language: "nl",
     readers: { team: "everyone" },
-    text: "Goed nieuws: de vernieuwde kantine op de tweede verdieping gaat open op dinsdag 6 april.",
+    text: "Goed nieuws: de vernieuwde kantine op de tweede verdieping gaat open op dinsdag 6 april. Dank.",
   },
   {
     key: "nl-date-declaraties",
@@ -355,6 +429,41 @@ export const dateSources: readonly BrainEvalSource[] = [
 ];
 
 export const dateQuestions: readonly BrainEvalQuestion[] = [
+  {
+    id: "en-date-inspection",
+    language: "en",
+    question: "When is the north dock forklift inspection, 22 November 2028?",
+    expects: answer(
+      "date",
+      "en-date-inspection",
+      "forklift inspection is on 22/11/2028"
+    ),
+  },
+  {
+    id: "nl-date-keuring",
+    language: "nl",
+    question:
+      "Wanneer is de keuring van de heftrucks bij dock noord, 6 december 2028?",
+    expects: answer("date", "nl-date-keuring", "dock noord is op 6-12-2028"),
+  },
+  {
+    id: "de-date-pruefung",
+    language: "de",
+    question:
+      "Wann ist die Prüfung der Stapler am Nordtor, am 14. November 2028?",
+    expects: answer("date", "de-date-pruefung", "am Nordtor ist am 14.11.2028"),
+  },
+  {
+    id: "es-date-inspeccion",
+    language: "es",
+    question:
+      "¿Cuándo es la inspección de las carretillas del muelle norte, el 9 de octubre de 2028?",
+    expects: answer(
+      "date",
+      "es-date-inspeccion",
+      "muelle norte es el 9/10/2028"
+    ),
+  },
   {
     id: "en-date-forklift",
     language: "en",

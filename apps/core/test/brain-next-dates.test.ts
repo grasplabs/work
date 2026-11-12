@@ -91,6 +91,10 @@ const exactIn = (pack: RecalledPack): string[] =>
     .filter(({ found }) => found === "exact")
     .map(({ source }) => source.id);
 
+/** The first two sources a pack cites. */
+const top = (pack: RecalledPack): string[] =>
+  pack.items.slice(0, 2).map(({ source }) => source.id);
+
 /** The word index's rules number, as the store keeps it. */
 const wordIndexVersion = async (): Promise<number> =>
   await runInDurableObject(
@@ -274,6 +278,108 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
     }).toStrictEqual({ launch: answer, audit: twoDigits, people: true });
   });
 
+  it("reads an ID or a file name that holds a date as the ID, found as written and said missing when nothing writes it", async () => {
+    const reader = await person();
+    const year = 2040 + (crypto.getRandomValues(new Uint8Array(1))[0] ?? 0);
+    const seven = `INV-${year}-03-14-7`;
+    const eight = `INV-${year}-03-14-8`;
+    const missing = `INV-${year}-03-14-9`;
+    const bySeven = await add(`Booked ${seven} for the crane.`, owner(reader));
+    await add(`Booked ${eight} for the crane.`, owner(reader));
+    const file = `report-${year}-03-14.pdf`;
+    const byFile = await add(`Attached: ${file}, as promised.`, owner(reader));
+    // Notes writing that day, which a date read inside the ID would rank.
+    for (let index = 0; index < 12; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`Note ${index} on 14 March ${year}.`, owner(reader));
+    }
+
+    const [found, absent, asFile] = await Promise.all([
+      packFor(reader, seven),
+      packFor(reader, missing),
+      packFor(reader, `What is in ${file}?`),
+    ]);
+
+    expect({
+      found: found.items[0],
+      absent: absent.notFound,
+      file: asFile.items[0],
+    }).toMatchObject({
+      found: { source: bySeven, found: "exact" },
+      absent: [missing],
+      file: { source: byFile, found: "exact" },
+    });
+  });
+
+  it("never lets a passage sharing nothing with the question but its day outrank the word search's answers", async () => {
+    const reader = await person();
+    const subject = word();
+    const year = 2040 + (crypto.getRandomValues(new Uint8Array(1))[0] ?? 0);
+    const first = await add(
+      `The ${subject} launch slipped on 14 March ${year}.`,
+      owner(reader)
+    );
+    const answer = await add(
+      `The ${subject} launch slipped to mid-March ${year} after the board's long review.`,
+      owner(reader)
+    );
+    for (let index = 0; index < 12; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`The ${subject} launch slipped ${index}.`, owner(reader));
+    }
+    const lunch = await add(`Lunch 14/03/${year}.`, owner(reader));
+    const lunchTwo = await add(`Lunch 15/03/${year}.`, owner(reader));
+
+    const [one, two, dayOnly] = await Promise.all([
+      packFor(reader, `Did the ${subject} launch slip on 14 March ${year}?`),
+      packFor(
+        reader,
+        `Did the ${subject} launch slip on 14 March ${year} or 15 March ${year}?`
+      ),
+      packFor(reader, `${year}-03-14`),
+    ]);
+
+    expect({
+      one: top(one),
+      two: top(two),
+      lunchInOne: citedIn(one).includes(lunch.id),
+      lunchInTwo: citedIn(two).includes(lunchTwo.id),
+      // A question of nothing but the date lists the day's passages.
+      dayOnly: citedIn(dayOnly).includes(lunch.id),
+    }).toStrictEqual({
+      one: [first.id, answer.id],
+      two: [first.id, answer.id],
+      lunchInOne: false,
+      lunchInTwo: false,
+      dayOnly: true,
+    });
+  });
+
+  it("finds a passage writing the day in a form the word search can't match, by one word of the question beside it", async () => {
+    const reader = await person();
+    const subject = word();
+    const year = 2040 + (crypto.getRandomValues(new Uint8Array(1))[0] ?? 0);
+    // More shorter passages holding the same words than the words way lists.
+    for (let index = 0; index < 12; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`${subject} kickoff ${index}.`, owner(reader));
+    }
+    // Its day with no word the question writes (no year, "21st").
+    const answer = await add(
+      `${subject} kickoff: April 21st, main hall.`,
+      owner(reader)
+    );
+
+    const pack = await packFor(
+      reader,
+      `When is the ${subject} kickoff? ${year}-04-21`
+    );
+
+    expect(
+      pack.items.find(({ source }) => source.id === answer.id)
+    ).toMatchObject({ source: answer, found: "exact" });
+  });
+
   it("reads a numbered timeline's days, never its numbers", async () => {
     const reader = await person();
     const timeline = await add(
@@ -322,7 +428,8 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
         "UPDATE word_index SET version = 2, target = 2, cursor = 0"
       );
     });
-    const during = await packFor(reader, "What is due on 2033-09-09?");
+    // A question of nothing but its date: every passage writing the day.
+    const during = await packFor(reader, "2033-09-09");
     let at = Date.now();
     for (let tick = 0; tick < 100; tick += 1) {
       at += 60_000;
@@ -333,7 +440,7 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
         break;
       }
     }
-    const after = await packFor(reader, "What is due on 2033-09-09?");
+    const after = await packFor(reader, "2033-09-09");
 
     expect({
       during: citedIn(during),
@@ -342,10 +449,10 @@ describe("dates, however a source writes them", { timeout: 120_000 }, () => {
       afterNotFound: after.notFound,
     }).toStrictEqual({
       during: [byWords.id],
-      // Its other word, never its date.
-      duringNotFound: ["due"],
+      // Never its date.
+      duringNotFound: [],
       after: [byDay.id, byWords.id].toSorted(),
-      afterNotFound: ["due"],
+      afterNotFound: [],
     });
   });
 });

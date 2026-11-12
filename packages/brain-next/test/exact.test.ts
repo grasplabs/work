@@ -52,6 +52,10 @@ describe("the exact parts of a question", () => {
       ["4x4", ["4x4"]],
       ["COVID-19", ["COVID-19"]],
       ["2026-03-14T09:00:00Z", []],
+      // A longer word holding a date is an ID, never a date.
+      ["INV-2026-03-14-7", ["INV-2026-03-14-7"]],
+      ["report-2026-03-14.pdf", ["report-2026-03-14.pdf"]],
+      ["PO-2026-03-01", ["PO-2026-03-01"]],
       ["20260314", ["20260314"]],
       ["€1250000", ["1250000"]],
       // Words.

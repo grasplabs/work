@@ -7,7 +7,7 @@ import { fuse, packOf } from "./pack.ts";
 import type { Found } from "./pack.ts";
 import { readableSql } from "./reader-sets.ts";
 import { sequenceOf, termsOf, wordsVersion } from "./words.ts";
-import type { Terms } from "./words.ts";
+import type { Term, Terms } from "./words.ts";
 
 // Recall: two ways at once, fused by rank into a pack (pack.ts). Words,
 // in one statement that finds, checks and ranks, and a second for the
@@ -247,12 +247,15 @@ ORDER BY length(chunks.text), source_versions.added_at DESC,
 /**
  * `?1` the question's dates (JSON: each a list of the days it may be, as
  * `[year, monthday]`, year 0 for none), `?2` the reader's person, `?3`
- * their groups (JSON), `?4` the most to check of each date: the chunks the
- * reader may read that write one of its days (`chunk_days`, the same year
- * or either naming none), each with the dates (by index) within whose
- * most it is (`parts`), shortest first, then newer, and those whose most
- * it is the first past (`past`), which are capped. As the exact way's
- * statement, the cap counts only what the reader may read.
+ * their groups (JSON), `?4` the most to check of each date, `?5` the
+ * question's other telling words (JSON: each its `forms` query, words.ts
+ * `Term`): the chunks the reader may read that write one of its days
+ * (`chunk_days`, the same year or either naming none), each with how many
+ * of the other words it holds in any form (`held`), the dates (by index)
+ * within whose most it is (`parts`: those holding more of the other words
+ * first, then shorter, then newer), and those whose most it is the first
+ * past (`past`), which are capped. As the exact way's statement, the cap
+ * counts only what the reader may read.
  */
 const dateSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
@@ -262,7 +265,7 @@ asked AS (
   FROM json_each(?1) AS asked
   CROSS JOIN json_each(asked.value) AS day
 ),
-found AS (
+found AS MATERIALIZED (
   SELECT DISTINCT chunks.row AS row, asked.part AS part
   FROM asked
   CROSS JOIN chunk_days
@@ -270,18 +273,36 @@ found AS (
     AND chunk_days.monthday = asked.monthday
     AND (asked.year = 0 OR chunk_days.year IN (asked.year, 0))
 ),
+termed AS (
+  SELECT chunk_words.rowid AS row, term.key AS term
+  FROM json_each(?5) AS term
+  CROSS JOIN chunk_words
+  WHERE chunk_words MATCH term.value
+    AND +chunk_words.rowid IN (SELECT row FROM found)
+  UNION ALL
+  SELECT chunk_stems.rowid AS row, term.key AS term
+  FROM json_each(?5) AS term
+  CROSS JOIN chunk_stems
+  WHERE chunk_stems MATCH term.value
+    AND +chunk_stems.rowid IN (SELECT row FROM found)
+),
+held AS (
+  SELECT row, count(DISTINCT term) AS held FROM termed GROUP BY row
+),
 ranked AS (
   SELECT found.row AS row, found.part AS part,
+    coalesce(held.held, 0) AS held,
     row_number() OVER (
       PARTITION BY found.part
-      ORDER BY length(chunks.text), source_versions.added_at DESC,
-        source_versions.source, chunks.position
+      ORDER BY coalesce(held.held, 0) DESC, length(chunks.text),
+        source_versions.added_at DESC, source_versions.source, chunks.position
     ) AS rank
   FROM found
+  LEFT JOIN held ON held.row = found.row
   JOIN chunks ON chunks.row = found.row
   JOIN source_versions ON source_versions.row = chunks.version_row
 )
-SELECT ${chunkColumns},
+SELECT ${chunkColumns}, max(ranked.held) AS held,
   json_group_array(ranked.part) FILTER (WHERE ranked.rank <= ?4) AS parts,
   json_group_array(ranked.part) FILTER (WHERE ranked.rank > ?4) AS past
 FROM ranked
@@ -289,8 +310,8 @@ JOIN chunks ON chunks.row = ranked.row
 JOIN source_versions ON source_versions.row = chunks.version_row
 WHERE ranked.rank <= ?4 + 1
 GROUP BY chunks.row
-ORDER BY length(chunks.text), source_versions.added_at DESC,
-  source_versions.source, chunks.position`;
+ORDER BY max(ranked.held) DESC, length(chunks.text),
+  source_versions.added_at DESC, source_versions.source, chunks.position`;
 
 /** A chunk a statement found. */
 interface Row extends Record<string, SqlStorageValue> {
@@ -443,10 +464,11 @@ const byExact = (
 const byDates = (
   sql: SqlStorage,
   dates: readonly AskedDate[],
+  others: readonly Term[],
   reader: Reader,
   asOf: AsOf
 ): {
-  rows: (Row & { parts: string })[];
+  rows: (Row & { parts: string; held: number })[];
   parts: Set<number>;
   capped: Set<number>;
 } => {
@@ -454,14 +476,15 @@ const byDates = (
     return { rows: [], parts: new Set(), capped: new Set() };
   }
   const rows = sql
-    .exec<Row & { parts: string; past: string }>(
-      dateSql(asOf.length > 0 ? 5 : undefined),
+    .exec<Row & { parts: string; past: string; held: number }>(
+      dateSql(asOf.length > 0 ? 6 : undefined),
       JSON.stringify(
         dates.map(({ days }) => days.map((day) => [day.year, monthDayOf(day)]))
       ),
       reader.person,
       JSON.stringify(reader.groups),
       exactCandidatesMax,
+      JSON.stringify(others.map(({ forms }) => forms)),
       ...asOf
     )
     .toArray();
@@ -473,28 +496,37 @@ const byDates = (
 };
 
 /**
- * Each date's list for the fusion: the chunks writing one of its days that
- * the words way didn't list (`byWordsRank`), as the statement orders them
- * (shortest, then newer). A chunk the words way lists counts once, by its
- * words; the date way adds what they missed, so a common day never counts
- * a passage twice and outranks the ID or phrase beside it.
+ * Each date's list for the fusion. A date alone is weak evidence; a date
+ * with what the question is about is strong. So when the question asks
+ * other telling words besides its dates (`topical`), a date's list holds
+ * only the chunks writing its day that hold at least one of them, more of
+ * them first, then in the words way's order where it ranks them, then as
+ * the statement orders them: a passage sharing nothing with the question
+ * but the day ("Lunch 14/03") never outranks its real answers. When the
+ * question is nothing but dates, a date's list holds the chunks writing
+ * its day that the words way didn't list, shortest first: what they
+ * missed, each passage counted once.
  */
 const dateLists = (
   dates: readonly AskedDate[],
-  rows: readonly (Row & { parts: string })[],
-  byWordsRank: ReadonlyMap<number, number>
-): Found[][] =>
-  dates.map((_, part) =>
-    foundAs(
-      rows
-        .filter(
-          ({ row, parts }) =>
-            !byWordsRank.has(row) && indexesOf(parts).includes(part)
-        )
-        .slice(0, recallLimit),
+  rows: readonly (Row & { parts: string; held: number })[],
+  byWordsRank: ReadonlyMap<number, number>,
+  topical: boolean
+): Found[][] => {
+  const rankOf = ({ row }: Row): number => byWordsRank.get(row) ?? recallLimit;
+  return dates.map((_, part) => {
+    const writing = rows.filter(({ parts }) => indexesOf(parts).includes(part));
+    return foundAs(
+      (topical
+        ? writing
+            .filter(({ held }) => held > 0)
+            .toSorted((a, b) => b.held - a.held || rankOf(a) - rankOf(b))
+        : writing.filter(({ row }) => !byWordsRank.has(row))
+      ).slice(0, recallLimit),
       "exact"
-    )
-  );
+    );
+  });
+};
 
 /** Whether the word index, and the days with it, is built by the current rules. */
 const wordIndexCurrent = (sql: SqlStorage): boolean =>
@@ -526,7 +558,10 @@ export const recall = (
   const words = byWords(sql, terms, reader, at);
   const byWordsRank = new Map(words.found.map(({ row }, rank) => [row, rank]));
   const exact = byExact(sql, exacts, reader, at, byWordsRank);
-  const dated = byDates(sql, dates, reader, at);
+  // The question's telling words besides its dates' own.
+  const ofDates = new Set(dates.flatMap(({ asked }) => sequenceOf(asked)));
+  const others = terms.telling.filter(({ word }) => !ofDates.has(word));
+  const dated = byDates(sql, dates, others, reader, at);
   // While the word index is rebuilt to the current rules, a chunk not yet
   // reached has no days: a date is never said not found meanwhile.
   const daysWhole = wordIndexCurrent(sql);
@@ -552,7 +587,7 @@ export const recall = (
     fuse([
       ...exact.lists,
       words.found,
-      ...dateLists(dates, dated.rows, byWordsRank),
+      ...dateLists(dates, dated.rows, byWordsRank, others.length > 0),
     ]),
     { terms: terms.telling, exacts, dates: dates.map(({ days }) => days) },
     budget.tokens,

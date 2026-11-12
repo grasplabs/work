@@ -1,3 +1,5 @@
+import { idSpansOf } from "./ids.ts";
+
 // The calendar days a text mentions, read by one closed table of written
 // forms, the same where passages are indexed (words.ts `indexWords`, into
 // `chunk_days`) and where a question is read (recall.ts). Neither `Intl`
@@ -31,6 +33,13 @@
 // form's reading is collected and the best that don't overlap are kept: a
 // reading with a year before one without, then the longer, then the
 // earlier. So a numbered line's number is never taken for the day.
+//
+// A date written inside an ID is no date: a reading that lies within a
+// longer ID (ids.ts: "INV-2026-03-14-7", "report-2026-03-14.pdf") is
+// dropped, so a passage writing that ID stores no day for it, and a
+// question asking it asks the ID. A reading that is exactly a date form,
+// an ISO timestamp included ("2026-03-14T09:00:00Z", whose first word
+// alone would be an ID), is a date.
 
 /** A calendar day: `year` 0 when the text names none. */
 export interface Day {
@@ -139,8 +148,12 @@ const after = String.raw`(?!\p{N})`;
 /** An ordinal's ending after a day, in the five languages. */
 const ordinal = String.raw`(?:st|nd|rd|th|ste|de|er|e|º|°|\.)?`;
 
-/** A year after a day or a month's name: optional. */
-const year = String.raw`(?:,?\s+(?:de\s+|del\s+)?(?<year>\d{4}))?`;
+/**
+ * A year after a day or a month's name: optional, and never the first
+ * part of another date written in numbers ("14 March, 2026-03-15" is 14
+ * March, and 15 March 2026).
+ */
+const year = String.raw`(?:,?\s+(?:de\s+|del\s+)?(?<year>\d{4})(?![-/.]\p{N}))?`;
 
 /** The forms (above), each with the days it reads. */
 const forms: readonly [RegExp, (groups: Groups) => (Day | undefined)[]][] = [
@@ -197,24 +210,28 @@ const hasYear = ({ days }: DateWritten): number =>
  * one with a year first, then the longer, then the earlier.
  */
 export const datesIn = (text: string): DateWritten[] => {
+  const ids = idSpansOf(text);
   const readings: DateWritten[] = [];
   for (const [pattern, read] of forms) {
     for (const match of text.matchAll(pattern)) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const insideId = ids.some(
+        ([from, to]) => from <= start && end <= to && to - from > end - start
+      );
       const days = read(match.groups ?? {}).filter(
         (day): day is Day => day !== undefined
       );
       const unique = [
         ...new Map(days.map((day) => [keyOf(day), day])).values(),
       ];
-      if (unique.length > 0) {
-        readings.push({
-          start: match.index,
-          end: match.index + match[0].length,
-          days: unique,
-        });
+      if (!insideId && unique.length > 0) {
+        readings.push({ start, end, days: unique });
       }
     }
   }
+  // The best first; each kept unless it overlaps one kept before, found
+  // by the place it would take among those kept, in start order.
   const kept: DateWritten[] = [];
   for (const reading of readings.toSorted(
     (a, b) =>
@@ -222,13 +239,26 @@ export const datesIn = (text: string): DateWritten[] => {
       b.end - b.start - (a.end - a.start) ||
       a.start - b.start
   )) {
+    let low = 0;
+    let high = kept.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if ((kept[middle]?.start ?? 0) < reading.start) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    const previous = kept[low - 1];
+    const next = kept[low];
     if (
-      !kept.some((date) => reading.start < date.end && date.start < reading.end)
+      (previous === undefined || previous.end <= reading.start) &&
+      (next === undefined || reading.end <= next.start)
     ) {
-      kept.push(reading);
+      kept.splice(low, 0, reading);
     }
   }
-  return kept.toSorted((a, b) => a.start - b.start);
+  return kept;
 };
 
 /**
