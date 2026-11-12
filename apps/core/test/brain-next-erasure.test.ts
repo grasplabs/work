@@ -403,6 +403,11 @@ describe("erasing a source", { timeout: 120_000 }, () => {
             results: embedded.vectors,
           };
         },
+      },
+      {
+        handOver: async () => {
+          await Promise.resolve();
+        },
       }
     );
     const hashes = await Promise.all(texts.map(hashOf));

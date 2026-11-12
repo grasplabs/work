@@ -1279,10 +1279,15 @@ const leavingWork: Record<string, () => Promise<void>> = {
   },
 };
 
-/** The methods that only read, or take work away (`erasePerson` erases it all). */
+/**
+ * The methods that only read, or take work away (`erasePerson` erases it
+ * all), or that a person's own store refuses (`handOver`: the shared
+ * store's alone).
+ */
 const leavingNone = [
   "erasePerson",
   "find",
+  "handOver",
   "listSources",
   "listVersions",
   "readCurrent",

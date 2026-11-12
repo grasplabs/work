@@ -10,6 +10,7 @@ import type {
   EmbedModel,
   Embedders,
   EmbeddingOverview,
+  HandOvers,
 } from "@grasp-os/brain-next/contract";
 import { questionEmbedder } from "@grasp-os/embed/embedder";
 import type { Embedder } from "@grasp-os/embed/embedder";
@@ -45,6 +46,13 @@ import {
   vectorKeyOf,
 } from "../src/files.ts";
 import { workAttemptsMax } from "../src/work.ts";
+
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+  },
+};
 
 /** The test models' identities, as their embedders give them. */
 let int8: EmbedModel;
@@ -95,7 +103,7 @@ const embeddersOf = (
 const clock = { at: Date.now() };
 const tick = async (embedders: Embedders, aheadMs = 0): Promise<void> => {
   clock.at = Math.max(clock.at, Date.now()) + aheadMs;
-  await store().work(quietAsk, new Date(clock.at), embedders);
+  await store().work(quietAsk, new Date(clock.at), embedders, noHandOvers);
 };
 
 /** A paragraph of its own, about 800 characters: one chunk. */

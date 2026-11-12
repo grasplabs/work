@@ -1,13 +1,16 @@
 import {
   brainOf,
   currentReadMax,
+  erasedRefusal,
   erasureReasons,
+  handOversMax,
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
   principalMaxLength,
   questionMaxLength,
   sourceIdMaxLength,
+  sourceTextMaxBytes,
   wellFormedString,
   modelWaitMaxSeconds,
   storeBytesMax,
@@ -18,6 +21,8 @@ import type {
   Brain,
   ErasureReason,
   Embedders,
+  HandOverPriority,
+  HandOvers,
   ModelReply,
   Pack,
   PackItem,
@@ -53,6 +58,7 @@ import { z } from "zod";
 
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
+import { erasureBegun } from "./brain-hand-overs.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
@@ -127,7 +133,7 @@ const kindsWithoutColon = <const K extends string>(
 
 /**
  * Everything that adds sources to the Brain, one kind each. Each producer
- * issue adds its own (GRA-1727: meetings, workflow runs, interviews;
+ * issue adds its own (GRA-1727: workflow runs; GRA-1824: uploads;
  * GRA-1730: what agents fetch). A kind is never `instructions`, the
  * instruction files' own (`instructionKeyOf`).
  *
@@ -136,8 +142,8 @@ const kindsWithoutColon = <const K extends string>(
  * (`sourceRefOf`), so a kind gone from this list would fail every recall
  * whose results hold one of its sources.
  */
-// `run` stays although nothing produces it now: stores filled between
-// #2157 and its revert hold run sources, and a recall that meets one must
+// `chat` stays although nothing produces it now: stores filled between
+// #2157 and its revert hold chat sources, and a recall that meets one must
 // still read it.
 const producerKinds = kindsWithoutColon(["upload", "chat", "run"]);
 
@@ -910,16 +916,202 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
     await embedInBulk(env, texts, timeoutMs),
 });
 
+// Hand-overs: what core produces reaches the Brain through its work
+// queue (the contract's `handOver`). Core notes what to hand over from the
+// audit events of its changes (brain-hand-overs.ts), and the clock relays
+// it to the queue by key alone (brain-sources.ts `relayHandOvers`, through
+// `queueHandOvers`); the queue's item asks core's producers for the source
+// as their records hold it when it runs (brain-sources.ts `producersOf`,
+// given to `workBrain`), and tells them how it ended. The readers are
+// checked here as an add's (`sourceReadersSchema`): a producer that names
+// none is refused, and nothing is added.
+
+/**
+ * A source as its producer holds it now: its change, text and readers; or
+ * nothing to hand over (`gone`); or nothing, as the erasure of its one
+ * reader (`readers`, the store that may hold it) has begun, when the Brain
+ * closes its key, as an add of it may have landed after that erasure.
+ */
+export type Handed =
+  | { kind: "gone" }
+  | { kind: "erased"; readers: SourceReaders }
+  | { kind: "source"; change: string; text: string; readers: SourceReaders };
+
+/** How a hand-over ended, as the Brain tells it. */
+export type HandOverEnd =
+  | { kind: "added"; version: number }
+  | { kind: "refused" };
+
+/** Core's producers, as the Brain's hand-overs reach them (brain-sources.ts). */
+export interface Producers {
+  /** `source` as its producer's records hold it now. */
+  read: (source: SourceRef) => Promise<Handed>;
+  /** How the hand-over of `source` ended: once it did, and again on a repeat. */
+  settled: (source: SourceRef, outcome: HandOverEnd) => Promise<void>;
+}
+
+/** The class of the Brain's work every hand-over takes. */
+const handOverPriority: HandOverPriority = "conversation";
+
+/**
+ * Most UTF-8 bytes of a text handed over: below the Brain's bound
+ * (`sourceTextMaxBytes`), with room for the Brain's folding of it for its
+ * word index, which can grow it. A longer text is cut (`fitted`), not
+ * refused.
+ */
+const handedMaxBytes = Math.floor(sourceTextMaxBytes * 0.9);
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/**
+ * `text`'s start that fits `handedMaxBytes`, cut where a character starts,
+ * the same each time for the same text: a run's result can be a little
+ * over the Brain's bound.
+ */
+const fitted = (text: string): string => {
+  const bytes = encoder.encode(text);
+  if (bytes.byteLength <= handedMaxBytes) {
+    return text;
+  }
+  let end = handedMaxBytes;
+  // A byte `10xxxxxx` (0x80 to 0xbf) continues a character: cut before
+  // the one it is in.
+  while (end > 0 && (bytes[end] ?? 0) >= 0x80 && (bytes[end] ?? 0) < 0xc0) {
+    end -= 1;
+  }
+  return decoder.decode(bytes.subarray(0, end));
+};
+
+/**
+ * Closes `source`'s key for good, as the erasure of its one reader
+ * (`readers`) has begun: the Brain's `eraseSource`, from the store
+ * `readers` say holds it.
+ */
+const closeKey = async (
+  env: BrainEnv,
+  source: SourceRef,
+  readers: SourceReaders
+): Promise<void> => {
+  checked(sourceReadersSchema, readers);
+  await eraseSource(env, { source, reason: "person_erased" });
+};
+
+/**
+ * Hands `source` over as its producer's records hold it now, through
+ * `addSource`, which takes it to the store its readers belong in: nothing,
+ * when the producer has nothing to hand over. The readers are checked as
+ * any add's, so a producer that names none is refused, and the item is
+ * tried again, then parked. An add refused because what it adds was erased
+ * is final: told to the producer, never tried again.
+ *
+ * A source for one person alone whose erasure has begun is erased (its key
+ * closed), never left: when the producer says so (`erased`), as an add of
+ * it may have landed after the Brain's erasure (began before it, the add's
+ * erasure failed or never ran), and when it was added while that erasure
+ * began (core's record of it is written before the Brain's erasure, and
+ * the producer checked it before the add). An erasure that fails fails the
+ * item, which is tried again. Erasing a key twice is harmless.
+ */
+const handOver = async (
+  env: Env,
+  producers: Producers,
+  source: SourceRef
+): Promise<void> => {
+  const handed = await producers.read(source);
+  if (handed.kind === "gone") {
+    return;
+  }
+  if (handed.kind === "erased") {
+    await closeKey(env, source, handed.readers);
+    await producers.settled(source, { kind: "refused" });
+    return;
+  }
+  const readers = checked(sourceReadersSchema, handed.readers);
+  let outcome: HandOverEnd;
+  try {
+    const { version } = await addSource(env, {
+      source,
+      change: handed.change,
+      text: fitted(checked(wellFormedString(), handed.text)),
+      readers,
+    });
+    outcome = { kind: "added", version };
+  } catch (error) {
+    if (!(error instanceof Error && error.message === erasedRefusal)) {
+      throw error;
+    }
+    outcome = { kind: "refused" };
+  }
+  if (
+    outcome.kind === "added" &&
+    readers.kind === "owner" &&
+    (await erasureBegun(env, readers.personId))
+  ) {
+    await closeKey(env, source, readers);
+    outcome = { kind: "refused" };
+  }
+  await producers.settled(source, outcome);
+};
+
+/** Core's producers as the Brain's work reaches them, by its keys. */
+const handOversOf = (env: Env, producers: Producers): HandOvers => ({
+  handOver: async (key) => {
+    await handOver(env, producers, sourceRefOf(key));
+  },
+});
+
+/**
+ * Puts `sources` on the shared store's work queue to be handed over, each
+ * in place of one of its hand-overs still waiting or parked: their keys
+ * alone, as what is added is what its producer answers when the item runs
+ * (`workBrain`). One the Brain can't key (too long, a control character)
+ * never will be: left out and counted in the log, never named, as an id
+ * can echo what a person typed. Sent `handOversMax` at a time, one call
+ * after the other: a call that fails leaves those after it unsent.
+ */
+export const queueHandOvers = async (
+  env: BrainEnv,
+  sources: readonly SourceRef[]
+): Promise<void> => {
+  const items = sources.flatMap((each) => {
+    const source = sourceRefSchema.safeParse(each);
+    return source.success
+      ? [{ source: sourceKeyOf(source.data), priority: handOverPriority }]
+      : [];
+  });
+  if (items.length < sources.length) {
+    log.warn("brain.hand_over.unkeyed", {
+      count: sources.length - items.length,
+    });
+  }
+  for (let at = 0; at < items.length; at += handOversMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one call after the other
+    await brain(env).handOver({ items: items.slice(at, at + handOversMax) });
+  }
+};
+
 /**
  * One tick of the Brain's background work at `at`, the time core's clock
  * runs it: the store sweeps what adds that never finished left, repacks a
  * few blocks of vector codes, keeps its vectors to core's embedding model,
  * then runs what is due in its queue, its model calls through core's
- * gateway and its passages through core's bulk embedders. Harmless late or
- * twice.
+ * gateway, its passages through core's bulk embedders and its hand-overs
+ * through `producers` (brain-sources.ts `producersOf`, which the clock
+ * gives). Without them a hand-over due fails and is tried again later,
+ * adding nothing. Harmless late or twice.
  */
-export const workBrain = async (env: Env, at: Date): Promise<void> => {
-  await brain(env).work(askModel(env), at, await embeddersOf(env));
+export const workBrain = async (
+  env: Env,
+  at: Date,
+  producers?: Producers
+): Promise<void> => {
+  await brain(env).work(
+    askModel(env),
+    at,
+    await embeddersOf(env),
+    producers === undefined ? undefined : handOversOf(env, producers)
+  );
 };
 
 /** The Brain's work queue, store and ledger, as staff see it (brain-report.ts). */

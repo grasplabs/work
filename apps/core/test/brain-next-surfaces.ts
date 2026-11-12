@@ -30,6 +30,7 @@
 import {
   brainOf,
   currentReadMax,
+  handOversMax,
   instructionsMaxLength,
   listPageMax,
   listPrefixesMax,
@@ -49,6 +50,7 @@ import type {
   EmbedModel,
   ErasureReason,
   Embedders,
+  HandOvers,
   Reader,
   VectorModel,
   VectorsToPut,
@@ -74,6 +76,7 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
+import { producersOf } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
@@ -750,6 +753,13 @@ const noEmbedders: Embedders = {
   },
 };
 
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+  },
+};
+
 /**
  * The host's embedders, as a probe hands them: they run a model, and fail
  * every passage with the passages and the markers in their error, so
@@ -1339,11 +1349,45 @@ export const coreProbes = {
       ),
     ];
   },
+  // Queuing hand-overs has no reader: whatever it is handed, it answers
+  // alike and says nothing of what it queues. What it puts on the queue
+  // is worked by the next tick, which reads core's records for it.
+  queueHandOvers: async ({ markers }) => {
+    const queue = async (
+      name: string,
+      sources: readonly SourceRef[],
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.queueHandOvers(env, sources);
+        },
+        about
+      );
+    return [
+      await queue("a run that never ran", [missingSource()], "nothing"),
+      await queue(
+        "a run named by the markers",
+        [{ producer: "run", id: markers.join("-") }],
+        "hidden"
+      ),
+      await queue("a run named by the markers and a control character", [
+        { producer: "run", id: `${markers.join("-")}\u0007` },
+      ]),
+      await queue("a source of a kind no one produces", [
+        unchecked({ producer: markers.join(""), id: "x" }),
+      ]),
+      await answer("a tick handing them over", async () => {
+        await coreBrain.workBrain(env, nextDay(), producersOf(env));
+      }),
+    ];
+  },
   brainWorkOverview: async ({ markers }) => [
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, noEmbedders);
+        await store().work(quietModel, at, noEmbedders, noHandOvers);
       },
       "a marked item worked to parking"
     )),
@@ -1860,7 +1904,7 @@ const queuedVectors = async ({
     const answered = await answer(
       `a tick embedding, ${round + 1}`,
       async () => {
-        await store().work(quietModel, nextDay(), embedders);
+        await store().work(quietModel, nextDay(), embedders, noHandOvers);
       }
     );
     ticked.push(answered);
@@ -2866,7 +2910,7 @@ export const storeProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, noEmbedders);
+        await store().work(quietModel, at, noEmbedders, noHandOvers);
       },
       "a marked item worked by the store"
     )),
@@ -2874,20 +2918,26 @@ export const storeProbes = {
       sweepTimes().map(
         async (at) =>
           await answer(`a tick as of ${at.toISOString()}`, async () => {
-            await store().work(quietModel, at, noEmbedders);
+            await store().work(quietModel, at, noEmbedders, noHandOvers);
           })
       )
     )),
     // One tick with embedders that fail with the passages and the markers
     // in their error: what embedding's items do with a failure.
     await answer("a tick whose embedders fail", async () => {
-      await store().work(quietModel, nextDay(), leakyEmbedders(markers));
+      await store().work(
+        quietModel,
+        nextDay(),
+        leakyEmbedders(markers),
+        noHandOvers
+      );
     }),
     await answer("a tick at no time", async () => {
       await store().work(
         quietModel,
         unchecked(markers.join(" ")),
-        leakyEmbedders(markers)
+        leakyEmbedders(markers),
+        noHandOvers
       );
     }),
   ],
@@ -2940,6 +2990,67 @@ export const storeProbes = {
         source: keyOf(missingSource()),
         reason: "deleted",
         extra: markers.join(" "),
+      }),
+    ];
+  },
+  // Putting sources on the queue has no reader either: it answers alike
+  // whatever was added, and a tick asks the host for each.
+  handOver: async ({ markers }) => {
+    const over = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await store().handOver(unchecked(request));
+        },
+        about
+      );
+    const marked = keyOf(missingSource());
+    await store().addSource({
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      access: { kind: "owner", person: stranger() },
+    });
+    return [
+      await over(
+        "a source no one added",
+        {
+          items: [{ source: keyOf(missingSource()), priority: "conversation" }],
+        },
+        "nothing"
+      ),
+      await over(
+        "someone else's marked source",
+        { items: [{ source: marked, priority: "conversation" }] },
+        "hidden"
+      ),
+      await over("a source named by the markers, too long", {
+        items: [
+          { source: markers.join("").repeat(300), priority: "conversation" },
+        ],
+      }),
+      await over("a class named by the markers", {
+        items: [
+          { source: keyOf(missingSource()), priority: markers.join(" ") },
+        ],
+      }),
+      await over("more sources than one call takes", {
+        items: Array.from({ length: handOversMax + 1 }, () => ({
+          source: keyOf(missingSource()),
+          priority: "conversation",
+        })),
+      }),
+      await answer("a tick whose host fails with the markers", async () => {
+        await store().work(quietModel, nextDay(), noEmbedders, {
+          handOver: async () => {
+            await Promise.resolve();
+            throw new Error(`Could not hand over ${markers.join(" ")}`);
+          },
+        });
       }),
     ];
   },
@@ -2999,13 +3110,18 @@ export const storeProbes = {
     // What a re-embed puts back, worked by embedders that fail with the
     // passages and the markers in their error.
     await answer("a tick after a re-embed", async () => {
-      await store().work(quietModel, nextDay(), leakyEmbedders(markers));
+      await store().work(
+        quietModel,
+        nextDay(),
+        leakyEmbedders(markers),
+        noHandOvers
+      );
     }),
     ...(await workMarked(
       markers,
       async (at) => {
         await store().reembed();
-        await store().work(quietModel, at, noEmbedders);
+        await store().work(quietModel, at, noEmbedders, noHandOvers);
       },
       "a marked item worked after a re-embed"
     )),
@@ -3014,7 +3130,7 @@ export const storeProbes = {
     ...(await workMarked(
       markers,
       async (at) => {
-        await store().work(quietModel, at, noEmbedders);
+        await store().work(quietModel, at, noEmbedders, noHandOvers);
       },
       "a marked item worked to parking"
     )),

@@ -890,6 +890,53 @@ export interface Embedders {
   embed: (request: EmbedRequest) => Promise<EmbedReply>;
 }
 
+// Hand-overs: what the host produces (a workflow run, say) reaches the
+// Brain through its work queue, never in a call that adds it at once. The
+// host puts a source's key on the queue (`handOver`); the item, as it
+// runs, asks the host to hand that source over (`HandOvers.handOver`): the
+// host reads it from its records then and adds it, through its own way
+// of adding, which picks the store its readers belong in. A hand-over
+// that fails is retried and, after too many failures, parked where staff
+// see it.
+
+/** The classes of work a hand-over may take (work.ts `workPriorities`). */
+export const handOverPriorities = ["conversation"] as const;
+export type HandOverPriority = (typeof handOverPriorities)[number];
+
+/** Most sources one `handOver` puts on the queue. */
+export const handOversMax = 100;
+
+/** Sources to put on the queue, each with its class of work. */
+export const handOverRequestSchema = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        source: sourceIdSchema,
+        priority: z.enum(handOverPriorities),
+      })
+    )
+    .min(1)
+    .max(handOversMax),
+});
+export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
+
+/** The host's side of hand-overs, as the Brain's work uses it. */
+export interface HandOvers {
+  /**
+   * Hands `source` over as the host's records hold it now: resolves once
+   * it is added, or there is nothing to add; throws to be tried again.
+   * Safe to repeat.
+   */
+  handOver: (source: SourceId) => Promise<void>;
+}
+
+/**
+ * What an add answers when what it adds was erased: the source's key is
+ * closed, or its one reader was erased since it began. Final: a producer
+ * never tries it again.
+ */
+export const erasedRefusal = "The Brain refused it: what this adds was erased";
+
 /**
  * A step of the tick that didn't finish: when, and why, as a code of the
  * store's own (R2 didn't answer in time, or the step failed), never an
@@ -1103,11 +1150,25 @@ export interface Brain {
    * removed. Then it works the queue: runs what is due, a few at a time,
    * asking `ask` for the model calls it makes and `embedders` for vectors,
    * and returns once what it started has ended and nothing more is due,
-   * or its time to start more is up. `ask` and `embedders` are used only
-   * while this call is open. A second tick at the same time shares the same
-   * limits and claims nothing the first has under way.
+   * or its time to start more is up. `ask`, `embedders` and `handOvers`
+   * (the host's side of hand-overs) are used only while this call is open.
+   * A second tick at the same time shares the same limits and claims
+   * nothing the first has under way.
    */
-  work: (ask: AskModel, at: Date, embedders: Embedders) => Promise<void>;
+  work: (
+    ask: AskModel,
+    at: Date,
+    embedders: Embedders,
+    handOvers?: HandOvers
+  ) => Promise<void>;
+  /**
+   * Puts each source on the work queue to be handed over (above), in
+   * place of one of its hand-overs still waiting or parked. What the item
+   * adds is whatever the host's `HandOvers.handOver` adds when it runs:
+   * so putting a source on twice, or late, adds nothing twice and nothing
+   * stale. The shared store's alone: a person's own store refuses it.
+   */
+  handOver: (request: HandOverRequest) => Promise<void>;
   /**
    * Starts the rebuild for the host's model again: every current version
    * with chunks it hasn't embedded goes on the queue again, those parked

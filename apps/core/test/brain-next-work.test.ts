@@ -1,4 +1,4 @@
-import type { Embedders } from "@grasp-os/brain-next/contract";
+import type { Embedders, HandOvers } from "@grasp-os/brain-next/contract";
 import {
   defineWork,
   enqueueWork,
@@ -53,6 +53,13 @@ import { testBinding } from "./test-env.ts";
 // kind takes the queue's usual time per attempt, the other a short one.
 
 /** No embedders: the store's own ticks here embed nothing, as core's while no model ships. */
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+  },
+};
+
 const noEmbedders: Embedders = {
   model: null,
   embed: async () => {
@@ -1056,7 +1063,12 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     for (let tickNumber = 0; tickNumber <= workAttemptsMax; tickNumber += 1) {
       // Past each wait, which doubles up to 30 minutes.
       // oxlint-disable-next-line no-await-in-loop -- tick after tick
-      await store().work(brokenHost, later(40 * 60_000), noEmbedders);
+      await store().work(
+        brokenHost,
+        later(40 * 60_000),
+        noEmbedders,
+        noHandOvers
+      );
     }
     const meanwhile = await queue([item]);
     await answeringProvider(() => answer);
@@ -1451,7 +1463,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       return { kind: "answer" as const, text: "An answer." };
     };
     const at = later(1000);
-    await store().work(host, at, noEmbedders);
+    await store().work(host, at, noEmbedders, noHandOvers);
     const { paused } = await queue();
     expect({
       reason: paused?.reason,
@@ -1549,7 +1561,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     const plain = keyOf("plain");
     behaviours.set(asking, asksOnce);
     await enqueue({ key: asking, priority: "asked" });
-    await store().work(brokenHost, later(1000), noEmbedders);
+    await store().work(brokenHost, later(1000), noEmbedders, noHandOvers);
     await enqueue({ key: plain, priority: "archive" });
     // Within the pause's minute: nothing runs, not even work with no model.
     await tick(10_000);

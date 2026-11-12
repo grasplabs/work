@@ -1,5 +1,5 @@
 import { brainOf, vectorModelNameOf } from "@grasp-os/brain-next/contract";
-import type { Embedders } from "@grasp-os/brain-next/contract";
+import type { Embedders, HandOvers } from "@grasp-os/brain-next/contract";
 import {
   defineWork,
   enqueueWork,
@@ -807,6 +807,13 @@ describe("the Brain's actions when the store throws", () => {
 });
 
 /** The host's model, as the store's own tick asks it: it answers, and holds nothing. */
+/** No hand-overs: these tests hand nothing over. */
+const noHandOvers: HandOvers = {
+  handOver: async () => {
+    await Promise.resolve();
+  },
+};
+
 const quietModel = async () => {
   await Promise.resolve();
   return { kind: "answer" as const, text: "" };
@@ -836,7 +843,7 @@ const embedAll = async (embedders: Embedders): Promise<void> => {
   const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
   for (let ticks = 0; ticks < 50; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one tick after another
-    await brain.work(quietModel, nextDay(), embedders);
+    await brain.work(quietModel, nextDay(), embedders, noHandOvers);
     // oxlint-disable-next-line no-await-in-loop -- look after each tick
     const { embedding } = await brainWorkOverview(env);
     if (embedding.rebuilt) {
@@ -942,7 +949,7 @@ describe("the Brain's embedding, as staff see it", () => {
       },
     };
     const brain = brainOf(inJurisdiction(env, env.BRAIN_STORE));
-    await brain.work(quietModel, nextDay(), choosy);
+    await brain.work(quietModel, nextDay(), choosy, noHandOvers);
     const before = await reported((report) => report?.embedding);
     const answered = await answerTo({ type: "reembed" });
     const after = await reported((report) => report?.embedding);
@@ -979,12 +986,12 @@ describe("the Brain's embedding, as staff see it", () => {
     // and fails again: ticked until the overview shows one parked, as how
     // many items a tick runs depends on the machine's load, at most 20
     // ticks.
-    await brain.work(quietModel, nextDay(), broken);
+    await brain.work(quietModel, nextDay(), broken, noHandOvers);
     await brain.reembed();
     let { embedding: whileBroken } = await brainWorkOverview(env);
     for (let round = 0; round < 20 && whileBroken.parked === 0; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one tick after another, past each backoff
-      await brain.work(quietModel, nextDay(), broken);
+      await brain.work(quietModel, nextDay(), broken, noHandOvers);
       // oxlint-disable-next-line no-await-in-loop -- looked at after each tick
       ({ embedding: whileBroken } = await brainWorkOverview(env));
     }
@@ -1078,7 +1085,8 @@ describe("the Brain's upkeep, as staff see it", () => {
     await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work(
       quietModel,
       nextDay(),
-      await testModelEmbedders()
+      await testModelEmbedders(),
+      noHandOvers
     );
     // The step's own table refuses every write, with the marker in its words.
     await runInDurableObject(storeObject(), (_store, state) => {
