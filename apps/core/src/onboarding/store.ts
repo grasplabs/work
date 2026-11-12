@@ -6260,9 +6260,9 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * The staff-list team of the person `account` is linked to
-   * (`linkAccount`), while they are on the list and core didn't erase
-   * them: whose claims they read in the new Brain (brain-next.ts,
-   * `readerOf`). Null otherwise.
+   * (`linkAccount`), while they are on the list, core didn't erase them,
+   * and the team may have claims shown (`teamMayClaim`): whose claims they
+   * read in the new Brain (brain-next.ts, `readerOf`). Null otherwise.
    */
   interviewTeamOf(account: string): string | null {
     const [link] = this.#db
@@ -6273,12 +6273,13 @@ export class Onboarding extends DurableObject<Env> {
     if (link === undefined) {
       return null;
     }
-    const [person] = this.#db
-      .select({ team: people.team })
-      .from(people)
-      .where(eq(people.id, link.person))
-      .all();
-    return person?.team ?? null;
+    // A team too small to have claims shown gives its group to nobody,
+    // from the moment its count changes: a claim owed an erasure is
+    // unreadable before core's clock erases it (`teamMayClaim`).
+    const team = this.#teamOfPerson(link.person);
+    return team !== null && teamMayClaim(this.#tellers(team).length)
+      ? team
+      : null;
   }
 
   /**
@@ -6487,17 +6488,26 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Every erasure the onboarding still owes the new Brain: each source it
    * noted that no longer stands, until core says it is erased
-   * (`erasedFromBrain`). Interviews are decided first. With `of`, only
-   * that person's interviews: what a request of theirs erases at once,
-   * the rest left to core's clock.
+   * (`erasedFromBrain`). Interviews are decided first. Scoped to what a
+   * request erases at once, the rest left to core's clock:
+   *
+   * - `person`: that person's interviews, and the claims of their team now
+   *   owed: what their withdrawal or delete takes out (a claim they backed
+   *   that fell under five, or every claim of a team their leaving took
+   *   under seven), never another team's;
+   * - `claims`: every claim owed, after a roster save, which may take any
+   *   team under seven.
    */
-  owedErasures(of?: string): OwedErasure[] {
+  owedErasures(scope?: { person: string } | { claims: true }): OwedErasure[] {
     this.#decideInterviews();
-    if (of !== undefined) {
-      return this.owedErasures().filter(
-        (owed) =>
-          owed.kind === "interview" &&
-          this.#interviewPersonOf(owed.source) === of
+    if (scope !== undefined) {
+      const team = "person" in scope ? this.#teamOfPerson(scope.person) : null;
+      return this.owedErasures().filter((owed) =>
+        "claims" in scope
+          ? owed.kind === "claim"
+          : (owed.kind === "interview" &&
+              this.#interviewPersonOf(owed.source) === scope.person) ||
+            (owed.kind === "claim" && owed.team === team)
       );
     }
     const owedInterviews: OwedErasure[] = this.#db
@@ -6518,6 +6528,16 @@ export class Onboarding extends DurableObject<Env> {
       .all()
       .map(({ source, team }) => ({ kind: "claim", source, team }));
     return [...owedInterviews, ...claims];
+  }
+
+  /** The staff-list team `person` is in now; null when they aren't on the list. */
+  #teamOfPerson(person: string): string | null {
+    const [row] = this.#db
+      .select({ team: people.team })
+      .from(people)
+      .where(eq(people.id, person))
+      .all();
+    return row?.team ?? null;
   }
 
   /** Whose interview the source `source` is; null for none. */

@@ -15,12 +15,10 @@ import {
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { interviewErasure } from "../src/onboarding/interview-erasure.ts";
-import {
-  eraseOnboardingInterview,
-  eraseOwedOnboardingSources,
-} from "../src/onboarding/new-brain.ts";
+import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
+import { retryErasures } from "../src/person-erasure.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -49,6 +47,7 @@ import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
   entraPerson,
+  signedInApi,
   signedIn,
   unique,
   whoami,
@@ -349,7 +348,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
     expect({
       recalled: await recalled(lea, marker),
-      owed: await store.owedErasures(ids.lea),
+      owed: await store.owedErasures({ person: ids.lea }),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       recalled: [],
@@ -380,7 +379,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
     expect({
       erased,
-      owed: await onboardingStore(env).owedErasures(ids.lea),
+      owed: await onboardingStore(env).owedErasures({ person: ids.lea }),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       erased: "erased",
@@ -464,21 +463,38 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     const lea = await signsIn(addressOf(ids.lea));
     await handOverNow();
     const key = await interviewKeyOf(lea);
-    // As person-erasure.ts does: her entry's link closed for good and her
-    // interview deleted, then let go only once the Brain holds none of it.
-    await store.eraseInterviewOf(ids.lea, new Date().toISOString());
-    await eraseOnboardingInterview(env, ids.lea);
+    // Core's erasure of her (person-erasure.ts): an admin removes her,
+    // then erases her, which takes her interview out of the Brain before
+    // its area is done.
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.members.remove(lea);
+    const name = await env.DB.prepare("SELECT name FROM users WHERE id = ?")
+      .bind(lea)
+      .first<string>("name");
+    await admin.api.members.erase(lea, name ?? "");
+    // Her own store goes whole, done once the time an add under way has to
+    // land in it has passed, as core's clock retries it.
+    await ageOwnErasure(lea);
+    await retryErasures(env);
+    const completed = await env.DB.prepare(
+      "SELECT completed_at FROM person_erasures WHERE user_id = ?"
+    )
+      .bind(lea)
+      .first<number | null>("completed_at");
     const relinked = await store.linkAccount(
       `other-${unique()}`,
       addressOf(ids.lea)
     );
     expect({
+      done: completed !== null,
       kept: await keptIn(key, lea),
       team: await store.interviewTeamOf(lea),
       relinked,
-      owed: await store.owedErasures(ids.lea),
+      owed: await store.owedErasures({ person: ids.lea }),
     }).toStrictEqual({
-      kept: { shared: "erased", own: "erased" },
+      done: true,
+      // Her own store erased whole holds nothing: its keys read `free`.
+      kept: { shared: "erased", own: "free" },
       team: null,
       relinked: false,
       owed: [],
@@ -505,7 +521,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       purged: await recalled(lea, marker),
       rewritten: await recalled(lea, "(removed)", "interview"),
       old: await keptIn(before, lea),
-      owed: await onboardingStore(env).owedErasures(ids.lea),
+      owed: await onboardingStore(env).owedErasures({ person: ids.lea }),
     }).toStrictEqual({
       purged: [],
       rewritten: [
@@ -535,7 +551,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     const { own } = await keptIn(key, lea);
     expect({
       recalled: await recalled(lea, marker),
-      owed: await onboardingStore(env).owedErasures(ids.lea),
+      owed: await onboardingStore(env).owedErasures({ person: ids.lea }),
       held: own === "held",
     }).toStrictEqual({ recalled: [], owed: [], held: false });
   });
@@ -549,13 +565,22 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
    * account: seven who told their own work (Sam too, a step of his own)
    * unless `small`, and then six.
    */
-  const drawnTeam = async ({ small = false, drained = false } = {}) => {
-    const keys: readonly Key[] = small ? everyone : [...everyone, "sam"];
+  const drawnTeam = async ({
+    small = false,
+    drained = false,
+    eight = false,
+  } = {}) => {
+    const seven: Key[] = [...everyone, "sam"];
+    const larger: Key[] = eight ? [...seven, "ada"] : seven;
+    const keys: readonly Key[] = small ? everyone : larger;
     const ids = await team(keys, addressOf);
     await mapped(ids);
     await told(ids);
     if (!small) {
       await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+    }
+    if (eight) {
+      await agree(ids.ada, [fact("a1", "step", "Closes the day's tickets.")]);
     }
     // With `drained`, every other team due is given first, before this
     // one's work is drawn: the next intake is this team's.
@@ -814,6 +839,78 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       before: [zendeskClaim.text],
       after: [],
       listed: [],
+    });
+  });
+
+  /** What `max` can read of the team's claims now: the group core gives them, recall and listing. */
+  const readableBy = async (max: string) => ({
+    group: await onboardingStore(env).interviewTeamOf(max),
+    recalled: await recalled(max, "Zendesk", "claim"),
+    listed: await claimsOf(max),
+  });
+
+  it("are unreadable the moment a move leaves six interviewed, before core's clock erases them", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    await onboardingStore(env).saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+      type: "system",
+    });
+    await expect(readableBy(max)).resolves.toStrictEqual({
+      group: null,
+      recalled: [],
+      listed: [],
+    });
+  });
+
+  it("are unreadable the moment one who backs none of them withdraws and leaves six, before core's clock", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
+    await expect(readableBy(max)).resolves.toStrictEqual({
+      group: null,
+      recalled: [],
+      listed: [],
+    });
+  });
+
+  it("are unreadable the moment a backer withdraws and leaves four behind one, in a team still of seven, before core's clock", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    // Pim backs the claim: four are left behind it, seven still told.
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    expect({ before, now: await readableBy(max) }).toStrictEqual({
+      before: [zendeskClaim.text],
+      now: { group: ids.team, recalled: [], listed: [] },
+    });
+  });
+
+  it("are never shown again under their old key when the team goes under seven and back before core's clock", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const [first] = await claimsOf(max);
+    // The company's admin moves Rik out and back, as two saves.
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.onboarding.confirmRoster(
+      rosterWith(ids, { moved: ["rik"] })
+    );
+    await admin.api.onboarding.confirmRoster(rosterWith(ids));
+    await handOverNow();
+    const listed = await claimsOf(max);
+    expect({
+      first: first === undefined,
+      group: await onboardingStore(env).interviewTeamOf(max),
+      oldKey: listed.some(({ source }) => source.id === first?.source.id),
+      recalled: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      first: false,
+      group: ids.team,
+      oldKey: false,
+      recalled: [],
     });
   });
 });

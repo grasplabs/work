@@ -26,7 +26,16 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
 
 /** The people of a team, by key. */
-export type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik" | "sam";
+export type Key =
+  | "lea"
+  | "max"
+  | "mia"
+  | "mo"
+  | "noor"
+  | "pim"
+  | "rik"
+  | "sam"
+  | "ada";
 
 const names: Record<Key, [string, string]> = {
   lea: ["Lea Lind", "Team lead"],
@@ -37,6 +46,7 @@ const names: Record<Key, [string, string]> = {
   pim: ["Pim Peeters", "Agent"],
   rik: ["Rik Rooms", "Agent"],
   sam: ["Sam Smit", "Agent"],
+  ada: ["Ada Aerts", "Agent"],
 };
 
 /** Each person's and the team's id, by key. */
@@ -50,6 +60,7 @@ const idsOf = (id: string) => ({
   pim: `pim-${id}`,
   rik: `rik-${id}`,
   sam: `sam-${id}`,
+  ada: `ada-${id}`,
 });
 
 /** The staff list of Ops, led by Lea, with the people `keys`. */
