@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { maxOpenStretches } from "../src/transcription.ts";
 import { lateMs } from "./ai-providers-fake.ts";
 import type { RealtimeSocket } from "./ai-providers-fake.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
@@ -500,6 +501,39 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       next: { type: "partial", text: "Hello" },
       nextFinal: { type: "final", text: "Hello there", words: [] },
     });
+  });
+
+  it("fails a listening that commits stretch after stretch faster than their words can come, opening no more sessions", async () => {
+    const { ada } = await openedTwo();
+
+    const { upstream, result } = await relaying(async () => {
+      const page = await listen();
+      page.start({
+        type: "start",
+        language: "en",
+        sampleRate: 16_000,
+        link: ada,
+      });
+      await page.next();
+      // Ten stretches at once: none has its words yet.
+      for (let stretch = 0; stretch < 10; stretch += 1) {
+        page.socket.send(tenthOfASecond());
+        page.socket.send(JSON.stringify({ type: "commit" }));
+      }
+      const { messages, code } = await page.ended();
+      return {
+        code,
+        failed: messages.some(
+          (message) =>
+            message.type === "error" && message.code === "transcription.failed"
+        ),
+      };
+    });
+
+    expect({
+      ...result,
+      bounded: upstream.opened.length <= maxOpenStretches,
+    }).toStrictEqual({ code: 1011, failed: true, bounded: true });
   });
 
   it.each([

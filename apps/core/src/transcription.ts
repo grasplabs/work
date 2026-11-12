@@ -47,7 +47,10 @@ import { Resampler } from "./resampler.ts";
 // be in another stretch's final, and no final goes out before its words
 // are whole. A final that doesn't come within `doneWaitMs` fails the
 // whole listening, and the page has its stretches written down from their
-// recordings. A commit with nothing sent settles as an empty final.
+// recordings. A commit with nothing sent settles as an empty final. A
+// listening has `maxOpenStretches` sessions open at most, and
+// `maxStretches` in all: one more fails it, so a page can't have socket
+// after socket opened on Grasp's key by committing as fast as it can.
 //
 // The realtime session takes names and terms to listen out for
 // (`context_bias`) and no free text, so what was said just before, which
@@ -72,6 +75,20 @@ const streamingDelayMs = 480;
  * for a stretch's words, after which it has the recording written down.
  */
 export const doneWaitMs = 5000;
+
+/**
+ * The most sessions one listening has open at once: the stretch being
+ * said, and those before it whose whole text is still to come. Someone
+ * talking never has more than a couple; a page that commits faster than
+ * that is refused more, so it can't crowd Grasp's key with sockets.
+ */
+export const maxOpenStretches = 4;
+
+/**
+ * The most stretches one listening takes, each a session of its own: more
+ * than the lines an interview may hold.
+ */
+export const maxStretches = 500;
 
 /** What the session sends, as far as the relay reads it: the first that fits. */
 const serverEventSchema = z.union([
@@ -287,6 +304,8 @@ export const platformTranscription = (
         socket.send(message);
       }
     };
+    /** The stretches started so far. */
+    let started = 1;
     /** The stretch being said. */
     let saying = newStretch();
     try {
@@ -327,6 +346,12 @@ export const platformTranscription = (
           before = settle(before, Promise.resolve(""));
           return;
         }
+        if (open.size >= maxOpenStretches || started >= maxStretches) {
+          // More sessions than anyone talking needs.
+          end("too_many_stretches");
+          return;
+        }
+        started += 1;
         stretch.ending = true;
         // Has the session write down what it still held back, then say
         // the stretch's whole text.
