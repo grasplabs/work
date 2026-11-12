@@ -5,24 +5,17 @@ import { z } from "zod";
 import { recallAs } from "../src/brain-next.ts";
 import { parseModelRef } from "../src/model-catalog.ts";
 import { usageRecorded } from "../src/model-usage.ts";
-import { models } from "../src/models.ts";
+import { answerAndJudge, bothArms } from "./brain-eval-arms.ts";
 import { idIn, setUpEvalCompany } from "./brain-eval-company.ts";
-import { realProvider, realProviderTakes } from "./brain-real-provider.ts";
+import { realProvider } from "./brain-real-provider.ts";
 import type { BrainEvalQuestion } from "./fixtures/brain-eval/company.ts";
 import {
-  answerInput,
-  answerSystem,
   answeringPassageOf,
   costOf,
   everythingBudgetOf,
   everythingFor,
-  judgeInput,
-  judgeSystem,
-  judgedCorrect,
-  outputTokensMax,
   packTokens,
   questionTokensMax,
-  saidNotFound,
   secretsHiddenFrom,
   seededOrder,
   sourceBlock,
@@ -37,6 +30,7 @@ import {
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { spentMicros } from "./model-usage.ts";
+import { realProviderTakes, unreachableModel } from "./real-providers.ts";
 import { testBinding } from "./test-env.ts";
 
 // The Brain evaluation against a real model (GRA-1813), on request only:
@@ -66,8 +60,7 @@ const settings = z
   .object({
     model: z.string().min(1),
     budgetUsd: z.number().positive(),
-    everythingTokens: z.number().nonnegative(),
-    sha: z.string().regex(/^[0-9a-f]{40}$/u),
+    everythingTokens: z.int().positive().nullable(),
   })
   .parse(testBinding("BRAIN_EVAL_MODEL_RUN"));
 
@@ -95,66 +88,11 @@ const spentIn = async (months: ReadonlySet<string>): Promise<number> => {
   return total;
 };
 
-/** One answer through core's gateway: its text and the tokens it used. */
-const ask = async (
-  purpose: string,
-  system: string,
-  input: string
-): Promise<{ text: string; input: number; output: number }> => {
-  const { text, usage } = await models(env).call({
-    model: settings.model,
-    system,
-    input,
-    purpose,
-    trigger: { type: "system" },
-    work: { platform: "brain_upkeep" },
-    maxTokens: outputTokensMax,
-  });
-  return { text, input: usage.inputTokens, output: usage.outputTokens };
-};
-
-/** Secrets of `question` that `text` holds. */
-const leaksIn = (question: BrainEvalQuestion, text: string): string[] =>
-  question.expects.kind === "hidden"
-    ? question.expects.secrets.filter((secret) => text.includes(secret))
-    : [];
-
-/** One arm's answer to `question` from `context`, judged. */
-const answerAndJudge = async (
-  question: BrainEvalQuestion,
-  arm: "pack" | "everything",
-  context: string,
-  passage: string
-) => {
-  const answered = await ask(
-    `brain.eval.${arm}`,
-    answerSystem,
-    answerInput(question.question, context)
-  );
-  const leaks = leaksIn(question, answered.text);
-  let correct = saidNotFound(answered.text) && leaks.length === 0;
-  let { input } = answered;
-  let { output } = answered;
-  if (question.expects.kind === "answer") {
-    const verdict = await ask(
-      "brain.eval.judge",
-      judgeSystem,
-      judgeInput(question.question, passage, answered.text)
-    );
-    correct = judgedCorrect(verdict.text);
-    input += verdict.input;
-    output += verdict.output;
-  }
-  return { correct, leaks, inputTokens: input, outputTokens: output };
-};
-
 describe("the Brain evaluation against a real model", () => {
   it(`answers every question from the recall pack and from everything, with ${settings.model}, within its budget`, async () => {
     const ref = parseModelRef(settings.model);
     if (ref === undefined || !realProviderTakes(settings.model)) {
-      throw new Error(
-        `A run reaches Anthropic, Mistral and OpenRouter models of the gateway's catalog, not ${settings.model}`
-      );
+      throw new Error(unreachableModel(settings.model));
     }
     expect(setProblems(sources, questions)).toStrictEqual([]);
     const people = await setUpEvalCompany(idp, sources);
@@ -179,36 +117,31 @@ describe("the Brain evaluation against a real model", () => {
         packTokens,
         everythingTokens: settings.everythingTokens,
         budgetUsd: settings.budgetUsd,
+        packSearch: "words and exact parts",
       })}`
     );
 
-    let asked = 0;
-    let stoppedAtBudget = false;
     const leaking: string[] = [];
-    for (const question of seededOrder(questions)) {
+    /** One question asked of both arms and judged; false when the budget stops it first. */
+    const askOne = async (question: BrainEvalQuestion): Promise<boolean> => {
       const asker = askerOf(question);
       const everything = everythingFor(
         sources,
         asker,
         Math.min(
           everythingBudgetOf(contextWindow, question),
-          settings.everythingTokens > 0
-            ? settings.everythingTokens
-            : Number.POSITIVE_INFINITY
+          settings.everythingTokens ?? Number.POSITIVE_INFINITY
         )
       );
       const passage = answeringPassageOf(sources, question);
       months.add(monthOf(new Date()));
-      // oxlint-disable-next-line no-await-in-loop -- the budget is read before each question
       const spent = (await spentIn(months)) - before;
       const most =
         costOf(questionTokensMax(question, everything.tokens, passage), cost) *
         micros;
       if (spent + most > budget) {
-        stoppedAtBudget = true;
-        break;
+        return false;
       }
-      // oxlint-disable-next-line no-await-in-loop -- one question at a time, for the budget
       const recalled = await recallAs(env, idIn(people, asker), {
         question: question.question,
         budget: { tokens: packTokens },
@@ -229,11 +162,27 @@ describe("the Brain evaluation against a real model", () => {
           );
         }
       }
-      // oxlint-disable-next-line no-await-in-loop -- one question at a time, for the budget
-      const [fromPack, fromEverything] = await Promise.all([
-        answerAndJudge(question, "pack", pack, passage),
-        answerAndJudge(question, "everything", everything.text, passage),
-      ]);
+      // Both settle before either's failure is thrown (`bothArms`).
+      const { pack: fromPack, everything: fromEverything } = await bothArms(
+        async () =>
+          await answerAndJudge(
+            env,
+            settings.model,
+            question,
+            "pack",
+            pack,
+            passage
+          ),
+        async () =>
+          await answerAndJudge(
+            env,
+            settings.model,
+            question,
+            "everything",
+            everything.text,
+            passage
+          )
+      );
       for (const [arm, result] of [
         ["pack", fromPack],
         ["everything", fromEverything],
@@ -242,7 +191,6 @@ describe("the Brain evaluation against a real model", () => {
           leaking.push(`${question.id} (${arm})`);
         }
       }
-      asked += 1;
       console.log(
         `BRAIN_EVAL_MODEL_RESULT ${JSON.stringify({
           id: question.id,
@@ -255,11 +203,34 @@ describe("the Brain evaluation against a real model", () => {
           },
         })}`
       );
+      return true;
+    };
+
+    // One question at a time, for the budget. A call that fails (a
+    // provider's error, a context refused) ends the run marked failed,
+    // with the results asked before it kept, and then fails the test.
+    let asked = 0;
+    let stoppedAtBudget = false;
+    let failure: Error | null = null;
+    try {
+      for (const question of seededOrder(questions)) {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, see above
+        if (!(await askOne(question))) {
+          stoppedAtBudget = true;
+          break;
+        }
+        asked += 1;
+      }
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
     }
     const spentUsd = ((await spentIn(months)) - before) / micros;
     console.log(
-      `BRAIN_EVAL_MODEL_END ${JSON.stringify({ asked, stoppedAtBudget, spentUsd })}`
+      `BRAIN_EVAL_MODEL_END ${JSON.stringify({ asked, stoppedAtBudget, failed: failure !== null, spentUsd })}`
     );
+    if (failure !== null) {
+      throw failure;
+    }
     expect({
       leaking,
       withinBudget: spentUsd <= settings.budgetUsd,
