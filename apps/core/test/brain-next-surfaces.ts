@@ -998,45 +998,57 @@ const recallFixture = async (probing: Probing): Promise<MemoryFixture> => {
   const fixture = await memoryFixture(probing);
   const text = markedText(probing.markers);
   const group = stranger();
+  const person = {
+    key: "p",
+    kind: "person" as const,
+    names: [text],
+    identifiers: [
+      {
+        type: "email" as const,
+        value: `${probing.markers[0] ?? "x"}@hidden.test`,
+      },
+    ],
+  };
+  const role = {
+    about: "p",
+    attribute: "role",
+    value: text,
+    type: "fact" as const,
+    statement: `Plain ${text}`,
+    speaker: { kind: "system" as const },
+    basis: { kind: "writer" as const, writer: stranger() },
+  };
+  // The reader's "Plain" is in their first group (the memory fixture's):
+  // a reader in none has no entity of theirs to relate a hidden one to.
+  const seenBy = probing.reader.groups.length > 0;
   await store().addMemories({
     change: crypto.randomUUID(),
     access: { kind: "audience", group },
-    // Made for someone who sees the reader's entity and is in the group.
-    reader: {
-      person: probing.reader.person,
-      groups: [group, ...probing.reader.groups],
-    },
-    entities: [
-      { key: "c", id: fixture.seen, kind: "customer", names: ["Plain"] },
-      {
-        key: "p",
-        kind: "person",
-        names: [text],
-        identifiers: [
-          { type: "email", value: `${probing.markers[0] ?? "x"}@hidden.test` },
-        ],
-      },
-    ],
-    memories: [
-      {
-        about: "c",
-        attribute: "contact",
-        object: "p",
-        type: "fact",
-        statement: text,
-        speaker: { kind: "system" },
-        basis: { kind: "writer", writer: stranger() },
-      },
-      {
-        about: "p",
-        attribute: "role",
-        value: text,
-        type: "fact",
-        statement: `Plain ${text}`,
-        speaker: { kind: "system" },
-        basis: { kind: "writer", writer: stranger() },
-      },
-    ],
+    ...(seenBy
+      ? {
+          // Made for someone who sees the reader's entity and is in the group.
+          reader: {
+            person: probing.reader.person,
+            groups: [group, ...probing.reader.groups],
+          },
+          entities: [
+            { key: "c", id: fixture.seen, kind: "customer", names: ["Plain"] },
+            person,
+          ],
+          memories: [
+            {
+              about: "c",
+              attribute: "contact",
+              object: "p",
+              type: "fact",
+              statement: text,
+              speaker: { kind: "system" },
+              basis: { kind: "writer", writer: stranger() },
+            },
+            role,
+          ],
+        }
+      : { entities: [person], memories: [role] }),
   });
   return fixture;
 };

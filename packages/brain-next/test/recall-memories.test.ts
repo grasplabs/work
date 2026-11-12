@@ -10,6 +10,7 @@
 // them. They must be byte for byte the same.
 import { packMemoryTokens } from "@grasp-os/brain-next/contract";
 import type { Pack, Reader } from "@grasp-os/brain-next/contract";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { hubRelationsMax } from "../src/recall-memories.ts";
@@ -221,14 +222,16 @@ describe("recall through memories", () => {
   });
 
   // Contract v4: an instruction is its writer's own item, said to be one.
-  it("gives an instruction to its writer alone, as an instruction", async () => {
+  it("gives an instruction in its writer's own store, as an instruction", async () => {
     const writer = unique("ann");
-    const other = readerOf(unique("bob"));
     const name = word();
-    await remember(
-      { kind: "owner", person: writer },
-      [{ key: "p", kind: "person", names: [name] }],
-      [
+    // An instruction is its writer's alone: only their own store keeps it.
+    const own = env.BRAIN_STORE.getByName(`person:${writer}`);
+    await own.addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "owner", person: writer },
+      entities: [{ key: "p", kind: "person", names: [name] }],
+      memories: [
         {
           about: "p",
           attribute: "instruction",
@@ -238,18 +241,17 @@ describe("recall through memories", () => {
           speaker: { kind: "internal", person: writer },
           basis: { kind: "writer", writer },
         },
-      ]
-    );
-    const own = await recallAs(readerOf(writer), `${name} answers`);
-    const others = await recallAs(other, `${name} answers`);
-
-    expect({
-      own: own.memories.map(({ type, writer: by }) => ({ type, by })),
-      others: others.memories,
-    }).toStrictEqual({
-      own: [{ type: "instruction", by: writer }],
-      others: [],
+      ],
     });
+    const pack = await own.recall({
+      question: `${name} answers`,
+      reader: readerOf(writer),
+      budget: { tokens: 20_000 },
+    });
+
+    expect(
+      pack.memories.map(({ type, writer: by }) => ({ type, by }))
+    ).toStrictEqual([{ type: "instruction", by: writer }]);
   });
 
   // Contested facts carried in the pack, both sides.
