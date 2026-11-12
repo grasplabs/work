@@ -448,7 +448,9 @@ type ReaderEnv = Pick<Env, "DB" | "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">;
  * it. Asked of the onboarding's object at every read, beside core's own
  * records, so a move or a removal holds from the next question on. A
  * failure there drops only that group, so the onboarding can't take the
- * Brain down with it: the reader then reads less, never more.
+ * Brain down with it: the reader then reads less, never more. It has no
+ * timeout of its own: a slow onboarding object holds the read up to the
+ * platform's own RPC limits, and a throw fails closed as above.
  */
 const interviewTeamOf = async (
   env: ReaderEnv,

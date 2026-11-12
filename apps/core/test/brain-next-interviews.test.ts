@@ -14,7 +14,11 @@ import {
 } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
+import { interviewErasure } from "../src/onboarding/interview-erasure.ts";
+import {
+  eraseOnboardingInterview,
+  eraseOwedOnboardingSources,
+} from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
@@ -345,7 +349,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
     expect({
       recalled: await recalled(lea, marker),
-      owed: await store.owedErasures(),
+      owed: await store.owedErasures(ids.lea),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       recalled: [],
@@ -376,7 +380,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
     expect({
       erased,
-      owed: await onboardingStore(env).owedErasures(),
+      owed: await onboardingStore(env).owedErasures(ids.lea),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       erased: "erased",
@@ -450,6 +454,68 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({ reminded: true, colleague: [], max: [] });
   });
 
+  it("go with core's erasure of their person: erased in the Brain, unlinked, and their address links nobody again", async () => {
+    const marker = `marker${unique()}`;
+    const ids = await team(undefined, addressOf);
+    await mapped(ids, {
+      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
+    });
+    const store = onboardingStore(env);
+    const lea = await signsIn(addressOf(ids.lea));
+    await handOverNow();
+    const key = await interviewKeyOf(lea);
+    // As person-erasure.ts does: her entry's link closed for good and her
+    // interview deleted, then let go only once the Brain holds none of it.
+    await store.eraseInterviewOf(ids.lea, new Date().toISOString());
+    await eraseOnboardingInterview(env, ids.lea);
+    const relinked = await store.linkAccount(
+      `other-${unique()}`,
+      addressOf(ids.lea)
+    );
+    expect({
+      kept: await keptIn(key, lea),
+      team: await store.interviewTeamOf(lea),
+      relinked,
+      owed: await store.owedErasures(ids.lea),
+    }).toStrictEqual({
+      kept: { shared: "erased", own: "erased" },
+      team: null,
+      relinked: false,
+      owed: [],
+    });
+  });
+
+  it("are replaced in the Brain when a content purge rewrites them", async () => {
+    const marker = `marker${unique()}`;
+    const ids = await team(undefined, addressOf);
+    await mapped(ids, {
+      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
+    });
+    const lea = await signsIn(addressOf(ids.lea));
+    await handOverNow();
+    const before = await interviewKeyOf(lea);
+    // The purge rewrites her interview, and lets go only once the Brain's
+    // copy with the purged word is erased.
+    await interviewErasure(env).rewrite(
+      { actor: { type: "system" }, userId: "system" },
+      (text) => text.replaceAll(marker, "(removed)")
+    );
+    await handOverNow();
+    expect({
+      purged: await recalled(lea, marker),
+      rewritten: await recalled(lea, "(removed)", "interview"),
+      old: await keptIn(before, lea),
+      owed: await onboardingStore(env).owedErasures(ids.lea),
+    }).toStrictEqual({
+      purged: [],
+      rewritten: [
+        expect.stringContaining("Every refund needs (removed) first."),
+      ],
+      old: { shared: "erased", own: "erased" },
+      owed: [],
+    });
+  });
+
   it("stay erased when an add of them lands after a withdrawal erased them", async () => {
     const marker = `marker${unique()}`;
     const ids = await team(undefined, addressOf);
@@ -469,7 +535,7 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     const { own } = await keptIn(key, lea);
     expect({
       recalled: await recalled(lea, marker),
-      owed: await onboardingStore(env).owedErasures(),
+      owed: await onboardingStore(env).owedErasures(ids.lea),
       held: own === "held",
     }).toStrictEqual({ recalled: [], owed: [], held: false });
   });
@@ -542,9 +608,10 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       outsider: [],
       outsiderListed: [],
     });
-    // Pim withdraws: the claim rests on four now. It is erased: no
-    // recall, no listing, no version of it, as history or otherwise.
+    // Pim withdraws: the claim rests on four now. Core's clock erases it:
+    // no recall, no listing, no version of it, as history or otherwise.
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    await eraseOwedOnboardingSources(env);
     const [claim] = listed;
     if (claim === undefined) {
       throw new Error("The claim was never listed.");
@@ -612,7 +679,9 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       gave,
       edited,
       listed: await claimsOf(max),
-      claims: owed.filter(({ kind }) => kind === "claim"),
+      claims: owed.filter(
+        (each) => each.kind === "claim" && each.team === ids.team
+      ),
     }).toStrictEqual({
       gave: `brain:${ids.team}`,
       edited: true,
@@ -648,5 +717,103 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       listed: await claimsOf(max),
       owed: await onboardingStore(env).owedErasures(),
     }).toStrictEqual({ max: [], listed: [], owed: [] });
+  });
+
+  /**
+   * Ops' list, with Sam: `moved` in a team of their own, Billing, and
+   * `lead` leading Ops (Lea when none is given).
+   */
+  const rosterWith = (
+    ids: Awaited<ReturnType<typeof team>>,
+    { moved = [], lead }: { moved?: readonly Key[]; lead?: Key } = {}
+  ) => {
+    const keys: Key[] = [...everyone, "sam"];
+    const base = rosterOf(
+      ids,
+      keys,
+      Object.fromEntries(keys.map((key) => [key, addressOf(ids[key])]))
+    );
+    const billing = `${ids.team}-billing`;
+    return {
+      teams: [
+        ...base.teams.map((each) => ({
+          ...each,
+          lead: lead === undefined ? each.lead : ids[lead],
+        })),
+        { id: billing, name: "Billing", lead: null, does: "", off: false },
+      ],
+      people: base.people.map((person) =>
+        moved.some((key) => ids[key] === person.id)
+          ? { ...person, team: billing }
+          : person
+      ),
+    };
+  };
+
+  it("are erased when someone moving to another team leaves six interviewed, and form anew under a new key when seven are back", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const [first] = await claimsOf(max);
+    const store = onboardingStore(env);
+    // Rik, who backs no claim, moves to Billing: Ops has six who told.
+    await store.saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+      type: "system",
+    });
+    await eraseOwedOnboardingSources(env);
+    const whileSix = {
+      recalled: await recalled(max, "Zendesk", "claim"),
+      listed: await claimsOf(max),
+    };
+    // Back in Ops: seven again. The next intake (Sam agreeing to more,
+    // the work drawn again) puts the claim together anew.
+    await store.saveRoster(rosterWith(ids), { type: "system" });
+    await agree(
+      ids.sam,
+      [
+        fact("s1", "step", "Answers the phone."),
+        fact("s2", "step", "Logs the call."),
+      ],
+      1
+    );
+    await answering(
+      [ticketsReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const [again] = await claimsOf(max);
+    expect({
+      first: first === undefined,
+      whileSix,
+      again: await recalled(max, "Zendesk", "claim"),
+      newKey: again !== undefined && again.source.id !== first?.source.id,
+    }).toStrictEqual({
+      first: false,
+      whileSix: { recalled: [], listed: [] },
+      again: [zendeskClaim.text],
+      newKey: true,
+    });
+  });
+
+  it("are erased when one who told becomes the team's lead and leaves six", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    // Rik leads Ops now: a lead's own work isn't told, so six told.
+    await onboardingStore(env).saveRoster(rosterWith(ids, { lead: "rik" }), {
+      type: "system",
+    });
+    await eraseOwedOnboardingSources(env);
+    expect({
+      before,
+      after: await recalled(max, "Zendesk", "claim"),
+      listed: await claimsOf(max),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      after: [],
+      listed: [],
+    });
   });
 });

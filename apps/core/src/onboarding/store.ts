@@ -1253,6 +1253,10 @@ export class Onboarding extends DurableObject<Env> {
     }
     this.#lateTeams(late ? before : roster, roster, now);
     this.#askNewcomers(before, roster);
+    // Someone moved out, made a lead or taken off may leave a team too
+    // small to have claims shown: its claims are owed an erasure at once
+    // (`teamMayClaim`), which core's clock does within a minute.
+    this.#eraseClaimsOfSmallTeams();
     return { removed: gone.length, erased };
   }
 
@@ -6483,10 +6487,19 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Every erasure the onboarding still owes the new Brain: each source it
    * noted that no longer stands, until core says it is erased
-   * (`erasedFromBrain`). Interviews are decided first.
+   * (`erasedFromBrain`). Interviews are decided first. With `of`, only
+   * that person's interviews: what a request of theirs erases at once,
+   * the rest left to core's clock.
    */
-  owedErasures(): OwedErasure[] {
+  owedErasures(of?: string): OwedErasure[] {
     this.#decideInterviews();
+    if (of !== undefined) {
+      return this.owedErasures().filter(
+        (owed) =>
+          owed.kind === "interview" &&
+          this.#interviewPersonOf(owed.source) === of
+      );
+    }
     const owedInterviews: OwedErasure[] = this.#db
       .select()
       .from(brainInterviews)
@@ -6505,6 +6518,30 @@ export class Onboarding extends DurableObject<Env> {
       .all()
       .map(({ source, team }) => ({ kind: "claim", source, team }));
     return [...owedInterviews, ...claims];
+  }
+
+  /** Whose interview the source `source` is; null for none. */
+  #interviewPersonOf(source: string): string | null {
+    const [row] = this.#db
+      .select({ person: brainInterviews.person })
+      .from(brainInterviews)
+      .where(eq(brainInterviews.source, source))
+      .all();
+    return row?.person ?? null;
+  }
+
+  /**
+   * The person a link's secret (`secretMark`) is theirs, for core's own
+   * use after a request on that link (onboarding/links.ts): never answered
+   * to the link's holder. Null for an unknown link.
+   */
+  personOfLink(secretMark: string): string | null {
+    const [code] = this.#db
+      .select({ person: linkCodes.person })
+      .from(linkCodes)
+      .where(eq(linkCodes.mark, secretMark))
+      .all();
+    return code?.person ?? null;
   }
 
   /** Forgets the owed erasure of `source` of `kind`: core's `eraseSource` of it returned. */

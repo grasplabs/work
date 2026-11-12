@@ -98,7 +98,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   {
     name: "onboarding.brain_erasures",
     period: "minute",
-    run: eraseOwedOnboardingSources,
+    run: async (env) => {
+      await eraseOwedOnboardingSources(env);
+    },
   },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },

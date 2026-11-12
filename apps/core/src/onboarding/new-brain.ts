@@ -100,13 +100,19 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
 
 /**
  * Erases every source the onboarding still owes the Brain an erasure of
- * (`owedErasures`), each then forgotten there. Each failure is logged by
- * name alone and left for the next run: core's clock runs it every
- * minute, until none is owed.
+ * (`owedErasures`), or with `person` only that person's interviews, each
+ * then forgotten there. Each failure is logged by name alone and left for
+ * the next run: core's clock runs it every minute, for every owed source,
+ * until none is owed. One that fails for ever is retried every minute and
+ * logged each time, never parked: the store keeps it owed until
+ * `eraseSource` returns.
  */
-export const eraseOwedOnboardingSources = async (env: Env): Promise<void> => {
+export const eraseOwedOnboardingSources = async (
+  env: Env,
+  person?: string
+): Promise<void> => {
   const store = onboardingStore(env);
-  for (const owed of await store.owedErasures()) {
+  for (const owed of await store.owedErasures(person)) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
       await erase(env, owed);
@@ -129,18 +135,26 @@ export const eraseOnboardingInterview = async (
   env: Env,
   person: string
 ): Promise<void> => {
-  await eraseOwedOnboardingSources(env);
+  await eraseOwedOnboardingSources(env, person);
   if (await onboardingStore(env).interviewOwed(person)) {
     throw new Error("The Brain still holds their interview.");
   }
 };
 
-/** `eraseOwedOnboardingSources` where a failure must not fail what ran before it. */
-export const eraseOwedOnboardingSourcesQuietly = async (
-  env: Env
+/**
+ * Erases what the onboarding owes the Brain of `person`'s interview,
+ * where a failure must not fail what ran before it: the request of theirs
+ * that took it out. The rest, and any failure, is core's clock's.
+ */
+export const eraseOwedOfPersonQuietly = async (
+  env: Env,
+  person: string | null
 ): Promise<void> => {
+  if (person === null) {
+    return;
+  }
   try {
-    await eraseOwedOnboardingSources(env);
+    await eraseOwedOnboardingSources(env, person);
   } catch (error) {
     log.error("onboarding.brain_erasure_failed", {
       error: error instanceof Error ? error.name : "unknown",
