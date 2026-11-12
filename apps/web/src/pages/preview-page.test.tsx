@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 // @vitest-environment happy-dom
 // React Fast Refresh must hook into React before React DOM loads (as the
 // preview runtime orders it): the Refresh runtime is imported first, and
-// React DOM only inside the test.
+// React DOM, and what loads it, only after it has evaluated.
 import {
   commit,
   discard,
@@ -13,6 +13,21 @@ import {
   register,
 } from "../../../../packages/runtime/src/preview-refresh.ts";
 import { previewReceiver } from "../../../../packages/runtime/src/preview-updates.ts";
+
+// Loaded while the file loads, which no timeout holds, rather than in
+// the test, whose 5 s should time what it does: their first load is
+// most of the test's time, and on a runner busy with other files (CI's
+// first shard, beside the package-definition scripts' installs and the
+// browser tests) it alone outlasted the test's timeout and its retry's.
+const { createRoot } = await import("react-dom/client");
+const {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} = await import("@tanstack/react-router");
+const { routeBy } = await import("@grasp-os/runtime/page");
 
 // A chat's preview taking an update of its pages, with React, React Fast
 // Refresh and TanStack Router themselves: the route tree's module
@@ -30,9 +45,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let mounts = 0;
 
 /** A route tree whose `/` is a desk saying `word`, its state the mount it was made in. */
-const desk = async (name: string, word: string) => {
-  const { createRootRoute, createRoute } =
-    await import("@tanstack/react-router");
+const desk = (name: string, word: string) => {
   const Page = () => {
     const [mount, setMount] = useState(() => {
       mounts += 1;
@@ -66,9 +79,9 @@ const desk = async (name: string, word: string) => {
  * again.
  */
 const modules: Record<string, () => Promise<{ routeTree: unknown }>> = {
-  first: async () => await desk("Desk", "First"),
-  edited: async () => await desk("Desk", "Edited"),
-  renamed: async () => await desk("RenamedDesk", "Renamed"),
+  first: async () => await Promise.resolve(desk("Desk", "First")),
+  edited: async () => await Promise.resolve(desk("Desk", "Edited")),
+  renamed: async () => await Promise.resolve(desk("RenamedDesk", "Renamed")),
 };
 
 /** The address of the module of `code`, as core would serve it. */
@@ -91,10 +104,6 @@ describe("a preview's pages as their updates come", () => {
   });
 
   it("shows a page renamed in an update, and keeps the state of one only edited", async () => {
-    const { createRoot } = await import("react-dom/client");
-    const { createMemoryHistory, createRouter, RouterProvider } =
-      await import("@tanstack/react-router");
-    const { routeBy } = await import("@grasp-os/runtime/page");
     const container = document.createElement("div");
     document.body.append(container);
     // The pages as the frame first loaded them.
