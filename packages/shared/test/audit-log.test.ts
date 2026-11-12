@@ -188,14 +188,17 @@ describe("audit event types", () => {
     expect(typeOf("permission.granted")).toBe("permission");
   });
 
-  it("files a staff member's read of the Brain as a read, and an action they asked for as an action, asked and answered", () => {
+  it("files what Grasp's staff read in a deployment as reads, and what they asked it to do as actions", () => {
     expect(
       [
         "admin.brain.read",
         "admin.brain.action.asked",
         "admin.brain.action.answered",
+        "admin.snapshot.read",
+        "admin.kickoff.read",
+        "admin.command",
       ].map((action) => typeOf(action))
-    ).toStrictEqual(["read", "action", "action"]);
+    ).toStrictEqual(["read", "action", "action", "read", "read", "action"]);
   });
 
   it("files a visitor's sign-in, sign-out and refusals, and who may visit, under permissions, and a code sent as an action, never as configuration", () => {

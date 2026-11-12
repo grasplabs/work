@@ -148,6 +148,12 @@ const typeRules: readonly {
   // an action on it and its outcome (core's brain-report.ts).
   { action: "admin.brain.read", type: "read" },
   { action: "admin.brain.action", type: "action" },
+  // A command Grasp's admin gives the deployment, whatever came of it
+  // (core's admin-command.ts), and Grasp staff reading the deployment's
+  // snapshot and its kickoff (admin-snapshot.ts, admin-kickoff.ts).
+  { action: "admin.command", type: "action" },
+  { action: "admin.snapshot.read", type: "read" },
+  { action: "admin.kickoff.read", type: "read" },
   { action: "knowledge.search", type: "read" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
