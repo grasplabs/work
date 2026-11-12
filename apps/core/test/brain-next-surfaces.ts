@@ -37,6 +37,7 @@ import type {
   Access,
   Brain,
   ChunkRef,
+  EmbedModel,
   ErasureReason,
   Embedders,
   Reader,
@@ -1792,6 +1793,130 @@ const vectorScene = async (reader: Reader) => {
   return { question, ownCoded, modelWith, search };
 };
 
+/** `model` as the host's embedder names it: its name, and its build after the last `@`. */
+const embedModelOf = ({ name }: VectorModel): EmbedModel => {
+  const at = name.lastIndexOf("@");
+  return { name: name.slice(0, at), build: name.slice(at + 1) };
+};
+
+/**
+ * Recall by meaning (GRA-1769), with the codes of `vectorScene`: the
+ * reader's own, and the hidden versions' at the question itself. Asked of
+ * the markers, whole and in a few tokens, each pack must be exactly the
+ * pack with nothing hidden stored: no hidden chunk returned, no order,
+ * count, cut or word not found moved. Recall's meaning way is the vector
+ * scan's (vectors.ts `closestOf`), whose hidden codes in a tail past the
+ * candidates and in a packed block the `searchVectors` probe holds to the
+ * same. And what the vector way refuses, each with the markers in it.
+ */
+const meaningProbes = async ({
+  reader,
+  markers,
+  hiddenVersions,
+}: Probing): Promise<Answer[]> => {
+  const { question, modelWith } = await vectorScene(reader);
+  const words = markedText(markers);
+  const nothing = await modelWith();
+  const hidden = await modelWith(
+    placedAt(firstChunksOf(hiddenVersions), question)
+  );
+  const asked = (
+    model: VectorModel,
+    more: Partial<PackAsk> = {}
+  ): Record<string, unknown> => ({
+    question: words,
+    reader,
+    budget: { tokens: recallBudgetMax },
+    meaning: { model: embedModelOf(model), vector: question },
+    ...more,
+  });
+  const recallBy = async (request: Record<string, unknown>) =>
+    await store().recall(unchecked(request));
+  const compared: Answer[] = [];
+  for (const [like, more] of [
+    ["by meaning", {}],
+    ["by meaning in 40 tokens", { budget: { tokens: 40 } }],
+  ] as const) {
+    for (const [name, model, about] of [
+      ["nothing hidden stored", nothing, "nothing"],
+      ["the hidden versions' codes at the question", hidden, "hidden"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one recall at a time
+      const answered = await answer(
+        `${like}, ${name}`,
+        async () => await recallBy(asked(model, more)),
+        about,
+        like
+      );
+      compared.push(answered);
+    }
+  }
+  const meaning = { model: embedModelOf(nothing), vector: question };
+  // The question's own words, the markers, echoed in what was not found.
+  return [
+    ...compared,
+    await answer(
+      "by meaning, a vector of other dimensions",
+      async () =>
+        await recallBy({
+          ...asked(nothing),
+          meaning: { ...meaning, vector: question.slice(1) },
+        })
+    ),
+    await answer(
+      "by meaning, a model named by the markers",
+      async () =>
+        await recallBy({
+          ...asked(nothing),
+          meaning: { ...meaning, model: { ...meaning.model, name: words } },
+        })
+    ),
+    await answer(
+      "by meaning, a model named by the markers, too long",
+      async () =>
+        await recallBy({
+          ...asked(nothing),
+          meaning: {
+            ...meaning,
+            model: { ...meaning.model, name: words.repeat(modelNameMaxLength) },
+          },
+        })
+    ),
+    await answer(
+      "by meaning, a build of the markers",
+      async () =>
+        await recallBy({
+          ...asked(nothing),
+          meaning: { ...meaning, model: { ...meaning.model, build: words } },
+        })
+    ),
+    await answer(
+      "by meaning, a vector of the markers",
+      async () =>
+        await recallBy({
+          ...asked(nothing),
+          meaning: { ...meaning, vector: markers },
+        })
+    ),
+    await answer(
+      "by meaning, a vector of zeros",
+      async () =>
+        await recallBy({
+          ...asked(nothing),
+          meaning: { ...meaning, vector: question.map(() => 0) },
+        })
+    ),
+    await answer(
+      "by meaning, with an unknown field",
+      async () =>
+        await recallBy({
+          ...asked(nothing),
+          meaning: { ...meaning, extra: words },
+        })
+    ),
+  ].map((answered) => echoesHidden(answered, markers));
+};
+
 /** One probe per public method of the Brain's store. */
 export const storeProbes = {
   addSource: async ({ markers }) => {
@@ -2025,6 +2150,7 @@ export const storeProbes = {
             unchecked({ question: hidden, budget: whole, asOf: hidden })
           )
       ),
+      ...(await meaningProbes(probing)),
     ];
   },
   // A put has no reader: what it may never do is widen who reads a chunk.

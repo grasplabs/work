@@ -28,8 +28,9 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 //
 // 1. In one transaction: the erasure recorded in the store, unconfirmed,
 //    and everything it covers hidden: listed in `erasing_versions`, which
-//    history leaves out, their change keys gone, and, where a source's
-//    current version is among them, its current pointer and queued work.
+//    history leaves out, their vector codes out of the scan, their change
+//    keys gone, and, where a source's current version is among them, its
+//    current pointer and queued work.
 //    A person's erasure works out what it covers here, in the same
 //    transaction, so nothing added meanwhile slips between.
 // 2. The ledger entry is written, its parts first, and the erasure
@@ -404,6 +405,14 @@ const hideVersions = (
     key,
     listed
   );
+  // Their vector codes leave the scan now, as a replaced version's do:
+  // a code the scan may pick must be of a current version, or hidden ones
+  // nearer the question would take every candidate and leave a reader's
+  // live passages unfound until the deletion. Packed ones are marked
+  // removed; `eraseVersion` repacks their blocks.
+  for (const row of rows) {
+    removeVectorsOf(sql, row);
+  }
   sql.exec(
     `DELETE FROM source_changes
     WHERE source = ? AND version_row IN (SELECT value FROM json_each(?))`,

@@ -1,10 +1,15 @@
-import { exactCandidatesMax, recallLimit } from "./contract.ts";
+import {
+  exactCandidatesMax,
+  recallLimit,
+  vectorModelNameOf,
+} from "./contract.ts";
 import type { FoundBy, Pack, Reader, RecallRequest } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Found } from "./pack.ts";
 import { readableSql } from "./reader-sets.ts";
+import { nearChunks } from "./vectors.ts";
 import { sequenceOf, termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
 
@@ -12,7 +17,10 @@ import type { Terms } from "./words.ts";
 // in one statement that finds, checks and ranks, and a second for the
 // stop words alone when the first finds little; exact, in one statement
 // that finds the chunks holding every word of an exact part, whose order
-// is then checked in code (exact.ts).
+// is then checked in code (exact.ts). And a third when the host gives the
+// question's vector: meaning, the vector way's scan (vectors.ts), with
+// the access check inside it. The host embeds the question before it
+// calls, so recall stays one synchronous read of one snapshot.
 //
 // It searches the chunks of each source's current version (a version is
 // current once `current_versions` points at it, set in the transaction
@@ -387,16 +395,43 @@ const byExact = (
 };
 
 /**
+ * The meaning way: the chunks the reader may read whose vectors of the
+ * question's model and build are nearest its vector, best first, at most
+ * `recallLimit` (vectors.ts `nearChunks`). None without a vector, for a
+ * question of no word (an empty question finds nothing by any way), and
+ * as of a moment: vectors are kept for current versions only, so the scan
+ * can't tell which were current then, and nearer chunks added since would
+ * take every place.
+ */
+const byMeaning = (
+  sql: SqlStorage,
+  meaning: RecallRequest["meaning"],
+  hasWords: boolean,
+  reader: Reader,
+  asOf: AsOf
+): Found[] =>
+  meaning === undefined || !hasWords || asOf.length > 0
+    ? []
+    : nearChunks(
+        sql,
+        vectorModelNameOf(meaning.model),
+        meaning.vector,
+        reader,
+        recallLimit
+      ).map((chunk) => ({ ...chunk, found: "meaning" }));
+
+/**
  * What the reader may read for the question, as a pack within its budget
- * (contract.ts `Brain.recall`): the exact way's lists, one per part, and
- * the words way's, fused by rank (the exact parts' first on a tie, in the
- * question's order), and the parts of the
- * question neither found: its exact parts, but those capped, then its
- * telling words, but those of its IDs.
+ * (contract.ts `Brain.recall`): the exact way's lists, one per part, the
+ * words way's and the meaning way's, fused by rank (the exact parts'
+ * first on a tie, in the question's order, then words, then meaning), and
+ * the parts of the question neither words nor exact found: its exact
+ * parts, but those capped, then its telling words, but those of its IDs.
+ * Meaning finds no word, so it never takes one off that list.
  */
 export const recall = (
   sql: SqlStorage,
-  { question, reader, budget, asOf }: RecallRequest
+  { question, reader, budget, asOf, meaning }: RecallRequest
 ): Pack => {
   const exacts = exactsOf(question);
   const terms = termsOf(question);
@@ -423,8 +458,15 @@ export const recall = (
       )
       .map(({ word }) => word),
   ];
+  const meant = byMeaning(
+    sql,
+    meaning,
+    terms.telling.length + exacts.length > 0,
+    reader,
+    at
+  );
   return packOf(
-    fuse([...exact.lists, words.found]),
+    fuse([...exact.lists, words.found, meant]),
     { terms: terms.telling, exacts },
     budget.tokens,
     notFound

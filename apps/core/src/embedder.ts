@@ -13,6 +13,8 @@ import type {
 } from "@grasp-os/embed/model-files";
 import { embedWithPool } from "@grasp-os/embed/pool";
 import type { PoolReply } from "@grasp-os/embed/pool";
+import { embedQuestion } from "@grasp-os/embed/question";
+import type { QuestionVector } from "@grasp-os/embed/question";
 import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { deployedModelPrefix } from "@grasp-os/shared/release";
@@ -49,6 +51,36 @@ export const questionEmbedderOf = (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">
 ): DurableObjectStub<Embedder> =>
   questionEmbedder(inJurisdiction(env, env.EMBEDDER));
+
+/**
+ * How long a recall waits for its question's vector before it goes ahead
+ * without. Measured locally (workerd on a laptop) with a 10-layer model
+ * of width 384: one warm question of 17 to 152 characters through
+ * `embedMany` took p50 5 ms, p95 7 ms, at most 13 ms. On Cloudflare a call
+ * costs 10 to 36 ms of round trip and such a model about 0.61 ms a token,
+ * so some 20 to 55 ms for a question of up to 30 tokens. 250 ms is about
+ * four times that, and a quarter of recall's p95 target of 1 s: a busy
+ * embedder still answers, a broken one costs a recall no more. An
+ * embedder evicted since its last question reloads its model from its own
+ * storage first (seconds): the first question after that goes without
+ * vectors, and the load goes on, so the next one has them.
+ */
+export const questionVectorMs = 250;
+
+/**
+ * `question`'s vector by the question embedder, in core's jurisdiction,
+ * within `questionVectorMs` (@grasp-os/embed/question); null while no
+ * model ships, when nothing is embedded.
+ */
+export const questionVectorOf = async (
+  env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
+  question: string
+): Promise<QuestionVector | null> =>
+  shippedModel === null
+    ? null
+    : await embedQuestion(questionEmbedderOf(env), question, {
+        timeoutMs: questionVectorMs,
+      });
 
 /** The model core's embedders run, and its build: none while no model ships. */
 export const embedderModel = async (): Promise<ModelIdentity | null> =>

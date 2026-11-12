@@ -1,4 +1,5 @@
 import type {
+  ChunkRef,
   FoundChunk,
   Reader,
   VectorModel,
@@ -40,8 +41,21 @@ import { readableSql } from "./reader-sets.ts";
 // deleted, and a packed one is deleted from `vector_codes` and its slot
 // marked in `vector_removed`, which the scan skips before scoring. A
 // repack rewrites one marked block at a time without them. An erasure
-// removes a version's codes the same way and repacks each block it marked
-// at once (erasure.ts), so no block keeps an erased chunk's row or code.
+// removes a version's codes the same way, in the transaction that hides
+// the version, and repacks each block it marked once it deletes the
+// version (erasure.ts), so no block keeps an erased chunk's row or code.
+//
+// The rule the scan's candidates rest on: every code the scan can offer
+// is of a current version the reader may read, by the model asked. Only
+// so is no candidate place taken by one the re-scoring then drops, which
+// would leave a nearer readable chunk unfound. Each way a chunk stops
+// counting takes its codes out of the scan in the same transaction: a
+// version replaced (sources.ts), hidden by an erasure and later deleted
+// (erasure.ts); its readers never change (new readers make a new
+// version); a code is read only from its model's blocks and tails, and
+// from the reader's sets' (`blocksSql`); and a vector of other dimensions
+// never reaches the scan. So the re-scoring's own check of currency and
+// access drops nothing but what a fault left behind.
 //
 // Everything runs in TypeScript over typed arrays: measured in workerd,
 // it scans far beyond what one store holds within the spike's numbers
@@ -648,11 +662,9 @@ CROSS JOIN vector_codes INDEXED BY vector_codes_group_idx
 /**
  * As `blocksSql`, and `?4` the candidates' chunks (JSON): each one's
  * 8-bit code and place, if its version is current and the reader may
- * read it. The scan only offered such codes; this checks again, so a code
- * left behind by a fault is dropped before it is ranked, never returned.
- * The candidates come first (`CROSS JOIN` keeps SQLite to that order), so
- * it looks up at most `rescoreCandidates` codes: left to choose, SQLite
- * read every code of the model, 100 ms at 10,000.
+ * read it. The scan only offered such codes (the rule above); this checks
+ * again, so a code left behind by a fault is dropped before it is ranked,
+ * never returned.
  */
 const candidatesSql = `
 WITH ${readableSql}
@@ -683,27 +695,29 @@ const maskOf = (removed: string, size: number): Uint8Array | undefined => {
   return mask;
 };
 
+/** A chunk the vector way found: its row, and its place and cosine. */
+interface Closest {
+  chunk: number;
+  found: FoundChunk;
+}
+
 /**
- * The chunks of current versions `reader` may read whose codes for the
- * model are nearest `vector`, nearest first: the `rescoreCandidates`
- * nearest by Hamming distance over every such code, block by block, then
- * re-scored by the cosine of their 8-bit codes. Ties go to the older
- * chunk. Memory stays at one block and the candidates.
+ * The chunks of current versions `reader` may read whose codes for
+ * `stored` are nearest `vector` (as long as its centre), nearest first,
+ * at most `limit`: the `rescoreCandidates` nearest by Hamming distance
+ * over every such
+ * code, block by block, then re-scored by the cosine of their 8-bit
+ * codes. Ties go to the older chunk. Memory stays at one block and the
+ * candidates.
  */
-export const searchVectors = (
+const closestOf = (
   sql: SqlStorage,
-  { model, vector, reader, limit }: VectorSearch
-): VectorsFound => {
-  const stored = storedModel(sql, model);
-  if (stored === undefined) {
-    return { chunks: [] };
-  }
-  if (vector.length !== stored.centre.length) {
-    throw new Error(
-      `The Brain refused it: the model's vectors have ${stored.centre.length} dimensions`
-    );
-  }
-  const { person, groups } = reader satisfies Reader;
+  stored: StoredModel,
+  vector: readonly number[],
+  reader: Reader,
+  limit: number
+): Closest[] => {
+  const { person, groups } = reader;
   const readerJson = JSON.stringify(groups);
   const query = bitsOf(vector, stored.centre);
   const nearest = nearestOf(rescoreCandidates);
@@ -739,7 +753,7 @@ export const searchVectors = (
   }
   const candidates = [...nearest.chunks.subarray(0, nearest.count)];
   if (candidates.length === 0) {
-    return { chunks: [] };
+    return [];
   }
   const asked = fineOf(vector);
   const scored = sql
@@ -765,5 +779,75 @@ export const searchVectors = (
       } satisfies FoundChunk,
     }));
   scored.sort((a, b) => b.found.score - a.found.score || a.chunk - b.chunk);
-  return { chunks: scored.slice(0, limit).map(({ found }) => found) };
+  return scored.slice(0, limit);
+};
+
+/**
+ * The chunks of current versions `reader` may read whose codes for the
+ * model are nearest `vector`, nearest first (`closestOf`); none for a
+ * model with no codes. Refused for a vector of other dimensions than the
+ * model's.
+ */
+export const searchVectors = (
+  sql: SqlStorage,
+  { model, vector, reader, limit }: VectorSearch
+): VectorsFound => {
+  const stored = storedModel(sql, model);
+  if (stored === undefined) {
+    return { chunks: [] };
+  }
+  if (vector.length !== stored.centre.length) {
+    throw new Error(
+      `The Brain refused it: the model's vectors have ${stored.centre.length} dimensions`
+    );
+  }
+  return {
+    chunks: closestOf(sql, stored, vector, reader satisfies Reader, limit).map(
+      ({ found }) => found
+    ),
+  };
+};
+
+/** A chunk recall's vector way found, with its row and text. */
+export interface NearChunk extends ChunkRef {
+  row: number;
+  text: string;
+}
+
+/**
+ * For recall: the chunks `searchVectors` finds for the model named
+ * `model`, nearest first, at most `limit`, with their rows and texts.
+ * None, never a refusal, when the store holds no codes of the model or
+ * `vector` has other dimensions than its codes.
+ */
+export const nearChunks = (
+  sql: SqlStorage,
+  model: string,
+  vector: readonly number[],
+  reader: Reader,
+  limit: number
+): NearChunk[] => {
+  const stored = storedModel(sql, model);
+  if (stored === undefined || vector.length !== stored.centre.length) {
+    return [];
+  }
+  const closest = closestOf(sql, stored, vector, reader, limit);
+  if (closest.length === 0) {
+    return [];
+  }
+  const texts = new Map(
+    sql
+      .exec<{ row: number; text: string }>(
+        "SELECT row, text FROM chunks WHERE row IN (SELECT value FROM json_each(?))",
+        JSON.stringify(closest.map(({ chunk }) => chunk))
+      )
+      .toArray()
+      .map(({ row, text }) => [row, text])
+  );
+  return closest.flatMap(({ chunk, found: { source, version, position } }) => {
+    const text = texts.get(chunk);
+    return text === undefined
+      ? []
+      : [{ row: chunk, source, version, position, text }];
+  });
 };

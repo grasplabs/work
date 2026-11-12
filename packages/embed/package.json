@@ -8,7 +8,8 @@
   "exports": {
     "./embedder": "./src/embedder.ts",
     "./model-files": "./src/model-files.ts",
-    "./pool": "./src/pool.ts"
+    "./pool": "./src/pool.ts",
+    "./question": "./src/question.ts"
   },
   "scripts": {
     "build:wasm": "./build.sh"

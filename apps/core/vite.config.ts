@@ -113,6 +113,10 @@ export const coreProject = (
   {
     sandboxSocket,
     bindings = {},
+    services = {},
+    plugins = [],
+    main,
+    durableObjects,
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -122,6 +126,20 @@ export const coreProject = (
     sandboxSocket?: () => string;
     /** Bindings a project adds to the tests' env, such as a run's size. */
     bindings?: Record<string, unknown>;
+    /**
+     * Services a project binds, each answered in Node, such as the
+     * evaluation's local model files (vite.brain-eval.config.ts).
+     */
+    services?: Record<string, (request: Request) => Response>;
+    /** Vite plugins a project adds before the test pool's. */
+    plugins?: UserWorkspaceConfig["plugins"];
+    /**
+     * The Worker a project runs instead of core's own: core's, with test
+     * classes beside it (test/meaning-worker.ts).
+     */
+    main?: string;
+    /** Durable Object bindings a project gives other classes of that Worker. */
+    durableObjects?: Record<string, { className: string; useSQLite: true }>;
   } = {}
 ) =>
   defineProject({
@@ -240,9 +258,11 @@ export const coreProject = (
       ],
     },
     plugins: [
+      ...plugins,
       // Read when the pool starts, after the global setup wrote the bundle.
       cloudflareTest(() => ({
         wrangler: { configPath: "./wrangler.jsonc" },
+        ...(main === undefined ? {} : { main }),
         // Tests run fully local, including in CI without Cloudflare credentials.
         miniflare: {
           // The embed package's test model's files as bytes, for the
@@ -251,6 +271,7 @@ export const coreProject = (
             ...oxcParseTestConfig.modulesRules,
             { type: "Data", include: ["**/*.bin"] },
           ],
+          ...(durableObjects === undefined ? {} : { durableObjects }),
           bindings: {
             ROUTER_SECRET: "test-router-secret",
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",
@@ -303,6 +324,7 @@ export const coreProject = (
           // The outside systems connect reaches, so tests can plan how
           // they answer and read what they did (test/mail-server.ts).
           serviceBindings: {
+            ...services,
             CONNECT_PROVIDERS: "connect-providers",
             ...(sandboxSocket === undefined
               ? {}
@@ -416,6 +438,9 @@ export default coreProject({
     "test/brain-scale-*-of-*.test.ts",
     // The Brain evaluation, on request only: vite.brain-eval.config.ts.
     "test/brain-eval.test.ts",
+    // Recall by meaning through core, with a test model as if it shipped:
+    // vite.brain-meaning.config.ts.
+    "test/brain-next-meaning.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
     "test/stephen-eval*.test.ts",
     // Stephen's eval against a real model, which costs money, on request

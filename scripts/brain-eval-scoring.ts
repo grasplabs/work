@@ -96,6 +96,8 @@ export const runInfoSchema = z.object({
   passages: z.int().optional(),
   questions: z.int(),
   recallLimit: z.int(),
+  /** The model and build recall searched by meaning with; null for none. */
+  vectors: z.string().nullable().optional(),
 });
 export type RunInfo = z.infer<typeof runInfoSchema>;
 

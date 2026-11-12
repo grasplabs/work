@@ -9,6 +9,8 @@
  *   vp run brain:eval                      run it against a local Brain
  *   vp run brain:eval -- --against <file>  compare with that run instead of the last
  *   vp run brain:eval -- --out <dir>       keep results there (default .brain-eval/)
+ *   BRAIN_EVAL_MODEL=<dir> vp run brain:eval   with vectors, by the model in <dir>
+ *                                          (apps/core/vite.brain-eval.config.ts)
  *
  * (`node scripts/brain-eval.ts --out <dir>` works alike: the one `--` that
  * `vp run` passes on is dropped before the options are read.)
@@ -174,7 +176,7 @@ const passagesLine =
     ? ""
     : ` (${info.longDocuments} long documents, ${info.passages} passages)`;
 const head = [
-  `Brain evaluation · set ${info.set} · ${info.questions} questions over ${info.sources} sources${passagesLine} · ${run.identity.target} · ${sha.slice(0, 8)}${run.identity.dirty ? " (uncommitted changes)" : ""}`,
+  `Brain evaluation · set ${info.set} · ${info.questions} questions over ${info.sources} sources${passagesLine} · vectors: ${info.vectors ?? "none"} · ${run.identity.target} · ${sha.slice(0, 8)}${run.identity.dirty ? " (uncommitted changes)" : ""}`,
   `R@${resultBudget}: the passage that answers the question among the first ${resultBudget} of at most ${info.recallLimit} results. Latency targets (${latencyTargetsMs.p50} ms / ${latencyTargetsMs.p95} ms) are for production; this is not.`,
   before === undefined
     ? "No earlier run to compare with."

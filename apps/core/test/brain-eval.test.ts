@@ -1,12 +1,22 @@
-import { recallBudgetMax, recallLimit } from "@grasp-os/brain-next/contract";
+import {
+  recallBudgetMax,
+  recallLimit,
+  vectorModelNameOf,
+} from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, recallAs } from "../src/brain-next.ts";
+import {
+  addSource,
+  brainWorkOverview,
+  recallAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import type { SourceReaders } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { embedderModel, warmQuestionEmbedder } from "../src/embedder.ts";
 import {
   brainEvalPeople,
   brainEvalTeamNames,
@@ -50,6 +60,12 @@ import { signedInWithRole } from "./sign-in.ts";
 // cut (`BRAIN_EVAL_UNCUT`); it fails only when the set is broken, the
 // Brain returned something its asker may not read, or it returned a chunk
 // the set didn't cut.
+//
+// With a model (`BRAIN_EVAL_MODEL`, vite.brain-eval.config.ts), it first
+// has core embed every passage, through the Brain's queue and core's bulk
+// embedders as core's clock would, and loads the question embedder, so
+// every recall searches by meaning too, its question embedded inside the
+// recall's time.
 
 const { sources, questions, version } = brainEvalSet;
 
@@ -146,6 +162,40 @@ const readersIn = (
     : { kind: "team", teamId: idIn(teamIds, readers.team) };
 };
 
+/** Most ticks the embedding of every passage may take. */
+const embeddingTicksMost = 200;
+
+/**
+ * Has core embed every current passage with its model, tick after tick of
+ * the Brain's work as core's clock runs it, an hour apart so a failed item
+ * is due again at once, and load the question embedder: the model's name
+ * and build. Null while no model ships.
+ */
+const embedEverything = async (): Promise<string | null> => {
+  const model = await embedderModel();
+  if (model === null) {
+    return null;
+  }
+  await warmQuestionEmbedder(env);
+  let at = Date.now();
+  for (let tick = 0; tick < embeddingTicksMost; tick += 1) {
+    at += 60 * 60 * 1000;
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
+    await workBrain(env, new Date(at));
+    // oxlint-disable-next-line no-await-in-loop -- read after each tick
+    const { embedding } = await brainWorkOverview(env);
+    if (
+      embedding.rebuilt &&
+      embedding.embedded + embedding.unembeddable === embedding.chunks
+    ) {
+      return vectorModelNameOf(model);
+    }
+  }
+  throw new Error(
+    `Not every passage was embedded in ${embeddingTicksMost} ticks`
+  );
+};
+
 describe("the Brain evaluation", () => {
   it("asks every question of the Brain and of plain text search; nothing reaches an asker who may not read it, and every chunk returned is one the set cut", async () => {
     expect(setProblems(sources, questions)).toStrictEqual([]);
@@ -166,6 +216,8 @@ describe("the Brain evaluation", () => {
       });
     }
 
+    const vectors = await embedEverything();
+
     console.log(
       `BRAIN_EVAL_RUN ${JSON.stringify({
         set: version,
@@ -176,6 +228,7 @@ describe("the Brain evaluation", () => {
         passages: passages.length,
         questions: questions.length,
         recallLimit,
+        vectors,
       })}`
     );
 
