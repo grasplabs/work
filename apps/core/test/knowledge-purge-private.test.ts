@@ -1,8 +1,9 @@
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import type { PurgeInput, PurgeStatus } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { advanceExports } from "../src/knowledge/brain-export.ts";
 import { saveUserMemory } from "../src/knowledge/memory.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
@@ -16,7 +17,16 @@ import {
 } from "./knowledge-purge.ts";
 import type { Person } from "./knowledge-purge.ts";
 import { newTeam, storedVersionTexts as versionTexts } from "./knowledge.ts";
-import { auditedDuring, refusal, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  refusal,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
 
 // A content purge and a person's own collections (access `me`: their
 // Personal collection with USER.md, and any they made for themselves),
@@ -439,6 +449,223 @@ describe(
         read: { code: "knowledge.not_found", message: notFound },
         occurrences: 1,
         texts: ["# Note\nAsk (removed).", "# Note\nAsk (removed)."],
+      });
+    });
+
+    it("tells another admin nothing of an unfinished purge once its owner's private document is gone", async () => {
+      const owner = await personOf("admin");
+      const other = await personOf("admin");
+      const secret = `Benefit${unique()}`;
+      const { personal } = await owner.api.memory.collections();
+      const note = await saveOver(
+        owner,
+        personal,
+        "benefits.md",
+        `# Benefits\n${secret}.`
+      );
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [note.id],
+        terms: [secret],
+        reason: "erasure_request",
+      };
+      const failing = await rebuildFailingOnce(owner);
+      const first = await owner.api.knowledge.preparePurge(input);
+      await refusal(failing.knowledge.purge(input, first.token));
+      // The owner's Personal collection goes, the note with it, while
+      // their purge is unfinished.
+      await purged(other, {
+        type: "personal",
+        userId: owner.userId,
+        reason: "offboarding",
+      });
+      const missing = crypto.randomUUID();
+      let answers: unknown[] = [];
+      const events = await auditedDuring(async () => {
+        answers = [
+          answerOf(
+            await refusal(other.api.knowledge.preparePurge(input)),
+            note.id
+          ),
+          answerOf(
+            await refusal(
+              other.api.knowledge.preparePurge({
+                ...input,
+                terms: [`Other${unique()}`],
+              })
+            ),
+            note.id
+          ),
+          answerOf(
+            await refusal(
+              other.api.knowledge.preparePurge({
+                ...input,
+                documentIds: [missing],
+              })
+            ),
+            missing
+          ),
+        ];
+      });
+      const notFoundAnswer = {
+        code: "knowledge.not_found",
+        message: notFound,
+        details: { documentIds: ["<id>"] },
+      };
+      // Left open, it would hold back every export after it: finished by
+      // its ID, as nobody can run it again.
+      const open = await env.KNOWLEDGE.prepare(
+        "SELECT id FROM brain_purges WHERE by = ? AND completed_at IS NULL"
+      )
+        .bind(owner.userId)
+        .first<{ id: string }>();
+      const finished = await other.api.knowledge.finishPurge(open?.id ?? "");
+      expect({
+        answers,
+        events: events.map(({ action }) => action),
+        finished: finished.state,
+      }).toStrictEqual({
+        answers: [notFoundAnswer, notFoundAnswer, notFoundAnswer],
+        events: [],
+        finished: "complete",
+      });
+    });
+
+    it("is finished by another admin by its ID alone once its owner left, so exports work again", async () => {
+      const owner = await personOf("admin");
+      const other = await personOf("admin");
+      const member = await personOf("user");
+      const staffRpc = await openRpc(
+        await signedIn(idp, "grasp-staff", staffPerson())
+      );
+      const staff = staffRpc.core.authenticate();
+      const secret = `Leave${unique()}`;
+      const handbook = await other.api.knowledge.createCollection({
+        name: `Handbook ${unique()}`,
+        access: "everyone",
+      });
+      const shared = await saveOver(
+        other,
+        handbook.id,
+        "leave.md",
+        `# Leave\nAsk ${secret}.`
+      );
+      const { personal } = await owner.api.memory.collections();
+      const own = await saveOver(
+        owner,
+        personal,
+        "leave.md",
+        `# Mine\n${secret}.`
+      );
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [own.id, shared.id],
+        terms: [secret],
+        reason: "erasure_request",
+      };
+      // The owner's purge is left unfinished: its index rebuild fails.
+      const failing = await rebuildFailingOnce(owner);
+      const first = await owner.api.knowledge.preparePurge(input);
+      await refusal(failing.knowledge.purge(input, first.token));
+      // Its ID, as the audit log and its status name it.
+      const open = await env.KNOWLEDGE.prepare(
+        "SELECT id FROM brain_purges WHERE by = ? AND completed_at IS NULL"
+      )
+        .bind(owner.userId)
+        .first<{ id: string }>();
+      const purgeId = open?.id ?? "";
+      // They leave: their Personal collection goes, and they are an admin
+      // no more.
+      await purged(other, {
+        type: "personal",
+        userId: owner.userId,
+        reason: "offboarding",
+      });
+      await other.api.members.setRole(owner.userId, "user");
+      const stuck = {
+        prepare: await outcome(other.api.knowledge.preparePurge(input)),
+        exportOpen: await outcome(
+          other.api.knowledge
+            .prepareBrainExport()
+            .then(
+              async ({ token }) =>
+                await other.api.knowledge.startBrainExport(token)
+            )
+        ),
+      };
+      const refused = {
+        member: await outcome(member.api.knowledge.finishPurge(purgeId)),
+        staff: await outcome(staff.knowledge.finishPurge(purgeId)),
+      };
+      const statuses: PurgeStatus[] = [];
+      const events = await auditedDuring(async () => {
+        statuses.push(await other.api.knowledge.finishPurge(purgeId));
+      });
+      const [finished] = statuses;
+      const again = answerOf(
+        await refusal(other.api.knowledge.finishPurge(purgeId)),
+        purgeId
+      );
+      const unknownId = crypto.randomUUID();
+      const unknown = answerOf(
+        await refusal(other.api.knowledge.finishPurge(unknownId)),
+        unknownId
+      );
+      const plan = await other.api.knowledge.prepareBrainExport();
+      const { exportId } = await other.api.knowledge.startBrainExport(
+        plan.token
+      );
+      let exported = "running";
+      for (let tick = 0; tick < 20 && exported === "running"; tick += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one clock tick after another
+        await advanceExports(env, new Date());
+        // oxlint-disable-next-line no-await-in-loop -- read after each tick
+        const now = await other.api.knowledge.brainExportStatus(exportId);
+        exported = now.state;
+      }
+      const sharedTexts = await versionTexts(shared.id);
+      expect({
+        stuck,
+        refused,
+        state: finished?.state,
+        // Nothing of what it removed, nor where: no counts, no document.
+        steps: finished?.steps.map(({ step, counts }) => [step, counts]),
+        finishedBy: events
+          .filter(({ action }) => action === "knowledge.purge.resumed")
+          .map(({ actor, detail }) => [actor, detail]),
+        again,
+        unknown,
+        shared: sharedTexts.some((text) => text.includes(secret)),
+        exported,
+      }).toStrictEqual({
+        stuck: {
+          prepare: "knowledge.not_found",
+          exportOpen: "knowledge.export_purge_open",
+        },
+        refused: {
+          member: "role.forbidden",
+          staff: "role.forbidden",
+        },
+        state: "complete",
+        steps: [
+          ["statements", {}],
+          ["host_copies", {}],
+          ["host_documents", {}],
+          ["document", {}],
+          ["document", {}],
+          ["payloads", {}],
+          ["search", {}],
+        ],
+        finishedBy: [
+          [
+            { type: "person", userId: other.userId },
+            { purgeId, kind: "content", byId: true },
+          ],
+        ],
+        again: { code: "knowledge.not_found", message: notFound },
+        unknown: { code: "knowledge.not_found", message: notFound },
+        shared: false,
+        exported: "complete",
       });
     });
   }

@@ -696,4 +696,6 @@ export const knowledgeErrors = errorFamily({
     "This version's text can't be read right now. Try again in a moment.",
   "knowledge.purge_index_pending":
     "The data is deleted, but the search index isn't cleaned up yet. Run the purge again to finish.",
+  "knowledge.purge_needs_input":
+    "This purge still has text to remove: only running it again with what it removes finishes it.",
 });

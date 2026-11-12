@@ -44,6 +44,9 @@ export const purgeAttemptLeaseMs = 10 * 60 * 1000;
  */
 const stepRowsPerStatement = 14;
 
+/** How a content purge's step for one document it names begins (purge.ts). */
+export const documentStepPrefix = "document:";
+
 /** What a step changed: counts, by name. */
 export type StepCounts = Record<string, number>;
 
@@ -531,11 +534,16 @@ export const finishPurge = async <C>(
 
 /**
  * Where purge `purgeId` stands: each step's state, why one is blocked,
- * and what each changed. `knowledge.not_found` for none. Who may read it
- * is the host's to decide before (core: the client's admins).
+ * and, to the admin who began it alone, what each changed and which
+ * document each document step is of. Anyone else reads the steps' states
+ * and reasons only (a document step as `document`): the counts and the
+ * documents say what someone else is removing, and where.
+ * `knowledge.not_found` for none. Who may read it at all is the host's to
+ * decide before (core: the client's admins).
  */
 export const purgeStatus = async <C>(
   brain: Brain<C>,
+  by: Writer,
   purgeId: string
 ): Promise<PurgeStatus> => {
   const { db } = brain;
@@ -561,6 +569,7 @@ export const purgeStatus = async <C>(
   } else if (steps.some(({ state: each }) => each === "blocked")) {
     state = "blocked";
   }
+  const starter = purge.by === by.userId;
   return {
     purgeId,
     kind: purge.kind,
@@ -569,10 +578,96 @@ export const purgeStatus = async <C>(
     completedAt: purge.completedAt?.toISOString() ?? null,
     supersededBy: purge.supersededBy,
     steps: steps.map((each) => ({
-      step: each.step,
+      step:
+        starter || !each.step.startsWith(documentStepPrefix)
+          ? each.step
+          : "document",
       state: each.state,
       reason: each.reason,
-      counts: countsOf(each.counts),
+      counts: starter ? countsOf(each.counts) : {},
     })),
   };
+};
+
+/** A purge unfinished, as finishing it by its ID reads it. */
+export interface UnfinishedPurge {
+  /** The steps not complete, in order. */
+  owed: string[];
+}
+
+/**
+ * The content purge `purgeId` while it is unfinished (neither complete
+ * nor superseded): the steps it still owes. `knowledge.not_found` for any
+ * other, one that doesn't exist, finished or was superseded alike.
+ */
+export const unfinishedPurge = async <C>(
+  brain: Brain<C>,
+  purgeId: string
+): Promise<UnfinishedPurge> => {
+  const { db } = brain;
+  const [purge] = await db
+    .select({ id: brainPurges.id })
+    .from(brainPurges)
+    .where(
+      and(
+        eq(brainPurges.id, purgeId),
+        eq(brainPurges.kind, "content"),
+        isNull(brainPurges.completedAt),
+        isNull(brainPurges.supersededBy)
+      )
+    );
+  if (purge === undefined) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+  const steps = await db
+    .select({ step: brainPurgeSteps.step, state: brainPurgeSteps.state })
+    .from(brainPurgeSteps)
+    .where(eq(brainPurgeSteps.purgeId, purgeId))
+    .orderBy(asc(brainPurgeSteps.position));
+  return {
+    owed: steps
+      .filter(({ state }) => state !== "complete")
+      .map(({ step }) => step),
+  };
+};
+
+/**
+ * Takes the unfinished purge `purgeId` for a new attempt, as running it
+ * again does (`openPurge`), with what `renew` writes as it does:
+ * `knowledge.conflict` while another attempt holds it within its lease,
+ * or once it finished or was superseded.
+ */
+export const takePurge = async <C>(
+  brain: Brain<C>,
+  purgeId: string,
+  renew: (held: PurgeAttempt, at: Date) => BatchItem<"sqlite">[]
+): Promise<PurgeAttempt> => {
+  const { db } = brain;
+  const now = brain.ports.clock();
+  const held = { purgeId, attempt: crypto.randomUUID() };
+  const [taken] = await db.batch([
+    db
+      .update(brainPurges)
+      .set({ attempt: held.attempt, attemptAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(brainPurges.id, purgeId),
+          isNull(brainPurges.completedAt),
+          isNull(brainPurges.supersededBy),
+          or(
+            isNull(brainPurges.attemptAt),
+            lt(
+              brainPurges.attemptAt,
+              new Date(now.getTime() - purgeAttemptLeaseMs)
+            )
+          )
+        )
+      )
+      .returning({ id: brainPurges.id }),
+    ...renew(held, now),
+  ]);
+  if (taken.length === 0) {
+    throw knowledgeErrors.create("knowledge.conflict");
+  }
+  return held;
 };

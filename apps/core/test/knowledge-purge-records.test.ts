@@ -325,7 +325,7 @@ describe("a purge's record", setUpTime, () => {
         throw new Error("too late");
       })
     );
-    const status = await purgeStatus(brain, first.purgeId);
+    const status = await purgeStatus(brain, by, first.purgeId);
 
     expect({
       secondRun,
@@ -554,7 +554,7 @@ describe("a purge's record", setUpTime, () => {
         throw new Error("D1 is unavailable");
       })
     );
-    const blocked = await purgeStatus(brain, first.purgeId);
+    const blocked = await purgeStatus(brain, by, first.purgeId);
     const again = await open();
     const total = await runStep(brain, again, "versions", async (save) => {
       await brain.db.batch([save({ versions: 2 })]);

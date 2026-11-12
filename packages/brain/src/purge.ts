@@ -39,7 +39,7 @@ import {
   purgeMaxDocuments,
   purgedMarker,
 } from "./knowledge.ts";
-import type { PurgePlan, PurgeResult } from "./knowledge.ts";
+import type { PurgePlan, PurgeResult, PurgeStatus } from "./knowledge.ts";
 import { log } from "./log.ts";
 import {
   countStatements,
@@ -60,12 +60,16 @@ import type { PayloadRef, StagedPayload } from "./payloads.ts";
 import {
   attemptHolds,
   attemptHoldsOrIdle,
+  documentStepPrefix,
   finishPurge,
   heldNow,
   keepHold,
   openPurge,
+  purgeStatus,
   purgeUnfinished,
   runStep,
+  takePurge,
+  unfinishedPurge,
   whileHeld,
 } from "./purge-ledger.ts";
 import type { StepCounts } from "./purge-ledger.ts";
@@ -77,6 +81,7 @@ import {
   owedWritesDoneWhile,
   rebuildOwedWhile,
   rebuildOwedIfChanged,
+  rebuildSearchIndex,
   secureDeleteReady,
 } from "./search-erasure.ts";
 import {
@@ -435,7 +440,8 @@ const personalSteps = [
 ] as const;
 
 /** A named document's step of a content purge. */
-const documentStep = (documentId: string): string => `document:${documentId}`;
+const documentStep = (documentId: string): string =>
+  `${documentStepPrefix}${documentId}`;
 
 /** The steps of a content purge of `documentIds`, in the order it runs them. */
 const contentSteps = (documentIds: readonly string[]): string[] => [
@@ -2242,4 +2248,94 @@ export const purge = async <C>(
   return parsed.type === "personal"
     ? await purgePersonal(brain, by, parsed, onErase, fresh)
     : await purgeContent(brain, by, parsed, onErase, fresh);
+};
+
+/** The steps of a content purge that need none of its terms to run. */
+const termFreeSteps: ReadonlySet<string> = new Set(["payloads", "search"]);
+
+/**
+ * Finishes the unfinished content purge `purgeId`, by any admin (the host
+ * checks who), with neither its documents nor its terms as input, so it
+ * tells nothing of them: what the purge still owes that needs none of its
+ * terms is done from its own record. A step of a document named that is
+ * gone since finishes with nothing to erase; what the purge's writes let
+ * go of leaves the store; the search index is rebuilt whole. A purge left
+ * open when whoever began it can no longer run it again (their own
+ * document gone with them, or they are no admin any more) is so finished,
+ * and no longer holds back every export (exports.ts).
+ *
+ * Refused, changing nothing, as `knowledge.purge_needs_input` while a step
+ * that needs the terms is owed (a document still there, the memory
+ * records, the host's copies): only running the purge again with them
+ * finishes that. `knowledge.not_found` for a purge that doesn't exist,
+ * finished, was superseded or is a personal one, alike. Recorded in the
+ * audit log with who finished it; answers where the purge stands as
+ * `purgeStatus` gives it to `by`, so nothing of what it removed to anyone
+ * but who began it.
+ */
+export const finishPurgeById = async <C>(
+  brain: Brain<C>,
+  by: Writer,
+  purgeId: string
+): Promise<PurgeStatus> => {
+  const { db } = brain;
+  const { owed } = await unfinishedPurge(brain, purgeId);
+  const documentIds = owed
+    .filter((step) => step.startsWith(documentStepPrefix))
+    .map((step) => step.slice(documentStepPrefix.length));
+  const remaining =
+    documentIds.length === 0
+      ? []
+      : await db
+          .select({ id: documents.id })
+          .from(documents)
+          .where(inList(documents.id, documentIds));
+  const needsTerms = owed.some(
+    (step) => !step.startsWith(documentStepPrefix) && !termFreeSteps.has(step)
+  );
+  if (remaining.length > 0 || needsTerms) {
+    throw knowledgeErrors.create("knowledge.purge_needs_input");
+  }
+  // Each attempt owes its own rebuild, as running the purge again does.
+  const held = await takePurge(brain, purgeId, (taken, at) => [
+    rebuildOwedWhile(db, taken.purgeId, attemptHolds(taken, at)),
+  ]);
+  await auditedBatch(brain.ports, db, [
+    outboxed(brain, {
+      actor: by.actor,
+      action: "knowledge.purge.resumed",
+      provenance: [],
+      detail: { purgeId, kind: "content", byId: true },
+    }),
+  ]);
+  try {
+    for (const documentId of documentIds) {
+      // oxlint-disable-next-line no-await-in-loop -- one step after another
+      await runStep(brain, held, documentStep(documentId), async () => {
+        // Gone since: nothing of it is left to erase.
+        await Promise.resolve();
+        return {};
+      });
+    }
+  } finally {
+    await whileHeld(brain, held, (at) => [
+      owedWritesDoneWhile(db, purgeId, attemptHoldsOrIdle(held, at)),
+      erasedDocumentsDone(
+        db,
+        purgeId,
+        brain.ports.clock(),
+        attemptHoldsOrIdle(held, at)
+      ),
+    ]);
+  }
+  await runStep(brain, held, "payloads", async () => {
+    await collectPayloads(brain, db);
+  });
+  await runStep(brain, held, "search", async () => {
+    await cleanSearchIndex(async () => {
+      await rebuildSearchIndex(db);
+    });
+  });
+  await finishPurge(brain, held);
+  return await purgeStatus(brain, by, purgeId);
 };
