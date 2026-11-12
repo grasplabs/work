@@ -2454,15 +2454,18 @@ const memoryFixture = async ({
     entities: [marked("c")],
     memories: [memory("c", { kind: "writer", writer: stranger() })],
   });
+  // A group the reader is in: memories only one person may read are kept
+  // in that person's own store, never in the shared one this probes.
+  const theirs = reader.groups[0] ?? stranger();
   const drawn = await store().addMemories({
     change: crypto.randomUUID(),
-    access: { kind: "owner", person: reader.person },
+    access: { kind: "audience", group: theirs },
     entities: [{ key: "c", kind: "customer", names: [text] }],
     memories: [memory("c", { kind: "source", ...version, quote: text })],
   });
   const seen = await store().addMemories({
     change: crypto.randomUUID(),
-    access: { kind: "owner", person: reader.person },
+    access: { kind: "audience", group: theirs },
     entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
     memories: [
       memory(
@@ -2477,7 +2480,7 @@ const memoryFixture = async ({
     change: crypto.randomUUID(),
     access: { kind: "audience", group },
     // Made for someone who sees the reader's entity and is in the group.
-    reader: { person: reader.person, groups: [group] },
+    reader: { person: reader.person, groups: [group, theirs] },
     entities: [{ key: "c", id: seenId, kind: "customer", names: [text] }],
     memories: [
       memory(
@@ -2525,12 +2528,17 @@ const memoryProbes = {
     };
     const adding = {
       change: crypto.randomUUID(),
-      access: { kind: "owner", person: stranger() },
+      access: { kind: "audience", group: stranger() },
       entities,
       memories: [memory],
     };
     return [
-      await add("for someone else", adding),
+      await add("for a group the reader isn't in", adding),
+      await add("for someone else alone, which the shared store refuses", {
+        ...adding,
+        change: crypto.randomUUID(),
+        access: { kind: "owner", person: stranger() },
+      }),
       await add("the same change again", adding),
       await add("the same change with other memories", {
         ...adding,
@@ -2621,14 +2629,27 @@ const memoryProbes = {
     ) =>
       await answer(
         name,
-        // The moment each page was read at differs between calls and says
-        // nothing of what is stored: compared without it.
+        // The moment each page was read at (its `at`, and its cursor's)
+        // differs between calls and says nothing of what is stored:
+        // compared without it.
         async () => {
-          const { facts, more } = await store().listContested({
+          const { facts, more, next } = await store().listContested({
             reader,
             ...(entity === null ? {} : { entity }),
           });
-          return { facts, more };
+          return {
+            facts,
+            more,
+            ...(next === undefined
+              ? {}
+              : {
+                  next: {
+                    learnedAt: next.learnedAt,
+                    entity: next.entity,
+                    attribute: next.attribute,
+                  },
+                }),
+          };
         },
         about
       );

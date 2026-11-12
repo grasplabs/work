@@ -122,6 +122,7 @@ import {
   readMemories,
   retireMemory,
 } from "./memories.ts";
+import { rebuildMissingSets } from "./reader-sets.ts";
 import {
   countingInto,
   countWithoutMeaning,
@@ -222,6 +223,10 @@ const sharedOnly = "The Brain refused it: only the shared store takes this";
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
+
+/** What the shared store answers memories only one person may read. */
+const sharedNotOwn =
+  "The Brain refused it: memories only one person may read are kept in that person's own store";
 
 /** What a read of memories under an attribute it can't have answers. */
 const noSuchAttribute =
@@ -463,6 +468,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // readers it dropped are made again from their keys.
       this.ctx.storage.transactionSync(() => {
         replayMemoryErasures(this.ctx.storage.sql);
+        rebuildMissingSets(this.ctx.storage.sql);
       });
       this.#opened = true;
       this.#schema = true;
@@ -506,25 +512,23 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * The latest moment this instance gave a read to page from (`#readMoment`):
-   * every write after it is stamped past it (`#writeMoment`), so no later
-   * page of that read sees what was written after its first.
+   * The moments a page is read at and its cursor carries (`at` and
+   * `cursorAt`): a later page's, its cursor's; one as of a moment, that
+   * moment; a first page's, now, with its cursor a millisecond before, so
+   * no later page sees a write made in the first page's millisecond,
+   * whether before or after it, and a fresh read sees every write. Plain
+   * time: the store keeps no clock of its own.
    */
-  #issuedAt = 0;
-
-  /** The moment a first page is read at: `asOf`, or now, kept as issued. */
-  #readMoment(asOf?: Date): number {
-    if (asOf !== undefined) {
-      return asOf.getTime();
+  static #pageMoments(
+    after: { at: Date } | undefined,
+    asOf?: Date
+  ): { at: number; cursorAt: number } {
+    const fixed = after?.at ?? asOf;
+    if (fixed !== undefined) {
+      return { at: fixed.getTime(), cursorAt: fixed.getTime() };
     }
     const now = Date.now();
-    this.#issuedAt = Math.max(this.#issuedAt, now);
-    return now;
-  }
-
-  /** The moment a write is stamped at: now, past every moment issued to a read. */
-  #writeMoment(): number {
-    return Math.max(Date.now(), this.#issuedAt + 1);
+    return { at: now, cursorAt: now - 1 };
   }
 
   /** Refuses `reader` on a person's own store unless they are that person. */
@@ -1427,6 +1431,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   async addMemories(memories: NewMemories): Promise<AddedMemories> {
     const adding = checked(newMemoriesSchema, memories);
     this.#mayKeep(adding.access);
+    // Content only one person may read lies only in their own store.
+    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
+      throw new Error(sharedNotOwn);
+    }
     if (adding.reader !== undefined) {
       this.#mayRead(adding.reader);
     }
@@ -1434,8 +1442,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#readyToWrite();
       return await addMemories(
         { storage: this.ctx.storage, db: this.#db },
-        adding,
-        () => this.#writeMoment()
+        adding
       );
     });
   }
@@ -1476,7 +1483,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       entity: asked.entity,
       reader: asked.reader,
       ...(attribute === undefined ? {} : { attribute }),
-      at: asked.after?.at.getTime() ?? this.#readMoment(asked.asOf),
+      ...BrainStore.#pageMoments(asked.after, asked.asOf),
       history: asked.history ?? false,
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
@@ -1493,7 +1500,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return listContested(this.ctx.storage.sql, {
       ...(asked.entity === undefined ? {} : { entity: asked.entity }),
       reader: asked.reader,
-      at: asked.after?.at.getTime() ?? this.#readMoment(),
+      ...BrainStore.#pageMoments(asked.after),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });
@@ -1510,7 +1517,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return retireMemory(this.ctx.storage.sql, {
         id: memory,
         reader,
-        at: this.#writeMoment(),
+        at: Date.now(),
       });
     });
   }
@@ -1527,7 +1534,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         confirmMemory(this.ctx.storage.sql, {
           id: memory,
           reader,
-          at: this.#writeMoment(),
+          at: Date.now(),
         })
       );
     });
@@ -1542,7 +1549,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,
-      at: asked.after?.at.getTime() ?? this.#readMoment(),
+      ...BrainStore.#pageMoments(asked.after),
       ...(asked.kind === undefined ? {} : { kind: asked.kind }),
       ...(asked.identifier === undefined
         ? {}
@@ -1563,7 +1570,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return readEntityNames(this.ctx.storage.sql, {
       entity: asked.entity,
       reader: asked.reader,
-      at: asked.after?.at.getTime() ?? this.#readMoment(),
+      ...BrainStore.#pageMoments(asked.after),
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });

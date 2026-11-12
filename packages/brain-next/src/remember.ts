@@ -386,15 +386,12 @@ const markExtracted = (
 
 /**
  * Adds `adding` (above), or answers what its change added before. Its
- * memories are learned at `learnedAt()`, asked inside the transaction
- * (store.ts: past every moment a read was issued). Its
  * memories are readable by its `access` (and, resting on a version, by
  * that version's readers too: memories.ts).
  */
 export const addMemories = async (
   { storage, db }: RememberStore,
-  adding: Adding,
-  learnedAt: () => number
+  adding: Adding
 ): Promise<AddedMemories> => {
   const planned = planOf(adding);
   const { sql } = storage;
@@ -463,7 +460,7 @@ export const addMemories = async (
       ids,
       readers,
       subjects,
-      learnedAt: learnedAt(),
+      learnedAt: Date.now(),
       onlyFor,
       memo: new Map(),
     };

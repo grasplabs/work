@@ -128,7 +128,7 @@ const extractedSql = (alias: string): string => `
  * never before it was learned itself (an older version's memory that came
  * late is history from the start). Null while believed.
  */
-const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
+export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
   SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
   UNION ALL${newerSql("m", "?4", true)}
   UNION ALL${extractedSql("m")}
@@ -380,13 +380,14 @@ const aboutOrder = `m.attribute IS NULL, coalesce(m.attribute, ''),
  * too, `?8` 1 to go on after a page, ending at the memory whose place in
  * `aboutOrder` is `?9` (no attribute), `?10` (its attribute, or ''),
  * `?11` (not confirmed), `?12` (learned) and `?13` (its id): the memories
- * about the entity, as subject or as what a relation relates to.
+ * about the entity, as subject or as what a relation relates to; of one
+ * attribute, as subject only, so a contested fact's sides are exactly
+ * its entity's current memories of it.
  */
 const aboutSql = memoriesSql({
   base: `SELECT row FROM memories
     WHERE entity = ?1 AND (?6 IS NULL OR attribute = ?6)
-    UNION SELECT row FROM memories
-    WHERE object = ?1 AND (?6 IS NULL OR attribute = ?6)`,
+    UNION SELECT row FROM memories WHERE object = ?1 AND ?6 IS NULL`,
   filter: `(?7 = 1 OR judged.is_current = 1)
   AND (?8 = 0 OR (m.attribute IS NULL) > ?9 OR ((m.attribute IS NULL) = ?9 AND (
     coalesce(m.attribute, '') > ?10 OR (coalesce(m.attribute, '') = ?10 AND (
@@ -404,6 +405,8 @@ export interface MemoriesAsked {
   reader: Reader;
   attribute?: string;
   at: number;
+  /** The moment the next page's cursor carries (store.ts `#pageMoments`). */
+  cursorAt: number;
   history: boolean;
   after?: MemoriesCursor;
   limit: number;
@@ -416,10 +419,17 @@ export interface MemoriesAsked {
  */
 export const readMemories = (
   sql: SqlStorage,
-  { entity, reader, attribute, at: asked, history, after, limit }: MemoriesAsked
+  {
+    entity,
+    reader,
+    attribute,
+    at,
+    cursorAt,
+    history,
+    after,
+    limit,
+  }: MemoriesAsked
 ): MemoriesRead => {
-  // Every page of one read is read at the moment of its first.
-  const at = after?.at.getTime() ?? asked;
   const found = entityRowOf(sql, entity);
   if (found === undefined) {
     return { memories: [], more: false };
@@ -449,7 +459,7 @@ export const readMemories = (
     memories,
     more: true,
     next: {
-      at: new Date(at),
+      at: new Date(cursorAt),
       attribute: last.attribute,
       confirmed: last.confirmed !== null,
       learnedAt: last.learnedAt,
@@ -515,24 +525,24 @@ export const listContested = (
   {
     entity,
     reader,
-    at: asked,
+    at,
+    cursorAt,
     after,
     limit,
   }: {
     entity?: EntityId;
     reader: Reader;
     at: number;
+    cursorAt: number;
     after?: ContestedCursor;
     limit: number;
   }
 ): ContestedPage => {
-  // Every page of one listing is read at the moment of its first.
-  const at = after?.at.getTime() ?? asked;
   let entityRow: number | null = null;
   if (entity !== undefined) {
     const found = entityRowOf(sql, entity);
     if (found === undefined) {
-      return { facts: [], at: new Date(at), more: false };
+      return { facts: [], at: new Date(cursorAt), more: false };
     }
     entityRow = found.row;
   }
@@ -575,7 +585,7 @@ export const listContested = (
       memories,
       more,
     }));
-  const moment = new Date(at);
+  const moment = new Date(cursorAt);
   const last = all.at(limit - 1);
   if (all.length <= limit || last === undefined) {
     return { facts: page, at: moment, more: false };

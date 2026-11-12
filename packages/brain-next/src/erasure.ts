@@ -10,7 +10,7 @@ import {
   eraseMemoriesOfSource,
   eraseMemoriesOn,
 } from "./forget.ts";
-import { readerSetKeyOf, rebuildMissingSets } from "./reader-sets.ts";
+import { readerSetKeyOf } from "./reader-sets.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -1225,10 +1225,9 @@ export const deleteStoreObjects = async (
  * them after the roll forward; one this release applied finds nothing
  * more. Only those above the mark (`memory_erasure_replay`) are read, and
  * the mark moves past them, so a start with none recorded since reads one
- * row. When it replayed one, the sets of readers an older release dropped
- * in that erasure's batches, which memories still name, are made again
- * from their keys: nothing but an erasure deletes a memory. Answers how
- * many it replayed.
+ * row. (The mark orders by `erasures`' rowid: a column of its own would
+ * be null on every row an older release writes.) Answers how many it
+ * replayed.
  */
 export const replayMemoryErasures = (sql: SqlStorage): number => {
   const through =
@@ -1269,7 +1268,6 @@ export const replayMemoryErasures = (sql: SqlStorage): number => {
   for (const readerSet of new Set(sets)) {
     dropUnusedReaderSet(sql, readerSet);
   }
-  rebuildMissingSets(sql);
   sql.exec(
     `INSERT INTO memory_erasure_replay (id, through) VALUES (1, ?1)
     ON CONFLICT (id) DO UPDATE SET through = ?1`,
