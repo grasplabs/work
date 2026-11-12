@@ -6,8 +6,9 @@ import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
 import {
   changeKeySchema,
-  instructionsPrefix,
+  isWholeKey,
   newSourceSchema,
+  shippedSkillsPrefix,
   refusalPrefix,
   sourceIdSchema,
   storeBytesMax,
@@ -46,9 +47,10 @@ import type { WorkContext } from "./work.ts";
 // 1. Checking, before anything is written: each part's size, SHA-256 and
 //    count against the manifest, and each line by the contract's own rules
 //    for a source, its text and its readers, and by what a company export
-//    holds: readers a group names (never one person, never no one), and an
-//    instruction file (`instructions:`, never indexed) only as itself, as
-//    the store takes them (store.ts), so a file can't make a document into
+//    holds: readers a group names (never one person, never no one), no
+//    skill Grasp ships, and what is kept whole (an instruction file or a
+//    skill, never indexed) only as itself, as the store takes them
+//    (contract.ts `wholeKeyPrefixes`), so a file can't make a document into
 //    one, nor one into a document. A part that fails any of these fails the
 //    restore, and nothing of the export is written. The sources each part
 //    holds are recorded for the export as it is checked (exports.ts).
@@ -211,7 +213,8 @@ const lineSchema = exportLineSchema.superRefine((line, context) => {
     !sourceIdSchema.safeParse(line.source).success ||
     !z.array(changeKeySchema).safeParse(line.changes).success ||
     line.access.kind !== "audience" ||
-    line.source.startsWith(instructionsPrefix) === line.indexed
+    line.source.startsWith(shippedSkillsPrefix) ||
+    isWholeKey(line.source) === line.indexed
   ) {
     context.addIssue({ code: "custom", message: "Not a version to restore" });
   }

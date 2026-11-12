@@ -43,6 +43,7 @@
     "./skills": "./src/skills.ts",
     "./tokens": "./src/tokens.ts",
     "./tools": "./src/tools.ts",
+    "./transcript-schema": "./src/transcript-schema.ts",
     "./transcripts": "./src/transcripts.ts",
     "./unicode61": "./src/unicode61.ts"
   },

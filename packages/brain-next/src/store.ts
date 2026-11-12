@@ -14,7 +14,7 @@ import {
   exportIdSchema,
   exportRequestSchema,
   exportScopeSchema,
-  instructionsPrefix,
+  isWholeKey,
   newInstructionsSchema,
   newSourceSchema,
   personErasureSchema,
@@ -208,13 +208,13 @@ const sharedOnly =
 
 /**
  * What an add answers under the wrong kind of key (contract.ts
- * `instructionsPrefix`): instruction files are never indexed, and nothing
- * indexed is one.
+ * `wholeKeyPrefixes`): what is kept whole is never indexed, and nothing
+ * indexed is kept whole.
  */
 const notInstructions =
-  "The Brain refused it: an instruction file is added with addInstructions";
+  "The Brain refused it: an instruction file or a skill is added with addInstructions";
 const onlyInstructions =
-  "The Brain refused it: addInstructions takes only an instruction file's key";
+  "The Brain refused it: addInstructions takes only an instruction file's or a skill's key";
 
 /** What a store whose name says no one's answers every call. */
 const noOnes =
@@ -636,7 +636,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async addSource(source: NewSource): Promise<SourceVersionRef> {
     const adding = checked(newSourceSchema, source);
-    if (adding.source.startsWith(instructionsPrefix)) {
+    if (isWholeKey(adding.source)) {
       throw new Error(notInstructions);
     }
     this.#mayKeep(adding.access);
@@ -652,7 +652,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    */
   async addInstructions(source: NewInstructions): Promise<SourceVersionRef> {
     const adding = checked(newInstructionsSchema, source);
-    if (!adding.source.startsWith(instructionsPrefix)) {
+    if (!isWholeKey(adding.source)) {
       throw new Error(onlyInstructions);
     }
     this.#mayKeep(adding.access);

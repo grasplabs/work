@@ -40,7 +40,7 @@ export const prebuiltRoot = path.join(
 export const prebuiltInputs = [
   "packages",
   "apps/connect",
-  "apps/core/src/knowledge/extractor",
+  "apps/core/src/files/extractor",
   "apps/core/build-extractor.ts",
   "apps/core/test/fixtures/assets",
   "apps/core/test/build-connect.ts",

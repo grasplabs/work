@@ -1,7 +1,12 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import { accessSchema, exportKeptMs, restoringNow } from "./contract.ts";
+import {
+  accessSchema,
+  exportKeptMs,
+  restoringNow,
+  shippedSkillsPrefix,
+} from "./contract.ts";
 import type {
   Access,
   ExportFileRequest,
@@ -31,9 +36,11 @@ import type { WorkContext } from "./work.ts";
 //   known to read (a set with no one in it: an admin is not a reader of
 //   it), and every version of a source whose current version is such or
 //   that has none (no one else may read its history), left out in the
-//   statement that selects them. An admin's export holds every group's
-//   content, those they are not in among them: that is what a company's
-//   backup is for. A person's own store never takes part in one.
+//   statement that selects them; and the skills Grasp ships (contract.ts
+//   `shippedSkillsPrefix`), which each release adds again. It holds the
+//   company's instruction files and its own skills. An admin's export holds
+//   every group's content, those they are not in among them: that is what
+//   a company's backup is for. A person's own store never takes part in one.
 // - A person's: only the versions they alone may read, of sources whose
 //   current version they alone may read, from the shared store or from
 //   their own store, each export of its own.
@@ -255,6 +262,8 @@ const keyOf = (id: string): string => `export:${id}`;
  */
 const scopeSql = {
   company: `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
+    AND substr(source_versions.source, 1, ${shippedSkillsPrefix.length})
+      != '${shippedSkillsPrefix}'
     AND EXISTS (
       SELECT 1 FROM current_versions AS now
       JOIN source_versions AS current ON current.row = now.version_row

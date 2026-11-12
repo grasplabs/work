@@ -351,7 +351,7 @@ const sessionShape = {
       z.strictObject({ platform: z.literal("provider_test") }),
       /**
        * Core's own conversion of a PDF uploaded to the Brain into its text
-       * (knowledge/extract.ts), on Grasp's key: the company's own words,
+       * (files/extract.ts), on Grasp's key: the company's own words,
        * made for the person who uploaded it,
        * counted as theirs. Only core's own code makes such a call.
        */

@@ -57,15 +57,16 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
+import { transcriptSchema } from "./transcript-schema.ts";
+import type { Transcript } from "./transcript-schema.ts";
 import {
   hasTranscript,
   transcriptDetail,
-  transcriptSchema,
   isTranscriptMoved,
   transcriptUnmoved,
   transcriptWrites,
 } from "./transcripts.ts";
-import type { ReadAt, Transcript } from "./transcripts.ts";
+import type { ReadAt } from "./transcripts.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its

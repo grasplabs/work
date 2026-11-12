@@ -997,11 +997,30 @@ describe("exports and restores", () => {
       });
     });
 
-    it("exports and restores a source under any key the store takes as a document, and refuses an export while it runs (review round 2, P3 and P4)", async () => {
+    it("exports and restores the company's own skills, never Grasp's, and refuses an export while it runs (review round 2, P3 and P4)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
       await add(shared(), `test:${unique()}`, "a document", team(group));
-      await add(shared(), `skill:${unique()}`, "a shared skill", team(group));
+      // The company's own skill, kept whole; and one Grasp ships, which
+      // each release adds again, so no export holds it.
+      await shared().addInstructions({
+        source: `skill:company:${unique()}`,
+        change: "1",
+        text: "a skill of the company's",
+        access: team(group),
+      });
+      await shared().addInstructions({
+        source: `skill:grasp:${unique()}`,
+        change: "1",
+        text: "a skill Grasp ships",
+        access: team(group),
+      });
+      // A skill's key is never a document's.
+      await expect(
+        called(
+          add(shared(), `skill:company:${unique()}`, "a skill", team(group))
+        )
+      ).rejects.toThrow("added with addInstructions");
       const { id } = await shared().startExport(company, "test");
       const exported = await settled(shared(), id, company);
       await putBack(shared(), emptyShared);

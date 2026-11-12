@@ -954,11 +954,23 @@ export const refusalPrefix = "The Brain refused it:";
 export const restoringNow = `${refusalPrefix} it is restoring an export, so it adds nothing until that is done: add it again shortly`;
 
 /**
- * What an instruction file's key starts with, and only its key:
- * `addInstructions` takes only such keys, and `addSource` none, so an
- * instruction file is never indexed and nothing indexed is one.
+ * The keys of what is kept whole, never indexed: instruction files
+ * (`instructions:`) and skills (`skill:`, core's skills, #2198), both added
+ * with `addInstructions`. `addInstructions` takes only such keys and
+ * `addSource` none, so nothing kept whole is ever indexed, and nothing
+ * indexed is kept whole.
  */
-export const instructionsPrefix = "instructions:";
+export const wholeKeyPrefixes = ["instructions:", "skill:"] as const;
+
+/** Whether `source` is a key of what is kept whole (`wholeKeyPrefixes`). */
+export const isWholeKey = (source: string): boolean =>
+  wholeKeyPrefixes.some((prefix) => source.startsWith(prefix));
+
+/**
+ * The keys of Grasp's own skills, shipped with each release (core's
+ * `addShippedSkill`): never in an export, as each release adds them again.
+ */
+export const shippedSkillsPrefix = "skill:grasp:";
 
 /**
  * The deployment an export is of, as the host names it: its manifest says
