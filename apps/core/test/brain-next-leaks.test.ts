@@ -3,7 +3,7 @@ import {
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import { authoritySchema } from "@grasp-os/shared/permissions";
-import { DurableObject, env } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -25,16 +25,11 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
-import { BrainStore } from "../src/index.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { published } from "./apps.ts";
+import { brainModules } from "./brain-next-modules.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
-import {
-  coreProbes,
-  instructionProbes,
-  storeProbes,
-  textOf,
-} from "./brain-next-surfaces.ts";
+import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -114,21 +109,13 @@ const logsOf = async <T>(
   }
 };
 
-/** Every surface, by name, with its probe. */
-const surfaces: [string, Probe][] = [
-  ...Object.entries(coreProbes).map(([name, probe]): [string, Probe] => [
-    `core ${name}`,
+/** Every member of every surface, by name, with its probe. */
+const surfaces: [string, Probe][] = brainSurfaces.flatMap(({ name, probes }) =>
+  Object.entries(probes).map(([member, probe]): [string, Probe] => [
+    `${name} ${member}`,
     probe,
-  ]),
-  ...Object.entries(instructionProbes).map(([name, probe]): [string, Probe] => [
-    `instructions ${name}`,
-    probe,
-  ]),
-  ...Object.entries(storeProbes).map(([name, probe]): [string, Probe] => [
-    `store ${name}`,
-    probe,
-  ]),
-];
+  ])
+);
 
 /**
  * What a surface's answers give away: a forbidden marker, a hidden-only
@@ -268,46 +255,31 @@ const textsFor = async (
   return items.map(({ text }) => text);
 };
 
-/**
- * Each public method of the store: its own and any it inherits, up to the
- * Durable Object base class.
- */
-const storeMethods = (): string[] => {
-  const names = new Set<string>();
-  for (
-    let prototype: unknown = BrainStore.prototype;
-    prototype !== DurableObject.prototype &&
-    prototype !== Object.prototype &&
-    typeof prototype === "object" &&
-    prototype !== null;
-    prototype = Object.getPrototypeOf(prototype)
-  ) {
-    for (const name of Object.getOwnPropertyNames(prototype)) {
-      names.add(name);
-    }
-  }
-  names.delete("constructor");
-  return [...names];
-};
-
 describe(
   "the new Brain leaks nothing to a reader without access",
   { timeout: 120_000 },
   () => {
-    it("has a probe for every member core and the Brain's store expose", async () => {
-      const coreMembers = Object.keys(await import("../src/brain-next.ts"));
-      const instructionMembers = Object.keys(
-        await import("../src/instruction-files.ts")
-      );
+    it("has a probe for every member of every surface, and a surface for every module that reaches the Brain", () => {
+      const names = new Set<string>(brainSurfaces.map(({ name }) => name));
 
       expect({
-        core: coreMembers.toSorted(),
-        instructions: instructionMembers.toSorted(),
-        store: storeMethods().toSorted(),
+        members: Object.fromEntries(
+          brainSurfaces.map(({ name, module }) => [
+            name,
+            membersOf(module).toSorted(),
+          ])
+        ),
+        unprobed: Object.entries(brainModules).filter(
+          ([, name]) => !names.has(name)
+        ),
       }).toStrictEqual({
-        core: Object.keys(coreProbes).toSorted(),
-        instructions: Object.keys(instructionProbes).toSorted(),
-        store: Object.keys(storeProbes).toSorted(),
+        members: Object.fromEntries(
+          brainSurfaces.map(({ name, probes }) => [
+            name,
+            Object.keys(probes).toSorted(),
+          ])
+        ),
+        unprobed: [],
       });
     });
 

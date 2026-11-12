@@ -7,13 +7,18 @@
  * in what reached a model, and holds each answer to what the reader asked
  * only of hidden sources to the answer to words nothing holds.
  *
- * Three lists, checked against what exists: `coreProbes` has one entry
- * per export of core's `brain-next.ts`, `instructionProbes` one per export
- * of core's `instruction-files.ts` (the rules over the instruction files
- * brain-next.ts names), `storeProbes` one per public method of the
- * Brain's store (its contract, and anything else a holder of its
- * namespace could call). A member without an entry fails the type check
- * and the harness. A new surface is one more entry here:
+ * One registry, `brainSurfaces` at the end of this file, names each way
+ * in: a module (or the store's class) and its probes, one per member:
+ * `coreProbes` one per export of core's `brain-next.ts`,
+ * `instructionProbes` one per export of core's `instruction-files.ts` (the
+ * rules over the instruction files brain-next.ts names), `storeProbes` one
+ * per public method of the Brain's store (its contract, and anything else
+ * a holder of its namespace could call). A member without a probe fails
+ * the type check and the harness; a module of core that imports
+ * brain-next.ts fails lint unless brain-next-modules.ts names its surface
+ * here. A new member is one more probe in its list; a new module is its
+ * list, its entry in the registry and its line in brain-next-modules.ts.
+ * A probe:
  *
  * - one that answers about a single item probes it with `hiddenVersions`;
  * - one with no reader (an overview, a step the clock runs) ignores the
@@ -53,7 +58,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
+import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
@@ -65,7 +70,7 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import type { BrainStore } from "../src/index.ts";
+import { BrainStore } from "../src/index.ts";
 import * as instructionFiles from "../src/instruction-files.ts";
 
 /** The reader a probe calls as, and what they may not see. */
@@ -2687,3 +2692,46 @@ export const storeProbes = {
     ),
   ],
 } satisfies Record<StoreMember, Probe>;
+
+/** One way into the Brain: a module, or the store's class, and its probes. */
+interface Surface {
+  name: string;
+  module: object;
+  probes: Readonly<Record<string, Probe>>;
+}
+
+/**
+ * Every way into the Brain the harness probes, each member of each by its
+ * probe. Its names are the ones brain-next-modules.ts gives the modules
+ * of core that import brain-next.ts.
+ */
+export const brainSurfaces = [
+  { name: "core", module: coreBrain, probes: coreProbes },
+  { name: "instructions", module: instructionFiles, probes: instructionProbes },
+  { name: "store", module: BrainStore, probes: storeProbes },
+] as const satisfies readonly Surface[];
+
+/**
+ * A surface's members: a module's exports, or a class's public methods,
+ * its own and any it inherits, up to the Durable Object base class.
+ */
+export const membersOf = (module: object): string[] => {
+  if (typeof module !== "function") {
+    return Object.keys(module);
+  }
+  const names = new Set<string>();
+  for (
+    let prototype: unknown = module.prototype;
+    prototype !== DurableObject.prototype &&
+    prototype !== Object.prototype &&
+    typeof prototype === "object" &&
+    prototype !== null;
+    prototype = Object.getPrototypeOf(prototype)
+  ) {
+    for (const name of Object.getOwnPropertyNames(prototype)) {
+      names.add(name);
+    }
+  }
+  names.delete("constructor");
+  return [...names];
+};

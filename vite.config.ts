@@ -7,6 +7,7 @@ import tanstack from "ultracite/oxlint/tanstack";
 import vitest from "ultracite/oxlint/vitest";
 import { defineConfig } from "vite-plus";
 
+import { brainModules } from "./apps/core/test/brain-next-modules.ts";
 import DurationSequencer from "./scripts/test-sequencer.ts";
 
 const generated = [
@@ -78,15 +79,16 @@ const brainContractImports = {
 };
 
 /**
- * Core's module for the Brain (src/brain-next.ts): only the modules listed
- * in its override below import it, each with its probes in the Brain's
- * permission harness (test/brain-next-surfaces.ts), so no module reaches
- * the Brain without them.
+ * Core's module for the Brain (src/brain-next.ts): only the modules the
+ * Brain's permission harness lists (apps/core/test/brain-next-modules.ts)
+ * import it, each with the surface that probes it
+ * (test/brain-next-surfaces.ts), so no module reaches the Brain without
+ * them.
  */
 const brainModuleImports = {
   group: ["**/brain-next.ts"],
   message:
-    "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to its lint override and probes (test/brain-next-surfaces.ts).",
+    "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to apps/core/test/brain-next-modules.ts, with its surface in brainSurfaces (test/brain-next-surfaces.ts).",
 };
 
 export default defineConfig({
@@ -302,13 +304,9 @@ export default defineConfig({
       },
       {
         // The modules that reach the Brain through core's module, each
-        // probed by the permission harness: the instruction files' rules,
-        // the clock's sweep, and the staff's report and actions.
-        files: [
-          "apps/core/src/instruction-files.ts",
-          "apps/core/src/clock.ts",
-          "apps/core/src/brain-report.ts",
-        ],
+        // probed by the permission harness (its list,
+        // apps/core/test/brain-next-modules.ts).
+        files: Object.keys(brainModules),
         rules: {
           "no-restricted-imports": [
             "error",
