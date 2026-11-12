@@ -2,8 +2,8 @@
  * What one company takes in AI, and what that costs Grasp, ported from the
  * prototype (grasplabs/prototype `components/admin/org-usage.tsx`). At a
  * glance: this month against what the contract covers, and everything so
- * far. Then how it went over time, which model did what, and the same as
- * numbers, by what it was for and by model. One month can be looked at
+ * far. Then how it went over time, and what each use cost, split by which
+ * model did it, with its tokens and minutes. One month can be looked at
  * alone. Every figure is the model's (`usageOf`, `usageIn`): what core
  * counted as it happened, and what the model works out from what happened
  * before it counted.
@@ -15,7 +15,6 @@
 import {
   MODEL_NAMES,
   MODELS,
-  PRICES,
   PURPOSES,
   usageIn,
 } from "@grasp-os/shared/admin/admin-usage";
@@ -35,9 +34,6 @@ import {
   ChartTooltip,
   ChartTooltipContent,
   chartColor,
-  Label,
-  Pie,
-  PieChart,
   ReferenceLine,
   XAxis,
   YAxis,
@@ -51,7 +47,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import { Stat } from "@grasp-os/ui/components/stat";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -66,7 +61,6 @@ import { Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import {
   euro,
-  euroRate,
   euros,
   formatDay,
   formatMonth,
@@ -112,51 +106,28 @@ const fill: Record<ChartColor, string> = {
   "chart-5": "fill-chart-5",
 };
 
-/** What AI is used for, in a word, and in a line. */
-const purposeWords: Record<Purpose, { label: string; what: string }> = {
-  reading: {
-    label: "Reading",
-    what: "The first conversation, looking the company up, and what the company shared in its own onboarding.",
-  },
-  interviews: {
-    label: "Interviews",
-    what: "Every interview Stephen held, by voice or typed.",
-  },
-  drawing: {
-    label: "Drawing the work",
-    what: "Each team’s work and each workflow, drawn from what people agreed to.",
-  },
-  chat: { label: "Chat", what: "What people in the platform ask Grasp." },
-  runs: { label: "Workflows", what: "Every time a live workflow runs." },
+/** What AI is used for, in a word. */
+const purposeWords: Record<Purpose, string> = {
+  reading: "Reading",
+  interviews: "Interviews",
+  drawing: "Drawing the work",
+  chat: "Chat",
+  runs: "Workflows",
 };
 
 /** What does the work: a model by its own name, Stephen's voice and ears by what they are. */
-const modelWords: Record<Model, { label: string; what: string }> = {
-  opus: {
-    label: MODEL_NAMES.opus,
-    what: "The careful one: writes down what was said, draws the work, reads what was shared.",
-  },
-  sonnet: {
-    label: MODEL_NAMES.sonnet,
-    what: "The quick one: says Stephen’s lines, answers the chat, runs steps that need judgement.",
-  },
-  haiku: {
-    label: MODEL_NAMES.haiku,
-    what: "The small one: runs the plain steps of workflows.",
-  },
-  voice: {
-    label: "Stephen’s voice",
-    what: "What he says out loud, by the minute.",
-  },
-  ears: {
-    label: "Stephen’s ears",
-    what: "What he hears, written down as it is said, by the minute.",
-  },
-  other: {
-    label: MODEL_NAMES.other,
-    what: "Any other model the company’s Grasp calls, such as its own default. Its tokens count; with no price, it adds nothing to the cost.",
-  },
+const modelWords: Record<Model, string> = {
+  opus: MODEL_NAMES.opus,
+  sonnet: MODEL_NAMES.sonnet,
+  haiku: MODEL_NAMES.haiku,
+  voice: "Stephen’s voice",
+  ears: "Stephen’s ears",
+  other: MODEL_NAMES.other,
 };
+
+/** Whether a use took anything at all: tokens, minutes or money. */
+const taken = (use: Use): boolean =>
+  use.tokensIn + use.tokensOut + use.spoken + use.heard + use.spend > 0;
 
 type Split = "model" | "purpose";
 
@@ -170,26 +141,25 @@ type SplitUse = Pick<UsePeriod, "models" | "purposes">;
 interface SplitKey {
   key: Model | Purpose;
   label: string;
-  what: string;
   shade: ChartColor;
   takenIn: (split: SplitUse) => Use;
   /** What it cost on one day. */
   spentOn: (day: Usage["days"][number]) => number;
 }
 
-/** What the bars and rows are split by: each model, or each use. */
+/** What the bars are split by: each model, or each use. */
 const keysOf = (split: Split): SplitKey[] =>
   split === "model"
     ? MODELS.map((key) => ({
         key,
-        ...modelWords[key],
+        label: modelWords[key],
         shade: modelShade[key],
         takenIn: (each) => each.models[key],
         spentOn: (day) => day.models[key],
       }))
     : PURPOSES.map((key) => ({
         key,
-        ...purposeWords[key],
+        label: purposeWords[key],
         shade: purposeShade[key],
         takenIn: (each) => each.purposes[key],
         spentOn: (day) => day.purposes[key],
@@ -416,134 +386,38 @@ const OverTime = ({
   );
 };
 
-/** What stands in the middle of the ring: the amount, and that it is all of it. Recharts hands it where the middle is. */
-const Middle = ({
-  viewBox,
-  amount,
-}: {
-  viewBox?: { cx?: number; cy?: number };
-  amount: string;
-}) => {
-  const { cx, cy } = viewBox ?? {};
-  if (cx === undefined || cy === undefined) {
-    return null;
-  }
-  return (
-    <text dominantBaseline="middle" textAnchor="middle" x={cx} y={cy}>
-      <Stat render={<tspan x={cx} y={cy - 6} />}>{amount}</Stat>
-      <tspan className="fill-muted-foreground text-xs" x={cx} y={cy + 14}>
-        in all
-      </tspan>
-    </text>
-  );
-};
-
-/** What each model cost, as a ring, with all of it in the middle. */
-const ModelDonut = ({
-  models,
-  period,
-}: {
-  models: Model[];
-  period: UsePeriod;
-}) => {
-  const config: ChartConfig = Object.fromEntries(
-    models.map((model) => [
-      model,
-      { label: modelWords[model].label, color: modelShade[model] },
-    ])
-  );
-  const data = models.map((model) => ({
-    model,
-    spend: period.models[model].spend,
-    // Recharts colours each part of the ring by its own `fill`.
-    fill: chartColor(modelShade[model]),
-  }));
-  return (
-    <div>
-      <span className="sr-only">
-        {models
-          .map(
-            (model) =>
-              `${modelWords[model].label}: ${euro(period.models[model].spend)}`
-          )
-          .join(", ")}
-      </span>
-      <ChartContainer
-        aria-hidden
-        className="aspect-square h-40"
-        config={config}
-      >
-        <PieChart>
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                formatter={(value, name) =>
-                  `${modelWords[MODELS.find((model) => model === name) ?? "opus"].label}: ${euro(Number(value))}`
-                }
-                hideLabel
-              />
-            }
-          />
-          <Pie
-            data={data}
-            dataKey="spend"
-            innerRadius={50}
-            isAnimationActive={false}
-            nameKey="model"
-            outerRadius={72}
-            strokeWidth={2}
-          >
-            <Label content={<Middle amount={euro(period.total.spend)} />} />
-          </Pie>
-        </PieChart>
-      </ChartContainer>
-    </div>
-  );
-};
-
-/** Each use of AI, split by what did it; beside it the ring of what each model cost. */
+/**
+ * Each use of AI that took something: what it cost, split by what did it,
+ * and under it the tokens and the minutes by voice it took. A use on a
+ * model without a price cost nothing, and still shows what it took.
+ */
 const WhichModel = ({ period }: { period: UsePeriod }) => {
-  const models = MODELS.filter((model) => period.models[model].spend > 0);
-  const purposes = PURPOSES.filter(
-    (purpose) => period.purposes[purpose].spend > 0
+  const purposes = PURPOSES.filter((purpose) =>
+    taken(period.purposes[purpose])
   );
   return (
-    <div className="bg-border grid gap-px border-t lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)]">
-      <div className="bg-card flex min-w-0 flex-col items-center gap-4 px-5 py-5">
-        <ModelDonut models={models} period={period} />
-        <ul className="flex w-full flex-col gap-2">
-          {models.map((model) => (
-            <li
-              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2"
-              key={model}
-            >
+    <ul className="flex min-w-0 flex-col gap-4 border-t px-5 py-5">
+      {purposes.map((purpose) => {
+        const use = period.purposes[purpose];
+        const of = use.spend;
+        const minutes = use.spoken + use.heard;
+        const parts = MODELS.filter(
+          (model) => period.matrix[purpose][model].spend > 0
+        );
+        return (
+          <li className="flex min-w-0 flex-col gap-1.5" key={purpose}>
+            <span className="flex items-baseline justify-between gap-3">
+              <span>{purposeWords[purpose]}</span>
               <span
-                aria-hidden
                 className={cn(
-                  "size-2 translate-y-px rounded-xs",
-                  swatch[modelShade[model]]
+                  "tabular-nums",
+                  of === 0 && "text-muted-foreground"
                 )}
-              />
-              <span className="truncate">{modelWords[model].label}</span>
-              <span className="text-muted-foreground tabular-nums">
-                {formatPercent(period.models[model].spend / period.total.spend)}
+              >
+                {of > 0 ? euro(of) : "–"}
               </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <ul className="bg-card flex min-w-0 flex-col justify-center gap-4 px-5 py-5">
-        {purposes.map((purpose) => {
-          const of = period.purposes[purpose].spend;
-          const parts = MODELS.filter(
-            (model) => period.matrix[purpose][model].spend > 0
-          );
-          return (
-            <li className="flex min-w-0 flex-col gap-1.5" key={purpose}>
-              <span className="flex items-baseline justify-between gap-3">
-                <span>{purposeWords[purpose].label}</span>
-                <span className="tabular-nums">{euro(of)}</span>
-              </span>
+            </span>
+            {parts.length > 0 ? (
               <ShareBar
                 className="h-2.5"
                 parts={parts.map((model) => ({
@@ -552,118 +426,41 @@ const WhichModel = ({ period }: { period: UsePeriod }) => {
                   shade: modelShade[model],
                 }))}
               />
-              <span className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-                {parts.map((model) => (
+            ) : null}
+            <span className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+              {parts.map((model) => (
+                <span
+                  className="flex items-center gap-1.5 whitespace-nowrap"
+                  key={model}
+                >
                   <span
-                    className="flex items-center gap-1.5 whitespace-nowrap"
-                    key={model}
-                  >
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "size-2 rounded-xs",
-                        swatch[modelShade[model]]
-                      )}
-                    />
-                    {modelWords[model].label}{" "}
-                    {formatPercent(period.matrix[purpose][model].spend / of)}
-                  </span>
-                ))}
+                    aria-hidden
+                    className={cn(
+                      "size-2 rounded-xs",
+                      swatch[modelShade[model]]
+                    )}
+                  />
+                  {modelWords[model]}{" "}
+                  {formatPercent(period.matrix[purpose][model].spend / of)}
+                </span>
+              ))}
+              <span className="tabular-nums sm:ml-auto">
+                {[
+                  use.tokensIn + use.tokensOut > 0
+                    ? `${tokens(use.tokensIn)} read, ${tokens(use.tokensOut)} written`
+                    : "",
+                  minutes > 0 ? `${whole(minutes)} min by voice` : "",
+                ]
+                  .filter((line) => line !== "")
+                  .join(" · ")}
               </span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 };
-
-/**
- * One row of the numbers: what it is, a bar as long as its share of the
- * cost, the tokens and the minutes where there is room for them, and what
- * it cost.
- */
-const UseRow = ({
-  label,
-  what,
-  use,
-  most,
-  shade,
-}: {
-  label: string;
-  what: string;
-  use: Use;
-  most: number;
-  shade: ChartColor;
-}) => {
-  const minutes = use.spoken + use.heard;
-  const tokensLine =
-    use.tokensIn + use.tokensOut > 0
-      ? `${tokens(use.tokensIn)} read, ${tokens(use.tokensOut)} written`
-      : "–";
-  return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-1.5 border-t px-5 py-3 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,12rem)_minmax(0,11rem)_5.5rem]">
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate">{label}</span>
-        <span className="text-muted-foreground text-xs">{what}</span>
-      </span>
-      <span className="bg-muted col-span-2 row-start-2 h-2 overflow-hidden rounded-full @3xl:col-span-1 @3xl:row-start-auto">
-        {use.spend > 0 && most > 0 ? (
-          <ShareBar
-            className="h-full"
-            parts={[{ key: label, share: use.spend / most, shade }]}
-          />
-        ) : null}
-      </span>
-      <span className="text-muted-foreground hidden min-w-0 flex-col text-right text-xs tabular-nums @3xl:flex">
-        <span className="truncate">{tokensLine}</span>
-        {minutes > 0 ? (
-          <span className="truncate">{`${whole(minutes)} min by voice`}</span>
-        ) : null}
-      </span>
-      <span
-        className={cn(
-          "col-start-2 row-start-1 text-right tabular-nums @3xl:col-start-auto @3xl:row-start-auto",
-          use.spend === 0 && "text-muted-foreground"
-        )}
-      >
-        {use.spend > 0 ? euro(use.spend) : "–"}
-      </span>
-    </li>
-  );
-};
-
-/** What one model is counted at: a minute, a million tokens read and written, or nothing it has a price for. */
-const priceLine = (model: Model): string => {
-  const price = PRICES[model];
-  if (price.minute > 0) {
-    return `${euroRate(price.minute)} a minute`;
-  }
-  if (price.tokensIn + price.tokensOut > 0) {
-    return `${euros(price.tokensIn)} a million tokens read, ${euros(price.tokensOut)} written`;
-  }
-  return "No price: its tokens count, its cost doesn’t";
-};
-
-/** What each model is counted at: a million tokens read and written, or a minute. */
-const Prices = () => (
-  <ul className="bg-border grid gap-px border-t sm:grid-cols-2 xl:grid-cols-3">
-    {MODELS.map((model) => (
-      <li className="bg-card flex flex-col gap-0.5 px-5 py-3" key={model}>
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden
-            className={cn("size-2 rounded-xs", swatch[modelShade[model]])}
-          />
-          {modelWords[model].label}
-        </span>
-        <span className="text-muted-foreground text-xs">
-          {priceLine(model)}
-        </span>
-      </li>
-    ))}
-  </ul>
-);
 
 /**
  * What the month's spend is against what the contract covers, under its
@@ -713,12 +510,10 @@ export const AiUse = () => {
   const { usage, contract } = view;
   const [period, setPeriod] = useState(allMonths);
   const [stack, setStack] = useState<Split>("model");
-  const [table, setTable] = useState<Split>("purpose");
 
   // Nothing used is nothing counted: a model without a price adds tokens
   // but no spend, and its use still shows.
-  const { tokensIn, tokensOut, spoken, heard, spend } = usage.total;
-  if (tokensIn + tokensOut + spoken + heard + spend === 0) {
+  if (!taken(usage.total)) {
     return <NothingUsed />;
   }
 
@@ -743,9 +538,10 @@ export const AiUse = () => {
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Said only of figures that aren't counted: what they are instead. */}
         <p className="text-muted-foreground min-w-0 flex-1 basis-64">
           {usage.counted
-            ? "Counted as it happened, every time a model was asked. How long Stephen listened is worked out from how long people talked."
+            ? ""
             : "Worked out from what happened: every interview, who is in, and each workflow that runs."}
         </p>
         <MonthSelect
@@ -802,7 +598,7 @@ export const AiUse = () => {
         description={
           covered !== null && month === null
             ? `Against the ${euros(covered)} of AI use a month the contract covers.`
-            : "In euros, as Grasp pays for it."
+            : undefined
         }
         title="What it cost, over time"
       >
@@ -811,48 +607,11 @@ export const AiUse = () => {
         </div>
       </Section>
 
-      <Section
-        description="Each use of AI, split by what did it. The careful model is the dearest, so it only does what needs care."
-        title="Which model does what"
-      >
-        {now.total.spend > 0 ? <WhichModel period={now} /> : null}
-      </Section>
-
-      <Section
-        action={
-          <SplitToggle
-            label="What the rows are"
-            onChange={setTable}
-            value={table}
-          />
-        }
-        description="Tokens are what a model reads and writes. Voice is counted by the minute."
-        title="The numbers"
-      >
-        <ul className="@container flex flex-col">
-          {keysOf(table).map(({ key, label, what, shade, takenIn }) => (
-            <UseRow
-              key={key}
-              label={label}
-              most={now.total.spend}
-              shade={shade}
-              use={takenIn(now)}
-              what={what}
-            />
-          ))}
-        </ul>
-        <div className="bg-row-group text-row-group-foreground grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-6 border-t px-5 py-2.5">
-          <span>In all</span>
-          <span className="tabular-nums">{euro(now.total.spend)}</span>
-        </div>
-      </Section>
-
-      <Section
-        description="What Grasp pays for AI, in euros. These are sample prices, the same for every organization."
-        title="What it is counted at"
-      >
-        <Prices />
-      </Section>
+      {taken(now.total) ? (
+        <Section title="Which model does what">
+          <WhichModel period={now} />
+        </Section>
+      ) : null}
     </>
   );
 };

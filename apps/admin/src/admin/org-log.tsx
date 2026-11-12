@@ -6,7 +6,7 @@
  * who came in, each workflow going live), and what a person at Grasp did by
  * hand in this admin. It can be narrowed by what an entry is about, who
  * did it, a team, a day, words in it, or to what went wrong only; a chart
- * shows how busy each day was. The entries are the model's (`logItemsOf`,
+ * shows how busy each day was once the log is long (`chartFrom`). The entries are the model's (`logItemsOf`,
  * `logDays`, `logHours`).
  *
  * Not here, as the prototype has it: what the prototype's Worker noted with
@@ -66,6 +66,9 @@ import { formatDate } from "./words.ts";
 
 /** How many entries the list shows before it asks to show more. */
 const page = 150;
+
+/** How many entries a log has before its days are charted. */
+const chartFrom = 30;
 
 /** What two entries saying the same thing may lie apart and still be one. */
 const sameMinuteMs = 60_000;
@@ -145,110 +148,104 @@ const BusyChart = ({
   const days = logDays(items);
   // A log of one day is drawn by the hour.
   const hourly = days.length === 1 && items.some((item) => item.at !== null);
-  let description = "Press a day to see only that day.";
-  if (days.length === 0) {
-    description = "Nothing has happened here yet.";
-  } else if (hourly) {
-    description =
-      "Everything so far happened on one day: here by the hour (UTC).";
-  }
+  const description = hourly
+    ? "Everything so far happened on one day: here by the hour (UTC)."
+    : "Press a day to see only that day.";
   return (
     <Section description={description} title="What happened, by who did it">
-      {days.length === 0 ? null : (
-        <div className="border-t px-3 pt-4 pb-2">
-          <ChartContainer
-            className="aspect-auto h-44 w-full"
-            config={chartConfig}
-          >
-            {hourly ? (
-              <BarChart data={logHours(items)}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  axisLine={false}
-                  dataKey="hour"
-                  tickFormatter={(hour: number) => `${two(hour)}:00`}
-                  tickLine={false}
-                  ticks={[0, 6, 12, 18, 23]}
+      <div className="border-t px-3 pt-4 pb-2">
+        <ChartContainer
+          className="aspect-auto h-44 w-full"
+          config={chartConfig}
+        >
+          {hourly ? (
+            <BarChart data={logHours(items)}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                axisLine={false}
+                dataKey="hour"
+                tickFormatter={(hour: number) => `${two(hour)}:00`}
+                tickLine={false}
+                ticks={[0, 6, 12, 18, 23]}
+              />
+              <YAxis
+                allowDecimals={false}
+                axisLine={false}
+                tickLine={false}
+                width={28}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {LOG_ACTORS.map((actor) => (
+                <Bar
+                  dataKey={actor}
+                  fill={chartColor(actorColors[actor])}
+                  isAnimationActive={false}
+                  key={actor}
+                  maxBarSize={28}
+                  stackId="hour"
                 />
-                <YAxis
-                  allowDecimals={false}
-                  axisLine={false}
-                  tickLine={false}
-                  width={28}
-                />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                {LOG_ACTORS.map((actor) => (
-                  <Bar
-                    dataKey={actor}
-                    fill={chartColor(actorColors[actor])}
-                    isAnimationActive={false}
-                    key={actor}
-                    maxBarSize={28}
-                    stackId="hour"
+              ))}
+            </BarChart>
+          ) : (
+            <BarChart
+              data={days}
+              onClick={(state) => {
+                const label = state?.activeLabel;
+                if (typeof label === "string") {
+                  onDay(day === label ? null : label);
+                }
+              }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                axisLine={false}
+                dataKey="day"
+                minTickGap={24}
+                tickFormatter={shortDate}
+                tickLine={false}
+              />
+              <YAxis
+                allowDecimals={false}
+                axisLine={false}
+                tickLine={false}
+                width={28}
+              />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    labelFormatter={(label) =>
+                      typeof label === "string" ? formatDate(label) : ""
+                    }
                   />
-                ))}
-              </BarChart>
-            ) : (
-              <BarChart
-                data={days}
-                onClick={(state) => {
-                  const label = state?.activeLabel;
-                  if (typeof label === "string") {
-                    onDay(day === label ? null : label);
-                  }
-                }}
-              >
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  axisLine={false}
-                  dataKey="day"
-                  minTickGap={24}
-                  tickFormatter={shortDate}
-                  tickLine={false}
+                }
+              />
+              {LOG_ACTORS.map((actor) => (
+                <Bar
+                  className="cursor-pointer"
+                  dataKey={actor}
+                  fill={chartColor(actorColors[actor])}
+                  isAnimationActive={false}
+                  key={actor}
+                  maxBarSize={28}
+                  stackId="day"
                 />
-                <YAxis
-                  allowDecimals={false}
-                  axisLine={false}
-                  tickLine={false}
-                  width={28}
-                />
-                <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      labelFormatter={(label) =>
-                        typeof label === "string" ? formatDate(label) : ""
-                      }
-                    />
-                  }
-                />
-                {LOG_ACTORS.map((actor) => (
-                  <Bar
-                    className="cursor-pointer"
-                    dataKey={actor}
-                    fill={chartColor(actorColors[actor])}
-                    isAnimationActive={false}
-                    key={actor}
-                    maxBarSize={28}
-                    stackId="day"
-                  />
-                ))}
-              </BarChart>
-            )}
-          </ChartContainer>
-          {/* Its own legend, so it wraps where the page is narrow. */}
-          <ul className="text-muted-foreground flex flex-wrap justify-center gap-x-4 gap-y-1 px-2 pt-3 pb-1 text-xs">
-            {LOG_ACTORS.map((actor) => (
-              <li className="flex items-center gap-1.5" key={actor}>
-                <span
-                  aria-hidden
-                  className={cn("size-2 flex-none rounded-xs", swatches[actor])}
-                />
-                {actorWords[actor]}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+              ))}
+            </BarChart>
+          )}
+        </ChartContainer>
+        {/* Its own legend, so it wraps where the page is narrow. */}
+        <ul className="text-muted-foreground flex flex-wrap justify-center gap-x-4 gap-y-1 px-2 pt-3 pb-1 text-xs">
+          {LOG_ACTORS.map((actor) => (
+            <li className="flex items-center gap-1.5" key={actor}>
+              <span
+                aria-hidden
+                className={cn("size-2 flex-none rounded-xs", swatches[actor])}
+              />
+              {actorWords[actor]}
+            </li>
+          ))}
+        </ul>
+      </div>
     </Section>
   );
 };
@@ -360,10 +357,6 @@ export const OrgLog = ({
     day !== null ||
     filters.topic.length + filters.actor.length + filters.team.length > 0;
   const listed = shown.slice(0, limit);
-  const groups = [...new Set(listed.map((each) => each.item.on))].map((on) => ({
-    on,
-    entries: listed.filter((each) => each.item.on === on),
-  }));
   /** How many entries `keep` keeps, among those the other choices keep. */
   const countOf = (facet: Facet, keep: (each: Said) => boolean): number =>
     all.filter((each) => keep(each) && matches(each, facet)).length;
@@ -416,14 +409,16 @@ export const OrgLog = ({
 
   return (
     <>
-      {/* The chart keeps every day in view while one is picked, so another can be picked from it. */}
-      <BusyChart
-        day={day}
-        items={all
-          .filter((each) => matches(each, "day"))
-          .map((each) => each.item)}
-        onDay={setDay}
-      />
+      {/* Only a long log is charted: a short one is read as it is. The chart keeps every day in view while one is picked, so another can be picked from it. */}
+      {all.length > chartFrom ? (
+        <BusyChart
+          day={day}
+          items={all
+            .filter((each) => matches(each, "day"))
+            .map((each) => each.item)}
+          onDay={setDay}
+        />
+      ) : null}
       <section className="bg-card overflow-hidden rounded-xl border">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
           <span
@@ -491,38 +486,34 @@ export const OrgLog = ({
           </p>
         ) : (
           <ol className="@container flex flex-col">
-            {groups.map((group) => (
-              <li key={group.on}>
-                <div className="bg-muted/50 text-muted-foreground flex items-baseline justify-between gap-3 border-t px-5 py-1.5 text-xs">
-                  <span>{formatDate(group.on)}</span>
-                  <span className="tabular-nums">{group.entries.length}</span>
-                </div>
-                <ul className="flex flex-col">
-                  {group.entries.map(({ item, text }) => (
-                    <li
-                      className="flex items-baseline gap-x-4 border-t px-5 py-2"
-                      key={item.key}
-                    >
-                      <span className="text-muted-foreground w-11 flex-none text-xs tabular-nums">
-                        {item.at === null ? "" : timeOf(item.at)}
-                      </span>
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1",
-                          item.problem && "text-status-attention"
-                        )}
-                      >
-                        {text}
-                      </span>
-                      <span className="text-muted-foreground hidden w-48 flex-none truncate text-right text-xs @2xl:block">
-                        {item.actor === "person" && item.person !== undefined
-                          ? (people.find((each) => each.id === item.person)
-                              ?.name ?? actorWords.person)
-                          : actorWords[item.actor]}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+            {listed.map(({ item, text }, index) => (
+              <li
+                className="flex items-baseline gap-x-4 border-t px-5 py-2"
+                key={item.key}
+              >
+                {/* Its day, said once: on the first entry of each day. */}
+                <span className="text-muted-foreground w-36 flex-none text-xs tabular-nums">
+                  <span className="inline-block w-24">
+                    {listed[index - 1]?.item.on === item.on
+                      ? ""
+                      : formatDate(item.on)}
+                  </span>
+                  {item.at === null ? "" : timeOf(item.at)}
+                </span>
+                <span
+                  className={cn(
+                    "min-w-0 flex-1",
+                    item.problem && "text-status-attention"
+                  )}
+                >
+                  {text}
+                </span>
+                <span className="text-muted-foreground hidden w-48 flex-none truncate text-right text-xs @2xl:block">
+                  {item.actor === "person" && item.person !== undefined
+                    ? (people.find((each) => each.id === item.person)?.name ??
+                      actorWords.person)
+                    : actorWords[item.actor]}
+                </span>
               </li>
             ))}
           </ol>

@@ -87,7 +87,7 @@ describe("an organization's AI use and hours", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("shows what core counted: this month and in all, the tokens and minutes, by use, by model, and the prices", async () => {
+  it("shows what core counted: this month and in all, the tokens and minutes, and each use by model", async () => {
     const snapshot = usedSnapshot();
     const base = await liveClient(snapshot);
 
@@ -96,7 +96,8 @@ describe("an organization's AI use and hours", () => {
 
     expect({
       status,
-      counted: has("Counted as it happened, every time a model was asked."),
+      // What core counted isn't said to be worked out.
+      workedOut: has("Worked out from what happened"),
       month: has(`${monthName(snapshot.now)}</span>`),
       inAll: has("In all, so far"),
       spend: html.split(">€24<").length - 1,
@@ -110,36 +111,26 @@ describe("an organization's AI use and hours", () => {
         has("3.5 million read, 500 thousand written"),
       ],
       voice: [has(">20<"), has("20 spoken, 0 heard")],
-      // The numbers, by use: reading and interviews cost, the rest nothing.
+      // By use: reading and interviews cost; what took nothing, like chat, isn't listed.
       byUse: [
         has(">€15<"),
         has(">€9.00<"),
-        has("Every interview Stephen held"),
+        has(">Chat<"),
         // The unpriced model's tokens are among the interviews'.
         has("1.5 million read, 300 thousand written"),
-      ],
-      shares: [has(">63%<"), has(">25%<"), has(">13%<")],
-      prices: [
-        has("€5 a million tokens read, €25 written"),
-        has("€0.15 a minute"),
-        has("€0.006 a minute"),
-        has("Other models (not priced)"),
-        has("No price: its tokens count, its cost doesn’t"),
       ],
       toCome: has("This section isn’t in the admin yet."),
     }).toStrictEqual({
       status: 200,
-      counted: true,
+      workedOut: false,
       month: true,
       inAll: true,
-      // In all so far, this month, and the numbers' total.
-      spend: 3,
+      // In all so far, and this month.
+      spend: 2,
       contract: [true, false],
       tokens: [true, true],
       voice: [true, true],
-      byUse: [true, true, true, true],
-      shares: [true, true, true],
-      prices: [true, true, true, true, true],
+      byUse: [true, true, false, true],
       toCome: false,
     });
   });
@@ -211,7 +202,9 @@ describe("an organization's AI use and hours", () => {
     expect({
       nothing: html.includes("Nothing used yet"),
       figures: html.includes("In all, so far"),
-    }).toStrictEqual({ nothing: false, figures: true });
+      // Its tokens show with the use they went to.
+      byUse: html.includes("500 thousand read, 100 thousand written"),
+    }).toStrictEqual({ nothing: false, figures: true, byUse: true });
   });
 
   it("knows no hours while core sends no drawn work, saying why", async () => {
