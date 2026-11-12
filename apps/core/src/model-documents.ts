@@ -3,7 +3,7 @@ import { toBase64 } from "@grasp-os/shared/encoding";
 import { isRecord } from "@grasp-os/shared/json";
 
 // A document a model reads as it is: a PDF, for Grasp's own conversion of
-// uploads into the Brain (knowledge/extract.ts, through
+// uploads into the Brain (files/extract.ts, through
 // `models(env).platformCall`). pi's adapters send text and images only, so
 // the gateway adds the document to the request's last user message as the
 // provider's API takes one (`withDocument`), in the body pi made, before
