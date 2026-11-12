@@ -23,6 +23,7 @@
   "@grasp-os/brain-next test/exact.test.ts": 0,
   "@grasp-os/brain-next test/meaning.test.ts": 0.2,
   "@grasp-os/brain-next test/pack.test.ts": 1.8,
+  "@grasp-os/brain-next test/recall-cost.test.ts": 0.4,
   "@grasp-os/brain-next test/words.test.ts": 0.9,
   "@grasp-os/chat test/state.test.ts": 0.5,
   "@grasp-os/compiler build-heap.test.ts": 17.8,
