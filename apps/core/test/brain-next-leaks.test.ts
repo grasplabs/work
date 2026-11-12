@@ -789,9 +789,10 @@ describe(
         mixed: prompts.filter((held) => held.length > 1),
         findings,
       }).toStrictEqual({
-        // The customer, and the person: from the holder's own words only,
-        // as an instruction is only ever a person's own word.
-        holderReads: [2, 1],
+        // The customer alone: the instruction the model proposed about a
+        // person is never drawn from a source, the holder's own words
+        // included.
+        holderReads: [1, 1],
         promptCount: 7,
         mixed: [],
         findings: [],

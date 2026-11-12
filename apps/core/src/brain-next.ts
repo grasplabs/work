@@ -198,8 +198,9 @@ const changeSchema = producerIdSchema(sourceIdMaxLength);
  * Whose words a source's text is, as core names them: a person of the
  * company speaking for themselves (or an admin), an outside party (a
  * customer's mail, a supplier's document), an agent, or the system. A
- * producer that can't say for sure says the least trusted one: only a
- * person's own words become preferences or instructions.
+ * producer that can't say for sure says the least trusted one. Each
+ * memory drawn records it; none drawn from a source is ever a preference
+ * or an instruction, whoever's words they were.
  */
 const saidBySchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("person"), personId: idSchema }),
@@ -371,8 +372,8 @@ const readerOf = async (
  *
  * With `said`, the Brain also draws memories from the version on its work
  * queue, in `said.priority`'s class: whose words it is (`said.by`, the
- * producer's to know: a person's own words are the only ones that become
- * preferences or instructions) and when they were said. Without it, the
+ * producer's to know, recorded on every memory drawn) and when they were
+ * said. Without it, the
  * version is kept and found, and nothing is drawn from it.
  */
 export const addSource = async (
