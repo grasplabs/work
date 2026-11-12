@@ -1,6 +1,7 @@
 import type {
   Agent,
   AgentSettings,
+  AgentDocument,
   AgentUsage,
   AgentWake,
 } from "@grasp-os/shared/agents";
@@ -55,6 +56,7 @@ import {
 import type { AskableWorkflow } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentAvatar } from "./agent-avatar.tsx";
+import { AgentDocuments } from "./agent-documents.tsx";
 import {
   AgentStateBadge,
   classesOn,
@@ -380,6 +382,7 @@ export const AgentPage = ({
   settings,
   teams,
   wakes,
+  documents,
   people,
   editable,
   usable,
@@ -395,6 +398,8 @@ export const AgentPage = ({
   settings: AgentSettings | undefined;
   teams: StephenReach["teams"];
   wakes: readonly AgentWake[];
+  /** The documents it answers from; undefined where core didn't say. */
+  documents: readonly AgentDocument[] | undefined;
   /** The company's people, whom a wake-up can work for. */
   people: readonly Member[];
   /** Whether the person may change agents at all. */
@@ -646,6 +651,17 @@ export const AgentPage = ({
                 submit={t`Save`}
               />
             </SettingsSection>
+            <Card variant="panel">
+              <ul className="[&>li:first-child]:border-t-0">
+                <AgentDocuments
+                  agent={agent}
+                  can={can}
+                  change={change}
+                  documents={documents}
+                  editable={editable}
+                />
+              </ul>
+            </Card>
           </div>
         </TabsContent>
         <TabsContent keepMounted value="access">

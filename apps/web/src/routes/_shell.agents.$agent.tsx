@@ -50,7 +50,7 @@ const AgentRoutePage = () => {
       />
     );
   }
-  const { managed, usable, people, models, firstAccess } = page.data;
+  const { managed, usable, people, models, firstAccess, documents } = page.data;
   const agent = managed.agents.find(({ id }) => id === agentId);
   if (agent === undefined) {
     return (
@@ -67,6 +67,7 @@ const AgentRoutePage = () => {
       <SiteHeader crumbs={[...crumbs, { label: agent.name }]} />
       <AgentPage
         agent={agent}
+        documents={documents}
         editable={isMemberAdmin(identity)}
         first={agent.id === managed.agents.at(0)?.id}
         key={agent.id}
@@ -116,11 +117,17 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
       // The people a wake-up can work for: none when core won't say, and
       // the page still shows the agent.
       const [listed] = await Promise.allSettled([session.members.list()]);
+      // The agent's documents: not shown when core won't say, and the
+      // page still shows the agent.
+      const [kept] = await Promise.allSettled([
+        session.connections.agentDocuments(params.agent),
+      ]);
       return {
         managed,
         usable,
         people: listed.status === "fulfilled" ? listed.value : [],
         models: chosen.status === "fulfilled" ? chosen.value : [],
+        documents: kept.status === "fulfilled" ? kept.value : undefined,
         firstAccess:
           params.agent === managed.agents.at(0)?.id
             ? await readFirstAccess(session)

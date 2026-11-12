@@ -230,6 +230,7 @@ const buttonNamed = (name: string) =>
 const page = (agent: Agent, tab: AgentTab, usable = true) => (
   <AgentPage
     agent={agent}
+    documents={[]}
     editable
     first={agent.id === stephen.id}
     firstAccess={agent.id === stephen.id ? firstAccess : undefined}
@@ -502,6 +503,7 @@ describe("the company's agents, on pages of their own", () => {
       await mounted(
         <AgentPage
           agent={claire}
+          documents={[]}
           editable={false}
           first={false}
           models={[]}

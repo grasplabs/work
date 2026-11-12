@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { ChatFileInput, ChatFileType } from "./chat.ts";
 import type { CompanyToolClass, ToolClassAudience } from "./connect.ts";
 import { modelRoles } from "./deployment-config.ts";
 import type { ModelRole } from "./deployment-config.ts";
@@ -90,6 +91,26 @@ export interface AgentSettings {
   audience: ToolClassAudience;
   /** Every class the company turns on or off, as this agent has it. */
   classes: { toolClass: CompanyToolClass; audience: AppClassAudience }[];
+}
+
+/** Most documents one agent keeps. */
+export const agentDocumentsMax = 10;
+
+/**
+ * A document an admin gave an agent to answer from: a file whose text
+ * core read once and keeps, never the file itself. The agent reads it in
+ * any chat it answers, as the company's word on its job, so whoever may
+ * ask the agent may learn what it says.
+ */
+export interface AgentDocument {
+  id: string;
+  /** The file's name, as it was added. */
+  name: string;
+  type: ChatFileType;
+  /** The file's size, in bytes. */
+  bytes: number;
+  /** When it was added (ISO 8601). */
+  addedAt: string;
 }
 
 /** Most characters a wake-up's opening line holds. */
@@ -183,6 +204,19 @@ export interface AgentsApi {
     toolClass: CompanyToolClass,
     audience: AppClassAudience
   ) => Promise<void>;
+  /** The documents an agent answers from, the oldest first. Never their text. */
+  agentDocuments: (agentId: string) => Promise<AgentDocument[]>;
+  /**
+   * Gives an agent a document: a file of one of a chat file's types and
+   * sizes, up to {@link agentDocumentsMax} an agent. Resolves once its
+   * text is read, and is refused with why when it can't be.
+   */
+  addAgentDocument: (
+    agentId: string,
+    file: ChatFileInput
+  ) => Promise<AgentDocument>;
+  /** Takes a document from an agent, for good. */
+  removeAgentDocument: (agentId: string, documentId: string) => Promise<void>;
   /**
    * What every agent used of the organization's models this month and the
    * month before, in the order of `agents`.

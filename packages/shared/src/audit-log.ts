@@ -87,6 +87,10 @@ const typeRules: readonly {
   { action: "agent.deleted", type: "config" },
   { action: "agent.reach.changed", type: "config" },
   { action: "agent.class.changed", type: "config" },
+  // An admin giving an agent a document to answer from, or taking one
+  // away (core's src/agent-documents.ts).
+  { action: "agent.document.added", type: "config" },
+  { action: "agent.document.removed", type: "config" },
   // An admin making, pausing or deleting one of an agent's wake-ups
   // (core's src/agent-wakes.ts).
   { action: "agent.wake.made", type: "config" },

@@ -800,6 +800,14 @@ msgstr "{name} n’a pas accepté cet utilisateur de service. Vérifiez son ID e
 msgid "{name} edited it"
 msgstr "{name} l’a modifié"
 
+#: src/agents/agent-documents.tsx
+msgid "{name} has {most} documents, the most an agent keeps. Remove one to add another."
+msgstr "{name} a {most} documents, le maximum qu'un agent conserve. Retirez-en un pour en ajouter un autre."
+
+#: src/agents/agent-documents.tsx
+msgid "{name} has no documents."
+msgstr "{name} n'a aucun document."
+
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} dans {appName}"
@@ -1106,6 +1114,10 @@ msgstr "{shown} exécutions ou plus"
 #: src/onboarding/setup-steps.tsx
 msgid "{signIn} is connected. I can see {people} people in {teams} teams."
 msgstr "{signIn} est connecté. Je vois {people} personnes dans {teams} équipes."
+
+#: src/agents/agent-documents.tsx
+msgid "{size} · Added {when}"
+msgstr "{size} · Ajouté le {when}"
 
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
@@ -1991,6 +2003,10 @@ msgstr "Ajouter une intégration"
 #: src/projects/project-people.tsx
 msgid "Add as"
 msgstr "Ajouter en tant que"
+
+#: src/agents/agent-documents.tsx
+msgid "Add document"
+msgstr "Ajouter un document"
 
 #: src/apps/field-editor.tsx
 msgid "Add field"
@@ -4853,6 +4869,7 @@ msgstr "Document"
 msgid "Document not found"
 msgstr "Document introuvable"
 
+#: src/agents/agent-documents.tsx
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
@@ -5606,6 +5623,10 @@ msgstr "Fichier {where} : {message}"
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Fichiers"
+
+#: src/agents/agent-documents.tsx
+msgid "Files {name} answers from, such as a checklist or a policy. It reads one when a question needs it. Anyone who may ask {name} can learn what these say."
+msgstr "Fichiers à partir desquels {name} répond, comme une liste de contrôle ou une politique. Il en lit un lorsqu'une question le demande. Toute personne pouvant interroger {name} peut apprendre ce qu'ils contiennent."
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
@@ -10032,6 +10053,10 @@ msgstr "Reçus de paiement"
 msgid "PDF"
 msgstr "PDF"
 
+#: src/agents/agent-documents.tsx
+msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most {most} documents."
+msgstr "PDF, Word, Excel, Markdown, texte, CSV ou JSON, jusqu'à 10 Mo chacun. Au plus {most} documents."
+
 #: src/onboarding/document-drop.tsx
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint ou texte"
@@ -10778,6 +10803,7 @@ msgstr "Le retenir"
 msgid "Remember something"
 msgstr "Retenir quelque chose"
 
+#: src/agents/agent-documents.tsx
 #: src/agents/agent-wakes.tsx
 #: src/apps/app-webhooks.tsx
 #: src/apps/data-model-changes.tsx
@@ -10794,6 +10820,7 @@ msgctxt "take out of a project"
 msgid "Remove"
 msgstr "Retirer"
 
+#: src/agents/agent-documents.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Remove {file}"
 msgstr "Retirer {file}"
@@ -13542,6 +13569,10 @@ msgstr "L’annuaire et la connexion via Microsoft ou Google. Ajoute les équipe
 #: src/brain/brain-atlas.ts
 msgid "The directory brought in the teams and their roles."
 msgstr "L’annuaire a apporté les équipes et leurs rôles."
+
+#: src/agents/agent-documents.tsx
+msgid "The documents couldn't be loaded. Reload the page."
+msgstr "Les documents n'ont pas pu être chargés. Rechargez la page."
 
 #: src/pages/frame-failure.tsx
 msgid "The draft's code doesn't build."

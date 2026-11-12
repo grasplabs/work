@@ -1,3 +1,4 @@
+import { agentDocumentsMax } from "./agents.ts";
 import {
   chatFileMaxBytes,
   chatFilesMax,
@@ -20,6 +21,16 @@ export const agentErrors = defineErrorFamily({
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":
     "That isn't a model your organization has chosen. Pick one in Settings › Models.",
+  // An agent's documents (core's agent-documents.ts).
+  "agent.too_many_documents": `An agent keeps at most ${agentDocumentsMax} documents. Remove one to add another.`,
+  "agent.document_unsupported":
+    "A document is a PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV or JSON file, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json.",
+  "agent.document_too_large": `A document is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB.`,
+  "agent.document_busy":
+    "The document's text couldn't be read just now. Add it again in a moment.",
+  "agent.document_unknown": "The agent has no such document.",
+  "agent.document_named":
+    "The agent already has another document with that name. Remove it first, or rename the file.",
   // An agent's wake-ups (core's agent-wakes.ts).
   "agent.wake_invalid":
     "That isn't a wake-up: it needs a schedule that names a time to come, a person of the company, and what to ask.",
