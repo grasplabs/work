@@ -832,37 +832,38 @@ describe("AI providers in connect", () => {
       ).resolves.toBe("ai_key.invalid");
     });
 
-    it("sends a recording to write down, and nothing else of OpenAI's audio, its speech included", async () => {
-      const grant = async () =>
-        await grantFor({
-          provider: "openai",
-          host: "eu.api.openai.com",
-          credential: "platform",
-        });
+    it("sends a line to say and a recording to write down to Mistral, and nothing else of its audio; none of OpenAI's", async () => {
+      const mistral = connect({ MISTRAL_API_KEY: platformKey });
+      const grant = async (provider: "mistral" | "openai", host: string) =>
+        await grantFor({ provider, host, credential: "platform" });
+      const asked = async (provider: "mistral" | "openai", url: string) =>
+        refusalOf(
+          await mistral.modelFetch(
+            modelRequest(url),
+            await grant(provider, new URL(url).hostname)
+          )
+        );
       const outcomes = {
-        speech: refusalOf(
-          await connect().modelFetch(
-            modelRequest("https://eu.api.openai.com/v1/audio/speech"),
-            await grant()
-          )
+        speech: await asked(
+          "mistral",
+          "https://api.mistral.ai/v1/audio/speech"
         ),
-        transcription: refusalOf(
-          await connect().modelFetch(
-            modelRequest("https://eu.api.openai.com/v1/audio/transcriptions"),
-            await grant()
-          )
+        transcription: await asked(
+          "mistral",
+          "https://api.mistral.ai/v1/audio/transcriptions"
         ),
-        translation: refusalOf(
-          await connect().modelFetch(
-            modelRequest("https://eu.api.openai.com/v1/audio/translations"),
-            await grant()
-          )
+        voices: await asked(
+          "mistral",
+          "https://api.mistral.ai/v1/audio/voices"
         ),
-        voices: refusalOf(
-          await connect().modelFetch(
-            modelRequest("https://eu.api.openai.com/v1/audio/voice_consents"),
-            await grant()
-          )
+        files: await asked("mistral", "https://api.mistral.ai/v1/files"),
+        openaiSpeech: await asked(
+          "openai",
+          "https://eu.api.openai.com/v1/audio/speech"
+        ),
+        openaiTranscription: await asked(
+          "openai",
+          "https://eu.api.openai.com/v1/audio/transcriptions"
         ),
       };
 
@@ -871,21 +872,27 @@ describe("AI providers in connect", () => {
         paths: sent.map(({ path }) => path),
       }).toStrictEqual({
         outcomes: {
-          speech: "path",
+          speech: "sent",
           transcription: "sent",
-          translation: "path",
           voices: "path",
+          files: "path",
+          openaiSpeech: "path",
+          openaiTranscription: "path",
         },
-        paths: ["/v1/audio/transcriptions"],
+        paths: ["/v1/audio/speech", "/v1/audio/transcriptions"],
       });
     });
   });
 
   describe("a realtime socket, for Grasp's live listening", () => {
     const realtimeUrl =
-      "https://eu.api.openai.com/v1/realtime?intent=transcription";
+      "https://api.mistral.ai/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3-0";
 
-    /** OpenAI's end of each socket connect opens: what it got, and how it closed. */
+    /** Connect with Grasp's Mistral key, which live listening goes on. */
+    const listening = (vars: Partial<Env> = {}) =>
+      connect({ MISTRAL_API_KEY: platformKey, ...vars });
+
+    /** Mistral's end of each socket connect opens: what it got, and how it closed. */
     const upstreams: {
       socket: WebSocket;
       got: string[];
@@ -921,7 +928,7 @@ describe("AI providers in connect", () => {
       const granted =
         grant === undefined
           ? await grantFor({
-              provider: "openai",
+              provider: "mistral",
               host: new URL(url).hostname,
               credential: "platform",
             })
@@ -937,39 +944,41 @@ describe("AI providers in connect", () => {
 
     it("refuses a socket without a platform grant, to any other path or host, without the placeholder, or without Grasp's key", async () => {
       const organizationGrant = await grantFor({
-        provider: "openai",
-        host: "eu.api.openai.com",
+        provider: "mistral",
+        host: "api.mistral.ai",
       });
       const elsewhereGrant = await grantFor({
-        provider: "openai",
+        provider: "mistral",
         host: "evil.example",
         credential: "platform",
       });
       const refusals = {
         forged: refusalOf(
-          await connect().fetch(await upgrade(realtimeUrl, { grant: "forged" }))
+          await listening().fetch(
+            await upgrade(realtimeUrl, { grant: "forged" })
+          )
         ),
         organization: refusalOf(
-          await connect().fetch(
+          await listening().fetch(
             await upgrade(realtimeUrl, { grant: organizationGrant })
           )
         ),
         responses: refusalOf(
-          await connect().fetch(
-            await upgrade("https://eu.api.openai.com/v1/responses")
+          await listening().fetch(
+            await upgrade("https://api.mistral.ai/v1/chat/completions")
           )
         ),
         conversation: refusalOf(
-          await connect().fetch(
+          await listening().fetch(
             await upgrade(
-              "https://eu.api.openai.com/v1/realtime?model=gpt-realtime"
+              "https://api.mistral.ai/v1/audio/transcriptions/realtime?model=another-model"
             )
           )
         ),
         elsewhere: refusalOf(
-          await connect().fetch(
+          await listening().fetch(
             await upgrade(
-              "https://evil.example/v1/realtime?intent=transcription",
+              "https://evil.example/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3-0",
               {
                 grant: elsewhereGrant,
               }
@@ -977,19 +986,19 @@ describe("AI providers in connect", () => {
           )
         ),
         ownKey: refusalOf(
-          await connect().fetch(
+          await listening().fetch(
             await upgrade(realtimeUrl, {
               headers: { authorization: "Bearer sk-core-of-its-own" },
             })
           )
         ),
         noUpgrade: refusalOf(
-          await connect().fetch(
+          await listening().fetch(
             new Request(realtimeUrl, {
               headers: {
                 [aiGrantHeader]: await grantFor({
-                  provider: "openai",
-                  host: "eu.api.openai.com",
+                  provider: "mistral",
+                  host: "api.mistral.ai",
                   credential: "platform",
                 }),
                 authorization: `Bearer ${aiCredentialPlaceholder}`,
@@ -997,9 +1006,7 @@ describe("AI providers in connect", () => {
             })
           )
         ),
-        noPlatformKey: refusalOf(
-          await connect({ OPENAI_API_KEY: "" }).fetch(await upgrade())
-        ),
+        noPlatformKey: refusalOf(await connect().fetch(await upgrade())),
       };
 
       expect(refusals).toStrictEqual({
@@ -1015,8 +1022,8 @@ describe("AI providers in connect", () => {
       expect(sent).toStrictEqual([]);
     });
 
-    it("opens OpenAI's socket with Grasp's key alone, and passes each message on both ways", async () => {
-      const response = await connect().fetch(await upgrade());
+    it("opens Mistral's socket with Grasp's key alone, and passes each message on both ways", async () => {
+      const response = await listening().fetch(await upgrade());
       const core = response.webSocket;
       core?.accept();
       const heard = Promise.withResolvers<string>();
@@ -1042,7 +1049,7 @@ describe("AI providers in connect", () => {
       }).toStrictEqual({
         status: 101,
         answered: '{"type":"session.updated"}',
-        path: "/v1/realtime?intent=transcription",
+        path: "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3-0",
         headers: ["authorization", "upgrade"],
         key: `Bearer ${platformKey}`,
       });
@@ -1051,7 +1058,7 @@ describe("AI providers in connect", () => {
     });
 
     it("closes core's end when OpenAI's closes, and says a provider that won't upgrade refused", async () => {
-      const response = await connect().fetch(await upgrade());
+      const response = await listening().fetch(await upgrade());
       const core = response.webSocket;
       core?.accept();
       const closed = Promise.withResolvers<number>();
@@ -1060,7 +1067,7 @@ describe("AI providers in connect", () => {
       });
       upstreams[0]?.socket.close(1011, "Gone");
       nextAnswer = () => Response.json({ error: "no" }, { status: 401 });
-      const refused = await connect().fetch(await upgrade());
+      const refused = await listening().fetch(await upgrade());
 
       expect({
         closed: await closed.promise,

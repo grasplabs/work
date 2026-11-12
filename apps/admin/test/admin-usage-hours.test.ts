@@ -99,7 +99,7 @@ describe("an organization's AI use and hours", () => {
       counted: has("Counted as it happened, every time a model was asked."),
       month: has(`${monthName(snapshot.now)}</span>`),
       inAll: has("In all, so far"),
-      spend: html.split(">€24<").length - 1,
+      spend: html.split(">€21<").length - 1,
       // Core doesn't send the contract yet: unknown, not unsigned.
       contract: [
         has("the contract isn’t known yet"),
@@ -113,12 +113,12 @@ describe("an organization's AI use and hours", () => {
       // The numbers, by use: reading and interviews cost, the rest nothing.
       byUse: [
         has(">€15<"),
-        has(">€9.00<"),
+        has(">€6.24<"),
         has("Every interview Stephen held"),
         // The unpriced model's tokens are among the interviews'.
         has("1.5 million read, 300 thousand written"),
       ],
-      shares: [has(">63%<"), has(">25%<"), has(">13%<")],
+      shares: [has(">71%<"), has(">28%<"), has(">1%<")],
       prices: [
         has("€5 a million tokens read, €25 written"),
         has("€0.012 a minute"),
@@ -163,7 +163,7 @@ describe("an organization's AI use and hours", () => {
       thisMonth: html.includes(`>${monthName(snapshot.now)}</span>`),
       // This month took nothing; everything so far is the earlier month's.
       nothingYet: html.includes(">€0.00<"),
-      inAll: html.includes(">€24<"),
+      inAll: html.includes(">€21<"),
       since: html.includes(`since ${monthName(earlier)}`),
     }).toStrictEqual({
       status: 200,

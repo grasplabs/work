@@ -145,13 +145,13 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       }
     );
     // The fake says each character in 25 ms, 450 ms in all: each word has
-    // its characters' share of it, one more for the pause after it;
-    // punctuation stays with its word.
+    // its characters' share of it, with the pause after it, longer after a
+    // comma and longest after a full stop; punctuation stays with its word.
     const last = line.split(" ").at(-1);
     expect(speech.words).toStrictEqual([
-      { text: "Hello", startMs: 0, endMs: 142 },
-      { text: "there,", startMs: 142, endMs: 308 },
-      { text: last, startMs: 308, endMs: 450 },
+      { text: "Hello", startMs: 0, endMs: 104 },
+      { text: "there,", startMs: 104, endMs: 260 },
+      { text: last, startMs: 260, endMs: 450 },
     ]);
     await expect(sentWith(line)).resolves.toStrictEqual([
       {

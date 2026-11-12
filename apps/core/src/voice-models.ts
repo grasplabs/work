@@ -163,19 +163,35 @@ const direction = /\[[^\]]*\]/gu;
 
 const spaces = /\s+/u;
 
+/** A word's last character that ends a sentence, and one that ends a clause. */
+const sentenceEnd = /[.?!…]$/u;
+const clauseEnd = /[,;:]$/u;
+
+/**
+ * The pause after a word, in characters' worth of time: a breath after a
+ * comma, a longer one after a full stop, as the page paces a line it has
+ * no times for (apps/web/src/voice/timing.ts).
+ */
+const pauseAfter = (word: string): number => {
+  if (sentenceEnd.test(word)) {
+    return 6;
+  }
+  return clauseEnd.test(word) ? 3 : 1;
+};
+
 /**
  * When each word of a line is said, estimated: Mistral's speech names no
  * times, so each word takes its share of the audio's length by its
- * characters, one more for the pause after it. Close enough to light a
- * line's words up as they are said (the page's use of them); never exact.
- * Directions are left out, as they aren't said.
+ * characters and the pause after it. Close enough to light a line's words
+ * up as they are said (the page's use of them); never exact. Directions
+ * are left out, as they aren't said.
  */
 export const wordsOver = (text: string, durationMs: number): SpokenWord[] => {
   const written = text
     .replaceAll(direction, " ")
     .split(spaces)
     .filter((word) => word !== "");
-  const shares = written.map((word) => charactersOf(word) + 1);
+  const shares = written.map((word) => charactersOf(word) + pauseAfter(word));
   const whole = shares.reduce((sum, share) => sum + share, 0);
   const words: SpokenWord[] = [];
   let before = 0;
