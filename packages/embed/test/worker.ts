@@ -113,8 +113,13 @@ const spoil = (engine: object): void => {
  * Every other text runs as in any embedder.
  */
 export class TrappingEmbedder extends Embedder {
-  protected override readonly model = int8Model;
+  protected override model: EmbedModel = int8Model;
   private readonly broken = new WeakSet<object>();
+
+  /** Test-only: the model this object loads from now on. */
+  use(model: EmbedModel): void {
+    this.model = model;
+  }
   /** The texts with `trapOnceWord` that trapped already, for the life of the object. */
   private readonly trapped = new Set<string>();
 

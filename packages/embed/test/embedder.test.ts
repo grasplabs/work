@@ -137,16 +137,11 @@ const [kind, heads, feedForward, floatChannels] = [0, 1, 2, 3] as const;
 const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
-/**
- * An embedder named `name` that runs a model made of `files`, each named
- * by its own hash and put in the bucket: for files that are wrong on
- * purpose but are what the model names.
- */
-const customEmbedder = async (
+/** A model named `name` made of `files`, each named by its own hash and put in the bucket. */
+const uploadedModel = async (
   name: string,
-  files: Record<Which, Uint8Array>,
-  kernel: Kernel = "auto"
-): Promise<DurableObjectStub<CustomEmbedder>> => {
+  files: Record<Which, Uint8Array>
+): Promise<EmbedModel> => {
   const named = async (bytes: Uint8Array) => ({
     sha256: hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))),
     size: bytes.byteLength,
@@ -158,6 +153,20 @@ const customEmbedder = async (
     tokens: await named(files.tokens),
   };
   await upload(model, files);
+  return model;
+};
+
+/**
+ * An embedder named `name` that runs a model made of `files`, each named
+ * by its own hash and put in the bucket: for files that are wrong on
+ * purpose but are what the model names.
+ */
+const customEmbedder = async (
+  name: string,
+  files: Record<Which, Uint8Array>,
+  kernel: Kernel = "auto"
+): Promise<DurableObjectStub<CustomEmbedder>> => {
+  const model = await uploadedModel(name, files);
   const stub = env.CUSTOM.getByName(name);
   await stub.use(model, kernel);
   return stub;
@@ -907,6 +916,27 @@ describe("embedder, several texts a call", () => {
     ]);
   });
 
+  it("counts the tokens of every attempt that trapped toward the call's bound, and defers the texts past it", async () => {
+    // A model reading 1,024 tokens: each text that traps twice is given
+    // 2,048, so 4 of them use up the 8,192 and the rest wait.
+    const model = await uploadedModel("trapping-tokens", {
+      tokenizer: new Uint8Array(tokenizer),
+      encoder: withMaxTokens(encoderInt8, 1024, 1),
+      tokens: new Uint8Array(tokensInt8),
+    });
+    const stub = env.TRAPPING.getByName("trapping-tokens");
+    await stub.use(model);
+    const texts = Array.from(
+      { length: 16 },
+      (_, i) => `${trapWord} ${String(i)} ${"a ".repeat(2000)}`
+    );
+    const results = await stub.embedMany(texts);
+    expect(outcomes(results)).toStrictEqual([
+      ...Array.from({ length: 4 }, () => "failed: kernel"),
+      ...Array.from({ length: 12 }, () => "deferred"),
+    ]);
+  });
+
   it("takes at most 16 texts a call, and refuses more, embedding none", async () => {
     await upload(int8Model, int8Files);
     const stub = env.INT8.getByName("many-bound");
@@ -978,6 +1008,52 @@ describe("embedder, several texts a call", () => {
     expect(outcomes(again)).toStrictEqual([int8Bits[0], int8Bits[1]]);
   });
 });
+
+/**
+ * What an older release (one that kept no row count or width) leaves in
+ * the storage of the object behind `stub` when it copies `model`: its
+ * constructor's table, and its copy, `files` in parts and rows.
+ */
+const asOlderRelease = async (
+  stub: DurableObjectStub<Int8Embedder>,
+  model: EmbedModel,
+  files: Files
+): Promise<void> => {
+  await runInDurableObject(stub, (_, state) => {
+    const { sql } = state.storage;
+    sql.exec(`CREATE TABLE IF NOT EXISTS loaded_model (
+      id INTEGER PRIMARY KEY CHECK (id = 1), files TEXT NOT NULL, format TEXT NOT NULL)`);
+    state.storage.transactionSync(() => {
+      sql.exec("DELETE FROM loaded_model");
+      sql.exec("DELETE FROM model_part");
+      sql.exec("DELETE FROM token_row");
+      // Each fixture file fits one part of 1 MiB.
+      sql.exec(
+        "INSERT INTO model_part (file, part, bytes) VALUES ('tokenizer', 0, ?), ('encoder', 0, ?)",
+        new Uint8Array(files.tokenizer),
+        new Uint8Array(files.encoder)
+      );
+      const rows = new Uint8Array(files.tokens).subarray(32);
+      // int8 rows of the fixtures' width, 128: a scale and 128 bytes.
+      const width = 4 + 128;
+      for (let id = 0; id * width < rows.byteLength; id += 1) {
+        sql.exec(
+          "INSERT INTO token_row (id, row) VALUES (?, ?)",
+          id,
+          rows.subarray(id * width, (id + 1) * width)
+        );
+      }
+      sql.exec(
+        "INSERT INTO loaded_model (id, files, format) VALUES (1, ?, 'int8')",
+        [
+          model.tokenizer.sha256,
+          model.encoder.sha256,
+          model.tokens.sha256,
+        ].join(" ")
+      );
+    });
+  });
+};
 
 describe("embedder, waking", () => {
   const damaged =
@@ -1090,39 +1166,11 @@ describe("embedder, waking", () => {
     const stub = env.INT8.getByName("rolled-back");
     await stub.embed(text);
     await evict(stub);
-    await runInDurableObject(env.INT8.getByName("rolled-back"), (_, state) => {
-      const { sql } = state.storage;
-      // What the older release's constructor and copy do, with its files.
-      sql.exec(`CREATE TABLE IF NOT EXISTS loaded_model (
-        id INTEGER PRIMARY KEY CHECK (id = 1), files TEXT NOT NULL, format TEXT NOT NULL)`);
-      state.storage.transactionSync(() => {
-        sql.exec("DELETE FROM loaded_model");
-        sql.exec("DELETE FROM model_part");
-        sql.exec("DELETE FROM token_row");
-        sql.exec(
-          "INSERT INTO model_part (file, part, bytes) VALUES ('tokenizer', 0, ?), ('encoder', 0, ?)",
-          new Uint8Array(tokenizer),
-          new Uint8Array(deepEncoderInt8)
-        );
-        const rows = new Uint8Array(deepTokensInt8).subarray(32);
-        const width = 4 + 128;
-        for (let id = 0; id * width < rows.byteLength; id += 1) {
-          sql.exec(
-            "INSERT INTO token_row (id, row) VALUES (?, ?)",
-            id,
-            rows.subarray(id * width, (id + 1) * width)
-          );
-        }
-        sql.exec(
-          "INSERT INTO loaded_model (id, files, format) VALUES (1, ?, 'int8')",
-          [
-            deepInt8Model.tokenizer.sha256,
-            deepInt8Model.encoder.sha256,
-            deepInt8Model.tokens.sha256,
-          ].join(" ")
-        );
-      });
-    });
+    await asOlderRelease(
+      env.INT8.getByName("rolled-back"),
+      deepInt8Model,
+      deepInt8Files
+    );
     await evict(env.INT8.getByName("rolled-back"));
     const { vector, model } =
       await env.INT8.getByName("rolled-back").embed(text);
@@ -1130,5 +1178,27 @@ describe("embedder, waking", () => {
       "fixture-int8",
       int8Bits[0],
     ]);
+  });
+
+  it("copies its model again, refusing nothing, after an older release copied the same model without its rows and width", async () => {
+    await upload(int8Model, int8Files);
+    const text = reference.embeddings[0]?.text ?? "";
+    const stub = env.INT8.getByName("rolled-back-same");
+    await stub.embed(text);
+    await evict(stub);
+    await asOlderRelease(
+      env.INT8.getByName("rolled-back-same"),
+      int8Model,
+      int8Files
+    );
+    await evict(env.INT8.getByName("rolled-back-same"));
+    const answer = await inObject(
+      env.INT8.getByName("rolled-back-same"),
+      async (embedder) => {
+        const { vector, model } = await embedder.embed(text);
+        return [model.name, bitsOf(vector)];
+      }
+    );
+    expect(answer).toStrictEqual(["fixture-int8", int8Bits[0]]);
   });
 });

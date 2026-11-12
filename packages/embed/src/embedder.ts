@@ -96,8 +96,8 @@ export const maxTextsPerCall = 16;
  * and 0.61 ms a token on Cloudflare, against the 30 s a Durable Object
  * request may use). It is 16 texts of 512 tokens: with a model that reads
  * at most 512, a call of 16 always fits; with one that reads 1,024, 8 full
- * texts do. The first text of a call always runs, whatever its length,
- * so every call embeds at least one. A caller that wants shorter calls
+ * texts do. A text whose module trapped counts the tokens it was given,
+ * and a text tried again counts twice. A caller that wants shorter calls
  * sends fewer texts.
  */
 export const maxTokensPerCall = 8192;
@@ -223,29 +223,33 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       );
     }
     const results: EmbedResult[] = [];
+    // Every token the encoder was given, a trapped attempt's included, so
+    // the bound holds whatever traps.
     let tokens = 0;
     for (const text of texts) {
       if (results.at(-1)?.kind === "deferred") {
         results.push(deferred);
         continue;
       }
-      // The first text always runs, whatever its length.
-      const budget = tokens === 0 ? Infinity : maxTokensPerCall - tokens;
       // oxlint-disable-next-line no-await-in-loop -- one text at a time: after a trap, the next one loads a fresh instance
-      let [result, used] = await this.embedOne(text, budget);
+      let [result, used] = await this.embedOne(text, maxTokensPerCall - tokens);
+      tokens += used;
       if (result.kind === "failed" && result.reason === "kernel") {
         // The trap may be the instance's (one worn by what ran before it),
         // not the text's: once more on the fresh one, then it is final.
         // oxlint-disable-next-line no-await-in-loop -- as above
-        [result, used] = await this.embedOne(text, budget);
+        [result, used] = await this.embedOne(text, maxTokensPerCall - tokens);
+        tokens += used;
       }
       results.push(result);
-      tokens += used;
     }
     return results;
   }
 
-  /** One text of a call, within `budget` tokens, and the tokens it used. */
+  /**
+   * One text of a call, within `budget` tokens, and the tokens the encoder
+   * was given for it: a trapped attempt's too.
+   */
   private async embedOne(
     text: unknown,
     budget: number
@@ -254,19 +258,21 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       return [{ kind: "failed", reason: "not-text" }, 0];
     }
     const loaded = await this.loaded();
+    let given = 0;
     try {
       const ids = this.inModule(() => loaded.engine.tokenize(text));
       if (ids.length > budget) {
         return [deferred, 0];
       }
+      given = ids.length;
       const vector = this.vectorOf(loaded, ids);
-      return [{ kind: "embedded", vector, model: loaded.identity }, ids.length];
+      return [{ kind: "embedded", vector, model: loaded.identity }, given];
     } catch (error) {
       const reason = failureOf(error);
       if (reason === undefined) {
         throw error;
       }
-      return [{ kind: "failed", reason }, 0];
+      return [{ kind: "failed", reason }, given];
     }
   }
 
@@ -328,7 +334,19 @@ export class Embedder extends DurableObject<EmbedderEnv> {
       table,
       identity: await modelIdentity(this.running),
     };
-    this.vectorOf(loaded, engine.tokenize(warmUpText));
+    try {
+      this.vectorOf(loaded, engine.tokenize(warmUpText));
+    } catch (error) {
+      // The warm-up text is always the same, so a trap on it is the
+      // embedder's, not a caller's text's: no call can run.
+      if (error instanceof WebAssembly.RuntimeError) {
+        throw new ModelFilesError(
+          `${this.running.name} can't run here: the module trapped on the warm-up text.`,
+          { cause: error }
+        );
+      }
+      throw error;
+    }
     return loaded;
   }
 
