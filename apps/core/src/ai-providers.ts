@@ -209,7 +209,7 @@ const platformProvider = (
  * on Grasp's keys whatever the organization connected: its admins can't
  * switch them off here, but they see where that data goes. Document
  * conversion stays on the deployment while Grasp has no key for its
- * provider (knowledge/extract.ts, `extractorFor`).
+ * provider (files/extract.ts, `extractorFor`).
  */
 const platformUses = (
   env: Env,

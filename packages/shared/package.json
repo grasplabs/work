@@ -177,6 +177,7 @@
     "./stores": "./src/stores.ts",
     "./submissions": "./src/submissions.ts",
     "./token-bucket": "./src/token-bucket.ts",
+    "./transcripts": "./src/transcripts.ts",
     "./uploads": "./src/uploads.ts",
     "./value-bounds": "./src/value-bounds.ts",
     "./value-depth": "./src/value-depth.ts",

@@ -34,21 +34,21 @@ import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { identify, memberRole, teamsOf } from "../auth/identity.ts";
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
+import { ExtractorUnavailableError, extractorFor } from "../files/extract.ts";
+import type { Extracted } from "../files/extract.ts";
+import { hasText, signatures } from "../files/upload-checks.ts";
 import { routeMember } from "../staff-audit.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import { requireWritable } from "./collection-rules.ts";
-import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
-import type { Extracted } from "./extract.ts";
 import { brainOf } from "./ports.ts";
-import { hasText, signatures } from "./upload-checks.ts";
 
 // Files uploaded into Knowledge (see @grasp-os/shared/uploads). An upload
 // is checked by what arrived (its size, and that its first bytes are the
 // type its name says), recorded as `pending` with its audit event, its
 // original stored in R2 (checked against its hash), and its extraction
 // started: a run of core's own workflow (extraction.ts) on the engine,
-// whose one step extracts the text in a sandbox (extract.ts) and saves it
+// whose one step extracts the text in a sandbox (files/extract.ts) and saves it
 // as the next version of the document at the file's name, then marks the
 // upload ready. The uploader's access is checked again just before that
 // save. Whatever fails ends the upload failed, with the code of why.
@@ -439,7 +439,7 @@ const extractionError = (uploadId: string, error: unknown): unknown => {
 
 /**
  * The extraction run's one step: extracts the upload's text with the
- * extractor its collection gets (extract.ts), after recording that the
+ * extractor its collection gets (files/extract.ts), after recording that the
  * file is sent out when it is converted by Grasp's own conversion, and
  * saves it as the
  * next version of its document, marking the upload ready and recording
