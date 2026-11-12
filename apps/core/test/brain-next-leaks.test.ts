@@ -440,7 +440,11 @@ describe(
       // the reader asks for is still not found, as its twin is. They hold
       // an ID the outsider's own longer chunk holds too: ranked past the
       // hidden ones, it would be missed if the cap counted them.
-      const capId = `CAP-${unique()}`;
+      // An ID by the exact way's rule (exact.ts: a letter and two digits
+      // or more), whatever the random part draws: eight hex characters
+      // hold fewer than two digits about once in 180 draws, and then the
+      // ID was a word, found "words" instead of "exact".
+      const capId = `CAP-42-${unique()}`;
       for (let index = 0; index <= exactCandidatesMax; index += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one source at a time
         await add(`Copy ${index} ${ownerMarker} ${capId}`, {
