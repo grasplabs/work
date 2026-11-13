@@ -168,6 +168,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone changed the parameters since you read them. Read them again, then retry.",
   "workflow.state_invalid":
     "That isn't state a step may keep: name each value with letters, digits and underscores, starting with a letter, and keep each value JSON.",
+  // A run's recall evidence (core's workflows/run-evidence.ts): the codes
+  // and words the old Brain's contract has for them, which runs keep
+  // until the cutover (GRA-1735) drops that contract.
+  "brain.revoked":
+    "Evidence this run recalled can no longer be read. Recall again before using it.",
+  "brain.budget_exceeded": "This request is over the Brain's limits for it.",
   "workflow.state_restricted":
     "A run in restricted mode keeps no state for later runs: what it read stays with it, so the step that set it failed.",
   "workflow.state_too_large":
@@ -237,7 +243,7 @@ export const workflowResourceErrors = defineErrorFamily({
 
 /**
  * The binding kinds the host catalog serves, beside other workflows. A
- * `knowledge` or `files` binding is for the Brain and files steps
+ * `brain` or `files` binding is for the Brain and files steps
  * (GRA-1662); until they land, no JSON task calls one.
  */
 export const catalogBindingKinds = [
@@ -245,7 +251,7 @@ export const catalogBindingKinds = [
   "model",
   "decision",
   "event",
-  "knowledge",
+  "brain",
   "files",
 ] as const;
 export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
@@ -449,11 +455,11 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("event"),
     source: identifierSchema.optional(),
   }),
-  // One Knowledge collection, through a permission the workflow itself
-  // holds to read it (GRA-700): its runs' actions read only that, and
-  // only what the person a run acts for may read too.
+  // The Brain, through the workflow's own `{ type: "platform" }`
+  // permission to read it (`brain`): its runs recall what the person a
+  // run acts for may read, never more.
   z.strictObject({
-    kind: z.literal("knowledge"),
+    kind: z.literal("brain"),
     permissionId: identifierSchema,
   }),
   // The run's own files (GRA-724): what its actions write and read back,
@@ -495,7 +501,7 @@ export interface WorkflowBindingApproval {
  * An active approval as a workflow's listing names it: with what its
  * target names, as an offer of the same target is named
  * (`PendingWorkflowBindings`): a connector's grant
- * by its binding name, a Brain collection by its name, a model by its ID;
+ * by its binding name, a model by its ID;
  * empty where the target names nothing, or its grant is gone.
  */
 export interface ListedWorkflowBindingApproval extends WorkflowBindingApproval {
@@ -508,7 +514,7 @@ export interface ListedWorkflowBindingApproval extends WorkflowBindingApproval {
  * with the targets core can offer now that would serve it, each checked as
  * an approval is. A decision is offered none: the admin names its
  * deciders. Across workflows (`pendingBindings`) only what is quick to
- * read is offered (models, events, files, Knowledge); a connector is
+ * read is offered (models, events, files, the Brain); a connector is
  * offered on the workflow's own read
  * (`pendingBindingsOf`).
  */
@@ -1135,19 +1141,6 @@ export interface WorkflowDefinitionProblem {
 
 /** Independent workflows over `/rpc`. */
 /**
- * A Knowledge collection a workflow may read itself, through a permission
- * it holds (GRA-700): its name, what the permission allows, and the
- * knowledge bindings of its versions that use it, by alias.
- */
-export interface WorkflowKnowledge {
-  collectionId: string;
-  name: string;
-  actions: string[];
-  /** Its knowledge bindings' aliases, active ones only; none while no binding uses it. */
-  aliases: string[];
-}
-
-/**
  * A file a run of a workflow wrote: what it is and which run wrote it,
  * never its bytes. Seen as a run's results are: by the person the run
  * acted for, and the organization's admins. Kept with its run, and gone
@@ -1281,8 +1274,6 @@ export interface WorkflowResourcesApi {
    * a user's own for a user; never what one returned or why it failed.
    */
   runs: (id: string) => Promise<WorkflowResourceRun[]>;
-  /** The Knowledge collections it may read itself, by name; for anyone with a role. */
-  knowledge: (id: string) => Promise<WorkflowKnowledge[]>;
   /**
    * The files its runs wrote, newest first, the latest page: what they are,
    * never their bytes. For anyone with a role, of the runs that acted for

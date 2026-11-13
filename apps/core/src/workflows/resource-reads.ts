@@ -1,397 +1,34 @@
-import { brainErrors, recallInputSchema } from "@grasp-os/brain/contract";
-import { recall } from "@grasp-os/brain/recall";
-import { d1BrainStore } from "@grasp-os/brain/recall-store";
-import type { PinnedVersion } from "@grasp-os/brain/recall-store";
-import { documents } from "@grasp-os/brain/schema";
-import { search } from "@grasp-os/brain/search";
-import { read } from "@grasp-os/brain/tools";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
-import { functionErrors } from "@grasp-os/shared/functions";
 import {
   chatIdSchema,
-  collectionIdSchema,
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
-import type { Json } from "@grasp-os/shared/json";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
-import { permissions, runChatSources } from "../db/core/schema.ts";
+import { readableVersionsAs } from "../brain-next.ts";
+import type { SourceVersionRef } from "../brain-next.ts";
+import { runChatSources } from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
-import type { Reader } from "../knowledge/access.ts";
-import { readAsDelegate } from "../knowledge/binding.ts";
-import { brainOf } from "../knowledge/ports.ts";
+import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
-import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
-import {
-  citedVersions,
-  evidenceOf,
-  isAccessRefusal,
-  recordRunEvidence,
-} from "./run-evidence.ts";
+import type { CallingRun } from "./resource-authority.ts";
+import { evidenceOf } from "./run-evidence.ts";
 
-// A run's reads of Knowledge (GRA-700; the threat model is on the issue). Each
-// is one of the run's named calls (resource-calls.ts, `makeCall`): its
-// binding frozen at the start, its authority decided again first, its
-// receipts kept. What each closes:
-//
-// - A collection the workflow wasn't granted, or the person can't read.
-//   A knowledge binding is one collection, through one permission the
-//   workflow holds; every read goes through Knowledge's own access rules
-//   as a delegate (`readAsDelegate`), as the run (the workflow, on behalf
-//   of the run's person), under that one permission: what both the grant
-//   and the person allow, nothing else. A document outside the collection,
-//   or one the person may not read, is refused alike, as one that isn't
-//   there (`permission.item_not_found`).
-// - Restricted data reaching an unrestricted run. Knowledge restricts the
-//   reading context before it returns a sensitive collection's data
-//   (knowledge/access.ts), and an independent run never enters restricted
-//   mode after its start (restricted.ts): such a read is refused
-//   (`permission.restricted`) before anything is returned, a search that
-//   finds nothing too, as that says something of what the collection
-//   holds (knowledge/search.ts). A run started restricted reads it.
-// - A recall wider than the binding, or without the Brain (GRA-1067; the
-//   threat model is on the issue). A recall is the Brain's own, the same
-//   service as every caller's: over the binding's one collection, under
-//   its one permission, as the run, and only while the workflow holds the
-//   `brain` permission (the recall port, `brain.denied`); a filter naming
-//   another collection is refused as one that isn't there
-//   (`brain.not_found`). What it read is recorded with the run.
-
-/** What a search asks: text, as Knowledge takes it, and how many hits. */
-const searchSchema = z.strictObject({
-  text: z.string().min(1).max(knowledgeSearchMaxLength),
-  limit: z.int().min(1).max(20).optional(),
-});
-
-/** What a read asks: one document, by its ID. */
-const readSchema = z.strictObject({ id: z.string().min(1).max(256) });
-
-/** What a recall asks: the Brain's recall input, over the binding's collection. */
-const recallSchema = recallInputSchema;
-
-/** How many hits a search answers when it doesn't say. */
-const defaultHits = 20;
-
-const callInvalid = (issue: string) =>
-  workflowResourceErrors.create("workflow.call_invalid", { issues: [issue] });
-
-/** A knowledge call, as an action asks it: an operation and its request. */
-export interface KnowledgeCall {
-  readonly operation: "search" | "read" | "recall";
-  readonly arguments: Json;
-}
+// What a run read, checked before anything of the run leaves it: the
+// Brain's versions its recalls pinned (run-evidence.ts) and what the chat
+// that started it had read (GRA-1093).
 
 /**
- * The collection a knowledge binding reads through its permission, read
- * now: the workflow's own, active, allowing `read`, or the call is denied.
+ * `brain.revoked` for a refusal (any expected error: a grant, a member or
+ * a read refused), or `error` as it is.
  */
-export const boundCollection = async (
-  env: Env,
-  run: CallingRun,
-  permissionId: string
-): Promise<{ permissionId: PermissionId; collectionId: CollectionId }> => {
-  const row = await drizzle(env.DB)
-    .select({ collectionId: permissions.objectId })
-    .from(permissions)
-    .where(
-      and(
-        eq(permissions.id, permissionId),
-        eq(permissions.subjectType, "workflow"),
-        eq(permissions.subjectId, run.workflowId),
-        eq(permissions.objectType, "collection"),
-        eq(permissions.status, "active")
-      )
-    )
-    .get();
-  if (row === undefined) {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  return {
-    permissionId: permissionIdSchema.parse(permissionId),
-    collectionId: collectionIdSchema.parse(row.collectionId),
-  };
-};
-
-/** The best hits for `text` in the bound collection the person may read. */
-const searched = async (
-  env: Env,
-  run: CallingRun,
-  bound: { permissionId: PermissionId; collectionId: CollectionId },
-  request: z.infer<typeof searchSchema>
-): Promise<Json> => {
-  try {
-    const { results, pins } = await readAsDelegate(
-      env,
-      runAuthority(run),
-      runContext(run),
-      bound.permissionId,
-      async (reader) => {
-        const brain = brainOf(env);
-        const found = await search(
-          brain,
-          reader,
-          request.text,
-          { limit: request.limit ?? defaultHits },
-          bound.collectionId
-        );
-        return {
-          results: found,
-          pins: await d1BrainStore(brain).pinsOf(reader, found.hits),
-        };
-      }
-    );
-    // Each document version whose excerpt it hands over, pinned to the run
-    // as a recall's evidence is, without the Brain (run-evidence.ts).
-    await recordRunEvidence(env, run, bound.permissionId, pins, {
-      recalled: false,
-    });
-    return results.hits.map((hit) => ({
-      id: hit.documentId,
-      title: hit.title,
-      excerpt: hit.snippet,
-    }));
-  } catch (error) {
-    // A collection the person may not read answers nothing, as one with
-    // no match: a search says nothing of what they can't read.
-    if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
-      return [];
-    }
-    throw error;
-  }
-};
-
-/** Where document `id` is, and its version now; undefined when there is none. */
-const locatedDocument = async (env: Env, id: string) =>
-  await drizzle(env.KNOWLEDGE)
-    .select({
-      collectionId: documents.collectionId,
-      currentVersion: documents.currentVersion,
-    })
-    .from(documents)
-    .where(eq(documents.id, id))
-    .get();
-
-/**
- * `store`'s pins of `refs` as `reader` may read them, a version it may not
- * read refused as a read refuses it (`knowledge.not_found`): so a pin taken
- * before the read says no more of what the person can't read than the
- * read does.
- */
-const readablePinsOf = async (
-  store: ReturnType<typeof d1BrainStore<Reader>>,
-  reader: Reader,
-  refs: Parameters<ReturnType<typeof d1BrainStore<Reader>>["pinsOf"]>[1]
-): Promise<PinnedVersion[]> => {
-  try {
-    return await store.pinsOf(reader, refs);
-  } catch (error) {
-    if (brainErrors.codeOf(error) === "brain.not_found") {
-      throw knowledgeErrors.create("knowledge.not_found");
-    }
-    throw error;
-  }
-};
-
-/** Tries of a read that a purge or a save keeps crossing. */
-const pinnedReadTries = 3;
-
-/**
- * Document `id` as `reader` reads it, with the pin of exactly the text it
- * hands over. The version is pinned before its text is read and again
- * after: the same pin both times says no purge or save landed between, so
- * the text is the pinned version's. A purge landing between the text and
- * the pin would otherwise pair the old text with the purged version's
- * pin, which every later check accepts. Crossed, it is read again, a few
- * times; then refused (`permission.unavailable`), never handed over
- * unpinned.
- */
-const pinnedRead = async (
-  env: Env,
-  reader: Reader,
-  id: string
-): Promise<{
-  found: Awaited<ReturnType<typeof read>>;
-  pins: PinnedVersion[];
-}> => {
-  const brain = brainOf(env);
-  const store = d1BrainStore(brain);
-  for (let attempt = 1; attempt <= pinnedReadTries; attempt += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
-    const located = await locatedDocument(env, id);
-    if (located === undefined) {
-      throw knowledgeErrors.create("knowledge.not_found");
-    }
-    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
-    const before = await readablePinsOf(store, reader, [
-      {
-        documentId: id,
-        collectionId: located.collectionId,
-        version: located.currentVersion,
-      },
-    ]);
-    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
-    const found = await read(brain, reader, id);
-    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
-    const pins = await readablePinsOf(store, reader, [
-      {
-        documentId: found.id,
-        collectionId: found.collectionId,
-        version: found.section?.version ?? found.currentVersion,
-      },
-    ]);
-    if (JSON.stringify(before) === JSON.stringify(pins)) {
-      return { found, pins };
-    }
-  }
-  throw functionErrors.create("permission.unavailable");
-};
-
-/** One document of the bound collection, by its ID. */
-const document = async (
-  env: Env,
-  run: CallingRun,
-  bound: { permissionId: PermissionId; collectionId: CollectionId },
-  request: z.infer<typeof readSchema>
-): Promise<Json> => {
-  const located = await locatedDocument(env, request.id);
-  if (located?.collectionId !== bound.collectionId) {
-    throw functionErrors.create("permission.item_not_found");
-  }
-  try {
-    const { found, pins } = await readAsDelegate(
-      env,
-      runAuthority(run),
-      runContext(run),
-      bound.permissionId,
-      async (reader) => await pinnedRead(env, reader, request.id)
-    );
-    // The document version it hands over, pinned to the run
-    // (run-evidence.ts).
-    await recordRunEvidence(env, run, bound.permissionId, pins, {
-      recalled: false,
-    });
-    return { title: found.title, text: found.text };
-  } catch (error) {
-    if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
-      throw functionErrors.create("permission.item_not_found");
-    }
-    throw error;
-  }
-};
-
-/**
- * The Brain's recall over the bound collection, as the run, under the
- * binding's permission: the same recall as every caller's, as JSON.
- */
-const recalled = async (
-  env: Env,
-  run: CallingRun,
-  bound: { permissionId: PermissionId; collectionId: CollectionId },
-  request: z.infer<typeof recallSchema>
-): Promise<Json> => {
-  const { pack, pins } = await readAsDelegate(
-    env,
-    runAuthority(run),
-    runContext(run),
-    bound.permissionId,
-    async (reader) => {
-      const brain = brainOf(env);
-      const recalledPack = await recall(brain, reader, request, [
-        bound.collectionId,
-      ]);
-      return {
-        pack: recalledPack,
-        pins: await d1BrainStore(brain).pinsOf(
-          reader,
-          citedVersions(recalledPack)
-        ),
-      };
-    }
-  );
-  // What it cites, pinned to the run under the binding's permission
-  // (run-evidence.ts): checked before anything leaves the run from now on.
-  // A replayed step answers its record and pins nothing more.
-  await recordRunEvidence(env, run, bound.permissionId, pins, {
-    recalled: true,
-  });
-  // A memory pack is plain data: what the contract's schemas parse.
-  return z.json().parse(pack);
-};
-
-/**
- * What knowledge call `call` asks, checked: a search's text and limit, a
- * read's document ID, or a recall's input (`workflow.call_invalid`
- * otherwise).
- */
-export const requireKnowledgeRequest = (
-  call: KnowledgeCall
-):
-  | { operation: "search"; request: z.infer<typeof searchSchema> }
-  | { operation: "read"; request: z.infer<typeof readSchema> }
-  | { operation: "recall"; request: z.infer<typeof recallSchema> } => {
-  if (call.operation === "search") {
-    const request = searchSchema.safeParse(call.arguments);
-    if (!request.success) {
-      throw callInvalid(
-        `arguments: Give text of 1 to ${knowledgeSearchMaxLength} characters, and a limit of 1 to 20 if any.`
-      );
-    }
-    return { operation: "search", request: request.data };
-  }
-  if (call.operation === "recall") {
-    const request = recallSchema.safeParse(call.arguments);
-    if (!request.success) {
-      throw callInvalid(
-        `arguments: Give a query of 1 to ${knowledgeSearchMaxLength} characters, and a budget if any.`
-      );
-    }
-    return { operation: "recall", request: request.data };
-  }
-  const request = readSchema.safeParse(call.arguments);
-  if (!request.success) {
-    throw callInvalid("arguments: Give a document's ID.");
-  }
-  return { operation: "read", request: request.data };
-};
-
-/**
- * Makes knowledge call `call` of `run` through `binding`, its authority
- * already decided again (`makeCall`): a search's hits, or a document.
- */
-export const callKnowledge = async (
-  env: Env,
-  run: CallingRun,
-  binding: FrozenCatalogBinding,
-  call: KnowledgeCall
-): Promise<Json> => {
-  const { target } = binding;
-  if (target.kind !== "knowledge") {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  const bound = await boundCollection(env, run, target.permissionId);
-  const request = requireKnowledgeRequest(call);
-  switch (request.operation) {
-    case "search": {
-      return await searched(env, run, bound, request.request);
-    }
-    case "recall": {
-      return await recalled(env, run, bound, request.request);
-    }
-    case "read": {
-      return await document(env, run, bound, request.request);
-    }
-    default: {
-      throw workflowResourceErrors.create("workflow.call_denied");
-    }
-  }
-};
+const revokedOr = (error: unknown): unknown =>
+  isExpectedError(error)
+    ? workflowResourceErrors.create("brain.revoked")
+    : error;
 
 /**
  * Refuses, as `brain.revoked`, run `runId` once the chat whose agent had
@@ -422,67 +59,72 @@ const requireChatPinsReadable = async (
     },
     rows.map(({ sourceId }) => sourceId)
   ).catch((error: unknown) => {
-    if (isAccessRefusal(error) || isExpectedError(error)) {
-      throw brainErrors.create("brain.revoked");
-    }
-    throw error;
+    throw revokedOr(error);
   });
   if (rows.some(({ sourceId }) => !readable.has(sourceId))) {
-    throw brainErrors.create("brain.revoked");
+    throw workflowResourceErrors.create("brain.revoked");
   }
 };
 
 /** `requireResourceRunEvidenceReadable` for `run`'s own evidence alone. */
 const requireOwnEvidenceReadable = async (
   env: Env,
-  run: CallingRun
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireChatPinsReadable(env, run.runId);
   const rows = await evidenceOf(env, run.runId);
   if (rows.length === 0) {
     return;
   }
-  const store = d1BrainStore(brainOf(env));
+  // SAFETY: core wrote each row from a pack's own item; checked again,
+  // strictly, by `readableVersionsAs`, which refuses a producer it
+  // doesn't know, and the run with it.
+  const versions = rows.map(
+    ({ producer, sourceId, version }) =>
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      ({ source: { producer, id: sourceId }, version }) as SourceVersionRef
+  );
   try {
     for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
-      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
-      const bound = await boundCollection(env, run, permissionId);
-      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
-      await readAsDelegate(
+      // oxlint-disable-next-line no-await-in-loop -- one per grant, few
+      await authorize(
         env,
         runAuthority(run),
-        runContext(run),
-        bound.permissionId,
-        async (reader) => {
-          const pinned = rows.filter(
-            (row) => row.permissionId === permissionId
-          );
-          // A recall's evidence needs the Brain too; a search's or a
-          // read's only the collection.
-          if (pinned.some((row) => row.recalled)) {
-            await store.requireBrainGrant(reader);
-          }
-          await store.requireDocumentsReadable(reader, pinned);
-        }
+        { type: "platform" },
+        "brain",
+        permissionIdSchema.parse(permissionId),
+        runContext(run)
       );
     }
-  } catch (error) {
-    if (isAccessRefusal(error)) {
-      throw brainErrors.create("brain.revoked");
+    // As the run's recalls read them: the company alone.
+    const readable = await readableVersionsAs(env, run.principal, versions, {
+      reach: "company",
+    });
+    const kept = new Set(
+      readable.map(({ source, version }) =>
+        JSON.stringify([source.producer, source.id, version])
+      )
+    );
+    if (
+      versions.some(
+        ({ source, version }) =>
+          !kept.has(JSON.stringify([source.producer, source.id, version]))
+      )
+    ) {
+      throw workflowResourceErrors.create("brain.revoked");
     }
-    throw error;
+  } catch (error) {
+    throw revokedOr(error);
   }
 };
 
 /**
  * Refuses anything leaving a run of a JSON workflow (GRA-299) that recalled
- * what it may no longer read, as `brain.revoked`: its
- * recalls are each through a knowledge binding, one collection under one
- * permission of the workflow's, so each binding's documents are checked
- * under that permission, as the run reads now: the permission still the
- * workflow's and active (`boundCollection`), the Brain still admitting
- * the run, each document still in its collection, readable there and
- * unpurged. A test run recalls nothing, so has nothing to check.
+ * what it may no longer read, as `brain.revoked`: each permission its
+ * recalls came through still the run's, active, now (`authorize`), and
+ * each version they handed it still one the whole company may read
+ * (`readableVersionsAs`, as `company`, as its recalls read): not erased,
+ * nor its readers narrowed away from the company. A test run recalls nothing, so has nothing to check.
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,
@@ -496,6 +138,19 @@ const requireOwnEvidenceReadable = async (
 export const requireResourceRunEvidenceReadable = async (
   env: Env,
   run: CallingRun
+): Promise<void> => {
+  await requireOwnEvidenceReadable(env, run);
+};
+
+/**
+ * The same check for a run that ended, before what it returned or why it
+ * failed is shown to anyone (resource-runs.ts `resultOf`): its record
+ * holds what it recalled, so once the company may no longer read that,
+ * the record is withheld as `brain.revoked`, its status and times shown.
+ */
+export const requireEndedRunEvidenceReadable = async (
+  env: Env,
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireOwnEvidenceReadable(env, run);
 };

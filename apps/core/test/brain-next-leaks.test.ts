@@ -209,7 +209,11 @@ const readingSurfaces = new Set([
 ]);
 
 /** The surfaces that recall, where no instruction file may ever show. */
-const recallSurfaces = new Set(["core recallAs", "store recall"]);
+const recallSurfaces = new Set([
+  "core recallAs",
+  "store recall",
+  "recall recallFor",
+]);
 
 /**
  * Calls every surface (or those `among`) as `probing`'s reader; what they
@@ -808,6 +812,35 @@ describe(
         },
         { inRecall }
       );
+      // Code's recall from an App or a workflow reads only what everyone
+      // in the company may: no person, no team. So nothing team-only
+      // reaches it even for someone in that team, nothing of the
+      // holder's own, and their own store is never addressed.
+      const holderThroughCode = await watched(
+        "the holder, through code's recall",
+        {
+          personId: holder,
+          reader: { person: holder, groups: [`team:${secretTeam}`] },
+          personal: false,
+          sharedWord,
+          markers: [ownerMarker, teamMarker, noneMarker, narrowedMarker],
+          hiddenVersions: everyVersionOf(...ownerIds, teamId, noneId),
+          hiddenInstructionFiles: [agentFile, appFile],
+          instructionGroups,
+          moments: [whileDraft],
+        },
+        {
+          "the holder's own source": ownerMarker,
+          "a team's source, though the holder is in the team": teamMarker,
+          "a source nobody is known to read": noneMarker,
+          "a source narrowed away from the outsider": narrowedMarker,
+        },
+        {
+          among: surfaces.filter(([name]) => name.startsWith("recall ")),
+          inRecall,
+        }
+      );
+
       // Recalling as an App does (`personal: false`), the holder finds
       // nothing of what is theirs alone: it is in their own store, which
       // that recall never addresses.
@@ -932,6 +965,7 @@ describe(
           ...inTheTeam,
           ...outAgain,
           ...asHolder,
+          ...holderThroughCode,
           ...asApp,
           ...asTeamMate,
           ...asAdmin,

@@ -42,16 +42,10 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import {
-  allChosen,
-  firstChoice,
-  formKey,
-  noChoice,
-  targetOf,
-} from "./binding-form.ts";
+import { firstChoice, formKey, noChoice, targetOf } from "./binding-form.ts";
 
 // What an App's actions reach through its declared resources (core's
-// resource-bindings.ts): the models, integrations and knowledge
+// resource-bindings.ts): the models, integrations and the Brain
 // its current version declares, whether a binding serves each now and,
 // when it doesn't, why. An admin binds each one to something that may
 // serve it, and replaces or revokes a binding. Core decides who may (the organization's own admins, never
@@ -70,7 +64,7 @@ const kindLabels: Readonly<
 > = {
   model: msg`AI`,
   connector: msg`Integration`,
-  knowledge: msg`Brain`,
+  brain: msg`Brain`,
   grasp: msg`The platform's statistics`,
   guests: msg`Guests`,
 };
@@ -115,10 +109,6 @@ const BoundTo = ({
   if (target.kind === "model") {
     return <span className="font-mono">{target.model}</span>;
   }
-  if (target.kind === "guests" || target.kind === "grasp") {
-    const { permissionId: permission } = target;
-    return <Trans>Permission {permission}</Trans>;
-  }
   if (target.kind === "connector") {
     // Core names the bound connection for everyone who reads the review,
     // while they can see it; its permission otherwise.
@@ -134,20 +124,10 @@ const BoundTo = ({
       </Trans>
     );
   }
-  return (
-    <ul className="flex flex-col gap-0.5">
-      {Object.entries(target.collections).map(([collection, permission]) => {
-        const name = label.collections[collection] ?? permission;
-        return (
-          <li key={collection}>
-            <Trans>
-              {collection}: {name}
-            </Trans>
-          </li>
-        );
-      })}
-    </ul>
-  );
+  // The platform's statistics, guests or the Brain: one of the App's
+  // platform permissions.
+  const { permissionId: permission } = target;
+  return <Trans>Permission {permission}</Trans>;
 };
 
 /** One labelled native select. */
@@ -207,9 +187,9 @@ const NothingToChoose = ({
         every action it declares. Grant one first.
       </Trans>
     ),
-    knowledge: (
+    brain: (
       <Trans>
-        The App has no permission to read a collection. Grant one first.
+        The App has no permission to read the Brain. Grant one first.
       </Trans>
     ),
     grasp: (
@@ -252,27 +232,13 @@ const BindForm = ({
   const { t } = useLingui();
   const { alias, binding } = resource;
   const [picked, setPicked] = useState(() => firstChoice(choices));
-  const [collections, setCollections] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      resource.collections.map((collection) => [
-        collection,
-        // Nothing chosen yet: each collection is chosen on purpose.
-        "",
-      ])
-    )
-  );
   if (noChoice(choices)) {
     return (
       <NothingToChoose resource={resource} truncated={choices.truncated} />
     );
   }
-  // Every collection declared now needs its own choice before binding;
-  // what is sent names those, and only those.
-  const chosen =
-    choices.kind !== "knowledge" ||
-    allChosen(resource.collections, collections);
   const submit = () => {
-    const target = targetOf(resource, choices, picked, collections);
+    const target = targetOf(choices, picked);
     if (target === undefined) {
       return;
     }
@@ -341,25 +307,19 @@ const BindForm = ({
           ))}
         </Choice>
       ) : null}
-      {choices.kind === "knowledge"
-        ? resource.collections.map((collection) => (
-            <Choice
-              key={collection}
-              label={t`Collection for ${collection}`}
-              onChange={(permission) => {
-                setCollections({ ...collections, [collection]: permission });
-              }}
-              value={collections[collection] ?? ""}
-            >
-              <NativeSelectOption value="">{t`Choose a collection`}</NativeSelectOption>
-              {choices.permissions.map(({ permissionId, name }) => (
-                <NativeSelectOption key={permissionId} value={permissionId}>
-                  {name ?? permissionId}
-                </NativeSelectOption>
-              ))}
-            </Choice>
-          ))
-        : null}
+      {choices.kind === "brain" ? (
+        <Choice
+          label={t`Permission to read the Brain`}
+          onChange={setPicked}
+          value={picked}
+        >
+          {choices.permissions.map(({ permissionId: permission }) => (
+            <NativeSelectOption key={permission} value={permission}>
+              {t`Permission ${permission}`}
+            </NativeSelectOption>
+          ))}
+        </Choice>
+      ) : null}
       {choices.truncated ? (
         <p className="text-muted-foreground max-w-prose">
           <Trans>
@@ -368,7 +328,7 @@ const BindForm = ({
           </Trans>
         </p>
       ) : null}
-      <Button disabled={busy || !chosen} size="sm" type="submit">
+      <Button disabled={busy} size="sm" type="submit">
         {binding === null ? (
           <Trans>Bind {alias}</Trans>
         ) : (
@@ -441,7 +401,7 @@ const Revoke = ({
 
 /** What `resource` declares, as a list of terms. */
 const Declared = ({ resource }: { resource: DeclaredResource }) => {
-  const { contract, actions, operations, collections } = resource;
+  const { contract, actions, operations } = resource;
   const tokens = resource.maxOutputTokens;
   return (
     <dl className="flex flex-col gap-1">
@@ -455,9 +415,6 @@ const Declared = ({ resource }: { resource: DeclaredResource }) => {
       )}
       {operations.length === 0 ? null : (
         <Term term={<Trans>Operations</Trans>}>{formatList(operations)}</Term>
-      )}
-      {collections.length === 0 ? null : (
-        <Term term={<Trans>Collections</Trans>}>{formatList(collections)}</Term>
       )}
       {tokens === null ? null : (
         <Term term={<Trans>Output</Trans>}>

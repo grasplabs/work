@@ -56,6 +56,7 @@ const stephen: Agent = {
   modelRole: null,
   model: null,
   state: "on",
+  ownerId: null,
   changedBy: null,
   changedAt: null,
 };
@@ -127,6 +128,7 @@ const fakeConnections = () => {
         ...input,
         model: input.model ?? null,
         state: "on",
+        ownerId: null,
         changedBy: "admin",
         changedAt: "2026-11-12T09:00:00.000Z",
       };
@@ -140,6 +142,22 @@ const fakeConnections = () => {
           audience: { who: "nobody" },
         })),
       });
+      return made;
+    },
+    makeOwnAgent: async (input: AgentInput): Promise<Agent> => {
+      await Promise.resolve();
+      asked.push(["make own", input]);
+      const made: Agent = {
+        id: `agent-${agents.length}`,
+        ...input,
+        model: input.model ?? null,
+        state: "on",
+        ownerId: "user-me",
+        changedBy: "user-me",
+        changedAt: "2026-11-12T09:00:00.000Z",
+      };
+      // As core makes it: theirs alone, with no settings of its own.
+      agents = [...agents, made];
       return made;
     },
     changeAgent: async (id: string, input: AgentInput) => {
@@ -292,7 +310,7 @@ const Page = ({
     open === "new" ? "overview" : (open.tab ?? "overview")
   );
   if (open === "new") {
-    return <NewAgent models={models} />;
+    return <NewAgent company={editable} models={models} />;
   }
   const agent = data.agents.find(({ name }) => name === open.agent);
   if (agent === undefined) {
@@ -330,6 +348,8 @@ const shown = async (connections: Connections, open: Open, editable = true) => {
     const read = await Promise.all(
       agents
         .slice(1)
+        // A person's own agent has no settings to read.
+        .filter(({ ownerId }) => ownerId === null)
         .map(async ({ id }): Promise<[string, AgentSettings]> => [
           id,
           await connections.agentSettings(id),
@@ -542,6 +562,60 @@ describe("an agent's page", () => {
     await press(button("Make agent"));
     expect(asked).toStrictEqual([["make", claire]]);
     expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
+  });
+
+  it("makes an agent of the person's own for someone who isn't an admin, with no choice of whose, and opens its page", async () => {
+    const { connections, asked } = fakeConnections();
+    const router = await shown(connections, "new", false);
+    const whose = document.querySelectorAll("input[name='whose']").length;
+    await set(field("Name"), "Claire", "input");
+    await set(field("What it is for"), "Chases unpaid invoices.", "input");
+    await set(field("Instructions"), "Answer only about invoices.", "input");
+    await press(button("Make agent"));
+    expect({ whose, asked, at: router.state.location.href }).toStrictEqual({
+      whose: 0,
+      asked: [["make own", claire]],
+      at: "/agents/agent-1",
+    });
+  });
+
+  it("lets an admin make an agent just for themselves instead of one for the company", async () => {
+    const { connections, asked } = fakeConnections();
+    await shown(connections, "new");
+    const mine = document.querySelector("input[name='whose'][value='own']");
+    if (!(mine instanceof HTMLElement)) {
+      throw new TypeError("Expected the choice of whose it is");
+    }
+    await press(mine);
+    await set(field("Name"), "Claire", "input");
+    await set(field("What it is for"), "Chases unpaid invoices.", "input");
+    await set(field("Instructions"), "Answer only about invoices.", "input");
+    await press(button("Make agent"));
+    expect(asked).toStrictEqual([["make own", claire]]);
+  });
+
+  it("shows a person's own agent as theirs alone, with no audience, classes or schedule to set, and saves what they change", async () => {
+    const { connections, asked } = fakeConnections();
+    await connections.makeOwnAgent(claire);
+    asked.length = 0;
+    await shown(connections, { agent: "Claire" });
+    const tabs = [...document.querySelectorAll("[role='tab']")].map((each) =>
+      each.textContent?.trim()
+    );
+    const text = document.body.textContent;
+    await set(field("Name"), "Clara", "input");
+    await press(button("Save"));
+    expect({
+      tabs,
+      alone: text.includes("Yours alone: nobody else sees or asks it"),
+      who: text.includes("Only you"),
+      asked,
+    }).toStrictEqual({
+      tabs: ["Overview", "Instructions"],
+      alone: true,
+      who: true,
+      asked: [["change", "agent-1", { ...claire, name: "Clara" }]],
+    });
   });
 
   it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {

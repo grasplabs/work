@@ -42,6 +42,11 @@ export const brainModules = {
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",
+  // Code's recall: an App's action, a workflow's step and a chat's code.
+  "apps/core/src/brain-recall.ts": "recall",
+  // Checks with core's readableVersionsAs that a run may still read what
+  // it recalled, and hands on only a refusal.
+  "apps/core/src/workflows/resource-reads.ts": "core",
   // A chat's recall before its question: hands the model what core's
   // recallAs gave the chat's own person, two of its packs merged at most
   // (mergeRecalled, which only drops and orders what both hold), as data;

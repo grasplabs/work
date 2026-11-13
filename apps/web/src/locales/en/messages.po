@@ -233,10 +233,6 @@ msgstr "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgid "{className}, for {name}"
 msgstr "{className}, for {name}"
 
-#: src/apps/resource-bindings.tsx
-msgid "{collection}: {name}"
-msgstr "{collection}: {name}"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "{coming} expected return"
 msgstr "{coming} expected return"
@@ -1465,10 +1461,6 @@ msgstr "2 Inventory"
 msgid "A bearer token"
 msgstr "A bearer token"
 
-#: src/workflows/binding-approvals.tsx
-msgid "A Brain collection it may read"
-msgstr "A Brain collection it may read"
-
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
 msgstr "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
@@ -2397,6 +2389,14 @@ msgstr "An admin refused or took back its start: it starts nothing."
 msgid "An admin revoked this version, so it can't be shared again."
 msgstr "An admin revoked this version, so it can't be shared again."
 
+#: src/agents/new-agent.tsx
+msgid "An agent for the company, or one only you use."
+msgstr "An agent for the company, or one only you use."
+
+#: src/agents/new-agent.tsx
+msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
+msgstr "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
+
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
 msgstr "An amount in a currency"
@@ -2867,6 +2867,10 @@ msgstr "As the App's code sets it"
 #: src/agents/agent-page.tsx
 msgid "As the company has it"
 msgstr "As the company has it"
+
+#: src/agents/agent-page.tsx
+msgid "As your company has set it, never more"
+msgstr "As your company has set it, never more"
 
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
@@ -3831,10 +3835,6 @@ msgctxt "a kind of field"
 msgid "Choice"
 msgstr "Choice"
 
-#: src/apps/resource-bindings.tsx
-msgid "Choose a collection"
-msgstr "Choose a collection"
-
 #: src/workflows/workflow-triggers.tsx
 msgid "Choose a connection."
 msgstr "Choose a connection."
@@ -4034,15 +4034,10 @@ msgstr "Collection {collectionId}"
 msgid "Collection actions"
 msgstr "Collection actions"
 
-#: src/apps/resource-bindings.tsx
-msgid "Collection for {collection}"
-msgstr "Collection for {collection}"
-
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection not found"
 msgstr "Collection not found"
 
-#: src/apps/resource-bindings.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Collections"
@@ -5960,6 +5955,10 @@ msgstr "For Stephen's requests, about “{label}” ({why}), do this: {proposal}
 msgid "For the {role}"
 msgstr "For the {role}"
 
+#: src/agents/new-agent.tsx
+msgid "For the company"
+msgstr "For the company"
+
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "For whom"
@@ -6893,6 +6892,10 @@ msgid "In {name}, make a service user that may read people’s basic and work de
 msgstr "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 
 #: src/agents/agent-page.tsx
+msgid "In Grasp's chat"
+msgstr "In Grasp's chat"
+
+#: src/agents/agent-page.tsx
 msgid "In Grasp's chat. Chat apps are under Access."
 msgstr "In Grasp's chat. Chat apps are under Access."
 
@@ -7194,10 +7197,6 @@ msgstr "It may read the name, email and teams of everyone in the organization."
 msgid "It opens for the member who created it, the admins, and whoever it is shared with."
 msgstr "It opens for the member who created it, the admins, and whoever it is shared with."
 
-#: src/workflows/files-and-apps.tsx
-msgid "It reads no Knowledge."
-msgstr "It reads no Knowledge."
-
 #: src/brain/memory-page.tsx
 msgid "It rests on nothing you can see."
 msgstr "It rests on nothing you can see."
@@ -7376,6 +7375,10 @@ msgstr "Its messages are deleted for good, and every change its agent holds for 
 msgid "Its name, job and picture show where people pick an agent. Its instructions are for the agent alone."
 msgstr "Its name, job and picture show where people pick an agent. Its instructions are for the agent alone."
 
+#: src/agents/new-agent.tsx
+msgid "Its name, job and picture show where you pick an agent. Its instructions are for the agent alone."
+msgstr "Its name, job and picture show where you pick an agent. Its instructions are for the agent alone."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
 msgstr "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
@@ -7436,10 +7439,6 @@ msgstr "Its URL takes nothing more, and no workflow starts on its events. This c
 msgid "Its version"
 msgstr "Its version"
 
-#: src/workflows/files-and-apps.tsx
-msgid "Its versions call it {aliases}"
-msgstr "Its versions call it {aliases}"
-
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
 msgstr "Its work"
@@ -7459,6 +7458,10 @@ msgstr "Judgment"
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
 msgstr "Jump to the newest message"
+
+#: src/agents/new-agent.tsx
+msgid "Just for me"
+msgstr "Just for me"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -7575,10 +7578,6 @@ msgstr "Knowledge"
 msgctxt "tab: what Grasp knows about a piece of work"
 msgid "Knowledge"
 msgstr "Knowledge"
-
-#: src/workflows/files-and-apps.tsx
-msgid "Knowledge it reads"
-msgstr "Knowledge it reads"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Known"
@@ -8847,10 +8846,6 @@ msgstr "No teams"
 msgid "No teams yet."
 msgstr "No teams yet."
 
-#: src/workflows/files-and-apps.tsx
-msgid "No version uses it yet"
-msgstr "No version uses it yet"
-
 #: src/workflows/workflow-triggers.tsx
 msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
 msgstr "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
@@ -9710,6 +9705,11 @@ msgstr "Only the workflow's builders can change these."
 msgid "Only when asked"
 msgstr "Only when asked"
 
+#: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
+msgid "Only you"
+msgstr "Only you"
+
 #: src/brain/sources-page.tsx
 msgctxt "a source nobody else may read"
 msgid "Only you"
@@ -9723,6 +9723,14 @@ msgstr "Only you and your agents read it, until you share it."
 #: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Only you can use it."
+
+#: src/agents/new-agent.tsx
+msgid "Only you see and ask it. It does at most what Grasp may do for you."
+msgstr "Only you see and ask it. It does at most what Grasp may do for you."
+
+#: src/agents/agents-overview.tsx
+msgid "Only you see and ask these."
+msgstr "Only you see and ask these."
 
 #: src/chat/plan-card.tsx
 msgid "Only you see it while you try it. You share it when it's right."
@@ -10328,6 +10336,10 @@ msgstr "Permission for the platform's statistics"
 msgid "Permission to invite guests"
 msgstr "Permission to invite guests"
 
+#: src/apps/resource-bindings.tsx
+msgid "Permission to read the Brain"
+msgstr "Permission to read the Brain"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Person"
@@ -10831,6 +10843,10 @@ msgstr "Real run"
 #: src/chat/thread.tsx
 msgid "Reasoning"
 msgstr "Reasoning"
+
+#: src/activity/audit-words.ts
+msgid "Recalled from the Brain"
+msgstr "Recalled from the Brain"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
@@ -13539,8 +13555,8 @@ msgid "The agents you can ask. Each has its own job and knows its own part of th
 msgstr "The agents you can ask. Each has its own job and knows its own part of the company."
 
 #: src/agents/agents-overview.tsx
-msgid "The agents your company sets up for you show here."
-msgstr "The agents your company sets up for you show here."
+msgid "The agents your company sets up for you show here. You can also make one of your own."
+msgstr "The agents your company sets up for you show here. You can also make one of your own."
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -13564,8 +13580,8 @@ msgid "The App has no permission to invite guests. Grant one first."
 msgstr "The App has no permission to invite guests. Grant one first."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App has no permission to read a collection. Grant one first."
-msgstr "The App has no permission to read a collection. Grant one first."
+msgid "The App has no permission to read the Brain. Grant one first."
+msgstr "The App has no permission to read the Brain. Grant one first."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the platform's statistics. Grant one first."
@@ -13696,6 +13712,10 @@ msgstr "The brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "The brain has no teams to group yet."
+
+#: src/workflows/binding-approvals.tsx
+msgid "The Brain, as each run's person may read it"
+msgstr "The Brain, as each run's person may read it"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
@@ -15690,6 +15710,10 @@ msgstr "What Grasp does not know yet, and who can answer it."
 msgid "What Grasp may do"
 msgstr "What Grasp may do"
 
+#: src/agents/agent-page.tsx
+msgid "What Grasp may do for you"
+msgstr "What Grasp may do for you"
+
 #: src/inbox/item-detail.tsx
 msgctxt "inbox item section"
 msgid "What happened"
@@ -16235,6 +16259,10 @@ msgstr "Who does it"
 msgid "Who gets it"
 msgstr "Who gets it"
 
+#: src/agents/new-agent.tsx
+msgid "Who it is for"
+msgstr "Who it is for"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Who leads it?"
 msgstr "Who leads it?"
@@ -16690,6 +16718,10 @@ msgstr "You can't read this source."
 msgid "You can't read this version."
 msgstr "You can't read this version."
 
+#: src/agents/new-agent.tsx
+msgid "You choose who may ask it and what it may do."
+msgstr "You choose who may ask it and what it may do."
+
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."
 msgstr "You come back to {app}’s page here."
@@ -16763,6 +16795,10 @@ msgstr "You're still signed in. Try again in a moment."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Your account"
+
+#: src/agents/agents-overview.tsx
+msgid "Your agents"
+msgstr "Your agents"
 
 #: src/chat/failure.ts
 msgid "Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while."
@@ -16838,6 +16874,10 @@ msgstr "Your company wants to know how the work really goes. First I ask how you
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. You lead your team, so I first ask how your team works with AI today. Then I ask what work the team does, and who does which. That takes about 20 minutes. Talking is the fastest. You can also type."
 msgstr "Your company wants to know how the work really goes. You lead your team, so I first ask how your team works with AI today. Then I ask what work the team does, and who does which. That takes about 20 minutes. Talking is the fastest. You can also type."
+
+#: src/agents/agents-overview.tsx
+msgid "Your company's"
+msgstr "Your company's"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."
@@ -16986,6 +17026,10 @@ msgstr "Your words"
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Your workspace, who may do what in it, and your own account."
 
+#: src/agents/agents-overview.tsx
+msgid "Yours"
+msgstr "Yours"
+
 #: src/brain/lessons-view.tsx
 msgctxt "lesson scope"
 msgid "Yours"
@@ -17000,6 +17044,10 @@ msgstr "Yours"
 msgctxt "memory records: the person's own"
 msgid "Yours"
 msgstr "Yours"
+
+#: src/agents/agent-page.tsx
+msgid "Yours alone: nobody else sees or asks it"
+msgstr "Yours alone: nobody else sees or asks it"
 
 #: src/brain/atlas-overlays.tsx
 #: src/workflows/workflow-flow.tsx

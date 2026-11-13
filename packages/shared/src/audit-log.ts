@@ -128,6 +128,11 @@ const typeRules: readonly {
   // An admin adding records the brain is built from, and a purge
   // rewriting a record's words.
   { action: "brain.records", type: "action" },
+  // An App, a workflow's run or a chat's code recalling from the Brain
+  // for a person (core's src/brain-recall.ts): for whom, how many
+  // passages and whether the budget cut it short, or why it was refused;
+  // never the question or what was found.
+  { action: "brain.recall", type: "read" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.
