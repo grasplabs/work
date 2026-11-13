@@ -916,10 +916,6 @@ msgstr "{name}: {hours, plural, one {# Stunde pro Woche} other {# Stunden pro Wo
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name}: {started} gestartet, {completed} abgeschlossen, {failed} fehlgeschlagen"
 
-#: src/brain/sources-page.tsx
-msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
-msgstr "{name}: Agenten durchsuchen es live, wenn Sie fragen. Das Gehirn behält nichts daraus."
-
 #: src/apps/app-status.tsx
 msgid "{names} use it"
 msgstr "{names} nutzen es"
@@ -5671,6 +5667,11 @@ msgstr "Ausweichmodelle"
 #: src/settings/ai-providers.tsx
 msgid "Fallbacks, in order"
 msgstr "Ausweichmodelle, der Reihe nach"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Fetched from a connection"
+msgstr "Aus einer Verbindung abgerufen"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
@@ -12088,6 +12089,10 @@ msgstr "Oben durchsucht. Danach wandern Ereignisse ins Archiv."
 msgid "Searched knowledge"
 msgstr "Im Wissen gesucht"
 
+#: src/brain/sources-page.tsx
+msgid "Searched live, nothing kept."
+msgstr "Durchsucht live, nichts behalten."
+
 #: src/chat/thread.tsx
 msgid "Searched the App's files for {text}"
 msgstr "In den Dateien der App nach {text} gesucht"
@@ -13759,6 +13764,14 @@ msgstr "Das Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Das Brain hat noch keine Teams zum Gruppieren."
+
+#: src/brain/sources-page.tsx
+msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "Das Gehirn behält eine Gmail-Nachricht oder einen Anhang oder eine OneNote-Seite, wenn ein Agent sie für Sie über ein Konto liest, das Sie selbst verbunden haben, und behält sie nur für Sie. Alles andere durchsuchen Agenten live, wenn Sie fragen, und das Gehirn behält nichts davon."
+
+#: src/brain/sources-page.tsx
+msgid "The Brain keeps the messages and pages an agent reads for you from this."
+msgstr "Das Gehirn behält die Nachrichten und Seiten, die ein Agent für Sie hierüber liest."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"

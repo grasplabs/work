@@ -155,7 +155,7 @@ export const recallFor = async (
     // teams alone; never what only a person may read. Nothing code sends
     // can change it.
     const { subject } = caller.authority;
-    const pack: BrainPack = await recallAs(env, caller.authority.onBehalfOf, {
+    const recalled = await recallAs(env, caller.authority.onBehalfOf, {
       ...recall,
       personal: false,
       company: subject.type !== "agent",
@@ -164,6 +164,18 @@ export const recallFor = async (
           ? await grantTeamsOf(env, caller.permissionId)
           : [],
     });
+    // A capture is one person's own, kept only in their own store (core's
+    // addSource refuses it anywhere else), which this recall never reads:
+    // none can be here. Narrowed for the SDK's type, never thrown over.
+    const pack: BrainPack = {
+      ...recalled,
+      items: recalled.items.flatMap((item) => {
+        const { producer, id } = item.source;
+        return producer === "capture"
+          ? []
+          : [{ ...item, source: { producer, id } }];
+      }),
+    };
     await caller.keep?.(pack);
     await audit({ items: pack.items.length, truncated: pack.truncated });
     return pack;
