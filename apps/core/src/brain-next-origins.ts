@@ -98,6 +98,9 @@ export const eraseChat = async (
     source: chatSource(personId, chatId),
     readers: { kind: "owner", personId },
     reason: "deleted",
+    // Erased as a group though no turn of it was kept yet, so none can be
+    // added under it after, whatever names it.
+    asGroup: true,
   });
 };
 

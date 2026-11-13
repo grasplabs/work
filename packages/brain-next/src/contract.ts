@@ -1044,6 +1044,14 @@ export type ErasureReason = (typeof erasureReasons)[number];
 export const sourceErasureSchema = z.strictObject({
   source: sourceIdSchema,
   reason: z.enum(erasureReasons),
+  /**
+   * That the key is a group's (`NewSource.group`), though no add may have
+   * named it yet: so it is erased as one, and keys under it are refused
+   * from then on, named in the group or not. A key an add named as a
+   * group is erased as one whether this is given or not. A person's own
+   * store's alone: the shared store, which holds no group, ignores it.
+   */
+  asGroup: z.literal(true).optional(),
 });
 export type SourceErasure = z.infer<typeof sourceErasureSchema>;
 

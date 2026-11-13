@@ -739,7 +739,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** The parts erasure.ts works with: the store's part of the bucket. */
   get #erasures(): ErasureStore {
-    return { storage: this.ctx.storage, bucket: this.#bucket };
+    return {
+      storage: this.ctx.storage,
+      bucket: this.#bucket,
+      groups: this.#kind.kind === "person",
+    };
   }
 
   /** The parts sources.ts works with: the store's part of the bucket. */
@@ -748,6 +752,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       storage: this.ctx.storage,
       db: this.#db,
       bucket: this.#bucket,
+      groups: this.#kind.kind === "person",
     };
   }
 
@@ -960,9 +965,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return "free";
     }
     const { sql } = this.ctx.storage;
+    // The shared store holds no group: nothing under one to look up.
     if (
       isErased(sql, await subjectOf(key)) ||
-      isUnderErasedGroup(sql, await subjectsOver(key))
+      (this.#kind.kind === "person" &&
+        isUnderErasedGroup(sql, await subjectsOver(key)))
     ) {
       return "erased";
     }
@@ -1016,15 +1023,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * that person's sources after them isn't held pending for good.
    */
   async eraseSource(request: SourceErasure): Promise<void> {
-    const { source, reason } = checked(sourceErasureSchema, request);
+    const { source, reason, asGroup } = checked(sourceErasureSchema, request);
     if (await this.#erasedWhole()) {
       return;
     }
     await this.#changing(async () => {
       await this.#readyToWrite();
-      await erase(this.#erasures, "source", source, reason, (sources) => {
-        stopWorkOn(this.#work, sources);
-      });
+      await erase(
+        this.#erasures,
+        "source",
+        source,
+        reason,
+        (sources) => {
+          stopWorkOn(this.#work, sources);
+        },
+        { asGroup: asGroup === true }
+      );
     });
   }
 

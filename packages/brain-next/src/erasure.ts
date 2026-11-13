@@ -101,6 +101,12 @@ import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 export interface ErasureStore {
   readonly storage: DurableObjectStorage;
   readonly bucket: BrainBucket;
+  /**
+   * Whether it may hold groups (a person's own store): only then is a
+   * source's erasure marked as a group's in its ledger entry, and only
+   * then does a replay read a source entry's body for that mark.
+   */
+  readonly groups: boolean;
 }
 
 /** What is erased: a source, or what a person alone may read. */
@@ -356,6 +362,34 @@ export const isUnderErasedGroup = (
       JSON.stringify(over)
     )
     .toArray().length > 0;
+
+/** Whether `subject` names a key kept as a group's (`known_groups`). */
+const isKnownGroup = (sql: SqlStorage, subject: string): boolean =>
+  sql
+    .exec("SELECT 1 FROM known_groups WHERE subject = ? LIMIT 1", subject)
+    .toArray().length > 0;
+
+/**
+ * A source entry's body (its ledger object's text): `{"group":true}` when
+ * the key was erased as a group's (`groupBody`), empty otherwise. Older
+ * entries are all empty, and an older release never reads a source
+ * entry's body: it applies a group's entry as its key's alone.
+ */
+const groupBody = JSON.stringify({ group: true });
+
+/** Whether a source entry's body (`groupBody`) marks a group's erasure. */
+const isGroupBody = (body: string): boolean => {
+  if (body === "") {
+    return false;
+  }
+  const parsed: unknown = JSON.parse(body);
+  return (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "group" in parsed &&
+    parsed.group === true
+  );
+};
 
 /** Keeps `subject` as a group's, as an add names it, in the add's transaction. */
 export const keepGroup = (sql: SqlStorage, subject: string): void => {
@@ -876,10 +910,17 @@ interface Recorded extends Record<string, SqlStorageValue> {
  * fails. Written again, it is the same.
  */
 const confirm = async (
-  { storage, bucket }: ErasureStore,
+  { storage, bucket, groups }: ErasureStore,
   { key, kind }: Recorded
 ): Promise<void> => {
-  let body = "";
+  const named = entryOf(key)?.subject;
+  let body =
+    groups &&
+    kind === "source" &&
+    named !== undefined &&
+    isKnownGroup(storage.sql, named)
+      ? groupBody
+      : "";
   if (kind === "person") {
     const hidden = storage.sql
       .exec<{ subject: string; version: number }>(
@@ -953,7 +994,8 @@ export const erase = async (
   kind: ErasureKind,
   id: string,
   reason: ErasureReason,
-  stop: (sources: string[]) => void
+  stop: (sources: string[]) => void,
+  { asGroup = false }: { asGroup?: boolean } = {}
 ): Promise<void> => {
   const { storage } = store;
   const { sql } = storage;
@@ -1002,6 +1044,11 @@ export const erase = async (
       const entry: LedgerEntry = { kind, subject, reason, at };
       const key = ledgerKeyOf(entry);
       const hidden = kind === "person" ? coveredFor(sql, id) : null;
+      // Said to be a group's: kept as one, so its entry is marked
+      // (`confirm`) and keys under it are refused from now on.
+      if (asGroup && store.groups && kind === "source") {
+        keepGroup(sql, subject);
+      }
       return { key, stopped: apply(sql, key, entry, hidden, false) };
     });
     recorded = { key: hid.key, kind };
@@ -1090,12 +1137,52 @@ const readPerson = async (
   return { hidden: read.flat(), reads: 1 + parts };
 };
 
+/** What a replay read of an entry: what a person's hid, whether a source's was a group's. */
+interface EntryRead {
+  hidden: Hidden | null;
+  group: boolean;
+  reads: number;
+}
+
+/**
+ * Whether a replay reads `entry`'s objects: a person's always; a
+ * source's in a store that may hold groups, for its mark (`groupBody`).
+ */
+const readsEntry = (entry: LedgerEntry, groups: boolean): boolean =>
+  entry.kind === "person" || groups;
+
+/** What a replay reads of `entry` (`readsEntry`), within `stopAt`. */
+const readEntry = async (
+  bucket: BrainBucket,
+  key: string,
+  entry: LedgerEntry,
+  groups: boolean,
+  stopAt: number
+): Promise<EntryRead> => {
+  if (entry.kind === "person") {
+    const { hidden, reads } = await readPerson(bucket, key, stopAt);
+    return { hidden, group: false, reads };
+  }
+  if (!readsEntry(entry, groups)) {
+    return { hidden: null, group: false, reads: 0 };
+  }
+  if (Date.now() >= stopAt) {
+    throw new OutOfTimeError();
+  }
+  return {
+    hidden: null,
+    group: isGroupBody(await textOf(bucket, key)),
+    reads: 1,
+  };
+};
+
 /**
  * One step of a replay: lists one page of the ledger after the store's
  * mark and applies, in order, the entries in it the store lacks,
  * literally (above), each in its own transaction and recorded as
- * confirmed. A source's entry takes no read; a person's is read with its
- * parts, at most `readsAtOnce` reads in flight. It stops after
+ * confirmed. A source's entry takes no read in the shared store, and one
+ * in a person's own (its body: whether it was a group's); a person's is
+ * read with its parts, at most `readsAtOnce` reads in flight. It stops after
  * `replayReadsPerStep` reads, or once `replayStepMs` is past, starting no
  * new read; an entry it didn't finish reading is read again by the next
  * step, which goes on after the last entry applied. Run it while the store
@@ -1110,6 +1197,7 @@ const readPerson = async (
 export const replayStep = async ({
   storage,
   bucket,
+  groups,
 }: ErasureStore): Promise<Replayed> => {
   const { sql } = storage;
   const stopAt = Date.now() + replayStepMs;
@@ -1142,27 +1230,30 @@ export const replayStep = async ({
       if (isNew) {
         if (
           Date.now() >= stopAt ||
-          (entry.kind === "person" && reads >= replayReadsPerStep)
+          (readsEntry(entry, groups) && reads >= replayReadsPerStep)
         ) {
           return { stopped, more: true };
         }
-        let hidden: Hidden | null = null;
-        if (entry.kind === "person") {
-          try {
-            // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
-            const read = await readPerson(bucket, key, stopAt);
-            ({ hidden } = read);
-            reads += read.reads;
-          } catch (error) {
-            if (error instanceof OutOfTimeError) {
-              return { stopped, more: true };
-            }
-            throw error;
+        let what: EntryRead;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
+          what = await readEntry(bucket, key, entry, groups, stopAt);
+        } catch (error) {
+          if (error instanceof OutOfTimeError) {
+            return { stopped, more: true };
           }
+          throw error;
         }
-        for (const source of storage.transactionSync(() =>
-          apply(sql, key, entry, hidden, true)
-        )) {
+        reads += what.reads;
+        const { hidden, group } = what;
+        for (const source of storage.transactionSync(() => {
+          // Kept as a group's before it applies: keys under it refused,
+          // though the copy restored predates the group's first add.
+          if (group) {
+            keepGroup(sql, entry.subject);
+          }
+          return apply(sql, key, entry, hidden, true);
+        })) {
           stopped.push(source);
         }
         applied += 1;

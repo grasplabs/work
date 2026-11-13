@@ -1906,6 +1906,101 @@ describe("a group in a person's own store", () => {
     });
   });
 
+  // Greptile, first paid review (P8): an erasure survives a restore whole.
+  // The copy restored predates the group's first add, so it knows no
+  // group: the ledger entry's mark tells the replay.
+  it("refuses every key under an erased group after a restore of a copy older than the group", async () => {
+    await add(own(), "Before the group", theirs());
+    const copy = await copyOf(own());
+    const group = newGroup();
+    await addIn(group, "1", "Quoll turn");
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    await restore(own(), copy);
+
+    const outcomes = await Promise.all(
+      [
+        { source: `${group}/1` },
+        { source: `${group}/2` },
+        { source: `${group}/3`, group },
+      ].map(
+        async (added) =>
+          await called(
+            own().addSource({
+              ...added,
+              change: "2",
+              text: "Quoll back",
+              access: theirs(),
+            })
+          ).then(
+            () => "added",
+            (error: unknown) =>
+              error instanceof Error ? error.message : String(error)
+          )
+      )
+    );
+    expect({
+      states: await Promise.all(
+        [`${group}/1`, `${group}/2`].map(
+          async (key) => await own().keyState(key)
+        )
+      ),
+      outcomes,
+      found: await foundFor("Quoll"),
+    }).toStrictEqual({
+      states: ["erased", "erased"],
+      outcomes: [erasedSource, erasedSource, erasedSource],
+      found: [],
+    });
+  });
+
+  // A group erased before any add named it, as the caller says it is one:
+  // the same, and across a restore.
+  it("erases a key said to be a group's as one, though no add named it", async () => {
+    await add(own(), "Before the group", theirs());
+    const group = newGroup();
+    const copy = await copyOf(own());
+    await own().eraseSource({
+      source: group,
+      reason: "deleted",
+      asGroup: true,
+    });
+
+    await restore(own(), copy);
+
+    await expect(own().keyState(`${group}/1`)).resolves.toBe("erased");
+    await expect(
+      called(
+        own().addSource({
+          source: `${group}/1`,
+          change: "1",
+          text: "Wallaby",
+          access: theirs(),
+        })
+      )
+    ).rejects.toThrow(erasedSource);
+  });
+
+  // An entry an older release wrote has no mark: it replays as its key's
+  // alone, as it always did.
+  it("replays a group's entry without the mark as its key's alone", async () => {
+    await add(own(), "Before the group", theirs());
+    const group = newGroup();
+    const copy = await copyOf(own());
+    await addIn(group, "1", "Bandicoot turn");
+    await own().eraseSource({ source: group, reason: "deleted" });
+    const [entry] = await groupEntries();
+    if (entry === undefined) {
+      throw new Error("No ledger entry");
+    }
+    await env.BRAIN_OBJECTS.put(entry, "");
+
+    await restore(own(), copy);
+
+    await expect(own().keyState(group)).resolves.toBe("erased");
+    await expect(own().keyState(`${group}/2`)).resolves.toBe("free");
+  });
+
   // ...and only a key an add named as a group: an erased key alone closes
   // nothing under it.
   it("leaves a key under a plainly erased key free", async () => {

@@ -980,6 +980,7 @@ const sourceErasureSchema = z.strictObject({
   source: sourceRefSchema,
   readers: sourceReadersSchema,
   reason: z.enum(erasureReasons),
+  asGroup: z.literal(true).optional(),
 });
 
 const personErasureSchema = z.strictObject({
@@ -1002,9 +1003,23 @@ const personErasureSchema = z.strictObject({
  */
 export const eraseSource = async (
   env: BrainEnv,
-  erased: { source: SourceRef; readers: SourceReaders; reason: ErasureReason }
+  erased: {
+    source: SourceRef;
+    readers: SourceReaders;
+    reason: ErasureReason;
+    /**
+     * That `source` is a group's (`addSource`'s `group`), though no add
+     * may have named it yet: its person's own store erases it as one, so
+     * every key under it stays refused, even after a restore of that
+     * store. For one person's own alone; the shared store holds no group.
+     */
+    asGroup?: true;
+  }
 ): Promise<void> => {
-  const { source, readers, reason } = checked(sourceErasureSchema, erased);
+  const { source, readers, reason, asGroup } = checked(
+    sourceErasureSchema,
+    erased
+  );
   const request = { source: sourceKeyOf(source), reason };
   // In its person's own store first, when it is theirs, and only once
   // that returned closed in the shared store, whatever its readers: the
@@ -1012,7 +1027,10 @@ export const eraseSource = async (
   // left. A failure of the first leaves the shared store as it was, and
   // the retry does both, in order.
   if (readers.kind === "owner") {
-    await ownBrain(env, readers.personId).eraseSource(request);
+    await ownBrain(env, readers.personId).eraseSource({
+      ...request,
+      ...(asGroup === undefined ? {} : { asGroup }),
+    });
   }
   await brain(env).eraseSource(request);
 };

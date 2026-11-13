@@ -74,6 +74,8 @@ export interface SourcesStore {
   readonly storage: DurableObjectStorage;
   readonly db: DrizzleSqliteDODatabase;
   readonly bucket: BrainBucket;
+  /** Whether it may hold groups: a person's own store; the shared one never. */
+  readonly groups: boolean;
 }
 
 const encoder = new TextEncoder();
@@ -331,7 +333,7 @@ const addAgain = "The Brain lost the file while adding it: add it again";
  * and indexed for recall when `indexed`; otherwise it is only kept whole.
  */
 export const addVersion = async (
-  { storage, db, bucket }: SourcesStore,
+  { storage, db, bucket, groups }: SourcesStore,
   added: NewSource,
   { indexed }: { indexed: boolean }
 ): Promise<SourceVersionRef> => {
@@ -344,7 +346,8 @@ export const addVersion = async (
       ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
       : {}),
     group: added.group === undefined ? null : await subjectOf(added.group),
-    over: await subjectsOver(added.source),
+    // The shared store holds no group: nothing under one to look up.
+    over: groups ? await subjectsOver(added.source) : [],
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     chunks: await Promise.all(
