@@ -13,7 +13,6 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Where an App (core's App) is in its life, and its builders moving it,
@@ -22,27 +21,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // for its builders, and its triggers don't fire, until it is shared. Core decides who may move
 // it (app-status.ts); a refusal shows under the buttons.
 
-/** Where an App is: core keeps only `archived` and its live version. */
-export type AppStatus = "draft" | "live" | "archived";
-
-/** The status of `app`, from whether it is archived and has a live version. */
-export const statusOf = (
-  app: Pick<App, "archived" | "currentVersion">
-): AppStatus => {
-  if (app.archived) {
-    return "archived";
-  }
-  return app.currentVersion === null ? "draft" : "live";
-};
-
 /** What a builder can move an App along, as core's `apps` names it. */
-export type Transition = "archive" | "restore";
-
-const moveOf = async (
-  session: Session,
-  app: string,
-  transition: Transition
-): Promise<App> => await session.apps[transition](app);
+type Transition = "archive" | "restore";
 
 /**
  * Asks before archiving: it takes the App offline and stops its runs,
@@ -96,7 +76,7 @@ export const useStatusMove = (app: string) => {
   const move = (transition: Transition): void => {
     void run(async (session) => {
       await changeThenRefresh(
-        async () => await moveOf(session, app, transition),
+        async () => await session.apps[transition](app),
         async () => {
           await router.invalidate({ sync: true });
         }
@@ -113,18 +93,17 @@ export const StatusNote = ({
   app: Pick<App, "archived" | "currentVersion">;
 }) => {
   const { t } = useLingui();
-  const status = statusOf(app);
-  if (status === "draft") {
-    return (
-      <p className="text-muted-foreground">
-        {t`Only its builders open it, and its triggers don't fire, until it is shared with the team.`}
-      </p>
-    );
-  }
-  if (status === "archived") {
+  if (app.archived) {
     return (
       <p className="text-muted-foreground">
         {t`Archived: nobody opens its pages and nothing runs, until a builder restores it.`}
+      </p>
+    );
+  }
+  if (app.currentVersion === null) {
+    return (
+      <p className="text-muted-foreground">
+        {t`Only its builders open it, and its triggers don't fire, until it is shared with the team.`}
       </p>
     );
   }

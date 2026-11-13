@@ -21,15 +21,15 @@ const sealedWorkflow = (value: unknown): WorkflowBindingExtras => {
   if (typeof alias !== "string") {
     return unsealed("a workflow with no alias");
   }
-  const { workflowId } = sealedRecord(sealed.pinned, "a pin");
+  const { workflowId } = sealed;
   if (typeof workflowId !== "string" || workflowId.length === 0) {
-    return unsealed("a pin that isn't a workflow");
+    return unsealed("a binding that names no workflow");
   }
-  return { alias, pinned: { workflowId } };
+  return { alias, workflowId };
 };
 
 /**
- * The workflow each binding of a release pinned, read back from
+ * The workflow each binding of a release names, read back from
  * its sealed contracts (`contracts.json`'s `workflows`): what its seal
  * resolved, whatever its bindings say now. Throws on anything else.
  */

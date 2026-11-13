@@ -84,12 +84,12 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { memberEntry, requireNotStaff, requireSharable } from "./sharing.ts";
+import { shareWorkflowResource } from "./workflow-members.ts";
 import {
   listWorkflowResources,
   nextGeneration,
   nextGenerationWhere,
   requireWorkflowRole,
-  shareWorkflowResource,
 } from "./workflow-resources.ts";
 
 // Projects (GRA-1458): an optional grouping of Apps and workflows for a

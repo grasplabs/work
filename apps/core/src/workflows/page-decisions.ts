@@ -52,7 +52,7 @@ export interface PageOf {
  * Whether App `app` may answer, through its release at `version`, a
  * decision of a run of workflow `workflowId`, whichever version: as the
  * reference's inbox lists it (workflow-reference-queries.ts), the workflow
- * the release's seal pins for one of its aliases, while the App's binding
+ * the release's seal binds for one of its aliases, while the App's binding
  * of that alias still names it.
  */
 const answersThrough = async (
@@ -63,7 +63,7 @@ const answersThrough = async (
 ): Promise<boolean> => {
   const sealed = await loadRelease(env, app, release);
   const aliases = declaredWorkflows(sealed.app, sealed.workflows)
-    .filter(({ pinned }) => pinned?.workflowId === run.workflowId)
+    .filter(({ workflowId }) => workflowId === run.workflowId)
     .map(({ alias }) => alias);
   if (aliases.length === 0) {
     return false;

@@ -100,7 +100,7 @@ const generateReleaseModules = async (
     manifest,
     fingerprints: await contractFingerprints(manifest),
     workflows: Object.fromEntries(
-      bound.map(({ alias, pinned }) => [alias, { alias, pinned }])
+      bound.map(({ alias, workflowId }) => [alias, { alias, workflowId }])
     ),
   });
   return {

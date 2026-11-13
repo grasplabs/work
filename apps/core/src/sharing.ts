@@ -2,7 +2,10 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { canBuild, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { ShareCandidates } from "@grasp-os/shared/subject-members";
+import type {
+  ShareCandidates,
+  SubjectMemberRef,
+} from "@grasp-os/shared/subject-members";
 import { and, asc, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -30,17 +33,6 @@ import { viaProjectSql } from "./project-sql.ts";
 export interface MemberColumns {
   memberType: SQLiteColumn;
   memberId: SQLiteColumn;
-}
-
-/** Whom a resource is shared with: a person, a team or a project. */
-export interface MemberRef {
-  type: "person" | "team" | "project";
-  id: string;
-}
-
-/** Whom a resource that is never shared with a project is shared with. */
-export interface PersonOrTeam extends MemberRef {
-  type: "person" | "team";
 }
 
 /**
@@ -134,7 +126,7 @@ export interface SharingRules {
  */
 export const requireSharable = async (
   env: Pick<Env, "DB">,
-  member: MemberRef,
+  member: SubjectMemberRef,
   rules: SharingRules,
   /**
    * Who shares: needed to share with a project, which only its builders
@@ -184,7 +176,7 @@ export const memberEntry = (
   by: Pick<Identity, "userId" | "staff"> & { actor?: AuditActor },
   action: string,
   target: { type: string; id: string },
-  member: MemberRef & { role: string }
+  member: SubjectMemberRef & { role: string }
 ): AuditEntry => ({
   // Whoever acts: an agent acting for the person when one does (an
   // `Acting`'s actor), the person themselves otherwise.

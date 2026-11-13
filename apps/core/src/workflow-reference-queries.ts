@@ -3,7 +3,7 @@ import {
   workflowFunctions,
   workflowQueryNames,
 } from "@grasp-os/runtime/host";
-import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/runtime/host";
+import type { WorkflowQueryName } from "@grasp-os/runtime/host";
 import {
   categoryOf,
   isRetryableCode,
@@ -87,14 +87,14 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   over the caller's own runs, and a cursor is a place in that list.
 // - A run's ID as an oracle: `history` reads a run only when its start
 //   receipt says this App started it for the caller, it acts for them,
-//   and it is of exactly the workflow version the release's seal resolved
-//   the alias to (`pinned`, contracts.json); any other run, a rebound
-//   alias's included, is refused as one that doesn't exist
+//   and it is of exactly the workflow the release's seal binds the alias
+//   to (`workflowId`, contracts.json); any other run, a rebound alias's
+//   included, is refused as one that doesn't exist
 //   (`workflow.run_unavailable`), before anything of it is read. A
-//   release that pinned nothing reads no run's history, nor one whose
+//   release that binds nothing reads no run's history, nor one whose
 //   alias the App has since bound to another workflow: as `runs` lists
 //   the binding's runs, history is read only while the binding names the
-//   pinned workflow. Each run's history is read from its own version's
+//   sealed workflow. Each run's history is read from its own version's
 //   sealed build.
 // - What a history tells: metadata only, from the engine's journal
 //   (workflows/history.ts), which holds no input, output or payload. A
@@ -104,7 +104,7 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   only by an ID the version's sealed build declares.
 // - A run offered as followable that a page can't follow: a row's
 //   `canWatch` is true only for a run the reference's `useWorkflow` would
-//   show now (page-workflows.ts): of the workflow the release pins, while
+//   show now (page-workflows.ts): of the workflow the release binds, while
 //   the binding names it, started by an App version declaring the same
 //   contract, and a returned restricted run only through an App that is
 //   restricted itself. It tells nothing past the row: the caller already
@@ -114,7 +114,7 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   the caller may answer now, by the decision service's own rule
 //   (decisions.ts, `answerableByNow`: never a run's starter it excludes,
 //   never staff), of runs this App started (their start receipt), of
-//   exactly the version the release pins, while the binding names it.
+//   the workflow the release binds, while the binding names it.
 //   Both checks are in the statement that reads, so a decision nobody
 //   asks of them never shapes a page or a cursor. A restricted run's
 //   decision only through an App that is restricted itself.
@@ -176,8 +176,8 @@ export interface ResolvedWorkflowQuery {
   readonly name: WorkflowQueryName;
   readonly args: unknown;
   readonly returns: unknown;
-  /** The workflow version the release's seal resolved the alias to. */
-  readonly pinned: WorkflowPin | undefined;
+  /** The workflow the release's seal binds the alias to. */
+  readonly workflowId: string | undefined;
   /** The release the reference was resolved in. */
   readonly release: Release;
   /** The decision keys the release's seal resolved the alias's workflow to have. */
@@ -216,7 +216,7 @@ export const workflowQueryOf = (
     name: query.name,
     args: fn.args,
     returns: fn.returns,
-    pinned: bound.pinned,
+    workflowId: bound.workflowId,
     release,
     decisionKeys: new Set(Object.keys(bound.decisions ?? {})),
   };
@@ -313,17 +313,14 @@ const placeOf = (cursor: unknown): Place | undefined => {
   return { at: Number(groups.at), id: groups.id };
 };
 
-/** The workflow version the App's binding of `alias` names now, or none. */
-const bindingOf = async (
+/** The workflow the App's binding of `alias` names now. */
+const boundNow = async (
   env: Env,
   app: string,
   alias: string
-): Promise<WorkflowPin> => {
+): Promise<string> => {
   const binding = await drizzle(env.DB)
-    .select({
-      workflowId: appWorkflowBindings.workflowResourceId,
-      version: appWorkflowBindings.workflowResourceVersion,
-    })
+    .select({ workflowId: appWorkflowBindings.workflowResourceId })
     .from(appWorkflowBindings)
     .where(
       and(
@@ -336,17 +333,26 @@ const bindingOf = async (
   if (binding === undefined) {
     throw functionErrors.create("permission.unavailable");
   }
-  return binding;
+  return binding.workflowId;
 };
 
 /** Whether `row` returned while restricted: shown only to a restricted App. */
 const returnedRestricted = (row: RunsRow): boolean =>
   row.restricted && (row.status === "completed" || row.status === "failed");
 
+/** The workflow the release binds, while the App's binding still names it. */
+const sealedBound = (
+  query: ResolvedWorkflowQuery,
+  bound: string
+): string | undefined =>
+  query.workflowId !== undefined && bound === query.workflowId
+    ? bound
+    : undefined;
+
 /**
  * Which of `rows`, runs of the caller's on a page, their page can follow
  * through the reference's `useWorkflow` now, as page-workflows.ts serves
- * a watch: a run of exactly the version the release pins, while the App's
+ * a watch: a run of the workflow the release binds, while the App's
  * binding names it, started by an App version whose contract the release
  * still declares, once it returned not restricted unless the App is, and
  * once it completed not past its retention: its watch then has no output
@@ -355,15 +361,14 @@ const returnedRestricted = (row: RunsRow): boolean =>
 const followable = async (
   env: Env,
   caller: WorkflowQueryCaller,
-  { query, binding }: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
+  { query, bound }: { query: ResolvedWorkflowQuery; bound: string },
   rows: readonly RunsRow[]
 ): Promise<ReadonlySet<string>> => {
-  const { pinned } = query;
-  if (pinned === undefined || binding.workflowId !== pinned.workflowId) {
+  if (sealedBound(query, bound) === undefined) {
     return new Set();
   }
   const app = appIdSchema.parse(caller.app);
-  const candidates = rows.filter((row) => row.workflowId === pinned.workflowId);
+  const candidates = rows.filter((row) => row.workflowId === bound);
   const origins = await followableOrigins(
     env,
     app,
@@ -410,12 +415,12 @@ interface RunsRow {
 
 /**
  * One page of the caller's runs through `app` of the workflow the App's
- * binding names now (`binding`).
+ * binding names now (`bound`).
  */
 const runsPage = async (
   env: Env,
   caller: WorkflowQueryCaller,
-  from: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
+  from: { query: ResolvedWorkflowQuery; bound: string },
   options: {
     status?: string;
     size: number;
@@ -436,7 +441,7 @@ const runsPage = async (
     return { items: [], hasMore: false };
   }
   const { after, until } = options;
-  const { workflowId } = from.binding;
+  const workflowId = from.bound;
   const rows: RunsRow[] = await drizzle(env.DB)
     .select({
       id: workflowResourceRuns.id,
@@ -588,19 +593,19 @@ const sequenceOf = (cursor: unknown): number => {
 
 /**
  * Run `runId`, when the caller may read its history through `app`: one
- * this App started for them (its receipt), acting for them, of exactly
- * `pinned`, whose workflow the App's binding still names (`bound`), as
- * `runs` lists it: rebound to another workflow, nothing is read until a
- * seal pins it. Anything else, an unknown ID included, is refused alike.
+ * this App started for them (its receipt), acting for them, of the
+ * workflow the release seals (`sealed`), which the App's binding still
+ * names (`bound`), as `runs` lists it: rebound to another workflow,
+ * nothing is read until a seal binds it. Anything else, an unknown ID included, is refused alike.
  */
 const historyRunOf = async (
   env: Env,
   caller: WorkflowQueryCaller,
-  { pinned, bound }: { pinned: WorkflowPin | undefined; bound: string },
+  { sealed, bound }: { sealed: string | undefined; bound: string },
   runId: string
 ) => {
   const refused = workflowResourceErrors.create("workflow.run_unavailable");
-  if (pinned === undefined || pinned.workflowId !== bound) {
+  if (sealed === undefined || sealed !== bound) {
     throw refused;
   }
   const row = await drizzle(env.DB)
@@ -620,7 +625,7 @@ const historyRunOf = async (
     .where(
       and(
         eq(workflowResourceRuns.id, runId),
-        eq(workflowResourceRuns.workflowResourceId, pinned.workflowId),
+        eq(workflowResourceRuns.workflowResourceId, sealed),
         eq(workflowResourceRuns.principalId, caller.userId),
         eq(workflowStartReceipts.invokerType, "app"),
         eq(workflowStartReceipts.invokerId, caller.app),
@@ -729,28 +734,23 @@ interface RunVersion {
   readonly version: number;
 }
 
-/** The task IDs version `pinned`'s sealed build declares; none if unreadable. */
+/** The task IDs version `run`'s sealed build declares; none if unreadable. */
 const declaredTasks = async (
   env: Env,
-  pinned: RunVersion,
+  run: RunVersion,
   manifestHash: string
 ): Promise<SealedSteps | undefined> => {
   try {
     return sealedStepsOf(
-      await loadWorkflowBuild(
-        env,
-        pinned.workflowId,
-        pinned.version,
-        manifestHash
-      )
+      await loadWorkflowBuild(env, run.workflowId, run.version, manifestHash)
     );
   } catch (error) {
     // A build that is gone or no longer verifies is the platform's fault,
     // logged where it loads (workflow-builds.ts): its history tells
     // nothing rather than failing the caller's page.
     log.error("workflow.history_build_unreadable", {
-      workflowId: pinned.workflowId,
-      version: pinned.version,
+      workflowId: run.workflowId,
+      version: run.version,
       ...errorFields(error),
     });
     return undefined;
@@ -765,7 +765,7 @@ const sequenceAt = (row: Json | undefined): number | undefined => {
 
 /**
  * Up to `size` rows of run `runId`'s history after the event `after`, for
- * `caller` through the release's pin while the binding names `bound`,
+ * `caller` through the workflow the release binds while the binding names `bound`,
  * oldest first.
  */
 const historyPage = async (
@@ -788,7 +788,7 @@ const historyPage = async (
   const run = await historyRunOf(
     env,
     caller,
-    { pinned: query.pinned, bound },
+    { sealed: query.workflowId, bound },
     runId
   );
   // Read only once the run is the caller's: a cursor tells nothing of a
@@ -798,14 +798,14 @@ const historyPage = async (
     endCursor === null || endCursor === undefined
       ? undefined
       : sequenceOf(endCursor);
-  if (detailsRemoved(run) || query.pinned === undefined) {
+  if (detailsRemoved(run) || query.workflowId === undefined) {
     return nothing;
   }
   // The run's own version's build: a binding follows the workflow's live
   // version, and a run keeps the one it started on.
   const declared = await declaredTasks(
     env,
-    { workflowId: query.pinned.workflowId, version: run.version },
+    { workflowId: query.workflowId, version: run.version },
     run.manifestHash
   );
   if (declared === undefined) {
@@ -847,19 +847,8 @@ const historyPage = async (
   };
 };
 
-/** The version the release pins, while the App's binding still names it. */
-const pinnedBound = (
-  query: ResolvedWorkflowQuery,
-  binding: WorkflowPin
-): WorkflowPin | undefined => {
-  const { pinned } = query;
-  return pinned !== undefined && binding.workflowId === pinned.workflowId
-    ? pinned
-    : undefined;
-};
-
 /**
- * Version `pinned`'s sealed build, as its decisions read it: its steps, as
+ * Version `run`'s sealed build, as its decisions read it: its steps, as
  * the run host names them, and the decision binding each decision task
  * asks through, by task ID (a decision's key); none if unreadable.
  */
@@ -870,14 +859,14 @@ interface DecisionTasks {
 
 const decisionTasksOf = async (
   env: Env,
-  pinned: RunVersion,
+  run: RunVersion,
   manifestHash: string
 ): Promise<DecisionTasks | undefined> => {
   try {
     const build = await loadWorkflowBuild(
       env,
-      pinned.workflowId,
-      pinned.version,
+      run.workflowId,
+      run.version,
       manifestHash
     );
     return {
@@ -894,8 +883,8 @@ const decisionTasksOf = async (
     // Logged where it loads (workflow-builds.ts): its decisions name no
     // key, so none of them is shown.
     log.error("workflow.decisions_build_unreadable", {
-      workflowId: pinned.workflowId,
-      version: pinned.version,
+      workflowId: run.workflowId,
+      version: run.version,
       ...errorFields(error),
     });
     return undefined;
@@ -922,21 +911,21 @@ interface DecisionRow {
 
 /**
  * The decisions `caller` may read through the reference, as a condition:
- * of runs this App started, of exactly `pinned`, that the caller may
+ * of runs this App started, of workflow `workflowId`, that the caller may
  * answer now (`answerableByNow`), and of a restricted run only while the
  * App is restricted itself (`appRestricted`).
  */
 const decisionScope = (
   env: Env,
   caller: WorkflowQueryCaller,
-  pinned: WorkflowPin,
+  workflowId: string,
   appRestricted: boolean
 ) => {
   const db = drizzle(env.DB);
   return and(
     // Staff answer no client's decision (decisions.ts), members or not.
     ...(caller.staff === true ? [sql`0`] : []),
-    eq(workflowResourceRuns.workflowResourceId, pinned.workflowId),
+    eq(workflowResourceRuns.workflowResourceId, workflowId),
     eq(workflowStartReceipts.invokerType, "app"),
     eq(workflowStartReceipts.invokerId, caller.app),
     answerableByNow(db, caller.userId),
@@ -1024,7 +1013,7 @@ const decisionWaitOf = (
 const decisionsPage = async (
   env: Env,
   caller: WorkflowQueryCaller,
-  { query, binding }: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
+  { query, bound }: { query: ResolvedWorkflowQuery; bound: string },
   options: {
     runId?: string;
     size: number;
@@ -1037,8 +1026,8 @@ const decisionsPage = async (
   last?: string;
   split?: string;
 }> => {
-  const pinned = pinnedBound(query, binding);
-  if (pinned === undefined || query.decisionKeys.size === 0) {
+  const workflowId = sealedBound(query, bound);
+  if (workflowId === undefined || query.decisionKeys.size === 0) {
     return { items: [], hasMore: false };
   }
   const { after, until, runId } = options;
@@ -1046,7 +1035,7 @@ const decisionsPage = async (
   const rows: DecisionRow[] = await decisionRows(
     env,
     and(
-      decisionScope(env, caller, pinned, appRestricted),
+      decisionScope(env, caller, workflowId, appRestricted),
       resourceDecisionPending(new Date()),
       ...(runId === undefined ? [] : [eq(workflowResourceRuns.id, runId)]),
       ...(after === undefined
@@ -1088,11 +1077,7 @@ const decisionsPage = async (
         async ([hash, version]) =>
           [
             hash,
-            await decisionTasksOf(
-              env,
-              { workflowId: pinned.workflowId, version },
-              hash
-            ),
+            await decisionTasksOf(env, { workflowId, version }, hash),
           ] as const
       )
     )
@@ -1142,14 +1127,14 @@ const decisionsPage = async (
 const decisionDetail = async (
   env: Env,
   caller: WorkflowQueryCaller,
-  { query, binding }: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
+  { query, bound }: { query: ResolvedWorkflowQuery; bound: string },
   { runId, decisionId }: { runId: string; decisionId: string }
 ): Promise<Json> => {
   const refused = workflowResourceErrors.create(
     "workflow.decision_unavailable"
   );
-  const pinned = pinnedBound(query, binding);
-  if (pinned === undefined || query.decisionKeys.size === 0) {
+  const workflowId = sealedBound(query, bound);
+  if (workflowId === undefined || query.decisionKeys.size === 0) {
     throw refused;
   }
   const appRestricted = await restrictedApp(env, caller);
@@ -1158,7 +1143,7 @@ const decisionDetail = async (
     and(
       eq(workflowDecisions.id, decisionId),
       eq(workflowResourceRuns.id, runId),
-      decisionScope(env, caller, pinned, appRestricted)
+      decisionScope(env, caller, workflowId, appRestricted)
     )
   ).get();
   const named =
@@ -1168,7 +1153,7 @@ const decisionDetail = async (
           row,
           await decisionTasksOf(
             env,
-            { workflowId: pinned.workflowId, version: row.version },
+            { workflowId, version: row.version },
             row.manifestHash
           ),
           query.decisionKeys
@@ -1247,8 +1232,7 @@ const answerOf = async (
     return await mayStartNow(env, caller, query.release, query.alias);
   }
   // The binding in force, for every other query: none, and nothing is read.
-  const binding = await bindingOf(env, caller.app, query.alias);
-  const { workflowId } = binding;
+  const bound = await boundNow(env, caller.app, query.alias);
   switch (query.name) {
     case "runs": {
       const pagination = isRecord(args.pagination) ? args.pagination : {};
@@ -1258,7 +1242,7 @@ const answerOf = async (
       const page = await runsPage(
         env,
         caller,
-        { query, binding },
+        { query, bound },
         {
           ...(typeof args.status === "string" ? { status: args.status } : {}),
           size,
@@ -1275,7 +1259,7 @@ const answerOf = async (
       const page = await decisionsPage(
         env,
         caller,
-        { query, binding },
+        { query, bound },
         {
           ...(typeof args.runId === "string" ? { runId: args.runId } : {}),
           size: pageSizeOf(pagination),
@@ -1292,23 +1276,17 @@ const answerOf = async (
       return await decisionDetail(
         env,
         caller,
-        { query, binding },
+        { query, bound },
         { runId: runIdOf(args), decisionId: args.decisionId }
       );
     }
     case "history": {
       const pagination = isRecord(args.pagination) ? args.pagination : {};
-      return await historyPage(
-        env,
-        caller,
-        { query, bound: workflowId },
-        runIdOf(args),
-        {
-          size: pageSizeOf(pagination),
-          cursor: pagination.cursor,
-          endCursor: pagination.endCursor,
-        }
-      );
+      return await historyPage(env, caller, { query, bound }, runIdOf(args), {
+        size: pageSizeOf(pagination),
+        cursor: pagination.cursor,
+        endCursor: pagination.endCursor,
+      });
     }
     default: {
       return query.name satisfies never;

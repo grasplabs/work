@@ -24,10 +24,10 @@ import {
 } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
-  shareWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -265,7 +265,7 @@ const started = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { amount }, key: unique() }
+    { expected: 1, args: { amount }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

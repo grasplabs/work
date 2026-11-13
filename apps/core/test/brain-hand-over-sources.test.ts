@@ -36,7 +36,7 @@ import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { brainHandOvers, personErasures } from "../src/db/core/schema.ts";
 import { statementsWithin } from "../src/db/d1.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { shareWorkflowResource } from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { allEvents, loggedEvents } from "./audit-events.ts";
 import { textOf } from "./brain-next-surfaces.ts";

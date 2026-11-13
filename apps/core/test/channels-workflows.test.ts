@@ -4,10 +4,10 @@ import { z } from "zod";
 
 import { memberOf } from "../src/auth/identity.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
   createWorkflowResource,
   setWorkflowAskable,
-  shareWorkflowResource,
   workflowAskable,
 } from "../src/workflow-resources.ts";
 import { codeStep, says } from "./agent-chat.ts";

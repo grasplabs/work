@@ -12,10 +12,8 @@ import {
   removeProjectMember,
   unfileItem,
 } from "../src/projects.ts";
-import {
-  deleteWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { deleteWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";

@@ -10,11 +10,9 @@ import {
   workflowResourceRuns,
   workflowStartReceipts,
 } from "../src/db/core/schema.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { workflowActivity } from "../src/workflow-own.ts";
-import {
-  createWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { unique } from "./sign-in.ts";
 import { publishDefinition } from "./workflow-publishing.ts";

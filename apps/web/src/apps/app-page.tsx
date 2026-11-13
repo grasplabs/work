@@ -32,7 +32,6 @@ import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import { buildsApp } from "./app-role.ts";
 import type { AppSettingsSection } from "./app-settings.tsx";
-import { statusOf } from "./app-status.tsx";
 import { AppWorkspace } from "./app-workspace.tsx";
 import type {
   ReadOnlyShown,
@@ -141,7 +140,7 @@ const AppPage = ({
           name={name}
           // Who uses it sees it only live; anything else says so.
           state={
-            statusOf(app) === "live" ? undefined : (
+            !app.archived && app.currentVersion !== null ? undefined : (
               <StatusBadge archived={app.archived} live={app.currentVersion} />
             )
           }

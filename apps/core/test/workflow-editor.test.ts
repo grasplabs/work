@@ -13,11 +13,11 @@ import {
   editWorkflowStep,
   workflowDraft,
 } from "../src/workflow-editor.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
   workflowKind,
   createWorkflowResource,
   deleteWorkflowResource,
-  shareWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { allEvents } from "./audit-events.ts";

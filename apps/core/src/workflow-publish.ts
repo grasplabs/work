@@ -1,8 +1,7 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import { draftErrors } from "@grasp-os/shared/drafts";
-import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -20,7 +19,7 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { retriedBatch } from "./db/d1.ts";
-import { subjectEntry } from "./drafts.ts";
+import { nextLabel, subjectEntry } from "./drafts.ts";
 import type { PublishSteps } from "./publish.ts";
 import { triggersFollowing } from "./trigger-resources.ts";
 import {
@@ -73,26 +72,6 @@ import {
 //   publish it is.
 
 /**
- * The label the next version of workflow `id` to go live takes at `at`
- * (`YY.MM.N`, @grasp-os/shared/release-id), as an App's does.
- */
-const nextLabel = async (env: Env, id: string, at: Date): Promise<string> => {
-  const rows = await drizzle(env.DB)
-    .select({ label: workflowResourceVersions.label })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, id),
-        like(workflowResourceVersions.label, `${releaseMonthPrefix(at)}%`)
-      )
-    );
-  return nextReleaseId(
-    rows.flatMap(({ label }) => (label === null ? [] : [label])),
-    at
-  );
-};
-
-/**
  * Makes `version` of workflow `id` live for `by`, who builds it, over
  * `basedOn`, the version live when the publish began, audited as
  * `action`, with `alongside` in the batch (`PublishSteps.activate`): its
@@ -136,8 +115,9 @@ const activate = async (
     throw draftErrors.create("draft.conflict");
   }
   const appsDeclare = await requireBoundAppsDeclare(env, workflow.id, version);
-  const at = new Date();
-  const label = row.label ?? (await nextLabel(env, workflow.id, at));
+  const label =
+    row.label ??
+    (await nextLabel(env, { kind: "workflow", id: workflow.id }, new Date()));
   const event = createAuditEvent(
     subjectEntry(
       by,

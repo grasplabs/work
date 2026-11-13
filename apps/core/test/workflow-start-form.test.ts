@@ -5,10 +5,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { rollback } from "../src/publish.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
   workflowKind,
   createWorkflowResource,
-  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { workflowStartForm } from "../src/workflow-start-form.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -101,7 +101,7 @@ const started = async (
 ): Promise<string> =>
   await outcome(
     startWorkflow(env, { type: "person", person: by }, id, {
-      version,
+      expected: version,
       args: input,
       key: `key-${unique()}`,
     })

@@ -19,11 +19,11 @@ import { z } from "zod";
 import { sweepReleases } from "../src/release-retention.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
-  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
 import {

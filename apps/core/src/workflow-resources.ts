@@ -15,14 +15,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
-import {
-  newSubjectMemberSchema,
-  subjectMemberRefSchema,
-} from "@grasp-os/shared/subject-members";
-import type {
-  MemberRole,
-  SubjectMember,
-} from "@grasp-os/shared/subject-members";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import {
   catalogBindingKinds,
   catalogKeySchema,
@@ -84,8 +77,6 @@ import {
   drafts,
   sdkResourceBindings,
   projectItems,
-  teams,
-  users,
   workflowResourceLifecycles,
   workflowResourceMembers,
   workflowResourceProcesses,
@@ -97,19 +88,13 @@ import {
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import type { Builder, DraftKind } from "./drafts.ts";
 import { checkWorkflowExpressions, withinBuildWait } from "./pages.ts";
-import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
-import { projectStillBuiltSql } from "./project-sql.ts";
 import { newSeal, sealReferencedSql } from "./sealed-artifacts.ts";
 import {
   ceilingOf,
-  memberEntry,
   requireNotStaff,
-  requireSharable,
   roleFromMembers,
   rowsOf,
-  stillMembers,
 } from "./sharing.ts";
-import type { MemberRef } from "./sharing.ts";
 import { permittedFunctionsOf } from "./workflow-app-functions.ts";
 import {
   buildOf,
@@ -2191,179 +2176,6 @@ export const exportedWorkflowVersion = async (
 };
 
 /**
- * Whom workflow `id` is shared with, for anyone with a role in it, each
- * by name, as an App's members are (app-members.ts): the people still in
- * the organization, the teams that still exist and the projects, in the
- * order they were shared. A project's name only for someone in it: to
- * anyone else it stays unnamed.
- */
-export const workflowMembers = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<SubjectMember[]> => {
-  const workflow = await requireWorkflowRole(env, by, id, "user");
-  const rows = await drizzle(env.DB)
-    .select({
-      row: workflowResourceMembers,
-      person: users.name,
-      team: teams.name,
-    })
-    .from(workflowResourceMembers)
-    .leftJoin(
-      users,
-      and(
-        eq(workflowResourceMembers.memberType, "person"),
-        eq(users.id, workflowResourceMembers.memberId)
-      )
-    )
-    .leftJoin(
-      teams,
-      and(
-        eq(workflowResourceMembers.memberType, "team"),
-        eq(teams.id, workflowResourceMembers.memberId)
-      )
-    )
-    .where(
-      and(
-        eq(workflowResourceMembers.workflowResourceId, workflow.id),
-        stillMembers(workflowResourceMembers)
-      )
-    )
-    .orderBy(
-      asc(workflowResourceMembers.addedAt),
-      asc(workflowResourceMembers.memberType),
-      asc(workflowResourceMembers.memberId)
-    );
-  const projectNames = await namedProjectsFor(
-    env,
-    by,
-    rows
-      .filter(({ row }) => row.memberType === "project")
-      .map(({ row }) => row.memberId)
-  );
-  return rows.map(({ row, person, team }) => ({
-    type: row.memberType,
-    id: row.memberId,
-    name:
-      row.memberType === "project"
-        ? (projectNames.get(row.memberId) ?? null)
-        : (person ?? team),
-    role: row.role,
-    addedBy: row.addedBy,
-    addedAt: row.addedAt.toISOString(),
-  }));
-};
-
-/**
- * Shares workflow `id` with a person or team in a role, for `by`, who must
- * build it and isn't Grasp staff: never with its owner; as a builder, only
- * with someone whose organization role builds. Sharing again changes the
- * role, and records only a change.
- */
-export const shareWorkflowResource = async (
-  env: Env,
-  by: Acting,
-  id: unknown,
-  input: unknown
-): Promise<SubjectMember> => {
-  requireNotStaff(by);
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const { role, ...member } = workflowResourceErrors.parse(
-    "workflow.resource_invalid",
-    newSubjectMemberSchema,
-    input
-  );
-  await requireSharable(
-    env,
-    member,
-    {
-      owner: workflow.owner,
-      builds: role === "builder",
-      invalid: (issue) =>
-        workflowResourceErrors.create("workflow.resource_invalid", {
-          issues: [issue],
-        }),
-      ownerIssue: "id: The workflow's owner always has it.",
-      buildsIssue:
-        "role: Only the organization's admins and builders build workflows.",
-    },
-    by
-  );
-  // A share with a project: the project, while `by` still builds it.
-  const toProject =
-    member.type === "project"
-      ? projectStillBuiltSql(member.id, by.userId)
-      : undefined;
-  const addedAt = new Date();
-  const db = drizzle(env.DB);
-  const batch = auditedBatch(env, db, [
-    db
-      .insert(workflowResourceMembers)
-      .values({
-        // Only while the workflow is live: otherwise NULL, which fails the
-        // batch, so a share racing a deletion writes nothing.
-        // A share with a project, also only while it is there and `by`
-        // builds it, read here: a builder taken out meanwhile shares
-        // nothing.
-        workflowResourceId: sql`(SELECT id FROM workflow_resources
-          WHERE id = ${workflow.id} AND deleted_at IS NULL
-            AND ${toProject === undefined ? sql`1` : sql`${toProject} IS NOT NULL`})`,
-        memberType: member.type,
-        memberId: member.id,
-        role,
-        addedBy: by.userId,
-        addedAt,
-      })
-      .onConflictDoUpdate({
-        target: [
-          workflowResourceMembers.workflowResourceId,
-          workflowResourceMembers.memberType,
-          workflowResourceMembers.memberId,
-        ],
-        set: { role, addedBy: by.userId, addedAt },
-        // Live already: a deleted workflow's ID is NULL above, which
-        // fails the insert before any conflict is looked for.
-        setWhere: sql`${workflowResourceMembers.role} <> ${role}`,
-      }),
-    // Only when the share changed something (a role the member already
-    // has changes nothing): a start decided meanwhile is still good.
-    nextGeneration(db, workflow.id, previousChanged),
-    outboxedIfChanged(
-      db,
-      memberEntry(
-        by,
-        "workflow.member.added",
-        { type: targetType, id: workflow.id },
-        { ...member, role }
-      )
-    ),
-  ]);
-  try {
-    await batch;
-  } catch (error) {
-    if (
-      notNullFailed(error, "workflow_resource_members.workflow_resource_id")
-    ) {
-      // The project's guard, if that was what held it back, says why.
-      if (toProject !== undefined) {
-        await requireStillBuilt(env, member.id, by.userId);
-      }
-      throw unavailable();
-    }
-    throw error;
-  }
-  const shared = await workflowMembers(env, by, workflow.id);
-  const added = shared.find(
-    (each) => each.type === member.type && each.id === member.id
-  );
-  if (added === undefined) {
-    throw unavailable();
-  }
-  return added;
-};
-
-/**
  * Whether workflow `id`'s owner lets people ask Stephen to start it in a
  * chat app (`workflow_resources.askable`), for anyone with a role in it.
  */
@@ -2417,54 +2229,6 @@ export const setWorkflowAskable = async (
     outboxedIfChanged(
       db,
       entry(by, "workflow.askable_changed", workflow.id, { askable: allowed })
-    ),
-  ]);
-};
-
-/**
- * Stops sharing workflow `id` with a person or team, for `by`, who must
- * build it and isn't Grasp staff. Unsharing someone it isn't shared with
- * changes and records nothing.
- */
-export const unshareWorkflowResource = async (
-  env: Env,
-  by: Acting,
-  id: unknown,
-  input: unknown
-): Promise<void> => {
-  requireNotStaff(by);
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const member: MemberRef = workflowResourceErrors.parse(
-    "workflow.resource_invalid",
-    subjectMemberRefSchema,
-    input
-  );
-  const db = drizzle(env.DB);
-  const ofMember = and(
-    eq(workflowResourceMembers.workflowResourceId, workflow.id),
-    eq(workflowResourceMembers.memberType, member.type),
-    eq(workflowResourceMembers.memberId, member.id)
-  );
-  // The role it had, for the event, which only the deletion stores.
-  const row = await db
-    .select({ role: workflowResourceMembers.role })
-    .from(workflowResourceMembers)
-    .where(ofMember)
-    .get();
-  if (row === undefined) {
-    return;
-  }
-  await auditedBatch(env, db, [
-    db.delete(workflowResourceMembers).where(ofMember),
-    nextGeneration(db, workflow.id, previousChanged),
-    outboxedIfChanged(
-      db,
-      memberEntry(
-        by,
-        "workflow.member.removed",
-        { type: targetType, id: workflow.id },
-        { ...member, role: row.role }
-      )
     ),
   ]);
 };
