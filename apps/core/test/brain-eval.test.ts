@@ -42,11 +42,11 @@ import { noProducers } from "./no-producers.ts";
 // Brain returned something its asker may not read, or it returned a chunk
 // the set didn't cut.
 //
-// With a model (`BRAIN_EVAL_MODEL`, vite.brain-eval.config.ts), it first
-// has core embed every passage, through the Brain's queue and core's bulk
-// embedders as core's clock would, and loads the question embedder, so
-// every recall searches by meaning too, its question embedded inside the
-// recall's time.
+// It first has core embed every passage with the model it runs
+// (`BRAIN_EVAL_MODEL`, vite.brain-eval.config.ts), through the Brain's
+// queue and core's bulk embedders as core's clock would, and loads the
+// question embedder, so every recall searches by meaning too, its
+// question embedded inside the recall's time.
 
 const { sources, questions, version } = brainEvalSet;
 
@@ -68,13 +68,10 @@ const embeddingTicksMost = 200;
  * Has core embed every current passage with its model, tick after tick of
  * the Brain's work as core's clock runs it, an hour apart so a failed item
  * is due again at once, and load the question embedder: the model's name
- * and build. Null while no model ships.
+ * and build.
  */
-const embedEverything = async (): Promise<string | null> => {
+const embedEverything = async (): Promise<string> => {
   const model = await embedderModel();
-  if (model === null) {
-    return null;
-  }
   await warmQuestionEmbedder(env);
   let at = Date.now();
   for (let tick = 0; tick < embeddingTicksMost; tick += 1) {

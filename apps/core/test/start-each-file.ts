@@ -1,19 +1,26 @@
 /**
  * Runs before each test file. Files share a runtime, one per Vitest worker
  * (`isolate: false` in vite.config.ts), so each starts from empty storage,
- * the env as configured, real timers, no spies, and the databases at the
- * committed migrations. Module state in core's isolate carries over, as it
- * does between requests in production: caches keyed by IDs a reset never
+ * the env as configured, real timers, no spies, the databases at the
+ * committed migrations, and the files of the model core ships in
+ * `MODEL_FILES`, as a deployment's deploy put them there. Module state in
+ * core's isolate carries over, as it does between requests in
+ * production: caches keyed by IDs a reset never
  * reuses, and once-per-isolate state, such as the built-ins' install,
  * which the first file's setup runs and waits for (builtins-first.ts), and
  * the missing-table warning (platform-updates.test.ts), which only that
  * file may trip.
  */
+import { shippedModel } from "@grasp-os/embed/model-files";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterAll, afterEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  isTestModel,
+  putTestModel,
+} from "../../../packages/embed/test/test-models.ts";
 import {
   backgroundCallsQuiet,
   countBackgroundCalls,
@@ -82,7 +89,7 @@ const migrationsSchema = z.array(
   z.object({ name: z.string(), queries: z.array(z.string()) })
 );
 
-/** Empty storage, the env as configured, and the databases migrated. */
+/** Empty storage, the env as configured, the databases migrated and the model's files in place. */
 const startEmpty = async (): Promise<void> => {
   // Real timers first: a file that faked them and stopped mid-test would
   // otherwise hold the reset's own timers (reset-storage.ts).
@@ -120,6 +127,14 @@ const startEmpty = async (): Promise<void> => {
     connectDb(),
     migrationsSchema.parse(testBinding("CONNECT_MIGRATIONS"))
   );
+
+  // The model core runs in tests is the embed package's test model
+  // (`coreProject` in vite.config.ts), whose files are put here; the
+  // evaluation's own model comes from its release directory instead
+  // (vite.brain-eval.config.ts).
+  if (isTestModel(shippedModel)) {
+    await putTestModel(env.MODEL_FILES, shippedModel);
+  }
 };
 
 countBackgroundCalls();

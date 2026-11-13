@@ -54,7 +54,6 @@ import { testBinding } from "./test-env.ts";
 // looked up by the item's key, and nothing for a key without one. One
 // kind takes the queue's usual time per attempt, the other a short one.
 
-/** No embedders: the store's own ticks here embed nothing, as core's while no model ships. */
 /** No hand-overs: these tests hand nothing over. */
 const noHandOvers: HandOvers = {
   handOver: async () => {
@@ -63,6 +62,7 @@ const noHandOvers: HandOvers = {
   },
 };
 
+/** No embedders: the store's own ticks here embed nothing. */
 const noEmbedders: Embedders = {
   model: null,
   embed: async () => {

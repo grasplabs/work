@@ -6149,7 +6149,7 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   parked: integer().notNull(),
   /** Whether a step of its tick last failed, its queue is paused, or its ledger isn't read through. */
   failing: integer({ mode: "boolean" }).notNull(),
-  /** Whether a model ships and its rebuild for that model isn't done. */
+  /** Whether its rebuild for the model core runs isn't done yet. */
   notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),

@@ -58,6 +58,9 @@ const git = (...args: string[]): string =>
 /** Hours a run may take before Vitest stops it. */
 const maxHours = 4;
 
+// No meaning hit of the test model reaches it: it measures the older Brain
+// (test/brain-harness.ts), whose chats hold no `brain` grant, so none
+// recalls core's Brain.
 export default coreProject(
   {
     name: "@grasp-os/core:brain-model",

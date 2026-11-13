@@ -68,6 +68,22 @@ const recalledAs = async (
   return chunks.map(({ source }) => source);
 };
 
+/**
+ * What `personId` recalls for `question`: each chunk's source and the way
+ * it was found, by words, an exact part or meaning.
+ */
+const foundAs = async (
+  personId: string,
+  question: string
+): Promise<{ source: SourceRef; found: string }[]> => {
+  const { items: chunks } = await recallAs(env, personId, {
+    personal: true,
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return chunks.map(({ source, found }) => ({ source, found }));
+};
+
 /** `word` 150 times: a paragraph too long to share a passage with another. */
 const filler = (word: string): string => `${word} `.repeat(150).trim();
 
@@ -479,20 +495,29 @@ describe(
         firstRules: await chunksFoundBy(mark, "straße"),
       };
       const ticks = await ticksUntilRebuilt();
+      const byWords = async (personId: string, question: string) => {
+        const found = await foundAs(personId, question);
+        return found.filter(({ found: way }) => way !== "meaning");
+      };
+      const others = await foundAs(other, "strasse");
 
       expect({
         before,
         rebuilt: ticks > 0 && Number.isFinite(ticks),
-        invoice: await recalledAs(reader, "factuur"),
-        street: await recalledAs(reader, "strasse"),
-        other: await recalledAs(other, "strasse"),
+        invoice: await byWords(reader, "factuur"),
+        street: await byWords(reader, "strasse"),
+        // By its words nothing of theirs, and by no way the reader's.
+        other: others.filter(
+          ({ found, source }) =>
+            found !== "meaning" || [invoices.id, street.id].includes(source.id)
+        ),
         // The first rules' rows went: none is left beside the new ones.
         firstRules: await chunksFoundBy(mark, "straße"),
       }).toStrictEqual({
         before: { invoice: [], street: [], firstRules: 1 },
         rebuilt: true,
-        invoice: [invoices],
-        street: [street],
+        invoice: [{ source: invoices, found: "words" }],
+        street: [{ source: street, found: "words" }],
         other: [],
         firstRules: 0,
       });
@@ -573,7 +598,10 @@ describe(
           midway.version === 1 && midway.target === 2 && midway.cursor > 0,
         rebuilt: Number.isFinite(ticks),
         indexed,
-        found: chunks.length,
+        // The one passage holding it, by its words; by meaning, others.
+        byWords: chunks.flatMap(({ found, text }) =>
+          found === "meaning" ? [] : [{ found, first: text.split(" ")[0] }]
+        ),
       }).toStrictEqual({
         midway: true,
         rebuilt: true,
@@ -581,7 +609,7 @@ describe(
           { chunks: count, twice: 0 },
           { chunks: count, twice: 0 },
         ],
-        found: 1,
+        byWords: [{ found: "words", first: `${mark}x7ingen` }],
       });
     });
 

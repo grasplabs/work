@@ -48,8 +48,8 @@ export interface ReleaseSpec {
   sendsMail?: boolean;
   /**
    * The model files it names, by name, and their contents: given at all
-   * (none, too, as while no model ships), core binds `MODEL_FILES` to
-   * `grasp-os-models`, as the real one does.
+   * (none, too, as a release built before a model shipped), core binds
+   * `MODEL_FILES` to `grasp-os-models`, as the real one does.
    */
   modelFiles?: Record<string, string>;
 }

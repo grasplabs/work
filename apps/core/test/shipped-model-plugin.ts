@@ -1,23 +1,16 @@
 import path from "node:path";
 
+import type { EmbedModel } from "@grasp-os/embed/model-files";
 import type { UserWorkspaceConfig } from "vite-plus";
 
-// For a test project only: core runs `model` as if it shipped. Every
+// For a test project only: core runs `model` as the one it ships. Every
 // import of the embed package's model module gets the same module with
-// `shippedModel` set to `model` instead of null, so core embeds with it
-// (its question embedder, its bulk embedders and the Brain's queue) as a
-// deployment that ships it would. Nothing outside the project changes:
-// `shippedModel` stays null in the code. Used by the evaluation with a
-// model from a local path (vite.brain-eval.config.ts) and by core's test
-// of recall by meaning (vite.brain-meaning.config.ts).
-
-/** A model as the embed package names it: its name and its three files. */
-export interface ShippedModel {
-  name: string;
-  tokenizer: { sha256: string; size: number };
-  encoder: { sha256: string; size: number };
-  tokens: { sha256: string; size: number };
-}
+// `shippedModel` set to `model`, so core embeds with it (its question
+// embedder, its bulk embedders and the Brain's queue) as a deployment
+// that ships it would. Nothing outside the project changes: the code
+// ships the model it names. Every core project runs the embed package's
+// int8 test model by default (`coreProject` in vite.config.ts); the
+// evaluation runs a model from a local path (vite.brain-eval.config.ts).
 
 type Plugins = NonNullable<UserWorkspaceConfig["plugins"]>;
 
@@ -31,7 +24,7 @@ const modelFilesModule = path.join(
 const shippedModelModule = "\0shipped-model";
 
 /** A Vite plugin that makes `model` core's shipped one (above). */
-export const shippedModelPlugin = (model: ShippedModel): Plugins[number] => ({
+export const shippedModelPlugin = (model: EmbedModel): Plugins[number] => ({
   name: "shipped-model",
   enforce: "pre",
   async resolveId(source, importer) {

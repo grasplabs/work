@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import type { EmbedModel } from "@grasp-os/embed/model-files";
 import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
+import { int8Model } from "../../packages/embed/test/test-model-files.ts";
 import { oxcParseTestConfig } from "../../packages/runtime/oxc-parse-test-config.ts";
 import { testComposioKey } from "../connect/test/provider-config.ts";
 import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
@@ -23,6 +25,7 @@ import {
   slackApp,
   teamsBot,
 } from "./test/connect-providers.ts";
+import { shippedModelPlugin } from "./test/shipped-model-plugin.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { testAssets } from "./test/test-run.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
@@ -115,7 +118,7 @@ export const coreProject = (
     sandboxSocket,
     bindings = {},
     services = {},
-    plugins = [],
+    model = int8Model,
     main,
     durableObjects,
   }: {
@@ -132,8 +135,14 @@ export const coreProject = (
      * evaluation's local model files (vite.brain-eval.config.ts).
      */
     services?: Record<string, (request: Request) => Response>;
-    /** Vite plugins a project adds before the test pool's. */
-    plugins?: UserWorkspaceConfig["plugins"];
+    /**
+     * The embedding model core runs as the one it ships
+     * (test/shipped-model-plugin.ts): the embed package's int8 test model
+     * unless a project names another, its files put in `MODEL_FILES` as
+     * each file starts (start-each-file.ts), so core embeds as a
+     * deployment does.
+     */
+    model?: EmbedModel;
     /**
      * The Worker a project runs instead of core's own: core's, with test
      * classes beside it (test/meaning-worker.ts).
@@ -259,7 +268,7 @@ export const coreProject = (
       ],
     },
     plugins: [
-      ...plugins,
+      shippedModelPlugin(model),
       // Read when the pool starts, after the global setup wrote the bundle.
       cloudflareTest(() => ({
         wrangler: { configPath: "./wrangler.jsonc" },

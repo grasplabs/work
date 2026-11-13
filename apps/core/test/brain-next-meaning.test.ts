@@ -2,21 +2,9 @@ import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type { Pack } from "@grasp-os/brain-next/contract";
 import { brainWithoutMeaningReasons } from "@grasp-os/shared/brain-report";
 import { env } from "cloudflare:workers";
-import {
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  calls,
-  int8Model,
-  poisonWord,
-  putTestModel,
-} from "../../../packages/embed/test/test-models.ts";
+import { calls, poisonWord } from "../../../packages/embed/test/test-models.ts";
 import type {
   BreakableEmbedder,
   Breakage,
@@ -134,6 +122,11 @@ describe("recall by meaning, through core", () => {
   let readers: SourceReaders = { kind: "none" };
   /** The person's sources, by the Brain's key for each (core's brain-next.ts). */
   const sources = new Map<string, SourceRef>();
+  /**
+   * Sources the person may not read, holding the words `withWords` finds
+   * by: another person's team's, and that person's own.
+   */
+  const hidden = new Set<string>();
 
   /**
    * The pack the store gives the person by words and exact parts alone,
@@ -168,10 +161,6 @@ describe("recall by meaning, through core", () => {
         })
     );
 
-  beforeAll(async () => {
-    await putTestModel(env.MODEL_FILES, int8Model);
-  });
-
   /**
    * The person and their passage, embedded, once for the file: inside the
    * first test, as the identity provider answers inside a test only.
@@ -195,6 +184,23 @@ describe("recall by meaning, through core", () => {
         readers,
       });
     }
+    // What the person may not read, holding the words they recall by, so a
+    // recall that goes without meaning shows whether it keeps to them.
+    const { userId: other } = await signedInWithRole(idp, "user");
+    for (const othersReaders of [
+      await soleReadersOf(other),
+      { kind: "owner", personId: other } as const,
+    ]) {
+      const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+      hidden.add(source.id);
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text: "De pallets voor de andere klant staan in hal vier.",
+        readers: othersReaders,
+      });
+    }
     await embedEverything();
     // Loaded once, as core's clock warms it, so no question waits for it.
     await questions().embed("Warm-up.");
@@ -215,12 +221,14 @@ describe("recall by meaning, through core", () => {
       english: value.items
         .filter(({ text }) => text === english)
         .map(({ found }) => found),
+      hiddenCited: value.items.filter(({ source }) => hidden.has(source.id)),
       byWords: byWords.items,
       warned,
       meaning: after.meaning - before.meaning,
       without: after.without - before.without,
     }).toStrictEqual({
       english: ["meaning"],
+      hiddenCited: [],
       byWords: [],
       warned: [],
       meaning: 1,
@@ -253,6 +261,7 @@ describe("recall by meaning, through core", () => {
       expect({
         pack: value,
         byWords: byWords.items.map(({ text, found }) => ({ text, found })),
+        hiddenCited: value.items.filter(({ source }) => hidden.has(source.id)),
         warned,
         tellsQuestion: said.includes("leverancier"),
         tellsPerson: said.includes(personId),
@@ -269,6 +278,7 @@ describe("recall by meaning, through core", () => {
       }).toStrictEqual({
         pack: byWords,
         byWords: [{ text: dutch, found: "words" }],
+        hiddenCited: [],
         warned: [{ event: "brain.recall.without_meaning", reason }],
         tellsQuestion: false,
         tellsPerson: false,

@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { assetKey, moduleKey } from "@grasp-os/shared/release";
+import { assetKey, modelBlobKey, moduleKey } from "@grasp-os/shared/release";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { builds, fixtureBuild, info, rawConfig } from "./fixture-release.ts";
@@ -91,10 +91,13 @@ describe("the release manifest", () => {
     ).toThrow(/jurisdiction/u);
   });
 
-  it("names no model files while none ships, though core binds their bucket", () => {
-    expect(
-      generateManifest({ ...info, modelFiles: [] }, fixture).modelFiles
-    ).toStrictEqual([]);
+  it("names each model file it is given at its content address, where the deploy copies it from", () => {
+    expect(generateManifest(info, fixture).modelFiles).toStrictEqual(
+      info.modelFiles.map((file) => ({
+        ...file,
+        r2Key: modelBlobKey(file.sha256),
+      }))
+    );
   });
 
   it("refuses model files no Worker binds a bucket for", async () => {

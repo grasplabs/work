@@ -582,7 +582,7 @@ const Recall = ({ report }: { report: BrainReport }) => {
         </Table>
       </div>
       <SectionRow
-        description="Recalls by words and exact parts alone, as the embedding model gave no vector for the question in time or none the Brain could use. Without a model, none is counted."
+        description="Recalls that went by words and exact parts alone because the embedding model failed, was too slow or had no files, or gave a vector the Brain couldn't use."
         label="Without meaning"
       >
         <span className="tabular-nums">

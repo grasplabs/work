@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { shippedModelPlugin } from "./test/shipped-model-plugin.ts";
 import { coreProject } from "./vite.config.ts";
 
 // The Brain evaluation (GRA-1726), on request only: it is in no project the
@@ -10,15 +9,16 @@ import { coreProject } from "./vite.config.ts";
 // repository root with `vp run brain:eval` (scripts/brain-eval.ts), which
 // runs this project, scores what it printed and keeps the result.
 //
-// With vectors: `BRAIN_EVAL_MODEL` names a directory outside the
+// It needs a real model: `BRAIN_EVAL_MODEL` names a directory outside the
 // repository holding a model's three files as scripts/export.py in
 // packages/embed writes them (tokenizer.bin, encoder-int8.bin,
-// tokens-int8.bin). The run then has core run that model as if it
-// shipped (test/shipped-model-plugin.ts), the files served to core as
-// on-prem's release directory serves them (`MODEL_SOURCE`, by SHA-256),
-// and the run embeds every passage before it asks. Without it, no model
-// ships, as in every deployment today, and recall is by words and exact
-// parts alone. The files are never committed.
+// tokens-int8.bin), such as the files of the model core ships. Core runs
+// that model as the one it ships (test/shipped-model-plugin.ts), the files
+// served to core as on-prem's release directory serves them
+// (`MODEL_SOURCE`, by SHA-256), and the run embeds every passage before it
+// asks. Without it the run stops before it starts: core's other projects
+// run the embed package's untrained test model, whose recall by meaning
+// would mean nothing. The files are never committed.
 
 /** The three files of a model, by the name export.py gives each. */
 const modelFileNames = {
@@ -44,15 +44,17 @@ const hashed = ({ sha256, size }: { sha256: string; size: number }) => ({
 });
 
 const modelDirectory = process.env.BRAIN_EVAL_MODEL;
+if (modelDirectory === undefined || modelDirectory === "") {
+  throw new Error(
+    "The Brain evaluation needs a real model: set BRAIN_EVAL_MODEL to the directory of its files"
+  );
+}
 
-const files =
-  modelDirectory === undefined
-    ? undefined
-    : {
-        tokenizer: fileIn(modelDirectory, modelFileNames.tokenizer),
-        encoder: fileIn(modelDirectory, modelFileNames.encoder),
-        tokens: fileIn(modelDirectory, modelFileNames.tokens),
-      };
+const files = {
+  tokenizer: fileIn(modelDirectory, modelFileNames.tokenizer),
+  encoder: fileIn(modelDirectory, modelFileNames.encoder),
+  tokens: fileIn(modelDirectory, modelFileNames.tokens),
+};
 
 export default coreProject(
   {
@@ -62,28 +64,24 @@ export default coreProject(
     fileParallelism: false,
     testTimeout: 10 * 60 * 1000,
   },
-  files === undefined
-    ? {}
-    : {
-        // As on-prem's release directory: each file by its SHA-256.
-        services: {
-          MODEL_SOURCE: (request) => {
-            const sha256 = new URL(request.url).pathname.slice(1);
-            const file = Object.values(files).find(
-              (each) => each.sha256 === sha256
-            );
-            return file === undefined
-              ? new Response(null, { status: 404 })
-              : new Response(file.bytes);
-          },
-        },
-        plugins: [
-          shippedModelPlugin({
-            name: "local",
-            tokenizer: hashed(files.tokenizer),
-            encoder: hashed(files.encoder),
-            tokens: hashed(files.tokens),
-          }),
-        ],
-      }
+  {
+    // As on-prem's release directory: each file by its SHA-256.
+    services: {
+      MODEL_SOURCE: (request) => {
+        const sha256 = new URL(request.url).pathname.slice(1);
+        const file = Object.values(files).find(
+          (each) => each.sha256 === sha256
+        );
+        return file === undefined
+          ? new Response(null, { status: 404 })
+          : new Response(file.bytes);
+      },
+    },
+    model: {
+      name: "local",
+      tokenizer: hashed(files.tokenizer),
+      encoder: hashed(files.encoder),
+      tokens: hashed(files.tokens),
+    },
+  }
 );

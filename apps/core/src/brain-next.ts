@@ -679,14 +679,12 @@ const isUsableVector = (vector: readonly number[]): boolean =>
 
 /**
  * `question`'s vector by core's question embedder, for the Brain to
- * search by meaning too; none while no model ships, for a question of
- * whitespace (which words a question holds is the Brain's to say, so a
- * question of punctuation alone is still embedded, and the Brain finds
- * nothing for it), or when the embedder gave no vector the Brain can use
- * in time: then why, logged with nothing of the question or the person,
- * and handed to the Brain, which counts it for staff; recall goes ahead
- * by words and exact parts. With no model shipped there is no why: going
- * without is no failure then.
+ * search by meaning too; none for a question of whitespace (which words
+ * a question holds is the Brain's to say, so a question of punctuation
+ * alone is still embedded, and the Brain finds nothing for it), or when
+ * the embedder gave no vector the Brain can use in time: then why, logged
+ * with nothing of the question or the person, and handed to the Brain,
+ * which counts it for staff; recall goes ahead by words and exact parts.
  */
 const meaningOf = async (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
@@ -696,9 +694,6 @@ const meaningOf = async (
     return {};
   }
   const embedded = await questionVectorOf(env, question);
-  if (embedded === null) {
-    return {};
-  }
   if (embedded.kind === "vector" && isUsableVector(embedded.vector)) {
     return { meaning: { model: embedded.model, vector: embedded.vector } };
   }
@@ -711,9 +706,9 @@ const meaningOf = async (
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
  * `tokensOf`), and, with `asOf`, of each source as it was then: the
- * Brain's `recall`, by words, exact parts and, once a model ships, by
- * meaning: the question is embedded while its reader is read. Every item
- * cites its source, version and place; the pack says what was not found
+ * Brain's `recall`, by words, exact parts and meaning: the question is
+ * embedded while its reader is read. Every item cites its source,
+ * version and place; the pack says what was not found
  * and whether the budget cut it short, all from what they may read alone.
  * With `personal`, from the shared store and their own together, packed
  * as one store holding both would pack them (`packAcross`); without, from
@@ -2268,9 +2263,8 @@ const askModel =
 
 /**
  * Core's embedders, as the Brain's background work uses them: the bulk
- * embedders, running the model core ships, or none while none ships (then
- * the Brain embeds nothing, and its overview says so). Whatever an
- * embedder answers or throws, the Brain gets vectors or `unavailable`.
+ * embedders, running the model core ships. Whatever an embedder answers
+ * or throws, the Brain gets vectors or `unavailable`.
  */
 const embeddersOf = async (env: Env): Promise<Embedders> => ({
   model: await embedderModel(),

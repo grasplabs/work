@@ -31,6 +31,7 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { embedderModel } from "../src/embedder.ts";
 import { usageRecorded } from "../src/model-usage.ts";
 import { models } from "../src/models.ts";
 import {
@@ -405,7 +406,8 @@ describe("the Brain's report", () => {
         sized: (report?.store.bytes ?? 0) > 0,
         limit: report?.store.limitBytes,
       },
-      // No model ships (core's own embedders): none, and nothing embedded.
+      // Core's own embedders' model, and the kept source's one passage,
+      // embedded by the ticks that parked the item.
       embedding: {
         model: report?.embedding.model,
         embedded: report?.embedding.embedded,
@@ -430,7 +432,10 @@ describe("the Brain's report", () => {
         parkedAt: "set",
       },
       store: { sized: true, limit: 10_000_000_000 },
-      embedding: { model: null, embedded: 0 },
+      embedding: {
+        model: vectorModelNameOf(await embedderModel()),
+        embedded: 1,
+      },
       ledger: {
         replay: "through",
         written: true,
@@ -478,7 +483,7 @@ const recallCountsOf = (report: BrainReport | null) =>
       };
 
 describe("recall, as staff see it", () => {
-  it("counts recalls by each way, with nothing of the question, and none without meaning while no model ships", async () => {
+  it("counts recalls by each way, with nothing of the question, and none without meaning while the embedder answers", async () => {
     const marked = marker();
     const { userId } = await signedInWithRole(idp, "user");
     await addSource(env, {
@@ -523,7 +528,8 @@ describe("recall, as staff see it", () => {
       after: {
         words: [(before.words[0] ?? 0) + 2, before.words[1]],
         exact: [(before.exact[0] ?? 0) + 1, before.exact[1]],
-        meaning: before.meaning,
+        // Each question but the empty one, embedded and searched by meaning.
+        meaning: [(before.meaning[0] ?? 0) + 2, before.meaning[1]],
         without: before.without,
       },
       content: [],
@@ -1225,12 +1231,16 @@ describe("the Brain's actions when the log fails after they applied", () => {
 describe("the Brain's upkeep, as staff see it", () => {
   it("shows an embedding step that failed as a code and a time, never what it failed with", async () => {
     const marked = marker();
-    // The store sees the test model first, so core's own tick (no model)
-    // changes the model it embeds for, which the step writes.
+    // The store sees another build of the model first, so core's own
+    // tick changes the model it embeds for, which the step writes.
+    const { model } = await embedInProcess([]);
     await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work({
       ask: quietModel,
       at: nextDay(),
-      embedders: await testModelEmbedders(),
+      embedders: {
+        model: { ...model, build: "0".repeat(model.build.length) },
+        embed: async () => await Promise.resolve({ kind: "unavailable" }),
+      },
       handOvers: noHandOvers,
     });
     // The step's own table refuses every write, with the marker in its words.
@@ -1244,8 +1254,8 @@ describe("the Brain's upkeep, as staff see it", () => {
       }
     });
     try {
-      // Core's embedders run no model, which the store last saw running
-      // one: the step writes its state, and fails.
+      // Core's embedders run another build than the store last saw: the
+      // step writes its state, and fails.
       await workBrain(env, nextDay(), noProducers);
       const { status, text, report } = await readReport();
 
