@@ -41,12 +41,24 @@ import {
 } from "@grasp-os/ui/components/toggle-group";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, ArrowRightIcon, SearchIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ChevronRightIcon,
+  SearchIcon,
+} from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { CommandButton } from "./commands.tsx";
-import { Dot, Figure, Initials, markOf, PeopleDots } from "./parts.tsx";
+import {
+  AttentionDot,
+  Dot,
+  Figure,
+  Initials,
+  markOf,
+  PeopleDots,
+} from "./parts.tsx";
 import { EmptySection, Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, linkWords, talkedWords, workflowWords } from "./words.ts";
@@ -363,12 +375,13 @@ const TeamRow = ({
   const flags = each.off ? [] : besideStanding(team);
   const [flag] = flags;
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 border-t px-5 py-3 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
+    // The whole row opens the team, as every list's rows open what they name: it answers the pointer and ends in a chevron.
+    <li className="hover:bg-muted/50 relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 border-t px-5 py-3 transition-colors md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
       <span className="flex min-w-0 flex-col">
         <TeamLink
           aria-label={`Open ${name}`}
           className={cn(
-            "focus-visible:ring-ring/50 truncate rounded-sm outline-none hover:underline focus-visible:ring-3",
+            "focus-visible:ring-ring/50 truncate rounded-sm outline-none after:absolute after:inset-0 focus-visible:ring-3",
             each.off && "text-muted-foreground"
           )}
           clientId={clientId}
@@ -387,7 +400,8 @@ const TeamRow = ({
           {line}
         </span>
         {flag === undefined ? null : (
-          <span className="text-status-attention truncate text-xs">
+          <span className="flex items-baseline gap-1.5 truncate text-xs">
+            <AttentionDot />
             {flagLine(flag)}
             {flags.length > 1 ? (
               <span className="text-muted-foreground tabular-nums">
@@ -416,20 +430,27 @@ const TeamRow = ({
           </>
         )}
       </span>
-      {each.off && !view.closed ? (
-        <span className="col-start-2 row-start-1 md:col-start-auto md:row-start-auto">
-          <CommandButton
-            clientId={clientId}
-            command={{
-              type: "onboarding.ask_in",
-              payload: { team: each.team.id },
-            }}
-            label={`Ask ${name} in`}
-          >
-            Ask it in
-          </CommandButton>
-        </span>
-      ) : null}
+      <span className="col-start-2 row-start-1 flex items-center gap-3 md:col-start-auto md:row-start-auto">
+        {each.off && !view.closed ? (
+          // Above the row's link, so it is pressed itself.
+          <span className="relative">
+            <CommandButton
+              clientId={clientId}
+              command={{
+                type: "onboarding.ask_in",
+                payload: { team: each.team.id },
+              }}
+              label={`Ask ${name} in`}
+            >
+              Ask it in
+            </CommandButton>
+          </span>
+        ) : null}
+        <ChevronRightIcon
+          aria-hidden
+          className="text-muted-foreground size-4 flex-none"
+        />
+      </span>
     </li>
   );
 };
@@ -587,11 +608,6 @@ const TeamFigures = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
         <Figure label="People" sub={peopleSub} value={people} />
         <Figure
           label="Talked"
-          ring={
-            counts
-              ? { value: each.counts.completed, of: each.asked }
-              : undefined
-          }
           sub={linksSub}
           value={counts ? `${each.counts.completed} of ${each.asked}` : "–"}
         />
@@ -602,7 +618,6 @@ const TeamFigures = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
         />
         <Figure
           label="Known"
-          ring={works > 0 ? { value: team.known, of: works } : undefined}
           value={works === 0 ? "–" : `${team.known} of ${works}`}
         />
       </div>
@@ -861,7 +876,7 @@ const TeamFlags = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
           className="flex flex-col gap-0.5 border-t px-5 py-3 first:border-t-0"
           key={flag.kind === "nobody" ? `nobody-${flag.work.id}` : flag.kind}
         >
-          <span className="text-status-attention flex items-center gap-2">
+          <span className="flex items-center gap-2">
             <span
               aria-hidden
               className="bg-status-attention size-1.5 flex-none rounded-full"
@@ -902,7 +917,7 @@ export const OneTeam = ({
           nativeButton={false}
           render={<TeamLink clientId={clientId} team={null} />}
           size="sm"
-          variant="ghost"
+          variant="outline"
         >
           <ArrowLeftIcon data-icon="inline-start" />
           All teams
