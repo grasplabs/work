@@ -91,9 +91,11 @@ const credentials: readonly (readonly [
 // `&#38;`, `&#x26;`, `&#038;` and `&AMP;` all separate parameters), it is
 // checked as a URL, and its query is read pair by pair; a parameter whose
 // value is itself a URL (a redirect's target) is read the same way, once.
-// Only the values of those parameters change: a link with none comes back
-// byte for byte as it was, and a word outside a link (`R&D`, `code=42`)
-// is never one. JSON escapes are not decoded: what is redacted (a tool's
+// Only the values of those parameters change, found by their offsets in
+// one pass (never searched for, which a link of many pairs would make
+// quadratic): a link with none comes back byte for byte as it was, one
+// with some comes back decoded with those values replaced, and a word
+// outside a link (`R&D`, `code=42`) is never one. JSON escapes are not decoded: what is redacted (a tool's
 // output as JSON text, a chat's text) holds `&` as itself.
 // Not caught: a credential in a URL's path, and an opaque download URL
 // that grants by its whole self. What is left is bounded: such text
@@ -123,95 +125,65 @@ const decoded = (component: string): string => {
 };
 
 /**
- * A pair of a link's query: its value as written (none for a name alone),
- * and what replaces it, if anything.
+ * `link` (a URL as text, its character references already decoded) with
+ * the values of its granting parameters replaced with `[redacted]`, and,
+ * with `nested`, a parameter whose value is itself a URL read the same way
+ * once; `undefined` when it isn't a URL or nothing in it changes. Its
+ * query is walked once, pair by pair, by offset: each pair ends at `&` or
+ * the query's end, its name at its first `=`; only a replaced value's
+ * span is written anew, every other character as it was. Linear in the
+ * link, whatever its pairs hold.
  */
-interface Pair {
-  value?: string;
-  to?: string;
-}
-
-/**
- * `text` (a link as written) with each of `pairs`' values replaced as
- * they say, found in order after their `=`; `undefined` when one can't be
- * found as written (it held a character reference).
- */
-const replacedIn = (
-  text: string,
-  pairs: readonly Pair[]
-): string | undefined => {
-  let out = "";
-  let at = 0;
-  for (const { value, to } of pairs) {
-    if (value === undefined) {
-      continue;
-    }
-    const found = text.indexOf(`=${value}`, at);
-    if (found === -1) {
-      if (to !== undefined) {
-        return undefined;
-      }
-      continue;
-    }
-    const start = found + 1;
-    out += text.slice(at, start) + (to ?? value);
-    at = start + value.length;
-  }
-  return out + text.slice(at);
-};
-
-/** `link` with `pairs`' values replaced, as written where they can be found so. */
-const written = (link: string, pairs: readonly Pair[]): string =>
-  replacedIn(link, pairs) ?? link;
-
-/**
- * The pairs of `link`'s query (a URL as text), in order, each granting
- * one's value to be replaced with `[redacted]`, and, with `nested`, a
- * value that is itself a URL with its own granting values redacted, once;
- * `undefined` when it isn't a URL or nothing in it is to change.
- */
-const pairsOf = (link: string, nested: boolean): Pair[] | undefined => {
+const redactedQuery = (link: string, nested: boolean): string | undefined => {
   const query = link.indexOf("?");
   if (query === -1 || !URL.canParse(link)) {
     return undefined;
   }
   const hash = link.indexOf("#", query);
-  const pairs = link
-    .slice(query + 1, hash === -1 ? link.length : hash)
-    .split("&")
-    .map((pair): Pair => {
-      const equals = pair.indexOf("=");
-      if (equals === -1) {
-        return {};
+  const end = hash === -1 ? link.length : hash;
+  let out = "";
+  // Written up to here; the pair being read starts at `start`, its `=` at `equals`.
+  let written = 0;
+  let start = query + 1;
+  let equals = -1;
+  for (let at = start; at <= end; at += 1) {
+    const char = at < end ? link[at] : "&";
+    if (char === "=" && equals === -1) {
+      equals = at;
+    } else if (char === "&") {
+      if (equals !== -1) {
+        const value = link.slice(equals + 1, at);
+        let to: string | undefined;
+        if (grantingName.test(decoded(link.slice(start, equals)))) {
+          to = "[redacted]";
+        } else if (nested) {
+          const inner = redactedQuery(decoded(value), false);
+          to = inner === undefined ? undefined : encodeURIComponent(inner);
+        }
+        if (to !== undefined) {
+          out += link.slice(written, equals + 1) + to;
+          written = at;
+        }
       }
-      const value = pair.slice(equals + 1);
-      if (grantingName.test(decoded(pair.slice(0, equals)))) {
-        return { value, to: "[redacted]" };
-      }
-      const inner = nested ? decoded(value) : "";
-      const innerPairs = nested ? pairsOf(inner, false) : undefined;
-      return innerPairs === undefined
-        ? { value }
-        : { value, to: encodeURIComponent(written(inner, innerPairs)) };
-    });
-  return pairs.some(({ to }) => to !== undefined) ? pairs : undefined;
+      start = at + 1;
+      equals = -1;
+    }
+  }
+  return written === 0 ? undefined : out + link.slice(written);
 };
 
 /**
  * `text` with the granting parameters of every link in it redacted: each
- * link decoded and parsed, and only those values replaced, in the link as
- * it was written (or as decoded, where a value held a character
- * reference); a link with nothing to redact is left exactly as it was.
+ * link's character references decoded as a browser reads an `href`, the
+ * result parsed and only those values replaced. A link with nothing to
+ * redact is left exactly as it was written; one with something is written
+ * back as decoded (its `&amp;` as `&`), the rest of it unchanged.
  */
 const redactLinks = (text: string): string =>
-  text.replace(linkPattern, (link) => {
-    const plain = decodeHTMLAttribute(link);
-    const pairs = pairsOf(plain, true);
-    if (pairs === undefined) {
-      return link;
-    }
-    return replacedIn(link, pairs) ?? written(plain, pairs);
-  });
+  text.replace(
+    linkPattern,
+    (link) => redactedQuery(decodeHTMLAttribute(link), true) ?? link
+  );
 
 /** `text` with every credential in it ({@link credentials}) redacted. */
 export const redact = (text: string): string => {

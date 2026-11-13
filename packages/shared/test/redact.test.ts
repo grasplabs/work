@@ -35,7 +35,8 @@ describe("redacting credentials", () => {
         '<a href="https://d111.cloudfront.net/q.pdf?Expires=1795000000&amp;Signature=Ab~Cd-Ef__&amp;Key-Pair-Id=K2J">Quote</a> <a href="https://acme.blob.core.windows.net/c/q.pdf?sv=2024&#38;sig=AbC%2Bd3fG%3D">Q</a>'
       )
     ).toBe(
-      '<a href="https://d111.cloudfront.net/q.pdf?Expires=1795000000&amp;Signature=[redacted]&amp;Key-Pair-Id=K2J">Quote</a> <a href="https://acme.blob.core.windows.net/c/q.pdf?sv=2024&#38;sig=[redacted]">Q</a>'
+      // Written back decoded where something was redacted.
+      '<a href="https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=[redacted]&Key-Pair-Id=K2J">Quote</a> <a href="https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=[redacted]">Q</a>'
     );
   });
 
@@ -50,13 +51,27 @@ describe("redacting credentials", () => {
         `https://app.acme.test/out?to=${encodeURIComponent(target)}`,
       ].map(redact)
     ).toStrictEqual([
-      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&#x26;sig=[redacted]",
-      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&#038;Signature=[redacted]",
-      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&AMP;sig=[redacted]",
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=[redacted]",
+      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=[redacted]",
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=[redacted]",
       `https://app.acme.test/out?to=${encodeURIComponent(
         "https://bucket.s3.amazonaws.com/q.pdf?x=1&X-Amz-Signature=[redacted]"
       )}`,
     ]);
+  });
+
+  it("redacts the parameter itself, never a look-alike inside another's value", () => {
+    expect(
+      redact("https://h.example/f?x=a=SECRET&#59;&sig=SECRET&y=sig=1")
+    ).toBe("https://h.example/f?x=a=SECRET;&sig=[redacted]&y=sig=1");
+  });
+
+  it("reads a megabyte link of many pairs, each holding a reference, in one pass", () => {
+    const pairs = 125_000;
+    const link = `https://h.example/x?${"a=&#59;&".repeat(pairs)}sig=S`;
+    expect(redact(`<a href="${link}">x</a>`)).toBe(
+      `<a href="https://h.example/x?${"a=;&".repeat(pairs)}sig=[redacted]">x</a>`
+    );
   });
 
   it("leaves a link with nothing to redact, and prose, exactly as they were", () => {
@@ -79,7 +94,7 @@ describe("redacting credentials", () => {
       large[0]?.length,
       large[1]?.length,
       "https://acme.test/q?sig=[redacted]".length,
-      "https://acme.test/q?x=1&amp;Signature=[redacted] ".length * 30_000,
+      "https://acme.test/q?x=1&Signature=[redacted] ".length * 30_000,
     ]);
   });
 
