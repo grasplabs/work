@@ -1,0 +1,1 @@
+CREATE INDEX `memories_entity_object_idx` ON `memories` (`entity`,`object`);

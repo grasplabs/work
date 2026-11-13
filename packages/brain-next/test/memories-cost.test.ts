@@ -71,7 +71,8 @@ type Store = Awaited<ReturnType<typeof countedStore>>["stub"];
 
 /**
  * Rows an index seek may read more as the indexes grow deeper: a scan of
- * what was added would read 1,000 or more here, the far step's read 60.
+ * what was added would read 1,000 or more here, a hub's relations 4,900,
+ * the far step's read 60.
  */
 const seekMargin = 8;
 
@@ -80,8 +81,9 @@ const flat = (alone: number, rows: number): boolean =>
   rows >= alone && rows - alone <= seekMargin;
 
 /**
- * Adds `count` memories about entities of their own, with no name (so no
- * question names them), readable by `group`, a hundred an add.
+ * Adds `count` memories about entities of their own, each with a name of
+ * its own (in the index of names, as any person's), readable by `group`,
+ * a hundred an add.
  */
 const unrelated = async (
   stub: Store,
@@ -94,8 +96,81 @@ const unrelated = async (
     await stub.addMemories({
       change: crypto.randomUUID(),
       access: audience(group),
-      entities: keys.map((key) => ({ key, kind: "person", names: [] })),
+      entities: keys.map((key) => ({ key, kind: "person", names: [word()] })),
       memories: keys.map((key) => fact(key, `unrelated ${start} ${key}`)),
+    });
+  }
+};
+
+/**
+ * The rows `ask` reads alone, then with `sizes` (in all) unrelated
+ * memories, half readable by `group` and half hidden from the reader.
+ */
+const rowsAsUnrelatedGrow = async (
+  stub: Store,
+  rowsReadBy: (ask: () => Promise<unknown>) => Promise<number>,
+  group: string,
+  ask: () => Promise<unknown>
+): Promise<number[]> => {
+  const hidden = `hidden-${crypto.randomUUID()}`;
+  const rows = [await rowsReadBy(ask)];
+  let have = 0;
+  for (const size of [1000, 5000, 20_000]) {
+    // oxlint-disable-next-line no-await-in-loop -- one size at a time
+    await unrelated(stub, group, (size - have) / 2);
+    // oxlint-disable-next-line no-await-in-loop -- one size at a time
+    await unrelated(stub, hidden, (size - have) / 2);
+    have = size;
+    // oxlint-disable-next-line no-await-in-loop -- one size at a time
+    rows.push(await rowsReadBy(ask));
+  }
+  return rows;
+};
+
+/**
+ * Adds `count` relations of the hub `hub` (an existing person's or
+ * customer's id) to entities of their own: from it (`out`, a person who
+ * owns customers) or to it (`in`, people who own the customer), 99 an
+ * add.
+ */
+const hubRelations = async (
+  stub: Store,
+  group: string,
+  maker: Reader,
+  hub: { id: string; kind: "person" | "customer" },
+  count: number,
+  direction: "out" | "in"
+): Promise<void> => {
+  for (let start = 0; start < count; start += 99) {
+    const keys = Array.from(
+      { length: Math.min(99, count - start) },
+      (_, index) => `o${index}`
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one add at a time
+    await stub.addMemories({
+      change: crypto.randomUUID(),
+      access: audience(group),
+      reader: maker,
+      entities: [
+        { key: "h", id: hub.id, kind: hub.kind, names: [] },
+        ...keys.map((key) => ({
+          key,
+          kind:
+            direction === "out" ? ("customer" as const) : ("person" as const),
+          names: [],
+        })),
+      ],
+      memories: keys.map((key, index) =>
+        direction === "out"
+          ? fact("h", `the hub owns ${start + index}`, {
+              attribute: "owns",
+              object: key,
+            })
+          : fact(key, `${start + index} owns the hub`, {
+              attribute: "owns",
+              object: "h",
+            })
+      ),
     });
   }
 };
@@ -119,7 +194,7 @@ const finding = async (stub: Store, reader: Reader, question: string) =>
   await stub.find({ question, reader, budget: { tokens: 20_000 } });
 
 describe("what reading memories costs", () => {
-  it("reads an entity's memories without reading other memories, readable or hidden", async () => {
+  it("reads an entity's memories without reading other memories or names, readable or hidden", async () => {
     const { stub, rowsReadBy } = await countedStore();
     const group = `seen-${crypto.randomUUID()}`;
     const reader = readerOf("reader", group);
@@ -136,21 +211,22 @@ describe("what reading memories costs", () => {
         }),
       ]
     );
-    const read = async () =>
-      await stub.readMemories({ entity: entities.c ?? "", reader });
-    const alone = await rowsReadBy(read);
-    await unrelated(stub, group, 1000);
-    const besideReadable = await rowsReadBy(read);
-    await unrelated(stub, `hidden-${crypto.randomUUID()}`, 1000);
-    const besideHidden = await rowsReadBy(read);
+    const [alone, ...grown] = await rowsAsUnrelatedGrow(
+      stub,
+      rowsReadBy,
+      group,
+      async () => await stub.readMemories({ entity: entities.c ?? "", reader })
+    );
 
-    expect({
-      besideReadable: flat(alone, besideReadable),
-      besideHidden: flat(alone, besideHidden),
-    }).toStrictEqual({ besideReadable: true, besideHidden: true });
-  });
+    expect(grown.map((rows) => flat(alone ?? 0, rows))).toStrictEqual([
+      true,
+      true,
+      true,
+    ]);
+    // Adding 20,000 memories, a hundred an add, takes its time.
+  }, 120_000);
 
-  it("walks from a named entity without reading other memories, readable or hidden", async () => {
+  it("walks from a named entity without reading other memories or names, readable or hidden", async () => {
     const { stub, rowsReadBy } = await countedStore();
     const group = `seen-${crypto.randomUUID()}`;
     const reader = readerOf("reader", group);
@@ -171,18 +247,77 @@ describe("what reading memories costs", () => {
         fact("c", `${other} pays on time`),
       ]
     );
-    const ask = async () => await finding(stub, reader, name);
-    const alone = await rowsReadBy(ask);
-    await unrelated(stub, group, 1000);
-    const besideReadable = await rowsReadBy(ask);
-    await unrelated(stub, `hidden-${crypto.randomUUID()}`, 1000);
-    const besideHidden = await rowsReadBy(ask);
+    const [alone, ...grown] = await rowsAsUnrelatedGrow(
+      stub,
+      rowsReadBy,
+      group,
+      async () => await finding(stub, reader, name)
+    );
 
-    expect({
-      besideReadable: flat(alone, besideReadable),
-      besideHidden: flat(alone, besideHidden),
-    }).toStrictEqual({ besideReadable: true, besideHidden: true });
-  });
+    expect(grown.map((rows) => flat(alone ?? 0, rows))).toStrictEqual([
+      true,
+      true,
+      true,
+    ]);
+    // Adding 20,000 memories, a hundred an add, takes its time.
+  }, 120_000);
+
+  // A hub the walk reaches: its relations pointing at it (`in`, reached a
+  // step on, where its relations are counted) and from it (`out`, reached
+  // two steps on, where none are), read a page of, never whole: the rows a
+  // walk reads with 100 of them and with 5,000 are the same.
+  it.each([
+    ["in", 1],
+    ["out", 2],
+  ] as const)(
+    "reads a hub's relations (%s, step %i) by seek, never whole",
+    async (direction, step) => {
+      const { stub, rowsReadBy } = await countedStore();
+      const group = `seen-${crypto.randomUUID()}`;
+      const reader = readerOf("reader", group);
+      const name = word();
+      const hubKind = direction === "in" ? "customer" : "person";
+      const { entities } = await add(
+        stub,
+        group,
+        [
+          { key: "a", kind: "person", names: [name] },
+          // B leads to the hub only when the hub is two steps out.
+          ...(step === 1
+            ? []
+            : [{ key: "b", kind: "customer" as const, names: [word()] }]),
+          { key: "h", kind: hubKind, names: [word()] },
+        ],
+        step === 1
+          ? [
+              fact("a", `${name} uses the hub`, {
+                attribute: "owns",
+                object: "h",
+              }),
+              fact("h", "The hub is big"),
+            ]
+          : [
+              fact("a", `${name} looks after B`, {
+                attribute: "owns",
+                object: "b",
+              }),
+              fact("b", "B is reached through the hub", {
+                attribute: "contact",
+                object: "h",
+              }),
+              fact("h", "The hub is big"),
+            ]
+      );
+      const hub = { id: entities.h ?? "", kind: hubKind } as const;
+      const ask = async () => await finding(stub, reader, name);
+      await hubRelations(stub, group, reader, hub, 100, direction);
+      const few = await rowsReadBy(ask);
+      await hubRelations(stub, group, reader, hub, 4900, direction);
+      const many = await rowsReadBy(ask);
+
+      expect(flat(few, many)).toBeTruthy();
+    }
+  );
 
   it("reads no entity two steps out once the nearer steps fill the list", async () => {
     const { stub, rowsReadBy } = await countedStore();

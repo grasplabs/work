@@ -653,6 +653,11 @@ export const memories = sqliteTable(
       table.lineage
     ),
     index("memories_object_idx").on(table.object),
+    // The relations between two given entities, and an entity's facts
+    // (object null) apart from its relations: what recall's walk seeks
+    // (recall-memories.ts), never reading a hub's relations whole. Added
+    // in 0009, after the table: a store made before it gains it then.
+    index("memories_entity_object_idx").on(table.entity, table.object),
     index("memories_version_idx").on(table.source, table.version),
     index("memories_subject_idx").on(table.subject, table.version),
     index("memories_readers_idx").on(table.readers),
