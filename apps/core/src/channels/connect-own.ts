@@ -50,10 +50,15 @@ const keptMs = 60 * 60 * 1000;
 /** How often the card is offered to one person: once a day. */
 const offerEveryMs = 24 * 60 * 60 * 1000;
 
-const keptKey = (userId: string): string => `connect-own:kept:${userId}`;
+// `asked`, not the `kept` an earlier build wrote: that build kept the
+// question from group chats too, so its records are never read.
+const keptKey = (userId: string): string => `connect-own:asked:${userId}`;
 const offeredKey = (userId: string): string => `connect-own:offered:${userId}`;
 
-/** What waits for a person to connect: their question and where they asked it. */
+/**
+ * What waits for a person to connect: their question and where they asked
+ * it, which is only ever their direct message (`offerConnectOwn`).
+ */
 const keptSchema = z.object({
   platform: z.string(),
   threadId: z.string(),
@@ -141,7 +146,8 @@ export interface Conversation {
 }
 
 /**
- * After `userId` was answered in `conversation`: if they have no working
+ * After `userId` was answered in `conversation`, their direct message
+ * (the caller checks; never a chat others read): if they have no working
  * Microsoft 365 of their own, keeps what they asked for the hour and, once
  * a day, offers the card to connect it. A failure here costs only the card.
  */

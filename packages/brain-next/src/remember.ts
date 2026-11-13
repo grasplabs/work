@@ -1,7 +1,7 @@
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
-import { attributeRuleOf, changeReused } from "./contract.ts";
+import { attributeRuleOf, changeReused, restoringNow } from "./contract.ts";
 import type {
   AddedMemories,
   AttributeRule,
@@ -24,6 +24,7 @@ import {
   stampWrite,
 } from "./memories.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { isRestoring } from "./restoring.ts";
 import { indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
@@ -46,7 +47,7 @@ interface Planned {
 }
 
 /** What an add answered, as kept with its change. */
-const answerSchema = z.strictObject({
+export const answerSchema = z.strictObject({
   memories: z.array(z.string()),
   entities: z.record(z.string(), z.string()),
 });
@@ -62,7 +63,7 @@ const refused = (why: string): Error =>
  * with an entity of a kind it relates to and no value; any other
  * attribute with a value and no entity it relates to.
  */
-const planOf = ({ entities, memories }: Adding): Planned[] => {
+export const planOf = ({ entities, memories }: Adding): Planned[] => {
   const byKey = new Map(entities.map(({ key }, index) => [key, index]));
   if (byKey.size !== entities.length) {
     throw refused("two entities have the same key");
@@ -231,6 +232,23 @@ interface Into {
 }
 
 /**
+ * What one-value attributes compare a memory by, under its attribute's
+ * `rule`: its `value` folded, or the id of the entity a relation relates
+ * to (`object`); none without an attribute. For an add and a restore
+ * (restore.ts) alike.
+ */
+export const valueKeyFor = (
+  rule: AttributeRule | undefined,
+  value: string | null,
+  object: string | null
+): string | null => {
+  if (rule === undefined) {
+    return null;
+  }
+  return rule.relation === undefined ? foldName(value ?? "") : object;
+};
+
+/**
  * What one-value attributes compare a memory by: its value folded, or the
  * id of the entity a relation relates to; none without an attribute.
  */
@@ -238,15 +256,12 @@ const valueKeyOf = (
   { ids }: Into,
   memory: NewMemory,
   plan: Planned
-): string | null => {
-  if (plan.rule === undefined) {
-    return null;
-  }
-  if (plan.rule.relation === undefined) {
-    return foldName(memory.value ?? "");
-  }
-  return plan.object === undefined ? null : (ids[plan.object] ?? null);
-};
+): string | null =>
+  valueKeyFor(
+    plan.rule,
+    memory.value ?? null,
+    plan.object === undefined ? null : (ids[plan.object] ?? null)
+  );
 
 /** The SHA-256 of `source`, which the add hashed before its transaction. */
 const subjectOfSource = (
@@ -433,6 +448,11 @@ export const addMemories = async (
     )
   );
   return storage.transactionSync(() => {
+    // Nothing is added while a restore runs (restoring.ts): it writes a
+    // lineage's memories in their order, which an add between would break.
+    if (isRestoring(sql)) {
+      throw new Error(restoringNow);
+    }
     const [before] = sql
       .exec<{ hash: string; answer: string }>(
         "SELECT hash, answer FROM memory_changes WHERE key = ?",

@@ -4,10 +4,13 @@ import { says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant, clientOrigin, otherTenant } from "./sign-in-config.ts";
-import { entraPerson, signedIn, whoami } from "./sign-in.ts";
+import { entraPerson, signedIn, signedInApi, whoami } from "./sign-in.ts";
 import {
   kept,
+  mentionIn,
   messageFrom,
+  newGroup,
+  onGroupRoster,
   onRoster,
   post,
   reached,
@@ -41,6 +44,12 @@ const sentIn = async (conversation: string): Promise<string[]> => {
       // Not the card offering their own Microsoft 365 (connect-own.ts).
       .filter((activity) => !activity.includes("/connect-microsoft"))
   );
+};
+
+/** Everything sent in `conversation`, as one text. */
+const textIn = async (conversation: string): Promise<string> => {
+  const sent = await sentIn(conversation);
+  return sent.join(",");
 };
 
 /** Someone of the client's tenant whom Grasp hasn't seen, as Teams' roster has them. */
@@ -124,6 +133,74 @@ describe("one of the client's people Grasp hasn't seen", setUpTime, () => {
     await post(messageFrom(person, { text: "Bye" }));
 
     expect(provider.requests).toHaveLength(3);
+  });
+
+  it("answers what they asked in their direct message there alone, never in a group chat they write in first", async () => {
+    const person = await newcomer();
+    const secret = `Am I on the ${crypto.randomUUID().slice(0, 8)} list?`;
+    await post(messageFrom(person, { text: secret }));
+    const { provider } = await signsIn(
+      person.aadObjectId,
+      "Lunch is at noon.",
+      "Not that I know of.",
+      "Hello again."
+    );
+    const ben = await signedInApi(idp, "user");
+    const benTeams = teamsPerson(String(ben.person.oid));
+    const group = newGroup();
+    await onGroupRoster(group, [{ person }, { person: benTeams }]);
+
+    // Their next message: an @mention in a group chat Ben is in.
+    await post(mentionIn(person, group, "What's for lunch?"));
+    const inGroup = await textIn(group);
+    const askedInGroup = JSON.stringify(
+      provider.requests.map(({ body }) => body)
+    );
+    // Then their direct message: the kept question is answered there.
+    await post(messageFrom(person, { text: "Hi" }));
+    const inDirect = await textIn(person.conversation);
+
+    expect({
+      groupHeardIt: askedInGroup.includes(secret),
+      groupAnswer: inGroup.includes("Lunch is at noon."),
+      keptAnswerInGroup: inGroup.includes("Not that I know of."),
+      keptAnswerInDirect: inDirect.includes("Not that I know of."),
+      asked: provider.requests.length,
+    }).toStrictEqual({
+      groupHeardIt: false,
+      groupAnswer: true,
+      keptAnswerInGroup: false,
+      keptAnswerInDirect: true,
+      // The group's question, the kept one, and "Hi".
+      asked: 3,
+    });
+  });
+
+  it("keeps nothing they asked in a group chat, and asks them there to ask again once signed in", async () => {
+    const person = await newcomer();
+    const group = newGroup();
+    await onGroupRoster(group, [{ person }]);
+    await post(mentionIn(person, group, "How long is parental leave?"));
+    const told = await textIn(group);
+    const { provider } = await signsIn(person.aadObjectId, "Hello.");
+
+    await post(messageFrom(person, { text: "Hi" }));
+
+    expect({
+      link: told.includes(signInLink),
+      askAgain: told.includes("then ask me again"),
+      promised: told.includes("answer you right after"),
+      asked: provider.requests.length,
+      keptReachedModel: JSON.stringify(
+        provider.requests.map(({ body }) => body)
+      ).includes("parental leave"),
+    }).toStrictEqual({
+      link: true,
+      askAgain: true,
+      promised: false,
+      asked: 1,
+      keptReachedModel: false,
+    });
   });
 
   it("isn't known by a sign-in with another object id", async () => {

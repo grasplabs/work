@@ -297,6 +297,18 @@ const sharedChatSchema = z.strictObject({
 });
 export type SharedChat = z.infer<typeof sharedChatSchema>;
 
+/**
+ * Where a question came in on a chat platform, as its door names it: a
+ * direct message, which the platform's own data proves is the person and
+ * the bot alone, or a chat others share. Always said, never assumed: a
+ * question without one is refused.
+ */
+const chatPlaceSchema = z.union([
+  z.strictObject({ kind: z.literal("direct") }),
+  sharedChatSchema,
+]);
+export type ChatPlace = z.infer<typeof chatPlaceSchema>;
+
 /** The title of a chat others share on `platform`. */
 const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
   `${chatPlatformName(platform)} ${kind === "group" ? "group chat" : "channel"}`;
@@ -768,9 +780,17 @@ const outputOf = (
 /**
  * Whether a turn of `chat` answers its person alone, so its recall may
  * hold what only they may read (their own store): only in their own chat
- * in Grasp, in a turn they started. A chat app's message (Teams, Slack) is
- * kept by that app too, where its admins and exports reach it; a thread
- * others share is read by all of them.
+ * in Grasp, in a turn they started. A chat for a thread others share
+ * (`thread`) is read by all of them, however few the platform says it
+ * holds.
+ *
+ * A chat app's direct message is the person's one chat there (`thread`
+ * null), which only a message the platform itself names one-to-one
+ * reaches (`askThrough`, place `direct`). It is left out here while the
+ * decision on it is open (GRA-1821): the chat app keeps the answer too,
+ * where its admins and compliance exports read it, so a person's own
+ * content would leave Grasp. Were it decided yes, this is the one place
+ * that changes: drop `via === "web"`.
  *
  * A turn a schedule or an event woke (`unattended`) wasn't theirs to
  * start, and acts on what woke it: an event's words, from anyone, steer
@@ -1642,20 +1662,27 @@ export class Workspace extends DurableObject<Env> {
    * asks: only the door of a chat platform calls it, once the platform's
    * verified sender id named the person (channels/door.ts).
    *
-   * Asked where others read the answer (`shared`: a group chat, a
-   * channel), it is the person's one chat for that thread instead, and who
-   * is in it is kept first: its agent reads only what all of them may.
+   * The door says where it was asked (`place`). In a direct message it is
+   * that one chat, theirs alone (`answersAlone`). Asked where others read
+   * the answer (a group chat, a channel), it is the person's one chat for
+   * that thread instead, and who is in it is kept first: its agent reads
+   * only what all of them may.
    */
   async askThrough(
     personId: string,
     agentId: string,
     via: string,
     text: string,
-    onText?: (text: string) => unknown,
-    shared?: SharedChat
+    onText: ((text: string) => unknown) | undefined,
+    place: ChatPlace
   ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
     const platform = chatPlatformSchema.parse(via);
-    const where = sharedChatSchema.optional().parse(shared);
+    const parsedPlace = permissionErrors.parse(
+      "permission.context_invalid",
+      chatPlaceSchema,
+      place
+    );
+    const where = parsedPlace.kind === "direct" ? undefined : parsedPlace;
     const [found] = this.#db
       .select()
       .from(chats)
