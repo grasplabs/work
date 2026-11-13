@@ -12335,6 +12335,10 @@ msgstr "Teilen, sobald es bereit ist"
 msgid "Share this record"
 msgstr "Diesen Eintrag teilen"
 
+#: src/brain/skills-page.tsx
+msgid "Share this version instead"
+msgstr "Stattdessen diese Version teilen"
+
 #: src/brain/share-record.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share with"

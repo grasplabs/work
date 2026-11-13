@@ -1,6 +1,7 @@
 import { failureText } from "@grasp-os/shared/errors";
 import type {
   ListedSkill,
+  OwnSkillShare,
   SkillShare,
   SkillShareRequest,
   SkillsOverview,
@@ -37,7 +38,7 @@ import {
 } from "@grasp-os/ui/components/page-header";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
@@ -171,6 +172,36 @@ const Confirmed = ({
   </AlertDialog>
 );
 
+/**
+ * The person's share button for a skill: share it; or, while a share of
+ * it waits, nothing to do unless they saved a newer version since, which
+ * asking again shares instead (the waiting one is closed).
+ */
+const ShareLabel = ({ waiting }: { waiting: Waiting | undefined }) => {
+  if (waiting === "outdated") {
+    return <Trans>Share this version instead</Trans>;
+  }
+  return waiting === "current" ? (
+    <Trans>Waiting for an admin</Trans>
+  ) : (
+    <Trans>Share with the company</Trans>
+  );
+};
+
+/** A share of a skill that waits: of its current text or an older one. */
+type Waiting = "current" | "outdated";
+
+/** Of each of the person's skills a share of which waits: of which text. */
+const waitingOf = (shares: OwnSkillShare[] = []): Map<string, Waiting> =>
+  new Map(
+    shares
+      .filter(({ status }) => status === "pending")
+      .map(({ name, outdated }): [string, Waiting] => [
+        name,
+        outdated ? "outdated" : "current",
+      ])
+  );
+
 /** One of the person's own skills, with what they can do with it. */
 const OwnSkill = ({
   skill,
@@ -181,7 +212,8 @@ const OwnSkill = ({
   onRemove,
 }: {
   skill: ListedSkill;
-  waiting: boolean;
+  /** Undefined while no share of it waits. */
+  waiting: Waiting | undefined;
   busy: boolean;
   onEdit: () => void;
   onShare: () => void;
@@ -211,17 +243,13 @@ const OwnSkill = ({
           <Trans>Edit</Trans>
         </Button>
         <Button
-          disabled={busy || waiting}
+          disabled={busy || waiting === "current"}
           onClick={onShare}
           size="sm"
           type="button"
           variant="outline"
         >
-          {waiting ? (
-            <Trans>Waiting for an admin</Trans>
-          ) : (
-            <Trans>Share with the company</Trans>
-          )}
+          <ShareLabel waiting={waiting} />
         </Button>
         <Confirmed
           confirm={t`Delete for good`}
@@ -319,6 +347,10 @@ export const SkillsPage = () => {
   const [text, setText] = useState(newSkillText);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string>();
+  /** The own skill the editor is reading, while it reads. */
+  const [reading, setReading] = useState<string | null>(null);
+  /** The read asked for last: only its reply fills the editor. */
+  const lastRead = useRef<string | null>(null);
 
   useEffect(() => {
     let left = false;
@@ -328,7 +360,10 @@ export const SkillsPage = () => {
         async (skills) => await skills.overview()
       );
       if (!left) {
-        setOverview(answer);
+        // Unless an action read the page meanwhile, which is newer.
+        setOverview((current) =>
+          current.state === "loading" ? answer : current
+        );
       }
     };
     void read();
@@ -337,7 +372,12 @@ export const SkillsPage = () => {
     };
   }, [core]);
 
-  /** Runs `call`, then reads the page again; says why when core refuses. */
+  /**
+   * Runs `call`, then reads the page again, refused or not: a refusal may
+   * follow a change (an approval decided, its add failed), and the page
+   * shows where things stand with why. Busy until the page is read again,
+   * so no later action's page is overwritten by this one's.
+   */
   const act = (
     call: (skills: Skills) => Promise<unknown>,
     after?: () => void
@@ -346,24 +386,33 @@ export const SkillsPage = () => {
     setFailed(undefined);
     void (async () => {
       const answer = await callCore(core, call);
-      setBusy(false);
       if (answer.state === "refused") {
         setFailed(answer.message);
-        return;
+      } else {
+        after?.();
       }
-      after?.();
       setOverview(
         await callCore(core, async (skills) => await skills.overview())
       );
+      setBusy(false);
     })();
   };
 
+  /** Fills the editor with the own skill `name`, if it is still the one asked for last. */
   const edit = (name: string) => {
+    lastRead.current = name;
+    setReading(name);
+    setFailed(undefined);
     void (async () => {
       const answer = await callCore(
         core,
         async (skills) => await skills.read("own", name)
       );
+      if (lastRead.current !== name) {
+        return;
+      }
+      lastRead.current = null;
+      setReading(null);
       if (answer.state === "ready") {
         setText(answer.data.text);
       } else if (answer.state === "refused") {
@@ -376,11 +425,9 @@ export const SkillsPage = () => {
     return <ErrorText>{overview.message}</ErrorText>;
   }
   const data = overview.state === "ready" ? overview.data : undefined;
-  const waitingNames = new Set(
-    (data?.shares ?? [])
-      .filter(({ status }) => status === "pending")
-      .map(({ name }) => name)
-  );
+  const waiting = waitingOf(data?.shares);
+  /** Saving or reading into the editor: it holds still meanwhile. */
+  const editorBusy = busy || reading !== null;
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -417,6 +464,7 @@ export const SkillsPage = () => {
               <Trans>Write a skill</Trans>
             </FieldLabel>
             <Textarea
+              disabled={editorBusy}
               id={editorId}
               onChange={(event) => {
                 setText(event.target.value);
@@ -434,7 +482,7 @@ export const SkillsPage = () => {
           </Field>
           <Button
             className="self-start"
-            disabled={busy || text.trim() === ""}
+            disabled={editorBusy || text.trim() === ""}
             type="submit"
             variant="highlight"
           >
@@ -471,7 +519,7 @@ export const SkillsPage = () => {
                     );
                   }}
                   skill={skill}
-                  waiting={waitingNames.has(skill.name)}
+                  waiting={waiting.get(skill.name)}
                 />
               </li>
             ))}

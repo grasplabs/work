@@ -12335,6 +12335,10 @@ msgstr "Delen zodra het klaar is"
 msgid "Share this record"
 msgstr "Deze herinnering delen"
 
+#: src/brain/skills-page.tsx
+msgid "Share this version instead"
+msgstr "Deze versie in plaats daarvan delen"
+
 #: src/brain/share-record.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share with"

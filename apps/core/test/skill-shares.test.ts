@@ -2235,4 +2235,33 @@ describe("writing and sharing skills", setUpTime, () => {
       namesThem: false,
     });
   });
+
+  it("tells its person a waiting share is of an older text once they saved a newer one, and asking again shares that", async () => {
+    const asker = await signedInApi(idp, "user");
+    const name = nameOf("saved-since");
+    const first = await asker.api.skills.save(skillText(name, "Old"));
+    const old = await asker.api.skills.share(name, first.version);
+    /** Each of the person's shares of `name`: old or new, status, outdated. */
+    const rows = async () => {
+      const { shares } = await overviewOf(asker.api);
+      return shares
+        .filter(({ name: named }) => named === name)
+        .map(({ id, status, outdated }) => [
+          id === old.id ? "old" : "new",
+          status,
+          outdated,
+        ]);
+    };
+    const asked = await rows();
+    const second = await asker.api.skills.save(skillText(name, "New"));
+    const saved = await rows();
+    await asker.api.skills.share(name, second.version);
+
+    expect({ asked, saved, again: await rows() }).toStrictEqual({
+      asked: [["old", "pending", false]],
+      saved: [["old", "pending", true]],
+      // The old ask is gone with its text; the new one is current.
+      again: [["new", "pending", false]],
+    });
+  });
 });

@@ -262,10 +262,28 @@ export const skillsOverview = async (
         .where(isOpen)
         .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
     : null;
+  /**
+   * Whether a waiting share's text is no longer the person's current one:
+   * read for those waiting alone, at most one a name.
+   */
+  const outdatedOf = async (row: ShareRow): Promise<boolean> => {
+    if (row.status !== "pending" || row.text === null) {
+      return false;
+    }
+    const current = await readCurrentSkillAs(env, by.userId, {
+      scope: "person",
+      name: row.name,
+    });
+    return current !== null && current.text !== row.text;
+  };
+  const outdated = await Promise.all(shares.map(outdatedOf));
   return {
     own: listed.filter(({ scope }) => scope === "person").map(listedOf),
     company: company.map(listedOf),
-    shares: shares.map(shareOf),
+    shares: shares.map((row, at) => ({
+      ...shareOf(row),
+      outdated: outdated[at] ?? false,
+    })),
     requests:
       requests?.flatMap((row): SkillShareRequest[] =>
         row.text === null

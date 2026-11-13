@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import type {
   ListedSkill,
+  OwnSkillShare,
   SkillShare,
   SkillShareRequest,
   SkillsOverview,
@@ -47,6 +48,12 @@ const own: ListedSkill = {
   description: "Quote a tender",
 };
 
+const other: ListedSkill = {
+  name: "plan-a-trip",
+  version: 1,
+  description: "Plan a trip",
+};
+
 const asked = "---\nname: close-the-month\ndescription: Close it\n---\nSteps.";
 
 const request: SkillShareRequest = {
@@ -62,7 +69,7 @@ const request: SkillShareRequest = {
   replaces: "grasp",
 };
 
-const shareOf = (name: string): SkillShare => ({
+const shareOf = (name: string): OwnSkillShare => ({
   id: `share-of-${name}`,
   name,
   status: "pending",
@@ -71,6 +78,7 @@ const shareOf = (name: string): SkillShare => ({
   decidedAt: null,
   version: null,
   open: true,
+  outdated: false,
 });
 
 /** Shows the page on a faked core, as an admin or not, refusing saves with `refusal`. */
@@ -79,23 +87,29 @@ const shown = async ({
   refusal,
   existing = [],
   waiting = request,
+  held = {},
+  approveRefusal,
 }: {
   admin: boolean;
   refusal?: string;
   /** The person's shares already there. */
-  existing?: SkillShare[];
+  existing?: OwnSkillShare[];
   /** The share that waits for an admin. */
   waiting?: SkillShareRequest;
+  /** Calls held until their promise settles: `save`, `read <name>`. */
+  held?: Record<string, Promise<unknown>>;
+  /** Refuses approving with this, after core moved the share on. */
+  approveRefusal?: string;
 }) => {
   const calls: string[] = [];
-  const shares: SkillShare[] = [...existing];
+  const shares: OwnSkillShare[] = [...existing];
   let requests = [waiting];
   const skills = {
     overview: async (): Promise<SkillsOverview> => {
       await Promise.resolve();
       calls.push("overview");
       return {
-        own: [own],
+        own: [own, other],
         company: [{ name: "file-expenses", version: 1, description: "File" }],
         shares: [...shares],
         requests: admin ? requests : null,
@@ -104,6 +118,7 @@ const shown = async ({
     save: async (text: string) => {
       await Promise.resolve();
       calls.push(`save ${text.split("\n")[1]}`);
+      await held.save;
       if (refusal !== undefined) {
         throw new Error(refusal);
       }
@@ -119,8 +134,23 @@ const shown = async ({
     approve: async (id: string) => {
       await Promise.resolve();
       calls.push(`approve ${id}`);
+      if (approveRefusal !== undefined) {
+        // Decided, its add failed: approved, not added yet.
+        requests = [{ ...waiting, status: "approved" }];
+        throw new Error(approveRefusal);
+      }
       requests = [];
       return { ...request, status: "approved" as const, version: 1 };
+    },
+    read: async (scope: string, name: string) => {
+      await Promise.resolve();
+      calls.push(`read ${scope} ${name}`);
+      await held[`read ${name}`];
+      return {
+        name,
+        version: 1,
+        text: `---\nname: ${name}\ndescription: Read\n---\n`,
+      };
     },
     decline: async (id: string) => {
       await Promise.resolve();
@@ -184,6 +214,15 @@ const stateOf = (name: string): string | null | undefined =>
   [...document.querySelectorAll("li")]
     .find((item) => item.textContent?.startsWith(name))
     ?.querySelector('[data-slot="badge"]')?.textContent;
+
+/** The page's skill editor. */
+const editor = (): HTMLTextAreaElement => {
+  const found = document.querySelector("textarea");
+  if (found === null) {
+    throw new Error("No editor");
+  }
+  return found;
+};
 
 describe("the skills page", () => {
   afterEach(() => {
@@ -319,5 +358,79 @@ describe("the skills page", () => {
       calls: ["overview", "decline share-1", "overview"],
       after: true,
     });
+  });
+
+  it("offers to share the saved version instead of a waiting share of an older one", async () => {
+    const { calls } = await shown({
+      admin: false,
+      existing: [{ ...shareOf("quote-a-tender"), outdated: true }],
+    });
+    const instead = button("Share this version instead");
+    const disabledBefore = instead.disabled;
+    await click("Share this version instead");
+
+    expect({ disabledBefore, calls }).toStrictEqual({
+      disabledBefore: false,
+      calls: ["overview", "share quote-a-tender@2", "overview"],
+    });
+  });
+
+  it("reads the page again after an approval core refused, showing why and what it moved to", async () => {
+    const { calls } = await shown({
+      admin: true,
+      approveRefusal: "Out of reach.",
+    });
+    await click("Approve");
+    const text = document.body.textContent ?? "";
+
+    expect({
+      calls,
+      said: text.includes("Out of reach."),
+      retry: text.includes("Approved, not added yet: approve it again"),
+    }).toStrictEqual({
+      calls: ["overview", "approve share-1", "overview"],
+      said: true,
+      retry: true,
+    });
+  });
+
+  it("keeps the editor still while it saves or reads, and applies only the read last asked for", async () => {
+    const saving = Promise.withResolvers<boolean>();
+    const firstRead = Promise.withResolvers<boolean>();
+    await shown({
+      admin: false,
+      held: { save: saving.promise, "read quote-a-tender": firstRead.promise },
+    });
+    await click("Save");
+    const whileSaving = editor().disabled;
+    await act(async () => {
+      saving.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+    // Edit the first skill, whose read is slow, then the second.
+    const edits = [...document.querySelectorAll("button")].filter(
+      (each) => each.textContent === "Edit"
+    );
+    await act(async () => {
+      edits[0]?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    await act(async () => {
+      edits[1]?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    await act(async () => {
+      firstRead.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      whileSaving,
+      shown: editor().value.includes("name: plan-a-trip"),
+    }).toStrictEqual({ whileSaving: true, shown: true });
   });
 });

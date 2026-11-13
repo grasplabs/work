@@ -60,6 +60,15 @@ export interface SkillShare {
   open: boolean;
 }
 
+/** One of the person's own shares, as their own page lists it. */
+export interface OwnSkillShare extends SkillShare {
+  /**
+   * Whether it waits with a text other than their skill's current one: they
+   * saved a newer version since asking, so asking again shares that one.
+   */
+  outdated: boolean;
+}
+
 /** A share waiting for an admin, with the exact text an approval adds. */
 export interface SkillShareRequest extends SkillShare {
   text: string;
@@ -77,7 +86,7 @@ export interface SkillsOverview {
   /** The company's skills, which every member's agents use. */
   company: ListedSkill[];
   /** Their own asks to share, newest first. */
-  shares: SkillShare[];
+  shares: OwnSkillShare[];
   /**
    * For the organization's own admins: every share that waits for a
    * decision, oldest first, and approved ones still to finish. Null for
