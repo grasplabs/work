@@ -266,14 +266,16 @@ const edgesOf = async (
     const of = [isApp ? subject : workflowNode(subject), to];
     const granted = actionsSchema.parse(JSON.parse(actions));
     // Which way each action carries data, holder `from` holding `to`'s:
+    // - any grant at all: the holder holds the workflow's data, as main
+    //   always counted it (a grant of `send` alone brings nothing back,
+    //   but loosening an existing sharing protection is not this rule's
+    //   to do);
     // - `start`: the arguments go into the run (the workflow holds the
-    //   starter's data), and what the run returns comes back (the starter
-    //   holds the workflow's);
-    // - `read`: following its runs brings their output in (the follower
-    //   holds the workflow's);
+    //   starter's data), and what the run returns comes back;
+    // - `read`: following its runs brings their output in;
     // - `send`: an event goes into its runs (the workflow holds the
     //   sender's).
-    if (granted.includes("start") || granted.includes("read")) {
+    if (granted.length > 0) {
       link(of, { from: holder, to });
     }
     if (granted.includes("start") || granted.includes("send")) {
