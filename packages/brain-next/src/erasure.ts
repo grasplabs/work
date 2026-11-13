@@ -1290,7 +1290,7 @@ export const replayStep = async ({
 // that stays of it.
 
 /** The key of the record that a person's store was erased whole. */
-const storeErasedKey = "erased";
+export const storeErasedKey = "erased";
 
 /** Most objects one call lists and deletes, per prefix: one page of R2's listing. */
 const storeDeletePage = 1000;
