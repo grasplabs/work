@@ -1231,9 +1231,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const results = await codeResults(stub, chat.id);
     expect(results.map(({ text }) => text)).toStrictEqual([
       expect.stringContaining("This chat has no API named env.brain"),
-      // Once granted, the turn recalls for the question first, then the
-      // code's own: their own plan, never the team's.
-      expect.not.stringContaining("The plan:"),
+      // Once granted, the code's own: their own plan, never the team's.
       `Returned:\n["Our plan: ${word}."]`,
       expect.stringContaining("This chat has no API named env.brain"),
     ]);

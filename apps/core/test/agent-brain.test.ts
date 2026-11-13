@@ -226,10 +226,10 @@ describe("a chat's brain", setUpTime, () => {
       })),
       built: [["writeFile", false]],
       with: { tool: true, api: true },
-      // The recall before the question, of the Brain, which holds none of
-      // Knowledge's documents; then the model's own search, which finds it.
+      // The recall before the question, then the model's own search: both
+      // find the note of the builder's team.
       searched: [
-        [false, false],
+        [false, true],
         [false, true],
       ],
     });

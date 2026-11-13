@@ -467,8 +467,8 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     });
     // The workflow.
     const { workflow } = await recallingWorkflow(ada, admin);
-    // The chat: its turn recalls for the question first, then runs the
-    // code.
+    // The chat: its code, the turn's own recall before the question
+    // being no code run of it.
     const { stub, chat, ask, agent } = await chatOf(
       ada.userId,
       recallCode(request),
@@ -476,7 +476,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     );
     await granted(ada, admin, brainGrant(agent));
     await ask("What about leave?");
-    const [, fromCode] = await codeResults(stub, chat.id);
+    const [fromCode] = await codeResults(stub, chat.id);
 
     const fromApp = await askedOf(app, ada, {
       question: request.question,
@@ -667,7 +667,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     await granted(ada, admin, brainGrant(agent));
     await ask("Go on.");
     const results = await codeResults(stub, chat.id);
-    const fromCode = results.slice(1).map(({ text }) => returnedOf(text));
+    const fromCode = results.map(({ text }) => returnedOf(text));
     const refused = { failed: "permission.invalid_args" };
     expect({
       app: [
