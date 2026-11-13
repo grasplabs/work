@@ -12,6 +12,7 @@ import type {
   NewEntity,
   NewMemory,
   PersonReader,
+  Reader,
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -2007,7 +2008,7 @@ describe("exports and restores", () => {
       ];
       const entities = [acme, globex.entities.c ?? ""];
       /** All `as` reads, but the moments reads are given at. */
-      const readsAs = async (as: PersonReader) => {
+      const readsAs = async (as: Reader) => {
         const memories = await Promise.all(
           entities.map(async (entity) => {
             const page = await shared().readMemories({

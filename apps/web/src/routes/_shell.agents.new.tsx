@@ -5,25 +5,28 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { NewAgent } from "../agents/new-agent.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 
-// A new agent (agents/new-agent.tsx), for the company's own admins: anyone
-// else is sent to the Agents page, as core would refuse them the making.
+// A new agent (agents/new-agent.tsx): anyone of the company makes one of
+// their own, and its own admins one for the company. Grasp's staff are
+// sent to the Agents page, as core would refuse them the making.
 
 const NewAgentPage = () => {
   const { t } = useLingui();
   const models = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   return (
     <>
       <SiteHeader
         crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`New agent` }]}
       />
-      <NewAgent models={models} />
+      <NewAgent company={isMemberAdmin(identity)} models={models} />
     </>
   );
 };
 
 export const Route = createFileRoute("/_shell/agents/new")({
   beforeLoad: ({ context: { identity } }) => {
-    if (!isMemberAdmin(identity)) {
+    // Grasp's staff are no one of the company: they make neither kind.
+    if (identity.staff) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/agents", replace: true });
     }

@@ -3,7 +3,11 @@
 // write of memories lands then. The export is the store as it was at its
 // stamp: restored into an empty store, it answers every reader as the
 // store did before the export started, and holds nothing written after.
-import type { Access, PersonReader } from "@grasp-os/brain-next/contract";
+import type {
+  Access,
+  PersonReader,
+  Reader,
+} from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
@@ -89,7 +93,7 @@ const fixtureOf = async (tag: string) => {
     person: `p2-${tag}`,
     groups: [one, `team:two-${tag}`],
   };
-  const readers: PersonReader[] = [
+  const readers: Reader[] = [
     writer,
     confirmer,
     { person: `p3-${tag}`, groups: [`team:two-${tag}`] },

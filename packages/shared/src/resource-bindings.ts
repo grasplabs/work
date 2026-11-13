@@ -35,7 +35,7 @@ const modelNameSchema = z
  *   checked on every call, through connect;
  * - `brain` (`brain`): one of the App's `{ type: "platform" }`
  *   permissions to read the Brain (`brain`), checked on every call, which
- *   recalls as the person the call acts for, never more;
+ *   recalls only what everyone in the company may read;
  * - `grasp` (`grasp`): the platform's own read-only
  *   functions, under one of the App's `{ type: "platform" }` permissions
  *   to read the platform's statistics (`statistics`), checked on every
