@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e2164075-5126-44fd-9bdd-b156bd49b57f",
+  "id": "ad25340b-5b7d-47f2-b600-501072998825",
   "prevId": "6cdbbf0e-946f-4f38-b024-8a666e11f444",
   "tables": {
     "approvals": {
@@ -863,6 +863,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "first": {
+          "name": "first",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         }
       },
       "indexes": {

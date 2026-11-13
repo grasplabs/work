@@ -1664,6 +1664,7 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(links.person, person))
           .run();
         this.#purged();
+        this.#eraseClaims(this.#backedRecords(person));
         // Unlike `rewriteInterview`, no line of the voice's is queued to go
         // from the speech cache: it can't be read out of what doesn't parse.
         // Those lines expire from the cache within a month, the residual
@@ -1813,6 +1814,11 @@ export class Onboarding extends DurableObject<Env> {
       this.#queueLines(after.lines);
       // A drawing read what they said before: it keeps nothing.
       this.#purged();
+      // Nor does a claim put together from it: every claim they back is
+      // owed an erasure, hidden from its team until it lands (rule (i),
+      // `interviewTeamOf`), and comes back only from the team's next
+      // intake, from what the purge left, under a new key.
+      this.#eraseClaims(this.#backedRecords(person));
       this.#changed(by, "onboarding.interview.purged", {
         lines: after.lines.length,
       });
@@ -3298,6 +3304,8 @@ export class Onboarding extends DurableObject<Env> {
     });
     this.#deliverAudit();
     this.#deliverMailSoon();
+    // A send-again to a second address ended a link: owed at once.
+    this.#decideInterviews();
     return "sent";
   }
 
@@ -4999,6 +5007,8 @@ export class Onboarding extends DurableObject<Env> {
       }
     });
     this.#deliverMailSoon();
+    // A reminder to a second address ended a link: owed at once.
+    this.#decideInterviews();
     return due.map(({ person }) => person);
   }
 
@@ -5238,6 +5248,13 @@ export class Onboarding extends DurableObject<Env> {
     const ledTeam =
       roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
     this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
+    // The link's first sending, recorded with the link itself: a link with
+    // none (made before addresses were recorded) is never linked to anyone.
+    this.#linkWentTo(
+      person,
+      roster.people.find(({ id }) => id === person)?.email ?? "",
+      true
+    );
     this.#queuePersonMail({ roster, plan, said, person, sentAt: now }, "link");
     const team = roster.people.find(({ id }) => id === person)?.team;
     if (team !== undefined && ledTeam === null) {
@@ -6149,7 +6166,15 @@ export class Onboarding extends DurableObject<Env> {
           teamId,
           records.flatMap((record) =>
             record.type === "statement"
-              ? [{ record: record.id, text: record.text }]
+              ? [
+                  {
+                    record: record.id,
+                    text: record.text,
+                    people: rests.flatMap(({ record: of, person }) =>
+                      of === record.id ? [person] : []
+                    ),
+                  },
+                ]
               : []
           )
         );
@@ -6175,13 +6200,30 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /** Notes, in the caller's transaction, that `person`'s link was queued to `email`. */
-  #linkWentTo(person: string, email: string): void {
+  #linkWentTo(person: string, email: string, first = false): void {
     const address = foldedAddress(email);
-    if (address !== "") {
+    if (address === "" && !first) {
+      return;
+    }
+    this.#db
+      .insert(linkAddresses)
+      .values({ person, address, first })
+      .onConflictDoNothing()
+      .run();
+    // A second address: whoever read either may hold the link, so an
+    // account linked to it is linked no more, at once, and the interview's
+    // copy in the Brain is owed an erasure (`#decideInterviews`). It is never
+    // linked again (`linkAccount`).
+    const recorded = this.#db
+      .select({ address: linkAddresses.address })
+      .from(linkAddresses)
+      .where(eq(linkAddresses.person, person))
+      .all();
+    if (recorded.length > 1) {
       this.#db
-        .insert(linkAddresses)
-        .values({ person, address })
-        .onConflictDoNothing()
+        .update(links)
+        .set({ account: null })
+        .where(eq(links.person, person))
         .run();
     }
   }
@@ -6221,7 +6263,7 @@ export class Onboarding extends DurableObject<Env> {
         return false;
       }
       const addresses = this.#db
-        .select({ address: linkAddresses.address })
+        .select({ address: linkAddresses.address, first: linkAddresses.first })
         .from(linkAddresses)
         .where(eq(linkAddresses.person, only.person))
         .all();
@@ -6230,8 +6272,12 @@ export class Onboarding extends DurableObject<Env> {
         .from(links)
         .where(eq(links.person, only.person))
         .all();
+      // Only one address ever, and it is the link's first sending: a
+      // history that starts later (a link made before addresses were
+      // recorded) can't say who else read it.
       if (
         addresses.length !== 1 ||
+        addresses[0]?.first !== true ||
         link === undefined ||
         link.account !== null ||
         link.erasedAt !== null
@@ -6561,12 +6607,7 @@ export class Onboarding extends DurableObject<Env> {
    * recount forgets those rows. At most the claims they back.
    */
   claimTeamsOf(person: string): string[] {
-    const backed = this.#db
-      .select({ record: brainSent.record })
-      .from(brainSent)
-      .where(and(eq(brainSent.person, person), eq(brainSent.type, "statement")))
-      .all()
-      .map(({ record }) => record);
+    const backed = this.#backedRecords(person);
     return [
       ...new Set(
         this.#db
@@ -6577,6 +6618,47 @@ export class Onboarding extends DurableObject<Env> {
           .map(({ team }) => team)
       ),
     ];
+  }
+
+  /**
+   * Those of `candidates` who back a claim of `team` now: they agree to what
+   * they said, and are in that team on the list now, so someone moved
+   * away no longer backs it. The one rule, for the recount (`#toPurge`)
+   * and for noting a claim (`#noteClaims`).
+   */
+  #currentBackers(
+    team: string,
+    candidates: readonly string[],
+    agreed: ReadonlySet<string> = new Set(
+      this.#db
+        .select({ person: interviewStates.person })
+        .from(interviewStates)
+        .where(isNotNull(interviewStates.agreedAt))
+        .all()
+        .map(({ person }) => person)
+    )
+  ): string[] {
+    const inTeam = new Set(
+      this.#db
+        .select({ id: people.id })
+        .from(people)
+        .where(eq(people.team, team))
+        .all()
+        .map(({ id }) => id)
+    );
+    return candidates.filter(
+      (person) => agreed.has(person) && inTeam.has(person)
+    );
+  }
+
+  /** The intake's statement records `person` is among the backers of (`brain_sent`). */
+  #backedRecords(person: string): string[] {
+    return this.#db
+      .select({ record: brainSent.record })
+      .from(brainSent)
+      .where(and(eq(brainSent.person, person), eq(brainSent.type, "statement")))
+      .all()
+      .map(({ record }) => record);
   }
 
   /** The staff-list team `person` is in now; null when they aren't on the list. */
@@ -6661,10 +6743,22 @@ export class Onboarding extends DurableObject<Env> {
    */
   #noteClaims(
     team: string,
-    claims: readonly { record: string; text: string }[]
+    claims: readonly {
+      record: string;
+      text: string;
+      people: readonly string[];
+    }[]
   ): void {
-    // A team too small to have claims shown has none (`teamMayClaim`).
-    const shown = teamMayClaim(this.#tellers(team).length) ? claims : [];
+    // A team too small to have claims shown has none (`teamMayClaim`); a
+    // claim is noted only while five or more of its team's people now
+    // back it (`#currentBackers`, the recount's own rule): one moved away
+    // while the claims were put together doesn't count.
+    const shown = teamMayClaim(this.#tellers(team).length)
+      ? claims.filter(
+          ({ people: backing }) =>
+            this.#currentBackers(team, backing).length >= minTeamShown
+        )
+      : [];
     const current = new Set(shown.map(({ record }) => record));
     const held = this.#db
       .select({ record: brainClaims.record })
@@ -6782,15 +6876,10 @@ export class Onboarding extends DurableObject<Env> {
       held.people.push(person);
       records.set(record, held);
     }
-    // Who is in which team now: a claim counts only those of its team
-    // who are in it now, so someone moved away no longer backs it.
-    const teamNow = new Map(
-      (roster?.people ?? []).map(({ id, team }) => [id, team])
-    );
     const purged = new Set<string>();
     for (const [record, { type, team, people: on }] of records) {
       const left = on.filter((person) => agreed.has(person));
-      const backers = left.filter((person) => teamNow.get(person) === team);
+      const backers = this.#currentBackers(team, on, agreed);
       if (
         emptied.has(team) ||
         left.length === 0 ||

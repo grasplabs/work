@@ -584,6 +584,72 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("end the link of an account that got the link first when a reminder takes it to a second address: nothing approved after reaches that account", async () => {
+    const store = onboardingStore(env);
+    const marker = `marker${unique()}`;
+    const wrong = `colleague-${unique()}@acme.test`;
+    const ids = await team(undefined, addressOf);
+    const emails = Object.fromEntries(
+      everyone.map((key) => [key, addressOf(ids[key])])
+    );
+    // Max's link goes to a colleague's address first, and the colleague
+    // signs in: one address, so they are linked to Max's entry.
+    await store.saveRoster(rosterOf(ids, everyone, { ...emails, max: wrong }), {
+      type: "system",
+    });
+    await mapped(ids);
+    let colleague = "";
+    const audited = await auditedDuring(async () => {
+      colleague = await signsIn(wrong);
+    });
+    const linked = audited.some(
+      ({ action, actor }) =>
+        action === "onboarding.interview.account_linked" &&
+        actor.type === "person" &&
+        actor.userId === colleague
+    );
+    // Corrected; his reminder goes to his own address: two addresses now.
+    await store.saveRoster(rosterOf(ids, everyone, emails), { type: "system" });
+    const reminded = await store.remindDue(
+      new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString()
+    );
+    // What he agrees to after never reaches the colleague's account.
+    await agree(ids.max, [
+      fact("m9", "rule", `Every refund needs ${marker} first.`),
+    ]);
+    await handOverNow();
+    expect({
+      linked,
+      reminded: reminded.includes(ids.max),
+      colleague: await recalled(colleague, marker),
+    }).toStrictEqual({ linked: true, reminded: true, colleague: [] });
+  });
+
+  it("are linked to nobody when the link's first sending has no recorded address, whatever goes to one later", async () => {
+    const store = onboardingStore(env);
+    const marker = `marker${unique()}`;
+    const ids = await team(undefined, addressOf);
+    await mapped(ids);
+    // A link whose history doesn't reach back to its first sending, as one
+    // made before addresses were recorded: none of its addresses is known.
+    await runInDurableObject(store, (_, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM link_addresses WHERE person = ?",
+        ids.max
+      );
+    });
+    // A reminder goes to his address: the one address recorded since.
+    await store.remindDue(
+      new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString()
+    );
+    await agree(ids.max, [
+      fact("m9", "rule", `Every refund needs ${marker} first.`),
+    ]);
+    const max = await signsIn(addressOf(ids.max));
+    await handOverNow();
+    await expect(recalled(max, marker)).resolves.toStrictEqual([]);
+  });
+
   it("stay erased when an add of them lands after a withdrawal erased them", async () => {
     const marker = `marker${unique()}`;
     const ids = await team(undefined, addressOf);
@@ -1117,6 +1183,61 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       max: true,
       after: "erased",
       file: null,
+    });
+  });
+
+  it("are hidden at once and erased when a content purge rewrites the interview of one who backs them, and never come back with the purged word", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    // The purge takes "Zendesk" out of every interview.
+    await interviewErasure(env).rewrite(
+      { actor: { type: "system" }, userId: "system" },
+      (text) => text.replaceAll("Zendesk", "(removed)")
+    );
+    await handOverNow();
+    const owedAfter = await onboardingStore(env).owedErasures();
+    expect({
+      before,
+      now: await readableBy(max),
+      owed: owedAfter.filter(
+        (each) => each.kind === "claim" && each.team === ids.team
+      ),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      now: { group: ids.team, recalled: [], listed: [] },
+      owed: [],
+    });
+  });
+
+  it("are not noted from an intake during which a backer moved to another team, leaving four of its people behind the claim", async () => {
+    const { ids, max } = await drawnTeam({ eight: true, drained: true });
+    let moved = false;
+    const reply = claimsReply([zendeskClaim]);
+    const { result: gave } = await answeringWith(
+      async (requests) => {
+        // Pim moves to Billing while the claims are put together.
+        if (!moved) {
+          moved = true;
+          await onboardingStore(env).saveRoster(
+            rosterWith(ids, { keys: eightBut(), moved: ["pim"] }),
+            { type: "system" }
+          );
+        }
+        return reply(requests);
+      },
+      async () => await onboardingStore(env).intakeNext()
+    );
+    await handOverNow();
+    expect({
+      gave,
+      moved,
+      now: await readableBy(max),
+    }).toStrictEqual({
+      gave: `brain:${ids.team}`,
+      moved: true,
+      now: { group: ids.team, recalled: [], listed: [] },
     });
   });
 });

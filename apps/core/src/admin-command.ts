@@ -115,6 +115,9 @@ const applyChange = async (
     }
     case "onboarding.send_mail_again": {
       const sent = await store.sendAgain(command.payload.person, by);
+      // A send-again to a second address ended their link to an account:
+      // the interview it read leaves the new Brain now, or on the clock.
+      await eraseOwedOfPersonQuietly(env, command.payload.person);
       refuseUnless(sent !== "none_failed", "onboarding.no_failed_mail");
       refuseUnless(sent !== "no_address", "onboarding.no_address");
       refuseUnless(sent !== "not_owed", "onboarding.reminder_not_owed");

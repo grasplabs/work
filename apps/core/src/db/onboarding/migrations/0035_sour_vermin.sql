@@ -19,6 +19,7 @@ CREATE INDEX `brain_interviews_person` ON `brain_interviews` (`person`);--> stat
 CREATE TABLE `link_addresses` (
 	`person` text NOT NULL,
 	`address` text NOT NULL,
+	`first` integer DEFAULT false NOT NULL,
 	PRIMARY KEY(`person`, `address`)
 );
 --> statement-breakpoint

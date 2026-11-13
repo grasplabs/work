@@ -685,16 +685,25 @@ export const brainClaims = sqliteTable(
 
 /**
  * Every address someone's link, or a reminder carrying it, was ever queued
- * to (GRA-1790), folded to lower case: whoever holds the mail holds the
- * link. A sign-in links an account to the person only while exactly one
- * address was ever recorded for their link and it is the account's
- * (store.ts, `linkAccount`); otherwise nobody. Goes with the link.
+ * to (GRA-1790), folded to lower case, from the link's first sending on:
+ * whoever holds the mail holds the link. A sign-in links an account to the
+ * person only while exactly one address was ever recorded for their link,
+ * it is the one of its first sending, and it is the account's (store.ts,
+ * `linkAccount`); otherwise nobody. A second address ends a link made.
+ * Goes with the link.
  */
 export const linkAddresses = sqliteTable(
   "link_addresses",
   {
     person: text().notNull(),
+    /** Empty for a first sending to no address (a link handed over by hand). */
     address: text().notNull(),
+    /**
+     * Whether this is the link's first sending, recorded in the statement
+     * that made the link: a link whose history holds no first sending
+     * (made before addresses were recorded) is never linked to anyone.
+     */
+    first: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.person, table.address] }),
