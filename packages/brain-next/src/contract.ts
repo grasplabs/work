@@ -1178,6 +1178,27 @@ export const exportFileRequestSchema = exportRequestSchema.extend({
 export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
 
 /**
+ * A person's own export, asked by that person: their store answers no one
+ * else (store.ts).
+ */
+export const ownExportRequestSchema = z.strictObject({
+  person: principalSchema,
+});
+export type OwnExportRequest = z.infer<typeof ownExportRequestSchema>;
+
+/** A person's start of their own export, for `deployment`. */
+export const ownExportStartSchema = ownExportRequestSchema.extend({
+  deployment: deploymentSchema,
+});
+export type OwnExportStart = z.infer<typeof ownExportStartSchema>;
+
+/** A file of a person's own export, asked by that person. */
+export const ownExportFileRequestSchema = exportFileRequestSchema.extend({
+  person: principalSchema,
+});
+export type OwnExportFileRequest = z.infer<typeof ownExportFileRequestSchema>;
+
+/**
  * Where an export is: being written; adopted by a restore that hasn't yet
  * checked every part (`restoring`: served to no one); done, with its files (the manifest
  * first); failed (a file it was to read was gone: its files deleted);
@@ -2253,6 +2274,27 @@ export interface Brain {
    */
   exportFile: (request: ExportFileRequest) => Promise<string | null>;
   /**
+   * Starts an export of what `person`'s own store holds, which only they
+   * may read, by the company's rules (above), in their store's part of
+   * the bucket: their sources and versions, memories, the entities and
+   * names those give, confirmations, extraction marks and change keys.
+   * Only their own store takes it, and only for them; erasing them deletes
+   * it. While one is being written, it answers with that one. Nothing
+   * restores it.
+   */
+  startOwnExport: (request: OwnExportStart) => Promise<{ id: string }>;
+  /**
+   * The export `person`'s own store shows them: their most recent one,
+   * whatever came of it; null when there is none or the store was erased.
+   * Only their own store answers, and only them.
+   */
+  ownExport: (request: OwnExportRequest) => Promise<ExportStatus | null>;
+  /**
+   * A file of `person`'s own done export, as `exportFile`: null for any
+   * other, alike. Only their own store answers, and only them.
+   */
+  ownExportFile: (request: OwnExportFileRequest) => Promise<string | null>;
+  /**
    * Starts restoring the company export `id` of `deployment` from the
    * bucket into this shared store, which must hold no version: a part a
    * run of the queue, every part checked against the manifest before any
@@ -2375,6 +2417,21 @@ export type StoreKind =
   | { kind: "shared" }
   | { kind: "person"; person: string }
   | { kind: "unknown" };
+
+/**
+ * How long an add may take between noting a file and recording its
+ * version (files.ts), and the grace a whole-store erasure waits from its
+ * record's moment before it is done (store.ts `#eraseWhole`).
+ */
+export const fileGraceMs = 15 * 60 * 1000;
+
+/**
+ * How long a person's own store may answer that it is still deleting
+ * before its host counts the erasure as stuck: two graces (the second after
+ * it moved its moment for a write that never answered) and an item's time
+ * of the queue (`modelTimeoutMaxMs`, work.ts `workItemTimeMs`) more.
+ */
+export const stillDeletingAtMostMs = 2 * fileGraceMs + modelTimeoutMaxMs;
 
 /**
  * What erasing a person's own store whole answers while it is still

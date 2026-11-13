@@ -23,27 +23,30 @@ import { chunkTarget } from "../src/chunks.ts";
 import {
   brainOf,
   erasedSource,
+  fileGraceMs,
   personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
 } from "../src/contract.ts";
 import { eraseChunksPerBatch } from "../src/erasure.ts";
-import { fileGraceMs } from "../src/files.ts";
 import { BrainStore } from "../src/store.ts";
 
 /** A store, as its namespace gives it. */
 type Store = DurableObjectStub<BrainStore>;
 
-/** This test's person, and their own store, named as `personalBrainOf` names it. */
+/**
+ * This test's person, and their own store, named as `personalBrainOf`
+ * names it; or `who`'s, for a test that names a person of its own.
+ */
 let person = "";
-const own = (): Store => env.BRAIN_STORE.getByName(`person:${person}`);
+const own = (who = person): Store => env.BRAIN_STORE.getByName(`person:${who}`);
 
 /** The shared store, as the host names it. */
 const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 
 const whole = { tokens: recallBudgetMax };
 const readerOf = (who: string): Reader => ({ person: who, groups: [] });
-const theirs = (): Access => ({ kind: "owner", person });
+const theirs = (who = person): Access => ({ kind: "owner", person: who });
 
 /** Adds `text` to `store` as a source of its own. */
 const add = async (
@@ -329,8 +332,8 @@ const eraseWhole = async (): Promise<void> => {
   await own().erasePerson({ person, reason: "person_erased" });
 };
 
-/** The reader that is this test's person. */
-const me = (): Reader => readerOf(person);
+/** The reader that is this test's person, or `who`. */
+const me = (who = person): Reader => readerOf(who);
 
 /** What a store holding nothing finds: nothing, by every way. */
 const nothingFound = {
@@ -1260,9 +1263,9 @@ const noHandOvers: HandOvers = {
   },
 };
 
-/** A tick of this test's person's store, as its alarm runs one with no model. */
-const tick = async (): Promise<void> => {
-  await own().work({
+/** A tick of this test's person's store, or `who`'s, as its alarm runs one with no model. */
+const tick = async (who = person): Promise<void> => {
+  await own(who).work({
     ask: quietAsk,
     at: new Date(),
     embedders: noModel,
@@ -1270,16 +1273,19 @@ const tick = async (): Promise<void> => {
   });
 };
 
-/** Runs `change` in this test's person's store, in its own storage. */
-const inStore = async (change: (sql: SqlStorage) => void): Promise<void> => {
-  await runInDurableObject(own(), (_instance, state) => {
+/** Runs `change` in this test's person's store, or `who`'s, in its own storage. */
+const inStore = async (
+  change: (sql: SqlStorage) => void,
+  who = person
+): Promise<void> => {
+  await runInDurableObject(own(who), (_instance, state) => {
     change(state.storage.sql);
   });
 };
 
 /** The store's alarm taken away, as once it has fired. */
-const noAlarm = async (): Promise<void> => {
-  await runInDurableObject(own(), async (_instance, state) => {
+const noAlarm = async (who = person): Promise<void> => {
+  await runInDurableObject(own(who), async (_instance, state) => {
     await state.storage.deleteAlarm();
   });
 };
@@ -1288,15 +1294,17 @@ const noAlarm = async (): Promise<void> => {
  * A person's store with a source kept and all its work done, as a host
  * with no model leaves it, and no alarm: the source's ref.
  */
-const settled = async (): Promise<{ source: string; version: number }> => {
-  const kept = await add(own(), "Settled and done", theirs());
-  await tick();
-  await noAlarm();
+const settled = async (
+  who = person
+): Promise<{ source: string; version: number }> => {
+  const kept = await add(own(who), "Settled and done", theirs(who));
+  await tick(who);
+  await noAlarm(who);
   return kept;
 };
 
 /** The model the store last saw is `name`, its walk over, as a tick with it leaves it. */
-const sawModel = async (name: string): Promise<void> => {
+const sawModel = async (name: string, who = person): Promise<void> => {
   await inStore((sql) => {
     sql.exec(
       `INSERT INTO embedding_state (id, model, walked_to, walked, rebuilt)
@@ -1304,7 +1312,7 @@ const sawModel = async (name: string): Promise<void> => {
       ON CONFLICT (id) DO UPDATE SET model = ?1, walked = 1, rebuilt = 1`,
       name
     );
-  });
+  }, who);
 };
 
 /** Each public method of the store, its own and any it inherits, but the runtime's handlers. */
@@ -1326,9 +1334,9 @@ const storeMethods = (): string[] => {
   return [...names].toSorted();
 };
 
-/** A recall of this test's person by meaning, the question's vector by `model`. */
-const byMeaningOf = (model: { name: string; build: string }) => ({
-  reader: me(),
+/** A recall of this test's person, or `who`, by meaning, the question's vector by `model`. */
+const byMeaningOf = (model: { name: string; build: string }, who = person) => ({
+  reader: me(who),
   question: "settled",
   budget: whole,
   meaning: {
@@ -1341,46 +1349,51 @@ const byMeaningOf = (model: { name: string; build: string }) => ({
 
 /**
  * For each method that can leave a person's store work for a tick: a
- * settled store with no alarm made to have work by it.
+ * settled store with no alarm made to have work by it: `who`'s, the
+ * person its test names.
  */
-const leavingWork: Record<string, () => Promise<void>> = {
-  addSource: async () => {
-    await add(own(), "A source to embed", theirs());
+const leavingWork: Record<string, (who: string) => Promise<void>> = {
+  addSource: async (who) => {
+    await add(own(who), "A source to embed", theirs(who));
+  },
+  // Their own export: written by the queue, a part a run.
+  startOwnExport: async (who) => {
+    await own(who).startOwnExport({ person: who, deployment: "test" });
   },
   // Failed: its file is noted before it is written, and nothing holds it.
-  addInstructions: async () => {
-    const { heal } = await breakBucket(own(), ["put"]);
+  addInstructions: async (who) => {
+    const { heal } = await breakBucket(own(who), ["put"]);
     await Promise.allSettled([
       called(
-        own().addInstructions({
+        own(who).addInstructions({
           source: "instructions:failed",
           change: "1",
           text: "Never written",
-          access: theirs(),
+          access: theirs(who),
         })
       ),
     ]);
     await heal();
   },
-  eraseSource: async () => {
-    const kept = await add(own(), "To erase", theirs());
-    await tick();
-    await noAlarm();
-    await own().eraseSource({ source: kept.source, reason: "deleted" });
+  eraseSource: async (who) => {
+    const kept = await add(own(who), "To erase", theirs(who));
+    await tick(who);
+    await noAlarm(who);
+    await own(who).eraseSource({ source: kept.source, reason: "deleted" });
   },
   // A tick that deletes an erased version lets its file go to the sweep.
-  work: async () => {
-    const kept = await add(own(), "Erased, then swept", theirs());
-    await own().eraseSource({ source: kept.source, reason: "deleted" });
-    await noAlarm();
-    await tick();
+  work: async (who) => {
+    const kept = await add(own(who), "Erased, then swept", theirs(who));
+    await own(who).eraseSource({ source: kept.source, reason: "deleted" });
+    await noAlarm(who);
+    await tick(who);
   },
-  reembed: async () => {
-    await sawModel("m@1");
-    await own().reembed();
+  reembed: async (who) => {
+    await sawModel("m@1", who);
+    await own(who).reembed();
   },
-  requeueWork: async () => {
-    await add(own(), "Parked for good", theirs());
+  requeueWork: async (who) => {
+    await add(own(who), "Parked for good", theirs(who));
     let parked = 0;
     await inStore((sql) => {
       parked = sql
@@ -1390,28 +1403,28 @@ const leavingWork: Record<string, () => Promise<void>> = {
           Date.now()
         )
         .one().id;
-    });
-    await noAlarm();
-    await own().requeueWork(parked);
+    }, who);
+    await noAlarm(who);
+    await own(who).requeueWork(parked);
   },
-  rebuildWords: async () => {
-    await own().rebuildWords();
+  rebuildWords: async (who) => {
+    await own(who).rebuildWords();
   },
   // A recall by meaning naming a model the store's tick never embedded
   // for: the host's model changed, and nothing else would tell it.
-  find: async () => {
-    await own().find(byMeaningOf(splitModel));
+  find: async (who) => {
+    await own(who).find(byMeaningOf(splitModel, who));
   },
-  recall: async () => {
-    await own().recall(byMeaningOf(splitModel));
+  recall: async (who) => {
+    await own(who).recall(byMeaningOf(splitModel, who));
   },
   // Vectors of a build other than the one the store saw: to remove.
-  putVectors: async () => {
-    const kept = await add(own(), "With a vector", theirs());
-    await tick();
-    await sawModel("m@1");
-    await noAlarm();
-    await own().putVectors({
+  putVectors: async (who) => {
+    const kept = await add(own(who), "With a vector", theirs(who));
+    await tick(who);
+    await sawModel("m@1", who);
+    await noAlarm(who);
+    await own(who).putVectors({
       model: { name: "other@1", centre: [0, 0] },
       vectors: [{ chunk: { ...kept, position: 0 }, vector: [1, 0] }],
     });
@@ -1437,6 +1450,8 @@ const leavingNone = [
   "listContested",
   "listSources",
   "listVersions",
+  "ownExport",
+  "ownExportFile",
   "readCurrent",
   "readEntity",
   "readEntityNames",
@@ -1449,7 +1464,7 @@ const leavingNone = [
   "retireMemory",
   "searchVectors",
   "startExport",
-  // A person's own store refuses every export and restore.
+  // A person's own store refuses the company's export and every restore.
   "checkRestore",
   "startRestore",
   "workOverview",
@@ -1466,21 +1481,18 @@ describe("a person's own store's alarm", () => {
     );
   });
 
-  it("is armed after every method that leaves work, though the store had none", async () => {
-    const armed: Record<string, boolean> = {};
-    for (const [method, leave] of Object.entries(leavingWork)) {
-      person = `person-${crypto.randomUUID()}`;
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await settled();
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await leave();
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      armed[method] = (await alarmOf(own())) !== null;
+  // One test per method, each within its own time limit, and each naming
+  // its own person rather than this file's: a retry's store is never one
+  // that an attempt still running before it uses.
+  it.each(Object.entries(leavingWork))(
+    "is armed after %s, though the store had none",
+    async (_method, leave) => {
+      const who = `person-${crypto.randomUUID()}`;
+      await settled(who);
+      await leave(who);
+      await expect(alarmOf(own(who))).resolves.not.toBeNull();
     }
-    expect(armed).toStrictEqual(
-      Object.fromEntries(Object.keys(leavingWork).map((name) => [name, true]))
-    );
-  });
+  );
 
   it("is not armed while the store has nothing to do: no model shipped, a model seen and done, or a paused queue with nothing in it", async () => {
     const asleep: Record<string, number | null> = {};
