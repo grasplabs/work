@@ -362,7 +362,7 @@ export const channelConversations = sqliteTable(
 );
 /**
  * A workflow Stephen offered to start, on a card in a person's chat app:
- * the workflow, the exact version and input the card shows, and, once the
+ * the workflow and the input the card shows, and, once the
  * person pressed Start, where they pressed it and the start it made, so
  * the run's end is told there once (`toldAt`). Good for a day unpressed
  * (`expiresAt`). Kept by channels/workflow-offers.ts.
@@ -381,8 +381,16 @@ export const chatWorkflowOffers = sqliteTable(
     workflowId: text("workflow_id").notNull(),
     /** Its name when offered, as the card shows it. */
     workflowName: text("workflow_name").notNull(),
-    version: integer().notNull(),
-    /** Its input, as the version's contract took it: canonical JSON. */
+    /**
+     * Unused since a press starts the version live as it is pressed:
+     * written and read by nothing. Dropped in a later release (expand,
+     * then contract).
+     */
+    version: integer(),
+    /**
+     * Its input, as the live version's contract took it as it was
+     * offered: canonical JSON, checked again by the start.
+     */
     input: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
@@ -4364,43 +4372,103 @@ export const workflowResourceMembers = sqliteTable(
 
 /**
  * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
- * starts one exact workflow version on its own (a system event, a
- * connector event, a webhook, a schedule, mail to its address), owned by
- * whoever created it, never by the workflow's owner or an App. `current_version` names the
- * version (`trigger_resource_versions`) future starts use; `enabled` false,
- * or `deleted_at`, stops future starts, never runs already started. Its
- * starts need a permission of its own (`start` on the workflow) like any
- * other subject's.
+ * starts one workflow on its own, at the version live as each run starts
+ * (a system event, a connector event, a webhook, a schedule, mail to its
+ * address), owned by whoever created it, never by the workflow's owner or
+ * an App, and configured once, as it is created: a trigger has no
+ * versions. `enabled` false, or `deleted_at`, stops future starts, never
+ * runs already started. Its starts need a permission of its own (`start`
+ * on the workflow) like any other subject's.
  */
-export const triggerResources = sqliteTable("trigger_resources", {
-  id: text().primaryKey(),
-  ownerId: text("owner_id").notNull(),
-  kind: text({
-    enum: ["connector", "webhook", "schedule", "email"],
-  }).notNull(),
-  currentVersion: integer("current_version").notNull(),
-  enabled: integer({ mode: "boolean" }).notNull(),
-  createdAt: timestamp("created_at").notNull(),
-  deletedAt: timestamp("deleted_at"),
-  /**
-   * For an email trigger: the part before the `@` of the address it
-   * receives mail at, the name its builder chose or `trigger-<token>`
-   * (128 random bits), set as it is created and never changed, and set to
-   * null as it is deleted, which frees it (workflows/email-addresses.ts);
-   * null for any other kind. Unlike its ID, shown only to whoever may see
-   * the trigger; a chosen name is audited as it is created, a random one
-   * never logged or audited.
-   */
-  emailAddress: text("email_address").unique(),
-  /**
-   * Never written or read since webhook triggers start on event sources
-   * (GRA-1560, `event_sources`). Kept, with the token's index, until
-   * GRA-1659 drops them (expand, then contract).
-   */
-  webhookToken: text("webhook_token").unique(),
-  webhookSecretGeneration: integer("webhook_secret_generation"),
-  webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
-});
+export const triggerResources = sqliteTable(
+  "trigger_resources",
+  {
+    id: text().primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    kind: text({
+      enum: ["connector", "webhook", "schedule", "email"],
+    }).notNull(),
+    /**
+     * Unused since a trigger has no versions: written 1, as it is NOT
+     * NULL, and read by nothing. Dropped in a later release (expand, then
+     * contract).
+     */
+    currentVersion: integer("current_version").notNull(),
+    enabled: integer({ mode: "boolean" }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    /**
+     * For an email trigger: the part before the `@` of the address it
+     * receives mail at, the name its builder chose or `trigger-<token>`
+     * (128 random bits), set as it is created and never changed, and set to
+     * null as it is deleted, which frees it (workflows/email-addresses.ts);
+     * null for any other kind. Unlike its ID, shown only to whoever may see
+     * the trigger; a chosen name is audited as it is created, a random one
+     * never logged or audited.
+     */
+    emailAddress: text("email_address").unique(),
+    /**
+     * Never written or read since webhook triggers start on event sources
+     * (GRA-1560, `event_sources`). Kept, with the token's index, until
+     * GRA-1659 drops them (expand, then contract).
+     */
+    webhookToken: text("webhook_token").unique(),
+    webhookSecretGeneration: integer("webhook_secret_generation"),
+    webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
+    /**
+     * The workflow it starts, the SHA-256 of its configuration, and the
+     * person its starts act for (`principal_binding`, a user ID the host
+     * bound at creation: who created it, never the workflow's owner). Every
+     * trigger is created with all three (trigger-resources.ts); the empty
+     * default is only there because SQLite adds a NOT NULL column only with
+     * one, and migration 0246 copied each existing trigger's from the
+     * version it ran (`trigger_resource_versions`).
+     */
+    workflowResourceId: text("workflow_resource_id").notNull().default(""),
+    configHash: text("config_hash").notNull().default(""),
+    principalBinding: text("principal_binding").notNull().default(""),
+    /** A connector trigger's event type, or a webhook trigger's. */
+    eventType: text("event_type"),
+    /**
+     * For a schedule trigger: its five-field cron expression, the IANA time
+     * zone it is read in, and the input each of its runs starts with
+     * (canonical JSON, accepted by the workflow's live version as the
+     * trigger was created, and checked again by every start), all checked as
+     * it was created (trigger-resources.ts). Null for any other kind.
+     */
+    scheduleCron: text("schedule_cron"),
+    scheduleTimeZone: text("schedule_time_zone"),
+    scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as it
+     * was created (trigger-resources.ts). An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
+    /**
+     * For a webhook trigger (GRA-1560): the event source whose events
+     * start it (`event_sources`), of type `event_type`; each event's data
+     * is its run's input. Null for any other kind.
+     */
+    eventSourceId: text("event_source_id"),
+  },
+  (table) => [
+    // The webhook triggers that take a source's events.
+    index("trigger_resources_source")
+      .on(table.eventSourceId, table.eventType)
+      .where(sql`${table.eventSourceId} IS NOT NULL`),
+    // The connector triggers that take a connection's events.
+    index("trigger_resources_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
+  ]
+);
 
 /**
  * The deployment's event sources (GRA-1560, event-sources.ts): where an
@@ -4515,12 +4583,10 @@ export const keptEventKeys = sqliteTable(
 );
 
 /**
- * Each version of a trigger, written once: the exact workflow version it
- * starts (never "the latest": a new workflow version changes no trigger
- * until one is explicitly updated to it), the SHA-256 of its
- * configuration, and the person its starts act for (`principal_binding`,
- * a user ID the host bound at creation: who created it, never the
- * workflow's owner).
+ * Unused since a trigger has no versions and keeps its configuration on
+ * its own row (`trigger_resources`, where migration 0246 copied each
+ * trigger's): written and read by nothing. Dropped in a later release
+ * (expand, then contract).
  */
 export const triggerResourceVersions = sqliteTable(
   "trigger_resource_versions",
@@ -4592,11 +4658,10 @@ export const triggerResourceVersions = sqliteTable(
 
 /**
  * When each schedule trigger next starts its run (workflows/schedule-
- * triggers.ts): the occurrence due next for the trigger version it was
- * worked out for (`version`), none once it stopped. Only a live, enabled
- * trigger whose current version is `version` starts anything; the rest
- * wait here untouched until enabling or moving the trigger works out its
- * next occurrence again, from then. `failed_starts` counts the starts in a
+ * triggers.ts): the occurrence due next, none once it stopped. Only a
+ * live, enabled trigger starts anything; a disabled one's waits here
+ * untouched until enabling it works out its next occurrence again, from
+ * then. `failed_starts` counts the starts in a
  * row that were refused or failed in the workflow's own terms, toward
  * stopping it; `attempts` counts every failed try of the occurrence due,
  * core's own failures too, each try waiting twice as long as the one
@@ -4608,7 +4673,11 @@ export const triggerSchedules = sqliteTable(
     triggerId: text("trigger_id")
       .primaryKey()
       .references(() => triggerResources.id),
-    version: integer().notNull(),
+    /**
+     * Unused since a trigger has no versions: written and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
+    version: integer(),
     nextAt: timestamp("next_at"),
     failedStarts: integer("failed_starts").notNull().default(0),
     attempts: integer().notNull().default(0),
@@ -4629,7 +4698,8 @@ export const triggerSchedules = sqliteTable(
 /**
  * The starts of independent workflows a chat's agent asked for, held
  * until the person it acts for confirms them in Grasp (src/held-starts.ts):
- * the workflow and version, the input exactly as it would start (canonical
+ * the workflow, whose version live as it is confirmed starts, the input
+ * exactly as it would start (canonical
  * JSON, with its SHA-256), the agent, its person and its chat, and the
  * agent's key, scoped to the chat. One per chat and key: the agent asking
  * again is the same start. Decided once: confirmed (with the start it
@@ -4650,7 +4720,12 @@ export const agentHeldStarts = sqliteTable(
     workflowResourceId: text("workflow_resource_id")
       .notNull()
       .references(() => workflowResources.id),
-    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    /**
+     * Unused since a held start starts the version live as it is
+     * confirmed: written and read by nothing. Dropped in a later release
+     * (expand, then contract).
+     */
+    workflowResourceVersion: integer("workflow_resource_version"),
     /** Null once the start is no longer open (held-starts.ts). */
     input: text(),
     inputHash: text("input_hash").notNull(),
@@ -4741,7 +4816,7 @@ export const triggerHourSlots = sqliteTable(
  * same start sent again is the same start, and one person's key never
  * reaches another's start. It pins the exact workflow version and manifest, who
  * invoked it (a person, an App, an agent or a trigger, with the App
- * version or trigger version), the person it acts for, the workflow's
+ * version for an App), the person it acts for, the workflow's
  * policy generation it was admitted under and its validated input
  * (canonical JSON, with its SHA-256). Never changed after, but for its
  * input and frozen parameter values, which run retention removes
@@ -4764,7 +4839,10 @@ export const workflowStartReceipts = sqliteTable(
     manifestHash: text("manifest_hash").notNull(),
     /** The App version, for an App's start; null otherwise. */
     originAppVersion: integer("origin_app_version"),
-    /** The trigger version, for a trigger's start; null otherwise. */
+    /**
+     * Unused since a trigger has no versions: written null, and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
     triggerVersion: integer("trigger_version"),
     principalId: text("principal_id").notNull(),
     authorityGeneration: integer("authority_generation").notNull(),

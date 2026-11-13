@@ -1751,7 +1751,7 @@ describe("erasing a person", () => {
         "INSERT INTO channel_conversations (platform, thread_id, user_id, created_at, last_message_at) VALUES ('teams', ?, ?, ?, ?)"
       ).bind(`thread-${userId}`, userId, now, now),
       env.DB.prepare(
-        "INSERT INTO chat_workflow_offers (id, user_id, workspace_id, chat_id, workflow_id, workflow_name, version, input, created_at, expires_at) VALUES (?, ?, 'workspace', 'chat', 'workflow', 'Follow-up', 1, '{}', ?, ?)"
+        "INSERT INTO chat_workflow_offers (id, user_id, workspace_id, chat_id, workflow_id, workflow_name, input, created_at, expires_at) VALUES (?, ?, 'workspace', 'chat', 'workflow', 'Follow-up', '{}', ?, ?)"
       ).bind(crypto.randomUUID(), userId, now, now + 60_000),
       env.DB.prepare(
         "INSERT INTO invitations (id, organization_id, email, role, status, expires_at, created_at, inviter_id) VALUES (?, 'organization', ?, 'user', 'accepted', ?, ?, ?)"

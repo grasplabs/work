@@ -254,6 +254,53 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     });
   });
 
+  it("starts the version live as its person confirms it, one published since it was held too", async () => {
+    const person = await signedInApi(idp, "user");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const { workflows } = await chatOf(chats, person);
+    const held = await workflows.start(workflow.id, { who: "Ada" }, "greet");
+    const by = await memberOf(env.DB, builder.userId);
+    if (by === undefined) {
+      throw new Error("Expected the builder to be a member");
+    }
+
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      greetingOf(undefined, "Version 2")
+    );
+    const [listed] = await person.api.heldStarts.list();
+    const confirmed = await person.api.heldStarts.confirm(
+      listed?.id ?? "",
+      listed?.argsHash ?? ""
+    );
+    const run = await env.DB.prepare(
+      "SELECT version FROM workflow_resource_runs WHERE id = ?"
+    )
+      .bind(confirmed.run)
+      .first<{ version: number }>();
+    const standing = await workflows.start(
+      workflow.id,
+      { who: "Ada" },
+      "greet"
+    );
+
+    expect({
+      held: held.status,
+      version: run?.version,
+      ended: await endOf(confirmed.run ?? ""),
+      standing: standing.status,
+    }).toStrictEqual({
+      held: "waiting",
+      version: 2,
+      ended: { status: "completed", code: null },
+      standing: "started",
+    });
+  });
+
   it("never runs a start its person declines or lets lapse, and refuses one it couldn't run", async () => {
     const person = await signedInApi(idp, "user");
     const { workflow, builder } = await workflowFor(person.userId);

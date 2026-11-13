@@ -201,6 +201,36 @@ describe("a workflow its owner lets people ask for", setUpTime, () => {
       runs: [],
     });
   });
+
+  it("starts the version live as it is pressed, one published since it was offered too", async () => {
+    const ann = await member(idp, offersFirst, says("There's a card for it."));
+    const by = await owner();
+    const workflow = await sharedWorkflow(by, ann.userId, true);
+    await post(messageFrom(ann.teams, { text: "Run the greeting for Ada" }));
+    const [offer = ""] = await offersIn(ann.teams.conversation);
+
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      greetingOf(undefined, "Version 2")
+    );
+    await post(pressStart(ann.teams, offer));
+
+    await vi.waitFor(
+      async () => {
+        const { lines } = await reached(ann.teams.conversation);
+        expect(lines).toContain(`${workflow.name} has finished.`);
+      },
+      { timeout: 60_000, interval: 200 }
+    );
+    const { results } = await env.DB.prepare(
+      "SELECT version, status FROM workflow_resource_runs WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .all<{ version: number; status: string }>();
+    expect(results).toStrictEqual([{ version: 2, status: "completed" }]);
+  });
 });
 
 describe("a workflow its owner didn't open to asking", setUpTime, () => {

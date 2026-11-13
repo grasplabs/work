@@ -152,7 +152,7 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
   async offer(
     workflow: unknown,
     input: unknown
-  ): Promise<{ offer: string; workflow: string; version: number }> {
+  ): Promise<{ offer: string; workflow: string }> {
     return await asPerson(this.env, this.ctx.props, {
       allowed: () => true,
       action: "write",
@@ -169,10 +169,7 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
           input
         );
       },
-      detail: (offered) => ({
-        workflow: offered.workflow,
-        version: offered.version,
-      }),
+      detail: (offered) => ({ workflow: offered.workflow }),
     });
   }
 
@@ -230,7 +227,6 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
       },
       detail: (standing) => ({
         workflow: standing.workflow,
-        version: standing.version,
         held: standing.held,
         status: standing.status,
       }),

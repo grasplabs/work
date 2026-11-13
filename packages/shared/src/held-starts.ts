@@ -8,10 +8,12 @@ import type { Json } from "./json.ts";
 /** A start a chat's agent asked for, waiting for its person to confirm it. */
 export interface HeldStart {
   id: string;
-  /** The independent workflow, its name, and the version it would start. */
+  /**
+   * The independent workflow and its name: confirming starts its version
+   * live then.
+   */
   workflow: string;
   workflowName: string;
-  version: number;
   /** The args it would start with, exactly as confirming it sends them. */
   args: Json;
   /** The SHA-256 of those args: confirming names it, so it is what was shown. */

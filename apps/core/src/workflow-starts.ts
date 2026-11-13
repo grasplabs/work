@@ -41,7 +41,6 @@ import type { Acting } from "./auth/identity.ts";
 import {
   permissions,
   triggerResources,
-  triggerResourceVersions,
   workflowResources,
   workflowResourceVersions,
   workflowStartReceipts,
@@ -134,10 +133,10 @@ import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 //   (`workflow.paused`), and a pause moves the policy generation on, so
 //   one decided before it is refused as it is admitted.
 // - The same start sent twice: one receipt per invoker, person acted for
-//   and idempotency key; the same key with the same input, trigger
-//   version and, for a person or an agent, who name it, version is the
-//   same start (an App's or a trigger's follows the live version, so one
-//   sent again after a publish is the start it made), with another is refused
+//   and idempotency key; the same key with the same input and, for a
+//   person, who names it, version is the same start (an App's, an agent's
+//   or a trigger's follows the live version, so one sent again after a
+//   publish is the start it made), with another is refused
 //   (`workflow.start_conflict`). One person never gets another's receipt
 //   through the same App, agent or trigger. A start sent again is
 //   answered with its receipt once the invoker's own access is checked
@@ -239,7 +238,6 @@ export interface StartAuthorization {
   manifestHash: string;
   invoker: WorkflowStart["invoker"];
   originAppVersion: number | null;
-  triggerVersion: number | null;
   principal: string;
   generation: number;
   /** The invoker's idempotency key. */
@@ -621,22 +619,14 @@ const frozenBindings = async (
   return { text: canonicalJson(z.json().parse(frozen)), required };
 };
 
-/** The trigger `id`'s current version, if it is live and enabled. */
+/** The trigger `id`, if it is live and enabled. */
 const liveTrigger = async (env: Env, id: string) =>
   await drizzle(env.DB)
     .select({
-      version: triggerResources.currentVersion,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      principal: triggerResourceVersions.principalBinding,
+      workflowId: triggerResources.workflowResourceId,
+      principal: triggerResources.principalBinding,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.id, id),
@@ -650,7 +640,6 @@ const liveTrigger = async (env: Env, id: string) =>
 interface InvokerRule {
   invoker: WorkflowStart["invoker"];
   originAppVersion: number | null;
-  triggerVersion: number | null;
   principal: string;
   actor: AuditActor;
   holds: SQL;
@@ -678,7 +667,6 @@ const ruleOf = async (
       return {
         invoker: { type: "person", id: person },
         originAppVersion: null,
-        triggerVersion: null,
         principal: person,
         actor: invoker.person.actor ?? actorOf(invoker.person),
         holds: workflowRoleSql(person, id),
@@ -692,7 +680,6 @@ const ruleOf = async (
       return {
         invoker: { type: "app", id: subject.appId },
         originAppVersion: appVersion,
-        triggerVersion: null,
         principal: onBehalfOf,
         actor: delegateActorOf(invoker.authority),
         holds: appStartHoldsSql(
@@ -711,7 +698,6 @@ const ruleOf = async (
       return {
         invoker: { type: "agent", id: subject.agentId },
         originAppVersion: null,
-        triggerVersion: null,
         principal: onBehalfOf,
         actor: delegateActorOf(invoker.authority),
         holds: sql`(${workflowRoleSql(onBehalfOf, id)} AND ${grantSql(
@@ -734,19 +720,16 @@ const ruleOf = async (
       return {
         invoker: { type: "trigger", id: invoker.triggerId },
         originAppVersion: null,
-        triggerVersion: trigger.version,
         principal: trigger.principal,
         actor: { type: "system" },
         // Its principal must still have a role in the workflow: a trigger
         // never acts for someone the workflow is no longer shared with.
         holds: sql`(${workflowRoleSql(trigger.principal, id)}
           AND EXISTS (SELECT 1 FROM trigger_resources AS live
-            JOIN trigger_resource_versions AS current
-              ON current.trigger_id = live.id AND current.version = live.current_version
             WHERE live.id = ${invoker.triggerId} AND live.deleted_at IS NULL
-              AND live.enabled = 1 AND current.version = ${trigger.version}
-              AND current.workflow_resource_id = ${id}
-              AND current.principal_binding = ${trigger.principal})
+              AND live.enabled = 1
+              AND live.workflow_resource_id = ${id}
+              AND live.principal_binding = ${trigger.principal})
           AND ${grantSql(
             allowingPermissionSql(subject, undefined, object, "start")
           )})`,
@@ -844,7 +827,6 @@ const sameStart = (
     version: number;
     principal: string;
     originAppVersion: number | null;
-    triggerVersion: number | null;
   },
   inputHash: string
 ): WorkflowStart => {
@@ -856,17 +838,15 @@ const sameStart = (
     row.invokerType === "app"
       ? row.originAppVersion !== null && start.originAppVersion !== null
       : row.originAppVersion === start.originAppVersion;
-  // An App's and a trigger's start follow the workflow's live version: one
-  // sent again after a publish is the start it made, on the version it
-  // started on. A person and an agent name the version they start.
-  const namesVersion =
-    row.invokerType === "person" || row.invokerType === "agent";
+  // An App's, an agent's and a trigger's start follow the workflow's live
+  // version: one sent again after a publish is the start it made, on the
+  // version it started on. A person names the version they start.
+  const namesVersion = row.invokerType === "person";
   if (
     row.workflowResourceId !== start.workflowId ||
     (namesVersion && row.workflowResourceVersion !== start.version) ||
     row.principalId !== start.principal ||
     !sameOrigin ||
-    row.triggerVersion !== start.triggerVersion ||
     row.inputHash !== inputHash
   ) {
     throw workflowResourceErrors.create("workflow.start_conflict");
@@ -1348,7 +1328,6 @@ export const decideWorkflowStart = async (
       manifestHash,
       invoker: rule.invoker,
       originAppVersion: rule.originAppVersion,
-      triggerVersion: rule.triggerVersion,
       principal: rule.principal,
       generation,
       key,
@@ -1460,7 +1439,8 @@ export const admitWorkflowStart = async (
     authorization.version,
     authorization.manifestHash,
     authorization.originAppVersion,
-    authorization.triggerVersion,
+    // `trigger_version`, unused since a trigger has no versions.
+    null,
     authorization.principal,
     authorization.generation,
     authorization.input,

@@ -26,7 +26,6 @@ import {
   permissions,
   triggerHourSlots,
   triggerResources,
-  triggerResourceVersions,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { allowingPermissionSql } from "../permissions.ts";
@@ -52,7 +51,7 @@ import type { StartFiles } from "./start-files.ts";
 //   and key (workflow-starts.ts): the same event delivered again is the
 //   same start, its run the same run, a cancelled one too.
 // - An event reaching a trigger that didn't ask for it. Only live,
-//   enabled connector triggers whose current version names the event's
+//   enabled connector triggers that name the event's
 //   connection, type and part of it (a mailbox, a drive, or none for the
 //   account's own) take it; on a personal connection, only those acting
 //   for its owner, as connect lets only its owner's calls use it.
@@ -124,10 +123,9 @@ import type { StartFiles } from "./start-files.ts";
 // Email triggers' messages (inbound-email.ts) go through the same steps
 // (`startOnce`), each message an event of its own.
 
-/** A trigger that takes an event or a message, as its current version keeps it. */
+/** A trigger that takes an event or a message, as it keeps its configuration. */
 export interface Taker {
   id: string;
-  version: number;
   workflowId: string;
   inputMapping: string | null;
 }
@@ -217,38 +215,30 @@ const tookPlace = async (
 };
 
 /**
- * The live, enabled connector triggers whose current version takes
- * `event`, that may hear it.
+ * The live, enabled connector triggers that take `event`, that may hear
+ * it.
  */
 const takersOf = async (env: Env, event: ConnectorEvent): Promise<Taker[]> => {
   const rows = await drizzle(env.DB)
     .select({
       id: triggerResources.id,
-      version: triggerResources.currentVersion,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      inputMapping: triggerResourceVersions.inputMapping,
+      workflowId: triggerResources.workflowResourceId,
+      inputMapping: triggerResources.inputMapping,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.kind, "connector"),
         eq(triggerResources.enabled, true),
         isNull(triggerResources.deletedAt),
-        eq(triggerResourceVersions.connectionId, event.connection),
-        eq(triggerResourceVersions.eventType, event.type),
+        eq(triggerResources.connectionId, event.connection),
+        eq(triggerResources.eventType, event.type),
         event.resource === undefined
-          ? isNull(triggerResourceVersions.connectionResource)
-          : eq(triggerResourceVersions.connectionResource, event.resource),
+          ? isNull(triggerResources.connectionResource)
+          : eq(triggerResources.connectionResource, event.resource),
         event.owner === null
           ? undefined
-          : eq(triggerResourceVersions.principalBinding, event.owner)
+          : eq(triggerResources.principalBinding, event.owner)
       )
     )
     .orderBy(asc(triggerResources.id));
@@ -400,7 +390,7 @@ const settle = async (
           ? (arrival.audited.dropped ?? arrival.audited.refused)
           : arrival.audited.refused,
       target: { type: "trigger", id: taker.id },
-      detail: { ...arrival.audited.detail, version: taker.version, ...detail },
+      detail: { ...arrival.audited.detail, ...detail },
     }),
   ]);
   return "gone";
@@ -656,8 +646,8 @@ export const startConnectorTriggers = async (
 
 /**
  * Where connect listens for connector triggers: each active grant of a
- * live, enabled connector trigger to hear its connection, for its current
- * version's event type and part and that type's read action, acting for
+ * live, enabled connector trigger to hear its connection, for its event
+ * type and part and that type's read action, acting for
  * the person it binds. A grant the trigger can't use (another part, or an
  * action its event type doesn't read) listens nowhere.
  */
@@ -670,9 +660,9 @@ export const triggerListeners = async (
     // oxlint-disable-next-line no-await-in-loop -- one query per event type, few
     const rows = await drizzle(env.DB)
       .select({
-        connection: triggerResourceVersions.connectionId,
-        resource: triggerResourceVersions.connectionResource,
-        owner: triggerResourceVersions.principalBinding,
+        connection: triggerResources.connectionId,
+        resource: triggerResources.connectionResource,
+        owner: triggerResources.principalBinding,
       })
       .from(permissions)
       .innerJoin(
@@ -682,23 +672,16 @@ export const triggerListeners = async (
           eq(permissions.subjectId, triggerResources.id)
         )
       )
-      .innerJoin(
-        triggerResourceVersions,
-        and(
-          eq(triggerResourceVersions.triggerId, triggerResources.id),
-          eq(triggerResourceVersions.version, triggerResources.currentVersion)
-        )
-      )
       .where(
         and(
           eq(triggerResources.kind, "connector"),
           eq(triggerResources.enabled, true),
           isNull(triggerResources.deletedAt),
-          eq(triggerResourceVersions.eventType, type),
+          eq(triggerResources.eventType, type),
           eq(permissions.status, "active"),
           eq(permissions.objectType, "connection"),
-          eq(permissions.objectId, triggerResourceVersions.connectionId),
-          sql`${permissions.resource} IS ${triggerResourceVersions.connectionResource}`,
+          eq(permissions.objectId, triggerResources.connectionId),
+          sql`${permissions.resource} IS ${triggerResources.connectionResource}`,
           sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = ${action})`
         )
       )

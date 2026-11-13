@@ -2498,14 +2498,12 @@ const namedWithin = (
 
 /**
  * The triggers that may start `id`, as SQL rows of their IDs: live,
- * enabled, their current version pinning `id`, and holding an active
+ * enabled, starting `id`, and holding an active
  * `start` grant on it. A trigger that can't start it pins nothing.
  */
 const pinningTriggersSql = (id: string) => sql`SELECT trigger.id AS id
     FROM trigger_resources AS trigger
-    JOIN trigger_resource_versions AS pinned
-      ON pinned.trigger_id = trigger.id AND pinned.version = trigger.current_version
-    WHERE pinned.workflow_resource_id = ${id} AND trigger.deleted_at IS NULL
+    WHERE trigger.workflow_resource_id = ${id} AND trigger.deleted_at IS NULL
       AND trigger.enabled = 1
       AND EXISTS (SELECT 1 FROM permissions AS allowed
         WHERE allowed.subject_type = 'trigger' AND allowed.subject_id = trigger.id
@@ -2542,7 +2540,7 @@ const liveRunsSql = (id: string) => sql`(SELECT COUNT(*)
 
 /**
  * That something still pins a version of `id`, as SQL: the current version
- * of another live workflow binds it, a live trigger's current version
+ * of another live workflow binds it, a live trigger
  * starts it, or an active App binding whose App may start it pins one of
  * its versions, or a run of it hasn't ended: its builders terminate one
  * (workflows/resource-runs.ts) to delete it sooner. Only another
@@ -2756,16 +2754,14 @@ export const deleteWorkflowResource = async (
 /**
  * What still names a version of workflow `id`, by kind, as SQL counts: any
  * version (not only the current one) of another live workflow that binds
- * it, any live trigger whose current version starts it, any active App
+ * it, any live trigger that starts it, any active App
  * binding to it whatever its grants, and its runs that haven't ended.
  * Stricter than what keeps it from being deleted (`boundSql`): releasing
  * its name is about who answers its name, not who may start it.
  */
 const namedBySql = (id: string) => sql`SELECT
     (SELECT COUNT(*) FROM trigger_resources AS trigger
-      JOIN trigger_resource_versions AS pinned
-        ON pinned.trigger_id = trigger.id AND pinned.version = trigger.current_version
-      WHERE pinned.workflow_resource_id = ${id}
+      WHERE trigger.workflow_resource_id = ${id}
         AND trigger.deleted_at IS NULL) AS triggers,
     (SELECT COUNT(*) FROM app_workflow_bindings AS pinned
       WHERE pinned.workflow_resource_id = ${id}

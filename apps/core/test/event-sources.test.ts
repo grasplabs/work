@@ -260,7 +260,7 @@ describe("connector events", () => {
     });
     const lookups = recorded.filter(
       ({ query }) =>
-        query.includes('"trigger_resource_versions"."event_type"') &&
+        query.includes('"trigger_resources"."event_type"') &&
         query.includes('json_each("permissions"."actions")')
     );
     const plans = await Promise.all(

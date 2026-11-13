@@ -172,11 +172,10 @@ const scheduleTrigger = async (
 /** Trigger `id`'s schedule, as core keeps it. */
 const scheduleOf = async (id: string) =>
   await env.DB.prepare(
-    "SELECT version, next_at AS nextAt, failed_starts AS failedStarts, attempts FROM trigger_schedules WHERE trigger_id = ?"
+    "SELECT next_at AS nextAt, failed_starts AS failedStarts, attempts FROM trigger_schedules WHERE trigger_id = ?"
   )
     .bind(id)
     .first<{
-      version: number;
       nextAt: number | null;
       failedStarts: number;
       attempts: number;
@@ -194,16 +193,16 @@ const dueAt = async (id: string, at: Date, failedStarts = 0) => {
 /** The runs trigger `trigger` started: each with its start key. */
 const runsOf = async (trigger: string) => {
   const rows = await env.DB.prepare(
-    "SELECT run.id, receipt.idempotency_key AS key, receipt.trigger_version AS version FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ? ORDER BY receipt.created_at"
+    "SELECT run.id, receipt.idempotency_key AS key FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ? ORDER BY receipt.created_at"
   )
     .bind(trigger)
-    .all<{ id: string; key: string; version: number }>();
+    .all<{ id: string; key: string }>();
   return rows.results;
 };
 
-/** The start key of trigger `id`'s version `version` occurrence at `at`. */
-const keyOf = (id: string, version: number, at: Date) =>
-  `grasp:schedule:${id}:${version}:${at.toISOString()}`;
+/** The start key of trigger `id`'s occurrence at `at`. */
+const keyOf = (id: string, at: Date) =>
+  `grasp:schedule:${id}:${at.toISOString()}`;
 
 /** `env` whose database refuses, once, any statement `matches` finds. */
 const failingOnce = (matches: RegExp): Env => {
@@ -459,10 +458,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       runs,
       output: run.result,
       movedOn: (after?.nextAt ?? 0) > occurrence.getTime(),
-      admitted: admitted.map(({ detail }) => ({
-        scheduledAt: detail.scheduledAt,
-        triggerVersion: detail.triggerVersion,
-      })),
+      admitted: admitted.map(({ detail }) => detail.scheduledAt),
     }).toStrictEqual({
       firstDue: true,
       killed: "Error: The database went away",
@@ -470,15 +466,12 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       runs: [
         {
           id: runs[0]?.id,
-          key: keyOf(trigger.id, 1, occurrence),
-          version: 1,
+          key: keyOf(trigger.id, occurrence),
         },
       ],
       output: { report: "nightly" },
       movedOn: true,
-      admitted: [
-        { scheduledAt: occurrence.toISOString(), triggerVersion: "1" },
-      ],
+      admitted: [occurrence.toISOString()],
     });
   });
 
@@ -519,7 +512,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       keys: runs.map(({ key }) => key),
       next: after?.nextAt,
     }).toStrictEqual({
-      keys: [keyOf(trigger.id, 1, firstMissed)],
+      keys: [keyOf(trigger.id, firstMissed)],
       next: Math.floor(now.getTime() / minuteMs) * minuteMs + minuteMs,
     });
   });
@@ -560,9 +553,9 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       autumnKeys: autumnRuns.map(({ key }) => key),
     }).toStrictEqual({
       springNext: "2027-03-29T00:30:00.000Z",
-      springKeys: [keyOf(spring.id, 1, beforeGap)],
+      springKeys: [keyOf(spring.id, beforeGap)],
       autumnNext: "2026-10-26T01:30:00.000Z",
-      autumnKeys: [keyOf(autumn.id, 1, repeated)],
+      autumnKeys: [keyOf(autumn.id, repeated)],
     });
   });
 
@@ -654,7 +647,6 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       runs: [0, 0],
       refusals: Array.from({ length: 2 }, () => [
         {
-          version: 1,
           scheduledAt: occurrence.toISOString(),
           code: "workflow.start_denied",
         },
@@ -754,16 +746,15 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         {
           action: "trigger.schedule.refused",
           detail: {
-            version: 1,
             scheduledAt: occurrence.toISOString(),
             code: "workflow.start_denied",
           },
         },
         {
           action: "trigger.schedule.stopped",
-          detail: { version: 1, failedStarts: maxFailedStarts },
+          detail: { failedStarts: maxFailedStarts },
         },
-        { action: "trigger.schedule.restarted", detail: { version: 1 } },
+        { action: "trigger.schedule.restarted", detail: {} },
       ],
     });
   });
@@ -809,7 +800,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       whileWaiting: { goesOn: true, failedStarts: 0, refusals: 0 },
       granted: { movedOn: true, failedStarts: 0 },
-      runs: [keyOf(waiting.id, 1, occurrence)],
+      runs: [keyOf(waiting.id, occurrence)],
     });
   });
 
@@ -831,7 +822,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     const runs = await runsOf(waiting.id);
 
     expect(runs.map(({ key }) => key)).toStrictEqual([
-      keyOf(waiting.id, 1, occurrence),
+      keyOf(waiting.id, occurrence),
     ]);
   });
 
@@ -1010,9 +1001,9 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
           env,
           { type: "trigger", triggerId: trigger.id },
           workflow.id,
-          { version: 1, args: nightly, key: keyOf(trigger.id, 1, occurrence) },
+          { version: 1, args: nightly, key: keyOf(trigger.id, occurrence) },
           undefined,
-          { scheduledAt: occurrence.toISOString(), triggerVersion: "1" }
+          { scheduledAt: occurrence.toISOString() }
         );
       })
     );
@@ -1039,7 +1030,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       },
       movedOn: true,
       failedStarts: 0,
-      runs: [keyOf(trigger.id, 1, occurrence)],
+      runs: [keyOf(trigger.id, occurrence)],
       stopped: 0,
     });
   });
@@ -1086,9 +1077,9 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
           env,
           { type: "trigger", triggerId: trigger.id },
           workflow.id,
-          { version: 2, args: nightly, key: keyOf(trigger.id, 1, occurrence) },
+          { version: 2, args: nightly, key: keyOf(trigger.id, occurrence) },
           undefined,
-          { scheduledAt: occurrence.toISOString(), triggerVersion: "1" }
+          { scheduledAt: occurrence.toISOString() }
         );
       }
       if (change === "revoked") {
@@ -1109,9 +1100,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       const schedule = await scheduleOf(trigger.id);
       const runs = await runsOf(trigger.id);
       const counted = (schedule?.failedStarts ?? 0) > 0;
-      const movedOn =
-        schedule?.version === 1 &&
-        (schedule.nextAt ?? 0) > occurrence.getTime();
+      const movedOn = (schedule?.nextAt ?? 0) > occurrence.getTime();
 
       // Started: moved on whatever changed, unless the trigger was
       // disabled, which works its schedule out again. Not started: a
@@ -1157,7 +1146,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     }
     const keysOf = async (id: string) => {
       const runs = await runsOf(id);
-      return runs.map(({ key }) => key.split(":").slice(4).join(":"));
+      return runs.map(({ key }) => key.split(":").slice(3).join(":"));
     };
 
     expect({

@@ -581,14 +581,11 @@ describe("model calls", () => {
     // its workflow, so the database is written as one would).
     const elsewhere = await runOf(async (trigger) => {
       const other = await greetingWorkflow(ada, admin);
-      await env.DB.batch([
-        env.DB.prepare(
-          "INSERT INTO trigger_resource_versions (trigger_id, version, workflow_resource_id, workflow_resource_version, config_hash, principal_binding, created_at) SELECT trigger_id, version + 1, ?, 1, config_hash, principal_binding, ? FROM trigger_resource_versions WHERE trigger_id = ? AND version = (SELECT current_version FROM trigger_resources WHERE id = ?)"
-        ).bind(other.workflow.id, Date.now(), trigger, trigger),
-        env.DB.prepare(
-          "UPDATE trigger_resources SET current_version = current_version + 1 WHERE id = ?"
-        ).bind(trigger),
-      ]);
+      await env.DB.prepare(
+        "UPDATE trigger_resources SET workflow_resource_id = ? WHERE id = ?"
+      )
+        .bind(other.workflow.id, trigger)
+        .run();
     });
     expect({ published, elsewhere }).toStrictEqual({
       published: { status: "completed", output: { status: "Hello Ada" } },

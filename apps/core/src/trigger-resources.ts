@@ -46,7 +46,6 @@ import {
   eventSources,
   permissions,
   triggerResources,
-  triggerResourceVersions,
   triggerSchedules,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
@@ -64,7 +63,8 @@ import { quotaLimits } from "./workflows/quotas.ts";
 
 // Independent triggers (platform specification 15, 24): each a resource of
 // its own that starts one workflow on its own, at the version live as it
-// starts. This is their registry: listing, creating one, disabling and
+// starts, configured once as it is created: a trigger has no versions of
+// its own. This is their registry: listing, creating one, disabling and
 // deleting it, each served to a signed-in person
 // over `/rpc` (workflow-triggers-rpc.ts). What it may start is decided as
 // for any other subject, by a permission of its own (`start` on the workflow), granted
@@ -141,7 +141,7 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   build may start a workflow on a source's events; nothing starts until
 //   that grant. Its events start runs as workflows/source-events.ts says.
 
-/** What a trigger version keeps of its configuration, by kind. */
+/** What a trigger keeps of its configuration, by kind. */
 interface KindFields {
   eventType: string | null;
   scheduleCron: string | null;
@@ -182,7 +182,8 @@ export const nextOccurrence = (
 /**
  * `input` as version `version` of workflow `workflowId` (its live one)
  * takes it, as canonical JSON; `workflow.resource_invalid` with the
- * issues otherwise.
+ * issues otherwise. Every start checks it again, against the version it
+ * starts.
  */
 const scheduleInputFor = async (
   env: Env,
@@ -262,7 +263,7 @@ const webhookFieldsOf = async (
 };
 
 /**
- * What a trigger of `kind` with `config` keeps in its version, checked
+ * What a trigger of `kind` with `config` keeps, checked
  * (`workflow.resource_invalid`): a schedule trigger's schedule and input,
  * accepted by version `version` of workflow `workflowId`, its live one, a connector trigger's connection, event and mapping, for
  * `principal`, a webhook trigger's source and type; an email trigger's
@@ -330,8 +331,6 @@ export interface TriggerResource {
   id: TriggerId;
   kind: TriggerKind;
   owner: string;
-  /** Its own version, whose configuration it keeps. */
-  version: number;
   workflowId: string;
   principal: string;
   enabled: boolean;
@@ -373,7 +372,7 @@ const creationRefusal = async (
     }
     return workflowResourceErrors.create("workflow.trigger_limit");
   }
-  if (notNullFailed(error, "trigger_resource_versions.workflow_resource_id")) {
+  if (notNullFailed(error, "trigger_resources.workflow_resource_id")) {
     return workflowResourceErrors.create("workflow.resource_unavailable");
   }
   return error;
@@ -452,24 +451,17 @@ export const createTriggerResource = async (
         ${chosen === undefined ? sql`` : sql`AND NOT ${addressTaken([chosen])}`})`,
       ownerId: by.userId,
       kind,
+      // Unused, and NOT NULL until a later release drops it.
       currentVersion: 1,
       enabled: true,
       createdAt: now,
       emailAddress: kind === "email" ? (chosen ?? randomEmailAddress()) : null,
-    }),
-    db.insert(triggerResourceVersions).values({
-      triggerId: id,
-      version: 1,
       // Only while the workflow is live: otherwise NULL, which fails the
       // batch, so a deletion and a new trigger never both land.
       workflowResourceId: sql`(SELECT id FROM workflow_resources
         WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
-      // Read by nothing since a trigger starts the live version: the
-      // version live as it was created (expand, then contract).
-      workflowResourceVersion: version,
       configHash,
       principalBinding: by.userId,
-      createdAt: now,
       ...fields,
     }),
     // A schedule trigger's first occurrence: the next after now.
@@ -478,7 +470,6 @@ export const createTriggerResource = async (
       : [
           db.insert(triggerSchedules).values({
             triggerId: id,
-            version: 1,
             nextAt:
               nextOccurrence(
                 fields.scheduleCron,
@@ -513,7 +504,6 @@ export const createTriggerResource = async (
     id,
     kind,
     owner: by.userId,
-    version: 1,
     workflowId: workflow.id,
     principal: by.userId,
     enabled: true,
@@ -546,19 +536,11 @@ export const requireTriggerManager = async (
     .select({
       kind: triggerResources.kind,
       owner: triggerResources.ownerId,
-      version: triggerResources.currentVersion,
       enabled: triggerResources.enabled,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      principal: triggerResourceVersions.principalBinding,
+      workflowId: triggerResources.workflowResourceId,
+      principal: triggerResources.principalBinding,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.id, parsed.data),
@@ -594,25 +576,19 @@ export const requireTriggerManager = async (
   return { id: parsed.data, ...row };
 };
 
-/** Trigger `id`'s schedule, as its version `version` keeps it, if it has one. */
+/** Trigger `id`'s schedule, if it has one. */
 const scheduleOf = async (
   env: Env,
-  id: string,
-  version: number
+  id: string
 ): Promise<{ cron: string; timeZone: string; input: string } | undefined> => {
   const row = await drizzle(env.DB)
     .select({
-      cron: triggerResourceVersions.scheduleCron,
-      timeZone: triggerResourceVersions.scheduleTimeZone,
-      input: triggerResourceVersions.scheduleInput,
+      cron: triggerResources.scheduleCron,
+      timeZone: triggerResources.scheduleTimeZone,
+      input: triggerResources.scheduleInput,
     })
-    .from(triggerResourceVersions)
-    .where(
-      and(
-        eq(triggerResourceVersions.triggerId, id),
-        eq(triggerResourceVersions.version, version)
-      )
-    )
+    .from(triggerResources)
+    .where(eq(triggerResources.id, id))
     .get();
   if (
     row === undefined ||
@@ -649,17 +625,10 @@ export const triggersFollowing = async (
       owner: triggerResources.ownerId,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         isNull(triggerResources.deletedAt),
-        eq(triggerResourceVersions.workflowResourceId, workflowId)
+        eq(triggerResources.workflowResourceId, workflowId)
       )
     )
     .orderBy(asc(triggerResources.id))
@@ -726,7 +695,7 @@ export const setTriggerEnabled = async (
   );
   const schedule =
     enabled && trigger.kind === "schedule"
-      ? await scheduleOf(env, trigger.id, trigger.version)
+      ? await scheduleOf(env, trigger.id)
       : undefined;
   const db = drizzle(env.DB);
   const toggled = [
@@ -764,7 +733,6 @@ export const setTriggerEnabled = async (
       .where(
         and(
           eq(triggerSchedules.triggerId, trigger.id),
-          eq(triggerSchedules.version, trigger.version),
           sql`(${triggerSchedules.nextAt} IS NULL OR EXISTS (
             SELECT 1 FROM trigger_resources
             WHERE id = ${trigger.id} AND enabled = 0 AND deleted_at IS NULL))`
@@ -774,9 +742,7 @@ export const setTriggerEnabled = async (
     // as that.
     outboxedWhere(
       db,
-      entry(by, "trigger.schedule.restarted", trigger.id, {
-        version: trigger.version,
-      }),
+      entry(by, "trigger.schedule.restarted", trigger.id),
       sql`changes() > 0 AND EXISTS (SELECT 1 FROM trigger_resources
         WHERE id = ${trigger.id} AND enabled = 1 AND deleted_at IS NULL)`
     ),
@@ -817,15 +783,14 @@ export const deleteTriggerResource = async (
 
 const jsonSchema = z.json();
 
-/** The canonical JSON a trigger version keeps, read back. */
+/** The canonical JSON a trigger keeps, read back. */
 const keptJson = (text: string): Json => jsonSchema.parse(JSON.parse(text));
 
-/** What a trigger's current version keeps, as `triggersWhere` reads it. */
+/** What a trigger keeps, as `triggersWhere` reads it. */
 interface TriggerRow {
   id: string;
   kind: TriggerKind;
   owner: string;
-  version: number;
   enabled: boolean;
   createdAt: Date;
   workflowId: string;
@@ -847,7 +812,7 @@ interface TriggerRow {
   events: string | null;
 }
 
-/** A schedule trigger's configuration, if its version keeps one. */
+/** A schedule trigger's configuration, if it keeps one. */
 const scheduleConfigOf = (row: TriggerRow): Json | null =>
   row.scheduleCron === null ||
   row.scheduleTimeZone === null ||
@@ -859,7 +824,7 @@ const scheduleConfigOf = (row: TriggerRow): Json | null =>
         missedOccurrences: "coalesce",
       };
 
-/** A connector trigger's configuration, if its version keeps one. */
+/** A connector trigger's configuration, if it keeps one. */
 const connectorConfigOf = (row: TriggerRow): Json | null => {
   if (
     row.connectionId === null ||
@@ -895,7 +860,7 @@ const sourceOf = (row: {
 
 /**
  * A trigger's configuration as it was created, in its kind's schema, from
- * the fields its version keeps. An email trigger's address is served as
+ * the fields it keeps. An email trigger's address is served as
  * its `address`, not in here.
  */
 const configOf = (row: TriggerRow): Json | null => {
@@ -939,8 +904,8 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
 
 /**
  * Where a trigger's permission on `object` (of `objectType`, and matching
- * `also`) allowing `action` stands, as SQL for a query joining
- * `trigger_resources` and its current `trigger_resource_versions` row: of
+ * `also`) allowing `action` stands, as SQL for a query of
+ * `trigger_resources`: of
  * its permissions for it, an active one first, then a requested one, then
  * a revoked one; NULL if none.
  */
@@ -963,28 +928,28 @@ const heldStatusSql = (
 /** Where a trigger's `start` on the workflow it starts stands (`heldStatusSql`). */
 export const startStatusSql = heldStatusSql(
   "workflow",
-  sql`${triggerResourceVersions.workflowResourceId}`,
+  sql`${triggerResources.workflowResourceId}`,
   sql`'start'`
 );
 
 /**
  * Where a connector trigger's read of its event on the connection and part
- * its current version names stands (`heldStatusSql`); NULL for any other
+ * it names stands (`heldStatusSql`); NULL for any other
  * kind, which names no connection.
  */
 const eventsStatusSql = heldStatusSql(
   "connection",
-  sql`${triggerResourceVersions.connectionId}`,
-  sql`(CASE ${triggerResourceVersions.eventType} ${sql.join(
+  sql`${triggerResources.connectionId}`,
+  sql`(CASE ${triggerResources.eventType} ${sql.join(
     Object.entries(connectorEventActions).map(
       ([type, action]) => sql`WHEN ${type} THEN ${action}`
     ),
     sql` `
   )} END)`,
-  sql` AND ${permissions.resource} IS ${triggerResourceVersions.connectionResource}`
+  sql` AND ${permissions.resource} IS ${triggerResources.connectionResource}`
 );
 
-/** The live triggers `where` finds, at their current versions, oldest first. */
+/** The live triggers `where` finds, oldest first. */
 const triggersWhere = async (
   env: Env,
   where: SQL | undefined
@@ -994,20 +959,19 @@ const triggersWhere = async (
       id: triggerResources.id,
       kind: triggerResources.kind,
       owner: triggerResources.ownerId,
-      version: triggerResources.currentVersion,
       enabled: triggerResources.enabled,
       createdAt: triggerResources.createdAt,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      principal: triggerResourceVersions.principalBinding,
+      workflowId: triggerResources.workflowResourceId,
+      principal: triggerResources.principalBinding,
       emailAddress: triggerResources.emailAddress,
-      eventType: triggerResourceVersions.eventType,
-      scheduleCron: triggerResourceVersions.scheduleCron,
-      scheduleTimeZone: triggerResourceVersions.scheduleTimeZone,
-      scheduleInput: triggerResourceVersions.scheduleInput,
-      connectionId: triggerResourceVersions.connectionId,
-      connectionResource: triggerResourceVersions.connectionResource,
-      inputMapping: triggerResourceVersions.inputMapping,
-      eventSourceId: triggerResourceVersions.eventSourceId,
+      eventType: triggerResources.eventType,
+      scheduleCron: triggerResources.scheduleCron,
+      scheduleTimeZone: triggerResources.scheduleTimeZone,
+      scheduleInput: triggerResources.scheduleInput,
+      connectionId: triggerResources.connectionId,
+      connectionResource: triggerResources.connectionResource,
+      inputMapping: triggerResources.inputMapping,
+      eventSourceId: triggerResources.eventSourceId,
       sourceName: eventSources.name,
       sourceDeletedAt: eventSources.deletedAt,
       nextAt: triggerSchedules.nextAt,
@@ -1016,24 +980,11 @@ const triggersWhere = async (
       events: eventsStatusSql,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .leftJoin(
       triggerSchedules,
-      and(
-        eq(triggerSchedules.triggerId, triggerResources.id),
-        eq(triggerSchedules.version, triggerResources.currentVersion)
-      )
+      eq(triggerSchedules.triggerId, triggerResources.id)
     )
-    .leftJoin(
-      eventSources,
-      eq(eventSources.id, triggerResourceVersions.eventSourceId)
-    )
+    .leftJoin(eventSources, eq(eventSources.id, triggerResources.eventSourceId))
     .where(and(isNull(triggerResources.deletedAt), where))
     .orderBy(asc(triggerResources.createdAt), asc(triggerResources.id))
     .all();
@@ -1057,27 +1008,17 @@ export const triggerSummaries = async (
     .select({
       id: triggerResources.id,
       kind: triggerResources.kind,
-      cron: triggerResourceVersions.scheduleCron,
-      timeZone: triggerResourceVersions.scheduleTimeZone,
-      event: triggerResourceVersions.eventType,
-      connectionId: triggerResourceVersions.connectionId,
-      resource: triggerResourceVersions.connectionResource,
-      eventSourceId: triggerResourceVersions.eventSourceId,
+      cron: triggerResources.scheduleCron,
+      timeZone: triggerResources.scheduleTimeZone,
+      event: triggerResources.eventType,
+      connectionId: triggerResources.connectionId,
+      resource: triggerResources.connectionResource,
+      eventSourceId: triggerResources.eventSourceId,
       sourceName: eventSources.name,
       sourceDeletedAt: eventSources.deletedAt,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
-    .leftJoin(
-      eventSources,
-      eq(eventSources.id, triggerResourceVersions.eventSourceId)
-    )
+    .leftJoin(eventSources, eq(eventSources.id, triggerResources.eventSourceId))
     .where(
       and(
         inList(triggerResources.id, [...new Set(ids)]),
@@ -1136,7 +1077,7 @@ export const listWorkflowTriggers = async (
     z.string().min(1).max(128),
     workflowId
   );
-  const ofWorkflow = eq(triggerResourceVersions.workflowResourceId, id);
+  const ofWorkflow = eq(triggerResources.workflowResourceId, id);
   if (isAdmin(by.role)) {
     return await triggersWhere(env, ofWorkflow);
   }

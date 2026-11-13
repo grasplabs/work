@@ -601,7 +601,6 @@ describe("connector triggers", { timeout: 120_000 }, () => {
           trigger: unstartable.id,
           detail: {
             event: "m365.mail.received",
-            version: 1,
             code: "workflow.start_denied",
           },
         },

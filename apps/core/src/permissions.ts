@@ -83,7 +83,6 @@ import {
   auditOutbox,
   permissions,
   triggerResources,
-  triggerResourceVersions,
   workflowResources,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
@@ -718,7 +717,7 @@ const requireObjectFits = (
   }
   requireAppCallerFits(subject, object);
   // A connector trigger also hears its connection's events: which, the
-  // one its version names, is `requireTriggerPins`'s to check.
+  // one it names, is `requireTriggerPins`'s to check.
   if (
     subject.type === "trigger" &&
     object.type !== "connection" &&
@@ -743,7 +742,7 @@ const requireObjectFits = (
 
 /**
  * Refuses a connector trigger's grant on a connection but exactly the
- * connection and part its current version names, for its event's read
+ * connection and part it names, for its event's read
  * action alone.
  */
 const requireTriggerHears = async (
@@ -754,18 +753,11 @@ const requireTriggerHears = async (
 ): Promise<void> => {
   const heard = await drizzle(env.DB)
     .select({
-      connectionId: triggerResourceVersions.connectionId,
-      resource: triggerResourceVersions.connectionResource,
-      eventType: triggerResourceVersions.eventType,
+      connectionId: triggerResources.connectionId,
+      resource: triggerResources.connectionResource,
+      eventType: triggerResources.eventType,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.id, triggerId),
@@ -792,8 +784,8 @@ const requireTriggerHears = async (
 };
 
 /**
- * Refuses a trigger's grant on any workflow but the one the trigger's
- * current version starts: a trigger starts one workflow, and its grant
+ * Refuses a trigger's grant on any workflow but the one the trigger
+ * starts: a trigger starts one workflow, and its grant
  * names it; on a connection, any but the one it hears
  * (`requireTriggerHears`). A trigger that isn't live names none.
  */
@@ -814,15 +806,8 @@ const requireTriggerPins = async (
     return;
   }
   const pinned = await drizzle(env.DB)
-    .select({ workflowId: triggerResourceVersions.workflowResourceId })
+    .select({ workflowId: triggerResources.workflowResourceId })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.id, subject.triggerId),
@@ -1326,7 +1311,7 @@ export const workflowStartRequests = (
  * The requests of trigger `trigger`, made by `by` as they create it
  * (trigger-resources.ts): to start workflow `workflowId`, the one it pins,
  * and, for a connector trigger, to hear its event on its connection
- * (`events`, as its version names them). The rows and their audit
+ * (`events`, as it names them). The rows and their audit
  * entries, for the batch that creates the trigger, so no trigger is left
  * without a way to be allowed. Like any request, they allow nothing until
  * an admin grants them.

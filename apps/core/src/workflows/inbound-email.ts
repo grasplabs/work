@@ -34,10 +34,7 @@ import {
   storedEvent,
   uuidFromHash,
 } from "../audit-outbox.ts";
-import {
-  triggerResources,
-  triggerResourceVersions,
-} from "../db/core/schema.ts";
+import { triggerResources } from "../db/core/schema.ts";
 import {
   authenticationOf,
   domainOf as domainNameOf,
@@ -623,18 +620,10 @@ const emailTakerAt = async (
   await drizzle(env.DB)
     .select({
       id: triggerResources.id,
-      version: triggerResources.currentVersion,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      inputMapping: triggerResourceVersions.inputMapping,
+      workflowId: triggerResources.workflowResourceId,
+      inputMapping: triggerResources.inputMapping,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.emailAddress, address),

@@ -15,7 +15,6 @@ import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import {
   permissions,
   triggerResources,
-  triggerResourceVersions,
   triggerSchedules,
   workflowResources,
   workflowStartReceipts,
@@ -35,8 +34,8 @@ import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 // - An occurrence starting its run twice: two clock runs at once, a lost
 //   answer, a clock killed between the start and writing the next
 //   occurrence. Each start is keyed by the concrete occurrence, the
-//   instant in UTC, under the trigger (`startKeyOf`), whatever version of
-//   the workflow is live by then, and
+//   instant in UTC, under the trigger alone (`startKeyOf`), whatever
+//   version of the workflow is live by then, and
 //   a start's receipt is one per trigger, person and key
 //   (workflow-starts.ts): the same occurrence started again is the same
 //   start, its run the same run, whatever became of it. A run cancelled
@@ -106,10 +105,9 @@ const refusedForGood: ReadonlySet<string> = new Set([
 /** The most times a failed try's wait doubles: 2^6 minutes, capped at an hour. */
 const maxBackoffDoublings = 6;
 
-/** A due schedule trigger, as its current version keeps it. */
+/** A due schedule trigger, as it keeps its schedule. */
 interface DueSchedule {
   triggerId: string;
-  version: number;
   ownerId: string;
   nextAt: Date;
   failedStarts: number;
@@ -129,7 +127,7 @@ interface DueSchedule {
 
 /** The start key of `schedule`'s occurrence at its `nextAt`. */
 const startKeyOf = (schedule: DueSchedule): string =>
-  `${coreStartKeyPrefix}schedule:${schedule.triggerId}:${schedule.version}:${schedule.nextAt.toISOString()}`;
+  `${coreStartKeyPrefix}schedule:${schedule.triggerId}:${schedule.nextAt.toISOString()}`;
 
 /** The longest a failed try waits before the next, in minutes. */
 const maxBackoffMinutes = 60;
@@ -147,7 +145,6 @@ const tryNow = (now: Date) =>
 const asRead = (schedule: DueSchedule) =>
   and(
     eq(triggerSchedules.triggerId, schedule.triggerId),
-    eq(triggerSchedules.version, schedule.version),
     eq(triggerSchedules.nextAt, schedule.nextAt),
     eq(triggerSchedules.failedStarts, schedule.failedStarts),
     eq(triggerSchedules.attempts, schedule.attempts)
@@ -169,13 +166,12 @@ const unadmitted = (schedule: DueSchedule) =>
 const sameOccurrence = (schedule: DueSchedule) =>
   and(
     eq(triggerSchedules.triggerId, schedule.triggerId),
-    eq(triggerSchedules.version, schedule.version),
     eq(triggerSchedules.nextAt, schedule.nextAt)
   );
 
 /** That `schedule`'s occurrence is still its trigger's next, as SQL. */
 const stillNext = (schedule: DueSchedule) =>
-  sql`EXISTS (SELECT 1 FROM ${triggerSchedules} WHERE ${triggerSchedules.triggerId} = ${schedule.triggerId} AND ${triggerSchedules.version} = ${schedule.version} AND ${triggerSchedules.nextAt} = ${schedule.nextAt.getTime()})`;
+  sql`EXISTS (SELECT 1 FROM ${triggerSchedules} WHERE ${triggerSchedules.triggerId} = ${schedule.triggerId} AND ${triggerSchedules.nextAt} = ${schedule.nextAt.getTime()})`;
 
 const systemEntry = (
   schedule: DueSchedule,
@@ -185,7 +181,7 @@ const systemEntry = (
   actor: { type: "system" },
   action,
   target: { type: "trigger", id: schedule.triggerId },
-  detail: { version: schedule.version, ...detail },
+  detail,
 });
 
 /**
@@ -408,10 +404,7 @@ const startScheduled = async (
       // disabled and enabled again since it was read, the schedule was
       // worked out again, and this one starts nothing.
       stillNext(schedule),
-      {
-        scheduledAt: schedule.nextAt.toISOString(),
-        triggerVersion: String(schedule.version),
-      }
+      { scheduledAt: schedule.nextAt.toISOString() }
     );
   } catch (error) {
     if (await admitted(env, schedule)) {
@@ -451,39 +444,30 @@ export const startDueScheduleTriggers = async (
   const due = await drizzle(env.DB)
     .select({
       triggerId: triggerSchedules.triggerId,
-      version: triggerSchedules.version,
       ownerId: triggerResources.ownerId,
       nextAt: triggerSchedules.nextAt,
       failedStarts: triggerSchedules.failedStarts,
       attempts: triggerSchedules.attempts,
       awaitingStart: sql`${startStatusSql} = 'requested'`.mapWith(Boolean),
-      workflowId: triggerResourceVersions.workflowResourceId,
+      workflowId: workflowResources.id,
       workflowVersion: workflowResources.currentVersion,
-      cron: triggerResourceVersions.scheduleCron,
-      timeZone: triggerResourceVersions.scheduleTimeZone,
-      input: triggerResourceVersions.scheduleInput,
+      cron: triggerResources.scheduleCron,
+      timeZone: triggerResources.scheduleTimeZone,
+      input: triggerResources.scheduleInput,
     })
     .from(triggerSchedules)
     .innerJoin(
       triggerResources,
       and(
         eq(triggerResources.id, triggerSchedules.triggerId),
-        eq(triggerResources.currentVersion, triggerSchedules.version),
         eq(triggerResources.kind, "schedule"),
         eq(triggerResources.enabled, true),
         isNull(triggerResources.deletedAt)
       )
     )
     .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerSchedules.triggerId),
-        eq(triggerResourceVersions.version, triggerSchedules.version)
-      )
-    )
-    .innerJoin(
       workflowResources,
-      eq(workflowResources.id, triggerResourceVersions.workflowResourceId)
+      eq(workflowResources.id, triggerResources.workflowResourceId)
     )
     .where(and(lte(triggerSchedules.nextAt, now), tryNow(now)))
     .orderBy(asc(triggerSchedules.nextAt))

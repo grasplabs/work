@@ -243,7 +243,6 @@ const waiting = (ranOut = true) =>
           id: "held-start-1",
           workflow: "greet",
           workflowName: "Greet",
-          version: 1,
           args: { who: "Ada" },
           argsHash: "hash-1",
           chatId: "chat-1",

@@ -680,7 +680,7 @@ export const reviewedPersonColumns: Readonly<
   "core.teams": ["member_count"],
   "core.tool_class_settings": ["changed_by"],
   "core.trigger_resource_versions": ["principal_binding"],
-  "core.trigger_resources": ["email_address", "owner_id"],
+  "core.trigger_resources": ["email_address", "owner_id", "principal_binding"],
   "core.uploads": ["actor", "uploaded_by"],
   "core.users": ["email", "email_verified"],
   "core.workflow_binding_approvals": ["approved_by", "revoked_by"],

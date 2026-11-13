@@ -190,11 +190,9 @@ const invokerSql = (run: CallingRun): SQL => {
       // Still live and enabled, and still of this run's workflow: a run
       // keeps the version it started on, whatever went live since.
       return sql`(EXISTS (SELECT 1 FROM trigger_resources AS live
-          JOIN trigger_resource_versions AS aim
-            ON aim.trigger_id = live.id AND aim.version = live.current_version
           WHERE live.id = ${trigger.data} AND live.deleted_at IS NULL
             AND live.enabled = 1
-            AND aim.workflow_resource_id = ${run.workflowId})
+            AND live.workflow_resource_id = ${run.workflowId})
         AND EXISTS (SELECT 1 FROM permissions WHERE ${allowingPermissionSql(
           { type: "trigger", triggerId: trigger.data },
           undefined,

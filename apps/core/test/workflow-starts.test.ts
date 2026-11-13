@@ -1206,7 +1206,7 @@ describe("a trigger starting a workflow", () => {
       outcome(deleteWorkflowResource(env, ada, other.id)),
     ]);
     const pinning = await env.DB.prepare(
-      "SELECT count(*) AS n FROM trigger_resource_versions WHERE workflow_resource_id = ?"
+      "SELECT count(*) AS n FROM trigger_resources WHERE workflow_resource_id = ?"
     )
       .bind(other.id)
       .first<{ n: number }>();
