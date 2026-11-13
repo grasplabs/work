@@ -534,12 +534,12 @@ describe("a person's own export", () => {
     }).toStrictEqual({ kept: true, dropped: [] });
   });
 
-  // GRA-1839 review: a run the queue stopped waiting for (past its time
-  // and grace) still runs, and may still write, each of its files. The
-  // erasure isn't done while it runs; past the erasure's grace it restarts
-  // the store, which ends it; and the next instance reports done only once
-  // it has been up for an item's time, so a write the ended one sent and
-  // that lands after the restart is deleted before done.
+  // GRA-1839 review: a write of each of its files, which the run that sent
+  // it stopped waiting for, is counted until R2 answers it. The erasure
+  // isn't done while it is on its way; past the grace it moves the
+  // record's moment and restarts the store; the write lands; the next
+  // instance is done a grace on, the file deleted (erase-whole.test.ts has
+  // the rule's other cases).
   it.each(["holds.json", "part-0000.jsonl", "manifest.json"])(
     "leaves nothing once erased as done, though a write of its %s the queue stopped waiting for lands after the store restarted",
     async (file) => {
@@ -554,12 +554,12 @@ describe("a person's own export", () => {
         const before = write.puts.length;
         const recorded = await erasureOf(person);
         await ageErasure(person);
-        // Past the grace, the run still counted: the store restarts.
+        // Past the grace, the write still on its way: the store restarts.
         const restarting = await erasureOf(person);
         await landHeld(write);
         const landed = await exportKeysOf(person);
         const tooSoon = await erasureOf(person);
-        vi.setSystemTime(Date.now() + workItemTimeMs);
+        await ageErasure(person);
         const done = await erasureOf(person);
         expect({
           held: write.held,
@@ -586,40 +586,4 @@ describe("a person's own export", () => {
       }
     }
   );
-
-  // A run whose write never returns: past the erasure's grace the erasure
-  // restarts the store itself, and ends done with nothing in the bucket.
-  it("is erased whole though a write of it never returns: the erasure restarts the store itself", async () => {
-    const person = unique();
-    await add(person, "Mine alone");
-    await start(person);
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    try {
-      const write = await holdExportWrite(person, "holds.json");
-      await tick(own(person));
-      const recorded = await erasureOf(person);
-      await ageErasure(person);
-      const restarting = await erasureOf(person);
-      const tooSoon = await erasureOf(person);
-      vi.setSystemTime(Date.now() + workItemTimeMs);
-      const done = await erasureOf(person);
-      expect({
-        held: write.held,
-        recorded,
-        restarting,
-        tooSoon,
-        done,
-        files: await exportKeysOf(person),
-      }).toStrictEqual({
-        held: true,
-        recorded: "rejected",
-        restarting: "rejected",
-        tooSoon: "rejected",
-        done: "fulfilled",
-        files: [],
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 });

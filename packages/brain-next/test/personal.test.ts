@@ -15,7 +15,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { DurableObject, env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { packAcross } from "../src/across.ts";
@@ -27,7 +27,6 @@ import {
 } from "../src/contract.ts";
 import { fileGraceMs } from "../src/files.ts";
 import { BrainStore } from "../src/store.ts";
-import { workItemTimeMs } from "../src/work.ts";
 
 /** A store, as its namespace gives it. */
 type Store = DurableObjectStub<BrainStore>;
@@ -325,22 +324,6 @@ const eraseWhole = async (): Promise<void> => {
   ]);
   await ageErasure();
   await own().erasePerson({ person, reason: "person_erased" });
-};
-
-/**
- * Runs `run` with the clock an item's time (work.ts `workItemTimeMs`)
- * ahead, the store's too, in this isolate: an instance started after its
- * store's erasure was recorded (a restart, a restore) reports it done only
- * once it has been up that long, as a write an ended instance sent may
- * still land until then.
- */
-const anItemLater = async (run: () => Promise<void>): Promise<void> => {
-  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + workItemTimeMs });
-  try {
-    await run();
-  } finally {
-    vi.useRealTimers();
-  }
 };
 
 /** The reader that is this test's person. */
@@ -986,9 +969,8 @@ describe("a person's own store", () => {
     ).resolves.toStrictEqual(nothingFound);
     await expect(tablesOf(own())).resolves.toStrictEqual([]);
 
-    // Erasing again is safe, and keeps only the record of it, once the
-    // restored instance has been up for an item's time.
-    await anItemLater(eraseWhole);
+    // Erasing again is safe, and keeps only the record of it.
+    await eraseWhole();
     await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
       `${await ownPrefix()}erased`,
     ]);
@@ -1176,14 +1158,7 @@ describe("a person's own store", () => {
       called(own().erasePerson({ person, reason: "person_erased" }))
     ).rejects.toThrow(stillDeleting);
     await ageErasure();
-    // The instance after the kill: not done until it has been up for an
-    // item's time, as a write the killed one sent may still land.
-    await expect(
-      called(own().erasePerson({ person, reason: "person_erased" }))
-    ).rejects.toThrow(stillDeleting);
-    await anItemLater(async () => {
-      await own().erasePerson({ person, reason: "person_erased" });
-    });
+    await own().erasePerson({ person, reason: "person_erased" });
     await expect(keysUnder(await ownPrefix())).resolves.toStrictEqual([
       `${await ownPrefix()}erased`,
     ]);
