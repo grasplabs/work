@@ -179,6 +179,14 @@ export interface Answer {
    * probe makes several: the probe's default one when absent.
    */
   like?: string;
+  /**
+   * Asked by a question core embeds (core's `recallAs`, as of now): what
+   * comes back depends on the question's meaning, so it is held to the
+   * same call's answer in a store without the hidden sources, before they
+   * were added and embedded (the leak harness's `before`), never to a
+   * `nothing` answer, whose question means something else.
+   */
+  byMeaning?: true;
 }
 
 /** Calls one surface every way it can answer; returns what came back each time. */
@@ -443,12 +451,15 @@ const echoesHidden = (answered: Answer, words: readonly string[]): Answer => {
 
 /**
  * Asks `ask` every question of `askedOf`, of the markers (`hidden`) and of
- * their twins (`nothing`), each pair compared by its name.
+ * their twins (`nothing`), each pair compared by its name. With
+ * `byMeaning`, `ask` is core's recall, whose answers but those as of a
+ * moment depend on the question's meaning (`Answer.byMeaning`).
  */
 const askedOfMarkers = async (
   probing: Probing,
   moments: readonly Date[],
-  ask: (asking: PackAsk) => Promise<unknown>
+  ask: (asking: PackAsk) => Promise<unknown>,
+  byMeaning = false
 ): Promise<Answer[]> => {
   const twins = probing.markers.map(twinOf);
   const asked: Answer[] = [];
@@ -469,7 +480,14 @@ const askedOfMarkers = async (
         about,
         name
       );
-      asked.push(echoesHidden(answered, words));
+      asked.push(
+        echoesHidden(
+          byMeaning && asOf === undefined
+            ? { ...answered, byMeaning: true }
+            : answered,
+          words
+        )
+      );
     }
   }
   return asked;
@@ -1429,12 +1447,22 @@ export const coreProbes = {
       return coreBrain.mergeRecalled(asked, shared, whole);
     };
     return [
-      await answer("the markers", async () => await merged(markers), "hidden"),
-      await answer(
-        "their twins",
-        async () => await merged(markers.map((marker) => twinOf(marker))),
-        "nothing"
-      ),
+      {
+        ...(await answer(
+          "the markers",
+          async () => await merged(markers),
+          "hidden"
+        )),
+        byMeaning: true,
+      },
+      {
+        ...(await answer(
+          "their twins",
+          async () => await merged(markers.map((marker) => twinOf(marker))),
+          "nothing"
+        )),
+        byMeaning: true,
+      },
     ];
   },
   recallAs: async (probing) => {
@@ -1446,12 +1474,15 @@ export const coreProbes = {
     const hidden = probing.markers.join(" ");
     const whole = { tokens: recallBudgetMax };
     return [
-      ...(await askedOfMarkers(probing, momentsOf(probing), recall)),
-      await answer(
-        "the shared word",
-        async () =>
-          await recall({ question: probing.sharedWord, budget: whole })
-      ),
+      ...(await askedOfMarkers(probing, momentsOf(probing), recall, true)),
+      {
+        ...(await answer(
+          "the shared word",
+          async () =>
+            await recall({ question: probing.sharedWord, budget: whole })
+        )),
+        byMeaning: true,
+      },
       await answer(
         "nothing",
         async () => await recall({ question: "", budget: whole })
@@ -6059,7 +6090,9 @@ export const sourcesProbes = {
     ...(await askedOfMarkers(
       probing,
       [],
-      async ({ question }) => await sourcesAs(probing.personId).search(question)
+      async ({ question }) =>
+        await sourcesAs(probing.personId).search(question),
+      true
     )),
     await answer(
       "too long a question",

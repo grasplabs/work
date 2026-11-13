@@ -1,6 +1,7 @@
 import {
   exactCandidatesMax,
   recallBudgetMax,
+  recallLimit,
 } from "@grasp-os/brain-next/contract";
 import type { WorkOverview } from "@grasp-os/brain-next/contract";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -25,6 +26,7 @@ import {
   addSource,
   alarmHostOf,
   brainStaffReport,
+  brainWorkOverview,
   eraseSource,
   erasePerson,
   recallAs,
@@ -160,29 +162,47 @@ const surfaces: [string, Probe][] = brainSurfaces.flatMap(({ name, probes }) =>
 
 /**
  * What a surface's answers give away: a forbidden marker, a hidden-only
- * answer unlike its answer to words nothing holds, or no answer worth the
- * name (a probe that calls nothing, or only ever gets errors, covers
- * nothing).
+ * answer unlike its answer to words nothing holds, an answer by meaning
+ * unlike the same call's `before` the hidden sources were added, or no
+ * answer worth the name (a probe that calls nothing, or only ever gets
+ * errors, covers nothing). An answer by meaning (`Answer.byMeaning`) is
+ * held to `before` alone, where a pass has one: a question of the markers
+ * and one of their twins mean different things, so their packs differ by
+ * meaning whatever is hidden.
  */
 const findingsIn = (
   answers: readonly Answer[],
-  forbidden: Readonly<Record<string, string>>
+  forbidden: Readonly<Record<string, string>>,
+  before?: readonly Answer[]
 ): string[] => {
   // Each hidden answer against the nothing answer of its comparison.
   const nothingOf = (like: string | undefined) =>
     answers.find((one) => one.about === "nothing" && one.like === like);
-  const unlike = answers.flatMap(({ about, got, call, like }) => {
+  const unlike = answers.flatMap(({ about, got, call, like, byMeaning }) => {
     const nothing = nothingOf(like);
-    return about === "hidden" && textOf(got) !== textOf(nothing?.got)
+    return about === "hidden" &&
+      byMeaning === undefined &&
+      textOf(got) !== textOf(nothing?.got)
       ? [
           `"${call}" answered ${textOf(got)}, unlike "${nothing?.call}": ${textOf(nothing?.got)}`,
         ]
       : [];
   });
+  const moved =
+    before === undefined
+      ? []
+      : answers.flatMap(({ got, call, byMeaning }) => {
+          const was = before.find((one) => one.call === call)?.got;
+          return byMeaning && textOf(got) !== textOf(was)
+            ? [
+                `"${call}" answered ${textOf(got)}, unlike before anything hidden was added: ${textOf(was)}`,
+              ]
+            : [];
+        });
   const thin = answers.some(({ got }) => "value" in got)
     ? []
     : ["no call answered"];
-  return [...markersIn(answers, forbidden), ...unlike, ...thin];
+  return [...markersIn(answers, forbidden), ...unlike, ...moved, ...thin];
 };
 
 /**
@@ -229,9 +249,12 @@ const findingsOf = async (
   {
     among = surfaces,
     inRecall = {},
+    before,
   }: {
     among?: readonly [string, Probe][];
     inRecall?: Readonly<Record<string, string>>;
+    /** Each surface's answers before the hidden sources were added (`answersOf`). */
+    before?: ReadonlyMap<string, readonly Answer[]>;
   } = {}
 ): Promise<Finding[]> => {
   const { value: answered, lines } = await logsOf(async () => {
@@ -246,7 +269,8 @@ const findingsOf = async (
     ...answered.flatMap(([name, answers]) =>
       findingsIn(
         answers,
-        recallSurfaces.has(name) ? { ...forbidden, ...inRecall } : forbidden
+        recallSurfaces.has(name) ? { ...forbidden, ...inRecall } : forbidden,
+        before?.get(name)
       ).map((found) => ({ pass, in: name, found }))
     ),
     ...markersIn(lines, forbidden).map((found) => ({
@@ -305,6 +329,76 @@ const ownTotals = async () => {
 /** `person`'s own store, as core names it. */
 const ownStoreOf = (person: string) =>
   inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`);
+
+/** The surfaces whose answers depend on a question's meaning (`Answer.byMeaning`). */
+const meaningSurfaces = new Set([
+  "core recallAs",
+  "core mergeRecalled",
+  "sources search",
+]);
+
+/** Each of `among`'s answers as `probing`'s reader, by surface: a `before` for `findingsOf`. */
+const answersOf = async (
+  probing: Probing,
+  among: readonly [string, Probe][]
+): Promise<Map<string, Answer[]>> => {
+  const answered = new Map<string, Answer[]>();
+  for (const [name, probe] of among) {
+    // oxlint-disable-next-line no-await-in-loop -- one surface at a time
+    answered.set(name, await probe(probing));
+  }
+  return answered;
+};
+
+/** How many items of `answers` were found by meaning. */
+const foundByMeaning = (answers: Iterable<readonly Answer[]>): number =>
+  [...answers]
+    .flat()
+    .reduce(
+      (sum, { got }) => sum + textOf(got).split('"found":"meaning"').length - 1,
+      0
+    );
+
+/** The queue's clock for ticks of this file: only forward. */
+const clock = { at: Date.now() };
+
+/** Most ticks the shared store, or a person's own, may take to embed. */
+const embedTicksMost = 50;
+
+/**
+ * Ticks the shared store, as core's clock does, until everything it holds
+ * is embedded, nothing waits and no erasure is under way, and runs each
+ * of `people`'s own stores' alarms until they sleep: the shared store's
+ * embedding then.
+ */
+const allEmbedded = async (
+  people: readonly string[]
+): Promise<WorkOverview["embedding"]> => {
+  for (const person of people) {
+    for (let run = 0; run < embedTicksMost; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one alarm after another
+      if (!(await runDurableObjectAlarm(ownStoreOf(person)))) {
+        break;
+      }
+    }
+  }
+  for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
+    clock.at = Math.max(clock.at, Date.now()) + 60_000;
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
+    await workBrain(env, new Date(clock.at), noProducers);
+    // oxlint-disable-next-line no-await-in-loop -- read after each tick
+    const { embedding, waiting, erasing } = await brainWorkOverview(env);
+    if (
+      embedding.rebuilt &&
+      embedding.embedded + embedding.unembeddable === embedding.chunks &&
+      waiting.length === 0 &&
+      erasing === 0
+    ) {
+      return embedding;
+    }
+  }
+  throw new Error(`Not everything was embedded in ${embedTicksMost} ticks`);
+};
 
 const join = async (teamId: string, userId: string): Promise<void> => {
   await drizzle(env.DB)
@@ -453,6 +547,179 @@ describe(
           Object.keys(probes).toSorted(),
         ]),
         unprobed: [],
+      });
+    });
+
+    it("answers every question by meaning exactly as before anything the reader may not read was added and embedded, across an erasure and a change of membership", async () => {
+      await answeringProvider(() => {});
+      // Non-interference by meaning: the answers of the surfaces that
+      // embed a question (`meaningSurfaces`) asked before anything hidden
+      // existed, in a store holding nothing but what the reader may read,
+      // all of it embedded, and again once the hidden sources are added
+      // and embedded too, must be the same in every result, order, count
+      // and note. The hidden passages hold exactly the questions asked, so
+      // their vectors are the questions' own: the nearest there are, they
+      // would take every place by meaning if they took any.
+      const { embedding: atStart } = await brainWorkOverview(env);
+      expect(atStart.chunks).toBe(0);
+      const [{ userId: reader }, { userId: holder }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const readersTeam = await newTeam(reader);
+      const secretTeam = await newTeam(holder);
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "the holder's own source": markerWord(),
+        "a team's source the reader isn't in": markerWord(),
+        "a source nobody is known to read": markerWord(),
+        "a source narrowed away from the reader": markerWord(),
+        "a source erased": markerWord(),
+      };
+      const {
+        "the holder's own source": ownerMarker,
+        "a team's source the reader isn't in": teamMarker,
+        "a source nobody is known to read": noneMarker,
+        "a source narrowed away from the reader": narrowedMarker,
+        "a source erased": erasedMarker,
+      } = markers;
+      const words = Object.values(markers);
+      // The reader's own, in their store, and their team's, current after
+      // drafts: what they may read, all of it holding the shared word.
+      await add(`Notes on ${sharedWord} for the reader`, {
+        kind: "owner",
+        personId: reader,
+      });
+      const handbookId = await add(`${sharedWord} draft 0`, {
+        kind: "team",
+        teamId: readersTeam,
+      });
+      await add(
+        `The handbook for everyone who joins, ${sharedWord}`,
+        { kind: "team", teamId: readersTeam },
+        handbookId
+      );
+      const readable = await allEmbedded([reader]);
+      const probing: Probing = {
+        personId: reader,
+        reader: { person: reader, groups: [`team:${readersTeam}`] },
+        personal: true,
+        sharedWord,
+        markers: words,
+        hiddenVersions: [],
+        hiddenInstructionFiles: [],
+        instructionGroups: [],
+      };
+      const among = surfaces.filter(([name]) => meaningSurfaces.has(name));
+      const before = await answersOf(probing, among);
+
+      // A source the reader may read now, embedded, then erased once the
+      // hidden ones are embedded too; and one narrowed away from them once
+      // embedded: neither may move anything once it is not theirs.
+      const erased = await add(`${sharedWord} ${erasedMarker}`, {
+        kind: "team",
+        teamId: readersTeam,
+      });
+      const narrowed = await add(`Draft plan ${sharedWord} ${narrowedMarker}`, {
+        kind: "team",
+        teamId: readersTeam,
+      });
+      await allEmbedded([reader]);
+      await add(
+        `Final plan ${sharedWord} ${narrowedMarker}`,
+        { kind: "team", teamId: secretTeam },
+        narrowed
+      );
+      // More hidden passages than recall takes by meaning, each exactly a
+      // question the surfaces ask: the markers, and the shared word.
+      const hiddenTexts = [words.join(" "), sharedWord];
+      for (const text of hiddenTexts) {
+        for (let copy = 0; copy <= recallLimit; copy += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one source at a time
+          await add(text, { kind: "team", teamId: secretTeam });
+          // oxlint-disable-next-line no-await-in-loop -- one source at a time
+          await add(text, { kind: "owner", personId: holder });
+        }
+      }
+      await add(`Board minutes ${sharedWord} ${teamMarker}`, {
+        kind: "team",
+        teamId: secretTeam,
+      });
+      await add(`Unfiled note ${sharedWord} ${noneMarker}`, { kind: "none" });
+      await add(`Salary review ${sharedWord} ${ownerMarker}`, {
+        kind: "owner",
+        personId: holder,
+      });
+      const hidden = await allEmbedded([reader, holder]);
+      // The hidden passages are near: the holder, who may read them, gets
+      // them by meaning for the markers' question.
+      const holders = await recallAs(env, holder, {
+        personal: true,
+        question: words.join(" "),
+        budget: { tokens: recallBudgetMax },
+      });
+
+      const asReader: Probing = {
+        ...probing,
+        hiddenVersions: everyVersionOf(erased, narrowed),
+      };
+      // Erased once embedded: before the tick deletes it, and after.
+      await eraseSource(env, {
+        source: erased,
+        readers: { kind: "team", teamId: readersTeam },
+        reason: "deleted",
+      });
+      const whileErasing = await findingsOf(
+        "the reader, an erasure under way",
+        asReader,
+        markers,
+        { among, before }
+      );
+      const afterErasure = await allEmbedded([reader, holder]);
+      const erasedGone = await findingsOf(
+        "the reader, the erasure done",
+        asReader,
+        markers,
+        { among, before }
+      );
+      // In the holder's team for one recall, then out again: the very next
+      // answers are as before.
+      await join(secretTeam, reader);
+      const joinedTexts = await textsFor(reader, teamMarker);
+      const joined = joinedTexts.includes(
+        `Board minutes ${sharedWord} ${teamMarker}`
+      );
+      await leave(secretTeam, reader);
+      const leftAgain = await findingsOf(
+        "the reader, out of the team again",
+        asReader,
+        markers,
+        { among, before }
+      );
+
+      expect({
+        findings: [...whileErasing, ...erasedGone, ...leftAgain],
+        // Not empty: the reader's own passages were embedded, and found by
+        // meaning, before; and every passage, the hidden ones among them,
+        // was embedded when the answers were taken again.
+        readable: readable.rebuilt && readable.embedded === readable.chunks,
+        meaningBefore: foundByMeaning(before.values()) > 0,
+        hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
+        hiddenChunks: hidden.chunks - readable.chunks,
+        afterErasure: afterErasure.rebuilt,
+        holdersByMeaning: holders.items.some(
+          ({ found, text }) => found === "meaning" && text === words.join(" ")
+        ),
+        joined,
+      }).toStrictEqual({
+        findings: [],
+        readable: true,
+        meaningBefore: true,
+        hidden: true,
+        hiddenChunks: (recallLimit + 1) * hiddenTexts.length + 4,
+        afterErasure: true,
+        holdersByMeaning: true,
+        joined: true,
       });
     });
 
