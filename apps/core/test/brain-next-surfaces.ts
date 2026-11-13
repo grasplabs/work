@@ -2011,7 +2011,6 @@ export const coreProbes = {
       async () =>
         await coreBrain.retireCompanySkill(env, personId, {
           name: "unwritten",
-          change: crypto.randomUUID(),
         })
     ),
     await answer(
@@ -2019,7 +2018,6 @@ export const coreProbes = {
       async () =>
         await coreBrain.retireCompanySkill(env, personId, {
           name: markers.join("-"),
-          change: crypto.randomUUID(),
         })
     ),
     await answer(
@@ -2027,7 +2025,6 @@ export const coreProbes = {
       async () =>
         await coreBrain.retireCompanySkill(env, stranger(), {
           name: "unwritten",
-          change: crypto.randomUUID(),
         })
     ),
     ...(await pairedOverSkills(
@@ -2035,7 +2032,6 @@ export const coreProbes = {
       async (name) =>
         await coreBrain.retireCompanySkill(env, personId, {
           name,
-          change: crypto.randomUUID(),
         })
     )),
   ],

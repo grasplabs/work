@@ -1687,9 +1687,9 @@ const changedOr = async <T>(write: () => Promise<T>): Promise<T> => {
  * nothing twice (the store answers a change it has with the version it
  * made). `after` is the current version the caller saw
  * (`companySkillVersionOf`, null for none): the store writes only while
- * it still is, in the same transaction, so an older text never lands over
- * a newer one, nor over a retirement it didn't see; otherwise refused with
- * `skills.changed`, nothing written. Refused (`skills.invalid`) for text
+ * it still is, in the same transaction, so this text never lands over a
+ * version the caller didn't see (another add, a retirement); otherwise
+ * refused with `skills.changed`, nothing written. Refused (`skills.invalid`) for text
  * that isn't a skill of that name.
  *
  * For skill-shares.ts only, once the approval is recorded and audited:
@@ -1756,44 +1756,79 @@ export const companySkillVersionOf = async (
  * Retires the company's skill `name` as the admin `adminId`: its current
  * text becomes a new version nobody reads (`retiredGroup`), so no member
  * lists, selects or reads it from then on, and every version stays in the
- * store as history. `change` as `addCompanySkill`'s. Answers the version
- * it retired, as the Brain read it just before the write; null when the
- * company has no such skill live (none, or retired already). An approved
- * share of the name makes it live again.
+ * store as history. Answers the version it retired; null when the
+ * company has no such skill live, nor one this retired. An approved share
+ * of the name makes it live again.
+ *
+ * Its change is the version it retires (`retire:<version>`), and it is
+ * written only over that version (`skills.changed` when an approval
+ * landed in between, nothing written). So asking again once it is
+ * retired is answered by the store with the retirement it made: a retry
+ * after a lost reply, or after its outcome wasn't recorded, answers the
+ * same version, and writes nothing.
  */
 export const retireCompanySkill = async (
   env: BrainEnv & Pick<Env, "DB">,
   adminId: string,
-  retired: { name: string; change: string }
+  retired: { name: string }
 ): Promise<number | null> => {
   const reader = await skillAdminOf(env, adminId);
   const skill = skillErrors.parse("skills.invalid", skillSchema, {
     scope: "company",
     name: retired.name,
   });
-  const change = skillErrors.parse(
-    "skills.invalid",
-    changeSchema,
-    retired.change
-  );
   const source = skillKeyOf(skill);
-  const [current] = await brain(env).readCurrent({ sources: [source], reader });
-  if (current === undefined) {
+  const retiredAccess: Access = { kind: "audience", group: retiredGroup };
+  const [live] = await brain(env).readCurrent({ sources: [source], reader });
+  if (live !== undefined) {
+    await changedOr(
+      async () =>
+        await brain(env).addInstructions({
+          source,
+          change: `retire:${live.version}`,
+          text: live.text,
+          access: retiredAccess,
+          after: live.version,
+        })
+    );
+    return live.version;
+  }
+  // Not live: retired already, or never there. A retirement this made is
+  // the current version, made over the one before it under that one's
+  // change: asked again, the store answers it, writing nothing.
+  const withRetired: Reader = {
+    person: reader.person,
+    groups: [companyGroup, retiredGroup],
+  };
+  const [current] = await brain(env).readCurrent({
+    sources: [source],
+    reader: withRetired,
+  });
+  const { versions } = await brain(env).listVersions({
+    source,
+    reader: withRetired,
+    limit: 2,
+  });
+  const [, before] = versions;
+  if (current === undefined || before === undefined) {
     return null;
   }
-  // Over the version just read: an approval landing in between is never
-  // retired unseen (`skills.changed`, nothing written).
-  await changedOr(
-    async () =>
-      await brain(env).addInstructions({
-        source,
-        change,
-        text: current.text,
-        access: { kind: "audience", group: retiredGroup },
-        after: current.version,
-      })
-  );
-  return current.version;
+  try {
+    await brain(env).addInstructions({
+      source,
+      change: `retire:${before.version}`,
+      text: current.text,
+      access: retiredAccess,
+      after: before.version,
+    });
+  } catch (error) {
+    // No retirement of that version under this change: none this made.
+    if (error instanceof Error && error.message === staleVersion) {
+      return null;
+    }
+    throw error;
+  }
+  return before.version;
 };
 
 /**

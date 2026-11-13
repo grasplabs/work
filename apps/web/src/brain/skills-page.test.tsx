@@ -274,9 +274,9 @@ describe("the skills page", () => {
       refused: stateOf("refused"),
     }).toStrictEqual({
       waiting: "Waiting for an admin",
-      added: "Shared with the company",
+      added: "Added to the company's skills.",
       stuck: "Approved, but not added to the company's skills yet.",
-      overtaken: "A later approval of this name was added instead.",
+      overtaken: "Not added: a later approval of this name takes its place.",
       refused: "Declined",
     });
   });

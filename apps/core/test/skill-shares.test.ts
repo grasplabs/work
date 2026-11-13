@@ -192,15 +192,20 @@ const sharedStoreFailing = (method: string): Env => {
 const refused = async () =>
   await Promise.reject(new Error("Out of reach, for the test"));
 
+/** Something run around a call of the shared store; `"lose"` after one throws its answer away. */
+type Hook = () => Promise<unknown>;
+
 /**
- * Core's env whose shared store runs `hooks[n]` before its n-th
- * `addInstructions` (from 1): something that lands while that add is on
- * its way.
+ * Core's env whose shared store runs `before[method][n]` ahead of that
+ * method's n-th call (from 1), and `after[method][n]` once it answered:
+ * what lands while a call is on its way. An after hook answering `"lose"`
+ * loses the reply, as a dropped connection would, after the store wrote.
  */
-const sharedStoreHooks = (
-  hooks: Record<number, () => Promise<unknown>>
-): Env => {
-  let calls = 0;
+const hooked = (hooks: {
+  before?: Record<string, Record<number, Hook>>;
+  after?: Record<string, Record<number, Hook>>;
+}): Env => {
+  const calls = new Map<string, number>();
   const binding = env.BRAIN_STORE;
   const getByName = (named: string) => {
     const stub = binding.getByName(named);
@@ -210,15 +215,17 @@ const sharedStoreHooks = (
     return new Proxy(stub, {
       get: (target, property): unknown => {
         const value: unknown = Reflect.get(target, property);
-        if (typeof value !== "function") {
+        if (typeof value !== "function" || typeof property !== "string") {
           return value;
         }
         return async (...args: unknown[]): Promise<unknown> => {
-          if (property === "addInstructions") {
-            calls += 1;
-            await hooks[calls]?.();
-          }
+          const call = (calls.get(property) ?? 0) + 1;
+          calls.set(property, call);
+          await hooks.before?.[property]?.[call]?.();
           const answered: unknown = await Reflect.apply(value, target, args);
+          if ((await hooks.after?.[property]?.[call]?.()) === "lose") {
+            throw new Error("Reply lost, for the test");
+          }
           return answered;
         };
       },
@@ -233,12 +240,19 @@ const sharedStoreHooks = (
   };
 };
 
+/** Core's env whose shared store runs `hooks[n]` ahead of its n-th add. */
+const sharedStoreHooks = (hooks: Record<number, Hook>): Env =>
+  hooked({ before: { addInstructions: hooks } });
+
 /** Core's env with its database refusing what `refuses` picks, as one out of reach would. */
 const databaseRefusing = (refuses: {
   sql?: RegExp;
   batches?: boolean;
+  /** Refuses every batch from this one on (from 1). */
+  batchesFrom?: number;
 }): Env => {
   const database = env.DB;
+  let batches = 0;
   /** The statements refused, alone or in a batch. */
   const refusedStatements = new WeakSet<object>();
   return {
@@ -247,8 +261,11 @@ const databaseRefusing = (refuses: {
       get: (target, property): unknown => {
         if (property === "batch") {
           return async (statements: D1PreparedStatement[]) => {
+            batches += 1;
             if (
               refuses.batches === true ||
+              (refuses.batchesFrom !== undefined &&
+                batches >= refuses.batchesFrom) ||
               statements.some((statement) => refusedStatements.has(statement))
             ) {
               return await refused();
@@ -565,7 +582,8 @@ describe("writing and sharing skills", setUpTime, () => {
       memberRetires: "role.forbidden",
       memberUses: [],
       readsV1: "skills.not_found",
-      retiredAgain: "skills.not_found",
+      // Retired already: the store answers the retirement it made.
+      retiredAgain: "ok",
       replaces: null,
       // Version 2 was the retirement: history, read by no one.
       back: 3,
@@ -979,65 +997,6 @@ describe("writing and sharing skills", setUpTime, () => {
     });
   });
 
-  it("refuses to finish an approval a later approval of the same name overtook, keeping the newer text, and says so to its asker", async () => {
-    const [author, other, admin, member] = await Promise.all([
-      signedInApi(idp, "user"),
-      signedInApi(idp, "user"),
-      signedInApi(idp, "admin"),
-      signedInApi(idp, "user"),
-    ]);
-    const name = nameOf("open-the-shop");
-    const older = await author.api.skills.save(skillText(name, "Older"));
-    const olderShare = await author.api.skills.share(name, older.version);
-    const deciding = await admin.api.whoami();
-    const head = await logHead();
-    // Approved, but its add never landed.
-    await outcome(
-      approveShare(
-        sharedStoreFailing("addInstructions"),
-        deciding,
-        olderShare.id
-      )
-    );
-    const stuck = await overviewOf(author.api);
-    const newer = await other.api.skills.save(skillText(name, "Newer"));
-    const newerShare = await other.api.skills.share(name, newer.version);
-    await admin.api.skills.approve(newerShare.id);
-
-    const stale = await outcome(admin.api.skills.approve(olderShare.id));
-    const page = await overviewOf(member.api);
-    const after = await overviewOf(author.api);
-    const statesOf = (overview: SkillsOverview) =>
-      overview.shares
-        .filter((share) => share.id === olderShare.id)
-        .map(({ status, version }) => [status, version]);
-
-    expect({
-      stuck: statesOf(stuck),
-      stale,
-      after: statesOf(after),
-      company: page.company
-        .filter((skill) => skill.name === name)
-        .map(({ description }) => description),
-      waiting: page.requests,
-      events: await skillEventsAfter(head),
-    }).toStrictEqual({
-      stuck: [["approved", null]],
-      stale: "skills.superseded",
-      after: [["superseded", null]],
-      company: ["Newer"],
-      waiting: null,
-      events: [
-        "skill.share.approved",
-        "skill.share.approve_failed",
-        "skill.share.requested",
-        "skill.share.approved",
-        "skill.share.added",
-        "skill.share.superseded",
-      ],
-    });
-  });
-
   it("leaves a decision with no outcome when its attempt stops between the decision and the add", async () => {
     const [author, admin] = await Promise.all([
       signedInApi(idp, "user"),
@@ -1396,6 +1355,293 @@ describe("writing and sharing skills", setUpTime, () => {
         "skill.share.approved",
         "skill.share.added",
         "skill.retire_failed",
+      ],
+    });
+  });
+
+  it("records a landed add whose reply was lost once it is approved again, whatever was approved meanwhile", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("lost-reply");
+    const older = await a.api.skills.save(skillText(name, "A"));
+    const sa = await a.api.skills.share(name, older.version);
+    const newer = await b.api.skills.save(skillText(name, "B"));
+    const sb = await b.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // A lands, but its reply is lost; B is approved and its add fails.
+    const first = await outcome(
+      approveShare(
+        hooked({
+          after: {
+            addInstructions: { 1: async () => await Promise.resolve("lose") },
+          },
+        }),
+        deciding,
+        sa.id
+      )
+    );
+    const bFailed = await outcome(
+      approveShare(sharedStoreFailing("addInstructions"), deciding, sb.id)
+    );
+    // Approved again, A's change is answered with the version it made.
+    const retry = await outcome(admin.api.skills.approve(sa.id));
+
+    expect({
+      first,
+      bFailed,
+      retry,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: sa.id },
+        { api: b.api, id: sb.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "Error: Reply lost, for the test",
+      bFailed: "Error: Out of reach, for the test",
+      retry: "ok",
+      live: [["A", 1]],
+      rows: [
+        ["approved", 1],
+        ["approved", null],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("makes the last add to land live, and says so in every row, when an older approval reads after a newer one landed", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("last-lands");
+    const older = await a.api.skills.save(skillText(name, "A"));
+    const sa = await a.api.skills.share(name, older.version);
+    const newer = await b.api.skills.save(skillText(name, "B"));
+    const sb = await b.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // B is approved and added in full before A reads the current version.
+    const first = await outcome(
+      approveShare(
+        hooked({
+          before: {
+            readCurrent: {
+              1: async () => await admin.api.skills.approve(sb.id),
+            },
+          },
+        }),
+        deciding,
+        sa.id
+      )
+    );
+
+    expect({
+      first,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: sa.id },
+        { api: b.api, id: sb.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "ok",
+      live: [["A", 2]],
+      rows: [
+        ["approved", 2],
+        ["approved", 1],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("records the version an add landed at although a newer add landed over it before it was recorded", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("landed-then-replaced");
+    const older = await a.api.skills.save(skillText(name, "A"));
+    const sa = await a.api.skills.share(name, older.version);
+    const newer = await b.api.skills.save(skillText(name, "B"));
+    const sb = await b.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+    let liveWhileOnItsWay: unknown;
+
+    // A lands at version 1, members read it, and B lands over it before A
+    // records its version.
+    const first = await outcome(
+      approveShare(
+        hooked({
+          after: {
+            addInstructions: {
+              1: async () => {
+                liveWhileOnItsWay = await liveOf(member.api, name);
+                await admin.api.skills.approve(sb.id);
+              },
+            },
+          },
+        }),
+        deciding,
+        sa.id
+      )
+    );
+
+    expect({
+      first,
+      liveWhileOnItsWay,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: sa.id },
+        { api: b.api, id: sb.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "ok",
+      liveWhileOnItsWay: [["A", 1]],
+      live: [["B", 2]],
+      rows: [
+        ["approved", 1],
+        ["approved", 2],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("adds a newer approval that failed while an older one landed once it is approved again, over the older", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("newer-again");
+    const older = await a.api.skills.save(skillText(name, "A"));
+    const sa = await a.api.skills.share(name, older.version);
+    const newer = await b.api.skills.save(skillText(name, "B"));
+    const sb = await b.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // While A's add is answering, B is decided, and its add fails.
+    const first = await outcome(
+      approveShare(
+        hooked({
+          after: {
+            addInstructions: {
+              1: async () =>
+                await outcome(
+                  approveShare(
+                    sharedStoreFailing("addInstructions"),
+                    deciding,
+                    sb.id
+                  )
+                ),
+            },
+          },
+        }),
+        deciding,
+        sa.id
+      )
+    );
+    const afterA = await liveOf(member.api, name);
+    const bAgain = await outcome(admin.api.skills.approve(sb.id));
+
+    expect({
+      first,
+      afterA,
+      bAgain,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: sa.id },
+        { api: b.api, id: sb.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "ok",
+      afterA: [["A", 1]],
+      bAgain: "ok",
+      live: [["B", 2]],
+      rows: [
+        ["approved", 1],
+        ["approved", 2],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.added",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("ends a retirement whose outcome wasn't recorded in its outcome when retired again, writing nothing more", async () => {
+    const [author, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("retire-unrecorded");
+    const saved = await author.api.skills.save(skillText(name, "Retire"));
+    const share = await author.api.skills.share(name, saved.version);
+    await admin.api.skills.approve(share.id);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // Its Brain write lands, its outcome's batch doesn't.
+    const failed = await outcome(
+      retireSkill(databaseRefusing({ batchesFrom: 2 }), deciding, name)
+    );
+    const halfway = await liveOf(member.api, name);
+    const again = await outcome(admin.api.skills.retire(name));
+    const { events } = await eventsAfterWithHead(head);
+
+    expect({
+      failed,
+      halfway,
+      again,
+      live: await liveOf(member.api, name),
+      events: events
+        .filter(({ action }) => action.startsWith("skill."))
+        .map(({ action, detail }) => [action, detail]),
+    }).toStrictEqual({
+      failed: "Error: Out of reach, for the test",
+      halfway: [],
+      again: "ok",
+      live: [],
+      events: [
+        ["skill.retired", {}],
+        ["skill.retired", {}],
+        ["skill.retire_done", { version: 1 }],
       ],
     });
   });

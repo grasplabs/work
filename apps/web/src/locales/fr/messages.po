@@ -1577,10 +1577,6 @@ msgstr "Une valeur JSON"
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Une recherche dans Connaissances depuis {about} n’a rien trouvé {searches, plural, one {une fois} other {# fois}}, pour {askers, plural, one {# personne} other {# personnes}}."
 
-#: src/brain/skills-page.tsx
-msgid "A later approval of this name was added instead."
-msgstr "Une approbation plus récente sous ce nom a été ajoutée à la place."
-
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
 msgid "A lesson"
@@ -2132,6 +2128,10 @@ msgstr "Ajoutée le"
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
 msgstr "A ajouté quelqu’un à une équipe"
+
+#: src/brain/skills-page.tsx
+msgid "Added to the company's skills."
+msgstr "Ajouté aux skills de l'entreprise."
 
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
@@ -9003,6 +9003,10 @@ msgstr "Aucun : son fournisseur a été supprimé."
 msgid "None."
 msgstr "Aucun."
 
+#: src/brain/skills-page.tsx
+msgid "Not added: a later approval of this name takes its place."
+msgstr "Non ajouté : une approbation plus récente sous ce nom prend sa place."
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -12334,10 +12338,6 @@ msgstr "Partagée avec"
 #: src/apps/publish.tsx
 msgid "Shared with {who}"
 msgstr "Partagé avec {who}"
-
-#: src/brain/skills-page.tsx
-msgid "Shared with the company"
-msgstr "Partagé avec l'entreprise"
 
 #: src/brain/memory-page.tsx
 msgctxt "memory records: others' that you read"

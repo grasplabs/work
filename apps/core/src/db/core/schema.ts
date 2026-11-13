@@ -3428,8 +3428,9 @@ export const appRequests = sqliteTable(
  * under a new ID, so an approval of the old one is refused. `version` is
  * the company skill's version an approval made, set once the Brain took
  * it: an approved row without one is finished by approving it again.
- * `superseded`: approved, but a later approval of the same name came
- * first, so its text was never added (or was put back under the newer).
+ * `superseded`: approved, but the company's skill changed while its text
+ * was being added, so it never was, and a later approval of the same name
+ * takes its place.
  */
 export const skillShares = sqliteTable(
   "skill_shares",
