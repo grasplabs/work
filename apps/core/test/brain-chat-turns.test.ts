@@ -641,13 +641,12 @@ describe("a deleted chat", () => {
     const core = producersOf(env);
     // The chat is deleted after its turn was read, before it is added.
     const racing: Producers = {
-      ...core,
-      read: async (source) => {
-        const handed = await core.read(source);
+      attempt: async (source) => {
+        const attempt = await core.attempt(source);
         if (source.producer === "chat") {
           await person.api.chats.remove(chatId);
         }
-        return handed;
+        return attempt;
       },
     };
 

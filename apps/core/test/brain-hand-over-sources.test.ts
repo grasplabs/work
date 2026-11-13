@@ -19,7 +19,7 @@ import {
   recallAs,
   workBrain,
 } from "../src/brain-next.ts";
-import type { SourceRef } from "../src/brain-next.ts";
+import type { Producers, SourceRef } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { brainHandOvers, personErasures } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -52,7 +52,12 @@ import {
 //   the erasure the hand-over then owes failing once; a run past its
 //   retention.
 // - A hand-over lost: an intent noted again while the relay ran, an id
-//   the Brain can't key, a noting that fails. (An answer without readers
+//   the Brain can't key, a noting that fails.
+// - A noted hand-over that ends in no outcome, or in two: a run gone,
+//   restricted or past its retention records nothing; an attempt whose
+//   answer was lost, or that failed after its outcome, records it again;
+//   one that failed between its add and its outcome records none.
+//   (An answer without readers
 //   can't come from a run: the person it acted for is a required,
 //   unchangeable reference. Core checks every answer's readers all the
 //   same, brain-next.ts `handOver`.)
@@ -115,6 +120,46 @@ const outcomesFor = async (id: string): Promise<string[]> => {
         action.startsWith("brain.source.") && target?.id === id
     )
     .map(({ action }) => action);
+};
+
+/** How the hand-over of source `id` ended in the log: each outcome, with its reason. */
+const endingsFor = async (id: string): Promise<string[]> => {
+  const logged = await allEvents();
+  return logged
+    .filter(
+      ({ action, target }) =>
+        action.startsWith("brain.source.") &&
+        action !== "brain.source.handover_started" &&
+        target?.id === id
+    )
+    .map(({ action, detail }) =>
+      typeof detail?.reason === "string" ? `${action}:${detail.reason}` : action
+    );
+};
+
+/**
+ * Core's producers, each attempt's outcome written and then answered as a
+ * failure, once: an answer lost on its way back to the Brain's queue,
+ * which tries the item again.
+ */
+const answerLostOnce = (into: Env): Producers => {
+  const core = producersOf(into);
+  let lost = false;
+  return {
+    attempt: async (source) => {
+      const attempt = await core.attempt(source);
+      return {
+        ...attempt,
+        ended: async (outcome) => {
+          await attempt.ended(outcome);
+          if (!lost) {
+            lost = true;
+            throw new Error("The answer was lost");
+          }
+        },
+      };
+    },
+  };
 };
 
 /**
@@ -312,13 +357,24 @@ const erasureRecorded = async (personId: string): Promise<void> => {
   });
 };
 
-/** The hand-overs noted and not yet relayed, among `ids`. */
-const notedAmong = async (ids: readonly string[]): Promise<string[]> => {
+/** The hand-overs noted and not yet ended, among `ids`, and those not yet relayed. */
+const openAmong = async (
+  ids: readonly string[]
+): Promise<{ open: string[]; unrelayed: string[] }> => {
   const rows = await drizzle(env.DB)
-    .select({ sourceId: brainHandOvers.sourceId })
+    .select({
+      sourceId: brainHandOvers.sourceId,
+      relayedAt: brainHandOvers.relayedAt,
+    })
     .from(brainHandOvers)
     .where(inArray(brainHandOvers.sourceId, [...ids]));
-  return rows.map(({ sourceId }) => sourceId).toSorted();
+  return {
+    open: rows.map(({ sourceId }) => sourceId).toSorted(),
+    unrelayed: rows
+      .filter(({ relayedAt }) => relayedAt === null)
+      .map(({ sourceId }) => sourceId)
+      .toSorted(),
+  };
 };
 
 describe("what core hands over to the new Brain", () => {
@@ -354,7 +410,8 @@ describe("what core hands over to the new Brain", () => {
     const starter = await startingApp(ada, adaAdmin, heldFlow.id, {
       restricted: true,
     });
-    const heldRun = await ended(ada, heldFlow.id, await starter.start());
+    const heldId = await starter.start();
+    const heldRun = await ended(ada, heldFlow.id, heldId);
 
     await handOverNow();
     // Handed over again, as a repeat would: still its one version.
@@ -366,15 +423,17 @@ describe("what core hands over to the new Brain", () => {
       actedFor: await recalled(actedFor.userId, secret),
       others: await whoRecalls([owner, admin, outsider], secret),
       held: await recalled(ada.userId, held),
+      heldEnded: await endingsFor(heldId ?? ""),
     }).toStrictEqual({
       status: ["completed", "completed"],
       actedFor: [{ source: { producer: "run", id: runId }, version: 1 }],
       others: [false, false, false],
       held: [],
+      heldEnded: ["brain.source.handover_skipped:restricted"],
     });
   });
 
-  it("records each hand-over before its text leaves core and once it ended, by ids alone, and nothing for a run that isn't there", async () => {
+  it("records each hand-over before its text leaves core and once it ended, by ids alone, and why a run that isn't there was not handed over", async () => {
     const runner = await builder();
     const secret = word();
     const runId = await endedRun(runner, secret);
@@ -415,7 +474,14 @@ describe("what core hands over to the new Brain", () => {
           detail: { producer: "run", version: 1 },
         },
       ],
-      missing: [],
+      missing: [
+        {
+          action: "brain.source.handover_skipped",
+          actor: { type: "system" },
+          target: { type: "workflow_run", id: missing },
+          detail: { producer: "run", reason: "deleted" },
+        },
+      ],
       content: false,
     });
   });
@@ -524,7 +590,7 @@ describe("how a hand-over fails closed", () => {
     const source: SourceRef = { producer: "run", id };
     await relayNow();
     // As above; the close of its key fails once, so the item is tried
-    // again, recording again, and closes it then.
+    // again and closes it then, its refusal recorded once.
     await tick(
       {
         ...env,
@@ -561,11 +627,7 @@ describe("how a hand-over fails closed", () => {
         ],
         landed: true,
       },
-      after: [
-        "brain.source.handover_started",
-        "brain.source.handover_refused",
-        "brain.source.handover_refused",
-      ],
+      after: ["brain.source.handover_started", "brain.source.handover_refused"],
       closed: { shared: "erased", own: "erased" },
       queued: { waiting: false, parked: false },
     });
@@ -650,7 +712,7 @@ describe("how a hand-over fails closed", () => {
     });
   });
 
-  it("hands nothing over of a run whose details are past their retention, and is done with it", async () => {
+  it("hands nothing over of a run whose details are past their retention, records why, and is done with it", async () => {
     const runner = await builder();
     const said = word();
     const id = await endedRun(runner, said);
@@ -663,13 +725,15 @@ describe("how a hand-over fails closed", () => {
     await handOverNow();
 
     expect({
-      outcomes: await outcomesFor(id),
+      outcomes: await endingsFor(id),
       recalled: await recalled(runner.userId, said),
       queued: await queuedFor({ producer: "run", id }),
+      open: await openAmong([id]),
     }).toStrictEqual({
-      outcomes: [],
+      outcomes: ["brain.source.handover_skipped:past_retention"],
       recalled: [],
       queued: { waiting: false, parked: false },
+      open: { open: [], unrelayed: [] },
     });
   });
 
@@ -678,16 +742,16 @@ describe("how a hand-over fails closed", () => {
     await noteRun(id);
     await relayHandOvers({
       ...env,
-      DB: racing(env.DB, /^delete from "brain_hand_overs"/iu, async () => {
+      DB: racing(env.DB, /^update "brain_hand_overs"/iu, async () => {
         await noteRun(id);
       }),
     });
-    const kept = await notedAmong([id]);
+    const kept = await openAmong([id]);
     await relayHandOvers(env);
 
-    expect({ kept, after: await notedAmong([id]) }).toStrictEqual({
-      kept: [id],
-      after: [],
+    expect({ kept, after: await openAmong([id]) }).toStrictEqual({
+      kept: { open: [id], unrelayed: [id] },
+      after: { open: [id], unrelayed: [] },
     });
   });
 
@@ -703,10 +767,10 @@ describe("how a hand-over fails closed", () => {
     await handOverNow();
 
     expect({
-      noted: await notedAmong([...unkeyable, id]),
+      noted: await openAmong([...unkeyable, id]),
       recalled: await recalled(runner.userId, said),
     }).toStrictEqual({
-      noted: [],
+      noted: { open: [], unrelayed: [] },
       recalled: [{ source: { producer: "run", id }, version: 1 }],
     });
   });
@@ -740,16 +804,89 @@ describe("how a hand-over fails closed", () => {
     }).catch(() => 0);
     const whileFailing = {
       inOutbox: await inOutbox(),
-      noted: await notedAmong([id]),
+      noted: await openAmong([id]),
     };
     await drainAuditOutboxes(env);
 
     expect({
       whileFailing,
-      after: { inOutbox: await inOutbox(), noted: await notedAmong([id]) },
+      after: { inOutbox: await inOutbox(), noted: await openAmong([id]) },
     }).toStrictEqual({
-      whileFailing: { inOutbox: true, noted: [] },
-      after: { inOutbox: false, noted: [id] },
+      whileFailing: { inOutbox: true, noted: { open: [], unrelayed: [] } },
+      after: { inOutbox: false, noted: { open: [id], unrelayed: [id] } },
+    });
+  });
+
+  it("ends a noted hand-over in one outcome when the answer to its record was lost, and the attempt tried again records nothing more", async () => {
+    const runner = await builder();
+    const said = word();
+    const id = await endedRun(runner, said);
+    const missing = crypto.randomUUID();
+    await noteRun(missing);
+    await relayNow();
+    // Each outcome is written, then its answer lost once: the queue tries
+    // that item again past its backoff.
+    const producers = answerLostOnce(env);
+    await workBrain(env, later(), producers);
+    await workBrain(env, later(2 * 60_000), producers);
+    await workBrain(env, later(20 * 60_000), producers);
+
+    expect({
+      handed: await outcomesFor(id),
+      missing: await endingsFor(missing),
+      recalled: await recalled(runner.userId, said),
+      open: await openAmong([id, missing]),
+      queued: await queuedFor({ producer: "run", id }),
+    }).toStrictEqual({
+      handed: ["brain.source.handover_started", "brain.source.handed_over"],
+      missing: ["brain.source.handover_skipped:deleted"],
+      recalled: [{ source: { producer: "run", id }, version: 1 }],
+      open: { open: [], unrelayed: [] },
+      queued: { waiting: false, parked: false },
+    });
+  });
+
+  it("records one outcome for a hand-over whose record failed after its add, once it is tried again", async () => {
+    const runner = await builder();
+    const said = word();
+    const id = await endedRun(runner, said);
+    await relayNow();
+    // Its start's write goes through; the outcome's, after the add, fails.
+    await tick(
+      {
+        ...env,
+        DB: inTurn(env.DB, auditWrite, [
+          async () => {
+            await Promise.resolve();
+          },
+          async () => {
+            await Promise.resolve();
+            throw new Error("D1 is out of reach");
+          },
+        ]),
+      },
+      later()
+    );
+    const afterFailure = await outcomesFor(id);
+    // Past the failed attempt's backoff.
+    await tick(env, later(2 * 60_000));
+
+    expect({
+      afterFailure,
+      after: await outcomesFor(id),
+      recalled: await recalled(runner.userId, said),
+      open: await openAmong([id]),
+    }).toStrictEqual({
+      afterFailure: ["brain.source.handover_started"],
+      // Each attempt whose text left core records its start; the hand-over
+      // ends once.
+      after: [
+        "brain.source.handover_started",
+        "brain.source.handover_started",
+        "brain.source.handed_over",
+      ],
+      recalled: [{ source: { producer: "run", id }, version: 1 }],
+      open: { open: [], unrelayed: [] },
     });
   });
 });

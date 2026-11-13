@@ -255,7 +255,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
   "core.brain_capture_intents": { company: "outcomes of runs (D3), by run" },
   "core.brain_hand_overs": {
-    none: "a source's kind and ID until the new Brain's queue takes it",
+    none: "a source's kind and ID until its hand-over to the new Brain ends",
   },
   // A person's own Brain store's health, keyed by the SHA-256 of their ID:
   // removed once the Brain's erasure erased their store (brain-next.ts
