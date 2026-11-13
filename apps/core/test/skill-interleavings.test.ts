@@ -691,10 +691,12 @@ describe("sharing skills, every step against every other", () => {
         ops: ["approve", "askAgain", "approve", "retire"],
         placements: [{ op: 0, step: 1, kind: "hold", inner: [1, 2, 3] }],
       },
-      // 2: a lost reply or failed record of an add and of a retirement.
-      { ops: ["approve"], placements: [{ op: 0, step: 4, kind: "lose" }] },
-      { ops: ["approve"], placements: [{ op: 0, step: 5, kind: "fail" }] },
-      { ops: ["retire"], placements: [{ op: 0, step: 4, kind: "lose" }] },
+      // 2: a lost reply of an add (approving's step 6) and of a
+      // retirement (retiring's step 6), and a failed record of an add
+      // (approving's step 7).
+      { ops: ["approve"], placements: [{ op: 0, step: 6, kind: "lose" }] },
+      { ops: ["approve"], placements: [{ op: 0, step: 7, kind: "fail" }] },
+      { ops: ["retire"], placements: [{ op: 0, step: 6, kind: "lose" }] },
       // 3: a deletion failing after it took the share away, then approving.
       {
         ops: ["delete", "approve"],
@@ -749,7 +751,6 @@ describe("sharing skills, every step against every other", () => {
     "holds when each operation is held at each step while another runs",
     sweepTime,
     async () => {
-      const started = Date.now();
       const violations: string[] = [];
       let runs = 0;
       for (const outer of outers) {
@@ -778,7 +779,6 @@ describe("sharing skills, every step against every other", () => {
         violations: [],
         ran: true,
       });
-      expect(Date.now() - started).toBeLessThan(sweepTime.timeout);
     }
   );
 

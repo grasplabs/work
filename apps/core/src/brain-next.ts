@@ -1343,6 +1343,15 @@ export const ownBrainExportFile = async (
 };
 
 /** Where the restore of the company's export `exportId` is: null when none was started. */
+/**
+ * Whether the shared store holds nothing a restore would refuse to go over
+ * (Grasp's own skills aside): emptied, as its storage lost leaves it, and
+ * so about to be restored.
+ */
+export const sharedStoreHoldsNothing = async (
+  env: BrainEnv
+): Promise<boolean> => await brain(env).holdsNothing();
+
 export const brainRestoreStatus = async (
   env: BrainEnv,
   exportId: string
@@ -1578,7 +1587,7 @@ export const readInstructionFilesAs = async (
 //
 // - Grasp's own (`scope` "grasp"), which each release ships, and the
 //   company's (`company`), added only by an admin's approval of a share
-//   (`addCompanySkill`, from skill-shares.ts): both in the shared store,
+//   (`writeCompanySkill`, from skill-shares.ts): both in the shared store,
 //   readable by every current member, as the company's instruction file.
 // - A person's own (`person`), which they write for themselves
 //   (`addOwnSkill`): in their own store (`ownBrain`), readable by them
@@ -2026,11 +2035,14 @@ export const companySkillVersion = async (
   env: BrainEnv,
   name: string
 ): Promise<number | null> => {
-  const [current] = await brain(env).readCurrent({
-    sources: [companySkillKey(name)],
+  // The newest version listed, live or retired, is the current one: read
+  // without its text, which nothing here needs.
+  const { versions } = await brain(env).listVersions({
+    source: companySkillKey(name),
     reader: decisionsReader,
+    limit: 1,
   });
-  return current?.version ?? null;
+  return versions[0]?.version ?? null;
 };
 
 /**
@@ -2098,7 +2110,7 @@ export const writeCompanySkill = async (
  * Adds `text` as the next version of the member `personId`'s own skill of
  * the name its frontmatter gives, in their own store (`keptIn`, with
  * `owner` access), readable by them alone; the one before stays as
- * history. `change` as `addCompanySkill`'s. Refused (`skills.invalid`)
+ * history. `change` as `writeCompanySkill`'s. Refused (`skills.invalid`)
  * for text that isn't a skill, (`skills.name_erased`) for a name of
  * theirs they erased, and `permission.person_inactive` once they are no
  * longer a member.

@@ -175,7 +175,12 @@ import {
 } from "./recall-counts.ts";
 import { find, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
-import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
+import {
+  checkRestore,
+  holdsNothing,
+  restoreStatus,
+  startRestore,
+} from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
 import {
   addVersion,
@@ -1888,6 +1893,20 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     await this.#ready();
     await checkRestore(this.ctx.storage, this.#bucket, asked, of);
+  }
+
+  /**
+   * Whether the shared store holds nothing a restore would refuse to go
+   * over (`holdsNothing`): emptied, as its storage lost leaves it, and so
+   * about to be restored. For the host, which then writes nothing it could
+   * write again after the restore.
+   */
+  async holdsNothing(): Promise<boolean> {
+    if (this.#kind.kind === "person") {
+      throw new Error(restoresShared);
+    }
+    await this.#ready();
+    return !this.#schema || holdsNothing(this.ctx.storage.sql);
   }
 
   /** Where the restore of export `id` is: null when none was started. */

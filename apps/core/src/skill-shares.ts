@@ -23,16 +23,19 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember } from "./auth/membership-sql.ts";
 import {
   addOwnSkill,
+  brainRestoreStatus,
   companyChangeVersion,
   companySkillVersion,
   eraseOwnSkill,
   listSkillsAs,
   readCurrentSkillAs,
   readSkillAs,
+  sharedStoreHoldsNothing,
   writeCompanySkill,
 } from "./brain-next.ts";
 import type { SkillCardAt } from "./brain-next.ts";
 import {
+  brainRestores,
   personErasures,
   skillDecisions,
   skillDeletions,
@@ -553,6 +556,23 @@ const reconcileOnce = async (
 };
 
 /**
+ * Whether the shared store is emptied while core's records say company
+ * skills landed in it: only ever a restore about to happen, and a restore
+ * goes only into a store that holds nothing. So nothing is written then;
+ * once the restore is done, the latest decisions are reopened and written
+ * again (`reopenAfterRestores`). Core's records first: the store is asked
+ * only once a skill ever landed.
+ */
+const restoreAwaited = async (env: Env): Promise<boolean> => {
+  const [landed] = await drizzle(env.DB)
+    .select({ id: skillDecisions.id })
+    .from(skillDecisions)
+    .where(eq(skillDecisions.outcome, "landed"))
+    .limit(1);
+  return landed !== undefined && (await sharedStoreHoldsNothing(env));
+};
+
+/**
  * Makes the Brain follow the latest decision on the company's skill `name`
  * (see the threat model above), and records each decision's outcome once.
  * Idempotent: run it as often as you like, from anywhere. Reads the
@@ -561,12 +581,21 @@ const reconcileOnce = async (
  * lands first and its write is refused as stale, then read again.
  */
 export const reconcileSkill = async (env: Env, name: string): Promise<void> => {
+  if (await restoreAwaited(env)) {
+    // Once, for this run: the clock asks again each minute.
+    log.warn("skills.reconcile_waits_for_restore", {});
+    return;
+  }
   for (let attempt = 0; attempt < reconcileAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- again only once refused
     if ((await reconcileOnce(env, name)) === "done") {
       return;
     }
   }
+  // Refused as stale each time: written over again and again meanwhile.
+  // Left to the clock, said once, by the attempts alone (a name is the
+  // company's, but the log holds no content).
+  log.warn("skills.reconcile_left_to_clock", { attempts: reconcileAttempts });
 };
 
 /** `reconcileSkill`, its failure logged: the clock runs it again. */
@@ -579,11 +608,125 @@ const reconcileNow = async (env: Env, name: string): Promise<void> => {
 };
 
 /**
+ * Records that a restore of the shared store from export `exportId` may
+ * start: before it is asked to, so it is always followed
+ * (`reopenAfterRestores`). Asked again for the same export, it records
+ * nothing more.
+ */
+export const recordRestore = async (
+  env: Env,
+  exportId: string
+): Promise<void> => {
+  await drizzle(env.DB)
+    .insert(brainRestores)
+    .values({ exportId: z.uuid().parse(exportId), startedAt: new Date() })
+    .onConflictDoNothing();
+};
+
+/**
+ * Forgets the restore from `exportId` once asking for it was refused, if
+ * the store has no record of it: it never started, so there is nothing to
+ * follow. One that did start (asked twice) is kept.
+ */
+export const forgetUnstartedRestore = async (
+  env: Env,
+  exportId: string
+): Promise<void> => {
+  try {
+    if ((await brainRestoreStatus(env, exportId)) === null) {
+      await drizzle(env.DB)
+        .delete(brainRestores)
+        .where(
+          and(
+            eq(brainRestores.exportId, exportId),
+            isNull(brainRestores.reopenedAt)
+          )
+        );
+    }
+  } catch (error) {
+    // Kept: the clock asks after it, and finds it never started.
+    log.error("skills.restore_unforgotten", errorFields(error));
+  }
+};
+
+/**
+ * Each name's latest decision, as SQL over `skill_decisions` itself: the
+ * table named in full, so the subquery's own rows never stand in for it.
+ */
+const latestOfItsName = sql.raw(
+  `"skill_decisions"."seq" = (SELECT MAX(latest."seq") FROM "skill_decisions" AS latest
+    WHERE latest."name" = "skill_decisions"."name")`
+);
+
+/** `reopenAfterRestores` for the restore from `exportId`. */
+const reopenAfter = async (env: Env, exportId: string): Promise<void> => {
+  const status = await brainRestoreStatus(env, exportId);
+  if (status === null || status.state === "running") {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const [counted] = await db
+    .select({ names: sql<number>`COUNT(DISTINCT ${skillDecisions.name})` })
+    .from(skillDecisions);
+  const followed = sql`EXISTS (SELECT 1 FROM ${brainRestores}
+    WHERE ${brainRestores.exportId} = ${exportId}
+      AND ${brainRestores.reopenedAt} IS NULL)`;
+  await auditedBatch(env, db, [
+    db
+      .update(skillDecisions)
+      .set({ outcome: null, version: null })
+      .where(and(latestOfItsName, followed)),
+    db
+      .update(brainRestores)
+      .set({ reopenedAt: new Date() })
+      .where(
+        and(
+          eq(brainRestores.exportId, exportId),
+          isNull(brainRestores.reopenedAt)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: reconciler,
+      action: "skill.decisions_reopened",
+      target: { type: "brain_restore", id: exportId },
+      detail: { names: counted?.names ?? 0 },
+    }),
+  ]);
+};
+
+/**
+ * Once a restore core recorded is no longer running, reopens the latest
+ * decision of every skill name: a restore puts back what its export held,
+ * which may be older than what was decided since (a retired skill live
+ * again, an older text). Clearing the outcome makes the reconciler write
+ * each again as it does any open decision, and record its outcome. One
+ * batch per restore, with one event saying how many names, conditional on
+ * the restore not being followed yet: a failure leaves it for the next
+ * minute, and nothing is reopened twice.
+ */
+const reopenAfterRestores = async (env: Env): Promise<void> => {
+  const db = drizzle(env.DB);
+  const waiting = await db
+    .select({ exportId: brainRestores.exportId })
+    .from(brainRestores)
+    .where(isNull(brainRestores.reopenedAt));
+  for (const { exportId } of waiting) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a restore at a time
+      await reopenAfter(env, exportId);
+    } catch (error) {
+      log.error("skills.reopen_failed", errorFields(error));
+    }
+  }
+};
+
+/**
  * Reconciles every name with a decision whose outcome isn't recorded
  * (`reconcileSkill`): core's clock runs it each minute, so a decision
  * whose write or record failed is finished without anyone asking.
  */
 export const reconcileSkills = async (env: Env): Promise<void> => {
+  await reopenAfterRestores(env);
   const names = await drizzle(env.DB)
     .selectDistinct({ name: skillDecisions.name })
     .from(skillDecisions)

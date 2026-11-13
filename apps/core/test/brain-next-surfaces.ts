@@ -2228,6 +2228,13 @@ export const coreProbes = {
         })
     )),
   ],
+  // A yes or no about the shared store, the same for everyone.
+  sharedStoreHoldsNothing: async () => [
+    await answer(
+      "the shared store",
+      async () => await coreBrain.sharedStoreHoldsNothing(env)
+    ),
+  ],
   companySkillVersion: async ({ markers, hiddenSkills }) => [
     await answer(
       "a skill never written",
@@ -5605,6 +5612,10 @@ export const storeProbes = {
       }),
     ];
   },
+  // A yes or no, the same for every reader: it names nothing it holds.
+  holdsNothing: async () => [
+    await answer("the shared store", async () => await store().holdsNothing()),
+  ],
   restoreStatus: async (probing) => {
     const others = await companyExport(probing);
     return [
@@ -5901,6 +5912,24 @@ export const shareProbes = {
         personal: true,
       });
     })),
+  ],
+  // A restore's record holds its export's ID alone: recording one, and
+  // forgetting one the store never started, answer nothing.
+  recordRestore: async ({ markers }) => [
+    await answer("a restore of an export no one made", async () => {
+      await skillShares.recordRestore(env, crypto.randomUUID());
+    }),
+    await answer("an export of the markers", async () => {
+      await skillShares.recordRestore(env, markers.join(""));
+    }),
+  ],
+  forgetUnstartedRestore: async ({ markers }) => [
+    await answer("a restore that never started", async () => {
+      await skillShares.forgetUnstartedRestore(env, crypto.randomUUID());
+    }),
+    await answer("an export of the markers", async () => {
+      await skillShares.forgetUnstartedRestore(env, markers.join(""));
+    }),
   ],
   reconcileSkills: async ({ personId }) => [
     await answer("every name with a decision on its way", async () => {

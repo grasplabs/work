@@ -142,6 +142,17 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // deleted; on asks they decided as an admin, `decided_by` is cleared,
   // and the decision stays.
   "core.skill_shares": { erased: "brain" },
+  // Admins' decisions on the company's skills, with the text each decided:
+  // the company's, and what the Brain follows, so they stay. Who decided
+  // (`decided_by`) is cleared when that admin is erased.
+  "core.skill_decisions": {
+    company:
+      "decisions on the company's skills, unnamed once their decider is erased",
+  },
+  // Restores of the shared store core started: export IDs and times.
+  "core.brain_restores": noPerson,
+  // The names of the skills they deleted for good: theirs alone.
+  "core.skill_deletions": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },
   "core.notifications": { erased: "channels" },
   // What they asked Stephen, with where their weekly summary stood.
@@ -564,6 +575,8 @@ export const reviewedPersonColumns: Readonly<
   "core.app_pointers": ["changed_by"],
   "core.app_requests": ["requested_by"],
   "core.skill_shares": ["decided_by", "requested_by"],
+  "core.skill_decisions": ["decided_by"],
+  "core.skill_deletions": ["person_id"],
   "core.app_resource_bindings": ["approved_by", "revoked_by"],
   "core.app_test_decisions": ["decided_by", "recipients"],
   "core.app_test_runs": ["deciders", "principal"],

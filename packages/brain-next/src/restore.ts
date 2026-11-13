@@ -192,6 +192,24 @@ const addedSince = (sql: SqlStorage, id: string): boolean =>
   sql.exec(`SELECT 1 WHERE ${addedSinceSql}`, id).toArray().length > 0;
 
 /**
+ * Whether the store holds nothing a restore would refuse to go over:
+ * Grasp's own skills, which a release installs, don't count (no export
+ * holds them, so a restore never meets them). A memory does, with or
+ * without a version (a writer's).
+ */
+export const holdsNothing = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      `SELECT 1 FROM source_versions
+      WHERE substr(source, 1, ?1) != ?2
+      UNION ALL SELECT 1 FROM memories
+      LIMIT 1`,
+      shippedSkillsPrefix.length,
+      shippedSkillsPrefix
+    )
+    .toArray().length === 0;
+
+/**
  * Why a restore of `id` may not start now, if it may not: one is under
  * way, or the store holds a version (but for a failed restore of `id`
  * started again, which finds what it wrote).
@@ -208,21 +226,7 @@ const refusalOf = (sql: SqlStorage, id: string): string | undefined => {
   if (rowOf(sql, id)?.state === "failed") {
     return addedSince(sql, id) ? refusals.givenUp : undefined;
   }
-  // Grasp's own skills, which a release installs, don't count: no export
-  // holds them, so a restore never meets them. A memory does, with or
-  // without a version (a writer's).
-  return sql
-    .exec(
-      `SELECT 1 FROM source_versions
-      WHERE substr(source, 1, ?1) != ?2
-      UNION ALL SELECT 1 FROM memories
-      LIMIT 1`,
-      shippedSkillsPrefix.length,
-      shippedSkillsPrefix
-    )
-    .toArray().length > 0
-    ? refusals.notEmpty
-    : undefined;
+  return holdsNothing(sql) ? undefined : refusals.notEmpty;
 };
 
 /**
