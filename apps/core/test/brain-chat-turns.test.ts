@@ -108,17 +108,33 @@ const handedTo = async (
     { timeout: 15_000, interval: 200 }
   );
 
+/**
+ * Hands over until `personId` recalls a chat's turn for `question`: that
+ * turn, whatever else holds its words or comes back by meaning first.
+ */
+const handedTurnOf = async (
+  personId: string,
+  question: string
+): Promise<SourceRef> =>
+  await vi.waitFor(
+    async () => {
+      await handOverNow();
+      const found = await recalled(personId, question);
+      const turn = found.find(({ producer }) => producer === "chat");
+      if (turn === undefined) {
+        throw new Error("The turn was never handed over");
+      }
+      return turn;
+    },
+    { timeout: 15_000, interval: 200 }
+  );
+
 /** The text kept of the one turn `personId` recalls for `question`, once handed over. */
 const keptTextOf = async (
   personId: string,
   question: string
 ): Promise<string | undefined> => {
-  // The turn, whatever else holds its words or comes back by meaning.
-  const found = await handedTo(personId, question);
-  const source = found.find(({ producer }) => producer === "chat");
-  if (source === undefined) {
-    throw new Error("Nothing was handed over");
-  }
+  const source = await handedTurnOf(personId, question);
   const kept = await readSourceVersionAs(env, personId, { source, version: 1 });
   return kept?.text;
 };
@@ -328,16 +344,16 @@ describe("a person's chat turn", () => {
     const admin = await signedInApi(idp, "admin");
 
     await ask(`Is the codename ${marker}?`);
-    const [source] = await handedTo(person.userId, marker);
+    const source = await handedTurnOf(person.userId, marker);
 
-    const turn = chatTurnOf(source?.id ?? "");
+    const turn = chatTurnOf(source.id);
     expect({
-      source: { producer: source?.producer, ...turn, answerId: undefined },
+      source: { producer: source.producer, ...turn, answerId: undefined },
       ben: await recalled(ben.userId, marker),
       admin: await recalled(admin.userId, marker),
       theirsOutsideTheirChat: await recalled(person.userId, marker, false),
       shared: await brainOf(inJurisdiction(env, env.BRAIN_STORE)).keyState(
-        `chat:${source?.id ?? ""}`
+        `chat:${source.id}`
       ),
     }).toStrictEqual({
       source: {
