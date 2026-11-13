@@ -22,9 +22,16 @@ import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
-import { addSource, eraseSource, recallAs } from "../src/brain-next.ts";
+import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import {
+  addSource,
+  eraseSource,
+  recallAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { recallFor } from "../src/brain-recall.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
@@ -141,6 +148,13 @@ const forEveryone = async (text: string): Promise<SourceRef> => {
     access: { kind: "audience", group: "company" },
   });
   return source;
+};
+
+/** Runs core's hand-overs to the Brain now, as its clock would. */
+const handOver = async (): Promise<void> => {
+  await drainAuditOutboxes(env);
+  await relayHandOvers(env);
+  await workBrain(env, new Date(Date.now() + 60_000), producersOf(env));
 };
 
 /** A team of `members`, as core keeps one. */
@@ -821,6 +835,64 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
         result: [keptText],
         error: null,
       },
+    });
+  });
+
+  it("hands a run that recalled over to its person's Brain as how it ended alone, so no copy of what it recalled outlives a narrowing or an erasure", async () => {
+    const { admin, ada } = await company();
+    const elsewhere = await teamOf(admin);
+    const [narrowedWord = "", erasedWord = ""] = [1, 2].map(
+      (at) => `hand${at}${unique().replaceAll(/\W/gu, "")}`
+    );
+    const narrowed = await forEveryone(`Salary band: ${narrowedWord} is 90k.`);
+    const erased = await forEveryone(`Salary band: ${erasedWord} is 70k.`);
+    const { workflow } = await recallingWorkflow(ada, admin);
+    for (const question of [narrowedWord, erasedWord]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const runId = await startedRun(ada, workflow.id, {
+        question,
+        tokens: 800,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each ends first
+      await endOf(ada, workflow.id, runId);
+    }
+    /** What Ada's own recall finds of her runs, for `question`. */
+    const ofRuns = async (question: string) => {
+      const { items } = await recallAs(env, ada.userId, {
+        question,
+        budget: { tokens: 4000 },
+        personal: true,
+      });
+      return items
+        .filter(({ source }) => source.producer === "run")
+        .map(({ text }) => text);
+    };
+    await handOver();
+    const handed = await ofRuns("Workflow run completed");
+    const before = [await ofRuns(narrowedWord), await ofRuns(erasedWord)];
+    await addSource(env, {
+      source: narrowed,
+      change: crypto.randomUUID(),
+      text: `Salary band: ${narrowedWord} is 95k.`,
+      readers: { kind: "team", teamId: elsewhere },
+    });
+    await eraseSource(env, {
+      source: erased,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    await handOver();
+    expect({
+      // Both runs were handed over, as how they ended.
+      handed: handed.length >= 2,
+      handedRecalled: handed.some((text) => text.includes("Salary band")),
+      before,
+      after: [await ofRuns(narrowedWord), await ofRuns(erasedWord)],
+    }).toStrictEqual({
+      handed: true,
+      handedRecalled: false,
+      before: [[], []],
+      after: [[], []],
     });
   });
 

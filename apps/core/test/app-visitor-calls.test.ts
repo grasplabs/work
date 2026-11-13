@@ -1240,4 +1240,43 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       await call(threeHops.app, threeHops.version, bo, "portal.mine"),
     ]).toStrictEqual(["visitor.not_granted", "visitor.not_granted"]);
   });
+
+  it("are refused when what the Brain recalled comes back to a workflow as an answer, and answered where no Brain is in the graph", async () => {
+    const domain = newDomain();
+    const [writtenTo, following, ordinary] = [
+      await portal(domain),
+      await portal(domain),
+      await portal(domain),
+    ];
+    const mail = await mailbox();
+    for (const { builder, app } of [writtenTo, following, ordinary]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, writtenTo.link, `ana@${domain}`);
+    const bo = await visitor(mail, following.link, `bo@${domain}`);
+    const cy = await visitor(mail, ordinary.link, `cy@${domain}`);
+    // App A holds the Brain. W1 calls A (its answer comes back to W1) and
+    // calls the first visited App (writes there). The second visited App
+    // follows the runs of W2, which calls A.
+    const [a, w1, w2] = [crypto.randomUUID(), workflowId(), workflowId()];
+    // And a graph with no Brain in it: W3 calls App B and the third visited
+    // App, which starts W3.
+    const [b, w3] = [crypto.randomUUID(), workflowId()];
+    await env.DB.batch([
+      grantedRow("app", a, "platform", "platform", ["brain"]),
+      grantedRow("workflow", w1, "app", a, ["call"]),
+      grantedRow("workflow", w1, "app", writtenTo.app, ["call"]),
+      grantedRow("workflow", w2, "app", a, ["call"]),
+      grantedRow("app", following.app, "workflow", w2, ["read"]),
+      grantedRow("workflow", w3, "app", b, ["call"]),
+      grantedRow("workflow", w3, "app", ordinary.app, ["call"]),
+      grantedRow("app", ordinary.app, "workflow", w3, ["start"]),
+    ]);
+    expect([
+      await call(writtenTo.app, writtenTo.version, ana, "portal.mine"),
+      await call(following.app, following.version, bo, "portal.mine"),
+      await call(ordinary.app, ordinary.version, cy, "portal.mine"),
+    ]).toStrictEqual(["visitor.not_granted", "visitor.not_granted", []]);
+  });
 });
