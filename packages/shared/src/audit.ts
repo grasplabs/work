@@ -289,6 +289,12 @@ export interface OutboxedAuditEvent {
   id: string;
   event: string;
   createdAt: number;
+  /**
+   * Where it was stored in its outbox (SQLite's rowid, which only grows):
+   * a drain takes the rows after the last it took, so a row it left behind
+   * (held) is passed over exactly, whatever another drain settled meanwhile.
+   */
+  position: number;
 }
 
 /**

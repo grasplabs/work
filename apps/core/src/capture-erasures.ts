@@ -9,6 +9,7 @@ import { log } from "@grasp-os/shared/log";
 import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
 import { uuidFromHash } from "./audit-outbox.ts";
+import type { Held } from "./audit-outbox.ts";
 import { eraseCaptures } from "./brain-next-origins.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 
@@ -26,9 +27,9 @@ import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 //
 // A disconnect whose erasure fails is held: it alone stays in connect's
 // outbox, to be erased by the next drain, while every other event settles
-// and the drain takes the rows past it (audit-outbox.ts). So a person's
-// store that stays out of reach keeps their own erasure waiting, never
-// anyone else's events from the log. One the Brain could never have kept
+// and the drain goes on with the rows after it (audit-outbox.ts). So a
+// person's store that stays out of reach keeps their own erasure waiting,
+// not anyone else's events, up to the drain's own limit (`drain` there). One the Brain could never have kept
 // a capture under (an id it refuses) has none to erase: it settles, and
 // is logged once.
 
@@ -84,13 +85,13 @@ const unkeyable = (connectionId: string): boolean =>
 const eraseEach = async (
   env: Pick<Env, "CONNECT" | "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
   events: readonly AuditEvent[]
-): Promise<{ erased: CapturesErased[]; failed: string[] }> => {
+): Promise<{ erased: CapturesErased[]; failed: Held }> => {
   const stopped = events.flatMap((disconnect) => {
     const connectionId = stoppedConnectionOf(disconnect);
     return connectionId === undefined ? [] : [{ disconnect, connectionId }];
   });
   if (stopped.length === 0) {
-    return { erased: [], failed: [] };
+    return { erased: [], failed: { ids: [], errors: [] } };
   }
   const listed = await ownersOf(env, [
     ...new Set(stopped.map(({ connectionId }) => connectionId)),
@@ -139,9 +140,21 @@ const eraseEach = async (
         ? [each.value]
         : []
     ),
-    failed: due.flatMap(({ disconnect }, index) =>
-      settled[index]?.status === "rejected" ? [disconnect.id] : []
-    ),
+    failed: {
+      ids: due.flatMap(({ disconnect }, index) =>
+        settled[index]?.status === "rejected" ? [disconnect.id] : []
+      ),
+      // Each error's name alone: its message could carry what it was about.
+      errors: [
+        ...new Set(
+          settled.flatMap((each) =>
+            each.status === "rejected"
+              ? [each.reason instanceof Error ? each.reason.name : "unknown"]
+              : []
+          )
+        ),
+      ],
+    },
   };
 };
 
@@ -150,12 +163,18 @@ const eraseEach = async (
  * captures: by whoever disconnected it, at the disconnect's moment, with
  * an ID made from the disconnect's, so a drain that erases again makes the
  * same event, which the log keeps once: a repeat answers the count the
- * erasure recorded. Two cases answer another count, if the person's store
- * changes between two drains of one disconnect: their store erased whole
- * (it then answers none) and their store restored from an older copy (its
- * replay records what it hides then). The log then keeps the first event
- * and records `audit.conflicting_duplicate`, and the drain logs
+ * erasure recorded. If the person's store changes between two erasures of
+ * one disconnect, the second answers otherwise:
+ * - their store erased whole between two drains: it answers none;
+ * - their store restored from an older copy between two drains: its
+ *   replay records what it hides then.
+ * In both the log keeps the first event and records
+ * `audit.conflicting_duplicate`, and the drain logs
  * `brain.capture.erased_conflict`, once: the disconnect settles with it.
+ * - Erased by core's disconnect straight away (connections.ts), then their
+ *   store erased whole before the first drain: the drain's erasure
+ *   answers none, so no `brain.capture.erased` is written at all; their
+ *   erasure's own event covers the store.
  */
 const erasedEvent = async ({
   disconnect,
@@ -184,13 +203,14 @@ const erasedEvent = async ({
  * erasure that erased something recorded (`brain.capture.erased`, ids and
  * how many). A disconnect of a connection with nothing kept leaves
  * connect's own event alone. Answers the disconnects it could not erase
- * yet, which the drain holds for the next.
+ * yet, which the drain holds for the next, with the names of the errors
+ * that stopped them, which the drain logs once.
  */
 export const eraseCapturesOfDisconnects = async (
   env: AuditLogEnv &
     Pick<Env, "CONNECT" | "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
   events: readonly AuditEvent[]
-): Promise<readonly string[]> => {
+): Promise<Held> => {
   const { erased, failed } = await eraseEach(env, events);
   const recorded = erased.filter(({ sources }) => sources > 0);
   if (recorded.length > 0) {

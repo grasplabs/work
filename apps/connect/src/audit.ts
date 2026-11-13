@@ -349,32 +349,32 @@ const ackSchema = z
     { message: `At most ${auditOutboxTakeMax} events` }
   );
 
-/** How many of the oldest events a take steps over: none by default. */
-const pastSchema = z.int().nonnegative().default(0);
+/** The position a take starts after: 0, the start, by default. */
+const afterSchema = z.int().nonnegative().default(0);
 
 /**
- * The oldest events in the outbox past the first `past`, in the order they
- * were stored (SQLite's rowid, which an insert sets past every row in the
+ * The oldest events in the outbox stored after `after` (a row's
+ * `position`, SQLite's rowid, which an insert sets past every row in the
  * table, also for events stored in one batch, which share their
- * `created_at`), at most {@link auditOutboxTakeMax}: core takes them,
- * appends them to the audit log, and only then acknowledges them
- * (`ackAuditEvents`). Taking removes nothing, so events core took but
- * didn't acknowledge are taken again. Core steps over the oldest it holds
- * (an erasure it could not finish yet), so those never keep the newer
- * ones from the log.
+ * `created_at`), in the order they were stored, at most
+ * {@link auditOutboxTakeMax}: core takes them, appends them to the audit
+ * log, and only then acknowledges them (`ackAuditEvents`). Taking removes
+ * nothing, so events core took but didn't acknowledge are taken again.
+ * Within one drain core takes after the last row it took, so the rows it
+ * holds (an erasure it could not finish yet) are left behind exactly.
  */
 export const takeAuditEvents = async (
   env: Env,
-  past: unknown = 0
+  after: unknown = 0
 ): Promise<OutboxedAuditEvent[]> => {
-  const parsed = pastSchema.safeParse(past);
+  const parsed = afterSchema.safeParse(after);
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
   const { results } = await env.DB.prepare(
-    "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ? OFFSET ?"
+    "SELECT rowid AS position, id, event, created_at AS createdAt FROM audit_outbox WHERE rowid > ? ORDER BY rowid LIMIT ?"
   )
-    .bind(auditOutboxTakeMax, parsed.data)
+    .bind(parsed.data, auditOutboxTakeMax)
     .all<OutboxedAuditEvent>();
   return results;
 };

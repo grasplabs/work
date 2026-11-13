@@ -2095,13 +2095,12 @@ export interface ConnectApi
   refuseConfirmation: (request: RefuseConfirmation) => Promise<void>;
   /**
    * The oldest audit events connect recorded that core hasn't acknowledged,
-   * past the first `past` (those core holds: an erasure it could not
-   * finish yet; none by default), in the order they were stored, at most
-   * `auditOutboxTakeMax`. Taking removes nothing: events core took but
-   * didn't acknowledge are taken again, so core appends each at least
-   * once, and the log keeps it once.
+   * stored after `after` (a row's `position`; from the start by default),
+   * in the order they were stored, at most `auditOutboxTakeMax`. Taking
+   * removes nothing: events core took but didn't acknowledge are taken
+   * again, so core appends each at least once, and the log keeps it once.
    */
-  takeAuditEvents: (past?: number) => Promise<OutboxedAuditEvent[]>;
+  takeAuditEvents: (after?: number) => Promise<OutboxedAuditEvent[]>;
   /**
    * Settles taken events by ID: removes those core appended to the audit
    * log, and moves those the log can't take to `audit_outbox_rejected`,

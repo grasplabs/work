@@ -8,7 +8,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { drainAuditOutboxes } from "../src/audit-drains.ts";
+import {
+  drainAuditOutboxes,
+  drainConnectOutboxSoon,
+} from "../src/audit-drains.ts";
 import { brainOwnExportPath } from "../src/brain-next-exports.ts";
 import {
   addSource,
@@ -1397,6 +1400,47 @@ describe("a disconnected connection", setUpTime, () => {
       left: [],
       state: ["erased"],
     });
+  });
+
+  it("keeps connect's events in the order they were stored when another drain settles a held one mid-way", async () => {
+    const held = await signedInApi(idp, "user");
+    const { connectionId } = await ownGmail(held);
+    await allEvents();
+    // One disconnect whose person's store fails for this drain, then more
+    // events than a batch, of a connection nobody holds captures through.
+    const [heldId] = await forgedDisconnects(connectionId, 1);
+    const after = await forgedDisconnects(
+      `connection-${crypto.randomUUID()}`,
+      auditOutboxTakeMax + auditOutboxTakeMax / 2
+    );
+    // As this drain's erasure fails, another drain (one batch, its store
+    // in reach) takes the same rows and settles them, the held one with
+    // them.
+    const meanwhile = ownStoreWith(held.userId, "eraseSource", async () => {
+      drainConnectOutboxSoon(env);
+      await vi.waitFor(
+        async () => {
+          await expect(inConnectOutbox([heldId ?? ""])).resolves.toStrictEqual(
+            []
+          );
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      throw new Error("Out of reach, for the test");
+    });
+
+    await drainAuditOutboxes(meanwhile);
+    const logged = await allEvents();
+    const positions = after.map((id) =>
+      logged.findIndex((event) => event.id === id)
+    );
+
+    expect({
+      missing: positions.filter((at) => at === -1).length,
+      inOrder: positions.every(
+        (at, index) => index === 0 || at > (positions[index - 1] ?? at)
+      ),
+    }).toStrictEqual({ missing: 0, inOrder: true });
   });
 
   it("passes a disconnect the Brain could never have kept a capture under, so it holds nothing up", async () => {
