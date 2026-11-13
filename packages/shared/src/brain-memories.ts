@@ -192,6 +192,11 @@ export interface BrainMemorySourceRef {
 
 /** A page of what the Brain remembers about an entity, and where the next goes on: null at the last. */
 export interface BrainMemoryPage {
+  /**
+   * The entity as they may see it now, which the page names it by: null
+   * alike when there is none and when they may no longer see it.
+   */
+  entity: BrainEntityListed | null;
   memories: BrainMemoryShown[];
   next: BrainStoreCursor | null;
 }

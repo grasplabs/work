@@ -2823,6 +2823,12 @@ const memoriesWantedSchema = z.strictObject({
 
 /** A page of an entity's memories, and where it goes on: null at the last. */
 export interface StoredMemoryPage {
+  /**
+   * The entity as the reader may see it now (`liveNamed`), what the page
+   * names it by: null alike when there is none and when they may no
+   * longer see it.
+   */
+  entity: StoredEntity | null;
   memories: StoredMemory[];
   next: MemoriesCursor | null;
 }
@@ -2843,13 +2849,18 @@ export const memoriesAs = async (
   const { entity, after } = checked(memoriesWantedSchema, wanted);
   const reader = await readerOf(env, personId);
   const store = storeNamed(env, reader, entity.store);
-  const page = await store.readMemories({
-    entity: entity.id,
-    reader,
-    history: true,
-    ...(after === undefined ? {} : { after }),
-  });
+  const [page, read] = await Promise.all([
+    store.readMemories({
+      entity: entity.id,
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    }),
+    store.readEntity({ entity: entity.id, reader }),
+  ]);
   return {
+    entity:
+      read === null ? null : await liveNamed(env, reader, entity.store, read),
     memories: await storedMemories(store, entity.store, reader, page.memories),
     next: page.more && page.next !== undefined ? page.next : null,
   };

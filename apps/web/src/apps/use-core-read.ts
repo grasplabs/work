@@ -6,16 +6,15 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
 /**
- * What `read` read for `key`, read again whenever `key` changes; nothing
- * while it is read, unless an earlier read of the same `scope` landed:
- * that one stays until the new one does, so what is shown doesn't blink
- * away at each write.
+ * `useCoreRead`, and whether what it gives is the read for `key` itself
+ * (`current`) rather than an earlier one of the same `scope` held while
+ * `key` is read.
  */
-export const useCoreRead = <T>(
+export const useHeldCoreRead = <T>(
   key: string,
   read: (session: Session) => Promise<T>,
   scope?: string
-): Loaded<T> | undefined => {
+): { loaded: Loaded<T> | undefined; current: boolean } => {
   const core = useCore();
   const [held, setHeld] = useState<{
     key: string;
@@ -40,7 +39,23 @@ export const useCoreRead = <T>(
     };
   }, [key, scope]);
   if (held?.key === key) {
-    return held.loaded;
+    return { loaded: held.loaded, current: true };
   }
-  return scope !== undefined && held?.scope === scope ? held.loaded : undefined;
+  return {
+    loaded:
+      scope !== undefined && held?.scope === scope ? held.loaded : undefined,
+    current: false,
+  };
 };
+
+/**
+ * What `read` read for `key`, read again whenever `key` changes; nothing
+ * while it is read, unless an earlier read of the same `scope` landed:
+ * that one stays until the new one does, so what is shown doesn't blink
+ * away at each write.
+ */
+export const useCoreRead = <T>(
+  key: string,
+  read: (session: Session) => Promise<T>,
+  scope?: string
+): Loaded<T> | undefined => useHeldCoreRead(key, read, scope).loaded;

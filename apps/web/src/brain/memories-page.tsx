@@ -23,7 +23,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
 import {
   Empty,
@@ -342,25 +341,32 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
 
 /**
  * Says `memory` is wrong, with what is right: the person's own word,
- * theirs alone, confirmed. Each opening is one correction, with its id
- * minted then, so a retry saves it once, and the key its answer is tied
- * to: a reply for an earlier opening lands nowhere. While it saves, the
- * dialog can't be closed (its close button, Escape, a click outside).
+ * theirs alone, confirmed. One opening of it (`opening`, the page keys it
+ * by that) is one correction, its id first the opening's, so a retry
+ * saves it once, and the key its answer is tied to: a reply for an
+ * earlier opening lands nowhere. The page holds it apart from the row
+ * that opened it, so a row read away while it saves leaves it, and its
+ * outcome, in place. While it saves, it can't be closed (its close
+ * button, Escape, a click outside).
  */
 const CorrectDialog = ({
   memory,
+  opening,
+  returnTo,
+  onClose,
   onCorrected,
 }: {
   memory: BrainMemoryShown;
+  opening: string;
+  /** What opened it, where focus goes back to while it is on the page. */
+  returnTo: HTMLElement;
+  onClose: () => void;
   onCorrected: () => void;
 }) => {
   const { t } = useLingui();
   const ids = useId();
-  const [open, setOpen] = useState(false);
-  const { statement } = memory;
-  const wrongLabel = t`Say this is wrong: ${statement}`;
   const [right, setRight] = useState("");
-  const [change, setChange] = useState("");
+  const [change, setChange] = useState(opening);
   // The text of a save that failed: new words after it are a new
   // correction, with a new id, while the same words retry the same one.
   const [tried, setTried] = useState<string>();
@@ -383,7 +389,7 @@ const CorrectDialog = ({
         }),
       (saved) => {
         setTried(undefined);
-        setOpen(false);
+        onClose();
         // Not theirs to correct now: say so, and read the page again so
         // it shows what stands (their own earlier save of this one too).
         if (saved === null) {
@@ -396,25 +402,18 @@ const CorrectDialog = ({
   return (
     <Dialog
       disablePointerDismissal={busy}
-      onOpenChange={(opening) => {
-        if (!opening && busy) {
-          return;
+      onOpenChange={(open) => {
+        if (!open && !busy) {
+          onClose();
         }
-        if (opening) {
-          setRight("");
-          setTried(undefined);
-          setChange(crypto.randomUUID());
-        }
-        setOpen(opening);
       }}
-      open={open}
+      open
     >
-      <DialogTrigger
-        render={<Button aria-label={wrongLabel} size="sm" variant="outline" />}
+      <DialogContent
+        closeLabel={t`Close`}
+        finalFocus={() => (returnTo.isConnected ? returnTo : null)}
+        showCloseButton={!busy}
       >
-        <Trans>It&apos;s wrong</Trans>
-      </DialogTrigger>
-      <DialogContent closeLabel={t`Close`} showCloseButton={!busy}>
         <form
           className="flex flex-col gap-5"
           onSubmit={(event) => {
@@ -483,13 +482,19 @@ const CorrectDialog = ({
 /** Confirms `memory` over the sides that say otherwise. */
 const ConfirmButton = ({
   memory,
+  read,
   onConfirmed,
 }: {
   memory: BrainMemoryShown;
+  /** The read of the page it is on: a failure shows until the next. */
+  read: number;
   onConfirmed: () => void;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, ask } = useAsk(`confirm#${memoryKeyOf(memory)}`);
+  const { busy, failure, ask } = useAsk(
+    `confirm#${memoryKeyOf(memory)}`,
+    `${read}`
+  );
   const { statement } = memory;
   const changedText = t`This memory has changed or is no longer yours to read. Look at it again first.`;
   return (
@@ -569,12 +574,19 @@ const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
 /** One memory: what it says, where it came from, its marks, and what the person can do. */
 const MemoryLine = ({
   memory,
+  read,
   onChanged,
+  onCorrect,
 }: {
   memory: BrainMemoryShown;
+  /** The read of the page it is on. */
+  read: number;
   onChanged: () => void;
+  /** Opens the correction of `memory`, which the page holds, from `opener`. */
+  onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
 }) => {
   const { t } = useLingui();
+  const { statement } = memory;
   const attributeLabel = useAttributeLabel();
   const { attribute, object, value, endedAt, confirmed } = memory;
   const label = attribute === null ? null : attributeLabel(attribute);
@@ -623,6 +635,7 @@ const MemoryLine = ({
             {confirmable ? (
               <ConfirmButton
                 memory={memory}
+                read={read}
                 onConfirmed={() => {
                   said.current?.focus();
                   onChanged();
@@ -633,7 +646,17 @@ const MemoryLine = ({
                 word can't: core would keep it under no attribute, beside
                 the relation, so it isn't offered there. */}
             {object === null ? (
-              <CorrectDialog memory={memory} onCorrected={onChanged} />
+              <Button
+                aria-label={t`Say this is wrong: ${statement}`}
+                onClick={(event) => {
+                  onCorrect(memory, event.currentTarget);
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Trans>It&apos;s wrong</Trans>
+              </Button>
             ) : null}
           </span>
         ) : null}
@@ -699,12 +722,17 @@ const keyOfFact = ({ about, attribute }: BrainContestedFact): string =>
 /** The facts sources disagree on that the person may read, a page at a time. */
 const ContestedList = ({
   contested,
+  read,
   onOpen,
   onChanged,
+  onCorrect,
 }: {
   contested: ReturnType<typeof useContested>;
+  /** The read of the page it is on. */
+  read: number;
   onOpen: (entity: BrainEntityListed) => void;
   onChanged: () => void;
+  onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
 }) => {
   const attributeLabel = useAttributeLabel();
   const { first, items: facts, next } = contested;
@@ -747,7 +775,12 @@ const ContestedList = ({
                 <ItemGroup render={<ul />} spacing="tight">
                   {fact.sides.map((side) => (
                     <li key={memoryKeyOf(side)}>
-                      <MemoryLine memory={side} onChanged={onChanged} />
+                      <MemoryLine
+                        memory={side}
+                        onChanged={onChanged}
+                        onCorrect={onCorrect}
+                        read={read}
+                      />
                     </li>
                   ))}
                 </ItemGroup>
@@ -872,37 +905,49 @@ const EntityList = ({
 /** What the Brain remembers about one entity that the person may read, history included. */
 const EntityPanel = ({
   changes,
-  entity,
+  entity: ref,
   onChanged,
+  onCorrect,
 }: {
   /** How many changes the person made: each reads the panel again. */
   changes: number;
-  entity: BrainEntityListed;
+  /** The open entity, by its store and id alone. */
+  entity: BrainEntityRef;
   onChanged: () => void;
+  onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
 }) => {
   const kindLabel = useKindLabel();
-  const ref = entity.entity;
   const opened = keyOf(ref);
   const memories = usePaged(
     `memories#${opened}#${changes}`,
     `memories#${opened}`,
     async (read, next?: BrainStoreCursor) => {
       const page = await read.memories(ref, next);
-      return { items: page.memories, next: page.next };
+      return { items: page.memories, next: page.next, head: page.entity };
     },
     memoryKeyOf
   );
   const heading = useId();
-  const kind = kindLabel(entity.kind);
-  const { first, items } = memories;
+  const { first, head: entity, items } = memories;
   return (
     <Card render={<section aria-labelledby={heading} />} size="sm">
       <CardContent>
+        {/* Named by its own read, as the person may read it now: one
+            they may no longer read is named as one there isn't. */}
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-medium" id={heading}>
-            <EntityName entity={entity} />
+            {entity === null ? (
+              <span className="text-muted-foreground">
+                <Trans>Nothing you can read</Trans>
+              </span>
+            ) : null}
+            {entity === undefined || entity === null ? null : (
+              <EntityName entity={entity} />
+            )}
           </h3>
-          <Badge variant="secondary">{kind}</Badge>
+          {entity === undefined || entity === null ? null : (
+            <Badge variant="secondary">{kindLabel(entity.kind)}</Badge>
+          )}
           {ref.store === "own" ? (
             <Badge variant="outline">
               <Trans context="a memory nobody else may read">Only you</Trans>
@@ -923,7 +968,12 @@ const EntityPanel = ({
           <ItemGroup render={<ul />} spacing="tight">
             {items.map((memory) => (
               <li key={memoryKeyOf(memory)}>
-                <MemoryLine memory={memory} onChanged={onChanged} />
+                <MemoryLine
+                  memory={memory}
+                  onChanged={onChanged}
+                  onCorrect={onCorrect}
+                  read={changes}
+                />
               </li>
             ))}
           </ItemGroup>
@@ -938,9 +988,19 @@ const EntityPanel = ({
 export const MemoriesPage = () => {
   const kindLabel = useKindLabel();
   const [kind, setKind] = useState<BrainEntityKind>("customer");
-  // The open entity, as it was when opened: shown as the page reads it
-  // now, by its key, wherever it is listed (below).
-  const [opened, setOpened] = useState<BrainEntityListed>();
+  // The open entity, by its store and id alone: its panel names it from
+  // its own read, as the person may read it now.
+  const [opened, setOpened] = useState<BrainEntityRef>();
+  // The correction being made, apart from the row that opened it: each
+  // opening is one correction (`CorrectDialog`).
+  const [correcting, setCorrecting] = useState<{
+    memory: BrainMemoryShown;
+    opening: string;
+    returnTo: HTMLElement;
+  }>();
+  const correct = (memory: BrainMemoryShown, opener: HTMLElement) => {
+    setCorrecting({ memory, opening: crypto.randomUUID(), returnTo: opener });
+  };
   // Each change the person makes reads everything again, in place, so
   // what they confirmed or corrected shows where it now stands, and an
   // action still running elsewhere on the page keeps its state. Counted
@@ -951,17 +1011,6 @@ export const MemoriesPage = () => {
   };
   const contested = useContested(changes);
   const entities = useEntities(kind, changes);
-  // One source of truth for the open entity's name: the latest read of
-  // either list that holds it; as opened only while neither does.
-  const openedKey = opened === undefined ? undefined : keyOf(opened.entity);
-  const shown =
-    openedKey === undefined
-      ? undefined
-      : (entities.items.find(({ entity }) => keyOf(entity) === openedKey) ??
-        contested.items
-          .map(({ about }) => about)
-          .find(({ entity }) => keyOf(entity) === openedKey) ??
-        opened);
   const contestedHeading = useId();
   const entitiesHeading = useId();
   const kindId = useId();
@@ -995,10 +1044,12 @@ export const MemoriesPage = () => {
           <ContestedList
             contested={contested}
             onChanged={changed}
+            onCorrect={correct}
             onOpen={(entity) => {
               setKind(entity.kind);
-              setOpened(entity);
+              setOpened(entity.entity);
             }}
+            read={changes}
           />
         </section>
         <section
@@ -1035,20 +1086,35 @@ export const MemoriesPage = () => {
           <div className="grid min-h-0 gap-6 lg:grid-cols-2">
             <EntityList
               entities={entities}
-              onPick={setOpened}
-              picked={opened?.entity}
+              onPick={(entity) => {
+                setOpened(entity.entity);
+              }}
+              picked={opened}
             />
-            {shown === undefined ? null : (
+            {opened === undefined ? null : (
               <EntityPanel
                 changes={changes}
-                entity={shown}
-                key={keyOf(shown.entity)}
+                entity={opened}
+                key={keyOf(opened)}
                 onChanged={changed}
+                onCorrect={correct}
               />
             )}
           </div>
         </section>
       </div>
+      {correcting === undefined ? null : (
+        <CorrectDialog
+          key={correcting.opening}
+          memory={correcting.memory}
+          onClose={() => {
+            setCorrecting(undefined);
+          }}
+          onCorrected={changed}
+          opening={correcting.opening}
+          returnTo={correcting.returnTo}
+        />
+      )}
     </div>
   );
 };

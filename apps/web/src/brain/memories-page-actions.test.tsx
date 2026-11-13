@@ -303,10 +303,12 @@ describe("the Memories page's actions", () => {
     await press(buttons("Globex")[0]);
     await act(async () => {
       replies.get("e-globex")?.release({
+        entity: globex,
         memories: [memory("m-g", "Globex", "Paying")],
         next: null,
       });
       replies.get("e-acme")?.release({
+        entity: acme,
         memories: [memory("m-x", "Acme", "Renewing")],
         next: null,
       });
@@ -418,6 +420,7 @@ describe("the Memories page's actions", () => {
         }),
       memories: async () =>
         await Promise.resolve({
+          entity: lost ? { ...own, name: null, unreadable: true } : own,
           memories: [
             memory("m-mine", "e-own", "Churned", {
               store: "own",
@@ -500,6 +503,166 @@ describe("the Memories page's actions", () => {
     }).toStrictEqual({ said: false, offered: false });
   });
 
+  it("names a shared entity no longer readable while open as one there is nothing to read of", async () => {
+    let lost = false;
+    await shown({
+      contested: async () =>
+        await Promise.resolve(lost ? { facts: [], next: null } : factPage()),
+      entities: async () =>
+        await Promise.resolve({ entities: lost ? [] : [acme], next: null }),
+      memories: async () =>
+        await Promise.resolve(
+          lost
+            ? { entity: null, memories: [], next: null }
+            : {
+                entity: acme,
+                memories: [memory("m-x", "Acme", "Renewing")],
+                next: null,
+              }
+        ),
+      confirm: async () => {
+        lost = true;
+        return await Promise.resolve("done");
+      },
+    });
+    await press(
+      [...document.querySelectorAll("section ul button")].find(
+        (each): each is HTMLButtonElement =>
+          each instanceof HTMLButtonElement && each.textContent === "Acme"
+      )
+    );
+    const before = document.querySelector("h3")?.textContent;
+    await press(buttons("This one is right")[0]);
+    expect({
+      before,
+      after: document.querySelector("h3")?.textContent,
+    }).toStrictEqual({ before: "Acme", after: "Nothing you can read" });
+  });
+
+  it("shows a correction's failure when its memory left the list while it saved", async () => {
+    const confirmed = held<"done">();
+    const saved = held<unknown>();
+    let gone = false;
+    await shown({
+      contested: async () =>
+        await Promise.resolve(gone ? { facts: [], next: null } : factPage()),
+      entities: async () => await Promise.resolve({ entities: [], next: null }),
+      confirm: async () => {
+        const answer = await confirmed.promise;
+        gone = true;
+        return answer;
+      },
+      correct: async () => await saved.promise,
+    });
+    await press(buttons("This one is right")[0]);
+    await press(buttons("It's wrong")[1]);
+    await save("Paused");
+    await act(async () => {
+      confirmed.release("done");
+      await Promise.resolve();
+    });
+    await settle();
+    await act(async () => {
+      saved.release(
+        Promise.reject(
+          Object.assign(new Error("The store failed"), {
+            code: "brain.store_failed",
+          })
+        )
+      );
+      await Promise.resolve();
+    });
+    await settle();
+    expect(document.body.textContent).toContain("The store failed");
+  });
+
+  it("offers no more of a list while it is read again, so no page lands after the wrong one", async () => {
+    const fresh = held<unknown>();
+    let reads = 0;
+    await shown({
+      contested: async (next?: unknown) => {
+        if (next !== undefined && next !== null) {
+          return await Promise.resolve({ facts: [], next: null });
+        }
+        reads += 1;
+        return reads === 1
+          ? await Promise.resolve({ ...factPage(), next: { store: "shared" } })
+          : await fresh.promise;
+      },
+      entities: async () => await Promise.resolve({ entities: [], next: null }),
+      confirm: async () => await Promise.resolve("done"),
+    });
+    await press(buttons("This one is right")[0]);
+    const during = buttons("Show more")[0]?.disabled;
+    await act(async () => {
+      fresh.release({ ...factPage(), next: { store: "shared" } });
+      await Promise.resolve();
+    });
+    await settle();
+    expect({ during, after: buttons("Show more")[0]?.disabled }).toStrictEqual({
+      during: true,
+      after: false,
+    });
+  });
+
+  it("sends one call for two clicks in one tick", async () => {
+    let mores = 0;
+    let confirms = 0;
+    await shown({
+      contested: async (next?: unknown) => {
+        if (next !== undefined && next !== null) {
+          mores += 1;
+          return await Promise.resolve({ facts: [], next: null });
+        }
+        return await Promise.resolve({
+          ...factPage(),
+          next: { store: "shared" },
+        });
+      },
+      entities: async () => await Promise.resolve({ entities: [], next: null }),
+      confirm: async () => {
+        confirms += 1;
+        return await Promise.resolve("done");
+      },
+    });
+    for (const label of ["Show more", "This one is right"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one control after another
+      await act(async () => {
+        const [button] = buttons(label);
+        button?.click();
+        button?.click();
+        await Promise.resolve();
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each settles in turn
+      await settle();
+    }
+    expect({ mores, confirms }).toStrictEqual({ mores: 1, confirms: 1 });
+  });
+
+  it("clears a failed confirmation's message once the list is read again", async () => {
+    let tries = 0;
+    await shown({
+      contested: async () => await Promise.resolve(factPage()),
+      entities: async () => await Promise.resolve({ entities: [], next: null }),
+      confirm: async () => {
+        tries += 1;
+        if (tries === 1) {
+          throw Object.assign(new Error("The store failed"), {
+            code: "brain.store_failed",
+          });
+        }
+        return await Promise.resolve("done");
+      },
+    });
+    await press(buttons("This one is right")[0]);
+    const said = document.body.textContent.includes("The store failed");
+    await press(buttons("This one is right")[1]);
+    expect({
+      said,
+      after: document.body.textContent.includes("The store failed"),
+    }).toStrictEqual({ said: true, after: false });
+  });
+
   it("offers to confirm the person's own word not yet confirmed", async () => {
     const own: BrainEntityListed = {
       entity: { store: "own", id: "e-own" },
@@ -514,6 +677,7 @@ describe("the Memories page's actions", () => {
         await Promise.resolve({ entities: [own], next: null }),
       memories: async () =>
         await Promise.resolve({
+          entity: own,
           memories: [
             memory("m-mine", "e-own", "Churned", {
               store: "own",

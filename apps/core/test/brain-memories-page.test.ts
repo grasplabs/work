@@ -334,9 +334,9 @@ describe("the Brain's memories, as a person reads them", () => {
     const nothing = [
       { entities: [], pages: 1 },
       null,
-      { memories: [], next: null },
+      { entity: null, memories: [], next: null },
       null,
-      { memories: [], next: null },
+      { entity: null, memories: [], next: null },
     ];
     expect([
       await answersOf(ben.api),
@@ -1119,6 +1119,35 @@ describe("the Brain's memories, as a person reads them", () => {
       refusals: ["refused", "refused", "refused", "refused"],
       confirmed: ["attempted", "attempted", "refused", "refused"],
       corrected: ["attempted", "attempted", "refused", "refused"],
+    });
+  });
+
+  it("names the entity with its memories as the person may read it now, and one they may no longer read as one there isn't", async () => {
+    const anna = await signedInApi(idp, "user");
+    const [sales, other] = await Promise.all([teamOf(anna.userId), teamOf()]);
+    const { id, cited } = await sourceOf(sales, "Vandelay renews");
+    const added = await remember(
+      sales,
+      { kind: "customer", names: ["Vandelay"] },
+      [statusFrom(cited, "Renewing")]
+    );
+    const entity = { store: "shared" as const, id: added.entities.c ?? "" };
+    const nobody = { store: "shared" as const, id: crypto.randomUUID() };
+    const before = await anna.api.brainMemories.memories(entity);
+    await addSource(env, {
+      source: { producer: "upload", id },
+      change: crypto.randomUUID(),
+      text: "Vandelay renews, for others",
+      readers: { kind: "team", teamId: other },
+    });
+    expect({
+      named: before.entity,
+      gone: await anna.api.brainMemories.memories(entity),
+      none: await anna.api.brainMemories.memories(nobody),
+    }).toStrictEqual({
+      named: { entity, kind: "customer", name: "Vandelay", unreadable: false },
+      gone: { entity: null, memories: [], next: null },
+      none: { entity: null, memories: [], next: null },
     });
   });
 

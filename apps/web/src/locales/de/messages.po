@@ -9529,6 +9529,10 @@ msgstr "Es wurde nichts hinzugefügt. Korrigiere diese Zeilen und versuche es er
 msgid "Nothing yet"
 msgstr "Noch nichts"
 
+#: src/brain/memories-page.tsx
+msgid "Nothing you can read"
+msgstr "Nichts, was Sie lesen dürfen"
+
 #: src/brain/sources-page.tsx
 msgid "Nothing you may read holds {missing}."
 msgstr "Nichts, was Sie lesen dürfen, enthält {missing}."

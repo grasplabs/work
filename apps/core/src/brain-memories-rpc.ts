@@ -197,6 +197,7 @@ export class BrainMemoriesRpc
           : { after: cursorIn(next) }),
       });
       return {
+        entity: page.entity === null ? null : entityOut(page.entity),
         memories: page.memories.map((each) => memoryOut(person.userId, each)),
         next: page.next === null ? null : cursorOut(page.next),
       };

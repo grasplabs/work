@@ -153,12 +153,11 @@ const shown = async (refusal?: string, failedSaves = 0) => {
               next: { store: "shared" as const, after: { entity: "e-acme" } },
             }
       ),
-    entity: async (entity: BrainEntityRef) =>
-      await answer(`entity ${entity.id}`, () => acme),
     memories: async (entity: BrainEntityRef, next?: BrainStoreCursor | null) =>
       await answer(`memories ${entity.id}${next ? " next" : ""}`, () =>
         next
           ? {
+              entity: acme,
               memories: [
                 memory("m-old", "Prospect", {
                   endedAt: "2026-11-01T09:00:00.000Z",
@@ -167,6 +166,7 @@ const shown = async (refusal?: string, failedSaves = 0) => {
               next: null,
             }
           : {
+              entity: acme,
               memories: [
                 ...sides(),
                 memory("m-mine", "Paying", {
