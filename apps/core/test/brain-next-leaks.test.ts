@@ -10,7 +10,14 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import {
+  beforeAll,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
@@ -577,12 +584,23 @@ describe(
       // and note. The hidden passages hold exactly the questions asked, so
       // their vectors are the questions' own: the nearest there are, they
       // would take every place by meaning if they took any.
+      //
+      // The rule of its order: each shape of reader's answers before are
+      // taken once everything it may read exists and is embedded, and
+      // before the first thing hidden from it exists. Each shape, as core
+      // builds it (`readerOf`), what it may read, and what it may not:
+      // - the company alone (an App's or a workflow's code, `recall
+      //   recallFor`, asked in the admin's pass) and an admin in no team
+      //   with nothing of their own: the passage for everyone; not the
+      //   team's handbook, nor the reader's note, nor anything after;
+      // - the reader's teams with no person (a chat that doesn't answer
+      //   its person alone, `personal: false`, and a chat's code) and a
+      //   team-mate: the passage for everyone and the handbook; not the
+      //   reader's own note, nor anything after;
+      // - the reader, in the team with their own note: all three; nothing
+      //   after (an erased source, one narrowed away, the hidden ones).
       const { embedding: atStart } = await brainWorkOverview(env);
       expect(atStart.chunks).toBe(0);
-      // Three shapes of reader, as core builds them (`readerOf`): the
-      // reader, in a team and with their own note; a team-mate of theirs,
-      // to whom that note is hidden; and an admin in no team, with nothing
-      // of their own.
       const [
         { userId: reader },
         { userId: holder },
@@ -612,28 +630,6 @@ describe(
         "a source erased": erasedMarker,
       } = markers;
       const words = Object.values(markers);
-      // Their team's, current after drafts, then the reader's own, in their
-      // store: what each may read, all of it holding the shared word.
-      const handbookId = await add(`${sharedWord} draft 0`, {
-        kind: "team",
-        teamId: readersTeam,
-      });
-      await add(
-        `The handbook for everyone who joins, ${sharedWord}`,
-        { kind: "team", teamId: readersTeam },
-        handbookId
-      );
-      // And one everyone in the company may read, so a reader of the
-      // company alone has something by meaning hidden passages could crowd.
-      const everyone = `Company handbook for everyone, ${sharedWord}`;
-      const everyoneId = crypto.randomUUID();
-      await sharedStore().addSource({
-        source: `upload:${everyoneId}`,
-        change: crypto.randomUUID(),
-        text: everyone,
-        access: { kind: "audience", group: "company" },
-      });
-      await allEmbedded([teamMate]);
       const probingAs = (personId: string, groups: string[]): Probing => ({
         personId,
         reader: { person: personId, groups },
@@ -647,27 +643,64 @@ describe(
       const probing = probingAs(reader, [`team:${readersTeam}`]);
       const asMate = probingAs(teamMate, [`team:${readersTeam}`]);
       const asAdmin = probingAs(admin, []);
+      const asTeams: Probing = { ...probing, personal: false };
       const among = surfaces.filter(([name]) => meaningSurfaces.has(name));
-      // The team-mate's and the admin's before the reader's own note, which
-      // is hidden from both, and everything else hidden is added.
-      const mateBefore = await answersOf(asMate, among);
+      // Code's recall as an App reads as the company alone, whoever it
+      // acts for: held in the admin's pass, whose before has nothing more.
+      const amongMembers = among.filter(
+        ([name]) => name !== "recall recallFor"
+      );
+      const teamsAmong = among.filter(([name]) => name.startsWith("core "));
+      const chatCode: [string, Probe][] = [
+        ["recall recallFor, as a chat's code", chatCodeRecallProbe],
+      ];
+
+      // What everyone in the company may read, so a reader of the company
+      // alone has something by meaning hidden passages could crowd. Gone
+      // again once the test ends, however it ends, so this file's later
+      // tests, whose readers may read it, don't find it by meaning.
+      const everyone = `Company handbook for everyone, ${sharedWord}`;
+      const everyoneId = crypto.randomUUID();
+      await sharedStore().addSource({
+        source: `upload:${everyoneId}`,
+        change: crypto.randomUUID(),
+        text: everyone,
+        access: { kind: "audience", group: "company" },
+      });
+      onTestFinished(async () => {
+        await eraseSource(env, {
+          source: { producer: "upload", id: everyoneId },
+          readers: { kind: "none" },
+          reason: "deleted",
+        });
+        await allEmbedded([]);
+      });
+      await allEmbedded([admin]);
       const adminBefore = await answersOf(asAdmin, among);
+
+      // The reader's team's, current after drafts: the team-mate's, the
+      // reader's teams alone's and their chat's code's before.
+      const handbookId = await add(`${sharedWord} draft 0`, {
+        kind: "team",
+        teamId: readersTeam,
+      });
+      await add(
+        `The handbook for everyone who joins, ${sharedWord}`,
+        { kind: "team", teamId: readersTeam },
+        handbookId
+      );
+      await allEmbedded([teamMate]);
+      const mateBefore = await answersOf(asMate, amongMembers);
+      const teamsBefore = await answersOf(asTeams, teamsAmong);
+      const chatCodeBefore = await answersOf(probing, chatCode);
+
+      // The reader's own note, in their store: the reader's before.
       await add(`Notes on ${sharedWord} for the reader`, {
         kind: "owner",
         personId: reader,
       });
       const readable = await allEmbedded([reader]);
-      const before = await answersOf(probing, among);
-      // The reader's teams alone, no person, as a chat that doesn't answer
-      // them alone recalls (core's surfaces, `personal: false`), and as a
-      // chat's code does (code's recall under an agent's grant).
-      const teamsAmong = among.filter(([name]) => name.startsWith("core "));
-      const asTeams: Probing = { ...probing, personal: false };
-      const teamsBefore = await answersOf(asTeams, teamsAmong);
-      const chatCode: [string, Probe][] = [
-        ["recall recallFor, as a chat's code", chatCodeRecallProbe],
-      ];
-      const chatCodeBefore = await answersOf(probing, chatCode);
+      const before = await answersOf(probing, amongMembers);
 
       // A source the reader may read now, embedded, then erased once the
       // hidden ones are embedded too; and one narrowed away from them once
@@ -724,8 +757,13 @@ describe(
         const { hiddenVersions } = asReader;
         const passes: [string, Probing, Map<string, Answer[]>, typeof among][] =
           [
-            ["the reader", asReader, before, among],
-            ["a team-mate", { ...asMate, hiddenVersions }, mateBefore, among],
+            ["the reader", asReader, before, amongMembers],
+            [
+              "a team-mate",
+              { ...asMate, hiddenVersions },
+              mateBefore,
+              amongMembers,
+            ],
             [
               "an admin in no team",
               { ...asAdmin, hiddenVersions },
@@ -770,14 +808,6 @@ describe(
       );
       await leave(secretTeam, reader);
       const leftAgain = await everyShape("out of the team again");
-      // Gone again, so this file's later tests, whose readers may read
-      // anything everyone may, don't find it by meaning.
-      await eraseSource(env, {
-        source: { producer: "upload", id: everyoneId },
-        readers: { kind: "none" },
-        reason: "deleted",
-      });
-      await allEmbedded([]);
 
       expect({
         findings: [...whileErasing, ...erasedGone, ...leftAgain],
@@ -794,7 +824,7 @@ describe(
         // teams alone found their team's and the company's.
         adminMeaningBefore: foundByMeaning(adminBefore.values()) > 0,
         companyMeaningBefore:
-          foundByMeaning([before.get("recall recallFor") ?? []]) > 0,
+          foundByMeaning([adminBefore.get("recall recallFor") ?? []]) > 0,
         teamsMeaningBefore: foundByMeaning(teamsBefore.values()) > 0,
         chatCodeMeaningBefore: foundByMeaning(chatCodeBefore.values()) > 0,
         hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
