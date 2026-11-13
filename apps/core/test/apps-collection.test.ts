@@ -214,7 +214,7 @@ describe("indexing", setUpTime, () => {
     );
 
     // Back to the first version: its text is the entry's again.
-    await owner.api.apps.versions.publish(app.id, 1);
+    await owner.api.versions.rollback({ kind: "app", id: app.id }, 1);
     await expect(
       foundFor(owner.knowledge, first, second)
     ).resolves.toStrictEqual({ [first]: [path], [second]: [] });
@@ -335,7 +335,7 @@ describe("indexing", setUpTime, () => {
       await indexApps({
         ...env,
         KNOWLEDGE: knowledgeRacing(async () => {
-          await owner.api.apps.versions.publish(app.id, 3);
+          await owner.api.versions.rollback({ kind: "app", id: app.id }, 3);
         }),
       });
     });
@@ -366,7 +366,7 @@ describe("indexing", setUpTime, () => {
     await indexApps({
       ...env,
       KNOWLEDGE: knowledgeRacing(async () => {
-        await owner.api.apps.versions.publish(app.id, 1);
+        await owner.api.versions.rollback({ kind: "app", id: app.id }, 1);
       }),
     });
     await expect(

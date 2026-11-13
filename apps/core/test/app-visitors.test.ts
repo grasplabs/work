@@ -109,7 +109,7 @@ const releasedNotes = async (
     files,
     "First"
   );
-  await builder.api.apps.versions.publish(app, version);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
 };
 
 /** Posts a visitor's request, as their page does. */

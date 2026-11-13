@@ -15,10 +15,8 @@ import {
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
 import {
   startDetailsPerSweep,

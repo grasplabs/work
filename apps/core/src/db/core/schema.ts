@@ -12,6 +12,7 @@ import type {
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
 import { signalKinds } from "@grasp-os/shared/signals";
+import { subjectKinds } from "@grasp-os/shared/subject";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 /**
  * Core D1 database: identity (Better Auth), permissions and the App registry.
@@ -1122,7 +1123,13 @@ export const appVersions = sqliteTable(
 );
 
 /**
- * Each App's draft (src/app-drafts.ts): the one every builder of the App
+ * Unused since every subject's draft moved to `drafts` (src/drafts.ts),
+ * which migration 0245 copied each App's into: nothing reads or writes
+ * it. Kept while a release that writes it may serve or be rolled back to
+ * (expand, then contract); dropped in a later release, as are the four
+ * tables after it.
+ *
+ * Each App's draft: the one every builder of the App
  * and their chats' agents write, over the version it began from (`base`,
  * null for an App with none). Each write is the next `revision`, and
  * lands only over the revision it read, so of two writes made from the
@@ -1147,8 +1154,8 @@ export const appDrafts = sqliteTable("app_drafts", {
 });
 
 /**
- * A draft's changes (`appDrafts`): a file's new content by path, or null
- * to delete it, a row each, so no row holds more than one file.
+ * Unused (as `appDrafts`): a draft's changes, a file's new content by
+ * path, or null to delete it, a row each. Dropped in a later release.
  */
 export const appDraftFiles = sqliteTable(
   "app_draft_files",
@@ -1163,7 +1170,8 @@ export const appDraftFiles = sqliteTable(
 );
 
 /**
- * The undo points of each App's draft: one per agent turn that wrote it,
+ * Unused (as `appDrafts`), dropped in a later release: the undo points of
+ * each App's draft, now `draft_checkpoints`. One per agent turn that wrote it,
  * kept as the turn left the draft, one per person's own edit, and one per
  * restore. `number` counts up from 1 per App in the order they landed;
  * `revision` is the draft's revision it made, `base` the version it is
@@ -1202,7 +1210,8 @@ export const appDraftPoints = sqliteTable(
 );
 
 /**
- * What an undo point (`appDraftPoints`) changes over its base: each
+ * Unused (as `appDrafts`), dropped in a later release, now
+ * `draft_checkpoint_files`: what an undo point (`appDraftPoints`) changes over its base: each
  * path's content by its SHA-256 (`appDraftContents`), or null to delete
  * the file, a row each.
  */
@@ -1221,8 +1230,8 @@ export const appDraftPointFiles = sqliteTable(
 );
 
 /**
- * The contents an App's undo points name, each once, by its SHA-256: most
- * writes change a file or two, so the points share the rest.
+ * Unused (as `appDrafts`), dropped in a later release, now `draft_blobs`:
+ * the contents an App's undo points name, each once, by its SHA-256.
  */
 export const appDraftContents = sqliteTable(
   "app_draft_contents",
@@ -1234,6 +1243,140 @@ export const appDraftContents = sqliteTable(
     content: text().notNull(),
   },
   (table) => [primaryKey({ columns: [table.appId, table.sha256] })]
+);
+
+/**
+ * The draft of each App and workflow (src/drafts.ts), keyed by its
+ * subject (`subject_kind`, `subject_id`): the one every builder of it and
+ * their chats' agents write, over the version it began from (`base`, null
+ * for one with none). Each write is the next `revision`, and lands only
+ * over the revision it read, so of two writes made from the same read the
+ * second is refused. A draft whose changes are all gone (published or
+ * discarded) keeps its row and its revision. A workflow's draft is one
+ * file, `workflow.json`.
+ */
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    base: integer(),
+    revision: integer().notNull(),
+    /**
+     * An App draft's own definition, as its text (`definitionText`), next
+     * to its changed files: what the definition tools change. Null while
+     * it is its base's, and always for a workflow.
+     */
+    definition: text(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /** Who wrote it last: the person, themselves or through their chat's agent. */
+    updatedBy: text("updated_by").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subjectKind, table.subjectId] })]
+);
+
+/**
+ * A draft's changes (`drafts`): a file's new content by path, or null to
+ * delete it, a row each, so no row holds more than one file.
+ */
+export const draftFiles = sqliteTable(
+  "draft_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    path: text().notNull(),
+    content: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.path],
+    }),
+  ]
+);
+
+/**
+ * The checkpoints of each draft: one per agent turn that wrote it, kept
+ * as the turn left the draft, one per person's own edit, and one per
+ * restore, discard, publish and roll back. `number` counts up from 1 per
+ * subject in the order they landed; `revision` is the draft's revision
+ * it made, `base` the version it is over, `definition` its own definition
+ * (as `drafts.definition`), and `content_hash` the SHA-256 of what it
+ * holds (the canonical JSON of `base`, each path's content hash and its
+ * definition). Who wrote it: `person_id`, through the agent of chat
+ * `chat_id` in turn `turn_id` (its last write in the code step
+ * `call_id`), or themselves, restoring checkpoint `restored_from`. The
+ * draft's own rows hold only the latest; these hold every one, to list,
+ * preview and restore, and to say what a chat worked on.
+ */
+export const draftCheckpoints = sqliteTable(
+  "draft_checkpoints",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    definition: text(),
+    contentHash: text("content_hash").notNull(),
+    personId: text("person_id").notNull(),
+    chatId: text("chat_id"),
+    turnId: text("turn_id"),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number],
+    }),
+    // What a chat worked on, and what its turn wrote, without a scan.
+    index("draft_checkpoints_chat").on(table.chatId, table.turnId),
+  ]
+);
+
+/**
+ * What a checkpoint (`draftCheckpoints`) changes over its base: each
+ * path's content by its SHA-256 (`draftBlobs`), or null to delete the
+ * file, a row each.
+ */
+export const draftCheckpointFiles = sqliteTable(
+  "draft_checkpoint_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number, table.path],
+    }),
+    index("draft_checkpoint_files_content").on(
+      table.subjectKind,
+      table.subjectId,
+      table.sha256
+    ),
+  ]
+);
+
+/**
+ * The contents a subject's checkpoints name, each once, by its SHA-256:
+ * most writes change a file or two, so the checkpoints share the rest.
+ */
+export const draftBlobs = sqliteTable(
+  "draft_blobs",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.sha256],
+    }),
+  ]
 );
 
 /**
@@ -4128,7 +4271,19 @@ export const workflowResourceVersions = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     version: integer().notNull(),
+    /**
+     * Read by nothing: `contract_version` holds the same. Written in step
+     * with it, as the release before reads it and its unique index keeps
+     * a semantic version naming one content; dropped in a later release
+     * (expand, then contract).
+     */
     definitionVersion: text("definition_version").notNull(),
+    /**
+     * The semantic version publication gives the version's contract (its
+     * catalog key's), unique per workflow. Migration 0245 filled it from
+     * `definition_version` for the versions before it.
+     */
+    contractVersion: text("contract_version").notNull().default(""),
     definition: text().notNull(),
     definitionJsonHash: text("definition_json_hash").notNull(),
     profileVersion: text("profile_version").notNull(),
@@ -4150,12 +4305,30 @@ export const workflowResourceVersions = sqliteTable(
      * before seals, which this release refuses, to publish again.
      */
     sealId: text("seal_id"),
+    /**
+     * What people call it, `YY.MM.N`, as an App's version
+     * (`app_versions.label`): given in the batch that first makes it live
+     * (src/workflow-publish.ts) and kept when a roll back makes it live
+     * again. Null for a version never live.
+     */
+    label: text(),
+    /**
+     * Where publishing left the version: `published` once it was checked,
+     * built and stored, which is when its row is written; `failed` is an
+     * App's alone for now (`app_versions.status`). Null for a version an
+     * earlier release wrote.
+     */
+    status: text({ enum: ["published", "failed"] }),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.version] }),
     uniqueIndex("workflow_resource_versions_definition_version").on(
       table.workflowResourceId,
       table.definitionVersion
+    ),
+    uniqueIndex("workflow_resource_versions_label").on(
+      table.workflowResourceId,
+      table.label
     ),
   ]
 );
@@ -5251,8 +5424,12 @@ export const workflowStateSnapshots = sqliteTable("workflow_state_snapshots", {
 });
 
 /**
+ * Unused since a workflow's draft is in `drafts` (src/drafts.ts): nothing
+ * reads or writes it. Kept while a release that writes it may serve or be
+ * rolled back to (expand, then contract); dropped in a later release.
+ *
  * The draft of each independent workflow's next definition, as its
- * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
+ * builders edited it: one row per accepted edit,
  * `revision` counting them from 1. An edit names the revision it read and
  * inserts the next one, so of two concurrent edits the second is refused
  * and the first stays. `source` is the text as edited, JSON or not;
@@ -5323,13 +5500,14 @@ export const workflowResourceDraftInspections = sqliteTable(
 );
 
 /**
- * Where each independent workflow is in its life (src/workflow-lifecycle.ts):
- * one row, once something about it was set, moved on by every write
- * (`revision`), each write only over the revision it read. `stage` is the
- * stage a builder set; null follows the workflow (drafted, published,
- * live). `live_version` is the version that went live last, through an
- * approval of `go_live_version` by someone other than who asked for it.
- * While `paused_at` is set it starts no runs (workflow-starts.ts).
+ * Whether each independent workflow is paused (src/workflow-lifecycle.ts):
+ * one row, once it was paused, moved on by every write (`revision`), each
+ * write only over the revision it read. While `paused_at` is set it
+ * starts no runs (workflow-starts.ts). Its stage and go-live columns are
+ * unused since a workflow's live version is its current one, made live
+ * by a publish (src/workflow-publish.ts): nothing reads or writes them;
+ * kept while a release that writes them may serve or be rolled back to
+ * (expand, then contract), and dropped in a later release.
  */
 export const workflowResourceLifecycles = sqliteTable(
   "workflow_resource_lifecycles",
@@ -5361,11 +5539,11 @@ export const workflowResourceLifecycles = sqliteTable(
 );
 
 /**
- * Which exact version of an independent workflow each App binds, by an
- * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
- * version and grants nothing: starting it still takes the App's own
+ * Which independent workflow each App binds, by an alias of the App's
+ * (src/app-workflow-bindings.ts), whose live version its starts run. A
+ * binding grants nothing: starting it still takes the App's own
  * `start` permission. At most one active binding per App and alias;
- * moving to another version is a new binding. Removed ones stay.
+ * binding another workflow is a new binding. Removed ones stay.
  */
 export const appWorkflowBindings = sqliteTable(
   "app_workflow_bindings",
@@ -5378,6 +5556,11 @@ export const appWorkflowBindings = sqliteTable(
     workflowResourceId: text("workflow_resource_id")
       .notNull()
       .references(() => workflowResources.id),
+    /**
+     * The version it was made at, whose contract was checked against the
+     * App's declaration. A binding follows its workflow's live version
+     * (src/app-workflow-bindings.ts): starts never run this one for it.
+     */
     workflowResourceVersion: integer("workflow_resource_version").notNull(),
     status: text({ enum: ["active", "removed"] }).notNull(),
     boundBy: text("bound_by").notNull(),

@@ -94,8 +94,8 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   release that pinned nothing reads no run's history, nor one whose
 //   alias the App has since bound to another workflow: as `runs` lists
 //   the binding's runs, history is read only while the binding names the
-//   pinned workflow. A version rebound without a seal leaves its new
-//   runs' history unread until the next seal pins it.
+//   pinned workflow. Each run's history is read from its own version's
+//   sealed build.
 // - What a history tells: metadata only, from the engine's journal
 //   (workflows/history.ts), which holds no input, output or payload. A
 //   failure's message, the workflow's own text, never leaves: a code the
@@ -104,7 +104,7 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   only by an ID the version's sealed build declares.
 // - A run offered as followable that a page can't follow: a row's
 //   `canWatch` is true only for a run the reference's `useWorkflow` would
-//   show now (page-workflows.ts): of the version the release pins, while
+//   show now (page-workflows.ts): of the workflow the release pins, while
 //   the binding names it, started by an App version declaring the same
 //   contract, and a returned restricted run only through an App that is
 //   restricted itself. It tells nothing past the row: the caller already
@@ -359,18 +359,11 @@ const followable = async (
   rows: readonly RunsRow[]
 ): Promise<ReadonlySet<string>> => {
   const { pinned } = query;
-  if (
-    pinned === undefined ||
-    binding.workflowId !== pinned.workflowId ||
-    binding.version !== pinned.version
-  ) {
+  if (pinned === undefined || binding.workflowId !== pinned.workflowId) {
     return new Set();
   }
   const app = appIdSchema.parse(caller.app);
-  const candidates = rows.filter(
-    (row) =>
-      row.workflowId === pinned.workflowId && row.version === pinned.version
-  );
+  const candidates = rows.filter((row) => row.workflowId === pinned.workflowId);
   const origins = await followableOrigins(
     env,
     app,
@@ -613,6 +606,7 @@ const historyRunOf = async (
   const row = await drizzle(env.DB)
     .select({
       id: workflowResourceRuns.id,
+      version: workflowResourceRuns.version,
       manifestHash: workflowResourceRuns.manifestHash,
       endedAt: workflowResourceRuns.endedAt,
       // The retention sweep marks a run's receipt (resource-runs.ts).
@@ -627,7 +621,6 @@ const historyRunOf = async (
       and(
         eq(workflowResourceRuns.id, runId),
         eq(workflowResourceRuns.workflowResourceId, pinned.workflowId),
-        eq(workflowResourceRuns.version, pinned.version),
         eq(workflowResourceRuns.principalId, caller.userId),
         eq(workflowStartReceipts.invokerType, "app"),
         eq(workflowStartReceipts.invokerId, caller.app),
@@ -802,7 +795,13 @@ const historyPage = async (
   if (detailsRemoved(run) || query.pinned === undefined) {
     return nothing;
   }
-  const declared = await declaredTasks(env, query.pinned, run.manifestHash);
+  // The run's own version's build: a binding follows the workflow's live
+  // version, and a run keeps the one it started on.
+  const declared = await declaredTasks(
+    env,
+    { workflowId: query.pinned.workflowId, version: run.version },
+    run.manifestHash
+  );
   if (declared === undefined) {
     return nothing;
   }
@@ -848,9 +847,7 @@ const pinnedBound = (
   binding: WorkflowPin
 ): WorkflowPin | undefined => {
   const { pinned } = query;
-  return pinned !== undefined &&
-    binding.workflowId === pinned.workflowId &&
-    binding.version === pinned.version
+  return pinned !== undefined && binding.workflowId === pinned.workflowId
     ? pinned
     : undefined;
 };
@@ -934,7 +931,6 @@ const decisionScope = (
     // Staff answer no client's decision (decisions.ts), members or not.
     ...(caller.staff === true ? [sql`0`] : []),
     eq(workflowResourceRuns.workflowResourceId, pinned.workflowId),
-    eq(workflowResourceRuns.version, pinned.version),
     eq(workflowStartReceipts.invokerType, "app"),
     eq(workflowStartReceipts.invokerId, caller.app),
     answerableByNow(db, caller.userId),
@@ -1076,13 +1072,22 @@ const decisionsPage = async (
     // of one read (`cutPage`).
     .limit(until === undefined ? options.size + 1 : queryMaxScannedEntries + 1);
   const shown = until === undefined ? rows.slice(0, options.size) : rows;
-  // One build a manifest: the pinned version's runs share it.
-  const manifests = [...new Set(shown.map((row) => row.manifestHash))];
+  // One build a manifest: the runs of one version share it.
+  const manifests = new Map(
+    shown.map((row) => [row.manifestHash, row.version] as const)
+  );
   const builds = new Map(
     await Promise.all(
-      manifests.map(
-        async (hash) =>
-          [hash, await decisionTasksOf(env, pinned, hash)] as const
+      [...manifests].map(
+        async ([hash, version]) =>
+          [
+            hash,
+            await decisionTasksOf(
+              env,
+              { workflowId: pinned.workflowId, version },
+              hash
+            ),
+          ] as const
       )
     )
   );
@@ -1155,7 +1160,11 @@ const decisionDetail = async (
       ? undefined
       : keyOf(
           row,
-          await decisionTasksOf(env, pinned, row.manifestHash),
+          await decisionTasksOf(
+            env,
+            { workflowId: pinned.workflowId, version: row.version },
+            row.manifestHash
+          ),
           query.decisionKeys
         );
   if (row === undefined || named === undefined) {

@@ -65,7 +65,7 @@ describe("an App's own workflows", () => {
         )
       ),
     ]);
-    const versions = await builder.api.apps.versions.list(app);
+    const versions = await builder.api.versions.list({ kind: "app", id: app });
 
     expect({
       refused: refused.map((error) => ({
@@ -115,7 +115,10 @@ describe("an App's own workflows", () => {
         })
       );
       const after = await builder.api.apps.list();
-      const versions = await builder.api.apps.versions.list(copy.id);
+      const versions = await builder.api.versions.list({
+        kind: "app",
+        id: copy.id,
+      });
       expect({
         refused: [created, updated].map((error) => ({
           code: appErrors.codeOf(error),

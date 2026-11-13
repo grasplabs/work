@@ -66,7 +66,7 @@ const surfacedApp = async (name = "Notes") => {
     surfacedFiles(),
     "First"
   );
-  await builder.api.apps.versions.publish(id, version);
+  await builder.api.versions.rollback({ kind: "app", id }, version);
   return { app: id, builder, admin, version };
 };
 
@@ -81,7 +81,7 @@ describe("an App's surfaces", () => {
       notesFiles,
       "First"
     );
-    await builder.api.apps.versions.publish(plain, version);
+    await builder.api.versions.rollback({ kind: "app", id: plain }, version);
     // Another of theirs whose sealed release no longer passes its checks:
     // it drops out of the sidebar, the others' entries stay.
     const { id: broken } = await builder.api.apps.create({ name: "Broken" });
@@ -91,7 +91,10 @@ describe("an App's surfaces", () => {
       surfacedFiles(),
       "First"
     );
-    await builder.api.apps.versions.publish(broken, second.version);
+    await builder.api.versions.rollback(
+      { kind: "app", id: broken },
+      second.version
+    );
     await env.DB.prepare(
       "UPDATE sdk_release_manifests SET manifest = manifest || ' ' WHERE app_id = ?"
     )
@@ -159,7 +162,7 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
       }),
       "First"
     );
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
 
     expect({
       files: Object.keys(await builder.api.apps.files.read(app)).filter(
@@ -247,7 +250,10 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
       }),
       "First"
     );
-    await builder.api.apps.versions.publish(unreadable, version);
+    await builder.api.versions.rollback(
+      { kind: "app", id: unreadable },
+      version
+    );
     // Its sealed surfaces no longer read back: one App's, never the
     // listing's, failure.
     const row = await env.DB.prepare(

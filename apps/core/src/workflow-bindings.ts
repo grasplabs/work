@@ -59,11 +59,13 @@ import { sourcedTypesOf } from "./workflows/event-waits.ts";
 //   it stops the next start.
 // - An approval serving more than was reviewed: a row pins the alias's
 //   declaration in the version the admin reviewed (its kind, contract key
-//   and fingerprint) and serves that version alone. A version a builder
-//   publishes later, declaring the alias the same, is code nobody reviewed
-//   with that target (it could send what the connector reads anywhere),
-//   and so is one published before: each needs its own approval. A start
-//   requires the approval of its exact version as it is admitted.
+//   and fingerprint) and serves that version. A version made live after
+//   it takes the live version's approvals of the bindings it declares
+//   exactly alike, in the batch that makes it live (workflow-publish.ts):
+//   it reaches nothing the live version couldn't, through the target the
+//   admin chose. A binding it declares anew, or otherwise, needs an
+//   approval of its own. A start requires an approval of its exact
+//   version as it is admitted.
 // - A target that can't serve its contract, now or later: one function
 //   answers whether it can (`requireTargetServes`), at approval and again
 //   each time a start freezes its bindings (workflow-starts.ts), so an

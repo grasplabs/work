@@ -100,10 +100,10 @@ const callsOn = async ({ api }: Person, app: string) => ({
   commit: await outcome(
     commitApp(api.apps.files, app, { "notes.md": "# Mine\n" }, "Mine")
   ),
-  versions: await outcome(api.apps.versions.list(app)),
-  version: await outcome(api.apps.versions.get(app, 1)),
-  diff: await outcome(api.apps.versions.diff(app, 1, 1)),
-  publish: await outcome(api.apps.versions.publish(app, 1)),
+  versions: await outcome(api.versions.list({ kind: "app", id: app })),
+  version: await outcome(api.versions.get({ kind: "app", id: app }, 1)),
+  diff: await outcome(api.versions.diff({ kind: "app", id: app }, 1, 1)),
+  publish: await outcome(api.versions.rollback({ kind: "app", id: app }, 1)),
   errors: await outcome(api.pages.errors(app)),
   permission: await outcome(
     api.permissions.request({
@@ -348,7 +348,7 @@ describe("App roles", { timeout: 60_000 }, () => {
       listedBy(owner),
       outcome(user.api.apps.contents(app)),
     ]);
-    await owner.api.apps.versions.publish(app, version);
+    await owner.api.versions.rollback({ kind: "app", id: app }, version);
     // A version committed after the live one doesn't count: its page
     // opens for nobody yet.
     await commitApp(
@@ -419,7 +419,7 @@ export const Route = createFileRoute("/later")({ component: Page });
       files,
       "Draft"
     );
-    await owner.api.apps.versions.publish(middle, version);
+    await owner.api.versions.rollback({ kind: "app", id: middle }, version);
     await owner.api.apps.update(middle, { process: "o2c" });
     // Published, then archived.
     await release(owner, newest, files);

@@ -6,6 +6,7 @@ import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type { PageBundle } from "./pages.ts";
 import type { Role } from "./roles.ts";
+import type { Subject, SubjectKind } from "./subject.ts";
 import type { ThinkingStep } from "./thinking.ts";
 import { uploadTypes } from "./uploads.ts";
 
@@ -59,21 +60,6 @@ export type ChatChannel = z.infer<typeof chatChannelSchema>;
 
 /** A chat's title: what the person, or their first question, named it. */
 /** The longest a chat's name may be. */
-/**
- * The kinds of thing a question may be about: the page it is asked on
- * (the web's chat-subject.ts), as an App's workspace is about the App and
- * a workflow's page about the workflow.
- */
-export const chatSubjectKinds = ["app", "workflow"] as const;
-export type ChatSubjectKind = (typeof chatSubjectKinds)[number];
-
-/** What a question is about: one thing of a kind, by its ID. */
-export const chatSubjectSchema = z.strictObject({
-  kind: z.enum(chatSubjectKinds),
-  id: z.string().min(1).max(256),
-});
-export type ChatSubject = z.infer<typeof chatSubjectSchema>;
-
 /**
  * The kinds of thing a question may mention: what the person picks with
  * `@` in the composer, an App, a workflow, a member of the organization,
@@ -248,13 +234,13 @@ export interface ChatFileInput {
 }
 
 /**
- * What a chat's agent worked on (`ChatsApi.worked`): an App whose draft
- * it wrote, when it last did, and in which code step or tool call
- * (`ChatCode.callId`, `ChatToolCall.callId`), where the chat's thread shows
- * it. Shaped to name a workflow too, once workflows have drafts.
+ * What a chat's agent worked on (`ChatsApi.worked`): an App or workflow
+ * whose draft it wrote, when it last did, and in which code step or tool
+ * call (`ChatCode.callId`, `ChatToolCall.callId`), where the chat's thread
+ * shows it.
  */
 export interface ChatWork {
-  kind: "app";
+  kind: SubjectKind;
   id: string;
   /** When the chat's agent last wrote it (ISO 8601). */
   updatedAt: string;
@@ -1148,7 +1134,7 @@ export interface ChatQuestion {
    * about the App. Core tells the agent, by name, with the question, so
    * "this" and "it" mean that; only one the person may change.
    */
-  subject?: ChatSubject;
+  subject?: Subject;
   /**
    * What the person picked with `@` as they wrote it, at most
    * {@link chatMentionsMax}, each once: core tells the agent each by name
@@ -1260,7 +1246,7 @@ export interface ChatsApi {
   build: (chatId: string, build: ChatBuild) => Promise<ChatBuilt>;
   /**
    * What the chat's agent worked on, the most recently written first: each
-   * App whose draft it wrote (`ChatWork`).
+   * App or workflow whose draft it wrote (`ChatWork`).
    */
   worked: (chatId: string) => Promise<ChatWork[]>;
   /**

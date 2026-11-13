@@ -294,6 +294,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "DATA_STORES",
   "DB",
   "DEV_SKIP_ROUTER_SECRET",
+  // Who follows an App's or workflow's draft (core's src/draft-watch.ts).
+  "DRAFT_WATCHES",
   "DURABLE_OBJECT_JURISDICTION",
   "EMAIL",
   // Our own embedding model's objects (core's src/embedder.ts).

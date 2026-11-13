@@ -74,10 +74,14 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   person bound when it was created (`principal_binding`): whoever created
 //   it, never the workflow's owner, and only while they are still in the
 //   organization.
-// - A trigger following "latest". Each trigger version pins an exact,
-//   published workflow version; publishing a new workflow version changes
-//   no trigger. Moving a trigger to another version is a new trigger
-//   version, audited, of the same workflow only.
+// - A trigger starting a version nobody made live. Each trigger version
+//   pins an exact, published workflow version. Publishing or rolling back
+//   the workflow moves each enabled trigger onto the version it makes
+//   live, as a new trigger version in the batch that makes it live
+//   (`triggersMovedTo`), audited with it; a disabled one stays where it
+//   was until its owner moves it. Moving a trigger by hand is a new
+//   trigger version too, audited, of the same workflow only. A run keeps
+//   the version it started on.
 // - Creating a trigger grants it something. Nothing: its creator must
 //   build the workflow, and its starts still need a permission an admin
 //   grants, naming the workflow it pins. Creating it only asks for that.
@@ -733,6 +737,111 @@ export const updateTriggerVersion = async (
     ),
   ]);
   return { ...trigger, version: next, workflowVersion: target };
+};
+
+/**
+ * What moves every enabled trigger of workflow `workflowId` onto its
+ * version `version`, as that version goes live (workflow-publish.ts): a
+ * new trigger version each, pinning it, its configuration and principal
+ * as they were, written by the statements answered, each only while
+ * `live` (SQL) holds, in the batch that makes the version live. A
+ * schedule trigger's input must be one the version takes
+ * (`workflow.resource_invalid` otherwise, before anything is written); it
+ * goes on from its next occurrence. A trigger already pinning the
+ * version, as after a try of the batch whose answer was lost, isn't moved
+ * again. Answers how many it moves.
+ */
+export const triggersMovedTo = async (
+  env: Env,
+  workflowId: string,
+  version: number,
+  live: SQL,
+  at: Date
+) => {
+  const db = drizzle(env.DB);
+  const moving = await db
+    .select({
+      id: triggerResources.id,
+      scheduleInput: triggerResourceVersions.scheduleInput,
+    })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .where(
+      and(
+        isNull(triggerResources.deletedAt),
+        eq(triggerResources.enabled, true),
+        eq(triggerResourceVersions.workflowResourceId, workflowId),
+        sql`${triggerResourceVersions.workflowResourceVersion} IS NOT ${version}`
+      )
+    )
+    .all();
+  for (const { scheduleInput } of moving) {
+    if (scheduleInput !== null) {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      await scheduleInputFor(
+        env,
+        workflowId,
+        version,
+        JSON.parse(scheduleInput)
+      );
+    }
+  }
+  const ids = JSON.stringify(moving.map(({ id }) => id));
+  const moved = sql`trigger_resources.id IN (SELECT value FROM json_each(${ids}))`;
+  return {
+    count: moving.length,
+    statements:
+      moving.length === 0
+        ? []
+        : [
+            // In the table's column order.
+            db.insert(triggerResourceVersions).select(
+              sql`SELECT current.trigger_id, current.version + 1,
+                current.workflow_resource_id, ${version}, current.config_hash,
+                current.principal_binding, ${at.getTime()}, current.event_contract,
+                current.event_type, current.schedule_cron,
+                current.schedule_time_zone, current.schedule_input,
+                current.connection_id, current.connection_resource,
+                current.input_mapping, current.event_source_id
+              FROM trigger_resources
+              JOIN trigger_resource_versions AS current
+                ON current.trigger_id = trigger_resources.id
+                AND current.version = trigger_resources.current_version
+              WHERE ${moved} AND trigger_resources.deleted_at IS NULL
+                AND trigger_resources.enabled = 1
+                AND current.workflow_resource_id = ${workflowId}
+                AND current.workflow_resource_version IS NOT ${version}
+                AND ${live}`
+            ),
+            db
+              .update(triggerResources)
+              .set({
+                currentVersion: sql`${triggerResources.currentVersion} + 1`,
+              })
+              .where(
+                sql`${moved} AND EXISTS (SELECT 1 FROM trigger_resource_versions AS next
+                  WHERE next.trigger_id = trigger_resources.id
+                    AND next.version = trigger_resources.current_version + 1)`
+              ),
+            // A schedule follows its trigger's version, from the
+            // occurrence it is at.
+            db
+              .update(triggerSchedules)
+              .set({
+                version: sql`(SELECT current_version FROM trigger_resources
+                  WHERE trigger_resources.id = trigger_schedules.trigger_id)`,
+              })
+              .where(
+                sql`${triggerSchedules.triggerId} IN (SELECT value FROM json_each(${ids}))`
+              ),
+          ],
+  };
 };
 
 /**

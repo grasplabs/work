@@ -3,12 +3,10 @@ import { descriptorFromText, jsonSchemaOf } from "@grasp-os/runtime/host";
 import type { JsonSchema } from "@grasp-os/runtime/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { workflowResourceLifecycles } from "./db/core/schema.ts";
 import { requireWorkflowRole, versionContract } from "./workflow-resources.ts";
 import { organizationPeopleAndTeams } from "./workflow-share-candidates.ts";
 
@@ -73,12 +71,7 @@ export const workflowStartForm = async (
   id: unknown
 ): Promise<WorkflowStartForm> => {
   const workflow = await requireWorkflowRole(env, by, id, "user");
-  const lifecycle = await drizzle(env.DB)
-    .select({ live: workflowResourceLifecycles.liveVersion })
-    .from(workflowResourceLifecycles)
-    .where(eq(workflowResourceLifecycles.workflowResourceId, workflow.id))
-    .get();
-  const version = lifecycle?.live ?? workflow.currentVersion;
+  const version = workflow.currentVersion;
   if (version === null) {
     return { version: null, args: null, people: null };
   }

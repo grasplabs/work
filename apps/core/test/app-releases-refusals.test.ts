@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
 import {
   commitDraft,
@@ -14,6 +14,7 @@ import {
 } from "../src/apps.ts";
 import { deleteStore, openStore } from "../src/data-stores.ts";
 import { buildAppCode } from "../src/pages.ts";
+import { rollback } from "../src/publish.ts";
 import {
   changesOf,
   definitionOf,
@@ -181,7 +182,7 @@ JSON.stringify = (value, ...rest) => {
 
   it("binds its own App's store alone: another App's seal, by a builder of both, never reaches it", async () => {
     const first = await appWith(notesFiles());
-    await publishVersion(env, first.owner, first.app, 1);
+    await rollback(env, appPublishing, first.owner, first.app, 1);
     const second = await appWith(withTable("beta"), "Beta", first.owner);
     const sealed = await seal(second);
     const opened = await openStore(env, first.store);
@@ -217,7 +218,7 @@ JSON.stringify = (value, ...rest) => {
   it("keeps its store from being deleted while any release kept binds it, and lets it go once retention removed them", async () => {
     const fixture = await appWith(notesFiles());
     await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
     const current = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
@@ -236,7 +237,7 @@ JSON.stringify = (value, ...rest) => {
       "Two"
     );
     await seal(fixture, 2);
-    await publishVersion(env, fixture.owner, fixture.app, 2);
+    await rollback(env, appPublishing, fixture.owner, fixture.app, 2);
     const retained = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
@@ -365,7 +366,7 @@ export const reach = action({
       )
       // Its schema generated from its definition again: the version it
       // would commit is the one it is over.
-    ).resolves.toBe("app.draft_empty");
+    ).resolves.toBe("draft.empty");
   });
 
   it("can't keep anything but server code under server/: each is refused by name", async () => {

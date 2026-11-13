@@ -1,21 +1,24 @@
 import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type { DiagramScope } from "@grasp-os/shared/workflow-diagrams";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Acting } from "../src/auth/identity.ts";
+import { publish } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   editWorkflowDraft,
   editWorkflowStep,
-  publishWorkflowDraft,
   workflowDraft,
-} from "../src/workflow-drafts.ts";
+} from "../src/workflow-editor.ts";
+import {
+  publishWorkflowVersion,
+  workflowPublishing,
+} from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";
@@ -23,13 +26,14 @@ import { allEvents } from "./audit-events.ts";
 import { person as identityOf } from "./sealed-run-harness.ts";
 import { outcome, unique } from "./sign-in.ts";
 
-// A workflow's draft (workflow-drafts.ts), from its threat model: two
-// edits at once never both land, text that doesn't pass is kept but never
-// becomes a checkpoint or a version, only builders read it, and it keeps
-// only what it needs. Each test makes its own people and workflows.
+// A workflow's draft as its editor writes it (workflow-editor.ts, on
+// drafts.ts), from its threat model: two edits at once never both land,
+// text that doesn't pass is kept but never drawn or published, only
+// builders read it, and it goes with its workflow. Each test makes its own
+// people and workflows.
 
 /** A member of the organization in `role`, as their session has them. */
-const person = async (role: Role, staff = false): Promise<Acting> => {
+const person = async (role: Role, staff = false): Promise<Identity> => {
   const userId = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(
@@ -42,7 +46,15 @@ const person = async (role: Role, staff = false): Promise<Acting> => {
       "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
     ).bind(crypto.randomUUID(), userId, role, Date.now()),
   ]);
-  return { userId, role, teams: [], staff };
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Person",
+    role,
+    teams: [],
+    staff,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
 };
 
 const objectSchema = (fields: Record<string, unknown>) => ({
@@ -71,17 +83,21 @@ const waitStep = (id: string, more: Record<string, unknown> = {}) => ({
   ...more,
 });
 
-/** How many revisions of workflow `id`'s draft are stored. */
-const storedRevisions = async (id: string): Promise<number[]> => {
-  const { results } = await env.DB.prepare(
-    "SELECT revision FROM workflow_resource_drafts WHERE workflow_resource_id = ? ORDER BY revision"
+/** How many checkpoints of workflow `id`'s draft are stored. */
+const storedCheckpoints = async (id: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM draft_checkpoints WHERE subject_kind = 'workflow' AND subject_id = ?"
   )
     .bind(id)
-    .all<{ revision: number }>();
-  return results.map(({ revision }) => revision);
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 };
 
-const workflowOf = async (by: Acting) =>
+/** Publishes workflow `id`'s draft at `revision`, as its builder `by` does. */
+const publishAt = async (by: Identity, id: string, revision: number) =>
+  await publish(env, workflowPublishing, by, id, revision, "Published");
+
+const workflowOf = async (by: Identity) =>
   await createWorkflowResource(env, by, `draft-${unique()}`);
 
 /** Scopes as the drawing reads them, with the scopes their tasks hold. */
@@ -99,49 +115,30 @@ const drawn = (
   }));
 
 describe("a workflow's draft", () => {
-  it("starts from a definition that passes, and publishes its checkpoint as the next version", async () => {
+  it("starts from a definition that passes, and publishes as the next version", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     const started = await workflowDraft(env, ada, workflow.id);
-    expect(started).toMatchObject({
-      revision: 0,
-      problems: [],
-      checkpoint: null,
-    });
+    expect(started).toMatchObject({ revision: 0, problems: [] });
 
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source: started.source,
     });
-    expect(saved).toMatchObject({
-      revision: 1,
-      problems: [],
-      checkpoint: { revision: 1, source: started.source },
-      editedBy: ada.userId,
-    });
-    const version = await publishWorkflowDraft(env, ada, workflow.id, {
-      revision: 1,
-      basedOn: null,
-    });
-    expect(version).toMatchObject({ version: 1 });
-    // Once published, a later edit builds on that version.
-    const next = definitionOf({ status: "later" });
+    expect(saved).toMatchObject({ revision: 1, problems: [] });
+    const first = await publishAt(ada, workflow.id, 1);
+    expect(first).toMatchObject({ version: 1 });
+    // Once published, the draft is over that version: a later edit builds
+    // on it, and publishes only at the revision it was read at.
+    const after = await workflowDraft(env, ada, workflow.id);
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 1,
-      source: next,
+      revision: after.revision,
+      source: definitionOf({ status: "later" }),
     });
     await expect(
-      outcome(
-        publishWorkflowDraft(env, ada, workflow.id, {
-          revision: 2,
-          basedOn: null,
-        })
-      )
-    ).resolves.toBe("workflow.version_conflict");
-    await publishWorkflowDraft(env, ada, workflow.id, {
-      revision: 2,
-      basedOn: 1,
-    });
+      outcome(publishAt(ada, workflow.id, after.revision))
+    ).resolves.toBe("draft.conflict");
+    await publishAt(ada, workflow.id, after.revision + 1);
     await expect(workflowVersions(env, ada, workflow.id)).resolves.toHaveLength(
       2
     );
@@ -158,7 +155,7 @@ describe("a workflow's draft", () => {
     await expect(workflowDraft(env, ada, workflow.id)).resolves.toMatchObject({
       revision: 0,
       source: definition,
-      checkpoint: { revision: 0, source: definition },
+      problems: [],
     });
   });
 
@@ -176,21 +173,18 @@ describe("a workflow's draft", () => {
     const outcomes = await Promise.all([
       outcome(
         editWorkflowDraft(env, ada, workflow.id, {
-          expectedRevision: 0,
+          revision: 0,
           source: first,
         })
       ),
       outcome(
         editWorkflowDraft(env, bo, workflow.id, {
-          expectedRevision: 0,
+          revision: 0,
           source: second,
         })
       ),
     ]);
-    expect(outcomes.toSorted()).toStrictEqual([
-      "ok",
-      "workflow.draft_conflict",
-    ]);
+    expect(outcomes.toSorted()).toStrictEqual(["draft.conflict", "ok"]);
     const kept = await workflowDraft(env, ada, workflow.id);
     expect({
       revision: kept.revision,
@@ -200,32 +194,31 @@ describe("a workflow's draft", () => {
     await expect(
       outcome(
         editWorkflowDraft(env, bo, workflow.id, {
-          expectedRevision: 0,
+          revision: 0,
           source: second,
         })
       )
-    ).resolves.toBe("workflow.draft_conflict");
+    ).resolves.toBe("draft.conflict");
     await expect(
       outcome(
         editWorkflowDraft(env, bo, workflow.id, {
-          expectedRevision: 1,
+          revision: 1,
           source: second,
         })
       )
     ).resolves.toBe("ok");
-    // A stale edit is refused though the revision after the one it read
-    // is no longer stored: only the latest and the checkpoint are.
+    // A stale edit is refused, however far the draft moved since.
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 2,
+      revision: 2,
       source: "{",
     });
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 3,
+      revision: 3,
       source: "{ still",
     });
     const stale = await outcome(
       editWorkflowDraft(env, bo, workflow.id, {
-        expectedRevision: 2,
+        revision: 2,
         source: second,
       })
     );
@@ -235,7 +228,7 @@ describe("a workflow's draft", () => {
       revision: latest.revision,
       source: latest.source,
     }).toStrictEqual({
-      stale: "workflow.draft_conflict",
+      stale: "draft.conflict",
       revision: 4,
       source: "{ still",
     });
@@ -245,7 +238,7 @@ describe("a workflow's draft", () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source: definitionOf({
         steps: [
           {
@@ -268,7 +261,7 @@ describe("a workflow's draft", () => {
     });
     expect({
       problems: saved.problems,
-      scopes: drawn(saved.checkpoint?.diagram.tasks[0]?.scopes),
+      scopes: drawn(saved.diagram?.tasks[0]?.scopes),
     }).toStrictEqual({
       problems: [],
       scopes: [
@@ -296,64 +289,48 @@ describe("a workflow's draft", () => {
     });
   });
 
-  it("keeps text that doesn't pass with its problems, never as a checkpoint or a version", async () => {
+  it("keeps text that doesn't pass with its problems, never drawn or published", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     const good = definitionOf({ steps: [waitStep("finish")] });
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source: good,
     });
     const secret = `secret-${unique()}`;
     const invalid = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 1,
+      revision: 1,
       source: definitionOf({
         steps: [waitStep("finish", { unknown: secret })],
       }),
     });
     const incomplete = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 2,
+      revision: 2,
       source: good.slice(0, 40),
     });
     expect({
       invalid: invalid.problems.map(
         ({ code, pointer }) => `${code} ${pointer}`
       ),
-      invalidCheckpoint: invalid.checkpoint?.revision,
+      invalidDiagram: invalid.diagram,
       incomplete: incomplete.problems.map(({ code }) => code),
-      incompleteCheckpoint: incomplete.checkpoint?.revision,
-      // The diagram is the checkpoint's: the text that passed, never the
-      // latest edit's.
-      diagram: incomplete.checkpoint?.diagram.tasks.map(
-        ({ id, kind }) => `${id} ${kind}`
-      ),
+      incompleteDiagram: incomplete.diagram,
       leaked: JSON.stringify(invalid.problems).includes(secret),
     }).toStrictEqual({
       invalid: ["workflow.unknown_property /steps/0/unknown"],
-      invalidCheckpoint: 1,
+      invalidDiagram: null,
       incomplete: ["schema.invalid"],
-      incompleteCheckpoint: 1,
-      diagram: ["finish wait"],
+      incompleteDiagram: null,
       leaked: false,
     });
-    // Only the latest revision, once it passed, publishes: an earlier one
-    // conflicts, as an edit of it would.
-    await expect(
-      outcome(
-        publishWorkflowDraft(env, ada, workflow.id, {
-          revision: 3,
-          basedOn: null,
-        })
-      )
-    ).resolves.toBe("workflow.draft_unchecked");
-    await expect(
-      outcome(
-        publishWorkflowDraft(env, ada, workflow.id, {
-          revision: 1,
-          basedOn: null,
-        })
-      )
-    ).resolves.toBe("workflow.draft_conflict");
+    // Only the draft as it is publishes, and only once it passes: an
+    // earlier revision conflicts, as an edit of it would.
+    await expect(outcome(publishAt(ada, workflow.id, 3))).resolves.toBe(
+      "workflow.definition_invalid"
+    );
+    await expect(outcome(publishAt(ada, workflow.id, 1))).resolves.toBe(
+      "draft.conflict"
+    );
     await expect(workflowVersions(env, ada, workflow.id)).resolves.toHaveLength(
       0
     );
@@ -405,13 +382,13 @@ describe("a workflow's draft", () => {
       "args.count > (state.count ?? 3)"
     );
     const passed = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source: good,
     });
     // A state key reads its schema's type: a number is no string.
     const mistyped = typed("args.missing.x", 'state.count === "many"');
     const kept = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 1,
+      revision: 1,
       source: mistyped,
     });
     const published = await outcome(
@@ -427,7 +404,7 @@ describe("a workflow's draft", () => {
         pointer,
         at: /\(TS\d+, line \d+, column \d+\)$/u.exec(message)?.[0],
       })),
-      checkpoint: kept.checkpoint?.revision,
+      diagram: kept.diagram,
       // Not a value of the definition: the literal it compared with.
       leaked: JSON.stringify(kept.problems).includes("many"),
       published,
@@ -445,159 +422,10 @@ describe("a workflow's draft", () => {
           at: "(TS2339, line 1, column 6)",
         },
       ],
-      checkpoint: 1,
+      diagram: null,
       leaked: false,
       published: "workflow.definition_invalid",
     });
-  });
-
-  it("answers an edit with the revision it wrote and its checkpoint then, though another lands right after it", async () => {
-    const ada = await person("builder");
-    const workflow = await workflowOf(ada);
-    const passing = definitionOf({ status: "first" });
-    const theirs = definitionOf({ status: "theirs" });
-    await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
-      source: passing,
-    });
-    // Core's database, where another builder's edit that passes lands as
-    // soon as this one's batch has, keeping only itself as its checkpoint.
-    let raced = false;
-    const racing = new Proxy(env.DB, {
-      get: (target, property): unknown => {
-        if (property === "batch" && !raced) {
-          return async (statements: D1PreparedStatement[]) => {
-            raced = true;
-            const results = await target.batch(statements);
-            await target.batch([
-              target
-                .prepare(
-                  "INSERT INTO workflow_resource_drafts (workflow_resource_id, revision, source, checked, problems, edited_by, edited_at) VALUES (?, 3, ?, 1, '[]', ?, ?)"
-                )
-                .bind(workflow.id, theirs, ada.userId, Date.now()),
-              target
-                .prepare(
-                  "DELETE FROM workflow_resource_drafts WHERE workflow_resource_id = ? AND revision < 3"
-                )
-                .bind(workflow.id),
-            ]);
-            return results;
-          };
-        }
-        const value: unknown = Reflect.get(target, property);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    const saved = await editWorkflowDraft(
-      { ...env, DB: racing },
-      ada,
-      workflow.id,
-      { expectedRevision: 1, source: "{ mine, not yet" }
-    );
-    const latest = await workflowDraft(env, ada, workflow.id);
-    expect({
-      saved: [
-        saved.revision,
-        saved.source,
-        saved.checkpoint?.revision,
-        saved.checkpoint?.source,
-      ],
-      latest: [latest.revision, latest.source],
-    }).toStrictEqual({
-      saved: [2, "{ mine, not yet", 1, passing],
-      latest: [3, theirs],
-    });
-  });
-
-  it("reads its text and its checkpoint as one saved state, though an edit that passes lands between two reads", async () => {
-    const ada = await person("builder");
-    const workflow = await workflowOf(ada);
-    const passing = definitionOf({ status: "first" });
-    await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
-      source: passing,
-    });
-    await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 1,
-      source: "{ not yet",
-    });
-    // Core's database, where another builder's edit that passes lands as
-    // soon as a single read of the draft has run.
-    let landed = false;
-    const land = async (target: D1Database): Promise<void> => {
-      landed = true;
-      await target
-        .prepare(
-          "INSERT INTO workflow_resource_drafts (workflow_resource_id, revision, source, checked, problems, edited_by, edited_at) VALUES (?, 3, ?, 1, '[]', ?, ?)"
-        )
-        .bind(workflow.id, passing, ada.userId, Date.now())
-        .run();
-    };
-    const racing = new Proxy(env.DB, {
-      get: (target, property): unknown => {
-        // A batch's reads all see one state; the edit lands after it.
-        if (property === "batch" && !landed) {
-          return async (statements: D1PreparedStatement[]) => {
-            const results = await target.batch(statements);
-            await land(target);
-            return results;
-          };
-        }
-        if (property !== "prepare") {
-          const value: unknown = Reflect.get(target, property);
-          return typeof value === "function" ? value.bind(target) : value;
-        }
-        return (query: string) => {
-          const statement = target.prepare(query);
-          if (landed || !query.includes("workflow_resource_drafts")) {
-            return statement;
-          }
-          const ran = (bound: D1PreparedStatement): D1PreparedStatement =>
-            new Proxy(bound, {
-              get: (inner, name): unknown => {
-                const value: unknown = Reflect.get(inner, name);
-                if (typeof value !== "function") {
-                  return value;
-                }
-                if (name === "bind") {
-                  return (...values: unknown[]) => ran(inner.bind(...values));
-                }
-                if (["all", "first", "raw", "run"].includes(String(name))) {
-                  return async (...args: unknown[]) => {
-                    const result: unknown = await Reflect.apply(
-                      value,
-                      inner,
-                      args
-                    );
-                    await land(target);
-                    return result;
-                  };
-                }
-                return value.bind(inner);
-              },
-            });
-          return ran(statement);
-        };
-      },
-    });
-    const read = await workflowDraft({ ...env, DB: racing }, ada, workflow.id);
-    // The edit landed while it read, and it read one of the two states
-    // that were ever saved: before the edit, or after it.
-    const state = {
-      revision: read.revision,
-      checkpoint: read.checkpoint?.revision ?? null,
-    };
-    const saved = [
-      { revision: 2, checkpoint: 1 },
-      { revision: 3, checkpoint: 3 },
-    ];
-    expect({
-      landed,
-      saved: saved.some(
-        (one) =>
-          one.revision === state.revision && one.checkpoint === state.checkpoint
-      ),
-    }).toStrictEqual({ landed: true, saved: true });
   });
 
   it("finds a contract too large for a version, so a draft that passes publishes", async () => {
@@ -616,15 +444,15 @@ describe("a workflow's draft", () => {
       args: { kind: "object", fields: properties },
     });
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source,
     });
     expect({
       problems: saved.problems.map(({ code, pointer }) => `${code} ${pointer}`),
-      checkpoint: saved.checkpoint,
+      diagram: saved.diagram,
     }).toStrictEqual({
       problems: ["contract.too_large /args"],
-      checkpoint: null,
+      diagram: null,
     });
   });
 
@@ -635,7 +463,7 @@ describe("a workflow's draft", () => {
     await expect(
       outcome(
         editWorkflowDraft(env, ada, workflow.id, {
-          expectedRevision: 0,
+          revision: 0,
           source: "界".repeat(700_000),
         })
       )
@@ -654,7 +482,7 @@ describe("a workflow's draft", () => {
       },
     });
     const saved = await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source,
     });
     const read = await workflowDraft(env, ada, workflow.id);
@@ -682,18 +510,13 @@ describe("a workflow's draft", () => {
       role: "user",
     });
     const edit = {
-      expectedRevision: 0,
+      revision: 0,
       source: definitionOf(),
     };
     expect({
       read: await outcome(workflowDraft(env, user, workflow.id)),
       edit: await outcome(editWorkflowDraft(env, user, workflow.id, edit)),
-      publish: await outcome(
-        publishWorkflowDraft(env, user, workflow.id, {
-          revision: 1,
-          basedOn: null,
-        })
-      ),
+      publish: await outcome(publishAt(user, workflow.id, 0)),
       staff: await outcome(editWorkflowDraft(env, staff, workflow.id, edit)),
     }).toStrictEqual({
       read: "role.forbidden",
@@ -703,30 +526,30 @@ describe("a workflow's draft", () => {
     });
   });
 
-  it("keeps only its latest revision and its latest checkpoint, audits each edit, and goes with its workflow", async () => {
+  it("keeps each edit as a checkpoint, audits each, and goes with its workflow", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const good = definitionOf();
-    for (const [revision, source] of [good, good, "{", "{ not yet"].entries()) {
+    for (const [revision, source] of [
+      definitionOf(),
+      definitionOf({ status: "again" }),
+      "{",
+      "{ not yet",
+    ].entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one edit after the other
-      await editWorkflowDraft(env, ada, workflow.id, {
-        expectedRevision: revision,
-        source,
-      });
+      await editWorkflowDraft(env, ada, workflow.id, { revision, source });
     }
-    const kept = await storedRevisions(workflow.id);
+    const kept = await storedCheckpoints(workflow.id);
     const events = await allEvents();
     const audited = events.filter(
       (event) =>
-        event.action === "workflow.draft.edited" &&
-        event.target?.id === workflow.id
+        event.action === "draft.saved" && event.target?.id === workflow.id
     );
     expect({ kept, audited: audited.length }).toStrictEqual({
-      kept: [2, 4],
+      kept: 4,
       audited: 4,
     });
     await deleteWorkflowResource(env, ada, workflow.id);
-    await expect(storedRevisions(workflow.id)).resolves.toStrictEqual([]);
+    await expect(storedCheckpoints(workflow.id)).resolves.toBe(0);
   });
 });
 
@@ -756,7 +579,7 @@ describe("a step edited on the canvas", () => {
       basedOn: null,
     });
     const inserted = await editWorkflowStep(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       edit: {
         kind: "insert",
         list: "/steps",
@@ -766,7 +589,7 @@ describe("a step edited on the canvas", () => {
       },
     });
     const otherwise = await editWorkflowStep(env, ada, workflow.id, {
-      expectedRevision: 1,
+      revision: 1,
       edit: {
         kind: "insert",
         list: "/steps/1/else",
@@ -776,7 +599,7 @@ describe("a step edited on the canvas", () => {
       },
     });
     const changed = await editWorkflowStep(env, ada, workflow.id, {
-      expectedRevision: 2,
+      revision: 2,
       edit: {
         kind: "change",
         pointer: "/steps/1/then/0",
@@ -789,7 +612,7 @@ describe("a step edited on the canvas", () => {
     const audited = events
       .filter(
         ({ action, target }) =>
-          action === "workflow.draft.edited" && target?.id === workflow.id
+          action === "draft.saved" && target?.id === workflow.id
       )
       .map(({ detail }) => detail);
 
@@ -797,15 +620,15 @@ describe("a step edited on the canvas", () => {
       inserted: {
         revision: inserted.revision,
         problems: inserted.problems,
-        steps: inserted.checkpoint?.diagram.tasks.map(({ id }) => id),
+        steps: inserted.diagram?.tasks.map(({ id }) => id),
       },
-      otherwise: otherwise.checkpoint?.diagram.tasks[1]?.scopes.map(
+      otherwise: otherwise.diagram?.tasks[1]?.scopes.map(
         ({ kind, tasks }) => `${kind} ${tasks.map(({ id }) => id).join(",")}`
       ),
       changed: {
         revision: changed.revision,
         problems: changed.problems,
-        checkpoint: changed.checkpoint?.revision,
+        drawn: changed.diagram !== null,
       },
       steps:
         typeof source === "object" && source !== null && "steps" in source
@@ -819,7 +642,7 @@ describe("a step edited on the canvas", () => {
         steps: ["greet", "group", "finish"],
       },
       otherwise: ["then inner", "else elsewhere"],
-      changed: { revision: 3, problems: [], checkpoint: 3 },
+      changed: { revision: 3, problems: [], drawn: true },
       steps: [
         { id: "greet", type: "wait", for: "2 seconds" },
         {
@@ -837,21 +660,18 @@ describe("a step edited on the canvas", () => {
       audited: [
         {
           revision: 1,
-          checked: true,
           problems: 0,
           step: "insert",
           stepPointer: "/steps/0",
         },
         {
           revision: 2,
-          checked: true,
           problems: 0,
           step: "insert",
           stepPointer: "/steps/1/else/0",
         },
         {
           revision: 3,
-          checked: true,
           problems: 0,
           step: "change",
           stepPointer: "/steps/1/then/0",
@@ -860,15 +680,15 @@ describe("a step edited on the canvas", () => {
     });
   });
 
-  it("keeps a step the format refuses with its problems, never as a checkpoint", async () => {
+  it("keeps a step the format refuses with its problems, never drawn", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source: definitionOf({ steps: [waitStep("finish")] }),
     });
     const refused = await editWorkflowStep(env, ada, workflow.id, {
-      expectedRevision: 1,
+      revision: 1,
       edit: {
         kind: "change",
         pointer: "/steps/0",
@@ -879,8 +699,8 @@ describe("a step edited on the canvas", () => {
     expect({
       revision: refused.revision,
       problems: refused.problems.length > 0,
-      checkpoint: refused.checkpoint?.revision,
-    }).toStrictEqual({ revision: 2, problems: true, checkpoint: 1 });
+      diagram: refused.diagram,
+    }).toStrictEqual({ revision: 2, problems: true, diagram: null });
   });
 
   it("edits only a step or a list of steps, of the revision read, for the workflow's builders", async () => {
@@ -893,14 +713,14 @@ describe("a step edited on the canvas", () => {
       role: "user",
     });
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 0,
+      revision: 0,
       source: definitionOf({ steps: [waitStep("finish")] }),
     });
     const step = { type: "wait", for: "5 seconds" };
-    const change = async (pointer: string, expectedRevision = 1) => {
+    const change = async (pointer: string, revision = 1) => {
       const refused = await outcome(
         editWorkflowStep(env, ada, workflow.id, {
-          expectedRevision,
+          revision,
           edit: { kind: "change", pointer, step },
         })
       );
@@ -909,7 +729,7 @@ describe("a step edited on the canvas", () => {
     const insert = async (list: string, index = 0) => {
       const refused = await outcome(
         editWorkflowStep(env, ada, workflow.id, {
-          expectedRevision: 1,
+          revision: 1,
           edit: { kind: "insert", list, index, id: "added", step },
         })
       );
@@ -927,19 +747,19 @@ describe("a step edited on the canvas", () => {
       stale: await change("/steps/0", 0),
       user: await outcome(
         editWorkflowStep(env, reader, workflow.id, {
-          expectedRevision: 1,
+          revision: 1,
           edit: { kind: "change", pointer: "/steps/0", step },
         })
       ),
       invalid: await outcome(
         editWorkflowStep(env, ada, workflow.id, {
-          expectedRevision: 1,
+          revision: 1,
           edit: { kind: "rename", pointer: "/steps/0" },
         })
       ),
     };
     await editWorkflowDraft(env, ada, workflow.id, {
-      expectedRevision: 1,
+      revision: 1,
       source: "{ not yet",
     });
     const notJson = await change("/steps/0", 2);
@@ -947,7 +767,7 @@ describe("a step edited on the canvas", () => {
     expect({
       refusals,
       notJson,
-      kept: await storedRevisions(workflow.id),
+      kept: await storedCheckpoints(workflow.id),
     }).toStrictEqual({
       refusals: {
         notAStep: "workflow.step_not_found",
@@ -958,12 +778,12 @@ describe("a step edited on the canvas", () => {
         notAList: "workflow.step_not_found",
         listItsTypeHasNot: "workflow.step_not_found",
         beyondTheList: "workflow.step_not_found",
-        stale: "workflow.draft_conflict",
+        stale: "draft.conflict",
         user: "role.forbidden",
         invalid: "workflow.resource_invalid",
       },
       notJson: "workflow.draft_not_json",
-      kept: [1, 2],
+      kept: 2,
     });
   });
 });

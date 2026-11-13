@@ -19,6 +19,7 @@ import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { unique } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Email triggers: Email Routing hands core's email handler each message
 // for the deployment's domain, which starts the run of the independent
@@ -281,10 +282,7 @@ export const emailTriggerFor = async (
   const { id, name } = await builder.api.workflowResources.create(
     `intake-${unique()}`
   );
-  await builder.api.workflowResources.publish(id, {
-    definition: definition(name),
-    basedOn: null,
-  });
+  await publishOverRpc(builder.api, id, definition(name));
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "email",
     workflowId: id,

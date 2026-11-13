@@ -24,6 +24,7 @@ import {
   unique,
 } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // An independent workflow's triggers over the session's `/rpc`
 // (`workflowResources.triggers`), from trigger-resources.ts's threat model:
@@ -67,14 +68,8 @@ const reporting = async (builder: Person): Promise<string> => {
   const { id } = await builder.api.workflowResources.create(
     `report-${unique()}`
   );
-  await builder.api.workflowResources.publish(id, {
-    definition: definitionOf("1"),
-    basedOn: null,
-  });
-  await builder.api.workflowResources.publish(id, {
-    definition: definitionOf("1.1"),
-    basedOn: 1,
-  });
+  await publishOverRpc(builder.api, id, definitionOf("1"));
+  await publishOverRpc(builder.api, id, definitionOf("1.1"));
   return id;
 };
 

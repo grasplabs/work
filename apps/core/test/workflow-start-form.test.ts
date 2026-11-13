@@ -1,13 +1,16 @@
 import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Acting } from "../src/auth/identity.ts";
-import { decideGoLive, requestGoLive } from "../src/workflow-lifecycle.ts";
+import { rollback } from "../src/publish.ts";
+import {
+  publishWorkflowVersion,
+  workflowPublishing,
+} from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { workflowStartForm } from "../src/workflow-start-form.ts";
@@ -23,7 +26,7 @@ import { auditedDuring, outcome, unique } from "./sign-in.ts";
 // refuses, or one that lets through input the workflow doesn't take.
 
 /** A member of the organization in `role`, as their session has them. */
-const person = async (role: Role): Promise<Acting> => {
+const person = async (role: Role): Promise<Identity> => {
   const userId = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(
@@ -36,7 +39,15 @@ const person = async (role: Role): Promise<Acting> => {
       "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
     ).bind(crypto.randomUUID(), userId, role, Date.now()),
   ]);
-  return { userId, role, teams: [], staff: false };
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Person",
+    role,
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
 };
 
 /**
@@ -83,7 +94,7 @@ const greetingWorkflow = async () => {
 
 /** What starting `id` by hand as `by` with the form's version and `input` answers. */
 const started = async (
-  by: Acting,
+  by: Identity,
   id: string,
   version: number | null,
   input: unknown
@@ -223,25 +234,16 @@ describe("starting an independent workflow by hand", () => {
     });
   });
 
-  it("runs the version approved to go live, not one published after it, and none before any is published", async () => {
+  it("runs the live version, the one rolled back to rather than one published after it, and none before any is published", async () => {
     const { ada, uma, workflow } = await greetingWorkflow();
-    const admin = await person("admin");
-    const asked = await requestGoLive(env, ada, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: asked.revision,
-    });
-    // Version 2 takes other input, and isn't live.
+    // Version 2 takes other input, and is rolled back from.
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf("1.1.0", {
         who: { kind: "string" },
       }),
       basedOn: 1,
     });
+    await rollback(env, workflowPublishing, ada, workflow.id, 1);
     const empty = await createWorkflowResource(env, ada, `new-${unique()}`);
     const live = await workflowStartForm(env, uma, workflow.id);
 

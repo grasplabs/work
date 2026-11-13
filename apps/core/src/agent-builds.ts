@@ -20,6 +20,7 @@ import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { DefinitionPlan } from "@grasp-os/shared/data-model";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
+import { draftErrors } from "@grasp-os/shared/drafts";
 import { functionErrors } from "@grasp-os/shared/functions";
 import { httpContract } from "@grasp-os/shared/http-contract";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -46,8 +47,6 @@ import {
   operationDetail,
   refuseGeneratedFiles,
 } from "./app-definition.ts";
-import { draftOf, saveDraft, turnApps } from "./app-drafts.ts";
-import type { Draft, DraftWriter } from "./app-drafts.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import {
@@ -55,9 +54,9 @@ import {
   carriedOverBinding,
 } from "./app-workflow-bindings.ts";
 import {
+  appDraftKind,
   appFor,
   applyChanges,
-  changesAnything,
   draftDefinition,
   draftFiles,
   editableApp,
@@ -71,6 +70,8 @@ import { inspectDraft } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
 import { callDraft, draftRunOf } from "./draft-runs.ts";
 import type { DraftRun } from "./draft-runs.ts";
+import { changesAnything, draftOf, saveDraft, turnSubjects } from "./drafts.ts";
+import type { DraftState, DraftWriter } from "./drafts.ts";
 import { appPreview, workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import { admitPreviewCall } from "./pages-rpc.ts";
@@ -90,7 +91,7 @@ import {
 // Building Apps from a chat: `await env.build.write(app, { ... })`. The
 // chat's agent creates Apps (new, or from a blueprint the person may
 // create from, by the rules people follow: app-blueprints.ts), and
-// changes one in the App's draft (app-drafts.ts): one per App, shared by
+// changes one in the App's draft (drafts.ts): one per App, shared by
 // every builder of it and their chats' agents, over the App's latest
 // version when it began. Each write lands only over the revision it read,
 // so two agents', or an agent's and a person's, never overwrite each
@@ -121,7 +122,7 @@ import {
 // sealed into a draft release, on the preview's one store of test data,
 // never the App's live data (draft-runs.ts). Tests run in isolates with an empty
 // env: nothing they do leaves them. The agent never publishes: a builder
-// of the App does, in Grasp, as themselves (app-publish.ts, `publishDraft`), and what
+// of the App does, in Grasp, as themselves (publish.ts, `publish`), and what
 // the App asks for waits for an admin to grant it.
 //
 // The repair loop is the agent loop itself: a write answers with what
@@ -551,7 +552,7 @@ const writtenDiagnostics = (builds: Partial<DraftBuilds>): DraftFailures => {
 export const checkFiles = async (
   env: Env,
   app: AppId,
-  { base, revision }: Pick<Draft, "base" | "revision">,
+  { base, revision }: Pick<DraftState, "base" | "revision">,
   files: Record<string, string>
 ): Promise<DraftCheck> => {
   const builds = await draftBuilds(env, app, base, files);
@@ -680,7 +681,7 @@ export const buildingAs = async (
  * draft's definition as `definition` if given (the definition tools'),
  * refused as a whole as the changes of a commit would be, or when it
  * writes a file under `workflows/`, which nobody does (a draft may delete
- * one), and with `app.conflict` when another write landed since `draft`
+ * one), and with `draft.conflict` when another write landed since `draft`
  * was read. The draft's config and schema are always its definition's. A
  * draft of an App with no version gets an empty definition with its
  * first write. `admit`, if given, admits the write right before it is
@@ -696,7 +697,7 @@ export const saveDraftChanges = async (
     changes,
     definition,
   }: {
-    draft: Draft;
+    draft: DraftState;
     files: Map<string, string>;
     changes: Record<string, string | null>;
     definition?: AppDefinition;
@@ -756,6 +757,7 @@ export const saveDraftChanges = async (
   const ownText = definitionText(own);
   await saveDraft(
     env,
+    appDraftKind,
     id,
     draft,
     {
@@ -790,13 +792,13 @@ export const draftDefinitions = async (
 ): Promise<
   | { problem: string }
   | {
-      draft: Draft;
+      draft: DraftState;
       files: Map<string, string>;
       own: AppDefinition;
       before: AppDefinition | null;
     }
 > => {
-  const draft = await draftOf(env, id);
+  const draft = await draftOf(env, appDraftKind, id);
   const files = await draftFiles(env, id, draft);
   let current: AppDefinition;
   let before: AppDefinition | null;
@@ -841,7 +843,7 @@ export const defineInDraft = async <Saved>(
   app: Pick<App, "id" | "name" | "currentVersion">,
   operation: unknown,
   save: (
-    draft: Draft,
+    draft: DraftState,
     files: Map<string, string>,
     changes: Record<string, string | null>,
     definition: AppDefinition
@@ -961,8 +963,8 @@ export interface TurnCheck {
 }
 
 /**
- * Checks the drafts the chat's agent wrote this turn (app-drafts.ts,
- * `turnApps`) as the turn would answer (chat-harness.ts): each as
+ * Checks the drafts the chat's agent wrote this turn (drafts.ts,
+ * `turnSubjects`) as the turn would answer (chat-harness.ts): each as
  * publishing checks it (`checkFiles`), so the agent fixes what fails in
  * the same turn rather than when a builder publishes. Nothing when the turn wrote
  * none, its person may no longer build them, or they are where they were
@@ -981,7 +983,10 @@ export const turnCheck = async (
   const chats = workspace(env, scope.workspaceId);
   let shown = false;
   try {
-    const written = await turnApps(env, scope.chatId, turnId);
+    const subjects = await turnSubjects(env, scope.chatId, turnId);
+    const written = subjects.flatMap(({ kind, id }) =>
+      kind === "app" ? [id] : []
+    );
     const person =
       written.length === 0 ? undefined : await memberOf(env.DB, scope.personId);
     if (person === undefined) {
@@ -991,7 +996,7 @@ export const turnCheck = async (
     const drafts = await Promise.all(
       written.toSorted().map(async (named) => {
         const { id } = await appFor(env, by, named, "builder");
-        return { id, draft: await draftOf(env, id) };
+        return { id, draft: await draftOf(env, appDraftKind, id) };
       })
     );
     const at = JSON.stringify(
@@ -1134,7 +1139,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.files",
       async (by) => {
         const id = await this.#readable(by, app);
-        const draft = await draftOf(this.env, id);
+        const draft = await draftOf(this.env, appDraftKind, id);
         return {
           base: draft.base,
           revision: draft.revision,
@@ -1156,7 +1161,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * the agent never does (it may delete one). The version it is over,
    * what it changed and the revision it made. Only over `over`, the
    * revision of the draft its writer read (`files`, or its last write):
-   * refused with `app.conflict` if it moved since, so a write made from
+   * refused with `draft.conflict` if it moved since, so a write made from
    * what was read never lands over another's write, a discard or a
    * restore after the read.
    *
@@ -1178,9 +1183,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           changes
         );
         refuseGeneratedFiles(Object.keys(written));
-        const draft = await draftOf(this.env, found.id);
+        const draft = await draftOf(this.env, appDraftKind, found.id);
         if (expected.revision !== draft.revision) {
-          throw appErrors.create("app.conflict");
+          throw draftErrors.create("draft.conflict");
         }
         const files = await draftFiles(this.env, found.id, draft);
         return await this.#save(by, found, draft, files, written);
@@ -1239,7 +1244,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   async #save(
     by: Acting,
     found: Pick<App, "id" | "name" | "currentVersion">,
-    draft: Draft,
+    draft: DraftState,
     files: Map<string, string>,
     changes: Record<string, string | null>,
     definition?: AppDefinition
@@ -1297,7 +1302,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.check",
       async (by) => {
         const id = await this.#readable(by, app);
-        const draft = await draftOf(this.env, id);
+        const draft = await draftOf(this.env, appDraftKind, id);
         const files = await draftFiles(this.env, id, draft);
         return await checkFiles(this.env, id, draft, Object.fromEntries(files));
       },
@@ -1506,7 +1511,7 @@ const buildDeclaration = `/**
  * Building Apps for the person: create one, or change one they build, in
  * the App's draft (the App's users never see it until a builder publishes it), which
  * every builder of the App and their agents share: a write over a
- * revision another moved past is refused (\`app.conflict\`): read the
+ * revision another moved past is refused (\`draft.conflict\`): read the
  * files again and write anew. Each
  * write answers with what doesn't compile, and as you answer you are told
  * what else fails (types, lint, the preview): fix it and write again.
@@ -1681,7 +1686,7 @@ build: {
   /**
    * Writes files into the draft: new content by path, or null to delete one.
    * Only over \`over\`: the \`revision\` you read with \`files\`, or the one
-   * your last write answered. Refused with \`app.conflict\` if the draft
+   * your last write answered. Refused with \`draft.conflict\` if the draft
    * moved since (another builder or agent wrote it): read \`files\` again,
    * redo your change on what it has now, and write over its revision.
    * TypeScript is saved fixed and formatted (oxfmt, and what Ultracite's

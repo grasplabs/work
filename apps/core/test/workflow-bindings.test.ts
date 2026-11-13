@@ -37,12 +37,11 @@ import {
   publishCatalogContract,
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
-import { decideGoLive, requestGoLive } from "../src/workflow-lifecycle.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
   versionContract,
   workflowVersions,
@@ -874,31 +873,11 @@ describe("approving a workflow's binding", () => {
 describe("bindings waiting on an admin", () => {
   beforeAll(chooseModel);
 
-  it("list a live version's and a go-live version's unapproved bindings for admins, with the targets that would serve, until one is approved and lets a start through", async () => {
+  it("list a live version's unapproved bindings for admins, with the targets that would serve, until one is approved; a version made live after keeps the approvals of what it declares alike, and waits for what it declares anew", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const key = await modelContract(admin);
     const workflow = await workflowOf(ada, key);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({
-        status: "1.1.0",
-        model: key,
-      }),
-      basedOn: 1,
-    });
-    const asked = await requestGoLive(env, ada, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: asked.revision,
-    });
-    const live = await requestGoLive(env, ada, workflow.id, {
-      version: 2,
-      revision: asked.revision + 1,
-    });
     const pendingOf = async () => {
       const pending = await pendingWorkflowBindings(env, admin);
       return pending.filter((each) => each.workflow.id === workflow.id);
@@ -916,16 +895,34 @@ describe("bindings waiting on an admin", () => {
     });
     const after = await pendingOf();
     const started = await outcome(start(ada, workflow.id));
+    // Version 2 declares the model alike: it reaches nothing new.
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({ status: "1.1.0", model: key }),
+      basedOn: 1,
+    });
+    const alike = {
+      pending: await pendingOf(),
+      started: await outcome(start(ada, workflow.id, 2)),
+    };
+    // Version 3 declares another model's contract: new access.
+    const other = await modelContract(admin);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({ status: "1.2.0", model: other }),
+      basedOn: 2,
+    });
+    const anew = {
+      pending: await pendingOf(),
+      started: await outcome(start(ada, workflow.id, 3)),
+    };
 
-    const waiting = (version: number, isLive: boolean) => ({
+    const waiting = (version: number, contractId: string) => ({
       workflow: { id: workflow.id, name: workflow.name },
       version,
-      live: isLive,
       bindings: [
         {
           alias: "ai",
           kind: "model",
-          contractId: key,
+          contractId,
           offered: [
             {
               target: { kind: "model", model: allowedModel },
@@ -935,23 +932,20 @@ describe("bindings waiting on an admin", () => {
         },
       ],
     });
-    expect({
-      goLiveAsked: live.goLive?.version,
-      before,
-      refused,
-      after,
-      started,
-    }).toStrictEqual({
-      goLiveAsked: 2,
-      before: [waiting(1, true), waiting(2, false)],
+    expect({ before, refused, after, started, alike, anew }).toStrictEqual({
+      before: [waiting(1, key)],
       refused: "workflow.binding_unapproved",
-      // Version 2 still waits: an approval serves the version reviewed alone.
-      after: [waiting(2, false)],
+      after: [],
       started: "ok",
+      alike: { pending: [], started: "ok" },
+      anew: {
+        pending: [waiting(3, other)],
+        started: "workflow.binding_unapproved",
+      },
     });
   });
 
-  it("offer, on the workflow's own page before it goes live, a connector each contract its own connection grant serves, which approves its start", async () => {
+  it("offer, on the workflow's own page, a connector each contract its own connection grant serves, which approves its start", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const mailKey = `mail-${unique()}`;
@@ -1032,9 +1026,8 @@ describe("bindings waiting on an admin", () => {
         )
       );
 
-    // Asked to go live, it waits in the admins' inbox too, where a
-    // connector, slow to read, is offered nothing.
-    await requestGoLive(env, ada, workflow.id, { version: 1, revision: 0 });
+    // Live, it waits in the admins' inbox too, where a connector, slow to
+    // read, is offered nothing.
     const inbox = await pendingWorkflowBindings(connecting, admin);
     const before = await offeredOf();
     const refused = await startOf();
@@ -1065,7 +1058,6 @@ describe("bindings waiting on an admin", () => {
         {
           workflow: { id: workflow.id, name: workflow.name },
           version: 1,
-          live: true,
           bindings: [
             {
               alias: "mail",
@@ -1092,50 +1084,6 @@ describe("bindings waiting on an admin", () => {
     });
   });
 
-  it("list on the workflow's own read its newest version, which a test run starts, beside the live one it approved", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = await modelContract(admin);
-    const workflow = await workflowOf(ada, key);
-    const asked = await requestGoLive(env, ada, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: asked.revision,
-    });
-    await approveWorkflowBinding(env, admin, workflow.id, {
-      alias: "ai",
-      target: { kind: "model", model: allowedModel },
-      reviewed: { version: 1 },
-    });
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({
-        status: "1.1.0",
-        model: key,
-      }),
-      basedOn: 1,
-    });
-
-    const own = await workflowPendingBindings(env, admin, workflow.id);
-    const inbox = await pendingWorkflowBindings(env, admin);
-
-    expect({
-      own: own.map(({ version, live, bindings }) => ({
-        version,
-        live,
-        aliases: bindings.map(({ alias }) => alias),
-      })),
-      inbox: inbox.filter((each) => each.workflow.id === workflow.id),
-    }).toStrictEqual({
-      own: [{ version: 2, live: false, aliases: ["ai"] }],
-      // Neither live nor asked to go live: not the inbox's.
-      inbox: [],
-    });
-  });
-
   it("list a binding again once an admin revokes its approval, which refuses its starts until one approves it again", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1150,9 +1098,8 @@ describe("bindings waiting on an admin", () => {
       });
     const waiting = async () => {
       const pending = await workflowPendingBindings(env, admin, workflow.id);
-      return pending.map(({ version, live, bindings }) => ({
+      return pending.map(({ version, bindings }) => ({
         version,
-        live,
         aliases: bindings.map(({ alias }) => alias),
       }));
     };
@@ -1201,7 +1148,7 @@ describe("bindings waiting on an admin", () => {
       refusedTo: { builder: "role.forbidden", staff: "role.forbidden" },
       stillApproved: "ok",
       revoked: {
-        waiting: [{ version: 1, live: true, aliases: ["ai"] }],
+        waiting: [{ version: 1, aliases: ["ai"] }],
         start: "workflow.binding_unapproved",
       },
       approvedAgain: { waiting: [], start: "ok" },
@@ -1273,7 +1220,7 @@ describe("approving a store's operation", () => {
 describe("what a start freezes", () => {
   beforeAll(chooseModel);
 
-  it("serves an approval to the exact version an admin reviewed, never a later or an earlier one", async () => {
+  it("carries an approval onto each version made live after the one an admin reviewed while it declares the binding alike, and serves it to each", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const key = await modelContract(admin);
@@ -1291,7 +1238,7 @@ describe("what a start freezes", () => {
       });
     await approve(1);
     // A builder publishes versions 2 and 3, declaring the alias the same:
-    // code no admin reviewed with that model, until one reviews version 3.
+    // each reaches nothing version 1 didn't, and takes its approval.
     await publish("2.0.0", 1);
     const unreviewed = await outcome(start(ada, workflow.id, 2));
     await publish("3.0.0", 2);
@@ -1309,9 +1256,9 @@ describe("what a start freezes", () => {
       // Approving version 3 left version 1's approval as it was.
       decidedBefore: await outcome(admitWorkflowStart(env, decided)),
     }).toStrictEqual({
-      unreviewed: "workflow.binding_unapproved",
+      unreviewed: "ok",
       reviewed: "ok",
-      earlierThanReview: "workflow.binding_unapproved",
+      earlierThanReview: "ok",
       newlyReviewed: "ok",
       // The approval moved the policy generation: decided again.
       decidedBefore: "workflow.start_denied",

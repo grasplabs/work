@@ -397,7 +397,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
     // The same code and none of the data: the new App starts empty, and
     // shared with nobody.
     const theirs = await maker.api.apps.list();
-    await maker.api.apps.versions.publish(app.id, 1);
+    await maker.api.versions.rollback({ kind: "app", id: app.id }, 1);
     const { name: sourceName } = await owner.api.apps.get(source);
     expect({
       listed: theirs.some(({ id }) => id === app.id),

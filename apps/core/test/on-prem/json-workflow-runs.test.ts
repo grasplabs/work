@@ -5,10 +5,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { Acting } from "../../src/auth/identity.ts";
 import { approveWorkflowBinding } from "../../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../../src/workflow-publish.ts";
+import { createWorkflowResource } from "../../src/workflow-resources.ts";
 import { startWorkflow } from "../../src/workflow-starts.ts";
 import { resourceRunFor } from "../../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../../src/workflows/run-events.ts";

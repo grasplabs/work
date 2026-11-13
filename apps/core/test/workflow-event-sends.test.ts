@@ -54,10 +54,8 @@ import { StoreHost } from "../src/store-host.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { dispatchSendEventIntent } from "../src/workflow-event-sends.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
@@ -749,7 +747,7 @@ describe(
       });
     });
 
-    it("sends only the events its sealed version names, whatever the workflow is rebound to, and keeps a refused one as evidence", async () => {
+    it("sends only the events its sealed version names, whichever version of the workflow is live, and keeps a refused one as evidence", async () => {
       let runId = "";
       const fx = await fixture(async ({ admin, ada, app, workflowId }) => {
         runId = await startedRun({ app }, ada);
@@ -812,13 +810,13 @@ describe(
       expect({
         // The new event: the version was sealed without it.
         later: await raw("laterEvents"),
-        // The sealed one: its workflow is bound to another version now.
+        // The sealed one: the live version names it too.
         sealed: await raw("jobEvents"),
         refusals: await refusals(),
         outbox: await outboxOf(fx.store),
       }).toStrictEqual({
         later: "permission.not_allowed",
-        sealed: "permission.unavailable",
+        sealed: "staged",
         refusals: [
           {
             function: "jobs.rawSendEvent",
@@ -828,7 +826,9 @@ describe(
             errorCode: "permission.not_allowed",
           },
         ],
-        outbox: [],
+        outbox: [
+          { kind: "workflow.send_event", settled: false, undeliverable: null },
+        ],
       });
     });
 

@@ -17,9 +17,9 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";

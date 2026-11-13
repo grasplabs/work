@@ -12,10 +12,8 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import type { Idp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { openRpc, routed, signedInWithRole, unique } from "./sign-in.ts";

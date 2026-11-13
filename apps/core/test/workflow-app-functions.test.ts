@@ -7,9 +7,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { findApp } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
+import { rollback } from "../src/publish.ts";
 import { reviewDraft } from "../src/version-review.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { appCallKey } from "../src/workflows/app-calls.ts";
@@ -130,7 +131,7 @@ const published = async (
   by: Builder = builder
 ): Promise<unknown> => {
   const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
-  return await by.api.apps.versions.publish(id, version).then(
+  return await by.api.versions.rollback({ kind: "app", id }, version).then(
     (current) => current,
     (error: unknown) => error
   );
@@ -140,9 +141,9 @@ const published = async (
 const setUp = async (app: TestApp = notes()) => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  await expect(published(builder, id, app)).resolves.toStrictEqual(
-    expect.objectContaining({ id })
-  );
+  await expect(published(builder, id, app)).resolves.toMatchObject({
+    subject: { kind: "app", id },
+  });
   const workflow = await createWorkflowResource(
     env,
     { userId: builder.userId, role: "builder", teams: [], staff: false },
@@ -229,9 +230,9 @@ describe("a workflow calling an App's functions", () => {
     const source = notes();
     const { builder, app, workflow } = await setUp(source);
     const other = await builder.api.apps.create({ name: "Other notes" });
-    await expect(published(builder, other.id, source)).resolves.toStrictEqual(
-      expect.objectContaining({ id: other.id })
-    );
+    await expect(published(builder, other.id, source)).resolves.toMatchObject({
+      subject: { kind: "app", id: other.id },
+    });
     const create = await idOf(app, "notes.create");
     const titles = await idOf(app, "notes.titles");
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
@@ -356,7 +357,7 @@ export const create = mutation({
     const admin = await signedInApi(idp, "admin");
     await expect(
       published(builder, app, renamed, admin)
-    ).resolves.toStrictEqual(expect.objectContaining({ id: app }));
+    ).resolves.toMatchObject({ subject: { kind: "app", id: app } });
     const ids = await idsOf(app);
     expect(ids.get("notes.add")).toBe(create);
     expect(ids.get("notes.create")).not.toBe(create);
@@ -365,10 +366,12 @@ export const create = mutation({
     await called(run, app, create, { title: "Still mine" });
     // Rolled back past the rename, the ID is `create` at its old path
     // again: the function it always was.
-    const rolledBack = await admin.api.apps.versions.publish(app, 1).then(
-      ({ currentVersion }) => currentVersion,
-      (error: unknown) => error
-    );
+    const rolledBack = await admin.api.versions
+      .rollback({ kind: "app", id: app }, 1)
+      .then(
+        ({ version }) => version,
+        (error: unknown) => error
+      );
     await called(run, app, create, { title: "Mine again" });
 
     expect({
@@ -446,9 +449,9 @@ import { query } from "@server/_generated/server";
         ),
     });
     const { builder, app, workflow } = await setUp(bare);
-    await expect(published(builder, app, second)).resolves.toStrictEqual(
-      expect.objectContaining({ currentVersion: 2 })
-    );
+    await expect(published(builder, app, second)).resolves.toMatchObject({
+      version: 2,
+    });
     const create = await idOf(app, "notes.create");
     const grant = await requestGranted(
       idp,
@@ -473,7 +476,9 @@ import { query } from "@server/_generated/server";
         "args: { title: v.string().min(1).max(200), due: v.string() },"
       )
     );
-    const rollback = await refusal(builder.api.apps.versions.publish(app, 1));
+    const rolledBackTo = await refusal(
+      builder.api.versions.rollback({ kind: "app", id: app }, 1)
+    );
 
     // A new optional argument serves every call the workflow makes.
     const optional = await published(
@@ -488,7 +493,7 @@ import { query } from "@server/_generated/server";
     await admin.api.permissions.revoke(grant);
     const unbound = await published(builder, app, removed);
 
-    expect({ removal, required, rollback }).toMatchObject({
+    expect({ removal, required, rolledBackTo }).toMatchObject({
       removal: {
         code: "version.functions_in_use",
         details: {
@@ -503,11 +508,11 @@ import { query } from "@server/_generated/server";
           issues: [expect.stringContaining("no longer takes the arguments")],
         },
       },
-      rollback: { code: "version.functions_in_use" },
+      rolledBackTo: { code: "version.functions_in_use" },
     });
     expect({ optional, unbound }).toMatchObject({
-      optional: { id: app, currentVersion: 5 },
-      unbound: { id: app, currentVersion: 6 },
+      optional: { subject: { kind: "app", id: app }, version: 5 },
+      unbound: { subject: { kind: "app", id: app }, version: 6 },
     });
   });
 
@@ -524,9 +529,9 @@ import { query } from "@server/_generated/server";
     const removed = withFiles(source, {
       "server/notes.ts": notesCode("write"),
     });
-    await expect(published(builder, app, removed)).resolves.toStrictEqual(
-      expect.objectContaining({ id: app })
-    );
+    await expect(published(builder, app, removed)).resolves.toMatchObject({
+      subject: { kind: "app", id: app },
+    });
     const ids = await idsOf(app);
     expect([...ids.values()]).not.toContain(create);
     expect(ids.has("notes.write")).toBeTruthy();
@@ -644,8 +649,9 @@ export const stamp = action({
         /update "apps" set "current_version"/u
       );
       const refused = await refusal(
-        publishVersion(
+        rollback(
           { ...env, DB: racing },
+          appPublishing,
           await builder.api.whoami(),
           app,
           version
@@ -964,10 +970,12 @@ export const archive = mutation({ args: {}, returns: v.null(), handler: async ()
     );
     held.resolve(true);
     const before = await idsOf(app);
-    const sealed = await builder.api.apps.versions.publish(app, version).then(
-      () => "ok",
-      (error: unknown) => error
-    );
+    const sealed = await builder.api.versions
+      .rollback({ kind: "app", id: app }, version)
+      .then(
+        () => "ok",
+        (error: unknown) => error
+      );
     const again = await published(
       builder,
       app,
@@ -988,7 +996,7 @@ export const archive = mutation({ args: {}, returns: v.null(), handler: async ()
           issues: [expect.stringContaining("`archive.archive` has no ID yet")],
         },
       },
-      again: { id: app },
+      again: { subject: { kind: "app", id: app } },
       named: true,
     });
   });
@@ -1035,7 +1043,7 @@ export const archive = mutation({ args: {}, returns: v.null(), handler: async ()
     const reviewed = review.callers.find(
       ({ permission }) => permission.id === grant
     )?.askedAgain;
-    await builder.api.apps.versions.publish(app, two);
+    await builder.api.versions.rollback({ kind: "app", id: app }, two);
     const byBuilder = {
       status: await statusOf(),
       call: await outcome(called(run, app, create, { title: "b" })),

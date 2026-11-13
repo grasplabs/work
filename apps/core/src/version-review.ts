@@ -20,7 +20,6 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { definitionPlan } from "./app-definition.ts";
-import type { Draft } from "./app-drafts.ts";
 import { versionManifest } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import {
@@ -36,6 +35,7 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { draftRelease } from "./draft-runs.ts";
+import type { DraftState } from "./drafts.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
 import { takesFile } from "./workflows/start-files.ts";
@@ -287,7 +287,7 @@ type ManifestReview = Pick<
 const manifestReviewOf = async (
   env: Env,
   found: Pick<App, "id">,
-  draft: Draft,
+  draft: DraftState,
   before:
     | { version: number; files: Readonly<Record<string, string>> }
     | undefined,
@@ -336,7 +336,7 @@ const manifestReviewOf = async (
 const definitionReviewOf = async (
   env: Env,
   found: Pick<App, "id" | "currentVersion">,
-  draft: Draft
+  draft: DraftState
 ): Promise<{ changed: boolean; plan: AppDraftChanges["plan"] }> => {
   try {
     const own = await draftDefinition(env, found.id, draft);
@@ -372,7 +372,7 @@ export const reviewDraft = async (
   env: Env,
   by: Member,
   found: Pick<App, "id" | "currentVersion">,
-  draft: Draft
+  draft: DraftState
 ): Promise<
   Pick<
     AppDraftChanges,

@@ -6,10 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { publishWorkflowVersion } from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   repairResourceTerminations,
   terminateResourceRun,
@@ -59,7 +58,7 @@ describe(
   () => {
     afterEach(endLiveResourceRuns);
 
-    it("shows nothing of a page's run while its alias is bound elsewhere, and the run again once bound back", async () => {
+    it("keeps showing a page's run on its own version once a newer version of the workflow goes live", async () => {
       const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await pageOf(builder, app);
@@ -69,21 +68,19 @@ describe(
       const stopRun = channel.followRun(watched.runId, () => {
         // Read below.
       });
+      const stopOther = channel.followRun(other.runId, () => {
+        // Read below.
+      });
       const shown = () => channel.peekRun(watched.runId);
       await vi.waitFor(() => {
         expect(shown().value?.status).toBe("running");
       }, settles);
       const before = shown();
-      // Bound away: the next read, which another run's end causes, shows
-      // nothing of it.
+      // A newer version live, which the alias follows: the next read,
+      // which another run's end causes, still shows the run on its own.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
         definition: greetingOf("1 hour", "Version 2"),
         basedOn: 1,
-      });
-      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
-        app,
-        alias: "followUp",
-        version: 2,
       });
       await terminateResourceRun(
         env,
@@ -92,36 +89,20 @@ describe(
         other.runId
       );
       await vi.waitFor(() => {
-        expect(shown().value).toBeNull();
+        expect(channel.peekRun(other.runId).value?.status).not.toBe("running");
       }, settles);
-      const away = shown();
-      // Bound back, and read again as a new run starts: shown again.
-      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
-        app,
-        alias: "followUp",
-        version: 1,
-      });
-      await channel.start({ who: "Cy" });
-      await vi.waitFor(() => {
-        expect(shown().value).not.toBeNull();
-      }, settles);
-      const back = shown();
+      const after = shown();
       stopRun();
+      stopOther();
 
       expect({
-        before: before.value?.control,
-        // Losing it is a state, no error.
-        away: { value: away.value, error: away.error },
-        back: back.value?.control,
+        status: after.value?.status,
+        control: after.value?.control,
+        error: after.error,
       }).toStrictEqual({
-        before: {
-          canPause: true,
-          canResume: false,
-          canCancel: true,
-          pendingControl: null,
-        },
-        away: { value: null, error: undefined },
-        back: before.value?.control,
+        status: "running",
+        control: before.value?.control,
+        error: undefined,
       });
     });
 
@@ -278,7 +259,7 @@ describe(
       const { runId } = startedOf(
         await called(builder, app, live, startCommand(reference))
       );
-      const { lease } = await builder.api.apps.drafts.preview(app);
+      const { lease } = await builder.api.apps.preview.open(app);
       if (lease === undefined) {
         throw new Error("The preview opened with no lease.");
       }

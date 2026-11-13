@@ -12,18 +12,14 @@ import { describe, expect, it } from "vite-plus/test";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
-import { editWorkflowDraft } from "../src/workflow-drafts.ts";
 import {
-  decideGoLive,
   pauseWorkflow,
-  requestGoLive,
   resumeWorkflow,
-  setWorkflowStage,
   workflowLifecycle,
 } from "../src/workflow-lifecycle.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import {
@@ -36,15 +32,11 @@ import { allEvents } from "./audit-events.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
 
-// An independent workflow's lifecycle (workflow-lifecycle.ts), from its
-// threat model: a stage that follows the workflow until a builder sets
-// one, and never says live without an approval; going live only on the
-// say of its owner or an admin who didn't ask for it, for the exact
-// version they read; concurrent writes refused, never merged; a paused
-// workflow starting nothing, from people or triggers, a start decided
-// before the pause included, and its schedules skipping without
-// stopping; Grasp staff and users changing nothing. Each test makes its
-// own people and workflows.
+// An independent workflow's pause (workflow-lifecycle.ts), from its
+// threat model: a paused workflow starts nothing, from people or
+// triggers, a start decided before the pause included, and its schedules
+// skip without stopping; Grasp staff and users change nothing. Each test
+// makes its own people and workflows.
 
 const person = async (role: Role, staff = false): Promise<Identity> => {
   const userId = crypto.randomUUID();
@@ -117,266 +109,12 @@ const lifecycleEvents = async (id: string) => {
     .filter(
       ({ target, action }) =>
         target?.id === id &&
-        (action.startsWith("workflow.go_live.") ||
-          action.startsWith("workflow.stage.") ||
-          action === "workflow.paused" ||
-          action === "workflow.resumed")
+        (action === "workflow.paused" || action === "workflow.resumed")
     )
     .map(({ action, actor, detail }) => ({ action, actor, detail }));
 };
 
-describe("a workflow's lifecycle", { timeout: 60_000 }, () => {
-  it("follows the workflow until a builder sets a stage, and never says live before a version went live", async () => {
-    const owner = await person("builder");
-    const workflow = await createWorkflowResource(
-      env,
-      owner,
-      `greet-${unique()}`
-    );
-    const mapped = await workflowLifecycle(env, owner, workflow.id);
-    await editWorkflowDraft(env, owner, workflow.id, {
-      expectedRevision: 0,
-      source: greetingOf(),
-    });
-    const designed = await workflowLifecycle(env, owner, workflow.id);
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: greetingOf(),
-      basedOn: null,
-    });
-    const testing = await workflowLifecycle(env, owner, workflow.id);
-    const notLive = await Promise.all(
-      (["live", "scaling"] as const).map(
-        async (stage) =>
-          await outcome(
-            setWorkflowStage(env, owner, workflow.id, { stage, revision: 0 })
-          )
-      )
-    );
-    const set = await setWorkflowStage(env, owner, workflow.id, {
-      stage: "designed",
-      revision: 0,
-    });
-
-    expect({
-      followed: [mapped, designed, testing].map((lifecycle) => ({
-        stage: lifecycle.stage,
-        stageSet: lifecycle.stageSet,
-        draft: lifecycle.draft,
-        publishedVersion: lifecycle.publishedVersion,
-        revision: lifecycle.revision,
-      })),
-      notLive,
-      set: { stage: set.stage, stageSet: set.stageSet, revision: set.revision },
-      audited: await lifecycleEvents(workflow.id),
-    }).toStrictEqual({
-      followed: [
-        {
-          stage: "mapped",
-          stageSet: false,
-          draft: null,
-          publishedVersion: null,
-          revision: 0,
-        },
-        {
-          stage: "designed",
-          stageSet: false,
-          draft: { revision: 1, checkpoint: 1 },
-          publishedVersion: null,
-          revision: 0,
-        },
-        {
-          stage: "testing",
-          stageSet: false,
-          draft: { revision: 1, checkpoint: 1 },
-          publishedVersion: 1,
-          revision: 0,
-        },
-      ],
-      notLive: ["workflow.stage_invalid", "workflow.stage_invalid"],
-      set: { stage: "designed", stageSet: true, revision: 1 },
-      audited: [
-        {
-          action: "workflow.stage.updated",
-          actor: { type: "person", userId: owner.userId },
-          detail: { stage: "designed", previous: null },
-        },
-      ],
-    });
-  });
-
-  it("goes live only on the say of its owner or an admin who didn't ask, for the exact version waiting", async () => {
-    const owner = await person("builder");
-    const admin = await person("admin");
-    const workflow = await workflowOf(owner, 2);
-    const { builder, user } = workflow;
-    const unpublished = await outcome(
-      requestGoLive(env, builder, workflow.id, { version: 3, revision: 0 })
-    );
-    const byUser = await outcome(
-      requestGoLive(env, user, workflow.id, { version: 1, revision: 0 })
-    );
-    const asked = await requestGoLive(env, builder, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    const ownerSees = await workflowLifecycle(env, owner, workflow.id);
-    const decide = async (by: Identity, version = 1, revision = 1) => {
-      const decided = await outcome(
-        decideGoLive(env, by, workflow.id, {
-          version,
-          verdict: "approve",
-          revision,
-        })
-      );
-      return decided;
-    };
-    const refused = {
-      builderOwnRequest: await decide(builder),
-      user: await decide(user),
-      otherVersion: await decide(owner, 2),
-    };
-    const approved = await decideGoLive(env, owner, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: 1,
-    });
-    const alreadyLive = await outcome(
-      requestGoLive(env, builder, workflow.id, { version: 1, revision: 2 })
-    );
-    const backToTesting = await outcome(
-      setWorkflowStage(env, builder, workflow.id, {
-        stage: "testing",
-        revision: 2,
-      })
-    );
-    const scaling = await setWorkflowStage(env, builder, workflow.id, {
-      stage: "scaling",
-      revision: 2,
-    });
-    // The owner asks for the next version: an admin approves it, and the
-    // workflow stays scaling.
-    await requestGoLive(env, owner, workflow.id, { version: 2, revision: 3 });
-    const ownRequest = await decide(owner, 2, 4);
-    const second = await decideGoLive(env, admin, workflow.id, {
-      version: 2,
-      verdict: "approve",
-      revision: 4,
-    });
-
-    const goLiveEvents = await lifecycleEvents(workflow.id);
-
-    expect({
-      unpublished,
-      byUser,
-      asked: {
-        goLive: asked.goLive?.version,
-        canDecideAsker: asked.canDecide,
-        canDecideOwner: ownerSees.canDecide,
-      },
-      refused,
-      approved: {
-        stage: approved.stage,
-        live: approved.live?.version,
-        approvedBy: approved.live?.approvedBy,
-        goLive: approved.goLive,
-      },
-      alreadyLive,
-      backToTesting,
-      scaling: scaling.stage,
-      ownRequest,
-      second: { stage: second.stage, live: second.live?.version },
-      audited: goLiveEvents
-        .filter(({ action }) => action.startsWith("workflow.go_live."))
-        .map(({ action, detail }) => ({ action, detail })),
-    }).toStrictEqual({
-      unpublished: "workflow.go_live_invalid",
-      byUser: "role.forbidden",
-      asked: { goLive: 1, canDecideAsker: false, canDecideOwner: true },
-      refused: {
-        builderOwnRequest: "role.forbidden",
-        user: "role.forbidden",
-        otherVersion: "workflow.go_live_not_pending",
-      },
-      approved: {
-        stage: "live",
-        live: 1,
-        approvedBy: owner.userId,
-        goLive: null,
-      },
-      alreadyLive: "workflow.go_live_invalid",
-      backToTesting: "workflow.stage_invalid",
-      scaling: "scaling",
-      ownRequest: "workflow.go_live_own_request",
-      second: { stage: "scaling", live: 2 },
-      audited: [
-        {
-          action: "workflow.go_live.requested",
-          detail: { version: 1, replaced: null },
-        },
-        {
-          action: "workflow.go_live.approved",
-          detail: { version: 1, previous: null, requestedBy: builder.userId },
-        },
-        {
-          action: "workflow.go_live.requested",
-          detail: { version: 2, replaced: null },
-        },
-        {
-          action: "workflow.go_live.approved",
-          detail: { version: 2, previous: 1, requestedBy: owner.userId },
-        },
-      ],
-    });
-  });
-
-  it("refuses a write over a revision another write moved on, and a rejection leaves nothing live", async () => {
-    const owner = await person("builder");
-    const workflow = await createWorkflowResource(
-      env,
-      owner,
-      `greet-${unique()}`
-    );
-    await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: greetingOf(),
-      basedOn: null,
-    });
-    const admin = await person("admin");
-    // Two writers read revision 0: the second to land is refused.
-    await requestGoLive(env, owner, workflow.id, { version: 1, revision: 0 });
-    const stale = await outcome(
-      pauseWorkflow(env, admin, workflow.id, { revision: 0 })
-    );
-    const rejected = await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "reject",
-      revision: 1,
-    });
-
-    const staleEvents = await lifecycleEvents(workflow.id);
-
-    expect({
-      stale,
-      rejected: {
-        stage: rejected.stage,
-        live: rejected.live,
-        goLive: rejected.goLive,
-        paused: rejected.paused,
-        revision: rejected.revision,
-      },
-      audited: staleEvents.map(({ action }) => action),
-    }).toStrictEqual({
-      stale: "workflow.lifecycle_conflict",
-      rejected: {
-        stage: "testing",
-        live: null,
-        goLive: null,
-        paused: null,
-        revision: 2,
-      },
-      audited: ["workflow.go_live.requested", "workflow.go_live.rejected"],
-    });
-  });
-
+describe("a workflow's pause", { timeout: 60_000 }, () => {
   it("lets only its builders change it, never Grasp staff, while anyone with a role reads it", async () => {
     const owner = await person("builder");
     const workflow = await workflowOf(owner);
@@ -385,27 +123,16 @@ describe("a workflow's lifecycle", { timeout: 60_000 }, () => {
     const read = await workflowLifecycle(env, workflow.user, workflow.id);
 
     expect({
-      read: { stage: read.stage, canChange: read.canChange },
-      user: await outcome(
-        pauseWorkflow(env, workflow.user, workflow.id, { revision: 0 })
-      ),
-      staff: await outcome(
-        pauseWorkflow(env, staff, workflow.id, { revision: 0 })
-      ),
+      read: { paused: read.paused, canChange: read.canChange },
+      user: await outcome(pauseWorkflow(env, workflow.user, workflow.id)),
+      staff: await outcome(pauseWorkflow(env, staff, workflow.id)),
       stranger: await outcome(workflowLifecycle(env, stranger, workflow.id)),
-      invalid: await outcome(
-        setWorkflowStage(env, owner, workflow.id, {
-          stage: "shipped",
-          revision: 0,
-        })
-      ),
       audited: await lifecycleEvents(workflow.id),
     }).toStrictEqual({
-      read: { stage: "testing", canChange: false },
+      read: { paused: null, canChange: false },
       user: "role.forbidden",
       staff: "role.forbidden",
       stranger: "workflow.resource_unavailable",
-      invalid: "workflow.resource_invalid",
       audited: [],
     });
   });
@@ -424,19 +151,13 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
     if ("start" in decided) {
       throw new Error("A new start was answered as one already admitted");
     }
-    const paused = await pauseWorkflow(env, workflow.builder, workflow.id, {
-      revision: 0,
-    });
-    const pausedAgain = await pauseWorkflow(env, owner, workflow.id, {
-      revision: 1,
-    });
+    const paused = await pauseWorkflow(env, workflow.builder, workflow.id);
+    const pausedAgain = await pauseWorkflow(env, owner, workflow.id);
     const decidedBefore = await outcome(
       admitWorkflowStart(env, decided.authorization)
     );
     const whilePaused = await outcome(startBy(workflow.user, workflow.id));
-    const resumed = await resumeWorkflow(env, owner, workflow.id, {
-      revision: 1,
-    });
+    const resumed = await resumeWorkflow(env, owner, workflow.id);
     const afterResume = await outcome(startBy(workflow.user, workflow.id));
     const events = await allEvents();
     const refusals = events
@@ -449,20 +170,21 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
     const pauseEvents = await lifecycleEvents(workflow.id);
 
     expect({
-      paused: { by: paused.paused?.by, revision: paused.revision },
-      pausedAgain: pausedAgain.revision,
+      paused: paused.paused?.by,
+      pausedAgain: pausedAgain.paused?.by,
       decidedBefore,
       whilePaused,
-      resumed: { paused: resumed.paused, revision: resumed.revision },
+      resumed: resumed.paused,
       afterResume,
       refusals,
       audited: pauseEvents.map(({ action, actor }) => ({ action, actor })),
     }).toStrictEqual({
-      paused: { by: workflow.builder.userId, revision: 1 },
-      pausedAgain: 1,
+      paused: workflow.builder.userId,
+      // Pausing a paused workflow changes nothing: still the first pause.
+      pausedAgain: workflow.builder.userId,
       decidedBefore: "workflow.start_denied",
       whilePaused: "workflow.paused",
-      resumed: { paused: null, revision: 2 },
+      resumed: null,
       afterResume: "ok",
       refusals: ["workflow.start_denied", "workflow.paused"],
       audited: [
@@ -520,7 +242,7 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
       },
     });
     await grantPermission(env, admin, permission, { version: null });
-    await pauseWorkflow(env, admin, workflow.id, { revision: 0 });
+    await pauseWorkflow(env, admin, workflow.id);
     // One refusal short of stopping, as if it had failed before.
     const minute = 60_000;
     const occurrence = new Date(

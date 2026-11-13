@@ -34,6 +34,7 @@ export const familyNamespaces = [
   "dependency",
   "directory",
   "document",
+  "draft",
   "effect",
   "error_report",
   "execution",

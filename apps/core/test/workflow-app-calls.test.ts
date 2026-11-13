@@ -7,11 +7,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   candidateRunFor,
   startCandidateRun,
@@ -122,7 +120,9 @@ const published = async (
 ): Promise<unknown> => {
   const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
   const admin = await signedInApi(idp, "admin");
-  return await refusal(admin.api.apps.versions.publish(id, version));
+  return await refusal(
+    admin.api.versions.rollback({ kind: "app", id }, version)
+  );
 };
 
 /**
@@ -394,7 +394,7 @@ export const create = mutation({
       env,
       acting,
       workflow.id,
-      { expectedRevision: base, source }
+      { revision: base, source }
     );
     const { runId } = await startCandidateRun(env, acting, workflow.id, {
       revision,
@@ -461,7 +461,7 @@ export const create = mutation({
         { ...env, DB: counting },
         acting,
         workflow.id,
-        { expectedRevision: revision, source: text }
+        { revision, source: text }
       );
       return { codes: draft.problems.map(({ code }) => code), appReads };
     };
@@ -514,7 +514,7 @@ export const create = mutation({
     const save = async (text: string) => {
       const { revision } = await workflowDraft(env, acting, workflow.id);
       return await editWorkflowDraft(env, acting, workflow.id, {
-        expectedRevision: revision,
+        revision,
         source: text,
       });
     };
@@ -575,7 +575,7 @@ export const create = mutation({
     );
     const admin = await signedInApi(idp, "admin");
     const rolledBack = await refusal(
-      admin.api.apps.versions.publish(rolled.app, 1)
+      admin.api.versions.rollback({ kind: "app", id: rolled.app }, 1)
     );
     // A new version without the function the waiting run calls: refused
     // while the workflow holds its grant, so the run still reaches it.

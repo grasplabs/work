@@ -9,10 +9,8 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";

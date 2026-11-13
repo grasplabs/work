@@ -11,9 +11,9 @@ import { z } from "zod";
 import { appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";

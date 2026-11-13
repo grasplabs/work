@@ -84,11 +84,11 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { ensureReleaseContract } from "./workflow-catalog.ts";
+import { publishWorkflowVersion } from "./workflow-publish.ts";
 import {
   createWorkflowResource,
   definitionProblems,
   deleteWorkflowResource,
-  publishWorkflowVersion,
 } from "./workflow-resources.ts";
 
 // Blueprints: code to create Apps from, each its own record. A builder of
@@ -991,7 +991,7 @@ export const blueprintUpdate = async (
  * `app.conflict` when what they saw no longer holds: the blueprint
  * changed again, a version was committed meanwhile, or the update was
  * accepted already. Nothing goes live: a builder publishes the version
- * (`AppVersionsApi.publish`, app-publish.ts), and it asks for nothing.
+ * (`VersionsApi.rollback`, publish.ts), and it asks for nothing.
  */
 /**
  * Whether the update is still the one offered: the blueprint at the same

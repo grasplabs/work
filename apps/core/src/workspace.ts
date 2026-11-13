@@ -19,7 +19,6 @@ import {
   chatMentionsMax,
   chatPlanSchema,
   chatPlatformSchema,
-  chatSubjectSchema,
   chatToolEventsKept,
 } from "@grasp-os/shared/chat";
 import type {
@@ -69,6 +68,7 @@ import {
 } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
+import { subjectSchema } from "@grasp-os/shared/subject";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import { DurableObject } from "cloudflare:workers";
@@ -338,7 +338,7 @@ export const questionSchema = z.strictObject({
     .refine((files) => new Set(files).size === files.length)
     .optional(),
   /** What it is about, as core found it (`ChatsApi.send`): never the page's word alone. */
-  subject: chatSubjectSchema.extend({ name: z.string().min(1) }).optional(),
+  subject: subjectSchema.extend({ name: z.string().min(1) }).optional(),
   /**
    * What the person picked with `@` in it, as core found each for them
    * (`ChatsApi.send`), by name: never the page's word for a name.
@@ -4482,7 +4482,7 @@ export class Workspace extends DurableObject<Env> {
   }
 
   // What a chat's agent writes of Apps' drafts (agent-builds.ts), which
-  // live in core's database (app-drafts.ts): only what the chat's thread
+  // live in core's database (drafts.ts): only what the chat's thread
   // shows of it. Only core calls these, for the chat's agent.
 
   /**
@@ -4505,7 +4505,7 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Tells the chat's watchers its agent wrote an App's draft, so they read
    * what it worked on again (`ChatsApi.worked`). The App's preview hears
-   * of the write from the write itself (app-drafts.ts).
+   * of the write from the write itself (drafts.ts).
    */
   draftWritten(chatId: unknown): void {
     const chat = chatIdSchema.safeParse(chatId);

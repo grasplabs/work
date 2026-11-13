@@ -16,11 +16,9 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
   candidateRunFor,
@@ -476,7 +474,7 @@ describe("a workflow binding a native connector's operation", () => {
     );
     const { revision: base } = await workflowDraft(env, builder, workflow.id);
     const saved = await editWorkflowDraft(env, builder, workflow.id, {
-      expectedRevision: base,
+      revision: base,
       source: definitionOf(key),
     });
     expect(saved.problems).toStrictEqual([]);

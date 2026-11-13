@@ -3,7 +3,6 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatMakeSchema,
   chatMentionsSchema,
-  chatSubjectSchema,
   chatTitleSchema,
   unmetNeeds,
 } from "@grasp-os/shared/chat";
@@ -20,7 +19,6 @@ import type {
   ChatSearchHit,
   ChatsApi,
   ChatAgent,
-  ChatSubject,
   ChatSummary,
   ChatUpdate,
   ChatWork,
@@ -33,17 +31,19 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { subjectSchema } from "@grasp-os/shared/subject";
+import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
 import { firstAgentId, turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
-import { chatWork, chatsWorkedOn } from "./app-drafts.ts";
 import { createApp, editableApp } from "./apps.ts";
 import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { readChatFile } from "./chat-files.ts";
 import { mentionablePeople, mentionsOf } from "./chat-mentions.ts";
 import { personOf } from "./connections.ts";
+import { chatWork, chatsWorkedOn } from "./drafts.ts";
 import { workspace } from "./durable-objects.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
@@ -70,7 +70,7 @@ import type { Chat } from "./workspace.ts";
  * (`build`), never the page's.
  */
 const askedSchema = questionSchema.omit({ built: true }).extend({
-  subject: chatSubjectSchema.optional(),
+  subject: subjectSchema.optional(),
   mentions: chatMentionsSchema.optional(),
 });
 
@@ -309,7 +309,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       const kept = await this.#chatsOf(person.userId).appChat(
         person.userId,
         id,
-        await chatsWorkedOn(this.#env, id, person.userId)
+        await chatsWorkedOn(this.#env, { kind: "app", id }, person.userId)
       );
       if (kept !== null) {
         return kept;
@@ -581,9 +581,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async #chatSubjectOf(
     person: Identity,
     chatId: ChatId
-  ): Promise<
-    { kind: ChatSubject["kind"]; id: string; name: string } | undefined
-  > {
+  ): Promise<{ kind: SubjectKind; id: string; name: string } | undefined> {
     const app = await this.#chatsOf(person.userId).chatApp(chatId);
     if (app === null) {
       return undefined;
@@ -603,8 +601,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    */
   async #subjectOf(
     person: Identity,
-    { kind, id }: ChatSubject
-  ): Promise<{ kind: ChatSubject["kind"]; id: string; name: string }> {
+    { kind, id }: Subject
+  ): Promise<{ kind: SubjectKind; id: string; name: string }> {
     const found =
       kind === "app"
         ? await editableApp(this.#env, person, id)

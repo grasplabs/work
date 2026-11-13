@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   bindWorkflowToApp,
@@ -29,15 +29,14 @@ import { withPageReferences } from "../src/page-references.ts";
 import { buildPages } from "../src/pages.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import {
   publishCatalogContract,
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   confirmPageDecision,
   decidePageRun,
@@ -472,7 +471,7 @@ const answerOf = (result: FunctionResult): unknown =>
 const decisionInbox = async (looped = false) => {
   const { fixture, workflowId, binding } = await boundApp(looped);
   const release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
     person("admin"),
     person("admin"),
@@ -1376,7 +1375,7 @@ describe(
         reviewed: { version: 1 },
       });
       const release = await seal(fixture);
-      await publishVersion(env, owner, app, 1);
+      await rollback(env, appPublishing, owner, app, 1);
       const asked = await requestPermission(
         env,
         owner,
@@ -1539,16 +1538,12 @@ describe(
       });
     });
 
-    it("answer from a page only a decision of the version the release pins, as its inbox lists them", async () => {
+    it("answer from a page a decision of whichever version of the bound workflow a run is of, as its inbox lists them", async () => {
       const { fixture, opened, reviewer, runAsking } = await decisionInbox();
       const { app } = fixture;
-      // The App's binding of `review` moved to version 2 without a new
-      // release: the release still pins version 1.
-      await env.DB.prepare(
-        "UPDATE app_workflow_bindings SET workflow_resource_version = 2 WHERE app_id = ? AND alias = 'review' AND status = 'active'"
-      )
-        .bind(app)
-        .run();
+      // A run of version 2, though the release was sealed with version 1:
+      // a binding follows its workflow's live version, and a run of any
+      // version of it is the App's.
       const unsealed = await runAsking(app, opened, { version: 2 });
 
       await expect(
@@ -1563,7 +1558,7 @@ describe(
               { approved: true, payload: { comment: "Fine" } }
             )
         )
-      ).resolves.toBe("decision.not_found");
+      ).resolves.toBe("answered");
     });
 
     it("say a run's decision wait is answerable only by whom it asks, never staff, and only where the run's restricted mode is the App's", async () => {

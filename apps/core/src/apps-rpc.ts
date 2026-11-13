@@ -1,3 +1,4 @@
+import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
 import type {
   AppVisitorEntry,
   AppVisitorGrants,
@@ -12,21 +13,26 @@ import type {
   NewApp,
   ViewedApp,
 } from "@grasp-os/shared/apps";
+import type {
+  DataModelChange,
+  DraftDataModel,
+} from "@grasp-os/shared/data-model";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import type { AppId } from "@grasp-os/shared/ids";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppDataRpc } from "./app-data.ts";
-import { AppDraftsRpc } from "./app-drafts-rpc.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
 import { openAppLink, setAppLink } from "./app-own-links.ts";
+import { AppPreviewRpc } from "./app-preview-rpc.ts";
+import { AppReleasesRpc } from "./app-releases-rpc.ts";
 import { removeApp } from "./app-removal.ts";
+import { defineDraft, draftDataModel, reviewChanges } from "./app-review.ts";
 import { resetAppData } from "./app-schema.ts";
 import { appAnswerers, updateApp } from "./app-settings.ts";
 import { setArchived } from "./app-status.ts";
-import { AppVersionsRpc } from "./app-versions-rpc.ts";
 import {
   appVisitorGrantsOf,
   setAppVisitorGrants,
@@ -46,8 +52,10 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 /**
- * A signed-in person's `apps`, with `apps.files`, `apps.versions`,
- * `apps.members`, `apps.blueprints`, `apps.integrations`, `apps.webhooks`, `apps.data` and `apps.drafts`, in SessionRpc's form. The App
+ * A signed-in person's `apps`, with `apps.files`, `apps.releases`,
+ * `apps.members`, `apps.blueprints`, `apps.integrations`, `apps.webhooks`,
+ * `apps.data` and `apps.preview`, in SessionRpc's form. An App's draft and
+ * versions are every subject's (`drafts`, `versions`). The App
  * functions check the person's role in the App and validate what the
  * client sent.
  */
@@ -55,34 +63,34 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
   readonly #files: AppFilesRpc;
-  readonly #versions: AppVersionsRpc;
+  readonly #releases: AppReleasesRpc;
   readonly #members: AppMembersRpc;
   readonly #blueprints: AppBlueprintsRpc;
   readonly #integrations: AppIntegrationsRpc;
   readonly #webhooks: AppWebhooksRpc;
   readonly #data: AppDataRpc;
-  readonly #drafts: AppDraftsRpc;
+  readonly #preview: AppPreviewRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
     this.#files = new AppFilesRpc(env, check);
-    this.#versions = new AppVersionsRpc(env, check);
+    this.#releases = new AppReleasesRpc(env, check);
     this.#members = new AppMembersRpc(env, check);
     this.#blueprints = new AppBlueprintsRpc(env, check);
     this.#integrations = new AppIntegrationsRpc(env, check);
     this.#webhooks = new AppWebhooksRpc(env, check);
     this.#data = new AppDataRpc(env, check);
-    this.#drafts = new AppDraftsRpc(env, check);
+    this.#preview = new AppPreviewRpc(env, check);
   }
 
   get files(): AppFilesRpc {
     return this.#files;
   }
 
-  get versions(): AppVersionsRpc {
-    return this.#versions;
+  get releases(): AppReleasesRpc {
+    return this.#releases;
   }
 
   get members(): AppMembersRpc {
@@ -105,8 +113,33 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return this.#data;
   }
 
-  get drafts(): AppDraftsRpc {
-    return this.#drafts;
+  get preview(): AppPreviewRpc {
+    return this.#preview;
+  }
+
+  async review(app: string): Promise<AppDraftChanges> {
+    return await withPerson(
+      this.#check,
+      async (by) => await reviewChanges(this.#env, by, app)
+    );
+  }
+
+  async dataModel(app: string): Promise<DraftDataModel> {
+    return await withPerson(
+      this.#check,
+      async (by) => await draftDataModel(this.#env, by, app)
+    );
+  }
+
+  async define(
+    app: string,
+    operation: unknown,
+    preview = false
+  ): Promise<DataModelChange> {
+    return await withPerson(
+      this.#check,
+      async (by) => await defineDraft(this.#env, by, app, operation, preview)
+    );
   }
 
   async create(app: NewApp): Promise<App> {

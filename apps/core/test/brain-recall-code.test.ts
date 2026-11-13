@@ -22,7 +22,7 @@ import { appsReadableBy } from "../src/app-access.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, listMembers, removeMember } from "../src/app-members.ts";
 import { anyTeamGrant, mayReadBrainTeamsOf } from "../src/app-provenance.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { removeApp } from "../src/app-removal.ts";
 import { resetAppData } from "../src/app-schema.ts";
@@ -49,13 +49,14 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -291,7 +292,7 @@ export const ask = action({
 const askOf = async (owner: Member, users: Member[]) => {
   const fixture: Fixture = await appWith(askApp(), "Ask", owner);
   const release: Release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   for (const user of users) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time
     await env.DB.prepare(
@@ -1261,7 +1262,7 @@ describe("what code recalls, passed on", setUpTime, () => {
     // Bob's Notes, with no Brain, shared with Uma and Ben.
     const fixture: Fixture = await appWith(notesApp(), "Notes", bob);
     const release: Release = await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
     const notes = { ...fixture, release };
     for (const member of [uma, ben]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
@@ -1450,7 +1451,7 @@ const boundToTeams = async (
 const keepOf = async (owner: Member) => {
   const fixture: Fixture = await appWith(keepApp(), "Keep", owner);
   const release: Release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 

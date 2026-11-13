@@ -23,11 +23,11 @@ import {
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";
@@ -1379,7 +1379,7 @@ describe("a test run of a JSON workflow's decision", () => {
     );
     const { revision: base } = await workflowDraft(env, owner, workflow.id);
     const saved = await editWorkflowDraft(env, owner, workflow.id, {
-      expectedRevision: base,
+      revision: base,
       source: definitionOf(contract, approvalSteps()),
     });
     const run = async (

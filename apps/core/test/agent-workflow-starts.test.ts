@@ -10,9 +10,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentScope } from "../src/agent-scope.ts";
 import { memberOf } from "../src/auth/identity.ts";
 import { confirmHeldStart, sweepHeldStartInputs } from "../src/held-starts.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { openTestRun, personalChatsOf } from "./agent-chat.ts";

@@ -112,7 +112,7 @@ const servedApp = async () => {
     files,
     "First"
   );
-  await builder.api.apps.versions.publish(id, version);
+  await builder.api.versions.rollback({ kind: "app", id }, version);
   const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
   return { builder, app: id, lease, release };
@@ -535,7 +535,7 @@ const previewed = async (served: Served) => {
     role: "builder",
   });
   const leaseOf = async (by: Person) => {
-    const { lease } = await by.api.apps.drafts.preview(served.app);
+    const { lease } = await by.api.apps.preview.open(served.app);
     if (lease === undefined) {
       throw new Error("The preview opened with no lease.");
     }
@@ -816,7 +816,7 @@ describe(
         await framesOf(await post(`${served.app}/stream`, call, sent))
       );
       const before = resultOfLast(await framesOf(await attach()));
-      await builder.api.apps.drafts.resetTestData(served.app);
+      await builder.api.apps.preview.resetData(served.app);
       const reset = errorCodeOf(resultOfLast(await framesOf(await attach())));
       await builder.api.apps.archive(served.app);
       const archived = await refusalOf(await attach());

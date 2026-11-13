@@ -5,10 +5,8 @@ import { z } from "zod";
 
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { repairResourceTerminations } from "../src/workflows/resource-runs.ts";
 import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
 import { mockIdpWith } from "./idp.ts";

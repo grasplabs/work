@@ -4,7 +4,8 @@ import { z } from "zod";
 
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { revokePermission } from "../src/permissions.ts";
-import { publishWorkflowVersion } from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { grantReviewed } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
 import {
@@ -35,6 +36,7 @@ import {
   waitsShown,
   widerOf,
 } from "./page-typed-workflows-harness.ts";
+import { unique } from "./sign-in.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
@@ -45,6 +47,23 @@ import {
 // the descriptors the SDK generates.
 
 mockIdpWith(idp);
+
+/** Another workflow of `builder`'s, of the same contract, published. */
+const anotherWorkflow = async (
+  builder: Person,
+  hold?: string
+): Promise<string> => {
+  const other = await createWorkflowResource(
+    env,
+    builder.acting,
+    `other-${unique()}`
+  );
+  await publishWorkflowVersion(env, builder.acting, other.id, {
+    definition: greetingOf(hold, "Another"),
+    basedOn: null,
+  });
+  return other.id;
+};
 
 describe(
   "a page's typed workflow through the real host",
@@ -216,24 +235,21 @@ describe(
       });
     });
 
-    it("starts and shows nothing of another version the alias was bound to since the seal", async () => {
+    it("starts and shows nothing of another workflow the alias was bound to since the seal", async () => {
       const fixture = await boundApp({ hold: "1 hour" });
       const { builder, app, reference } = fixture;
       const lease = await pageOf(builder, app);
       const handle = await pageRuns(builder, app, lease, reference).start({
         who: "Ada",
       });
-      // Version 2, bound with no seal: the release's references were made
-      // for version 1.
-      await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf(undefined, "Version 2"),
-        basedOn: 1,
-      });
-      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
-        app,
-        alias: "followUp",
-        version: 2,
-      });
+      // Another workflow, bound with no seal: the release's references
+      // were made for the first.
+      await bindWorkflowToApp(
+        env,
+        builder.acting,
+        await anotherWorkflow(builder),
+        { app, alias: "followUp", version: 1 }
+      );
       const channel = pageRuns(builder, app, lease, reference);
       const stopBinding = channel.followBinding(() => {
         // Read below.
@@ -398,16 +414,14 @@ describe(
         expect(waitsShown(first.received.at(-1)?.outcome)).toBe(1);
         expect(canRun()).toBeTruthy();
       }, settles);
-      // Rebound away: the page is told at once, nothing else needed.
-      await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
-        definition: greetingOf("1 hour", "Version 2"),
-        basedOn: 1,
-      });
-      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
-        app,
-        alias: "followUp",
-        version: 2,
-      });
+      // Rebound away to another workflow: the page is told at once,
+      // nothing else needed.
+      await bindWorkflowToApp(
+        env,
+        builder.acting,
+        await anotherWorkflow(builder, "1 hour"),
+        { app, alias: "followUp", version: 1 }
+      );
       await vi.waitFor(() => {
         expect(first.received.at(-1)?.outcome).toBeNull();
         expect(canRun()).toBeFalsy();

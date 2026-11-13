@@ -60,7 +60,7 @@ const currentApp = async (builder: Person, files: TestSource) => {
     files,
     "First"
   );
-  await builder.api.apps.versions.publish(id, version);
+  await builder.api.versions.rollback({ kind: "app", id }, version);
   return { app: id, version };
 };
 
@@ -90,7 +90,7 @@ const nextVersion = async (builder: Person, app: string) => {
     { "src/routes/index.tsx": notesPage.replace(">Add<", ">Add a note<") },
     "Second"
   );
-  await builder.api.apps.versions.publish(app, version);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
   return {
     version,
     api: apiOf(await loadRelease(env, appIdSchema.parse(app), version)),

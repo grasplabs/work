@@ -26,7 +26,6 @@ import { exports } from "cloudflare:workers";
 import { functionRoles } from "./app-access.ts";
 import { testDataOf } from "./app-data.ts";
 import { schemaIdsOf } from "./app-definition.ts";
-import type { Draft } from "./app-drafts.ts";
 import {
   publicFunctionOf,
   readFunctionRequest,
@@ -41,17 +40,14 @@ import {
 } from "./app-people.ts";
 import { loadDraftRelease, sealDraftRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import {
-  changesAnything,
-  draftDefinition,
-  draftFiles,
-  editableApp,
-} from "./apps.ts";
+import { draftDefinition, draftFiles, editableApp } from "./apps.ts";
 import { memberRole } from "./auth/identity.ts";
 import { holdThrowawayStore, throwawayStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { pageModulesOf } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
+import { changesAnything } from "./drafts.ts";
+import type { DraftState } from "./drafts.ts";
 import { appPreview } from "./durable-objects.ts";
 import { hostFunctionCall } from "./function-host.ts";
 import type { Invocation, ProgressSink } from "./function-host.ts";
@@ -154,7 +150,7 @@ interface DraftSource {
 const draftSource = async (
   env: Env,
   app: AppId,
-  draft: Draft
+  draft: DraftState
 ): Promise<DraftSource | null> => {
   const held = await draftDefinition(env, app, draft);
   return held === null
@@ -222,7 +218,7 @@ const sealed = async (
  * What `draft`, a draft of `app`, holds (`draftSource`) and the release it
  * seals to (`sealed`); null for a draft that holds nothing.
  */
-const sealedDraft = async (env: Env, app: AppId, draft: Draft) => {
+const sealedDraft = async (env: Env, app: AppId, draft: DraftState) => {
   const source = await draftSource(env, app, draft);
   return source === null
     ? null
@@ -241,7 +237,7 @@ const sealedDraft = async (env: Env, app: AppId, draft: Draft) => {
 export const draftRelease = async (
   env: Env,
   app: AppId,
-  draft: Draft
+  draft: DraftState
 ): Promise<Release | null> => {
   const drafted = await sealedDraft(env, app, draft);
   return drafted?.release ?? null;
@@ -257,7 +253,7 @@ export const draftRelease = async (
 export const draftReferences = async (
   env: Env,
   app: AppId,
-  draft: Draft
+  draft: DraftState
 ): Promise<PageModules | null> => {
   const drafted = await sealedDraft(env, app, draft);
   if (drafted === null) {

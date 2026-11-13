@@ -80,7 +80,7 @@ const fromBuiltin = async (admin: Person, blueprint: string) => {
   const made = await admin.api.apps.blueprints.create(blueprint, {
     name: `Ours ${unique()}`,
   });
-  await admin.api.apps.versions.publish(made.app.id, 1);
+  await admin.api.versions.rollback({ kind: "app", id: made.app.id }, 1);
   return { app: appIdSchema.parse(made.app.id), permissions: made.permissions };
 };
 

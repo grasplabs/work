@@ -16,6 +16,7 @@ import { configuredLimits } from "./quota-limits.ts";
 import { runObject, sleeping } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // What the workflow-slot*.test.ts files share: the limit on workflow
 // attempts running at once (admission.ts). Each file calls `mockIdp()`
@@ -92,10 +93,11 @@ export const ownerOf = async (builder: Builder): Promise<RunOwner> => {
   const workflow = await builder.api.workflowResources.create(
     `idle-${unique()}`
   );
-  await builder.api.workflowResources.publish(workflow.id, {
-    definition: definitionOf([{ id: "idle", type: "wait", for: "1 day" }]),
-    basedOn: null,
-  });
+  await publishOverRpc(
+    builder.api,
+    workflow.id,
+    definitionOf([{ id: "idle", type: "wait", for: "1 day" }])
+  );
   const run = await idleRun(builder, workflow.id);
   return {
     run,

@@ -17,7 +17,6 @@ import type {
   WorkflowResource,
   WorkflowResourcesApi,
   WorkflowResourceRun,
-  WorkflowResourceVersion,
   WorkflowShareCandidates,
   WorkflowStart,
   WorkflowState,
@@ -54,9 +53,8 @@ import {
 import {
   editWorkflowDraft,
   editWorkflowStep,
-  publishWorkflowDraft,
   workflowDraft,
-} from "./workflow-drafts.ts";
+} from "./workflow-editor.ts";
 import { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
 import { workflowActivity, workflowFiles } from "./workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
@@ -65,7 +63,6 @@ import {
   deleteWorkflowResource,
   getWorkflowResource,
   listWorkflowResources,
-  publishWorkflowVersion,
   releaseWorkflowName,
   setWorkflowAskable,
   setWorkflowProcess,
@@ -75,7 +72,6 @@ import {
   workflowDefinition,
   workflowMembers,
   workflowSource,
-  workflowVersions,
 } from "./workflow-resources.ts";
 import { workflowShareCandidates } from "./workflow-share-candidates.ts";
 import { workflowStartForm } from "./workflow-start-form.ts";
@@ -161,14 +157,6 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async publish(id: string, input: unknown): Promise<WorkflowResourceVersion> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await publishWorkflowVersion(this.#env, person, id, input)
-    );
-  }
-
   async draft(id: string): Promise<WorkflowDraft> {
     return await withPerson(
       this.#check,
@@ -187,23 +175,6 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await editWorkflowStep(this.#env, person, id, input)
-    );
-  }
-
-  async publishDraft(
-    id: string,
-    input: unknown
-  ): Promise<WorkflowResourceVersion> {
-    return await withPerson(
-      this.#check,
-      async (person) => await publishWorkflowDraft(this.#env, person, id, input)
-    );
-  }
-
-  async versions(id: string): Promise<WorkflowResourceVersion[]> {
-    return await withPerson(
-      this.#check,
-      async (person) => await workflowVersions(this.#env, person, id)
     );
   }
 

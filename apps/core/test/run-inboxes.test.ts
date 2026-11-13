@@ -22,10 +22,8 @@ import {
   ensureReleaseContract,
   publishCatalogContract,
 } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import type { HostHooks } from "../src/workflows/host.ts";

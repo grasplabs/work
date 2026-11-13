@@ -1,4 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import { draftErrors } from "@grasp-os/shared/drafts";
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { runInDurableObject } from "cloudflare:test";
@@ -6,7 +7,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appDraftKind } from "../src/apps.ts";
+import { readDraft, saveDraft } from "../src/drafts.ts";
 import {
   editing,
   fixed,
@@ -123,19 +125,25 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
           },
           { timeout: 15_000, interval: 20 }
         );
-        const { revision } = await person.api.apps.drafts.get(existing);
-        await person.api.apps.drafts.discard(existing, revision);
+        const { revision } = await person.api.drafts.get({
+          kind: "app",
+          id: existing,
+        });
+        await person.api.drafts.discard(
+          { kind: "app", id: existing },
+          revision
+        );
         gate.released = true;
         await reply;
       }
     );
     const results = await toolResults(chat.stub, chatId);
     const overtaken = results.at(-1);
-    const { changes } = await readDraft(env, existing);
+    const { changes } = await readDraft(env, { kind: "app", id: existing });
     expect({
       overtaken: [overtaken?.tool, overtaken?.isError],
       conflict: overtaken?.text.includes(
-        appErrors.create("app.conflict").message
+        draftErrors.create("draft.conflict").message
       ),
       draft: changes,
     }).toStrictEqual({
@@ -157,9 +165,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ]);
     await chat.ask("Read the App's notes");
     // Another builder's chat changes the file after the agent read it.
-    const draft = await readDraft(env, existing);
+    const draft = await readDraft(env, { kind: "app", id: existing });
     await saveDraft(
       env,
+      appDraftKind,
       appIdSchema.parse(existing),
       { ...draft, base: 1 },
       { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },
@@ -172,7 +181,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       chat.stub,
       chat.chat.id
     );
-    const { changes } = await readDraft(env, existing);
+    const { changes } = await readDraft(env, { kind: "app", id: existing });
     expect({
       refused: [refused?.tool, refused?.isError],
       says: refused?.text.includes("changed in the draft since you last read"),
@@ -201,9 +210,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Read the App's notes");
     // Another builder's chat changes the file after the agent read it: the
     // text the edit replaces is there, but the agent never saw it.
-    const draft = await readDraft(env, existing);
+    const draft = await readDraft(env, { kind: "app", id: existing });
     await saveDraft(
       env,
+      appDraftKind,
       appIdSchema.parse(existing),
       { ...draft, base: 1 },
       { changes: { "AGENTS.md": "# Theirs\n" }, unchanged: [] },
@@ -216,7 +226,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       chat.stub,
       chat.chat.id
     );
-    const { changes } = await readDraft(env, existing);
+    const { changes } = await readDraft(env, { kind: "app", id: existing });
     expect({
       refused: [refused?.tool, refused?.isError],
       says: refused?.text.includes("changed in the draft since you last read"),
@@ -402,7 +412,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Write fifty-one notes");
 
     const [refused] = await toolResults(chat.stub, chat.chat.id);
-    const { changes } = await readDraft(env, existing);
+    const { changes } = await readDraft(env, { kind: "app", id: existing });
     expect({
       refused: refused?.isError,
       short: (refused?.text.length ?? Infinity) < 500,
@@ -486,7 +496,7 @@ export const list = query({ args: {}, handler: async () => [] });
     const { api: generated } = z
       .object({ api: z.string() })
       .parse(returned(after?.text));
-    const draft = await readDraft(env, existing);
+    const draft = await readDraft(env, { kind: "app", id: existing });
     const refusals = z
       .record(z.string(), z.string())
       .parse(returned(code?.text));

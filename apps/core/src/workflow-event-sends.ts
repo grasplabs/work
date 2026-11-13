@@ -140,7 +140,7 @@ const senderOf = (intent: Pick<SendEventIntent, "app" | "principal">): string =>
 
 /**
  * That run `runId` is one App `app` started through its binding of
- * `alias`, of exactly the version it names now, and hasn't ended; and that
+ * `alias`, of the workflow it binds now, and hasn't ended; and that
  * the App may send it events for `principal` now, as SQL.
  */
 const maySendSql = (
@@ -160,7 +160,6 @@ const maySendSql = (
       JOIN workflow_start_receipts AS receipt ON receipt.id = run.id
       WHERE run.id = ${runId}
         AND run.workflow_resource_id = ${pin.workflowId}
-        AND run.version = ${pin.version}
         AND run.status IN ('starting', 'running', 'paused')
         AND receipt.invoker_type = 'app' AND receipt.invoker_id = ${app})
     AND ${appSendHoldsSql(app, appVersion, principal, workflow.data)}
@@ -381,7 +380,7 @@ export const dispatchSendEventIntent = async (
       if (
         !(await holds(
           env,
-          sql`(${appSendHoldsSql(intent.app, intent.appVersion, intent.principal, intent.workflowId)} AND ${bindingPinnedSql(intent.app, intent.workflow, { workflowId: intent.workflowId, version: intent.version })})`
+          sql`(${appSendHoldsSql(intent.app, intent.appVersion, intent.principal, intent.workflowId)} AND ${bindingPinnedSql(intent.app, intent.workflow, { workflowId: intent.workflowId })})`
         ))
       ) {
         throw workflowResourceErrors.create("workflow.event_denied");

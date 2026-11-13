@@ -26,7 +26,7 @@ import {
   withFiles,
 } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { commitDefined, racingDb } from "./apps.ts";
+import { appVersionsOf, commitDefined, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
@@ -41,7 +41,7 @@ const idp = mockIdp();
 /** A signed-in person's App API, on a connection of their own. */
 const appsApi = async (role: Role) => {
   const person = await signedInApi(idp, role);
-  return { ...person, apps: person.api.apps };
+  return { ...person, apps: person.api.apps, versions: person.api.versions };
 };
 
 type Apps = Awaited<ReturnType<typeof appsApi>>["apps"];
@@ -136,7 +136,7 @@ export const Route = createFileRoute("/")({ component: Page });
 // that release Apps give theirs.
 describe("App code", { timeout: 60_000 }, () => {
   it("reads back every version exactly as it was committed", async () => {
-    const { apps, userId } = await appsApi("builder");
+    const { apps, userId, versions } = await appsApi("builder");
     const app = await newApp(apps);
     const v1 = await commit(apps, app.id, first, "First page");
     const v2 = await commit(apps, app.id, {
@@ -171,12 +171,12 @@ export const Route = createFileRoute("/")({ component: Page });
     // builds went (build-on-save.test.ts).
     const { builds: _builds, ...committedV1 } = v1;
     const [newestFirst, beforeTwo, one] = await Promise.all([
-      apps.versions.list(app.id),
-      apps.versions.list(app.id, 2),
-      apps.versions.get(app.id, 1),
+      versions.list({ kind: "app", id: app.id }),
+      versions.list({ kind: "app", id: app.id }, 2),
+      versions.get({ kind: "app", id: app.id }, 1),
     ]);
     expect({
-      newestFirst: newestFirst.map(({ version, message }) => [
+      newestFirst: appVersionsOf(newestFirst).map(({ version, message }) => [
         version,
         message,
       ]),
@@ -193,7 +193,7 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("reads the latest version without a version, and refuses a commit that changes nothing", async () => {
-    const { apps } = await appsApi("builder");
+    const { apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
     const none = await apps.files.read(app.id);
     await commit(apps, app.id, first);
@@ -229,11 +229,13 @@ export const Route = createFileRoute("/")({ component: Page });
       "app.nothing_to_commit",
       "app.nothing_to_commit",
     ]);
-    await expect(apps.versions.list(app.id)).resolves.toHaveLength(2);
+    await expect(
+      versions.list({ kind: "app", id: app.id })
+    ).resolves.toHaveLength(2);
   });
 
   it("gives an App a definition with its first version, and keeps its config and schema as the definition generates them", async () => {
-    const { apps } = await appsApi("builder");
+    const { apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
     // Pages alone: the first version gets an empty definition, named as
     // the App is, and the config and schema generated from it.
@@ -254,13 +256,13 @@ export const Route = createFileRoute("/")({ component: Page });
     const invalid = await outcome(
       apps.files.commit(app.id, {}, "Invalid", { name: 1 })
     );
-    const versions = await apps.versions.list(app.id);
+    const listed = await versions.list({ kind: "app", id: app.id });
     expect({
       pagesOnly,
       config: handwritten["grasp.config.ts"],
       // A definition that isn't one: refused, nothing of the commit kept.
       invalid,
-      versions: versions.map(({ version }) => version),
+      versions: listed.map(({ version }) => version),
     }).toStrictEqual({
       pagesOnly: withFiles(defined, {
         "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -319,7 +321,7 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("reviews a change of the definition in a draft as a change of the server code, with what it does to the records, renames included", async () => {
-    const { apps, userId } = await appsApi("admin");
+    const { apps, userId, versions } = await appsApi("admin");
     const app = await newApp(apps);
     const two = definitionOf({
       name: "Invoice desk",
@@ -353,7 +355,7 @@ export const Route = createFileRoute("/")({ component: Page });
       "Notes",
       definitionInput(two)
     );
-    await apps.versions.publish(app.id, 1);
+    await versions.rollback({ kind: "app", id: app.id }, 1);
     await apps.files.commit(
       app.id,
       unchanged,
@@ -438,7 +440,7 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("refuses to build on or run a version that holds no definition, saying so", async () => {
-    const { apps, userId } = await appsApi("builder");
+    const { apps, userId, versions } = await appsApi("builder");
     const app = await newApp(apps);
     await storedUnchecked(app.id, userId, first.files, null);
     let refusal: unknown;
@@ -447,13 +449,15 @@ export const Route = createFileRoute("/")({ component: Page });
     } catch (error) {
       refusal = error;
     }
-    const seal = await outcome(apps.versions.publish(app.id, 1));
-    const versions = await apps.versions.list(app.id);
+    const seal = await outcome(
+      versions.rollback({ kind: "app", id: app.id }, 1)
+    );
+    const listed = await versions.list({ kind: "app", id: app.id });
     expect({
       commit: appErrors.codeOf(refusal),
       issues: definitionRefusal(refusal),
       seal,
-      versions: versions.map(({ version }) => version),
+      versions: listed.map(({ version }) => version),
     }).toStrictEqual({
       commit: "app.definition_invalid",
       issues: "The App's version holds no definition.",
@@ -538,7 +542,7 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("keeps one of two commits over the same version, and refuses the other whole", async () => {
-    const { api, apps } = await appsApi("builder");
+    const { api, apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
     const theirs = { "AGENTS.md": "# Theirs\n" };
@@ -563,9 +567,9 @@ export const Route = createFileRoute("/")({ component: Page });
         )
       )
     ).resolves.toBe("app.conflict");
-    const versions = await apps.versions.list(app.id);
+    const listed = await versions.list({ kind: "app", id: app.id });
     expect(
-      versions.map(({ version, message }) => [version, message])
+      appVersionsOf(listed).map(({ version, message }) => [version, message])
     ).toStrictEqual([
       [2, "Theirs"],
       [1, "Change"],
@@ -578,7 +582,7 @@ export const Route = createFileRoute("/")({ component: Page });
   });
 
   it("diffs two versions by path", async () => {
-    const { apps } = await appsApi("builder");
+    const { apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
     await commit(apps, app.id, {
@@ -595,7 +599,9 @@ export const Route = createFileRoute("/detail")({ component: Page });
       "AGENTS.md": null,
     });
 
-    await expect(apps.versions.diff(app.id, 1, 2)).resolves.toStrictEqual([
+    await expect(
+      versions.diff({ kind: "app", id: app.id }, 1, 2)
+    ).resolves.toStrictEqual([
       {
         path: "AGENTS.md",
         change: "deleted",
@@ -621,36 +627,36 @@ export const Route = createFileRoute("/")({ component: Page });
 `,
       },
     ]);
-    await expect(apps.versions.diff(app.id, 2, 2)).resolves.toStrictEqual([]);
+    await expect(
+      versions.diff({ kind: "app", id: app.id }, 2, 2)
+    ).resolves.toStrictEqual([]);
   });
 
   it("runs the version published, labelled as it first goes live, without changing any version's files", async () => {
-    const { apps } = await appsApi("builder");
+    const { apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
-    const one = await apps.versions.publish(app.id, 1);
+    const one = await versions.rollback({ kind: "app", id: app.id }, 1);
     await commit(apps, app.id, { "AGENTS.md": "# Changed\n" });
 
-    const approved = await apps.versions.publish(app.id, 2);
+    const approved = await versions.rollback({ kind: "app", id: app.id }, 2);
     const month = releaseMonthPrefix(new Date());
     expect({ app, one, approved }).toMatchObject({
       app: { currentVersion: null, liveLabel: null },
-      one: { currentVersion: 1, liveLabel: `${month}1` },
-      approved: { currentVersion: 2, liveLabel: `${month}2` },
+      one: { version: 1, label: `${month}1` },
+      approved: { version: 2, label: `${month}2` },
     });
     // As its builder reads it: with their own role in it.
-    await expect(apps.get(app.id)).resolves.toStrictEqual({
-      ...approved,
+    await expect(apps.get(app.id)).resolves.toMatchObject({
+      currentVersion: 2,
+      liveLabel: `${month}2`,
       role: "builder",
     });
 
     // Rolling back is publishing an earlier version again, under its
     // label.
-    const rolledBack = await apps.versions.publish(app.id, 1);
-    expect(rolledBack).toMatchObject({
-      currentVersion: 1,
-      liveLabel: `${month}1`,
-    });
+    const rolledBack = await versions.rollback({ kind: "app", id: app.id }, 1);
+    expect(rolledBack).toMatchObject({ version: 1, label: `${month}1` });
     await expect(
       Promise.all([apps.files.read(app.id, 1), apps.files.read(app.id, 2)])
     ).resolves.toStrictEqual([
@@ -661,21 +667,18 @@ export const Route = createFileRoute("/")({ component: Page });
     ]);
     await expect(
       Promise.all([
-        outcome(apps.versions.publish(app.id, 3)),
-        outcome(apps.versions.publish(app.id, 0)),
+        outcome(versions.rollback({ kind: "app", id: app.id }, 3)),
+        outcome(versions.rollback({ kind: "app", id: app.id }, 0)),
       ])
-    ).resolves.toStrictEqual([
-      "app.version_not_found",
-      "app.version_not_found",
-    ]);
+    ).resolves.toStrictEqual(["app.version_not_found", "draft.invalid"]);
   });
 
   it("names the pages of the version that runs, and only those", async () => {
-    const { apps } = await appsApi("builder");
+    const { apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
     const none = await apps.contents(app.id);
-    await apps.versions.publish(app.id, 1);
+    await versions.rollback({ kind: "app", id: app.id }, 1);
     await commit(apps, app.id, {
       "src/routes/archive.tsx": `import { createFileRoute } from "@tanstack/react-router";
 const Page = () => null;
@@ -687,7 +690,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
     });
     // Committed, not yet current: what runs is still version 1.
     const beforeCurrent = await apps.contents(app.id);
-    await apps.versions.publish(app.id, 2);
+    await versions.rollback({ kind: "app", id: app.id }, 2);
 
     expect({
       none,
@@ -705,7 +708,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
 
   it("audits every commit and version change, by identifiers only", async () => {
     const aHash: unknown = expect.any(String);
-    const { apps, userId } = await appsApi("admin");
+    const { apps, userId, versions } = await appsApi("admin");
     const actor = { type: "person", userId };
     let tree = "";
     const recorded = await auditedDuring(async () => {
@@ -715,9 +718,9 @@ export const Route = createFileRoute("/archive")({ component: Page });
         sourceParts(first).files,
         "Secret plans in the message"
       ));
-      await apps.versions.publish(app.id, 1);
+      await versions.rollback({ kind: "app", id: app.id }, 1);
       // Already current: nothing changes, nothing is recorded.
-      await apps.versions.publish(app.id, 1);
+      await versions.rollback({ kind: "app", id: app.id }, 1);
     });
     // The App's own events; indexing it into the Apps collection records
     // its entry's (apps-collection.test.ts).
@@ -770,13 +773,13 @@ export const Route = createFileRoute("/archive")({ component: Page });
       // (app-publish.ts).
       {
         by: actor,
-        action: "app.version.published",
+        action: "app.version.built",
         on: target,
         detail: { version: 1, manifestHash: aHash },
       },
       {
         by: actor,
-        action: "app.version.current",
+        action: "version.rolled_back",
         on: target,
         // Its label, and what it replaced.
         detail: {
@@ -790,7 +793,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
 
   it("are made by builders and admins, and private to them", async () => {
     const { apps: builder } = await appsApi("builder");
-    const { apps: user } = await appsApi("user");
+    const { apps: user, versions: userVersions } = await appsApi("user");
     const app = await newApp(builder);
     await commit(builder, app.id, first);
 
@@ -803,9 +806,9 @@ export const Route = createFileRoute("/archive")({ component: Page });
       outcome(user.contents(app.id)),
       outcome(user.files.read(app.id, 1)),
       outcome(user.files.commit(app.id, { "AGENTS.md": "# Mine\n" }, "Mine")),
-      outcome(user.versions.list(app.id)),
-      outcome(user.versions.diff(app.id, 1, 1)),
-      outcome(user.versions.publish(app.id, 1)),
+      outcome(userVersions.list({ kind: "app", id: app.id })),
+      outcome(userVersions.diff({ kind: "app", id: app.id }, 1, 1)),
+      outcome(userVersions.rollback({ kind: "app", id: app.id }, 1)),
     ]);
     expect(new Set(refused)).toStrictEqual(new Set(["app.not_found"]));
     await expect(builder.get(app.id)).resolves.toMatchObject({
@@ -926,15 +929,15 @@ export const Route = createFileRoute("/archive")({ component: Page });
   });
 
   it("refuses Apps and versions that don't exist", async () => {
-    const { apps } = await appsApi("builder");
+    const { apps, versions } = await appsApi("builder");
     const app = await newApp(apps);
     await expect(
       Promise.all([
         outcome(apps.get("no-such-app")),
         outcome(commit(apps, "no-such-app", { "AGENTS.md": "x" })),
         outcome(apps.files.read(app.id, 1)),
-        outcome(apps.versions.get(app.id, 1)),
-        outcome(apps.versions.diff(app.id, 1, 2)),
+        outcome(versions.get({ kind: "app", id: app.id }, 1)),
+        outcome(versions.diff({ kind: "app", id: app.id }, 1, 2)),
       ])
     ).resolves.toStrictEqual([
       "app.not_found",

@@ -49,6 +49,7 @@ import { mockIdp } from "./idp.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Independent workflows' email triggers (workflows/inbound-email.ts), from
 // their threat model: mail reaches a trigger only through the signed
@@ -768,10 +769,11 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
 
   it("try a message again, never refuse it for good, when its trigger moves to another version as it starts, then start it at that version", async () => {
     const { builder, workflow, trigger, address } = await emailTrigger();
-    await builder.api.workflowResources.publish(workflow, {
-      definition: definitionOf("args.subject.trim()"),
-      basedOn: 1,
-    });
+    await publishOverRpc(
+      builder.api,
+      workflow,
+      definitionOf("args.subject.trim()")
+    );
     const message = invoiceMail({
       to: address,
       messageId: `moved-${unique()}@acme.test`,
@@ -901,10 +903,7 @@ const publishedWorkflow = async (builder: Person): Promise<string> => {
   const { id } = await builder.api.workflowResources.create(
     `named-${unique()}`
   );
-  await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(),
-    basedOn: null,
-  });
+  await publishOverRpc(builder.api, id, definitionOf());
   return id;
 };
 

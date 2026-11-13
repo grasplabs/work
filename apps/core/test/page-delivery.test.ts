@@ -244,7 +244,7 @@ const release = async (
     files,
     "Release"
   );
-  await builder.api.apps.versions.publish(app, version);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
   return version;
 };
 

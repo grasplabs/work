@@ -1,13 +1,14 @@
 import { z } from "zod";
 
 import type { AppDataApi } from "./app-data.ts";
-import type { AppDraftsApi } from "./app-drafts.ts";
+import type { AppDraftChanges, AppPreviewApi } from "./app-drafts.ts";
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
 import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
+import type { DataModelChange, DraftDataModel } from "./data-model.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
 import { defineErrorFamily } from "./errors.ts";
@@ -399,14 +400,14 @@ export interface AppFilesApi {
 /** Why an admin revokes a release or holds it: kept in the audit log. */
 const releaseReasonSchema = z.string().trim().min(1).max(500);
 
-/** Revoking an App's release (`AppVersionsApi.revoke`): why. */
+/** Revoking an App's release (`AppReleasesApi.revoke`): why. */
 export const releaseRevocationSchema = z.strictObject({
   reason: releaseReasonSchema,
 });
 export type ReleaseRevocation = z.input<typeof releaseRevocationSchema>;
 
 /**
- * A legal hold on an App's release (`AppVersionsApi.placeHold`): its name,
+ * A legal hold on an App's release (`AppReleasesApi.placeHold`): its name,
  * such as a case reference, which lifting it names again, and why.
  */
 export const releaseHoldSchema = z.strictObject({
@@ -438,41 +439,16 @@ export interface AppRelease {
   holds: AppReleaseHold[];
 }
 
-/** An App's versions and which of them runs. */
-export interface AppVersionsApi {
-  /** The App's versions, newest first, at most 100 from before `before`. */
-  list: (app: string, before?: number) => Promise<AppVersion[]>;
-  get: (app: string, version: number) => Promise<AppVersion>;
-  /** How the files of `to` differ from those of `from`, by path. */
-  diff: (app: string, from: number, to: number) => Promise<FileDiff[]>;
-  /**
-   * Publishes one of the App's versions again, to roll back to it (or a
-   * version that never was live, such as the first of an App created
-   * from a blueprint): published if it isn't yet (built, sealed and its
-   * tests run) and made live in one step, as `AppDraftsApi.publish`
-   * does. With `revision`, the draft's revision the person read, the
-   * draft is reset to it, its unpublished changes discarded
-   * (`app.conflict` once the draft moved since): what they confirm as
-   * they roll back. Without, the draft keeps its changes, which its next
-   * publish commits over the version live then. Given `expected`, the
-   * live version the person saw (null for none), only over it: once
-   * someone published another since,
-   * `app.conflict`, and that one stays live. Published by anyone but one
-   * of the organization's admins, the App's permissions that change
-   * things are asked for again (`AppDraftsApi.publish`).
-   */
-  publish: (
-    app: string,
-    version: number,
-    revision?: number,
-    expected?: number | null
-  ) => Promise<App>;
+/**
+ * An App's sealed releases (`apps.releases`): for the organization's own
+ * admins, never Grasp staff, as is each call below.
+ */
+export interface AppReleasesApi {
   /**
    * The App's sealed releases, newest first, at most 100 from before
-   * `before`, with whether each was revoked and its legal holds. For the
-   * organization's own admins, never Grasp staff, as is each call below.
+   * `before`, with whether each was revoked and its legal holds.
    */
-  releases: (app: string, before?: number) => Promise<AppRelease[]>;
+  list: (app: string, before?: number) => Promise<AppRelease[]>;
   /**
    * Revokes a sealed release (`releaseRevocationSchema`): it runs no more,
    * calls already running included, and is kept for good. Audited, with
@@ -716,7 +692,7 @@ export interface AppBlueprintsApi {
   update: (app: string) => Promise<BlueprintUpdate | null>;
   /**
    * Commits the update the builder saw as the App's next version, which
-   * a builder then publishes (`AppVersionsApi.publish`). Its builders.
+   * a builder then makes live (`VersionsApi.rollback`). Its builders.
    */
   acceptUpdate: (app: string, accepted: AcceptedUpdate) => Promise<AppVersion>;
 }
@@ -845,14 +821,38 @@ export interface AppsApi {
    * builders, never Grasp staff.
    */
   answerers: (app: string) => Promise<AppAnswerer[]>;
+  /**
+   * What publishing the App's draft would change against its live
+   * version, and whether its checks pass (`AppDraftChanges`), to review
+   * before publishing it at the revision this names (`DraftsApi.publish`).
+   */
+  review: (app: string) => Promise<AppDraftChanges>;
+  /**
+   * The data model of the App's draft, from its definition, and what
+   * publishing the draft does to the App's records.
+   */
+  dataModel: (app: string) => Promise<DraftDataModel>;
+  /**
+   * Changes the definition in the App's draft by `operation` (an
+   * operation of `@grasp-os/sdk/definition`, or a few made as one): the
+   * model after it, the plan, and what this change alone does
+   * (`change`), or the problem, which changed nothing. With `preview`,
+   * nothing is saved: what it would do, to show first. Not for an
+   * archived App.
+   */
+  define: (
+    app: string,
+    operation: unknown,
+    preview?: boolean
+  ) => Promise<DataModelChange>;
   readonly files: AppFilesApi;
-  readonly versions: AppVersionsApi;
+  readonly releases: AppReleasesApi;
   readonly members: AppMembersApi;
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
   readonly webhooks: AppWebhooksApi;
   readonly data: AppDataApi;
-  readonly drafts: AppDraftsApi;
+  readonly preview: AppPreviewApi;
 }
 
 /** Why a call to the App registry was refused. */
@@ -873,7 +873,6 @@ export const appErrors = defineErrorFamily({
   "app.version_not_found": "The App has no such version.",
   "app.too_large": "The App's files would be over its limits.",
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
-  "app.draft_empty": "The draft has no changes to publish.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.link_taken": "Another App has that link. Choose another.",

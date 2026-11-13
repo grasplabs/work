@@ -1,11 +1,12 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { releaseIdsOf } from "../src/apps.ts";
 import { queryMaxReruns } from "../src/call-limits.ts";
+import { rollback } from "../src/publish.ts";
 import { maxTornReads } from "../src/query-subscriptions.ts";
 import {
   appFiles,
@@ -21,7 +22,7 @@ import {
 /** A session of a sealed Notes App's test run, and its release. */
 const session = async () => {
   const built = await appWith(appFiles);
-  await publishVersion(env, built.owner, built.app, 1);
+  await rollback(env, appPublishing, built.owner, built.app, 1);
   const release = await loadRelease(env, built.app, 1);
   const host = fixtureHostFor(env, release, await releaseIdsOf(env, release));
   const opened = await host.open("live");
@@ -60,7 +61,7 @@ const tearingSession = async (torn: number) => {
     },
   });
   const built = await appWith(appFiles);
-  await publishVersion(env, built.owner, built.app, 1);
+  await rollback(env, appPublishing, built.owner, built.app, 1);
   const release = await loadRelease(env, built.app, 1);
   const host = fixtureHostFor(
     envWith({ DATA_STORES: stores }),

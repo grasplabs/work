@@ -12,6 +12,7 @@ import { z } from "zod";
 import { finished, liveStatus } from "./runs.ts";
 import type { signedInApi } from "./sign-in.ts";
 import { unique } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 /** Someone signed in, with their API. */
 export type Person = Awaited<ReturnType<typeof signedInApi>>;
@@ -126,10 +127,7 @@ export const approvalWorkflow = async (
   const { id } = await builder.api.workflowResources.create(
     `approval-${unique()}`
   );
-  await builder.api.workflowResources.publish(id, {
-    definition: approvalOf(contract, asking),
-    basedOn: null,
-  });
+  await publishOverRpc(builder.api, id, approvalOf(contract, asking));
   await admin.api.workflowResources.approveBinding(id, {
     alias: "approval",
     target: { kind: "decision", deciders: [asking.from] },

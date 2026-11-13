@@ -32,7 +32,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { appFor, editableApp } from "./apps.ts";
+import { appFor, editableApp, findApp } from "./apps.ts";
 import {
   auditedBatch,
   outboxed,
@@ -49,26 +49,31 @@ import {
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { requireWorkflowRole } from "./workflow-resources.ts";
+import { liveWorkflow, requireWorkflowRole } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
 import type { StartingAgent } from "./workflow-starts.ts";
 import type { StartFiles } from "./workflows/start-files.ts";
 
 // Apps binding independent workflows (platform specification 3, 13.1,
-// 15.1): an App names an exact version of a workflow by an alias of its
-// own, and its code starts that version through the alias. The App never
+// 15.1): an App names a workflow by an alias of its own, and its code
+// starts the workflow's live version through the alias (a binding
+// follows it; a run keeps the version it started on). The App never
 // owns the workflow nor gains its grants. Threat model, and how each is
 // closed:
 //
-// - Grouping or binding as a grant: a binding pins a version and nothing
-//   more. Starting through it still takes the App's own `start`
+// - Grouping or binding as a grant: a binding names a workflow and
+//   nothing more. Starting through it still takes the App's own `start`
 //   permission on the workflow, granted by an admin, from a version of the
 //   App an admin approved (workflow-starts.ts).
 // - Binding a version you can't use: only someone who builds the App and
 //   has a role in the workflow binds it, to a version the workflow
 //   published; anyone else is told the workflow doesn't exist.
-// - "latest": a binding names a publication number; a new version of the
-//   workflow changes no binding. Moving to it is a new binding, audited.
+// - A new version breaking the App: a binding follows the workflow's live
+//   version, which only a person makes live, and a version whose events,
+//   decisions or listen tasks differ from what an App binding it declares
+//   never goes live (`requireBoundAppsDeclare`, workflow-publish.ts). The
+//   version a binding names is the one it was made at, which its contract
+//   was checked against.
 // - A binding removed under a start: the start's admitting statement
 //   requires the binding still active, as it requires the grant.
 // - Deleting a workflow an App relies on: an active binding whose App
@@ -301,6 +306,39 @@ const requireDeclaredContract = async (
     throw workflowResourceErrors.create(
       "workflow.app_binding_contract_changed"
     );
+  }
+};
+
+/**
+ * That every App binding workflow `workflow` declares what its version
+ * `version` has (`requireDeclaredContract`): its events, decisions and
+ * listen tasks. A binding follows its workflow's live version, so a
+ * version that would change what an App's pages name never goes live
+ * (`workflow.app_binding_contract_changed`; workflow-publish.ts).
+ */
+export const requireBoundAppsDeclare = async (
+  env: Env,
+  workflow: string,
+  version: number
+): Promise<void> => {
+  const bound = await drizzle(env.DB)
+    .select({
+      app: appWorkflowBindings.appId,
+      alias: appWorkflowBindings.alias,
+    })
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        eq(appWorkflowBindings.workflowResourceId, workflow),
+        eq(appWorkflowBindings.status, "active")
+      )
+    )
+    .all();
+  for (const { app, alias } of bound) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    const found = await findApp(env, app);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await requireDeclaredContract(env, found, alias, workflow, version);
   }
 };
 
@@ -931,7 +969,8 @@ export const listAppWorkflowBindings = async (
 };
 
 /**
- * Starts the workflow version App code's `authority` binds under `alias`,
+ * Starts the live version of the workflow App code's `authority` binds
+ * under `alias`,
  * with `request` (its input and idempotency key): through the App's own
  * `start` permission, acting for the person its call acts for, and only
  * while the binding is still active as the start is admitted. Resolved
@@ -979,11 +1018,16 @@ export const startAppBinding = async (
   if (row === undefined) {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
   }
+  // The workflow's live version: a binding follows it.
+  const workflow = await liveWorkflow(env, row.workflowResourceId);
+  if (workflow?.currentVersion === null || workflow === undefined) {
+    throw workflowResourceErrors.create("workflow.app_binding_unavailable");
+  }
   return await startWorkflow(
     env,
     { type: "app", authority, agent },
     row.workflowResourceId,
-    { version: row.workflowResourceVersion, args, key },
+    { version: workflow.currentVersion, args, key },
     sql`EXISTS (SELECT 1 FROM app_workflow_bindings
       WHERE id = ${row.id} AND status = 'active') AND ${requires}`,
     noted,
@@ -993,17 +1037,17 @@ export const startAppBinding = async (
 };
 
 /**
- * That App `app`'s active binding of `alias` names exactly workflow
- * version `pin`, as SQL: what a page's run, and a run a mutation
- * sends an event, are read through (page-workflows.ts,
- * workflow-event-sends.ts).
+ * That App `app`'s active binding of `alias` names workflow `pin`, as
+ * SQL, whichever of its versions a run is of: a binding follows the
+ * workflow's live version, and a run keeps the one it started on. What a
+ * page's run, and a run a mutation sends an event, are read through
+ * (page-workflows.ts, workflow-event-sends.ts).
  */
 export const bindingPinnedSql = (
   app: AppId,
   alias: string,
-  pin: { readonly workflowId: string; readonly version: number }
+  pin: { readonly workflowId: string }
 ): SQL =>
   sql`EXISTS (SELECT 1 FROM app_workflow_bindings
     WHERE app_id = ${app} AND alias = ${alias} AND status = 'active'
-      AND workflow_resource_id = ${pin.workflowId}
-      AND workflow_resource_version = ${pin.version})`;
+      AND workflow_resource_id = ${pin.workflowId})`;

@@ -3,7 +3,8 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatWork, readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appDraftKind } from "../src/apps.ts";
+import { chatWork, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   appName,
   findApp,
@@ -98,7 +99,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         "builder.md": "mine",
       }).files
     );
-    // The chat's page lists what its agent worked on (app-drafts.test.ts
+    // The chat's page lists what its agent worked on (drafts.test.ts
     // has who reads it).
     const listed = await chatWork(env, chat.chat.id);
     // The draft names the code step that wrote it, where the thread shows
@@ -359,8 +360,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
     await saveDraft(
       env,
+      appDraftKind,
+
       app,
-      await readDraft(env, app),
+      await readDraft(env, { kind: "app", id: app }),
       {
         changes: files.files,
         unchanged: [],
@@ -416,7 +419,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         server: "failed",
       },
     });
-    await expect(person.api.apps.versions.list(app)).resolves.toStrictEqual([]);
+    await expect(
+      person.api.versions.list({ kind: "app", id: app })
+    ).resolves.toStrictEqual([]);
   });
 
   it("says a write's build couldn't run, passes nothing then, and checks it at the next write once it can", async () => {

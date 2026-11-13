@@ -454,7 +454,7 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
       pages: await poisonCache("Desk"),
       server: await poisonCache("Sealed pages"),
     };
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
 
     const sealed = await sealedPage(env, id, version);
     const frame = await loadFrame(await builder.api.pages.open(app));
@@ -514,7 +514,8 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     );
 
     const refused = await failure(
-      async () => await builder.api.apps.versions.publish(app, version)
+      async () =>
+        await builder.api.versions.rollback({ kind: "app", id: app }, version)
     );
     const versions = await drizzle(env.DB)
       .select()

@@ -89,23 +89,6 @@ export interface PermissionRequestItem extends ItemBase {
   reviewedVersion: number | null;
 }
 
-/**
- * A version of an independent workflow a builder asked to go live, for
- * its owner or an admin to approve or send back; for whoever asked only
- * while nobody else may (`selfApproval`).
- */
-export interface WorkflowGoLiveItem extends ItemBase {
-  kind: "workflowGoLive";
-  verdicts: ("approve" | "reject")[];
-  workflow: { id: string; name: string };
-  version: number;
-  requestedBy: string;
-  /** The lifecycle revision it was read at: a verdict names it. */
-  revision: number;
-  /** The reader asked for it, and approves it themselves as nobody else may. */
-  selfApproval: boolean;
-}
-
 /** One of the brain's open questions an admin asked the person: answered in the brain. */
 export interface OpenQuestionItem extends ItemBase {
   kind: "openQuestion";
@@ -152,7 +135,7 @@ export interface AppMessageItem extends ItemBase {
 }
 
 /**
- * A workflow version, live or asked to go live, whose bindings no admin
+ * A workflow's live version whose bindings no admin
  * approved, so its starts are refused: for the organization's own admins,
  * who approve each binding on it (`WorkflowResourcesApi.approveBinding`).
  */
@@ -193,7 +176,6 @@ export type WaitingItem =
   | HeldWriteItem
   | UnknownOutcomeItem
   | PermissionRequestItem
-  | WorkflowGoLiveItem
   | OpenQuestionItem
   | StoppedScheduleItem
   | PackageNoticeItem
@@ -215,7 +197,6 @@ export const waitingParts = [
   "held",
   "outcomes",
   "requests",
-  "workflowGoLives",
   "notifications",
   "connections",
   "decisions",
@@ -282,14 +263,6 @@ export const waitingVerdictSchema = z.union([
     kind: z.literal("permissionRequest"),
     id: identifierSchema,
     verdict: z.literal("reject"),
-  }),
-  z.strictObject({
-    kind: z.literal("workflowGoLive"),
-    workflow: identifierSchema,
-    version: z.int().min(1),
-    /** The lifecycle revision as shown: one changed since is refused. */
-    revision: z.int().min(0),
-    verdict: z.enum(["approve", "reject"]),
   }),
 ]);
 export type WaitingVerdict = z.input<typeof waitingVerdictSchema>;

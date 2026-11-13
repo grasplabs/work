@@ -4,9 +4,9 @@ import { z } from "zod";
 
 import { memberOf } from "../src/auth/identity.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   setWorkflowAskable,
   shareWorkflowResource,
   workflowAskable,

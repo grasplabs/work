@@ -4,7 +4,8 @@ import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appDraftKind } from "../src/apps.ts";
+import { readDraft, saveDraft } from "../src/drafts.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
@@ -16,15 +17,15 @@ import type { Framed } from "./page-frames.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// An App's draft is one, shared by every builder of the App and by the
-// agents of their chats (app-drafts.ts). Each agent turn's writes are one
-// undo point, as the turn left the draft; a restore is one too. These
+// A draft is one per App, shared by every builder of the App and by the
+// agents of their chats (drafts.ts). Each agent turn's writes are one
+// checkpoint, as the turn left the draft; a restore is one too. These
 // tests start from the ways it can fail: two writers overwriting each
 // other (two people's chats writing from the same read), a turn's writes
-// split into points or folded into another's, a restore that rewrites
-// history, an undo point's preview that runs anything, someone who
-// doesn't build the App reading or changing the draft, and what a chat
-// worked on told to anyone but its person.
+// split into checkpoints or folded into another's, a restore that
+// rewrites history, a checkpoint's preview that runs anything, someone
+// who doesn't build the App reading or changing the draft, and what a
+// chat worked on told to anyone but its person.
 
 const idp = mockIdp();
 
@@ -104,7 +105,7 @@ const chatOf = async (person: Person): Promise<ChatId> => {
 /**
  * Writes the Desk page saying `marker` into `app`'s draft as `person`'s
  * chat `chatId`'s agent does in turn `turnId`, over `revision` (the
- * draft's now when not named): its write refused with `app.conflict`
+ * draft's now when not named): its write refused with `draft.conflict`
  * once the draft moved past it.
  */
 const agentWrites = async (
@@ -114,9 +115,11 @@ const agentWrites = async (
   marker: string,
   revision?: number
 ): Promise<void> => {
-  const now = await readDraft(env, app);
+  const now = await readDraft(env, { kind: "app", id: app });
   await saveDraft(
     env,
+    appDraftKind,
+
     app,
     { ...now, base: 1, revision: revision ?? now.revision },
     { changes: { "src/routes/index.tsx": desk(marker) }, unchanged: [] },
@@ -124,14 +127,14 @@ const agentWrites = async (
   );
 };
 
-/** How many rows of `app`'s undo points, their files and contents there are. */
+/** How many rows of `app`'s checkpoints, their files and contents there are. */
 const keptRows = async (app: AppId) =>
   Object.fromEntries(
     await Promise.all(
-      ["app_draft_points", "app_draft_point_files", "app_draft_contents"].map(
+      ["draft_checkpoints", "draft_checkpoint_files", "draft_blobs"].map(
         async (table) => {
           const row = await env.DB.prepare(
-            `SELECT count(*) AS n FROM ${table} WHERE app_id = ?`
+            `SELECT count(*) AS n FROM ${table} WHERE subject_kind = 'app' AND subject_id = ?`
           )
             .bind(app)
             .first<{ n: number }>();
@@ -161,13 +164,13 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     const theirs = { app, chatId: await chatOf(other) };
 
     await agentWrites(owner, mine, "turn-a1", "Mine");
-    const read = await readDraft(env, app);
+    const read = await readDraft(env, { kind: "app", id: app });
     await agentWrites(owner, mine, "turn-a2", "Mine again");
     // Their agent writes from what it read before: refused, nothing lost.
     const stale = await failure(async () => {
       await agentWrites(other, theirs, "turn-b1", "Theirs", read.revision);
     });
-    const afterStale = await readDraft(env, app);
+    const afterStale = await readDraft(env, { kind: "app", id: app });
     // It reads again, and writes over the draft as it is now.
     await agentWrites(other, theirs, "turn-b1", "Theirs");
     // Two writes from one read, at once: one lands, the other is refused.
@@ -179,8 +182,8 @@ describe("an App's draft", { timeout: 180_000 }, () => {
         await agentWrites(other, theirs, "turn-b2", "Race B");
       }),
     ]);
-    const draft = await owner.api.apps.drafts.get(app);
-    const seen = await other.api.apps.drafts.get(app);
+    const draft = await owner.api.drafts.get({ kind: "app", id: app });
+    const seen = await other.api.drafts.get({ kind: "app", id: app });
     const mineWorked = await owner.api.chats.worked(mine.chatId);
     const theirsWorked = await other.api.chats.worked(theirs.chatId);
 
@@ -188,13 +191,13 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       stale,
       kept: afterStale.changes["src/routes/index.tsx"],
       landed: both.filter((outcome) => outcome === "ok").length,
-      refused: both.filter((outcome) => outcome === "app.conflict").length,
+      refused: both.filter((outcome) => outcome === "draft.conflict").length,
       revision: draft.revision,
       shared: seen,
       mine: mineWorked.map(({ id }) => id),
       theirs: theirsWorked.map(({ id }) => id),
     }).toStrictEqual({
-      stale: "app.conflict",
+      stale: "draft.conflict",
       kept: desk("Mine again"),
       landed: 1,
       refused: 1,
@@ -205,7 +208,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     });
   });
 
-  it("lists with each undo point the files it touched, against the point before it, and how many it changes", async () => {
+  it("lists with each checkpoint the files it touched, against the checkpoint before it, and how many it changes", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
     const chatId = await chatOf(builder);
@@ -215,8 +218,10 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     ): Promise<void> => {
       await saveDraft(
         env,
+        appDraftKind,
+
         app,
-        await readDraft(env, app),
+        await readDraft(env, { kind: "app", id: app }),
         { changes, unchanged: [] },
         await agentWriting(builder, chatId, { turnId })
       );
@@ -229,7 +234,10 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       "src/routes/about.tsx": null,
     });
     const listed = async (before?: number) => {
-      const points = await builder.api.apps.drafts.points(app, before);
+      const points = await builder.api.drafts.checkpoints(
+        { kind: "app", id: app },
+        before
+      );
       return points.map(({ number, touched, changes }) => ({
         number,
         touched,
@@ -260,7 +268,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     });
   });
 
-  it("lists the newest 50 undo points, the oldest of them still against the point before it, and the rest page by page", async () => {
+  it("lists the newest 50 checkpoints, the oldest of them still against the checkpoint before it, and the rest page by page", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
     const chatId = await chatOf(builder);
@@ -271,18 +279,26 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one turn after the other
       await saveDraft(
         env,
+        appDraftKind,
+
         app,
         // oxlint-disable-next-line no-await-in-loop -- read as each turn writes
-        await readDraft(env, app),
+        await readDraft(env, { kind: "app", id: app }),
         { changes, unchanged: [] },
         // oxlint-disable-next-line no-await-in-loop -- as each turn writes
         await agentWriting(builder, chatId, { turnId: `turn-${turn}` })
       );
     }
 
-    const newest = await builder.api.apps.drafts.points(app);
+    const newest = await builder.api.drafts.checkpoints({
+      kind: "app",
+      id: app,
+    });
     const oldest = newest.at(-1);
-    const rest = await builder.api.apps.drafts.points(app, oldest?.number);
+    const rest = await builder.api.drafts.checkpoints(
+      { kind: "app", id: app },
+      oldest?.number
+    );
 
     expect({
       newest: newest.length,
@@ -298,13 +314,13 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     });
   });
 
-  it("keeps one undo point per agent turn, as the turn left the draft, and each restore as a new one", async () => {
+  it("keeps one checkpoint per agent turn, as the turn left the draft, and each restore as a new one", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
     const chat = { app, chatId: await chatOf(builder) };
-    const { drafts } = builder.api.apps;
+    const { apps, drafts } = builder.api;
     const numbers = async () => {
-      const points = await drafts.points(app);
+      const points = await drafts.checkpoints({ kind: "app", id: app });
       return points.map(({ number }) => number);
     };
 
@@ -312,24 +328,28 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     await agentWrites(builder, chat, "turn-1", "One");
     await agentWrites(builder, chat, "turn-1", "Two");
     await agentWrites(builder, chat, "turn-1", "Three");
-    const [first] = await drafts.points(app);
-    const firstPreview = await drafts.preview(app);
+    const [first] = await drafts.checkpoints({ kind: "app", id: app });
+    const firstPreview = await apps.preview.open(app);
     const afterFirst = await keptRows(app);
     // A turn cut short after one write: what it wrote is its point.
     await agentWrites(builder, chat, "turn-2", "Cut");
     await agentWrites(builder, chat, "turn-3", "Four");
     // A restore while a turn writes: its next write is a point of its own.
     await agentWrites(builder, chat, "turn-4", "Five");
-    const before = await drafts.get(app);
-    const restored = await drafts.restorePoint(app, 1, before.revision);
-    const restoredPreview = await drafts.preview(app);
+    const before = await drafts.get({ kind: "app", id: app });
+    const restored = await drafts.restore(
+      { kind: "app", id: app },
+      1,
+      before.revision
+    );
+    const restoredPreview = await apps.preview.open(app);
     await agentWrites(builder, chat, "turn-4", "Six");
-    const points = await drafts.points(app);
+    const points = await drafts.checkpoints({ kind: "app", id: app });
     // A turn that writes what an earlier point holds, then writes over
     // it: the earlier point still reads it.
     await agentWrites(builder, chat, "turn-5", "Three");
     await agentWrites(builder, chat, "turn-5", "Seven");
-    const firstAfter = await drafts.preview(app, 1);
+    const firstAfter = await apps.preview.open(app, 1);
 
     expect({
       first: {
@@ -339,7 +359,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
         chatId: first?.chatId,
         callId: first?.callId,
       },
-      // What the turn wrote over is no undo point: one file, kept once.
+      // What the turn wrote over is no checkpoint: one file, kept once.
       afterFirst,
       restored: {
         number: restored.number,
@@ -362,9 +382,9 @@ describe("an App's draft", { timeout: 180_000 }, () => {
         callId: "call-turn-1",
       },
       afterFirst: {
-        app_draft_points: 1,
-        app_draft_point_files: 1,
-        app_draft_contents: 1,
+        draft_checkpoints: 1,
+        draft_checkpoint_files: 1,
+        draft_blobs: 1,
       },
       restored: {
         number: 5,
@@ -380,17 +400,17 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     });
   });
 
-  it("previews an undo point as it was, read-only, and refuses one there isn't", async () => {
+  it("previews a checkpoint as it was, read-only, and refuses one there isn't", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
     const chat = { app, chatId: await chatOf(builder) };
-    const { drafts } = builder.api.apps;
+    const { apps } = builder.api;
     await agentWrites(builder, chat, "turn-1", "One");
     await agentWrites(builder, chat, "turn-2", "Two");
 
-    const now = await drafts.preview(app);
-    const first = await drafts.preview(app, 1);
-    const second = await drafts.preview(app, 2);
+    const now = await apps.preview.open(app);
+    const first = await apps.preview.open(app, 1);
+    const second = await apps.preview.open(app, 2);
 
     const [nowCode, firstCode, secondCode] = await Promise.all(
       [now, first, second].map(async (bundle) => await codeOf(bundle))
@@ -403,13 +423,13 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       // A point's page, the latest's (the draft as it is now) too, gets
       // no lease: nothing a point opened read-only calls runs.
       leases: [now, first, second].map(({ lease }) => lease !== undefined),
-      missing: await failure(async () => await drafts.preview(app, 9)),
+      missing: await failure(async () => await apps.preview.open(app, 9)),
     }).toStrictEqual({
       first: readOnlyRevision,
       differs: true,
       secondIsNow: true,
       leases: [true, false, false],
-      missing: "app.version_not_found",
+      missing: "draft.checkpoint_not_found",
     });
   });
 
@@ -417,14 +437,14 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
     const chat = { app, chatId: await chatOf(builder) };
-    const { drafts } = builder.api.apps;
+    const { apps } = builder.api;
     // The draft's preview with no changes shows version 1.
-    const released = await drafts.preview(app);
+    const released = await apps.preview.open(app);
     // The draft moves on from version 1, so its preview isn't it any more.
     await agentWrites(builder, chat, "turn-1", "One");
 
-    const now = await drafts.preview(app);
-    const version = await drafts.preview(app, undefined, 1);
+    const now = await apps.preview.open(app);
+    const version = await apps.preview.open(app, undefined, 1);
     const [releasedCode, nowCode, versionCode] = await Promise.all(
       [released, now, version].map(async (bundle) => await codeOf(bundle))
     );
@@ -436,7 +456,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       // Opened read-only: no lease, so it calls nothing.
       lease: version.lease,
       missing: await failure(
-        async () => await drafts.preview(app, undefined, 9)
+        async () => await apps.preview.open(app, undefined, 9)
       ),
     }).toStrictEqual({
       revision: readOnlyRevision,
@@ -447,29 +467,33 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     });
   });
 
-  it("keeps its undo points when a builder discards it, which a write that read it before can't undo", async () => {
+  it("keeps its checkpoints when a builder discards it, which a write that read it before can't undo", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
     const chat = { app, chatId: await chatOf(builder) };
-    const { drafts } = builder.api.apps;
+    const { drafts } = builder.api;
     await agentWrites(builder, chat, "turn-1", "One");
     await agentWrites(builder, chat, "turn-2", "Two");
-    const { revision } = await drafts.get(app);
-    const before = await drafts.points(app);
+    const { revision } = await drafts.get({ kind: "app", id: app });
+    const before = await drafts.checkpoints({ kind: "app", id: app });
 
     // Over a revision it moved past: refused, nothing discarded.
     const staleDiscard = await failure(async () => {
-      await drafts.discard(app, revision - 1);
+      await drafts.discard({ kind: "app", id: app }, revision - 1);
     });
-    await drafts.discard(app, revision);
-    const discarded = await drafts.get(app);
+    await drafts.discard({ kind: "app", id: app }, revision);
+    const discarded = await drafts.get({ kind: "app", id: app });
     // The agent's write that read the draft before it was discarded.
     const stale = await failure(async () => {
       await agentWrites(builder, chat, "turn-3", "Three", revision);
     });
-    const restored = await drafts.restorePoint(app, 2, revision + 1);
-    const back = await drafts.get(app);
-    const after = await drafts.points(app);
+    const restored = await drafts.restore(
+      { kind: "app", id: app },
+      2,
+      revision + 1
+    );
+    const back = await drafts.get({ kind: "app", id: app });
+    const after = await drafts.checkpoints({ kind: "app", id: app });
     const logged = await allEvents();
 
     expect({
@@ -485,16 +509,16 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       audited: logged
         .filter(
           ({ action, target }) =>
-            action === "app.draft.discarded" && target?.id === app
+            action === "draft.discarded" && target?.id === app
         )
         .map(({ actor }) =>
           actor.type === "person" ? actor.userId : actor.type
         ),
     }).toStrictEqual({
-      staleDiscard: "app.conflict",
+      staleDiscard: "draft.conflict",
       discarded: { changed: [], revision: revision + 1 },
       pointsKept: before,
-      stale: "app.conflict",
+      stale: "draft.conflict",
       restored: 2,
       back: { changed: ["src/routes/index.tsx"], revision: revision + 2 },
       audited: [builder.userId],
@@ -511,13 +535,17 @@ describe("an App's draft", { timeout: 180_000 }, () => {
     await agentWrites(owner, { app, chatId: await chatOf(owner) }, "t", "One");
     /** How each way in to the draft went for `person`. */
     const outcomes = async (person: Person) => {
-      const { drafts } = person.api.apps;
+      const { apps, drafts } = person.api;
       return {
-        get: await failure(async () => await drafts.get(app)),
-        points: await failure(async () => await drafts.points(app)),
-        preview: await failure(async () => await drafts.preview(app, 1)),
+        get: await failure(
+          async () => await drafts.get({ kind: "app", id: app })
+        ),
+        points: await failure(
+          async () => await drafts.checkpoints({ kind: "app", id: app })
+        ),
+        preview: await failure(async () => await apps.preview.open(app, 1)),
         restore: await failure(
-          async () => await drafts.restorePoint(app, 1, 1)
+          async () => await drafts.restore({ kind: "app", id: app }, 1, 1)
         ),
       };
     };
@@ -557,8 +585,10 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       await failure(async () => {
         await saveDraft(
           env,
+          appDraftKind,
+
           app,
-          await readDraft(env, app),
+          await readDraft(env, { kind: "app", id: app }),
           { changes: { "src/routes/index.tsx": desk(marker) }, unchanged: [] },
           await agentWriting(builder, chatId),
           admit
@@ -575,7 +605,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
         role: "user",
       });
     });
-    const draft = await readDraft(env, app);
+    const draft = await readDraft(env, { kind: "app", id: app });
     const events = await allEvents();
 
     expect({
@@ -585,8 +615,7 @@ describe("an App's draft", { timeout: 180_000 }, () => {
       revision: draft.revision,
       recorded: events
         .filter(
-          ({ action, target }) =>
-            action === "app.draft.defined" && target?.id === app
+          ({ action, target }) => action === "draft.saved" && target?.id === app
         )
         .map(({ actor, detail }) => ({ actor, detail })),
     }).toMatchObject({

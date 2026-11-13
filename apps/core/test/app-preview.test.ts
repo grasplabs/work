@@ -8,7 +8,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appDraftKind } from "../src/apps.ts";
+import { readDraft, saveDraft } from "../src/drafts.ts";
+import { draftWatch } from "../src/durable-objects.ts";
 import { commitApp, sourceParts, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
 import { release } from "./apps.ts";
@@ -76,9 +78,11 @@ const writeDraft = async (
 ): Promise<void> => {
   const { id: chatId } = await person.api.chats.forApp(app);
   const { files, definition } = sourceParts(changes);
-  const now = await readDraft(env, app);
+  const now = await readDraft(env, { kind: "app", id: app });
   await saveDraft(
     env,
+    appDraftKind,
+
     app,
     { ...now, base, revision },
     {
@@ -128,11 +132,11 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   it("shows the App's latest version, its functions running, while nobody has written the draft, then takes its first write", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { drafts } = builder.api.apps;
+    const { apps, drafts } = builder.api;
 
-    const before = await drafts.preview(app);
+    const before = await apps.preview.open(app);
     const frame = await loadFrame(before);
-    const unwritten = await drafts.get(app);
+    const unwritten = await drafts.get({ kind: "app", id: app });
     const latest = {
       changed: unwritten.changed,
       revision: before.revision,
@@ -145,10 +149,10 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       { "src/routes/index.tsx": deskSaying("Drafted") },
       before.revision
     );
-    const draft = await drafts.get(app);
+    const draft = await drafts.get({ kind: "app", id: app });
     // The frame opened before the write takes it, at the draft's revision.
     const update = refreshed(
-      await drafts.previewUpdate(app, 1, {
+      await apps.preview.update(app, 1, {
         appVersion: 1,
       })
     );
@@ -191,13 +195,13 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       { "src/routes/index.tsx": deskSaying("Drafted") },
       0
     );
-    const outside = await answer(colleague.api.apps.drafts.preview(app));
+    const outside = await answer(colleague.api.apps.preview.open(app));
     await builder.api.apps.members.add(app, {
       type: "person",
       id: colleague.userId,
       role: "builder",
     });
-    const shared = await colleague.api.apps.drafts.preview(app);
+    const shared = await colleague.api.apps.preview.open(app);
     const served = await servedAll(
       await loadFrame(shared),
       shared.refresh ?? { modules: {} }
@@ -213,10 +217,10 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   it("tells every builder's pages of each write, one builder's newest pages at most, so nobody crowds out the others", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const preview = previewOf(app);
+    const watched = draftWatch(env, { kind: "app", id: app });
     const heard = new Map<string, number[]>();
     const follow = async (personId: string, page: string): Promise<void> => {
-      await preview.watch(personId, async (revision: number) => {
+      await watched.watch(personId, async (revision: number) => {
         heard.set(page, [...(heard.get(page) ?? []), revision]);
         await Promise.resolve();
       });
@@ -261,14 +265,17 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       "First"
     );
     const heard: number[] = [];
-    await previewOf(app).watch(builder.userId, async (revision: number) => {
-      heard.push(revision);
-      await Promise.resolve();
-    });
-    const before = await builder.api.apps.drafts.get(app);
+    await draftWatch(env, { kind: "app", id: app }).watch(
+      builder.userId,
+      async (revision: number) => {
+        heard.push(revision);
+        await Promise.resolve();
+      }
+    );
+    const before = await builder.api.drafts.get({ kind: "app", id: app });
 
-    await builder.api.apps.versions.publish(app, version);
-    const after = await builder.api.apps.drafts.get(app);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
+    const after = await builder.api.drafts.get({ kind: "app", id: app });
 
     expect({
       told: heard.length > 0,
@@ -282,7 +289,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   it("opens a draft whose page doesn't build on the App's latest version, its calls on the draft as it is and heard by the draft's check, then takes the next write that builds", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { drafts } = builder.api.apps;
+    const { apps } = builder.api;
     // The draft renames the function the latest version's page calls.
     await writeDraft(
       builder,
@@ -294,7 +301,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       0
     );
 
-    const broken = await drafts.preview(app);
+    const broken = await apps.preview.open(app);
     // The latest version's build, under a token of its own frame's.
     const frame = await loadFrame(broken);
     const opened = {
@@ -310,7 +317,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       callsAt: callsAt(broken),
       titles: await titlesOf(builder, app),
       // Asked for the draft's page, it still doesn't build.
-      update: await answer(drafts.previewUpdate(app, 1, { appVersion: 1 })),
+      update: await answer(apps.preview.update(app, 1, { appVersion: 1 })),
     };
     // The draft's call failed through its own fault: the draft's check
     // hears it.
@@ -322,7 +329,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       1
     );
     const refresh = refreshed(
-      await drafts.previewUpdate(app, 2, {
+      await apps.preview.update(app, 2, {
         appVersion: 1,
       })
     );
@@ -355,14 +362,14 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   it("opens a draft whose server code doesn't build, or that deletes every page, on the App's latest version", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { drafts } = builder.api.apps;
+    const { apps } = builder.api;
     await writeDraft(
       builder,
       app,
       { "server/notes.ts": "export const titles = query({ (" },
       0
     );
-    const server = await drafts.preview(app);
+    const server = await apps.preview.open(app);
     const serverTitles = await titlesOf(builder, app);
     await writeDraft(
       builder,
@@ -375,7 +382,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       },
       1
     );
-    const deleted = await drafts.preview(app);
+    const deleted = await apps.preview.open(app);
 
     // The draft's pages import references its server code doesn't build:
     // the frame shows the App's latest version, and its calls say why.
@@ -410,7 +417,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       null
     );
 
-    await expect(answer(builder.api.apps.drafts.preview(app))).resolves.toBe(
+    await expect(answer(builder.api.apps.preview.open(app))).resolves.toBe(
       "page.build_failed"
     );
   });
@@ -435,7 +442,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     );
     let refused: unknown;
     try {
-      await builder.api.apps.drafts.preview(app);
+      await builder.api.apps.preview.open(app);
     } catch (error) {
       refused = error;
     }
@@ -467,7 +474,7 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   it("shows the App's latest version again once the draft is discarded", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { drafts } = builder.api.apps;
+    const { apps, drafts } = builder.api;
     await writeDraft(
       builder,
       app,
@@ -475,9 +482,9 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       0
     );
 
-    await drafts.discard(app, 1);
-    const discarded = await drafts.get(app);
-    const after = await drafts.preview(app);
+    await drafts.discard({ kind: "app", id: app }, 1);
+    const discarded = await drafts.get({ kind: "app", id: app });
+    const after = await apps.preview.open(app);
 
     expect({
       discarded: { changed: discarded.changed, revision: discarded.revision },
@@ -497,8 +504,8 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     // An App whose drafts pass their checks to be published.
     const app = await newApp(builder, "Desk", deskFiles("Released"));
-    const { drafts } = builder.api.apps;
-    const opened = await drafts.preview(app);
+    const { apps, drafts } = builder.api;
+    const opened = await apps.preview.open(app);
     /**
      * Follows the App's version as the open frame does, past its first
      * push: `told` is the next push that tells of another version, past
@@ -525,14 +532,14 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
      * and what it opens on afresh.
      */
     const updated = async () => {
-      const answered = await drafts.previewUpdate(
+      const answered = await apps.preview.update(
         app,
         opened.revision,
         opened.refresh?.appVersion === undefined
           ? {}
           : { appVersion: opened.refresh.appVersion }
       );
-      const reopened = await drafts.preview(app);
+      const reopened = await apps.preview.open(app);
       // As its frame imports it: under the token it opened with.
       const served = await servedAll(
         await loadFrame(reopened),
@@ -578,10 +585,10 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
       0
     );
     const beforePublish = await follow();
-    await drafts.publish(app, 1, "Published elsewhere");
+    await drafts.publish({ kind: "app", id: app }, 1, "Published elsewhere");
     const published = await beforePublish.told();
     await beforePublish.release();
-    const afterPublish = await drafts.preview(app);
+    const afterPublish = await apps.preview.open(app);
 
     expect({
       opened: {
@@ -608,9 +615,9 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
   it("starts a frame afresh on another version of the App", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { drafts } = builder.api.apps;
-    const opened = await drafts.preview(app);
-    const same = await drafts.previewUpdate(app, opened.revision, {
+    const { apps, drafts } = builder.api;
+    const opened = await apps.preview.open(app);
+    const same = await apps.preview.update(app, opened.revision, {
       appVersion: 1,
     });
     // Version 2, published, names the page `board`: the draft, changing
@@ -620,11 +627,11 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
       "src/routes/board.tsx":
         notesFiles("board").files["src/routes/index.tsx"] ?? "",
     });
-    const { revision } = await drafts.get(app);
-    const moved = await drafts.previewUpdate(app, revision, {
+    const { revision } = await drafts.get({ kind: "app", id: app });
+    const moved = await apps.preview.update(app, revision, {
       appVersion: 1,
     });
-    const reopened = await drafts.preview(app);
+    const reopened = await apps.preview.open(app);
 
     expect({
       same,
@@ -644,14 +651,14 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
   it("keeps a frame shown in place of a draft that doesn't build on the version the draft is over, whatever is committed elsewhere", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { drafts } = builder.api.apps;
+    const { apps } = builder.api;
     await writeDraft(
       builder,
       app,
       { "src/routes/index.tsx": "export default function Desk( {" },
       0
     );
-    const broken = await drafts.preview(app);
+    const broken = await apps.preview.open(app);
     // A version nobody uses: never what the preview shows in the draft's
     // place.
     await commitApp(
@@ -661,11 +668,11 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
       "Second"
     );
     const still = await answer(
-      drafts.previewUpdate(app, broken.revision, {
+      apps.preview.update(app, broken.revision, {
         appVersion: 1,
       })
     );
-    const reopened = await drafts.preview(app);
+    const reopened = await apps.preview.open(app);
 
     expect({
       opened: { fallback: broken.fallback, callsAt: callsAt(broken) },
@@ -691,22 +698,22 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
   it("shows the version rolled back to, never the newer one, and in place of a draft over it that doesn't build", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { drafts } = builder.api.apps;
+    const { apps, drafts } = builder.api;
     await release(builder, app, {
       "server/notes.ts": titlesSaying("from version 2"),
     });
 
-    await builder.api.apps.versions.publish(app, 1);
-    const rolledBack = await drafts.preview(app);
+    await builder.api.versions.rollback({ kind: "app", id: app }, 1);
+    const rolledBack = await apps.preview.open(app);
     const rolledBackTitles = await titlesOf(builder, app);
-    const { revision } = await drafts.get(app);
+    const { revision } = await drafts.get({ kind: "app", id: app });
     await writeDraft(
       builder,
       app,
       { "src/routes/index.tsx": "export default function Desk( {" },
       revision
     );
-    const broken = await drafts.preview(app);
+    const broken = await apps.preview.open(app);
 
     expect({
       rolledBack: { callsAt: callsAt(rolledBack), titles: rolledBackTitles },
@@ -722,14 +729,14 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
     const { id } = await builder.api.apps.create({ name: "Empty" });
     const app = appIdSchema.parse(id);
 
-    const before = await answer(builder.api.apps.drafts.preview(app));
+    const before = await answer(builder.api.apps.preview.open(app));
     await commitApp(
       builder.api.apps.files,
       app,
       deskFiles("Committed"),
       "First"
     );
-    const after = await builder.api.apps.drafts.preview(app);
+    const after = await builder.api.apps.preview.open(app);
 
     expect({
       before,

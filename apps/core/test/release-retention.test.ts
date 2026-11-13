@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction, invocationFor } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import {
   loadRelease,
   readBackRelease,
@@ -14,6 +14,7 @@ import type { Release } from "../src/app-releases.ts";
 import { isPublished } from "../src/apps.ts";
 import { hostFunctionCall } from "../src/function-host.ts";
 import type { Runner } from "../src/function-host.ts";
+import { rollback } from "../src/publish.ts";
 import {
   leaseRelease,
   pinRelease,
@@ -99,12 +100,12 @@ const twoVersions = async (
 ): Promise<Fixture & { first: Release; second: Release }> => {
   const fixture = await appWith(files("one"));
   const first = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   // The sweep sees version 1 current.
   await sweepReleases(env, start);
   await commitDefined(env, fixture.owner, fixture.app, files("two"), "Two");
   const second = await seal(fixture, 2);
-  await publishVersion(env, fixture.owner, fixture.app, 2);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 2);
   await sweepReleases(env, start);
   return { ...fixture, first, second };
 };
@@ -360,7 +361,13 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     };
     const publishing = async () => {
       try {
-        return await publishVersion(env, fixture.owner, fixture.app, 1);
+        return await rollback(
+          env,
+          appPublishing,
+          fixture.owner,
+          fixture.app,
+          1
+        );
       } finally {
         state.sealing = false;
       }
@@ -368,7 +375,7 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     const [made, sweeps] = await Promise.all([publishing(), collecting()]);
     const release = await readBackRelease(env, fixture.app, 1);
     expect({
-      current: made.currentVersion,
+      current: made.version,
       sweeps: sweeps > 0,
       readBack: release.manifestHash,
     }).toStrictEqual({
@@ -700,11 +707,11 @@ describe("a deleted release", { timeout: 120_000 }, () => {
             .run()
       )
     ).resolves.toContain("apps are made current from a published version");
-    const back = await publishVersion(env, owner, app, 1);
+    const back = await rollback(env, appPublishing, owner, app, 1);
     const events = await allEvents();
     const published = events.filter(
       (event) =>
-        event.action === "app.version.published" &&
+        event.action === "app.version.built" &&
         event.target?.id === app &&
         event.detail?.version === 1
     );
@@ -713,7 +720,7 @@ describe("a deleted release", { timeout: 120_000 }, () => {
         event.action === "app.release.deleted" && event.target?.id === app
     );
     expect({
-      current: back.currentVersion,
+      current: back.version,
       published: published.length,
       deleted: deleted.map(({ actor, detail }) => [actor, detail?.version]),
       loads: await failure(async () => await loadRelease(env, app, 1)),

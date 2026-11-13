@@ -3,10 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { addMember } from "../src/app-members.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { setArchived } from "../src/app-status.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { deleteStore } from "../src/data-stores.ts";
+import { rollback } from "../src/publish.ts";
 import {
   repairResourceStarts,
   stopRunsStartedBy,
@@ -81,7 +82,7 @@ const unpublishedApp = async (
 /** A builder's App with a page, its first version live; shared with `user`. */
 const liveApp = async (builder: Person, user?: Person): Promise<string> => {
   const { app, version } = await unpublishedApp(builder, user);
-  await builder.api.apps.versions.publish(app, version);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
   return app;
 };
 
@@ -190,7 +191,7 @@ describe("an App's archive", () => {
 
     const notLive = await waysIn(user, app);
     const nothing = await waysIn(user, missing);
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
     const live = await waysIn(user, app);
     await builder.api.apps.archive(app);
     const archived = await waysIn(user, app);
@@ -315,7 +316,7 @@ describe("an App's archive", () => {
     });
 
     const byUserNotLive = await outcome(user.api.apps.archive(app));
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
     const byUser = await outcome(user.api.apps.archive(app));
     // A builder no longer: their role is read for the call.
     await builder.api.apps.members.remove(app, {
@@ -511,7 +512,9 @@ describe("an App's archive", () => {
       .run();
 
     expect({
-      current: await outcome(builder.api.apps.versions.publish(app, version)),
+      current: await outcome(
+        builder.api.versions.rollback({ kind: "app", id: app }, version)
+      ),
       share: await outcome(
         builder.api.apps.members.add(app, {
           type: "person",
@@ -571,14 +574,15 @@ describe("an App's archive", () => {
         "Raced"
       )
     );
-    const versions = await builder.api.apps.versions.list(app);
+    const versions = await builder.api.versions.list({ kind: "app", id: app });
     await restoredRaw(app);
     const published = await outcome(
-      publishVersion(
+      rollback(
         {
           ...env,
           DB: racingDb(archive, /update "apps" set "current_version"/iu),
         },
+        appPublishing,
         by,
         app,
         version
@@ -586,7 +590,10 @@ describe("an App's archive", () => {
     );
     await restoredRaw(app);
     const after = await builder.api.apps.get(app);
-    const versionsAfter = await builder.api.apps.versions.list(app);
+    const versionsAfter = await builder.api.versions.list({
+      kind: "app",
+      id: app,
+    });
 
     expect({
       committed,

@@ -33,10 +33,10 @@ import {
   setTriggerEnabled,
   updateTriggerVersion,
 } from "../src/trigger-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
   unshareWorkflowResource,
 } from "../src/workflow-resources.ts";

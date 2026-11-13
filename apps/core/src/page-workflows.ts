@@ -111,13 +111,15 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   publish is answered by the current one's contract: it never names its
 //   own, so nothing is refused as stale, and
 //   the page's types may lag until it loads the new release.
-// - A rebind since the seal running a version the reference's contract
+// - A rebind since the seal running a workflow the reference's contract
 //   wasn't made for: a start requires, in its admitting statement, that the
-//   App's active binding still names exactly the pinned version; a run is
-//   seen only while it does.
+//   App's active binding still names the pinned workflow, whose live
+//   version it starts; a run is seen only while it does. A version whose
+//   contract differs from what an App binding it declares never goes live
+//   (workflow-publish.ts).
 // - Another person's run, or another App's: a run is seen only when its
 //   start receipt says this App started it for the caller, and it acts for
-//   them, of exactly the pinned version, started by an App version that
+//   them, of the pinned workflow, started by an App version that
 //   declared the same contract; anything else, one that doesn't exist
 //   included, is `workflow.run_unavailable`, which the `run` query answers
 //   as null. No App role, owner or admin sees past that.
@@ -413,7 +415,8 @@ const askedNowSql = (env: Env, asking: Asking, appRestricted: boolean): SQL => {
 
 /**
  * Run `runId`, if the asking App started it for the asking person and it
- * acts for them, of exactly `pin`, while the App's binding names `pin`:
+ * acts for them, of `pin`'s workflow, whichever version it runs, while
+ * the App's binding names that workflow:
  * `workflow.run_unavailable` for any other, one that doesn't exist alike.
  * With `watching`, for a snapshot alone, also a run of the App's that one
  * of its decisions asks the person to answer now (`askedNowSql`): never
@@ -450,7 +453,6 @@ const seenRun = async (
           ? own
           : or(own, askedNowSql(env, asking, watching.appRestricted)),
         eq(workflowResourceRuns.workflowResourceId, pin.workflowId),
-        eq(workflowResourceRuns.version, pin.version),
         bindingPinnedSql(asking.app, alias, pin)
       )
     )

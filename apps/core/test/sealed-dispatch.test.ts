@@ -12,11 +12,9 @@ import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { releaseIdsOf } from "../src/apps.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   candidateActivation,
   candidateRunFor,
@@ -43,12 +41,12 @@ import { unique } from "./sign-in.ts";
 
 // A JSON workflow's run on the run host (resource-runs.ts,
 // `runActivation`), whatever started it: an independent run, a test run of
-// a draft's checkpoint or a run an App's test started. Each is started for
+// a workflow's draft or a run an App's test started. Each is started for
 // real, its activation loaded as the dispatcher loads it, and run on the
 // run host with its build's own generated module (`sealedRunModules`).
 // What each must keep there, from the threat model of its kind:
 //
-// - a test run of a checkpoint calls nothing: every call is answered from
+// - a test run of a draft calls nothing: every call is answered from
 //   its start's fixtures, and its waits are held short;
 // - a run an App's test started reaches nothing of the organization's: its
 //   model calls are answered by its fixture, never a model, and its store
@@ -310,7 +308,7 @@ const drafted = async (by: Identity, steps: unknown[], status: unknown) => {
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
-    expectedRevision: base,
+    revision: base,
     source: definitionOf(
       steps,
       {
@@ -494,7 +492,7 @@ describe(
   "the engine a JSON workflow's run runs on",
   { timeout: 180_000 },
   () => {
-    it("runs a test run of a draft's checkpoint generated for the run host there, every call answered from its start's fixtures", async () => {
+    it("runs a test run of a workflow's draft generated for the run host there, every call answered from its start's fixtures", async () => {
       const provider = await fakeProvider({
         text: '{"line":"From a real model"}',
         inputTokens: 1,

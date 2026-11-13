@@ -8,16 +8,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, evaluateAppQuery } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { rollback } from "../src/publish.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
@@ -47,7 +46,7 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const release = await seal(fixture);
-    await publishVersion(env, owner, app, 1);
+    await rollback(env, appPublishing, owner, app, 1);
     const bob = await person("user");
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
@@ -144,7 +143,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const release = await seal(fixture);
-    await publishVersion(env, owner, app, 1);
+    await rollback(env, appPublishing, owner, app, 1);
     const [bob, carol] = await Promise.all([person("user"), person("user")]);
     for (const member of [bob, carol]) {
       // oxlint-disable-next-line no-await-in-loop -- two rows, one each

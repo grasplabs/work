@@ -19,10 +19,8 @@ import {
   updateTriggerVersion,
 } from "../src/trigger-resources.ts";
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
-import {
-  publishWorkflowVersion,
-  workflowDefinition,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { workflowDefinition } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";

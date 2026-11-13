@@ -14,10 +14,8 @@ import {
   ensureReleaseContract,
   publishCatalogContract,
 } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";

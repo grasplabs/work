@@ -159,7 +159,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.binding_invalid":
     "That target can't serve this binding: check its kind, its contract and that the workflow holds the permission it needs.",
   "workflow.binding_unapproved":
-    "An admin hasn't approved what this version reaches yet, so it can't start. Ask for it to go live, or ask an admin to approve it on the workflow's Files and apps tab.",
+    "An admin hasn't approved what this version reaches yet, so it can't start. Ask an admin to approve it on the workflow's Files and apps tab.",
   "workflow.binding_conflict":
     "Someone changed this binding as you did. Read it again, then retry.",
   "workflow.params_invalid":
@@ -197,22 +197,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "Nobody answered the run's decision before its deadline, so the run failed.",
   "workflow.model_call_limit":
     "The run made as many model calls as its workflow allows, so it failed.",
-  "workflow.draft_conflict":
-    "Someone changed this draft since you read it. Read it again, then make your change.",
-  "workflow.draft_unchecked":
-    "Only the latest draft can be published, and only once it passes the profile.",
   "workflow.paused":
     "This workflow is paused, so it starts no runs. Someone who builds it can resume it.",
-  "workflow.lifecycle_conflict":
-    "Someone changed this workflow's stage, pause or go-live since you read it. Read it again, then make your change.",
-  "workflow.stage_invalid":
-    "A workflow is live or scaling only once a version went live, and stays one of the two from then on.",
-  "workflow.go_live_invalid":
-    "That version can't be asked to go live: name a published version that isn't live already.",
-  "workflow.go_live_not_pending":
-    "That version isn't the one waiting to go live.",
-  "workflow.go_live_own_request":
-    "Someone other than who asked for it approves a version going live: the workflow's owner or an admin.",
   "workflow.step_not_found":
     "There's no step there in this draft: read the draft again and pick the step, or the list to insert into, from its diagram.",
   "workflow.draft_not_json":
@@ -521,11 +507,6 @@ export interface ListedWorkflowBindingApproval extends WorkflowBindingApproval {
 export interface PendingWorkflowBindings {
   workflow: { id: string; name: string };
   version: number;
-  /**
-   * Whether it is the version a start runs now, rather than one asked to
-   * go live or, on the workflow's own read, its newest.
-   */
-  live: boolean;
   bindings: {
     alias: string;
     kind: CatalogBindingKind;
@@ -740,9 +721,8 @@ export interface WorkflowResourceRun {
 }
 
 /**
- * How a workflow is started by hand: the version a start runs, the one
- * approved to go live or else the one published last (null before any is
- * published), and the JSON Schema its args must match exactly (null when
+ * How a workflow is started by hand: the version a start runs, its live
+ * one (null before any is published), and the JSON Schema its args must match exactly (null when
  * it can't be read). A field of the args that takes a person, team or
  * role (`person:<id>`, `team:<id>` or `role:<role>`) carries
  * `"x-grasp-value": { "kind": "person" }`, as a workflow's JSON writes it,
@@ -839,8 +819,16 @@ export interface WorkflowVersionBuild {
 export interface WorkflowResourceVersion {
   resourceId: string;
   version: number;
-  /** The definition's own semantic version (`document.version`). */
-  definitionVersion: string;
+  /**
+   * The semantic version publication gives its contract (its catalog
+   * key's), unique per workflow.
+   */
+  contractVersion: string;
+  /**
+   * What people call it, `YY.MM.N`: given the first time it goes live,
+   * and kept; null for one never live.
+   */
+  label: string | null;
   profile: string;
   definitionHash: string;
   contractHash: string;
@@ -904,10 +892,6 @@ export interface WorkflowMember {
 }
 
 /**
- * An edit of a workflow's draft: its whole new text, and the revision it
- * read (0 before the first edit), which must still be the latest.
- */
-/**
  * A JSON Pointer to a step in a draft, as the diagram names it
  * (`DiagramTask.pointer`, `/steps/0/then/1`), or to a list of steps: the
  * workflow's own (`/steps`) or one a step holds (`/steps/0/else`).
@@ -922,14 +906,14 @@ const stepFieldsSchema = z.record(z.string(), z.json());
 
 /**
  * One step of a draft edited on the canvas or by the agent (`editStep`),
- * as the next revision over `expectedRevision`: `change` replaces the
+ * as the next revision over `revision`, the one read: `change` replaces the
  * fields of the step at `pointer`, keeping its ID (a rename is a new
  * `title`); `insert` puts step `id` with `step`'s fields at `index` of the
  * list of steps at `list`. The draft is saved checked, as any edit,
  * problems and all.
  */
 export const workflowStepEditSchema = z.strictObject({
-  expectedRevision: z.int().min(0),
+  revision: z.int().min(0),
   edit: z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("change"),
@@ -946,8 +930,13 @@ export const workflowStepEditSchema = z.strictObject({
   ]),
 });
 
+/**
+ * An edit of a workflow's draft (`workflow.json`): its whole new text, and
+ * the draft's revision it read (0 before the first edit), which must
+ * still be the draft's (`draft.conflict` otherwise).
+ */
 export const workflowDraftEditSchema = z.strictObject({
-  expectedRevision: z.int().min(0),
+  revision: z.int().min(0),
   // The profile's own bound on a definition: 1 MiB of UTF-8, as stored.
   source: z
     .string()
@@ -956,15 +945,6 @@ export const workflowDraftEditSchema = z.strictObject({
       (text) => new TextEncoder().encode(text).byteLength <= 1024 * 1024,
       "A draft is at most 1 MiB of UTF-8."
     ),
-});
-
-/**
- * Publishing a draft: its revision, which must be the latest and pass the
- * profile, and the current version it built on (`workflowPublishSchema`).
- */
-export const workflowDraftPublishSchema = z.strictObject({
-  revision: z.int().min(1),
-  basedOn: z.number().int().positive().nullable(),
 });
 
 /** Most bindings a test run's start answers for. */
@@ -1012,15 +992,15 @@ export const maxCandidateWaitMs = 15 * 60 * 1000;
 export const maxCandidateLifetimeMs = 60 * 60 * 1000;
 
 /**
- * A test run of a draft's checkpoint (GRA-815): the checkpoint's exact
- * revision, the run's args, the parameter values it runs with (each
+ * A test run of a workflow's draft (GRA-815): the draft's exact revision,
+ * which must still be the draft's and pass the profile, the run's args, the parameter values it runs with (each
  * left out takes its default; the workflow's own values never count),
  * and the result each binding it calls answers, by alias, and each App
  * function by `<alias>/<function ID>`. A test run never calls anything:
  * a call with no answer here fails (`workflow.candidate_unfixtured`).
  */
 export const workflowCandidateStartSchema = z.strictObject({
-  revision: z.int().min(1),
+  revision: z.int().min(0),
   args: z.json(),
   params: z.record(z.string().max(64), z.json()).optional(),
   fixtures: z
@@ -1041,11 +1021,11 @@ export const workflowCandidateStartSchema = z.strictObject({
     ),
 });
 
-/** A test run of a draft's checkpoint, for the workflow's builders. */
+/** A test run of a workflow's draft, for its builders. */
 export interface WorkflowCandidateRun {
   id: string;
   workflowId: string;
-  /** The draft revision whose checkpoint it runs. */
+  /** The draft revision it runs. */
   draftRevision: number;
   /** The executable identity it runs, compiled as it started. */
   buildHash: string;
@@ -1066,8 +1046,8 @@ export interface WorkflowCandidateRun {
 export const maxItemTestItems = maxLiveCandidateRuns;
 
 /**
- * A test of a draft's checkpoint over recent real items (GRA-513): the
- * checkpoint's exact revision runs once on the args of each of the
+ * A test of a workflow's draft over recent real items (GRA-513): the
+ * draft's exact revision runs once on the args of each of the
  * tester's most recent runs whose details they may see and whose input is
  * still kept (`items` of them, at most `maxItemTestItems`), each as a test
  * run (`workflowCandidateStartSchema`): with the parameters given here or
@@ -1094,7 +1074,7 @@ export interface WorkflowItemTestItem {
   refusal: string | null;
 }
 
-/** A test of a draft's checkpoint over recent real items, item by item. */
+/** A test of a workflow's draft over recent real items, item by item. */
 export interface WorkflowItemTest {
   id: string;
   workflowId: string;
@@ -1106,28 +1086,18 @@ export interface WorkflowItemTest {
 }
 
 /**
- * A workflow's draft, for its builders: its latest text and revision (0
- * while nobody has edited it: then the current version's definition, or
- * a starting one), what the profile said of it, and its latest checkpoint,
- * the latest text that passed (the current version's definition at
- * revision 0), which is what may be published and what its diagram shows.
+ * A workflow's draft as its editor shows it (`workflow.json` of its
+ * draft, @grasp-os/shared/drafts): its text at `revision` (0 while nobody
+ * has written it: the live version's definition, or a starting one with
+ * no steps), what the profile says of it, and its diagram, drawn from
+ * that very text while it has no problems.
  */
 export interface WorkflowDraft {
   revision: number;
   source: string;
   problems: WorkflowDefinitionProblem[];
-  checkpoint: {
-    revision: number;
-    source: string;
-    /**
-     * Drawn from the checkpoint's own JSON, as it passed. An edit that
-     * didn't pass leaves an earlier edit the checkpoint, as the editor
-     * already holds it.
-     */
-    diagram: WorkflowDiagram;
-  } | null;
-  editedBy: string | null;
-  editedAt: string | null;
+  /** Null while the text has problems: there is nothing sound to draw. */
+  diagram: WorkflowDiagram | null;
 }
 
 /** A refused publication's diagnostics, as the profile reports them. */
@@ -1201,23 +1171,19 @@ export interface WorkflowResourcesApi {
    * clears it with null; for its builders, audited.
    */
   setProcess: (id: string, process: unknown) => Promise<WorkflowResource>;
-  /** Publishes a version from a workflow.json; for its builders. */
-  publish: (id: string, input: unknown) => Promise<WorkflowResourceVersion>;
   /** Its draft, for its builders (`WorkflowDraft`). */
   draft: (id: string) => Promise<WorkflowDraft>;
-  /** Saves an edit of its draft (`workflowDraftEditSchema`), checked. */
+  /**
+   * Saves an edit of its draft (`workflowDraftEditSchema`), checked, as
+   * the person's own checkpoint; `draft.conflict` once the draft moved
+   * past the revision read. Publishing it is `drafts.publish`.
+   */
   editDraft: (id: string, input: unknown) => Promise<WorkflowDraft>;
   /**
    * Inserts or changes one step of its draft (`workflowStepEditSchema`),
    * saved as the draft's next revision, checked; for builders.
    */
   editStep: (id: string, input: unknown) => Promise<WorkflowDraft>;
-  /** Publishes its draft's checkpoint (`workflowDraftPublishSchema`). */
-  publishDraft: (
-    id: string,
-    input: unknown
-  ) => Promise<WorkflowResourceVersion>;
-  versions: (id: string) => Promise<WorkflowResourceVersion[]>;
   /** One version's definition text, exactly as published; for builders. */
   definition: (id: string, version: number) => Promise<string>;
   /**
@@ -1298,7 +1264,7 @@ export interface WorkflowResourcesApi {
   /** What run `runId` did, over its version's diagram, for builders. */
   runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
   /**
-   * Starts a test run of the draft's checkpoint at an exact revision,
+   * Starts a test run of the draft at an exact revision,
    * never published, its calls answered from the start's fixtures; for
    * builders (`workflowCandidateStartSchema`).
    */
@@ -1316,7 +1282,7 @@ export interface WorkflowResourcesApi {
     runId: string
   ) => Promise<WorkflowCandidateTrace>;
   /**
-   * Tests the draft's checkpoint at an exact revision over the caller's
+   * Tests the draft at an exact revision over the caller's
    * recent real runs, one test run each, every call answered from the
    * start's fixtures; for builders (`workflowItemTestStartSchema`).
    */
@@ -1341,16 +1307,15 @@ export interface WorkflowResourcesApi {
   /** Revokes a binding approval; for the organization's admins. */
   revokeBinding: (id: string, approval: string) => Promise<void>;
   /**
-   * The versions of workflows that run or wait to go live whose bindings
+   * The live versions of workflows whose bindings
    * no admin approved, at most 50, each with the targets core can offer;
    * for the organization's own admins, never Grasp staff.
    */
   pendingBindings: () => Promise<PendingWorkflowBindings[]>;
   /**
-   * Its versions whose bindings no admin approved, each with the targets
-   * core can offer, of every kind: the version a start runs now, the one
-   * asked to go live and its newest (a test run's); for the organization's
-   * own admins, never Grasp staff.
+   * Its live version, when its bindings no admin approved, with the
+   * targets core can offer, of every kind; for the organization's own
+   * admins, never Grasp staff.
    */
   pendingBindingsOf: (id: string) => Promise<PendingWorkflowBindings[]>;
   /** Binds an exact version to an App; for the App's builders. */
@@ -1366,7 +1331,7 @@ export interface WorkflowResourcesApi {
   catalog: () => Promise<CatalogContractEntry[]>;
   /** Publishes a catalog contract; for the organization's admins. */
   publishContract: (input: unknown) => Promise<CatalogContractEntry>;
-  /** Its stage, draft and live versions, pause and go-live. */
+  /** Whether it is paused, and pausing and resuming it. */
   readonly lifecycle: WorkflowLifecycleApi;
   /** Its triggers: list, create, move to a version, enable and delete. */
   readonly triggers: WorkflowTriggersApi;

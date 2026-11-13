@@ -177,7 +177,7 @@ class PackagedVersions {
     if (found.status !== "found") {
       return { reason: found.status };
     }
-    const key = `${workflowNamespace}/${found.name}/${found.definitionVersion}`;
+    const key = `${workflowNamespace}/${found.name}/${found.contractVersion}`;
     const files = this.#budget(`workflows/${key}`, found.files);
     this.packaged[key] = {
       provenance: {

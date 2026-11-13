@@ -6,7 +6,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { draftSummary, readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appDraftKind } from "../src/apps.ts";
+import { draftSummary, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   draftDefinitionOf,
   idp,
@@ -48,8 +49,9 @@ const draftOver = async (
 ): Promise<void> => {
   await saveDraft(
     env,
+    appDraftKind,
     appIdSchema.parse(app),
-    { ...(await readDraft(env, app)), base },
+    { ...(await readDraft(env, { kind: "app", id: app })), base },
     { changes: { "notes.md": "Notes\n" }, unchanged: [] },
     {
       by: {
@@ -318,7 +320,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         type: "v.string().optional()",
       })
     );
-    await builder.api.apps.versions.publish(app, 1);
+    await builder.api.versions.rollback({ kind: "app", id: app }, 1);
     // A builder's draft over version 2 still: the agent changes what they
     // began.
     await draftOver(builder, app, 2);
@@ -421,12 +423,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual([["notes.md"], []]);
-    await expect(readDraft(env, existing)).resolves.toMatchObject({
+    await expect(
+      readDraft(env, { kind: "app", id: existing })
+    ).resolves.toMatchObject({
       changes: {},
       revision: 2,
     });
     // Its builders see it as changing nothing.
-    await expect(draftSummary(env, existing)).resolves.toMatchObject({
+    await expect(
+      draftSummary(env, appDraftKind, existing)
+    ).resolves.toMatchObject({
       changed: [],
       revision: 2,
     });

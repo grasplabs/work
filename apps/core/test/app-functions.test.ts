@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   appMembers,
@@ -19,6 +19,7 @@ import {
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
 import { deliveryOf, standingOf } from "../src/page-delivery.ts";
+import { rollback } from "../src/publish.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
@@ -310,7 +311,7 @@ const sealedNotes = async (
 ): Promise<Sealed> => {
   const fixture = await appWith(files);
   const release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 
@@ -744,7 +745,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     });
     await commitDefined(env, notes.owner, notes.app, files, "Tag");
     await seal(notes, 2);
-    await publishVersion(env, notes.owner, notes.app, 2);
+    await rollback(env, appPublishing, notes.owner, notes.app, 2);
     const again = await save();
     const page = valueOf(
       await call(notes, notes.owner, "notes.list", { pagination: {} })
@@ -785,7 +786,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     });
     await commitDefined(env, notes.owner, notes.app, files, "Rename");
     await seal(notes, 2);
-    await publishVersion(env, notes.owner, notes.app, 2);
+    await rollback(env, appPublishing, notes.owner, notes.app, 2);
     const fromPage = async (
       reference: ReturnType<typeof referenceTo>,
       input: unknown

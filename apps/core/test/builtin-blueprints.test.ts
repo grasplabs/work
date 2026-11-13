@@ -337,7 +337,7 @@ describe("the built-in blueprints", () => {
     const created = await builder.api.apps.blueprints.create("hello", {
       name: "Our hello",
     });
-    await builder.api.apps.versions.publish(created.app.id, 1);
+    await builder.api.versions.rollback({ kind: "app", id: created.app.id }, 1);
     expect({
       blueprint: created.app.blueprint,
       owner: created.app.owner,
@@ -408,9 +408,11 @@ describe("the built-in blueprints", () => {
       const created = await builder.api.apps.blueprints.create(blueprint.id, {
         name: blueprint.name,
       });
-      // It becomes current, as its creator makes it: publishing builds,
-      // type-checks and tests it.
-      await builder.api.apps.versions.publish(created.app.id, 1);
+      // It becomes current, as its creator makes it.
+      await builder.api.versions.rollback(
+        { kind: "app", id: created.app.id },
+        1
+      );
       // Its pages pass the compiler's checks, with the references they
       // import (`@server/_generated/api`), as they do when saved and opened.
       if (
@@ -730,7 +732,10 @@ describe("the built-in blueprints", () => {
     // Its first version is the blueprint's code, which the admin granted
     // it for; a new release changes the built-in, not the copy.
     const kept = await auditedDuring(async () => {
-      await builder.api.apps.versions.publish(created.app.id, 1);
+      await builder.api.versions.rollback(
+        { kind: "app", id: created.app.id },
+        1
+      );
       await expect(
         install(
           releaseWith({
@@ -754,14 +759,17 @@ describe("the built-in blueprints", () => {
       },
       "Mine"
     );
-    await builder.api.apps.versions.publish(created.app.id, version);
+    await builder.api.versions.rollback(
+      { kind: "app", id: created.app.id },
+      version
+    );
     const next = await admin.api.permissions.list(copy);
 
     // Granted again for the builder's code, then rolled back to the first
     // version by the builder: asked for again, as for any version but the
     // first one's first time.
     await grantReviewed(admin.api, asked?.id ?? "");
-    await builder.api.apps.versions.publish(created.app.id, 1);
+    await builder.api.versions.rollback({ kind: "app", id: created.app.id }, 1);
     const rolledBack = await admin.api.permissions.list(copy);
 
     expect({
@@ -805,7 +813,7 @@ describe("the built-in blueprints", () => {
       { [greetings]: mine },
       "Mine"
     );
-    await builder.api.apps.versions.publish(app.id, edited);
+    await builder.api.versions.rollback({ kind: "app", id: app.id }, edited);
 
     // A release that changes the greeting too, and adds a helper.
     const helper =
@@ -861,7 +869,10 @@ describe("the built-in blueprints", () => {
     const { currentVersion: currentBefore } = await builder.api.apps.get(
       app.id
     );
-    await builder.api.apps.versions.publish(app.id, taken.version);
+    await builder.api.versions.rollback(
+      { kind: "app", id: app.id },
+      taken.version
+    );
     const { currentVersion: current } = await builder.api.apps.get(app.id);
 
     // A copy nobody edited takes the newer code whole; a copy of a marked

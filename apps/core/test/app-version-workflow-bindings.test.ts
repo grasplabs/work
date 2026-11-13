@@ -3,15 +3,17 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { draftOf, emptyDraft } from "../src/app-drafts.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import {
+  appDraftKind,
   commitDraft,
   draftDefinition,
   draftFiles,
   nextVersion,
 } from "../src/apps.ts";
+import { draftOf, emptyDraft } from "../src/drafts.ts";
+import { rollback } from "../src/publish.ts";
 import { appOf, commitApp } from "./app-definitions.ts";
 import { racingDb, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -24,6 +26,7 @@ import {
   requestsApp,
 } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // A workflow version bound from an App's draft (`bindWorkflow`) is
 // recorded with the App version the draft becomes, and bound as that
@@ -56,7 +59,7 @@ const committedDraft = async (
   message: string
 ): Promise<number> => {
   const id = appIdSchema.parse(app);
-  const draft = await draftOf(env, id);
+  const draft = await draftOf(env, appDraftKind, id);
   const defined = await draftDefinition(env, id, draft);
   const { version } = await commitDraft(
     env,
@@ -70,11 +73,11 @@ const committedDraft = async (
     },
     message
   );
-  await emptyDraft(env, id, {
+  await emptyDraft(env, appDraftKind, id, {
     revision: draft.revision,
     base: version,
     by: { ...person.acting, actor: actorOf(person.acting) },
-    published: true,
+    live: true,
   });
   return version;
 };
@@ -97,12 +100,9 @@ const threeVersions = async (
     jobWaitingOf(events, { more: ["laterEvents"] }),
     jobWaitingOf(events, { more: ["laterEvents"], label: "Version 3" }),
   ];
-  for (const [index, definition] of versions.entries()) {
+  for (const definition of versions) {
     // oxlint-disable-next-line no-await-in-loop -- each version on the last
-    await api.publish(flow.id, {
-      definition,
-      basedOn: index === 0 ? null : index,
-    });
+    await publishOverRpc(owner.api, flow.id, definition);
   }
   for (const builder of builders) {
     // oxlint-disable-next-line no-await-in-loop -- one share at a time
@@ -132,7 +132,7 @@ const proposedRebind = async (builder: Person, flow: string) => {
     app,
     requestsApp("review", jobEventsDeclared)
   );
-  await builder.api.apps.drafts.define(app, {
+  await builder.api.apps.define(app, {
     op: "bindWorkflow",
     alias: "review",
     workflow: flow,
@@ -186,7 +186,7 @@ describe(
       const { app, second } = await proposedRebind(builder, flow);
       const proposed = await boundOf(builder, app);
 
-      await builder.api.apps.versions.publish(app, second);
+      await builder.api.versions.rollback({ kind: "app", id: app }, second);
       const events = await allEvents();
       const audited = events
         .filter(
@@ -233,11 +233,11 @@ describe(
       ]);
       const flow = await threeVersions(admin, builder);
       const { app, first, second } = await proposedRebind(builder, flow);
-      await builder.api.apps.versions.publish(app, second);
+      await builder.api.versions.rollback({ kind: "app", id: app }, second);
 
-      await builder.api.apps.versions.publish(app, first);
+      await builder.api.versions.rollback({ kind: "app", id: app }, first);
       const rolledBack = await boundOf(builder, app);
-      await builder.api.apps.versions.publish(app, second);
+      await builder.api.versions.rollback({ kind: "app", id: app }, second);
 
       expect({
         rolledBack,
@@ -268,17 +268,17 @@ describe(
         alias: "review",
         version: 1,
       });
-      await builder.api.apps.drafts.define(app, {
+      await builder.api.apps.define(app, {
         op: "bindWorkflow",
         alias: "review",
         workflow: flow,
         version: 2,
       });
       const second = await committedDraft(builder, app, "Bind version 2");
-      await builder.api.apps.versions.publish(app, second);
+      await builder.api.versions.rollback({ kind: "app", id: app }, second);
 
       const rolledBack = await outcome(
-        builder.api.apps.versions.publish(app, first)
+        builder.api.versions.rollback({ kind: "app", id: app }, first)
       );
       const { currentVersion } = await builder.api.apps.get(app);
 
@@ -302,7 +302,7 @@ describe(
       ]);
       const flow = await threeVersions(admin, builder);
       const { app, second } = await proposedRebind(builder, flow);
-      await builder.api.apps.versions.publish(app, second);
+      await builder.api.versions.rollback({ kind: "app", id: app }, second);
       // The same contract as version 2: bound directly, as before.
       const rebound = await outcome(
         builder.api.workflowResources.bindToApp(flow, {
@@ -325,10 +325,10 @@ export const Route = createFileRoute("/")({ component: Desk });
         },
         "Rename the page"
       );
-      await builder.api.apps.versions.publish(app, third);
+      await builder.api.versions.rollback({ kind: "app", id: app }, third);
       // Version 2 again, from a draft: what the current version records
       // already, so it would bind nothing.
-      const again = await builder.api.apps.drafts.define(app, {
+      const again = await builder.api.apps.define(app, {
         op: "bindWorkflow",
         alias: "review",
         workflow: flow,
@@ -381,7 +381,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       await builder.api.workflowResources.delete(flow);
 
       const rolledBack = await outcome(
-        builder.api.apps.versions.publish(app, first)
+        builder.api.versions.rollback({ kind: "app", id: app }, first)
       );
 
       expect({
@@ -403,10 +403,10 @@ export const Route = createFileRoute("/")({ component: Desk });
       ]);
       const flow = await threeVersions(admin, builder);
       const { app, second } = await proposedRebind(builder, flow);
-      await builder.api.apps.versions.publish(app, second);
+      await builder.api.versions.rollback({ kind: "app", id: app }, second);
       // Version 3 of the workflow, of version 2's contract, bound from a
       // draft proposed but never made current.
-      await builder.api.apps.drafts.define(app, {
+      await builder.api.apps.define(app, {
         op: "bindWorkflow",
         alias: "review",
         workflow: flow,
@@ -432,7 +432,7 @@ export const Route = createFileRoute("/")({ component: Desk });
         },
         "Rename the page"
       );
-      await builder.api.apps.versions.publish(app, later);
+      await builder.api.versions.rollback({ kind: "app", id: app }, later);
 
       expect({
         bound: await boundOf(builder, app),
@@ -459,7 +459,7 @@ export const Route = createFileRoute("/")({ component: Desk });
         role: "builder",
       });
       const noRole = await outcome(
-        otherBuilder.api.apps.versions.publish(app, second)
+        otherBuilder.api.versions.rollback({ kind: "app", id: app }, second)
       );
       await owner.api.workflowResources.unshare(flow, {
         type: "person",
@@ -468,7 +468,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       // An admin has a role in every workflow; the person who bound it has
       // none any more.
       const binderLost = await outcome(
-        admin.api.apps.versions.publish(app, second)
+        admin.api.versions.rollback({ kind: "app", id: app }, second)
       );
       const { currentVersion } = await admin.api.apps.get(app);
 
@@ -494,8 +494,8 @@ export const Route = createFileRoute("/")({ component: Desk });
       ]);
       const flow = await threeVersions(admin, owner, [builder]);
       const { app, first, second } = await proposedRebind(builder, flow);
-      await builder.api.apps.versions.publish(app, second);
-      await builder.api.apps.versions.publish(app, first);
+      await builder.api.versions.rollback({ kind: "app", id: app }, second);
+      await builder.api.versions.rollback({ kind: "app", id: app }, first);
       await builder.api.apps.members.add(app, {
         type: "person",
         id: otherBuilder.userId,
@@ -509,15 +509,15 @@ export const Route = createFileRoute("/")({ component: Desk });
       // Neither the author, who lost their role, nor a builder of the App
       // who never had one binds the workflow by making it current again.
       const author = await outcome(
-        builder.api.apps.versions.publish(app, second)
+        builder.api.versions.rollback({ kind: "app", id: app }, second)
       );
       const noRole = await outcome(
-        otherBuilder.api.apps.versions.publish(app, second)
+        otherBuilder.api.versions.rollback({ kind: "app", id: app }, second)
       );
       const refused = await boundOf(admin, app);
       // An admin has a role in every workflow.
       const withRole = await outcome(
-        admin.api.apps.versions.publish(app, second)
+        admin.api.versions.rollback({ kind: "app", id: app }, second)
       );
       const { currentVersion } = await admin.api.apps.get(app);
 
@@ -548,13 +548,14 @@ export const Route = createFileRoute("/")({ component: Desk });
       // Its release sealed and published first, then made current: the
       // version unpublished between the two.
       const unpublished = await outcome(
-        publishVersion(
+        rollback(
           {
             ...env,
             DB: racingDb(async () => {
               await unpublish(app, second);
             }, switching),
           },
+          appPublishing,
           builder.acting,
           app,
           second
@@ -564,7 +565,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       // Published again, and the alias unbound as it lands: not the
       // binding it was checked against any more.
       const unbound = await outcome(
-        publishVersion(
+        rollback(
           {
             ...env,
             DB: racingDb(async () => {
@@ -573,6 +574,7 @@ export const Route = createFileRoute("/")({ component: Desk });
               await builder.api.workflowResources.unbindFromApp(held?.id ?? "");
             }, switching),
           },
+          appPublishing,
           builder.acting,
           app,
           second
@@ -580,13 +582,14 @@ export const Route = createFileRoute("/")({ component: Desk });
       );
       // Published again, and the workflow it binds deleted as it lands.
       const deleted = await outcome(
-        publishVersion(
+        rollback(
           {
             ...env,
             DB: racingDb(async () => {
               await builder.api.workflowResources.delete(flow);
             }, switching),
           },
+          appPublishing,
           builder.acting,
           app,
           second
@@ -604,7 +607,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       }).toStrictEqual({
         unpublished: "version.unpublished",
         afterUnpublished: { review: { workflowId: flow, version: 1 } },
-        unbound: "app.conflict",
+        unbound: "draft.conflict",
         deleted: "workflow.app_version_binding_unavailable",
         currentVersion: first,
         afterDeleted: {},
@@ -631,7 +634,7 @@ export const Route = createFileRoute("/")({ component: Desk });
         "Bind version 2, declaring version 1"
       );
       const contractChanged = await outcome(
-        builder.api.apps.versions.publish(app, mismatched)
+        builder.api.versions.rollback({ kind: "app", id: app }, mismatched)
       );
       // Committed by hand: a workflow its author can't see, refused as it
       // is committed, so no later version of anyone's carries it.

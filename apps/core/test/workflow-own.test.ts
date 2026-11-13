@@ -11,9 +11,9 @@ import {
   workflowStartReceipts,
 } from "../src/db/core/schema.ts";
 import { workflowActivity } from "../src/workflow-own.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { greetingOf } from "./json-workflow-apps.ts";

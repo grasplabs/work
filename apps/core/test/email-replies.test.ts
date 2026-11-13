@@ -17,10 +17,8 @@ import {
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
 import { ensureReleaseContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { trustedAuthservId } from "../src/workflows/authentication-results.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";

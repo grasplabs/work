@@ -1,5 +1,4 @@
 import type {
-  WorkflowGoLiveWaiting,
   WorkflowLifecycle,
   WorkflowLifecycleApi,
 } from "@grasp-os/shared/workflow-lifecycle";
@@ -8,12 +7,8 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import {
-  decideGoLive,
-  goLivesWaiting,
   pauseWorkflow,
-  requestGoLive,
   resumeWorkflow,
-  setWorkflowStage,
   workflowLifecycle,
 } from "./workflow-lifecycle.ts";
 
@@ -41,45 +36,17 @@ export class WorkflowLifecycleRpc
     );
   }
 
-  async setStage(id: string, input: unknown): Promise<WorkflowLifecycle> {
+  async pause(id: string): Promise<WorkflowLifecycle> {
     return await withPerson(
       this.#check,
-      async (person) => await setWorkflowStage(this.#env, person, id, input)
+      async (person) => await pauseWorkflow(this.#env, person, id)
     );
   }
 
-  async pause(id: string, input: unknown): Promise<WorkflowLifecycle> {
+  async resume(id: string): Promise<WorkflowLifecycle> {
     return await withPerson(
       this.#check,
-      async (person) => await pauseWorkflow(this.#env, person, id, input)
-    );
-  }
-
-  async resume(id: string, input: unknown): Promise<WorkflowLifecycle> {
-    return await withPerson(
-      this.#check,
-      async (person) => await resumeWorkflow(this.#env, person, id, input)
-    );
-  }
-
-  async requestGoLive(id: string, input: unknown): Promise<WorkflowLifecycle> {
-    return await withPerson(
-      this.#check,
-      async (person) => await requestGoLive(this.#env, person, id, input)
-    );
-  }
-
-  async decideGoLive(id: string, input: unknown): Promise<WorkflowLifecycle> {
-    return await withPerson(
-      this.#check,
-      async (person) => await decideGoLive(this.#env, person, id, input)
-    );
-  }
-
-  async waiting(): Promise<WorkflowGoLiveWaiting[]> {
-    return await withPerson(
-      this.#check,
-      async (person) => await goLivesWaiting(this.#env, person)
+      async (person) => await resumeWorkflow(this.#env, person, id)
     );
   }
 }

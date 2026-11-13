@@ -1,3 +1,5 @@
+import type { AppVersion } from "@grasp-os/shared/apps";
+import type { Version } from "@grasp-os/shared/drafts";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type {
   GrantReview,
@@ -8,8 +10,9 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { commitFiles, latestVersion } from "../src/apps.ts";
+import { rollback } from "../src/publish.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { commitApp, definitionInput, sourceParts } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
@@ -75,10 +78,22 @@ export const ordinaryData = async (app: string): Promise<void> => {
     .run();
 };
 
+/** The App versions among `versions`, as `versions.list` answers every kind's. */
+export const appVersionsOf = (versions: readonly Version[]): AppVersion[] =>
+  versions.flatMap((version) => ("app" in version ? [version] : []));
+
+/** `version` as an App's version, which `versions.get` of an App answers. */
+export const appVersionOf = (version: Version): AppVersion => {
+  if (!("app" in version)) {
+    throw new Error("Not an App's version");
+  }
+  return version;
+};
+
 /**
  * Makes the App open to the people it is shared with, as its first
  * publish does: its latest version, an empty first one for an App with
- * none, published by its owner (app-publish.ts, `publishVersion`). For
+ * none, made live by its owner (publish.ts, `rollback`). For
  * tests of what those people do, which aren't about publishing
  * (draft-publish.test.ts and app-publish.test.ts are).
  */
@@ -102,7 +117,7 @@ export const published = async (app: string): Promise<void> => {
   };
   const latest = await latestVersion(env, appIdSchema.parse(app));
   if (latest !== null) {
-    await publishVersion(env, by, app, latest);
+    await rollback(env, appPublishing, by, app, latest);
     return;
   }
   const first = await commitFiles(
@@ -112,7 +127,7 @@ export const published = async (app: string): Promise<void> => {
     { "README.md": "An App.\n" },
     "First"
   );
-  await publishVersion(env, by, app, first.version);
+  await rollback(env, appPublishing, by, app, first.version);
 };
 
 /**
@@ -148,7 +163,7 @@ export const release = async (
     files,
     "Release"
   );
-  await builder.api.apps.versions.publish(app, version);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
   await ordinaryData(app);
   return version;
 };

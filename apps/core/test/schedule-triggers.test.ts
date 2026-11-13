@@ -22,9 +22,9 @@ import {
   setTriggerEnabled,
   updateTriggerVersion,
 } from "../src/trigger-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";

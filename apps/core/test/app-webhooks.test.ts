@@ -181,7 +181,7 @@ const openNotes = async () => {
     personApi("admin"),
   ]);
   const { app, version } = await notesApp(builder);
-  await builder.api.apps.versions.publish(app, version);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
   const { lease } = await builder.api.pages.open(app);
   const release = await loadRelease(env, app, version);
   return { builder, admin, app, lease, release };
@@ -684,7 +684,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       events: ["published", "changed"],
     });
 
-    await builder.api.apps.versions.publish(app, first);
+    await builder.api.versions.rollback({ kind: "app", id: app }, first);
     const { version } = await commitApp(
       builder.api.apps.files,
       app,
@@ -693,7 +693,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       }),
       "Second"
     );
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
     await drainWebhookDeliveries(env);
     const payloads = await payloadsAt(url);
     const logged = await allEvents();
@@ -751,7 +751,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       throw new Error("Expected two webhooks");
     }
 
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
     await drainWebhookDeliveries(env, { maxAttempts: 2 });
     const afterOne = await deliveriesOf(first.webhook.id);
     await Promise.all([dueNow(first.webhook.id), dueNow(second.webhook.id)]);
@@ -808,7 +808,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       .bind(inside, app, builder.userId, Date.now())
       .run();
 
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
     await drainWebhookDeliveries(env, { maxAttempts: 1 });
     const logged = await allEvents();
 
@@ -1043,7 +1043,10 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     await open.builder.api.apps.archive(open.app);
     await open.builder.api.apps.remove(open.app);
     // One removed as the drain is about to send what it queued.
-    await other.api.apps.versions.publish(racing, racingVersion);
+    await other.api.versions.rollback(
+      { kind: "app", id: racing },
+      racingVersion
+    );
     await env.DB.prepare("UPDATE apps SET removed_at = ? WHERE id = ?")
       .bind(Date.now(), racing)
       .run();
@@ -1122,7 +1125,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       )
       .run();
 
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
     const [listed] = await builder.api.apps.webhooks.list(app);
     const { results } = await env.DB.prepare(
       "SELECT count(*) AS waiting FROM app_webhook_deliveries WHERE webhook_id = ? AND delivered_at IS NULL"
@@ -1398,7 +1401,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       url,
       events: ["form_sent"],
     });
-    const preview = await open.builder.api.apps.drafts.preview(open.app);
+    const preview = await open.builder.api.apps.preview.open(open.app);
     const drafted = { builder: open.builder, lease: preview.lease ?? "" };
     const added = await sentOnly(
       open,

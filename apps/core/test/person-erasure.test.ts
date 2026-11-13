@@ -14,7 +14,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { formSubmissionOf, queueFormSent } from "../src/app-webhook-queue.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource } from "../src/brain-next.ts";
@@ -22,10 +22,9 @@ import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { rollback } from "../src/publish.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
@@ -449,7 +448,7 @@ export const Route = createFileRoute("/")({ component: Desk });
     "Desk"
   );
   const release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   return {
     app: fixture.app,
     storeId: storeIdSchema.parse(release.store?.storeId),

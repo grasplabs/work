@@ -28,10 +28,8 @@ import {
   createTriggerResource,
   setTriggerEnabled,
 } from "../src/trigger-resources.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   deliverConnectorEvent,
   listenersOf,

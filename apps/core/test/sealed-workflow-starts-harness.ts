@@ -4,15 +4,14 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { rollback } from "../src/publish.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { appWith, seal } from "./sealed-apps.ts";
@@ -154,7 +153,7 @@ export const requestsApp = async (
 ) => {
   const fixture = await appWith(files(), "Requests", owner);
   const release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   for (const member of members) {
     // oxlint-disable-next-line no-await-in-loop -- a row each
     await env.DB.prepare(
@@ -223,7 +222,7 @@ export const pinnedApp = async (
     version: 1,
   });
   const release = await seal(fixture);
-  await publishVersion(env, owner, fixture.app, 1);
+  await rollback(env, appPublishing, owner, fixture.app, 1);
   for (const member of members) {
     // oxlint-disable-next-line no-await-in-loop -- a row each
     await env.DB.prepare(

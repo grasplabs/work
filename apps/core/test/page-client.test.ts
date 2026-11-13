@@ -517,7 +517,10 @@ describe("the session client", { timeout: 120_000 }, () => {
       }),
       "Second"
     );
-    await opened.builder.api.apps.versions.publish(opened.app, version);
+    await opened.builder.api.versions.rollback(
+      { kind: "app", id: opened.app },
+      version
+    );
     await revokeRelease(
       env,
       await sealedPerson("admin"),

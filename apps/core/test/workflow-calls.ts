@@ -31,9 +31,9 @@ import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { appWorkflowStarts } from "../src/workflow-start-intents.ts";

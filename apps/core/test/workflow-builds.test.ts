@@ -10,9 +10,9 @@ import type { Acting } from "../src/auth/identity.ts";
 import { sweepReleases } from "../src/release-retention.ts";
 import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
   workflowSource,
 } from "../src/workflow-resources.ts";
 import { lostAnswerDb, racingDb } from "./apps.ts";

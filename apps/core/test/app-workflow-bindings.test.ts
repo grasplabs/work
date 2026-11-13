@@ -22,6 +22,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Reading which workflow versions an App binds (`workflowResources.
 // appBindings`), over the session's RPC as the domain page reads it, next
@@ -38,23 +39,16 @@ const setUp = async () => {
   const builder = await signedInApi(idp, "builder");
   const { id: app } = await builder.api.apps.create({ name: "Ledger" });
   const flow = await builder.api.workflowResources.create(`bound-${unique()}`);
-  const started = await builder.api.workflowResources.draft(flow.id);
-  await builder.api.workflowResources.editDraft(flow.id, {
-    expectedRevision: started.revision,
-    source: greetingOf(undefined, "Version 1"),
-  });
-  await builder.api.workflowResources.publishDraft(flow.id, {
-    revision: 1,
-    basedOn: null,
-  });
-  await builder.api.workflowResources.editDraft(flow.id, {
-    expectedRevision: 1,
-    source: greetingOf(undefined, "Version 1.1"),
-  });
-  await builder.api.workflowResources.publishDraft(flow.id, {
-    revision: 2,
-    basedOn: 1,
-  });
+  await publishOverRpc(
+    builder.api,
+    flow.id,
+    greetingOf(undefined, "Version 1")
+  );
+  await publishOverRpc(
+    builder.api,
+    flow.id,
+    greetingOf(undefined, "Version 1.1")
+  );
   return { builder, app, flow };
 };
 
@@ -198,12 +192,9 @@ describe("binding a workflow its App's current version declares", () => {
       jobWaitingOf(events, { decision }),
       jobWaitingOf(events, { label: "Version 5" }),
     ];
-    for (const [index, definition] of versions.entries()) {
+    for (const definition of versions) {
       // oxlint-disable-next-line no-await-in-loop -- each version on the last
-      await builder.api.workflowResources.publish(flow.id, {
-        definition,
-        basedOn: index === 0 ? null : index,
-      });
+      await publishOverRpc(builder.api, flow.id, definition);
     }
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
     const api = builder.api.workflowResources;
@@ -265,12 +256,13 @@ describe("binding a workflow its App's current version declares", () => {
     const api = builder.api.workflowResources;
     const flow = await api.create(`bound-${unique()}`);
     // Two versions of the contract the App's current version declares.
-    for (const [index, label] of ["Version 1", "Version 2"].entries()) {
+    for (const label of ["Version 1", "Version 2"]) {
       // oxlint-disable-next-line no-await-in-loop -- each version on the last
-      await api.publish(flow.id, {
-        definition: jobWaitingOf(events, { label }),
-        basedOn: index === 0 ? null : index,
-      });
+      await publishOverRpc(
+        builder.api,
+        flow.id,
+        jobWaitingOf(events, { label })
+      );
     }
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
     await api.bindToApp(flow.id, { app, alias: "review", version: 1 });
@@ -292,7 +284,7 @@ describe("binding a workflow its App's current version declares", () => {
     const racing = {
       ...env,
       DB: racingDb(async () => {
-        await builder.api.apps.versions.publish(app, another);
+        await builder.api.versions.rollback({ kind: "app", id: app }, another);
       }, /insert into "app_workflow_bindings"/iu),
     };
 

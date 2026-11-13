@@ -14,12 +14,12 @@ import {
   deleteTriggerResource,
 } from "../src/trigger-resources.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
   getWorkflowResource,
   listWorkflowResources,
-  publishWorkflowVersion,
   releaseWorkflowName,
   setWorkflowProcess,
   shareWorkflowResource,
@@ -197,7 +197,7 @@ describe("publishing a version", () => {
     expect(first).toMatchObject({
       resourceId: workflow.id,
       version: 1,
-      definitionVersion: "1.0.0",
+      contractVersion: "1.0.0",
       profile: "grasp-workflow/2",
       bindings: [],
       author: ada.userId,
@@ -227,7 +227,7 @@ describe("publishing a version", () => {
     const events = await allEvents();
     const published = events.filter(
       ({ action, target }) =>
-        action === "workflow.version.published" && target?.id === workflow.id
+        action === "workflow.version.built" && target?.id === workflow.id
     );
     expect(published.map(({ detail }) => detail.manifestHash)).toStrictEqual([
       first.manifestHash,
@@ -251,7 +251,7 @@ describe("publishing a version", () => {
       definitionOf({ status: "other" }),
       1
     );
-    expect([first, other].map((each) => each.definitionVersion)).toStrictEqual([
+    expect([first, other].map((each) => each.contractVersion)).toStrictEqual([
       "1.0.0",
       "2.0.0",
     ]);
@@ -292,10 +292,15 @@ describe("publishing a version", () => {
     expect(raced.toSorted()).toStrictEqual(["ok", "workflow.version_conflict"]);
     const versions = await workflowVersions(env, ada, workflow.id);
     const current = await getWorkflowResource(env, ada, workflow.id);
+    // The one that lost may have built a version of its own: never live,
+    // so never labelled.
+    const live = versions.filter(({ label }) => label !== null);
     expect({
-      current: current.currentVersion,
-      versions: versions.map(({ version }) => version),
-    }).toStrictEqual({ current: 2, versions: [2, 1] });
+      current: live
+        .map(({ version }) => version)
+        .includes(current.currentVersion ?? 0),
+      live: live.length,
+    }).toStrictEqual({ current: true, live: 2 });
   });
 
   it("refuses a definition the format refuses, with its diagnostics and none of its values", async () => {
@@ -1227,7 +1232,7 @@ describe("releasing a deleted workflow's name", () => {
     // The contract keys an earlier holder's callers named never answer
     // for a new holder's versions.
     expect(
-      [secondOwn, thirdOwn].map((each) => each.definitionVersion)
+      [secondOwn, thirdOwn].map((each) => each.contractVersion)
     ).toStrictEqual(["3.0.0", "4.0.0"]);
   });
 });

@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
 import {
@@ -15,6 +15,7 @@ import {
   permissions as permissionRows,
 } from "../src/db/core/schema.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { testApp } from "./app-definitions.ts";
 import type { AppSpec, TestApp, TestSource } from "./app-definitions.ts";
@@ -148,7 +149,7 @@ export const sealedApp = async (
 ): Promise<Sealed> => {
   const fixture = await appWith(files, name);
   const release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appPublishing, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 
@@ -160,7 +161,7 @@ export const nextVersion = async (
 ): Promise<Sealed> => {
   await commitDefined(env, sealed.owner, sealed.app, files, "Next version");
   const release = await seal(sealed, version);
-  await publishVersion(env, sealed.owner, sealed.app, version);
+  await rollback(env, appPublishing, sealed.owner, sealed.app, version);
   return { ...sealed, release };
 };
 

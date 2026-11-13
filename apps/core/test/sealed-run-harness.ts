@@ -25,10 +25,8 @@ import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";

@@ -24,6 +24,7 @@ import type { Idp } from "./idp.ts";
 import { liveStatus, runObject } from "./runs.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Independent JSON workflows as run tests drive them, through the public
 // paths people and Apps take, each over a real session's RPC: a workflow
@@ -122,11 +123,11 @@ export const publishedWorkflow = async (
   tasks: unknown[] | ((name: string) => string)
 ): Promise<{ id: string; name: string }> => {
   const workflow = await by.api.workflowResources.create(`flow-${unique()}`);
-  await by.api.workflowResources.publish(workflow.id, {
-    definition:
-      typeof tasks === "function" ? tasks(workflow.name) : definitionOf(tasks),
-    basedOn: null,
-  });
+  await publishOverRpc(
+    by.api,
+    workflow.id,
+    typeof tasks === "function" ? tasks(workflow.name) : definitionOf(tasks)
+  );
   return { id: workflow.id, name: workflow.name };
 };
 

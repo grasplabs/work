@@ -38,7 +38,6 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import type { SkillsRpc } from "./skills-rpc.ts";
 import type { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
-import type { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
 import type { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 
 // What waits on a person, in one feed (@grasp-os/shared/waiting). It
@@ -66,8 +65,6 @@ export interface WaitingSources {
   connections: ConnectionsRpc;
   decisions: DecisionsRpc;
   heldStarts: HeldStartsRpc;
-  /** Independent workflows' lifecycles (`workflowResources.lifecycle`). */
-  lifecycles: WorkflowLifecycleRpc;
   /** Independent workflows' bindings that wait on an admin (`workflowResources.pendingBindings`). */
   bindings: Pick<WorkflowResourcesRpc, "pendingBindings">;
   /** Shares of skills that wait for an admin (`skills.waiting`). */
@@ -330,29 +327,10 @@ const parts: Parts = {
     };
   },
   requests: requestItems,
-  // A go-live waits on the workflow's owner as such, else on an admin.
-  workflowGoLives: async ({ lifecycles }, { forMe }) => {
-    const waiting = await lifecycles.waiting();
-    return {
-      items: waiting.map((goLive) => ({
-        kind: "workflowGoLive",
-        id: `workflowGoLive:${goLive.workflowId}:${goLive.version}`,
-        at: goLive.requestedAt,
-        urgent: false,
-        waitsOn: goLive.asOwner ? forMe : { type: "admin" },
-        verdicts: ["approve", "reject"],
-        workflow: { id: goLive.workflowId, name: goLive.name },
-        version: goLive.version,
-        requestedBy: goLive.requestedBy,
-        revision: goLive.revision,
-        selfApproval: goLive.selfApproval,
-      })),
-    };
-  },
   notifications: notificationItems,
   connections: connectionItems,
-  // Workflow versions whose bindings no admin approved: their starts are
-  // refused, so the live version's are urgent.
+  // Live workflow versions whose bindings no admin approved: their starts
+  // are refused, so they are urgent.
   bindings: async ({ bindings }, { admin }) => {
     if (!admin) {
       return { items: [] };
@@ -363,7 +341,7 @@ const parts: Parts = {
         kind: "bindingApproval",
         id: `bindingApproval:${each.workflow.id}:${each.version}`,
         at: null,
-        urgent: each.live,
+        urgent: true,
         waitsOn: { type: "admin" },
         verdicts: [],
         pending: each,
@@ -543,14 +521,6 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
         await (verdict.verdict === "grant"
           ? sources.permissions.grant(verdict.id, verdict.reviewed)
           : sources.permissions.revoke(verdict.id));
-        return { kind: verdict.kind };
-      }
-      case "workflowGoLive": {
-        await sources.lifecycles.decideGoLive(verdict.workflow, {
-          version: verdict.version,
-          verdict: verdict.verdict,
-          revision: verdict.revision,
-        });
         return { kind: verdict.kind };
       }
       default: {

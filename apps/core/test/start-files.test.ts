@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { appStartFiles } from "../src/app-start-files.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
@@ -25,13 +25,12 @@ import { appFor, findApp } from "../src/apps.ts";
 import type { Acting, Member } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeOutboxConsumers } from "../src/store-outbox-consumers.ts";
 import { reviewDraft } from "../src/version-review.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
 import { handFiles } from "../src/workflows/start-files.ts";
@@ -176,7 +175,7 @@ const reviewsApp = async () => {
     version: 1,
   });
   await seal(fixture);
-  await publishVersion(env, builder.acting, fixture.app, 1);
+  await rollback(env, appPublishing, builder.acting, fixture.app, 1);
   const asked = await requestPermission(
     env,
     builder.acting,
@@ -974,7 +973,10 @@ describe("a page's start handing its run a file", { timeout: 120_000 }, () => {
     const review = await reviewOf(fixture, version);
     // Made current, each alias it declares held to what it binds.
     const current = await outcome(
-      fixture.builder.api.apps.versions.publish(fixture.app, version)
+      fixture.builder.api.versions.rollback(
+        { kind: "app", id: fixture.app },
+        version
+      )
     );
 
     expect({

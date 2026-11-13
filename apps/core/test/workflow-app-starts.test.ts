@@ -29,7 +29,10 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { maxLiveRunsPerPrincipal } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowResourceRun,
+  WorkflowStart,
+} from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -60,10 +63,8 @@ import {
 } from "../src/permissions.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   appWorkflowStarts,
   dispatchStartIntent,
@@ -771,6 +772,44 @@ describe("an action starting a workflow", () => {
         },
       ],
     });
+  });
+
+  it("starts the workflow's live version through its binding, whichever it was bound at, and leaves a run on the version it started on", async () => {
+    let earlier: WorkflowStart | undefined;
+    // Version 2 goes live once the binding, made at version 1, is: the
+    // binding follows it. A run of version 1 started before stays on it.
+    const fx = await fixture(true, async ({ ada, app }) => {
+      const bound = await env.DB.prepare(
+        "SELECT workflow_resource_id AS id FROM app_workflow_bindings WHERE app_id = ?"
+      )
+        .bind(app)
+        .first<{ id: string }>();
+      const id = bound?.id ?? "";
+      earlier = await startWorkflow(env, { type: "person", person: ada }, id, {
+        version: 1,
+        args: { who: "Ada" },
+        key: `key-${unique()}`,
+      });
+      await publishWorkflowVersion(env, ada, id, {
+        definition: definitionOf(true).replace('"1 hour"', '"2 hours"'),
+        basedOn: 1,
+      });
+    });
+    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    expect(started.ok).toBeTruthy();
+    if (!started.ok) {
+      return;
+    }
+    const handle = handleSchema["~standard"].validate(started.value);
+    const [before, after] = await Promise.all([
+      runOf(fx, earlier?.id ?? null),
+      runOf(fx, "value" in handle ? handle.value.runId : null),
+    ]);
+    expect({
+      version: field(started.value, "version"),
+      runs: [before.version, after.version],
+      stillRunning: before.endedAt === null,
+    }).toStrictEqual({ version: 2, runs: [1, 2], stillRunning: true });
   });
 
   it("stops the runs the App started once a builder archives it", async () => {

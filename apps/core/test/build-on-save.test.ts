@@ -3,11 +3,12 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
 import { versionFiles } from "../src/apps.ts";
 import { versionPageCodes } from "../src/page-references.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
+import { rollback } from "../src/publish.ts";
 import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
 import { commitApp, withFiles } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
@@ -169,7 +170,7 @@ export const Route = createFileRoute("/")({ component: Desk });
       message: true,
     });
     await expect(
-      builder.api.apps.versions.get(app, committed.version)
+      builder.api.versions.get({ kind: "app", id: app }, committed.version)
     ).resolves.toMatchObject({ version: committed.version });
   });
 
@@ -343,15 +344,16 @@ export const Route = createFileRoute("/")({ component: Desk });
     const holding = holdingBuilds(env.FILES, held.promise);
 
     // Answers while builds are still held.
-    const made = await publishVersion(
+    const made = await rollback(
       { ...env, FILES: holding },
+      appPublishing,
       by,
       app,
       version
     );
     held.resolve(true);
 
-    expect(made.currentVersion).toBe(version);
+    expect(made.version).toBe(version);
   });
 
   it("answers a page whose build doesn't finish within the build wait as still building, rather than wait on", async () => {

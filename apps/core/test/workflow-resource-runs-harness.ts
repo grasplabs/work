@@ -13,10 +13,8 @@ import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";

@@ -67,7 +67,7 @@ export const openedApp = async (appFiles: TestSource = files) => {
     appFiles,
     "First"
   );
-  await builder.api.apps.versions.publish(id, version);
+  await builder.api.versions.rollback({ kind: "app", id }, version);
   const { lease } = await builder.api.pages.open(id);
   const { lease: adminLease } = await admin.api.pages.open(id);
   const release = await loadRelease(env, id, version);

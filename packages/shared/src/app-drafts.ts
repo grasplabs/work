@@ -1,93 +1,19 @@
 import type { AppDataPage, AppDataTable } from "./app-data.ts";
-import type {
-  App,
-  AppFiles,
-  FileDiff,
-  ReviewChange,
-  TableRowRules,
-} from "./apps.ts";
+import type { FileDiff, ReviewChange, TableRowRules } from "./apps.ts";
 import type {
   PreviewAt,
   PreviewBundle,
   PreviewShown,
   PreviewUpdate,
 } from "./chat.ts";
-import type {
-  DataModelChange,
-  DefinitionPlan,
-  DraftDataModel,
-} from "./data-model.ts";
-import type { AppId } from "./ids.ts";
-import type { PageProblem, SubscriptionApi } from "./pages.ts";
+import type { DefinitionPlan } from "./data-model.ts";
+import type { PageProblem } from "./pages.ts";
 import type { Permission } from "./permissions.ts";
 
-// An App's draft (core's app-drafts.ts): one per App, shared by everyone
-// who builds it and by the agents of their chats. Every write lands in it
-// over the revision it read, so a stale one is refused and rereads; each
-// agent turn and each person's edit keeps an undo point.
-
-/** An App's draft as it is now (`AppDraftsApi.get`). */
-export interface AppDraft {
-  app: AppId;
-  /** The version it is over; null for an App with none yet. */
-  base: number | null;
-  /** The paths it changes, sorted. */
-  changed: string[];
-  /** Those of `changed` it deletes, sorted: nothing to open or preview. */
-  deleted: string[];
-  /**
-   * Whether it changes the App's definition: a change of its stable IDs
-   * alone changes no file, yet is a change of the App all the same.
-   */
-  definitionChanged: boolean;
-  /** Which write of the draft this is (0: none yet): a preview of an earlier one is out of date. */
-  revision: number;
-  /** When it was last written (ISO 8601); null before its first write. */
-  updatedAt: string | null;
-  /** Who wrote it last, themselves or through their chat's agent; null before its first write. */
-  updatedBy: string | null;
-}
-
-/**
- * One undo point of an App's draft (`AppDraftsApi.points`): the draft as
- * one agent turn left it, as one person's edit left it, or as a restore
- * made it. The newest follows its turn's writes while the turn runs, then
- * never changes; it is restored only as a new one.
- */
-export interface AppDraftPoint {
-  /** Its place among the draft's points, from 1, in the order they landed. */
-  number: number;
-  /** The draft's revision it made: its preview's calls name it. */
-  revision: number;
-  /** The version of the App it is over; null for an App with none yet. */
-  base: number | null;
-  /** The SHA-256 of what it holds: two points alike hold the same. */
-  contentHash: string;
-  /** Who wrote it: the person, themselves or through their chat's agent. */
-  personId: string;
-  /** The chat whose agent wrote it; null for a person's own edit or restore. */
-  chatId: string | null;
-  /**
-   * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
-   * that wrote it last, when a chat's agent did.
-   */
-  callId: string | null;
-  /** The point the person restored as this one, if they did. */
-  restoredFrom: number | null;
-  /** When it was written (ISO 8601). */
-  createdAt: string;
-}
-
-/** An undo point as the draft's history lists it (`AppDraftsApi.points`). */
-export interface AppDraftHistoryPoint extends AppDraftPoint {
-  /** The paths it changed against the point before it, sorted. */
-  touched: string[];
-  /**
-   * How many paths it changes over its base: none for the draft as a
-   * publish or roll back left it, the version it is over.
-   */
-  changes: number;
-}
+// What is App-only about an App's draft (core's app-preview-rpc.ts and
+// apps-rpc.ts): its review before publishing, and its preview. The draft
+// itself, its checkpoints and its publish are every subject's
+// (@grasp-os/shared/drafts).
 
 /**
  * One problem the draft's check found (`AppDraftChanges.check`): where it
@@ -104,7 +30,7 @@ export interface AppDraftProblem {
 
 /**
  * What publishing the draft would change against the live version
- * (`AppDraftsApi.changes`), worked out by core from the draft as it is
+ * (`AppsApi.review`), worked out by core from the draft as it is
  * now, never taken from whoever wrote it, so code can't describe itself
  * as less than it is: its files, its server code, its data model, the
  * access the App holds and asks for, and whether its checks pass.
@@ -181,7 +107,7 @@ export interface AppDraftChanges {
   /**
    * What the App holds now, which the draft's code uses once live;
    * `askedAgain` for each that publishing it would ask an admin for
-   * again, as this person can't grant it (`AppDraftsApi.publish`).
+   * again, as this person can't grant it (`DraftsApi.publish`).
    */
   grants: { permission: Permission; askedAgain: boolean }[];
   /**
@@ -203,125 +129,25 @@ export interface AppDraftChanges {
 }
 
 /**
- * An App's draft, for its builders (`apps.drafts`): read it, step back to
- * an undo point, discard it, publish it, change its definition, and
- * preview it. The draft runs in one preview per App, shared by its
- * builders, on a store of test data, never on the App's data; each
- * viewer acts in it as themselves.
+ * The preview of an App's draft, for its builders (`apps.preview`): one
+ * per App, shared by its builders, on a store of test data, never on the
+ * App's data; each viewer acts in it as themselves.
  */
-export interface AppDraftsApi {
-  /** The App's draft now. */
-  get: (app: string) => Promise<AppDraft>;
-  /**
-   * Every file of the App's draft as it is now: its changes over the
-   * version it is over, or the App's latest version while it changes
-   * nothing. For the App's code view, read-only.
-   */
-  files: (app: string) => Promise<AppFiles>;
-  /**
-   * The draft's undo points, newest first, with what each touched: the
-   * newest page, or the page before point `before`.
-   */
-  points: (app: string, before?: number) => Promise<AppDraftHistoryPoint[]>;
-  /**
-   * What publishing the draft would change against the live version, and
-   * whether its checks pass (`AppDraftChanges`), to review before
-   * publishing it at the revision this names.
-   */
-  changes: (app: string) => Promise<AppDraftChanges>;
-  /**
-   * Makes undo point `point` the draft again, as a new point; refused
-   * with `app.conflict` when the draft moved since `revision`, which the
-   * person read.
-   */
-  restorePoint: (
-    app: string,
-    point: number,
-    revision: number
-  ) => Promise<AppDraftPoint>;
-  /**
-   * Discards the draft's changes; its undo points stay, to restore one.
-   * Refused with `app.conflict` when the draft moved since `revision`.
-   */
-  discard: (app: string, revision: number) => Promise<void>;
-  /**
-   * Follows the draft: `onRevision` hears its revision after each write,
-   * whoever made it, until the hold is released or the person no longer
-   * builds the App.
-   */
-  watch: (
-    app: string,
-    onRevision: (revision: number) => void
-  ) => Promise<SubscriptionApi>;
-  /**
-   * Clears the test data of the draft's preview, for everyone who builds
-   * the App: its next call starts on an empty store. Not for an archived
-   * App.
-   */
-  resetTestData: (app: string) => Promise<void>;
-  /**
-   * The tables of the preview's test data, on the data model of what it
-   * shows, as the App's Data view lists the live ones (`AppDataTable`):
-   * as the person reads them, their counts included. None for a draft
-   * without tables; `app.not_running` for an App with nothing to show.
-   */
-  testTables: (app: string) => Promise<AppDataTable[]>;
-  /**
-   * A page of the test records of `table`, newest first, from `cursor`
-   * (the last page's), as the person reads them.
-   */
-  testRecords: (
-    app: string,
-    table: string,
-    cursor: string | null
-  ) => Promise<AppDataPage>;
-  /**
-   * Publishes the draft at `revision`, the one the person read: checked
-   * as a chat's agent's turn checks it, committed as the App's next
-   * version, sealed, verified and made live, in one step, as the person.
-   * The draft is then empty over the new version. Refused with
-   * `app.conflict` when the draft moved since `revision` or another
-   * version went live meanwhile, `app.draft_empty` when it changes
-   * nothing, `app.draft_failed` when its check fails, and with the
-   * refusal of a seal or verification that fails; a publish that fails
-   * leaves no version. Published by anyone but one of the organization's
-   * admins, the App's permissions that change things are asked for again:
-   * they allow nothing until an admin grants them again
-   * (`PermissionsApi.grant`). Resolves with the App, live. Not for an
-   * archived App.
-   */
-  publish: (app: string, revision: number, message?: string) => Promise<App>;
-  /**
-   * The data model of the draft, from its definition, and what publishing
-   * the draft does to the App's records.
-   */
-  dataModel: (app: string) => Promise<DraftDataModel>;
-  /**
-   * Changes the draft's definition by `operation` (an operation of
-   * `@grasp-os/sdk/definition`, or a few made as one): the model after
-   * it, the plan, and what this change alone does (`change`), or the
-   * problem, which changed nothing. With `preview`, nothing is saved:
-   * what it would do, to show first. Not for an archived App.
-   */
-  define: (
-    app: string,
-    operation: unknown,
-    preview?: boolean
-  ) => Promise<DataModelChange>;
+export interface AppPreviewApi {
   /**
    * The draft's pages, built, to preview: its frame's calls and live
    * queries carry the bundle's lease on the path every page calls on
-   * (`PreviewBundle.lease`). A draft that changes nothing
-   * previews the App's latest version, at the draft's revision, so its
-   * next write comes into the frame; one whose changes leave no page that
-   * builds opens on that version too (`PreviewBundle.fallback`). With
-   * `point`, of that undo point, read-only: at `readOnlyRevision`, so its
-   * calls are all refused; with `version` (and no point), of that
-   * published version, read-only the same way.
+   * (`PreviewBundle.lease`). A draft that changes nothing previews the
+   * App's latest version, at the draft's revision, so its next write
+   * comes into the frame; one whose changes leave no page that builds
+   * opens on that version too (`PreviewBundle.fallback`). With
+   * `checkpoint`, of that checkpoint of the draft, read-only: at
+   * `readOnlyRevision`, so its calls are all refused; with `version` (and
+   * no checkpoint), of that published version, read-only the same way.
    */
-  preview: (
+  open: (
     app: string,
-    point?: number,
+    checkpoint?: number,
     version?: number
   ) => Promise<PreviewBundle>;
   /**
@@ -330,7 +156,7 @@ export interface AppDraftsApi {
    * build per revision, `app.preview_outdated` once the draft moved past
    * `revision`.
    */
-  previewUpdate: (
+  update: (
     app: string,
     revision: number,
     shown: PreviewShown
@@ -341,10 +167,31 @@ export interface AppDraftsApi {
    * agent. A report of a revision the draft moved past, or of a
    * version of the App, is dropped.
    */
-  previewReport: (
+  report: (
     app: string,
     at: PreviewAt,
     path: string,
     problem: PageProblem
   ) => Promise<void>;
+  /**
+   * Clears the preview's test data, for everyone who builds the App: its
+   * next call starts on an empty store. Not for an archived App.
+   */
+  resetData: (app: string) => Promise<void>;
+  /**
+   * The tables of the preview's test data, on the data model of what it
+   * shows, as the App's Data view lists the live ones (`AppDataTable`):
+   * as the person reads them, their counts included. None for a draft
+   * without tables; `app.not_running` for an App with nothing to show.
+   */
+  tables: (app: string) => Promise<AppDataTable[]>;
+  /**
+   * A page of the test records of `table`, newest first, from `cursor`
+   * (the last page's), as the person reads them.
+   */
+  records: (
+    app: string,
+    table: string,
+    cursor: string | null
+  ) => Promise<AppDataPage>;
 }

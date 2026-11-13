@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { appPublishing } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
@@ -19,11 +19,10 @@ import { decisionOutcome, openDecision } from "../src/decisions/decisions.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { publishWorkflowVersion } from "../src/workflow-publish.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
@@ -208,7 +207,7 @@ const followingRuns = async (
   });
   const fixture = await appWith(files(), "Requests", builder.acting);
   await seal(fixture);
-  await publishVersion(env, builder.acting, fixture.app, 1);
+  await rollback(env, appPublishing, builder.acting, fixture.app, 1);
   await bindWorkflowToApp(env, builder.acting, workflow.id, {
     app: fixture.app,
     alias: "followUp",
@@ -447,7 +446,7 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       version: 1,
     });
     await seal(fixture);
-    await publishVersion(env, builder.acting, fixture.app, 1);
+    await rollback(env, appPublishing, builder.acting, fixture.app, 1);
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
     )
@@ -557,7 +556,7 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       version: 1,
     });
     await seal(fixture);
-    await publishVersion(env, builder.acting, fixture.app, 1);
+    await rollback(env, appPublishing, builder.acting, fixture.app, 1);
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
     )
