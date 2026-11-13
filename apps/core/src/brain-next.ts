@@ -71,7 +71,6 @@ import type {
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
 import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
-import { brainErrors } from "@grasp-os/brain/contract";
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import {
   brainReportSchema,
@@ -172,7 +171,7 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
 export type SourceReaders = z.infer<typeof sourceReadersSchema>;
 
 /**
- * `input` as `schema` reads it, or refused as `brain.invalid`: an expected
+ * `input` as `schema` reads it, or refused as `brain.request_invalid`: an expected
  * error, so a caller over RPC gets that code, the audit log that reason,
  * and the log no stack. It names nothing of the input, not even its paths:
  * a key a caller sent is theirs.
@@ -180,7 +179,7 @@ export type SourceReaders = z.infer<typeof sourceReadersSchema>;
 const checked = <T>(schema: z.ZodType<T>, input: unknown): T => {
   const result = schema.safeParse(input);
   if (!result.success) {
-    throw brainErrors.create("brain.invalid");
+    throw brainSourceErrors.create("brain.request_invalid");
   }
   return result.data;
 };

@@ -296,7 +296,10 @@ describe("the Brain's sources, as a person reads them", () => {
           personal: true,
         })
       ),
-    }).toStrictEqual({ searched: "brain.invalid", recalled: "brain.invalid" });
+    }).toStrictEqual({
+      searched: "brain.request_invalid",
+      recalled: "brain.request_invalid",
+    });
   });
 
   it("reads a null page start as none, and refuses one that names no page", async () => {
@@ -314,7 +317,7 @@ describe("the Brain's sources, as a person reads them", () => {
           source: { producer: "upload", id: crypto.randomUUID() },
         })
       )
-    ).resolves.toBe("brain.invalid");
+    ).resolves.toBe("brain.request_invalid");
   });
 
   it("refuses a Grasp staff session", async () => {
@@ -507,11 +510,11 @@ describe("the Brain's methods over RPC, given arguments of the wrong kind", () =
       ),
     }).toStrictEqual({
       answers: {
-        forgetNumber: "brain.invalid",
-        forgetLong: "brain.invalid",
-        listExtraField: "brain.invalid",
-        versionsWrongType: "brain.invalid",
-        searchLong: "brain.invalid",
+        forgetNumber: "brain.request_invalid",
+        forgetLong: "brain.request_invalid",
+        listExtraField: "brain.request_invalid",
+        versionsWrongType: "brain.request_invalid",
+        searchLong: "brain.request_invalid",
       },
       events: [
         ...Array.from({ length: 2 }, () => ({
@@ -524,7 +527,7 @@ describe("the Brain's methods over RPC, given arguments of the wrong kind", () =
             onBehalfOf: userId,
             memory: null,
             outcome: "refused",
-            reason: "brain.invalid",
+            reason: "brain.request_invalid",
           },
         })),
       ],
