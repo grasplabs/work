@@ -345,6 +345,13 @@ export const manifestSchema = z.strictObject({
 });
 export type Manifest = z.infer<typeof manifestSchema>;
 
+/**
+ * An export being written by this release: started with the stamp and the
+ * bound of change keys it takes (`startExport`). One an older release
+ * started has neither, and is failed (`writePart`).
+ */
+type WritingRow = ExportRow & { stamp: number; changes_up_to: number };
+
 /** An export's row, as the store keeps it. */
 interface ExportRow extends Record<string, SqlStorageValue> {
   id: string;
@@ -945,8 +952,11 @@ const sweepDue = (sql: SqlStorage): boolean =>
 /**
  * Whether the export files `key` names, of an export the store has no row
  * of, may be dropped, by what that one file says (a run reads only it, and
- * for a part's holdings whether the manifest is there): a manifest that
- * can't be read or isn't a company's (nothing can serve or restore it); a
+ * for a part's holdings whether the manifest is there): a manifest that is
+ * missing, isn't JSON, or, read loosely, isn't a company export of that id
+ * (nothing can serve or restore it); never for its format, so a build
+ * rolled back to an older release keeps what a newer one wrote, and the
+ * other way round, each judged by its holdings as below; a
  * part's holdings without a manifest beside them (an export never
  * finished), or that can't be read, or that the ledger names; a part
  * without its holdings beside it (it can't be judged). Answers how
@@ -965,13 +975,10 @@ const orphanFileDrops = async (
       return { drop: true, reads: 1 };
     }
     try {
-      const manifest = manifestSchema.safeParse(
-        JSON.parse(await object.text())
-      );
-      return {
-        drop: !manifest.success || manifest.data.scope !== "company",
-        reads: 1,
-      };
+      const manifest = z
+        .looseObject({ id: z.literal(id), scope: z.literal("company") })
+        .safeParse(JSON.parse(await object.text()));
+      return { drop: !manifest.success, reads: 1 };
     } catch {
       return { drop: true, reads: 1 };
     }
@@ -1434,7 +1441,7 @@ export const partRowsOf = (sql: SqlStorage, id: string): PartRow[] =>
 const finish = async (
   storage: DurableObjectStorage,
   bucket: BrainBucket,
-  row: ExportRow
+  row: WritingRow
 ): Promise<void> => {
   const parts = partRowsOf(storage.sql, row.id);
   const manifest: Manifest = {
@@ -1446,7 +1453,7 @@ const finish = async (
     finishedAt: new Date().toISOString(),
     versions: row.versions,
     memories: parts.reduce((sum, { memories }) => sum + (memories ?? 0), 0),
-    stamp: row.stamp ?? 0,
+    stamp: row.stamp,
     parts: parts.map(({ part, hash, versions, memories, bytes }) => ({
       file: partFileOf(part),
       sha256: hash,
@@ -1590,7 +1597,7 @@ const versionsPart = async (
  */
 const memoriesPart = (
   sql: SqlStorage,
-  row: ExportRow
+  row: WritingRow
 ): NextPart | undefined => {
   for (let phase = row.phase ?? 1; phase <= memoryPhases.length; phase += 1) {
     const name = memoryPhases[phase - 1];
@@ -1601,8 +1608,8 @@ const memoriesPart = (
       phase === row.phase ? row.cursor : 0,
       row.up_to,
       memoryPartRows,
-      row.stamp ?? 0,
-      row.changes_up_to ?? 0,
+      row.stamp,
+      row.changes_up_to,
     ];
     // Each statement takes as many bindings as the last it names.
     const rows = sql
@@ -1655,10 +1662,18 @@ const writePart = async (
   { storage, bucket, again }: WorkContext
 ): Promise<void> => {
   const { sql } = storage;
-  const row = rowOf(sql, id);
-  if (row?.state !== "writing" || isStale(sql, id)) {
+  const found = rowOf(sql, id);
+  if (found?.state !== "writing" || isStale(sql, id)) {
     return;
   }
+  const { stamp, changes_up_to: changesUpTo } = found;
+  // Started by an older release, which took no memories: it would finish
+  // as whole without them. Failed; the admin starts a new one.
+  if (stamp === null || changesUpTo === null) {
+    fail(storage, id);
+    return;
+  }
+  const row: WritingRow = { ...found, stamp, changes_up_to: changesUpTo };
   const versions =
     row.phase === null ? await versionsPart(sql, bucket, row) : undefined;
   if (versions === "failed") {

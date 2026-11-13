@@ -132,6 +132,8 @@ const refusals = {
   // An export an older release made holds no memories: restored, it would
   // read as whole without them (exports.ts `exportFormat`).
   olderFormat: `${refusalPrefix} that export was made by an older release and holds no memories, so it can't be restored: make a new export`,
+  // One a newer release made may hold what this one doesn't know.
+  newerFormat: `${refusalPrefix} that export was made by a newer release, which this one can't restore`,
   // An abandoned restore's export id is refused for good: the store it
   // half-filled has been used since, or its export holds what the ledger
   // erased (its files are then deleted), so restoring it again would mix
@@ -261,16 +263,20 @@ const manifestOf = async (
   } catch {
     return undefined;
   }
-  // An older release's export of this deployment: refused for what it is.
-  const older = z
+  // Another release's export of this deployment: refused for what it is.
+  const other = z
     .looseObject({
-      format: z.int().lt(exportFormat),
+      format: z.int(),
       id: z.literal(id),
+      scope: z.literal("company"),
       deployment: z.literal(deployment),
     })
     .safeParse(parsed);
-  if (older.success) {
+  if (other.success && other.data.format < exportFormat) {
     throw new Error(refusals.olderFormat);
+  }
+  if (other.success && other.data.format > exportFormat) {
+    throw new Error(refusals.newerFormat);
   }
   const manifest = manifestSchema.safeParse(parsed);
   return manifest.success &&

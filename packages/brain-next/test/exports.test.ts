@@ -2254,43 +2254,175 @@ describe("exports and restores", () => {
       }).toStrictEqual({ failed: "failed", givenUp: "abandoned" });
     });
 
-    it("refuses an export an older release made, which holds no memories, saying so, and writes nothing (threat 10)", async () => {
+    it("refuses an export an older or a newer release made, saying which, writes nothing, and then restores a current one into that store (threat 10)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
-      await add(shared(), `test:${unique()}`, "older words", team(group));
+      const source = `test:${unique()}`;
+      await add(shared(), source, "current words", team(group));
       const { id } = await shared().startExport("test");
       await settled(shared(), id);
-      // Its manifest as an older release wrote it: format 1, versions only.
       const key = `exports/${id}/manifest.json`;
+      const current = await textAt(key);
       const manifest = z
         .looseObject({ parts: z.array(z.looseObject({})) })
-        .parse(JSON.parse(await textAt(key)));
+        .parse(JSON.parse(current));
       const { memories: _memories, stamp: _stamp, ...older } = manifest;
-      await env.BRAIN_OBJECTS.put(
-        key,
-        JSON.stringify({
-          ...older,
-          format: 1,
-          parts: manifest.parts.map(({ memories: _none, ...part }) => part),
-        })
-      );
       await putBack(shared(), emptyShared);
-
-      await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
-        "made by an older release and holds no memories"
+      /** What a restore of `id` answers with its manifest as `written`. */
+      const refusalOf = async (written: unknown): Promise<string> => {
+        await env.BRAIN_OBJECTS.put(key, JSON.stringify(written));
+        try {
+          await shared().startRestore(id, "test");
+          return "started";
+        } catch (error) {
+          return String(error);
+        }
+      };
+      // As an older release wrote it (format 1, versions only), and as a
+      // newer one might (format 3, with what this one doesn't know).
+      const refusedOlder = await refusalOf({
+        ...older,
+        format: 1,
+        parts: manifest.parts.map(({ memories: _none, ...part }) => part),
+      });
+      const refusedNewer = await refusalOf({
+        ...manifest,
+        format: 3,
+        somethingNew: true,
+      });
+      const held = await inStore(
+        (sql) =>
+          sql
+            .exec<{ count: number }>(
+              `SELECT (SELECT count(*) FROM source_versions)
+                + (SELECT count(*) FROM exports)
+                + (SELECT count(*) FROM restores) AS count`
+            )
+            .one().count
       );
+      // As this release wrote it: restored into the same store.
+      await env.BRAIN_OBJECTS.put(key, current);
+      await shared().startRestore(id, "test");
+      const restored = await restoreSettled(id);
+      const read = await shared().readCurrent({
+        sources: [source],
+        reader: readerOf(unique(), [group]),
+      });
+
       expect({
-        restore: await shared().restoreStatus(id),
-        held: await inStore(
-          (sql) =>
-            sql
-              .exec<{ count: number }>(
-                `SELECT (SELECT count(*) FROM source_versions)
-                  + (SELECT count(*) FROM exports) AS count`
-              )
-              .one().count
+        older: refusedOlder.includes(
+          "made by an older release and holds no memories"
         ),
-      }).toStrictEqual({ restore: null, held: 0 });
+        newer: refusedNewer.includes("made by a newer release"),
+        held,
+        restored: restored?.state,
+        read: read.map(({ text }) => text),
+      }).toStrictEqual({
+        older: true,
+        newer: true,
+        held: 0,
+        restored: "done",
+        read: ["current words"],
+      });
+    });
+
+    it("keeps export files the store has no record of whatever release wrote them, and drops only one holding what the ledger names (threats 2, 10)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      await add(shared(), `test:${unique()}`, "kept words", team(group));
+      const { id: kept } = await shared().startExport("test");
+      await settled(shared(), kept);
+      const erased = `test:${unique()}`;
+      /**
+       * `kept`'s files copied as another export, its manifest as `edit`
+       * makes it, and its holdings naming `erased` too when `holds` says.
+       */
+      const copied = async (
+        edit: (manifest: Record<string, unknown>) => Record<string, unknown>,
+        holds = false
+      ): Promise<string> => {
+        const other = unique();
+        for (const key of await keysUnder(`exports/${kept}/`)) {
+          // oxlint-disable-next-line no-await-in-loop -- one file at a time
+          let body = await textAt(key);
+          if (key.endsWith("/manifest.json")) {
+            const manifest = z.looseObject({}).parse(JSON.parse(body));
+            body = JSON.stringify(edit({ ...manifest, id: other }));
+          }
+          if (holds && key.endsWith(".holds.json")) {
+            const held = z.array(z.unknown()).parse(JSON.parse(body));
+            // oxlint-disable-next-line no-await-in-loop -- one file at a time
+            body = JSON.stringify([...held, [await sha256(erased), 1]]);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one file at a time
+          await env.BRAIN_OBJECTS.put(key.replace(kept, other), body);
+        }
+        return other;
+      };
+      const older = await copied((manifest) => ({ ...manifest, format: 1 }));
+      const newer = await copied((manifest) => ({
+        ...manifest,
+        format: 3,
+        somethingNew: true,
+      }));
+      const holding = await copied((manifest) => manifest, true);
+
+      // Storage lost: the store has no record of any of them. Then an
+      // erasure, and the sweep's passes.
+      await putBack(shared(), emptyShared);
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      for (let ticks = 0; ticks < 30; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const left = async (id: string): Promise<boolean> => {
+        const keys = await keysUnder(`exports/${id}/`);
+        return keys.length > 0;
+      };
+
+      expect({
+        current: await left(kept),
+        older: await left(older),
+        newer: await left(newer),
+        holding: await left(holding),
+      }).toStrictEqual({
+        current: true,
+        older: true,
+        newer: true,
+        holding: false,
+      });
+    });
+
+    it("fails an export an older release started, which takes no memories, rather than finish it as whole (threat 10)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, "words", team(group));
+      await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [drawn(source, "Acme said words")],
+      });
+      const { id } = await shared().startExport("test");
+      // As the older release left it: written, with no stamp or bound of
+      // change keys.
+      await inStore((sql) => {
+        sql.exec(
+          "UPDATE exports SET stamp = NULL, changes_up_to = NULL WHERE id = ?",
+          id
+        );
+      });
+      const status = await settled(shared(), id);
+      for (let ticks = 0; ticks < 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+
+      expect({
+        state: status?.state,
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ state: "failed", files: [] });
     });
 
     it("fails a restore whose memory an add would refuse, and writes nothing of it (threat 6)", async () => {
