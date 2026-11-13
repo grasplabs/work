@@ -5,6 +5,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch } from "../audit-outbox.ts";
 import { eraseSources, runSource } from "../brain-next-origins.ts";
+import type { OwedErasure } from "../brain-owed-erasures.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
@@ -160,6 +161,21 @@ interface DueStart {
 }
 
 /**
+ * Whether a start receipt, joined to its run if it admitted one, is due at
+ * `before` (`dueStarts`): its details are still there, it was admitted
+ * before `before`, and its run, if any, ended before it too.
+ */
+const dueAt = (before: Date): SQL | undefined =>
+  and(
+    isNull(workflowStartReceipts.detailsRemovedAt),
+    lt(workflowStartReceipts.createdAt, before),
+    or(
+      isNull(workflowResourceRuns.id),
+      lt(workflowResourceRuns.endedAt, before)
+    )
+  );
+
+/**
  * The next `limit` start receipts due at `before`, after `after` by when
  * they were admitted and their IDs, oldest first: read by the index of
  * receipts that still have their details, each one's run by its ID, so
@@ -189,11 +205,9 @@ const dueStarts = async (
     .leftJoin(runs, eq(runs.id, receipts.id))
     .where(
       and(
-        isNull(receipts.detailsRemovedAt),
-        lt(receipts.createdAt, before),
+        dueAt(before),
         after &&
-          sql`(${receipts.createdAt}, ${receipts.id}) > (${after.createdAt}, ${after.id})`,
-        or(isNull(runs.id), lt(runs.endedAt, before))
+          sql`(${receipts.createdAt}, ${receipts.id}) > (${after.createdAt}, ${after.id})`
       )
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
@@ -206,6 +220,15 @@ const dueStarts = async (
     principalId,
   }));
 };
+
+/**
+ * What the Brain is asked to erase of run `runId`, run for `principalId`:
+ * its source, as the person's alone (`owner`), as its producer adds it.
+ */
+const runErasureOf = (runId: string, principalId: string) => ({
+  source: runSource(runId),
+  readers: { kind: "owner" as const, personId: principalId },
+});
 
 /**
  * Removes the details of `dueRows` (`sweepWorkflowStartDetails`), read
@@ -247,14 +270,7 @@ const startDetailsRemoved = async (
   await eraseSources(
     env,
     dueRows.flatMap(({ id, ran, principalId }) =>
-      ran
-        ? [
-            {
-              source: runSource(id),
-              readers: { kind: "owner" as const, personId: principalId },
-            },
-          ]
-        : []
+      ran ? [runErasureOf(id, principalId)] : []
     ),
     "retention"
   );
@@ -389,11 +405,49 @@ export const sweepWorkflowStartDetails = async (
   }
 };
 
+/** When the run retention began for what is due at `now`. */
+const retainedFrom = (now: Date): Date =>
+  new Date(now.getTime() - runRetentionDays * dayMs);
+
 /**
  * Removes what core keeps of what independent workflows' runs read, once
  * the run retention before `now` is over (`sweepWorkflowStartDetails`).
  */
 export const sweepRunDetails = async (env: Env, now: Date): Promise<void> => {
-  const before = new Date(now.getTime() - runRetentionDays * dayMs);
-  await sweepWorkflowStartDetails(env, before, now);
+  await sweepWorkflowStartDetails(env, retainedFrom(now), now);
+};
+
+/**
+ * The Brain erasures run retention owes at `now` (brain-owed-erasures.ts),
+ * at most `limit`, oldest first: the source of every run the sweep would
+ * remove the details of now, with the readers it erases it with, whether
+ * or not an earlier sweep's erasure of it returned. Owed until the sweep
+ * marks its receipt, which it does only once its erasure returned.
+ */
+export const owedRunErasures = async (
+  env: Env,
+  now: Date,
+  limit: number
+): Promise<OwedErasure[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      id: workflowResourceRuns.id,
+      principalId: workflowStartReceipts.principalId,
+    })
+    .from(workflowStartReceipts)
+    .innerJoin(
+      workflowResourceRuns,
+      eq(workflowResourceRuns.id, workflowStartReceipts.id)
+    )
+    .where(dueAt(retainedFrom(now)))
+    .orderBy(
+      asc(workflowStartReceipts.createdAt),
+      asc(workflowStartReceipts.id)
+    )
+    .limit(limit);
+  return rows.map(({ id, principalId }) => ({
+    kind: "source",
+    ...runErasureOf(id, principalId),
+    reason: "retention",
+  }));
 };

@@ -39,6 +39,10 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Makes the erasures core owes the Brain with core's eraseSource and
+  // erasePerson before an export (GRA-1848), and answers only whether any
+  // is still owed.
+  "apps/core/src/brain-owed-erasures.ts": "core",
   // A chat's recall before its question: hands the model what core's
   // recallAs gave the chat's own person, two of its packs merged at most
   // (mergeRecalled, which only drops and orders what both hold), as data;

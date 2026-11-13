@@ -1,25 +1,36 @@
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
   brainExportsPath,
   brainRestorePath,
 } from "../src/brain-next-exports.ts";
+import { runSource } from "../src/brain-next-origins.ts";
 import {
   addSource,
   readSourceVersionAs,
   workBrain,
 } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { soleReadersOf } from "./brain-next-sole-readers.ts";
+import { newMark, nextBucketPut, wordOf } from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  endedRun,
+  greetingTasks,
+  jsonWorkflowAppsOf,
+  publishedWorkflow,
+  startedBy,
+} from "./json-workflow-apps.ts";
 import { noProducers } from "./no-producers.ts";
 import {
   auditedDuring,
   routed,
   signedIn,
+  signedInApi,
   signedInWithRole,
   staffPerson,
 } from "./sign-in.ts";
@@ -30,6 +41,56 @@ import {
 // rest: history, erasure, restore. The threat model is on GRA-1755.
 
 const idp = mockIdp();
+const workflowApps = jsonWorkflowAppsOf(idp);
+
+const day = 24 * 60 * 60 * 1000;
+
+/**
+ * Fails the shared Brain store's next write to its bucket, as an R2 out
+ * of reach: the ledger entry of the next erasure, which so doesn't return.
+ */
+const failNextBucketPut = async (): Promise<void> => {
+  await nextBucketPut(async () => {
+    await Promise.resolve();
+    throw new Error("R2 out of reach, for the test");
+  });
+};
+
+/**
+ * A builder's run that ended, its result handed to the Brain with `mark`
+ * for a team of the builder alone, so it is in the shared store and in a
+ * company export. (Core hands a run over as its person's alone today; a
+ * run read by a team is the case where its erasure decides what an
+ * export holds.)
+ */
+const runInBrain = async (mark: string) => {
+  const builder = await workflowApps.signedIn("builder");
+  const { id } = await publishedWorkflow(builder, greetingTasks());
+  const runId = await startedBy(builder, id, { who: "the guest" });
+  await endedRun(builder, id, runId);
+  await addSource(env, {
+    source: runSource(runId),
+    change: crypto.randomUUID(),
+    text: `What the run said: ${wordOf(mark)}.`,
+    readers: await soleReadersOf(builder.userId),
+  });
+  return { runId, builderId: builder.userId };
+};
+
+/**
+ * Runs `run` 31 days on, past the retention of every run that ended
+ * before it began, in core's clock and the Brain's (one isolate). Last in
+ * this file: the Brain's ledger orders entries by when they are written,
+ * so nothing may be erased at today's date after it.
+ */
+const pastRetention = async <T>(run: () => Promise<T>): Promise<T> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 31 * day });
+  try {
+    return await run();
+  } finally {
+    vi.useRealTimers();
+  }
+};
 
 /** A request of core's own page, signed in on `cookie`. */
 const request = async (
@@ -353,6 +414,120 @@ describe(
           );
         });
       }
+    });
+
+    it("starts no company export while a person's erasure in the Brain is owed, and starts one once it returned", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const person = await signedInWithRole(idp, "user");
+      await admin.api.members.remove(person.userId);
+      await failNextBucketPut();
+      const pending = await admin.api.members.erase(
+        person.userId,
+        String(person.person.name)
+      );
+
+      await failNextBucketPut();
+      const refused = await request(admin.session, brainExportsPath, {
+        method: "POST",
+      });
+      const started = await request(admin.session, brainExportsPath, {
+        method: "POST",
+      });
+
+      expect({
+        pending: pending.areas.find(({ area }) => area === "brain_sources"),
+        refused: refused.status,
+        code: z.object({ code: z.string() }).parse(await refused.json()).code,
+        started: started.status,
+      }).toStrictEqual({
+        pending: { area: "brain_sources", state: "pending" },
+        refused: 409,
+        code: "brain.erasures_owed",
+        started: 200,
+      });
+    });
+
+    it("starts no company export while an erasure is owed, naming nothing, and once it returned starts one that holds none of it", async () => {
+      const mark = newMark();
+      const { runId, builderId } = await runInBrain(mark);
+      // Past its retention, its erasure owed: the clock's sweep hasn't run.
+      const { refused, refusal, events, bodies } = await pastRetention(
+        async () => {
+          const admin = await signedInWithRole(idp, "admin");
+          await failNextBucketPut();
+          let answered: Response | undefined;
+          const audited = await auditedDuring(async () => {
+            answered = await request(admin.session, brainExportsPath, {
+              method: "POST",
+            });
+          });
+          const text = await answered?.text();
+          const id = await start(admin.session);
+          return {
+            refused: answered,
+            refusal: text,
+            events: audited,
+            bodies: await writtenFiles(admin.session, id),
+          };
+        }
+      );
+
+      expect({
+        status: refused?.status,
+        code: z.object({ code: z.string() }).parse(JSON.parse(refusal ?? ""))
+          .code,
+        names: [runId, builderId, mark].filter((each) =>
+          `${refusal}${JSON.stringify(events)}`.includes(each)
+        ),
+        audited: events
+          .filter(({ action }) => action.startsWith("brain.export."))
+          .map(({ action, detail }) => [action, detail?.outcome ?? null]),
+        held: bodies.join("\n").includes(wordOf(mark)),
+      }).toStrictEqual({
+        status: 409,
+        code: "brain.erasures_owed",
+        names: [],
+        audited: [
+          ["brain.export.asked", null],
+          ["brain.export.answered", "failed"],
+        ],
+        held: false,
+      });
+    });
+
+    it("serves no file of a done export while an erasure is owed, and none of it once the erasure returned and the export holds what it erased", async () => {
+      const admin = await signedInWithRole(idp, "admin");
+      const mark = newMark();
+      await runInBrain(mark);
+      const id = await start(admin.session);
+      const before = await writtenFiles(admin.session, id);
+      const response = await request(admin.session, queryOf(id));
+      const { files } = statusSchema.parse(await response.json());
+      const part = files.find((file) => file !== "manifest.json") ?? "";
+      // The run's erasure becomes owed after the export was done, and fails.
+      const { owed, code, landed } = await pastRetention(async () => {
+        const later = await signedInWithRole(idp, "admin");
+        await failNextBucketPut();
+        const refused = await request(later.session, queryOf(id, part));
+        const again = await request(later.session, queryOf(id, part));
+        return {
+          owed: refused.status,
+          code: z.object({ code: z.string() }).parse(await refused.json()).code,
+          landed: again.status,
+        };
+      });
+
+      expect({
+        held: before.join("\n").includes(wordOf(mark)),
+        owed,
+        code,
+        landed,
+      }).toStrictEqual({
+        held: true,
+        owed: 409,
+        code: "brain.erasures_owed",
+        landed: 404,
+      });
     });
   }
 );

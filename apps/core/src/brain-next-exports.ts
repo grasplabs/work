@@ -15,6 +15,7 @@ import {
   startBrainExport,
   startBrainRestore,
 } from "./brain-next.ts";
+import { settleOwedErasures } from "./brain-owed-erasures.ts";
 import { installShippedSkills } from "./brain-skills.ts";
 import { errorResponse } from "./errors.ts";
 
@@ -33,6 +34,16 @@ import { errorResponse } from "./errors.ts";
 // Each start is in the audit log before it applies, with its outcome after;
 // each download before its file is answered. Events name the export's
 // random id and the kind of file: no content, key or name.
+//
+// Nothing core owes the Brain an erasure of leaves in an export
+// (GRA-1848): a start, and each download, first makes every erasure core
+// owes (brain-owed-erasures.ts) and is refused while one is still owed,
+// `brain.erasures_owed`, naming nothing. At the start, so the export
+// holds none of it; at each download, so an export started or done before
+// an erasure became owed serves nothing while it is, and once it landed
+// the Brain finds the export stale and serves none of it. Checked by core
+// as it answers, not by the Brain as it finishes: the Brain can't see what
+// core owes, and an erasure can become owed after an export is done.
 
 /** Where exports are started, followed and downloaded. */
 export const brainExportsPath = "/api/brain/exports";
@@ -158,6 +169,14 @@ const audited = async <T>(
   return value;
 };
 
+/** The refusal of an export's start or download while an erasure is owed. */
+const erasuresOwed = (requestId: string): Response =>
+  errorResponse(
+    409,
+    brainExportErrors.create("brain.erasures_owed"),
+    requestId
+  );
+
 /** Starts an export of the company's Brain, for an admin. */
 const startExport = async (
   env: Env,
@@ -174,9 +193,17 @@ const startExport = async (
           // The new export's random id, once it is started.
           ...(answered === undefined ? {} : { exportId: answered.id }),
         }),
-      async () => await startBrainExport(env)
+      async () => {
+        if ((await settleOwedErasures(env, new Date())) === "owed") {
+          throw brainExportErrors.create("brain.erasures_owed");
+        }
+        return await startBrainExport(env);
+      }
     );
   } catch (error) {
+    if (brainExportErrors.codeOf(error) === "brain.erasures_owed") {
+      return erasuresOwed(requestId);
+    }
     // Refused for the state the Brain is in: a conflict.
     if (brainExportErrors.codeOf(error) === "brain.export_refused") {
       return errorResponse(
@@ -206,6 +233,11 @@ const readExport = async (
     return status === null ? notFound(requestId) : answer(status);
   }
   const { file } = asked;
+  // Before the file is read, whether or not the export exists: an
+  // erasure owed answers alike for every id.
+  if ((await settleOwedErasures(env, new Date())) === "owed") {
+    return erasuresOwed(requestId);
+  }
   const body = await brainExportFile(env, { id: asked.id, file });
   if (body === null) {
     return notFound(requestId);
