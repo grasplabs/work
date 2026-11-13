@@ -22,7 +22,9 @@ import { audience, fact, readerOf, word } from "./entity-helpers.ts";
 // grow deeper (measured: 3 rows after 1,000 memories, 3 after 2,000),
 // where a scan of them would read a row or more for each. And the entities
 // way reads no further step once the nearer steps fill its list: facts
-// added two steps out cost it nothing either.
+// added two steps out cost it nothing either. An add links its names by
+// their exact names (linking.ts `linkedByName`): what it reads is the
+// same however many names the store holds.
 
 /** Rows the store's SQL read, counted at the store itself. */
 interface Counter {
@@ -76,14 +78,8 @@ type Store = Awaited<ReturnType<typeof countedStore>>["stub"];
  */
 const seekMargin = 8;
 
-/**
- * How many names alike the named-entity tests add. Small: an add links a
- * name of two words or more by its exact name (linking.ts `linkedByName`),
- * whose read grows with the add's readers' memories (reported on #2209),
- * so adding 20,000 such names takes minutes. The 5,000 and 20,000 figures
- * are in the PR body.
- */
-const namedSizes = [100, 1000, 2000];
+/** How many names alike the named-entity tests add, in all. */
+const namedSizes = [100, 5000, 20_000];
 
 /**
  * Rows read for each name that begins with two words next to each other
@@ -469,4 +465,39 @@ describe("what reading memories costs", () => {
       found: before.length,
     }).toStrictEqual({ after: before, flat: true, found: recallLimit });
   });
+
+  it("links an add's names without reading other names or memories, readable or hidden", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const group = `seen-${crypto.randomUUID()}`;
+    const hidden = `hidden-${crypto.randomUUID()}`;
+    /** An add of 100 entities, each with a new name of two words. */
+    const named = async (readers: string) =>
+      await add(
+        stub,
+        readers,
+        Array.from({ length: 100 }, (_, index) => ({
+          key: `n${index}`,
+          kind: "person" as const,
+          names: [`${word()} ${word()}`],
+        })),
+        Array.from({ length: 100 }, (_, index) =>
+          fact(`n${index}`, `named ${index}`)
+        )
+      );
+    const rows: number[] = [];
+    let have = 0;
+    for (const size of [100, 2000, 20_000]) {
+      for (let start = have; start < size; start += 100) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await named((start / 100) % 2 === 0 ? group : hidden);
+      }
+      have = size;
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      rows.push(await rowsReadBy(async () => await named(group)));
+    }
+    const [alone = 0, ...grown] = rows;
+
+    expect(grown.map((read) => flat(alone, read))).toStrictEqual([true, true]);
+    // Adding 20,000 names, a hundred an add, takes its time.
+  }, 120_000);
 });

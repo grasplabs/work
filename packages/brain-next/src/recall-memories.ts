@@ -216,9 +216,9 @@ FROM json_each(?1) AS asked`;
  */
 const stepSql = memoriesSql({
   base: `SELECT m.row FROM json_each(?1) AS asked
-    JOIN memories AS m ON m.entity = asked.value AND m.object IS NOT NULL
+    CROSS JOIN memories AS m ON m.entity = asked.value AND m.object IS NOT NULL
     UNION SELECT m.row FROM json_each(?1) AS asked
-    JOIN memories AS m ON m.object = asked.value`,
+    CROSS JOIN memories AS m ON m.object = asked.value`,
   filter: "judged.is_current = 1",
   columns: ", m.entity AS entity_end, m.object AS object_end",
   order: "m.row",
@@ -426,7 +426,7 @@ const byEntities = (
  */
 const sidesSql = memoriesSql({
   base: `SELECT m.row FROM json_each(?1) AS asked
-    JOIN memories AS m ON m.entity = asked.value ->> 0
+    CROSS JOIN memories AS m ON m.entity = asked.value ->> 0
       AND m.attribute = asked.value ->> 1 AND m.one_value = 1`,
   filter: "judged.is_current = 1",
   order: "confirmation IS NULL, m.learned_at DESC, m.id DESC",

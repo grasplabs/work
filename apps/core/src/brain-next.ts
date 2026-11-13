@@ -699,8 +699,8 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
  * fits as the Brain counts it (`packItemTokens`); then the same of their
  * memories (`packMemoryTokens`, the same memory by its id), from what the
  * budget leaves; cut short when either was or one of the second's didn't
- * fit. A contested fact keeps the sides the merged pack holds, when more
- * than one. What was not found is the second's: it was asked for what the
+ * fit. A fact is contested when the merged pack holds more than one of its
+ * contested sides, whichever pass found each. What was not found is the second's: it was asked for what the
  * first meant. Both must be packs of the same reader's, as `recallAs`
  * gave them.
  */
@@ -756,18 +756,18 @@ export const mergeRecalled = (
     memories.push(memory);
     used += tokens;
   }
+  // As the Brain's pack finds them: each entity's one-value attribute
+  // whose contested sides the merged pack holds more than one of, in the
+  // order of its first. Each pass may hold only one side.
   const facts = new Map<string, RecalledPack["contested"][number]>();
-  for (const fact of [...first.contested, ...second.contested]) {
-    const key = JSON.stringify([fact.about, fact.attribute]);
-    const sides = new Set([
-      ...(facts.get(key)?.memories ?? []),
-      ...fact.memories,
-    ]);
-    facts.set(key, {
-      about: fact.about,
-      attribute: fact.attribute,
-      memories: [...sides].filter((memory) => heldMemories.has(memory)),
-    });
+  for (const { memory, about, attribute, contested } of memories) {
+    if (!contested || attribute === null) {
+      continue;
+    }
+    const key = JSON.stringify([about, attribute]);
+    const fact = facts.get(key) ?? { about, attribute, memories: [] };
+    fact.memories.push(memory);
+    facts.set(key, fact);
   }
   return {
     items,

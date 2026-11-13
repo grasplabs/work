@@ -1,8 +1,7 @@
 import type { EntityKind, Proposal, ProposalPage, Reader } from "./contract.ts";
-import { coveredSql, foldName } from "./entities.ts";
+import { asSeen, coveredSql, foldName } from "./entities.ts";
 import { readMoment, visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
-import { seenAs } from "./seen.ts";
 
 // Linking entities (contract.ts "Cards and proposals").
 //
@@ -48,10 +47,13 @@ export const linkedByName = (
     .exec<{ entity: number }>(
       `SELECT DISTINCT entity_names.entity AS entity
       FROM json_each(?2) AS asked
-      JOIN entity_names
+      -- The exact name first (the index of names), then the memory that
+      -- gave it by its row, then the readers' check: never every memory of
+      -- the add's readers.
+      CROSS JOIN entity_names
         ON entity_names.type = 'name' AND entity_names.folded = asked.value
-      JOIN memories AS m ON m.row = entity_names.memory
-      JOIN entities ON entities.row = entity_names.entity
+      CROSS JOIN memories AS m ON m.row = entity_names.memory
+      CROSS JOIN entities ON entities.row = entity_names.entity
       WHERE entities.kind = ?1 AND ${coveredSql("m")}
       LIMIT 2`,
       kind,
@@ -79,7 +81,7 @@ asked AS (SELECT row, kind FROM entities WHERE id = ?1),
 own AS MATERIALIZED (
   SELECT n.folded AS folded, min(n.value) AS value
   FROM entity_names AS n
-  JOIN memories AS m ON m.row = n.memory
+  CROSS JOIN memories AS m ON m.row = n.memory
   WHERE n.entity = (SELECT row FROM asked) AND n.type = 'name'
     AND ${visibleSql("m")}
   GROUP BY n.folded
@@ -188,7 +190,7 @@ export const listProposals = (
           .toArray();
   // The asked entity and each candidate, with the names the reader may see.
   const seen = new Map(
-    seenAs(
+    asSeen(
       sql,
       [...(asked === undefined ? [] : [asked]), ...page],
       reader,

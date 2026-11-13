@@ -1,3 +1,9 @@
+import { brainOf, packMemoryTokens } from "@grasp-os/brain-next/contract";
+import type {
+  NewEntity,
+  NewMemory,
+  Reader,
+} from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -6,11 +12,20 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, eraseSource } from "../src/brain-next.ts";
-import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import {
+  addSource,
+  eraseSource,
+  mergeRecalled,
+  recallAs,
+} from "../src/brain-next.ts";
+import type {
+  RecalledPack,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
@@ -1099,5 +1114,253 @@ describe("what the recall before a question may reach", setUpTime, () => {
       ],
       recordedBefore: true,
     });
+  });
+});
+
+/** The shared store, where a team's memories are kept. */
+const shared = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** A new team of `personId`'s, as the Brain's group. */
+const teamOf = async (personId: string): Promise<string> => {
+  const teamId = crypto.randomUUID();
+  const db = drizzle(env.DB);
+  await db.insert(teams).values({
+    id: teamId,
+    name: `Team ${unique()}`,
+    organizationId,
+    createdAt: new Date(),
+  });
+  await db.insert(teamMembers).values({
+    id: crypto.randomUUID(),
+    teamId,
+    userId: personId,
+    createdAt: new Date(),
+  });
+  return `team:${teamId}`;
+};
+
+/** Adds `memories` about `entities` that `group` may read. */
+const remembered = async (
+  group: string,
+  entities: NewEntity[],
+  memories: NewMemory[],
+  reader?: Reader
+) =>
+  await shared().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    entities,
+    memories,
+    ...(reader === undefined ? {} : { reader }),
+  });
+
+/** A system fact about `about`, written by `writer`. */
+const fact = (
+  about: string,
+  statement: string,
+  extra: Partial<NewMemory> = {},
+  writer = "crm"
+): NewMemory => ({
+  about,
+  type: "fact",
+  statement,
+  speaker: { kind: "system" },
+  basis: { kind: "writer", writer },
+  ...extra,
+});
+
+/** A customer named `name`, as an add's entity `c`. */
+const customer = (name: string): NewEntity => ({
+  key: "c",
+  kind: "customer",
+  names: [name],
+});
+
+/** The tokens `pack`'s memories take, as the Brain counts them (none cites a source). */
+const memoryTokensOf = (pack: RecalledPack): number =>
+  pack.memories.reduce(
+    (sum, memory) => sum + packMemoryTokens({ ...memory, source: null }),
+    0
+  );
+
+/** The ids of `pack`'s memories, in its order. */
+const idsOf = (pack: RecalledPack): string[] =>
+  pack.memories.map(({ memory }) => memory);
+
+/** The person's recall of `question`, within `tokens`. */
+const recalledBy =
+  (personId: string, tokens: number) => async (question: string) =>
+    await recallAs(env, personId, {
+      question,
+      budget: { tokens },
+      personal: false,
+    });
+
+/** The budget both passes of the merge tests recall within. */
+const mergeBudget = { tokens: 3000 };
+
+// The second pass's pack merged into the first's (`mergeRecalled`), from
+// the ways it can fail: a memory both passes found is handed over twice;
+// the second pass's memories overrun the budget the first left; a fact
+// whose sides the two passes found apart is not shown as contested; what
+// the person may not read reaches the merged pack, or changes it at all.
+describe("two recalls merged into one pack", setUpTime, () => {
+  it("holds a memory both passes found once, then the second's own", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const group = await teamOf(person.userId);
+    const [first, second] = [word(), word()];
+    const both = await remembered(
+      group,
+      [customer(`Depot ${word()}`)],
+      [fact("c", `Depot ${first} ships ${second}`)]
+    );
+    const own = await remembered(
+      group,
+      [customer(`Depot ${word()}`)],
+      [fact("c", `Depot ${second} closes`)]
+    );
+    const recall = recalledBy(person.userId, mergeBudget.tokens);
+    const merged = mergeRecalled(
+      await recall(first),
+      await recall(second),
+      mergeBudget
+    );
+
+    expect(idsOf(merged)).toStrictEqual([both.memories[0], own.memories[0]]);
+    expect(merged.truncated).toBeFalsy();
+  });
+
+  it("keeps both passes within one budget, and says the second's was cut", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const group = await teamOf(person.userId);
+    const [first, second] = [word(), word()];
+    await remembered(
+      group,
+      [customer(`Depot ${word()}`)],
+      [fact("c", `Depot ${first} opens on Monday`)]
+    );
+    const later = await remembered(
+      group,
+      [customer(`Depot ${word()}`)],
+      [fact("c", `Depot ${second} opens on Tuesday at noon`)]
+    );
+    const recall = recalledBy(person.userId, mergeBudget.tokens);
+    const firstPack = await recall(first);
+    const secondPack = await recall(second);
+    const held = memoryTokensOf(firstPack);
+    const laterTokens = memoryTokensOf(secondPack);
+    const tight = { tokens: held + laterTokens - 1 };
+    const merged = mergeRecalled(firstPack, secondPack, tight);
+
+    expect(idsOf(merged)).toStrictEqual(idsOf(firstPack));
+    expect(memoryTokensOf(merged)).toBeLessThanOrEqual(tight.tokens);
+    expect(merged.truncated).toBeTruthy();
+    expect(
+      idsOf(
+        mergeRecalled(firstPack, secondPack, { tokens: held + laterTokens })
+      )
+    ).toStrictEqual([...idsOf(firstPack), later.memories[0]]);
+  });
+
+  it("shows a fact as contested when each pass held one side of it", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const group = await teamOf(person.userId);
+    const name = `${word()} ${word()}`;
+    const march = await remembered(
+      group,
+      [customer(name)],
+      [
+        fact("c", `${name} renews in March`, {
+          attribute: "renewal_date",
+          value: "March",
+        }),
+      ]
+    );
+    const june = await remembered(
+      group,
+      [customer(name)],
+      [
+        fact(
+          "c",
+          "The renewal is due in June",
+          { attribute: "renewal_date", value: "June" },
+          "ledger"
+        ),
+      ]
+    );
+    const pack = await recalledBy(person.userId, mergeBudget.tokens)(name);
+    const sideOf = (id: string | undefined): RecalledPack => ({
+      ...pack,
+      memories: pack.memories.filter(({ memory }) => memory === id),
+      contested: [],
+    });
+    const merged = mergeRecalled(
+      sideOf(march.memories[0]),
+      sideOf(june.memories[0]),
+      mergeBudget
+    );
+
+    expect(pack.contested).toHaveLength(1);
+    expect(merged.contested).toStrictEqual([
+      {
+        about: march.entities.c,
+        attribute: "renewal_date",
+        memories: [march.memories[0], june.memories[0]],
+      },
+    ]);
+  });
+
+  it("is the same pack when the second pass's words reach what the person may not read", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const group = await teamOf(person.userId);
+    const hiddenGroup = `team:${crypto.randomUUID()}`;
+    const [first, second, theirs] = [word(), word(), word()];
+    const name = `Depot ${word()}`;
+    await remembered(
+      group,
+      [customer(`Depot ${word()}`)],
+      [fact("c", `Depot ${first} ships ${second}`)]
+    );
+    const renewing = await remembered(
+      group,
+      [customer(name)],
+      [
+        fact("c", `Depot ${second} renews in March`, {
+          attribute: "renewal_date",
+          value: "March",
+        }),
+      ]
+    );
+    const recall = recalledBy(person.userId, mergeBudget.tokens);
+    const asked = async () =>
+      mergeRecalled(
+        await recall(first),
+        await recall(`${second} ${theirs}`),
+        mergeBudget
+      );
+    const before = await asked();
+    // What only another team may read: a memory holding both of the second
+    // pass's words, and a rival side of the person's own fact.
+    await remembered(
+      hiddenGroup,
+      [customer(`Depot ${word()}`)],
+      [fact("c", `Depot ${second} ${theirs} keeps the other team's note`)]
+    );
+    await remembered(
+      hiddenGroup,
+      [{ ...customer(name), id: renewing.entities.c ?? "" }],
+      [
+        fact(
+          "c",
+          `Depot ${second} renews in June`,
+          { attribute: "renewal_date", value: "June" },
+          "ledger"
+        ),
+      ],
+      { person: crypto.randomUUID(), groups: [group, hiddenGroup] }
+    );
+
+    expect(before.notFound).toContain(theirs);
+    await expect(asked()).resolves.toStrictEqual(before);
   });
 });
