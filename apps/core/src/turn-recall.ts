@@ -76,8 +76,12 @@ export const turnRecallDeadlineMs = 3000;
  */
 export const analysisWaitMs = 1500;
 
-/** What the analysis is recorded as, in the audit log and its spend. */
-export const analysisPurpose = "chat.recall_analysis";
+/**
+ * What the analysis is recorded as, in the audit log and its spend: a
+ * Brain purpose (model-spend.ts `brainPurposePrefix`), so staff see what
+ * it spent in the Brain's report.
+ */
+export const analysisPurpose = "brain.recall_analysis";
 
 /**
  * The messages before the question the analysis reads, at most: the
