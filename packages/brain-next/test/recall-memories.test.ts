@@ -293,6 +293,89 @@ describe("recall through memories", () => {
     );
   });
 
+  // A contested fact is packed with every side or none: never some of its
+  // sides listed as the whole fact. At every budget, alone and with
+  // another memory competing for the room.
+  it.each([
+    ["alone", false],
+    ["with another memory competing", true],
+  ] as const)(
+    "packs every side of a contested fact or none, %s",
+    async (_case, competing) => {
+      const group = unique("team");
+      const reader = readerOf(unique("ann"), group);
+      const name = `${word()} ${word()}`;
+      const sides = [
+        ["crm", "March"],
+        ["ledger", "June"],
+        ["sheet", "September"],
+      ] as const;
+      for (const [writer, month] of sides) {
+        // oxlint-disable-next-line no-await-in-loop -- one lineage each
+        await remember(
+          audience(group),
+          [{ key: "c", kind: "customer", names: [name] }],
+          [
+            fact(
+              "c",
+              `${name} renews in ${month}`,
+              { attribute: "renewal_date", value: month },
+              writer
+            ),
+          ]
+        );
+      }
+      if (competing) {
+        await remember(
+          audience(group),
+          [{ key: "c", kind: "customer", names: [name] }],
+          [fact("c", `${name} renews its contract with care`)]
+        );
+      }
+      const question = `${name} renews`;
+      const whole = await recallAs(reader, question);
+      const all = whole.memories.reduce(
+        (sum, memory) => sum + packMemoryTokens(memory),
+        0
+      );
+      const facts = new Set<number>();
+      const broken: string[] = [];
+      for (let tokens = 1; tokens <= all; tokens += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one budget at a time
+        const pack = await recallAs(reader, question, { tokens });
+        const held = pack.memories.filter(
+          ({ attribute }) => attribute === "renewal_date"
+        );
+        facts.add(held.length);
+        const listed = pack.contested.map(({ memories }) => memories.length);
+        const spent = pack.memories.reduce(
+          (sum, memory) => sum + packMemoryTokens(memory),
+          0
+        );
+        if (
+          ![0, sides.length].includes(held.length) ||
+          JSON.stringify(listed) !==
+            JSON.stringify(held.length === 0 ? [] : [sides.length]) ||
+          spent > tokens ||
+          (held.length === 0 && !pack.truncated)
+        ) {
+          broken.push(
+            `${tokens}: ${held.length} sides, listed ${listed.join("+")}`
+          );
+        }
+      }
+
+      expect(whole.contested[0]?.memories).toHaveLength(sides.length);
+      expect({
+        broken,
+        facts: [...facts].toSorted((x, y) => x - y),
+      }).toStrictEqual({
+        broken: [],
+        facts: [0, sides.length],
+      });
+    }
+  );
+
   // A packed memory holding a word or a quoted part has it found.
   it("says a word or quoted part a packed memory holds was found", async () => {
     const group = unique("g");

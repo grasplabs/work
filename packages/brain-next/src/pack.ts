@@ -277,7 +277,8 @@ const contestedOf = (packed: readonly PackMemory[]): PackContested[] => {
  * `packItemTokens`, `packMemoryTokens`), in three passes, each best first,
  * leaving out what no longer fits and going on with the next: first each
  * passage's quote and each memory's statement (a contested memory's other
- * sides right after it); then each passage widened to its whole chunk and
+ * sides right after it, all of them or none: `contested` lists only facts
+ * whose every side is packed); then each passage widened to its whole chunk and
  * each memory's quote; then each memory's passage around its quote. Cut
  * short when the budget left anything out.
  */
@@ -294,30 +295,52 @@ export const packOf = (
   // Each word is stemmed once for the whole pack, however many quotes
   // hold it.
   const memo: WordMemo = new Map();
-  const holdMemory = (
-    key: string,
-    memory: FoundMemory,
-    found: MemoryFoundBy
+  // A memory with the other sides of its contested fact, held or left
+  // out together: a contested fact is packed with every side the reader
+  // may read, or with none, and nothing of a group left out takes room.
+  // A side left out once (its group didn't fit) keeps the rest of its
+  // fact out too.
+  const skipped = new Set<string>();
+  const holdGroup = (
+    group: readonly { key: string; memory: FoundMemory; found: MemoryFoundBy }[]
   ): void => {
-    if (placed.has(key)) {
+    const fresh = group.filter(({ key }) => !placed.has(key));
+    for (const { key } of fresh) {
+      placed.add(key);
+    }
+    if (fresh.length === 0) {
       return;
     }
-    placed.add(key);
-    const item = memoryItemOf(memory, found);
-    const cost = packMemoryTokens(item);
-    if (cost <= left) {
-      left -= cost;
-      held.push({ kind: "memory", found: memory, item });
-    } else {
+    const items = fresh.map(({ memory, found }) => ({
+      memory,
+      item: memoryItemOf(memory, found),
+    }));
+    const cost = items.reduce(
+      (sum, { item }) => sum + packMemoryTokens(item),
+      0
+    );
+    if (group.some(({ key }) => skipped.has(key)) || cost > left) {
       truncated = true;
+      for (const { key } of fresh) {
+        skipped.add(key);
+      }
+      return;
+    }
+    left -= cost;
+    for (const { memory, item } of items) {
+      held.push({ kind: "memory", found: memory, item });
     }
   };
   for (const entry of fused) {
     if (entry.kind === "memory") {
-      holdMemory(entry.key, entry.memory, entry.found);
-      for (const rival of entry.rivals) {
-        holdMemory(rival.key, rival.memory, "contested");
-      }
+      holdGroup([
+        { key: entry.key, memory: entry.memory, found: entry.found },
+        ...entry.rivals.map((rival) => ({
+          key: rival.key,
+          memory: rival.memory,
+          found: "contested" as const,
+        })),
+      ]);
       continue;
     }
     const found = entry.passage;
