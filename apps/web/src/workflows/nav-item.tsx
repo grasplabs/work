@@ -44,6 +44,10 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
   }
 };
 
+/** How many workflows need the person; `undefined` until core says. */
+export const useWorkflowsWaiting = (): number | undefined =>
+  useFrameRead(readCount).value;
+
 /**
  * The sidebar's Workflows entry, with how many workflows need the person;
  * for owners and admins (`requests`), Stephen's requests under it while
@@ -52,7 +56,7 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
 export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
-  const { value: waiting } = useFrameRead(readCount);
+  const waiting = useWorkflowsWaiting();
   const shown = waiting !== undefined && waiting > 0;
   // As the prototype's: Requests is under Workflows while the person is
   // in them, and lit on its own there.

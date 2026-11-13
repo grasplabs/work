@@ -4,9 +4,11 @@ import linguiMacro from "@lingui/babel-plugin-lingui-macro";
 import { getConfig } from "@lingui/conf";
 import { lingui } from "@lingui/vite-plugin";
 import babel from "@rolldown/plugin-babel";
+import stylex from "@stylexjs/unplugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
 
 import { localePreload } from "./locale-preload.ts";
@@ -33,6 +35,15 @@ export default defineConfig({
       // imports only small modules of plain checks.
       codeSplittingOptions: { defaultBehavior: [["loader", "component"]] },
     }),
+    // Grasp UI's styles (src/grasp): StyleX compiles each `stylex.create`
+    // to class names before React's own transforms, and adds its CSS to
+    // the build's stylesheet. Outside any cascade layer, so it holds over
+    // Tailwind's layers (its reset of headings and buttons among them)
+    // whichever stylesheet the page loads first, as in development.
+    // light-dark() is left as it is, which every browser this app supports
+    // reads: rewritten, it would lean on variables that only the build's
+    // own stylesheet sets, and fail in development.
+    stylex({ lightningcssOptions: { exclude: Features.LightDark } }),
     react(),
     babel({
       // Lingui's macros turn the English in the code into catalog lookups

@@ -25,6 +25,7 @@ import {
   CoinsIcon,
   CreditCardIcon,
   HistoryIcon,
+  ImageIcon,
   KeyRoundIcon,
   PlugIcon,
   RocketIcon,
@@ -60,6 +61,7 @@ type SettingsPath =
   | "/settings/outcomes"
   | "/settings/billing"
   | "/settings/profile"
+  | "/settings/appearance"
   | "/settings/security";
 
 interface SettingsItem {
@@ -147,6 +149,11 @@ const groupsFor = ({
       title: msg`Your account`,
       items: [
         { label: msg`Profile`, to: "/settings/profile", icon: UserRoundIcon },
+        {
+          label: msg`Appearance`,
+          to: "/settings/appearance",
+          icon: ImageIcon,
+        },
         { label: msg`Security`, to: "/settings/security", icon: KeyRoundIcon },
       ],
     },

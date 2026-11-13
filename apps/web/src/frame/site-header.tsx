@@ -4,6 +4,8 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
+import { useFrameStyle } from "../grasp/frame/frame-style.ts";
+import { PageBar } from "../grasp/frame/page-bar.tsx";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
@@ -95,6 +97,23 @@ export const SiteHeader = ({
   phoneCrumbs?: "last-two" | "first";
 }) => {
   const { t } = useLingui();
+  const { frame } = useFrameStyle();
+  if (frame === "grasp") {
+    return (
+      <PageBar
+        actions={actions}
+        breadcrumbLabel={t`Breadcrumb`}
+        crumbs={crumbs.map((crumb) =>
+          "to" in crumb
+            ? { label: crumb.label, link: crumbLink(crumb) }
+            : { label: crumb.label }
+        )}
+        phoneCrumbs={phoneCrumbs}
+        trailing={trailing}
+        triggerLabel={t`Show or hide the sidebar`}
+      />
+    );
+  }
   return (
     <SiteHeaderBar
       actions={actions}

@@ -1323,6 +1323,7 @@ msgid "{waiting, plural, one {# person new on your list gets a link once you con
 msgstr "{waiting, plural, one {# nouvelle personne de votre liste reçoit un lien dès que vous confirmez votre organisation.} other {# nouvelles personnes de votre liste reçoivent leur lien dès que vous confirmez votre organisation.}}"
 
 #: src/dashboard/nav-item.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# élément en attente} other {# éléments en attente}}"
 
@@ -1334,6 +1335,7 @@ msgstr "{waiting, plural, one {# exécution en attente} other {# exécutions en 
 msgid "{waiting, plural, one {# waiting} other {# waiting}}"
 msgstr "{waiting, plural, one {# en attente} other {# en attente}}"
 
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/workflows/nav-item.tsx
 msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
 msgstr "{waiting, plural, one {# workflow a besoin de vous} other {# workflows ont besoin de vous}}"
@@ -1701,6 +1703,10 @@ msgstr "Une exécution de la version {version} a démarré pour quelqu’un d’
 #: src/workflows/activity-bar.tsx
 msgid "A run of version {version} started for you"
 msgstr "Une exécution de la version {version} a démarré pour vous"
+
+#: src/settings/backdrop-settings.tsx
+msgid "A scene, a dither, sand, or nothing."
+msgstr "Une scène, un tramage, du sable ou rien."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "A schedule"
@@ -2193,6 +2199,7 @@ msgstr "Agent introuvable"
 
 #: src/agents/agents-overview.tsx
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
 #: src/routes/_shell.agents.index.tsx
 #: src/routes/_shell.agents.new.tsx
@@ -2613,6 +2620,11 @@ msgstr "Page de l’application"
 msgid "App spend"
 msgstr "Dépenses par application"
 
+#: src/grasp/frame/profile-menu.tsx
+#: src/routes/_shell.settings.tsx
+msgid "Appearance"
+msgstr "Apparence"
+
 #: src/brain/brain.ts
 msgid "Application"
 msgstr "Application"
@@ -2735,6 +2747,7 @@ msgstr "Responsable des nouveaux outils désigné"
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
@@ -3052,6 +3065,10 @@ msgstr "A joint un fichier à une discussion"
 msgid "Audit trail"
 msgstr "Journal d’audit"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Aurora"
+msgstr "Aurore"
+
 #: src/brain/brain.ts
 msgid "Available, direct"
 msgstr "Disponible, en direct"
@@ -3094,10 +3111,22 @@ msgstr "Retour à la liste"
 msgid "Back to your version"
 msgstr "Revenir à votre version"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Backdrop"
+msgstr "Arrière-plan"
+
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "Base URL"
 msgstr "URL de base"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer"
+msgstr "Bayer"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer grid"
+msgstr "Bayer en grille"
 
 #: src/brain/brain.ts
 msgctxt "note property"
@@ -3226,6 +3255,7 @@ msgstr "Lié à"
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 #: src/routes/_shell.settings.tsx
@@ -3672,8 +3702,8 @@ msgstr "Graphique"
 
 #: src/agents/agents-overview.tsx
 #: src/chat/chat-panel.tsx
-#: src/chat/chat-start.tsx
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Chat"
 msgstr "Chat"
 
@@ -3698,6 +3728,10 @@ msgstr "Applications de chat"
 #: src/settings/chat-accounts.tsx
 msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
 msgstr "Les applications de chat où Grasp sait que c’est vous. Écrivez à Grasp dans l’une d’elles, et il vous envoie un lien pour relier votre compte ici. Dissociez celle que vous n’utilisez plus."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Chat backdrop"
+msgstr "Arrière-plan du chat"
 
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
@@ -3881,6 +3915,10 @@ msgstr "Effacer {0}"
 msgid "Clear filters"
 msgstr "Effacer les filtres"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Cliffs"
+msgstr "Falaises"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-data.tsx
@@ -4004,6 +4042,10 @@ msgstr "Collections"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 msgstr "Les collections contiennent les documents que Grasp et ses agents peuvent lire. Un admin les partage avec vous, ou vous ajoutez les vôtres."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Colour"
+msgstr "Couleur"
 
 #: src/chat/composer-menu.tsx
 #: src/chat/mentions.tsx
@@ -4520,7 +4562,12 @@ msgstr "Abonnement actuel"
 msgid "Dark"
 msgstr "Sombre"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dark edge"
+msgstr "Bord sombre"
+
 #: src/dashboard/nav-item.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.dashboard.tsx
 msgid "Dashboard"
 msgstr "Tableau de bord"
@@ -4608,6 +4655,10 @@ msgstr "Refuser de lancer {name}"
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
 msgstr "Refusé : {name}."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Deep"
+msgstr "Profond"
 
 #: src/workflows/resource-params.tsx
 msgid "Default"
@@ -4877,6 +4928,10 @@ msgstr "Ignorer ce signal sur {name}"
 msgid "Dismissed a knowledge signal"
 msgstr "A écarté un signal de connaissances"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dithers"
+msgstr "Tramages"
+
 #: src/workflows/requests/request-needs.tsx
 msgid "Do it"
 msgstr "Le faire"
@@ -4988,6 +5043,14 @@ msgstr "Travail bien fait"
 msgid "Done with"
 msgstr "Fait avec"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Door"
+msgstr "Porte"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dots"
+msgstr "Points"
+
 #: src/chat/chat-more.tsx
 msgid "Download"
 msgstr "Télécharger"
@@ -5086,6 +5149,14 @@ msgstr "A abandonné un événement qu’aucun workflow n’a pu recevoir"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Dublin"
 msgstr "Dublin"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dunes"
+msgstr "Dunes"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dusk"
+msgstr "Crépuscule"
 
 #: src/agents/agents-overview.tsx
 msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it."
@@ -5970,12 +6041,17 @@ msgid "From when each event was recorded, archive included. After this, archived
 msgstr "À partir de l’enregistrement de chaque événement, archive comprise. Ensuite, les événements archivés sont supprimés."
 
 #: src/frame/surface-nav.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "From your Apps"
 msgstr "De vos applications"
 
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "Depuis votre outil RH ou de paie. Microsoft 365 ou Google pourront être connectés plus tard, avec nous."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Fuji"
+msgstr "Fuji"
 
 #: src/settings/staff-access.tsx
 msgid "Full access"
@@ -6028,6 +6104,10 @@ msgstr "Général"
 msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "En préparation"
+
+#: src/grasp/frame/profile-menu.tsx
+msgid "Getting started"
+msgstr "Premiers pas"
 
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
@@ -6394,6 +6474,10 @@ msgstr "Les fonctionnalités d'IA propres à Grasp"
 msgid "Grasp’s proposal counts once you confirm it."
 msgstr "La proposition de Grasp compte dès que vous la confirmez."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Grid"
+msgstr "Grille"
+
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group name"
 msgstr "Nom du groupe"
@@ -6619,6 +6703,10 @@ msgstr "À quelle fréquence"
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "Quelle certitude"
+
+#: src/settings/backdrop-settings.tsx
+msgid "How the dither's cells are set."
+msgstr "Comment les cellules du tramage sont disposées."
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -6900,6 +6988,10 @@ msgctxt "an advisory's severity"
 msgid "Info"
 msgstr "Info"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Ink"
+msgstr "Encre"
+
 #: src/chat/thread.tsx
 msgid "Input"
 msgstr "Entrée"
@@ -6924,6 +7016,7 @@ msgstr "Intégration"
 
 #: src/apps/app-integrations.tsx
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
@@ -7728,12 +7821,21 @@ msgid "Lift the legal hold {hold} from version {label}?"
 msgstr "Lever la conservation légale {hold} de la version {label} ?"
 
 #: src/frame/person-menu.tsx
+#: src/settings/backdrop-settings.tsx
 msgid "Light"
 msgstr "Clair"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Light edge"
+msgstr "Bord clair"
 
 #: src/projects/project-dialog.tsx
 msgid "Lightbulb"
 msgstr "Ampoule"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Lime"
+msgstr "Citron vert"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Limits"
@@ -7931,6 +8033,7 @@ msgid "Mailbox or drive, if not the account's own"
 msgstr "Boîte aux lettres ou espace de stockage, si ce n’est pas celui du compte"
 
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Main"
 msgstr "Principal"
 
@@ -8095,6 +8198,10 @@ msgstr "Méthodes autorisées"
 #: src/interview/sound-check.tsx
 msgid "Microphone: {name}"
 msgstr "Micro : {name}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Mint"
+msgstr "Menthe"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "Minutes saved a request"
@@ -8930,6 +9037,7 @@ msgid "Nobody yet, until you choose."
 msgstr "À personne pour l'instant, jusqu'à ce que vous choisissiez."
 
 #: src/settings/ai-providers.tsx
+#: src/settings/backdrop-settings.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "None"
 msgstr "Aucune"
@@ -9533,6 +9641,10 @@ msgstr "Dès qu'elle a une version, elle peut être copiée."
 msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
 msgstr "Un par ligne, jusqu’à {most} : un nom, chacune de ses autres formes, une adresse e-mail. Un terme est supprimé comme mot entier, sans tenir compte de la casse : listez les formes accolées comme termes à part entière."
 
+#: src/settings/backdrop-settings.tsx
+msgid "One green, or a run of greens from the edge in."
+msgstr "Un vert, ou une suite de verts du bord vers l’intérieur."
+
 #: src/agents/agent-form.tsx
 msgid "One line, such as: chases unpaid invoices."
 msgstr "Une ligne, par exemple : relance les factures impayées."
@@ -10086,6 +10198,10 @@ msgstr "Préfixes de chemin autorisés, un par ligne"
 msgid "Paths"
 msgstr "Chemins"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pattern"
+msgstr "Motif"
+
 #: src/settings/stephen-card.tsx
 #: src/voice/sound-controls.tsx
 #: src/workflows/workflow-status.tsx
@@ -10298,6 +10414,10 @@ msgstr "Image"
 msgid "pieces of work found"
 msgstr "tâches trouvées"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pixel sand"
+msgstr "Sable en pixels"
+
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: where people reach Stephen"
 msgid "Place"
@@ -10368,6 +10488,10 @@ msgstr "Préférence"
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 msgstr "Appuyez sur une ligne pour la modifier, retirez ce qui est faux, ou tapez ce qui manque. Ce que vous laissez, c’est ce qui compte."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Preview of your chat backdrop"
+msgstr "Aperçu de votre arrière-plan du chat"
+
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Prévisualiser la purge"
@@ -10398,6 +10522,7 @@ msgid "Project"
 msgstr "Projet"
 
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -11116,6 +11241,7 @@ msgctxt "column: billed requests"
 msgid "Requests"
 msgstr "Demandes"
 
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.workflows.requests.tsx
 #: src/workflows/nav-item.tsx
 msgctxt "Stephen's requests: the page"
@@ -11434,6 +11560,10 @@ msgstr "Reformulez-le pour eux si vous le souhaitez. Il ne peut pas reposer sur 
 msgid "Reword the goal"
 msgstr "Reformuler l’objectif"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Rings"
+msgstr "Anneaux"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Risk-to-Compliance"
@@ -11726,6 +11856,10 @@ msgstr "Sam, comme tous ceux qui utilisent l’App, peut modifier tout enregistr
 msgid "Sam, like everyone who uses the App, sees every record in {table}."
 msgstr "Sam, comme tous ceux qui utilisent l’App, voit tous les enregistrements de {table}."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Sand"
+msgstr "Sable"
+
 #: src/agents/agent-page.tsx
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
@@ -11843,6 +11977,10 @@ msgstr "Dites ce qu’il faut changer. Vous seul voyez les modifications, dans l
 msgid "Say what you want to build, and Grasp builds it."
 msgstr "Dites ce que vous voulez construire, et Grasp le construit."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Scenes"
+msgstr "Scènes"
+
 #: src/agents/agent-page.tsx
 msgid "Schedule"
 msgstr "Horaire"
@@ -11872,6 +12010,7 @@ msgstr "Rechercher par nom ou type"
 
 #: src/chat/chat-window.tsx
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Search chats"
 msgstr "Rechercher dans les chats"
 
@@ -12187,6 +12326,7 @@ msgstr "Préparation de {name}…"
 
 #: src/apps/app-page.tsx
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/profile-menu.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -12376,8 +12516,10 @@ msgstr "Afficher les versions plus anciennes"
 msgid "Show only the failed runs."
 msgstr "Afficher uniquement les exécutions en échec."
 
+#: src/chat/chat-start.tsx
 #: src/frame/sidebar-brand.tsx
 #: src/frame/site-header.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Show or hide the sidebar"
 msgstr "Afficher ou masquer la barre latérale"
 
@@ -12410,6 +12552,7 @@ msgid "Shown with the App. It opens the App to nobody: who may use it is who it 
 msgstr "Affiché avec l’application. Cela ne la rend accessible à personne : seules les personnes avec qui elle est partagée peuvent l’utiliser."
 
 #: src/frame/app-sidebar.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Sidebar"
 msgstr "Barre latérale"
 
@@ -12467,6 +12610,7 @@ msgid "Sign in with your organization's account."
 msgstr "Connectez-vous avec le compte de votre organisation."
 
 #: src/frame/person-menu.tsx
+#: src/grasp/frame/profile-menu.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
@@ -12733,6 +12877,10 @@ msgstr "Partie prenante invitée dans Grasp"
 #: src/brain/brain.ts
 msgid "Stakeholder named: the {role}"
 msgstr "Partie prenante désignée : {role}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Starry night"
+msgstr "Nuit étoilée"
 
 #: src/inbox/item-detail.tsx
 msgid "Start"
@@ -13046,6 +13194,10 @@ msgctxt "tab: an interview written up short"
 msgid "Summary"
 msgstr "Résumé"
 
+#: src/grasp/frame/profile-menu.tsx
+msgid "Support"
+msgstr "Assistance"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Support"
@@ -13063,6 +13215,10 @@ msgstr "Désactivez une équipe et personne dedans ne reçoit de lien."
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Changer maintenant"
+
+#: src/grasp/frame/profile-menu.tsx
+msgid "Switch organization"
+msgstr "Changer d’organisation"
 
 #: src/settings/ai-providers.tsx
 msgid "Switch to Grasp’s AI"
@@ -15378,6 +15534,10 @@ msgstr "attend votre équipe, {team}"
 msgid "Waits until"
 msgstr "Attend jusqu'au"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Wanderer"
+msgstr "Voyageur"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Warsaw"
@@ -15422,6 +15582,10 @@ msgstr "Auparavant : inconnu"
 #: src/brain/brain.ts
 msgid "Was: {before}"
 msgstr "Auparavant : {before}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Wave"
+msgstr "Vague"
 
 #. A folder of sources: conversations, Pulse, documents or connections
 #: src/brain/brain.ts
@@ -15742,8 +15906,13 @@ msgid "What should this App do?"
 msgstr "Que doit faire cette app ?"
 
 #: src/chat/chat-start.tsx
+#: src/settings/backdrop-settings.tsx
 msgid "What should we look at today?"
 msgstr "Que regardons-nous aujourd’hui ?"
+
+#: src/settings/backdrop-settings.tsx
+msgid "What stands behind the page where you start a chat. Yours alone, kept in this browser."
+msgstr "Ce qui se trouve derrière la page où vous commencez un chat. Rien qu’à vous, conservé dans ce navigateur."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "What starts it"
@@ -16328,6 +16497,7 @@ msgstr "workflow.json"
 #: src/dashboard/custom-widget.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$workflow.tsx

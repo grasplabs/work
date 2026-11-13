@@ -10,6 +10,8 @@
 @import "@fontsource-variable/jetbrains-mono";
 /* How each icon of a control moves when it is pointed at. */
 @import "./icon-moves.css";
+/* Grasp UI's tokens, read by the StyleX styles under grasp/. */
+@import "./grasp/grasp.css";
 
 @source "../";
 /* The kit's demos and examples, shown on the local kit pages (routes/kit_.*). */

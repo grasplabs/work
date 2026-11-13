@@ -26,7 +26,7 @@ import { appSplat } from "../pages/app-address.ts";
 // answer.
 
 /** The Apps with sidebar entries, as core lists them for the person. */
-const useSidebarApps = (core: CoreConnection): SidebarApp[] => {
+export const useSidebarApps = (core: CoreConnection): SidebarApp[] => {
   const [apps, setApps] = useState<SidebarApp[]>([]);
   useEffect(() => {
     const left = new AbortController();

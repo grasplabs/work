@@ -1,41 +1,114 @@
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatMake } from "@grasp-os/shared/chat";
-import { canBuild } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Await, useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
-import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import type { Session } from "../core.ts";
-import { SiteHeader } from "../frame/site-header.tsx";
+import { BackdropField } from "../grasp/field/backdrop.tsx";
+import { schemeOf, useLook } from "../grasp/field/look.ts";
+import { frame } from "../grasp/frame/frame.stylex.ts";
+import { SidebarButton } from "../grasp/frame/page-bar.tsx";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
 import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
-import { MakeSomethingLink } from "../make/make-link.tsx";
 import { TourOffer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
 import { AgentPicker, agentModelOf, startingAgent } from "./agent-choice.tsx";
 import { openChat } from "./chat-layout.ts";
-import { ChatSwitcherButton } from "./chat-switcher.tsx";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
 import { RecentsButton } from "./recents.tsx";
-import { StartingQuestions } from "./suggestions.tsx";
 import { useAsk } from "./use-ask.ts";
 
-// Chat's own page (routes/_shell.index.tsx): where to start. Grasp's buddy
-// and the question "What should we look at today?", centred, with the box
-// to ask in and questions to start from under it (the first time,
-// Stephen's offer of his tour stands in the question's place,
+// Chat's own page (routes/_shell.index.tsx): where to start. The question
+// "What should we look at today?", centred over the backdrop the person
+// chose in Settings (grasp/field/look.ts), with the box to ask in under it (the
+// first time, Stephen's offer of his tour stands in the question's place,
 // tour/tour-layer.tsx), and Make something for who builds. Make something
 // comes here too (`make`, from `?make=app` or `?make=workflow` and
-// `&project=`): what to get done, and ideas to start from in place of the
-// questions (make/make-ideas.tsx), the blueprints for an App, a few
+// `&project=`): what to get done, and ideas to start from under the box
+// (make/make-ideas.tsx), the blueprints for an App, a few
 // starting sentences for a workflow; the first question starts the chat
 // with what to make (`ChatMake`), which the chat keeps. Asking starts a new
 // chat in Grasp's one chat (global-chat.tsx), which opens full screen over
 // the page with the answer coming in, as on every other page.
+
+// The page's look, from Grasp UI's tokens (grasp/tokens), in StyleX.
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
+    minHeight: 0,
+    minWidth: 0,
+    overflowY: "auto",
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.text,
+  },
+  // The backdrop's box, with the page's words above it.
+  centre: {
+    position: "relative",
+    isolation: "isolate",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100%",
+    paddingInline: grasp.space6,
+    paddingBlock: grasp.space12,
+  },
+  // On a scene, which is night, what stands on it turns light.
+  onNight: {
+    colorScheme: "dark",
+  },
+  // The box to ask in is glass: the card's colour, most of the way, over
+  // a blur of what stands behind the page, so a backdrop runs on under it
+  // and its words still read. Its corners are the composer's (14px); the
+  // box's own fill is let go in grasp.css (`data-glass`).
+  composer: {
+    borderRadius: "14px",
+    backgroundColor: `color-mix(in oklch, ${frame.card} 62%, transparent)`,
+    backdropFilter: "blur(14px) saturate(1.5)",
+  },
+  column: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space8,
+    width: "100%",
+    maxWidth: "48rem",
+    paddingBottom: grasp.space10,
+  },
+  head: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space6,
+    textAlign: "center",
+  },
+  greeting: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+  },
+  title: {
+    fontFamily: grasp.fontSerif,
+    fontSize: grasp.titleLg,
+    lineHeight: grasp.titleLgLine,
+    fontWeight: grasp.weightRegular,
+    letterSpacing: grasp.trackingTitle,
+    color: grasp.ink,
+  },
+  hint: {
+    color: grasp.muted,
+  },
+});
 
 /** What Make something offers to start from: an App's blueprints, or a workflow's starting sentences. */
 export type MakeIdeas =
@@ -67,18 +140,18 @@ const Ideas = ({
 /** The page's question: what to look at, or, making something, what to get done. */
 const Greeting = ({ making }: { making: boolean }) =>
   making ? (
-    <div className="flex flex-col gap-2">
-      <h1 className="type-display" id="new-chat">
+    <div {...stylex.props(styles.greeting)}>
+      <h1 id="new-chat" {...stylex.props(styles.title)}>
         <Trans>What do you want to get done?</Trans>
       </h1>
-      <p className="text-muted-foreground">
+      <p {...stylex.props(styles.hint)}>
         <Trans>
           Say it like you&apos;d tell a colleague. Grasp works out what to make.
         </Trans>
       </p>
     </div>
   ) : (
-    <h1 className="type-display" id="new-chat">
+    <h1 id="new-chat" {...stylex.props(styles.title)}>
       <Trans>What should we look at today?</Trans>
     </h1>
   );
@@ -116,10 +189,12 @@ export const ChatStart = ({
   const { t } = useLingui();
   const { offered } = useGlobalChat();
   const { identity } = useRouteContext({ from: "/_shell" });
+  const look = useLook(identity.userId);
+  const scheme = schemeOf(look);
   const agents = offered?.agents ?? [];
   const [picked, setPicked] = useState<string | undefined>(agent);
   const agentId = startingAgent(agents, picked)?.id;
-  const { composer, ask } = useAsk(
+  const { composer } = useAsk(
     undefined,
     offered?.models,
     offered?.efforts,
@@ -140,43 +215,31 @@ export const ChatStart = ({
   // Where focus goes once the offer is turned down: the box to ask in.
   const page = useRef<HTMLDivElement>(null);
   return (
-    <>
-      <SiteHeader
-        actions={
-          <>
-            {canBuild(identity.role) ? (
-              <MakeSomethingLink kind="app" size="sm" />
-            ) : null}
-            <ChatSwitcherButton />
-          </>
-        }
-        crumbs={[{ label: t`Chat` }]}
-      />
-      <section
-        aria-labelledby="new-chat"
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto text-sm"
+    <section aria-labelledby="new-chat" {...stylex.props(styles.page)}>
+      <div
+        {...stylex.props(styles.centre, scheme === "dark" && styles.onNight)}
       >
-        <div className="flex min-h-full items-center justify-center px-6 py-12">
-          <div
-            className="flex w-full max-w-3xl flex-col gap-8 pb-10"
-            ref={page}
-          >
-            <div className="flex flex-col items-center gap-6 text-center">
-              <GraspBuddy />
-              {offeredTour ? (
-                <TourOffer
-                  headingId="new-chat"
-                  onDeclined={() => {
-                    page.current
-                      ?.querySelector<HTMLElement>('[role="textbox"]')
-                      ?.focus();
-                  }}
-                  userId={identity.userId}
-                />
-              ) : (
-                <Greeting making={make !== undefined} />
-              )}
-            </div>
+        <BackdropField clear={page} look={look} />
+        {/* Chat has no bar above it: the sidebar's way back floats here. */}
+        <SidebarButton floating label={t`Show or hide the sidebar`} />
+        <div ref={page} {...stylex.props(styles.column)}>
+          <div {...stylex.props(styles.head)}>
+            {offeredTour ? (
+              <TourOffer
+                headingId="new-chat"
+                onDeclined={() => {
+                  page.current
+                    ?.querySelector<HTMLElement>('[role="textbox"]')
+                    ?.focus();
+                }}
+                userId={identity.userId}
+              />
+            ) : (
+              <Greeting making={make !== undefined} />
+            )}
+          </div>
+          {/* Glass under the box: the backdrop runs on behind it. */}
+          <div data-glass="" {...stylex.props(styles.composer)}>
             <Composer
               actions={<RecentsButton />}
               agent={
@@ -190,25 +253,17 @@ export const ChatStart = ({
               running={false}
               {...composer}
             />
-            {offeredTour || ideas === undefined ? null : (
-              <Ideas
-                ideas={ideas}
-                onPick={(text) => {
-                  composer.onText(text);
-                }}
-              />
-            )}
-            {offeredTour || make !== undefined ? null : (
-              <StartingQuestions
-                disabled={composer.busy || (composer.models?.length ?? 0) === 0}
-                onPick={(question) => {
-                  void ask(question);
-                }}
-              />
-            )}
           </div>
+          {offeredTour || ideas === undefined ? null : (
+            <Ideas
+              ideas={ideas}
+              onPick={(text) => {
+                composer.onText(text);
+              }}
+            />
+          )}
         </div>
-      </section>
-    </>
+      </div>
+    </section>
   );
 };

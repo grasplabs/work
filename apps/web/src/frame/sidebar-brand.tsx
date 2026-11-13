@@ -93,14 +93,13 @@ const SidebarBrandView = ({ name }: { name?: string }) => {
 };
 
 /**
- * The header, reading the organization's name once with `organization`,
- * and showing any rename since (`organizationRenamed`).
+ * The organization's name as `organization` reads it once, with any
+ * rename since (`organizationRenamed`); none until then, or when it has
+ * none.
  */
-export const SidebarBrandOf = ({
-  organization,
-}: {
-  organization: () => Promise<Organization>;
-}) => {
+export const useShownName = (
+  organization: () => Promise<Organization>
+): string | undefined => {
   // A header mounted anew (another session, say) shows no name set before
   // it mounted, not even for its first paint: only one core says, or a
   // rename, since.
@@ -115,17 +114,25 @@ export const SidebarBrandOf = ({
       read.current = false;
     };
   }, [organization]);
-  return <SidebarBrandView name={name} />;
+  return name;
 };
+
+/**
+ * The header, reading the organization's name once with `organization`,
+ * and showing any rename since (`organizationRenamed`).
+ */
+export const SidebarBrandOf = ({
+  organization,
+}: {
+  organization: () => Promise<Organization>;
+}) => <SidebarBrandView name={useShownName(organization)} />;
+
+/** Reads the organization from core. */
+export const organizationOf =
+  (core: CoreConnection) => async (): Promise<Organization> =>
+    await readWithin(core, async (session) => await session.organization.get());
 
 /** The header, reading the organization's name from core once. */
 export const SidebarBrand = ({ core }: { core: CoreConnection }) => (
-  <SidebarBrandOf
-    organization={async () =>
-      await readWithin(
-        core,
-        async (session) => await session.organization.get()
-      )
-    }
-  />
+  <SidebarBrandOf organization={organizationOf(core)} />
 );

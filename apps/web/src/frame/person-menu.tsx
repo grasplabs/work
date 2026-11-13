@@ -97,7 +97,7 @@ const Who = ({ identity }: { identity: Identity }) => (
  * Who is signed in, atop the menu, as the prototype's: their initials and
  * their name, as on the menu's button; under the name, their role.
  */
-const SignedIn = ({ identity }: { identity: Identity }) => {
+export const SignedIn = ({ identity }: { identity: Identity }) => {
   const { t } = useLingui();
   const role = roleLabel(identity.role);
   return (
@@ -134,16 +134,26 @@ const themeIcons: Record<Theme, LucideIcon> = {
  * person's own choice in this browser (theme.ts). The person menu applies
  * it; this mounts only while the menu is open.
  */
-const ThemeMenu = ({ userId }: { userId: string }) => {
+export const ThemeMenu = ({
+  userId,
+  label,
+  icon,
+}: {
+  userId: string;
+  /** Its name, where a menu calls it otherwise ("Appearance"); "Theme" if not. */
+  label?: string;
+  /** Its icon, where a menu gives it one of its own; the theme's own if not. */
+  icon?: LucideIcon;
+}) => {
   const { t, i18n } = useLingui();
   // Read where it is kept, so a choice made in another tab shows here too.
   const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
-  const Icon = themeIcons[theme];
+  const Icon = icon ?? themeIcons[theme];
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <Icon />
-        {t`Theme`}
+        {label ?? t`Theme`}
         <span className="text-muted-foreground ml-auto">
           {i18n._(themeNames[theme])}
         </span>
@@ -168,6 +178,25 @@ const ThemeMenu = ({ userId }: { userId: string }) => {
   );
 };
 
+/**
+ * Signs the person out; a sign-out core didn't carry out is said in a
+ * toast, and the page stays.
+ */
+export const useSignOut = (core: CoreConnection): (() => Promise<void>) => {
+  const { t } = useLingui();
+  return async () => {
+    try {
+      await signOut(core);
+    } catch {
+      toast.add({
+        type: "error",
+        title: t`Signing out didn't work`,
+        description: t`You're still signed in. Try again in a moment.`,
+      });
+    }
+  };
+};
+
 export const PersonMenu = ({
   core,
   identity,
@@ -184,19 +213,7 @@ export const PersonMenu = ({
   const { isMobile, setOpenMobile } = useSidebar();
   const { pathname } = useLocation();
   const toured = tourStops(identity).length > 0;
-  // The menu is gone once clicked: a sign-out core didn't carry out is
-  // said in a toast, and the page stays.
-  const signOutOrSay = async (): Promise<void> => {
-    try {
-      await signOut(core);
-    } catch {
-      toast.add({
-        type: "error",
-        title: t`Signing out didn't work`,
-        description: t`You're still signed in. Try again in a moment.`,
-      });
-    }
-  };
+  const signOutOrSay = useSignOut(core);
   return (
     <SidebarMenu>
       <SidebarMenuItem>

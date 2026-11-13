@@ -718,6 +718,16 @@
   --icon-y: -2.5px;
 }
 
+/* The chevrons part, one up and one down, and come back. */
+.lucide-chevrons-up-down > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+}
+.lucide-chevrons-up-down > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+
 /* The ring is drawn round. */
 .lucide-circle > :nth-child(1) {
   --icon-move: icon-draw;
@@ -999,6 +1009,15 @@
   --icon-from: 21.5;
   --icon-time: 0.45s;
   --icon-wait: 0.15s;
+}
+
+/* The dark half turns round the circle, and comes to rest as it was. */
+.lucide-contrast > :nth-child(2) {
+  --icon-move: icon-to;
+  --icon-turn: 360deg;
+  --icon-origin: 12px 12px;
+  --icon-box: view-box;
+  --icon-time: 0.7s;
 }
 
 /* The two sheets come together and part. */
@@ -1310,6 +1329,25 @@
   --icon-fade: 0;
 }
 
+/* The bars in the folder grow, one after the other. */
+.lucide-folder-kanban > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 4 100;
+  --icon-from: 5.5;
+}
+.lucide-folder-kanban > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 2 100;
+  --icon-from: 3.5;
+  --icon-wait: 0.07s;
+}
+.lucide-folder-kanban > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 6 100;
+  --icon-from: 7.5;
+  --icon-wait: 0.14s;
+}
+
 /* The line grows from its middle. */
 .lucide-folder-minus > :nth-child(1) {
   --icon-move: icon-from;
@@ -1408,6 +1446,12 @@
   --icon-turn: 12deg;
   --icon-origin: 50% 85%;
   --icon-time: 0.6s;
+}
+
+/* The hand lifts what it holds, and settles. */
+.lucide-hand-helping > * {
+  --icon-move: icon-hop;
+  --icon-y: -2px;
 }
 
 /* The two lights blink, one after the other. */
@@ -1521,6 +1565,12 @@
 .lucide-info > :nth-child(3) {
   --icon-move: icon-pop;
   --icon-wait: 0.2s;
+}
+
+/* The arrow takes a step round the loop, and a small step back. */
+.lucide-iteration-cw > :nth-child(2) {
+  --icon-move: icon-hop;
+  --icon-x: -2.5px;
 }
 
 /* The key turns in its lock. */
@@ -2231,6 +2281,19 @@
 .lucide-panel-right-open > :nth-child(2) {
   --icon-move: icon-there;
   --icon-x: -1.5px;
+}
+
+/* The panels' lines are drawn: across, then down. */
+.lucide-panels-top-left > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 18 100;
+  --icon-from: 19.5;
+}
+.lucide-panels-top-left > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 12 100;
+  --icon-from: 13.5;
+  --icon-wait: 0.1s;
 }
 
 /* The clip is drawn in one line. */
@@ -3040,6 +3103,27 @@
  * An event passes round the hook: each of its three arms reaches out in turn and comes back, on the
  * house curve, all of it within 300 ms.
  */
+/* The points come up one by one. */
+.lucide-waypoints > :nth-child(4) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+}
+.lucide-waypoints > :nth-child(5) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.07s;
+}
+.lucide-waypoints > :nth-child(6) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.14s;
+}
+.lucide-waypoints > :nth-child(7) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.21s;
+}
+
 .lucide-webhook {
   overflow: visible;
 }

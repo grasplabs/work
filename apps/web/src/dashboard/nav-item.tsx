@@ -42,11 +42,15 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
   }
 };
 
+/** How many things wait on the person; `undefined` until core says. */
+export const useWaitingCount = (): number | undefined =>
+  useFrameRead(readCount).value;
+
 /** The sidebar's Dashboard entry, with how many things wait. */
 export const DashboardItem = () => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
-  const { value: waiting } = useFrameRead(readCount);
+  const waiting = useWaitingCount();
   const shown = waiting !== undefined && waiting > 0;
   return (
     <SidebarMenuItem>

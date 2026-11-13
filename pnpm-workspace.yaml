@@ -202,6 +202,8 @@ catalog:
   "@dnd-kit/core": 6.3.1
   "@dnd-kit/sortable": 10.0.0
   "@dnd-kit/utilities": 3.2.2
+  "@stylexjs/stylex": 0.19.1
+  "@stylexjs/unplugin": 0.19.1
   "@tailwindcss/vite": 4.3.3
   # The state, subscriptions and lifecycle under the SDK's forms (useForm,
   # @grasp-os/sdk/react) and their fields (@grasp-os/ui/form).

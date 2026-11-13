@@ -7,17 +7,40 @@ import {
 } from "@grasp-os/ui/components/app-shell";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { keepFolded, readFolded } from "../fold.ts";
+import {
+  FrameStyleProvider,
+  readFrameStyle,
+} from "../grasp/frame/frame-style.ts";
+import { frame } from "../grasp/frame/frame.stylex.ts";
+import { GraspSidebar } from "../grasp/frame/grasp-sidebar.tsx";
+import { media } from "../grasp/tokens/tokens.stylex.ts";
 import { TourLayer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
+
+// Grasp UI's frame: the sidebar on the window's ground, the page a card on
+// it a hair off the window's edges, lifted by a hair (frame.stylex.ts).
+const styles = stylex.create({
+  shell: {
+    backgroundColor: frame.ground,
+  },
+  // On a phone the sidebar is a sheet: the card is the whole window.
+  card: {
+    margin: { default: frame.inset, [media.belowTablet]: 0 },
+    borderRadius: { default: frame.cardCorner, [media.belowTablet]: 0 },
+    backgroundColor: frame.card,
+    boxShadow: { default: frame.cardShadow, [media.belowTablet]: "none" },
+  },
+});
 
 /**
  * The signed-in product's frame (the kit's AppShell): the app's sidebar
@@ -58,6 +81,8 @@ export const AppFrame = ({
 }) => {
   // Folded as the person left it in this browser.
   const [open, setOpen] = useState(() => readFolded("sidebar") !== true);
+  // oxlint-disable-next-line react/hook-use-state -- read once, never set
+  const [style] = useState(readFrameStyle);
   const { phase } = useTour();
   const touring = phase === "opening" || phase === "running";
   return (
@@ -65,28 +90,39 @@ export const AppFrame = ({
     // sign-out from the person menu that core didn't carry out.
     <Toaster>
       <TooltipProvider>
-        <AppShell
-          inert={touring}
-          onOpenChange={(next) => {
-            setOpen(next);
-            void keepFolded("sidebar", !next);
-          }}
-          open={open}
-        >
-          <AppSidebar core={core} identity={identity} />
-          <AppShellMain covered={covered}>
-            <AppShellContent>
-              <AiKeyBanner
-                failing={failing}
-                identity={identity}
-                providers={providersOf(core)}
-              />
-              <InFrame value>{children}</InFrame>
-            </AppShellContent>
-            {dock === undefined ? null : <AppShellDock>{dock}</AppShellDock>}
-          </AppShellMain>
-          {panels}
-        </AppShell>
+        <FrameStyleProvider value={style}>
+          <AppShell
+            {...(style.frame === "grasp" ? stylex.props(styles.shell) : {})}
+            data-frame={style.frame}
+            inert={touring}
+            onOpenChange={(next) => {
+              setOpen(next);
+              void keepFolded("sidebar", !next);
+            }}
+            open={open}
+          >
+            {style.frame === "grasp" ? (
+              <GraspSidebar core={core} identity={identity} />
+            ) : (
+              <AppSidebar core={core} identity={identity} />
+            )}
+            <AppShellMain
+              {...(style.frame === "grasp" ? stylex.props(styles.card) : {})}
+              covered={covered}
+            >
+              <AppShellContent>
+                <AiKeyBanner
+                  failing={failing}
+                  identity={identity}
+                  providers={providersOf(core)}
+                />
+                <InFrame value>{children}</InFrame>
+              </AppShellContent>
+              {dock === undefined ? null : <AppShellDock>{dock}</AppShellDock>}
+            </AppShellMain>
+            {panels}
+          </AppShell>
+        </FrameStyleProvider>
         <TourLayer identity={identity} />
       </TooltipProvider>
     </Toaster>

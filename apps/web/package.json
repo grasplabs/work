@@ -21,6 +21,7 @@
     "@lingui/core": "catalog:",
     "@lingui/react": "catalog:",
     "@pierre/diffs": "catalog:",
+    "@stylexjs/stylex": "catalog:",
     "@tanstack/react-router": "catalog:",
     "capnweb": "catalog:",
     "lucide-react": "catalog:",
@@ -40,6 +41,7 @@
     "@lingui/vite-plugin": "catalog:",
     "@messageformat/parser": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
+    "@stylexjs/unplugin": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/router-plugin": "catalog:",
     "@types/react": "catalog:",
@@ -47,6 +49,7 @@
     "@vitejs/plugin-react": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
     "happy-dom": "catalog:",
+    "lightningcss": "catalog:",
     "tailwindcss": "catalog:",
     "vite-plus": "catalog:"
   }
