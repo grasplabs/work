@@ -65,23 +65,42 @@ const agentMayUse = async (connectionId: string): Promise<void> => {
 };
 
 /**
- * A shared mail connection in connect's registry, as a Composio toolkit's,
+ * A mail connection in connect's registry, shared unless `owner` is
+ * given, as a Composio toolkit's,
  * allowing `tools`, to a mail server of its own that answers its next
  * calls as `plan` says (then sends mail), and tells what it did. The
  * chat's agent may use it (`agentMayUse`).
  */
 export const mailConnection = async (
   plan: MailAnswer[] = [],
-  tools: unknown[] = ["mail.send"]
+  tools: unknown[] = ["mail.send"],
+  {
+    provider = "mail",
+    owner,
+  }: {
+    /** The toolkit it is of, as connect's review classes it. */
+    provider?: string;
+    /** The person whose own connection it is: none for a shared one. */
+    owner?: string;
+  } = {}
 ) => {
   const name = `mail-${crypto.randomUUID()}`;
   const id = `connection-${name}`;
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', 'active', 'composio', ?, ?, ?, ?)"
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'composio', ?, ?, ?, ?)"
     )
-    .bind(id, mailServerUrl(name), JSON.stringify(tools), now, now)
+    .bind(
+      id,
+      provider,
+      owner === undefined ? "shared" : "personal",
+      owner ?? null,
+      mailServerUrl(name),
+      JSON.stringify(tools),
+      now,
+      now
+    )
     .run();
   await agentMayUse(id);
   await providers().fetch(mailControlUrl(name), {
@@ -107,6 +126,27 @@ export const mailConnection = async (
     did: async () => {
       const response = await providers().fetch(mailControlUrl(name));
       return mailServerStateSchema.parse(await response.json());
+    },
+    /** Lists `tools` (MCP tool definitions) from now on. */
+    serves: async (listed: unknown[]) => {
+      await providers().fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify({ list: listed }),
+      });
+    },
+    /** Answers each tool with its MCP tool result from now on, these alone. */
+    answers: async (results: Record<string, unknown>) => {
+      await providers().fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify({ answers: results }),
+      });
+    },
+    /** Answers `tool` with `result` (an MCP tool result) from now on. */
+    answer: async (tool: string, result: unknown) => {
+      await providers().fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify({ answers: { [tool]: result } }),
+      });
     },
     /** The queries `mail.search` ran for, in order. */
     searched: async () => {

@@ -39,6 +39,7 @@ import type { ConnectionGrant } from "./bindings.ts";
 import { readsMail, textsOf } from "./channels/stephen-rules.ts";
 import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
+import { captureRead } from "./connection-capture.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
@@ -470,6 +471,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       await recordToolCall(this.env, scope, shown, endedBy(error));
       throw forSandbox(error);
     }
+    // When the tool answered, before anything else is awaited: what the
+    // Brain keeps of it never replaces what a later read kept.
+    const readAt = new Date();
     if (result.pending !== undefined) {
       await heldInChat(this.env, scope);
       await recordToolCall(this.env, scope, shown, {
@@ -497,6 +501,14 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           resource ?? null
         ),
       ]
+    );
+    // Recorded with the chat first: a run that ended since keeps nothing.
+    // Kept in the Brain once the agent has its answer, never in its way.
+    this.ctx.waitUntil(
+      captureRead(this.env, scope, connectionId, request.action, input, {
+        result,
+        readAt,
+      })
     );
     await recordToolCall(this.env, scope, shown);
     return { output, pending: null };
