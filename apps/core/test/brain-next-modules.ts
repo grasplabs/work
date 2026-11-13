@@ -41,12 +41,17 @@ export const brainModules = {
   "apps/core/src/person-erasure.ts": "core",
   // Code's recall: an App's action, a workflow's step and a chat's code.
   "apps/core/src/brain-recall.ts": "recall",
-  // Checks with core's readableVersionsAs which versions a chat read are
-  // still readable, and hands on only which of its own sources are.
-  "apps/core/src/history-access.ts": "core",
   // Checks with core's readableVersionsAs that a run may still read what
   // it recalled, and hands on only a refusal.
   "apps/core/src/workflows/resource-reads.ts": "core",
+  // A chat's recall before its question: hands the model what core's
+  // recallAs gave the chat's own person, two of its packs merged at most
+  // (mergeRecalled, which only drops and orders what both hold), as data;
+  // what an analysis says only ever becomes that same person's question.
+  "apps/core/src/turn-recall.ts": "core",
+  // Checks what a chat once handed over with core's readableVersionsAs, and
+  // hands on only which of those it may still send, never what they say.
+  "apps/core/src/history-access.ts": "core",
   // Remembers, forgets and corrects for a person, and reads entities for
   // them: its own surface, each export probed as the person.
   "apps/core/src/brain-memories.ts": "memories",

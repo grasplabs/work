@@ -1260,6 +1260,32 @@ export const coreProbes = {
       ]),
     ];
   },
+  mergeRecalled: async ({ personId, personal, markers, sharedWord }) => {
+    const whole = { tokens: recallBudgetMax };
+    // The markers' pack joined by a pack of what the reader may read must
+    // be their twins' pack joined by the same.
+    const merged = async (words: readonly string[]) => {
+      const asked = await coreBrain.recallAs(env, personId, {
+        question: words.join(" "),
+        budget: whole,
+        personal,
+      });
+      const shared = await coreBrain.recallAs(env, personId, {
+        question: sharedWord,
+        budget: whole,
+        personal,
+      });
+      return coreBrain.mergeRecalled(asked, shared, whole);
+    };
+    return [
+      await answer("the markers", async () => await merged(markers), "hidden"),
+      await answer(
+        "their twins",
+        async () => await merged(markers.map((marker) => twinOf(marker))),
+        "nothing"
+      ),
+    ];
+  },
   recallAs: async (probing) => {
     const recall = async (asking: PackAsk) =>
       await coreBrain.recallAs(env, probing.personId, {
@@ -1880,6 +1906,13 @@ export const coreProbes = {
       ),
     ];
   },
+  // A number, the longest question recall takes: the same for everyone.
+  recallQuestionMaxLength: async () => [
+    await answer(
+      "the longest question",
+      async () => await Promise.resolve(coreBrain.recallQuestionMaxLength)
+    ),
+  ],
   // The host of a store's own alarm: refused for any name but a person's
   // own store's; for the reader's own, its report kept and summed into
   // staff's totals, which hold numbers alone.
@@ -3754,24 +3787,6 @@ export const storeProbes = {
     );
     return asked;
   },
-  // What recall finds before it is packed: the same questions, answered
-  // as lists with their order keys, must hold no marker either.
-  find: async (probing) => {
-    const find = async (asking: PackAsk) =>
-      await store().find({ ...asking, reader: probing.reader });
-    const whole = { tokens: recallBudgetMax };
-    return [
-      ...(await askedOfMarkers(probing, momentsOf(probing), find)),
-      await answer(
-        "the shared word",
-        async () => await find({ question: probing.sharedWord, budget: whole })
-      ),
-      await answer(
-        "nothing",
-        async () => await find({ question: "", budget: whole })
-      ),
-    ];
-  },
   readableVersions: async ({ reader, hiddenVersions, markers }) => {
     const check = async (
       name: string,
@@ -3825,6 +3840,24 @@ export const storeProbes = {
           await store().readableVersions(
             unchecked({ versions: [], reader, extra: markers.join(" ") })
           )
+      ),
+    ];
+  },
+  // What recall finds before it is packed: the same questions, answered
+  // as lists with their order keys, must hold no marker either.
+  find: async (probing) => {
+    const find = async (asking: PackAsk) =>
+      await store().find({ ...asking, reader: probing.reader });
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), find)),
+      await answer(
+        "the shared word",
+        async () => await find({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "nothing",
+        async () => await find({ question: "", budget: whole })
       ),
     ];
   },

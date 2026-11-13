@@ -11,6 +11,7 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
+import { addSource } from "../src/brain-next.ts";
 import { grantReviewed, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -80,6 +81,14 @@ describe("guest chats", { timeout: 60_000 }, () => {
 
   it("let a guest chat through the link with a model that has only the guide and the chat, all of it on record", async () => {
     const builder = await signedInApi(idp, "builder");
+    // What only the member it was made for may read: never the guest's.
+    const marker = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `I close the month with ${marker}`,
+      readers: { kind: "owner", personId: builder.userId },
+    });
     const { app } = await guestApp(builder);
     const { id, token, link } = await invite(app, builder.userId);
 
@@ -124,6 +133,7 @@ describe("guest chats", { timeout: 60_000 }, () => {
       guide: bodies.every((body) => body.includes("Interview a stakeholder")),
       bounds: bodies.every((body) => body.includes("You have no tools")),
       tools: bodies.some((body) => body.includes('"tools"')),
+      member: bodies.some((body) => body.includes(marker)),
       history: [
         bodies[0]?.includes("I close the month.") === true,
         bodies[1]?.includes("What do you do most weeks?") === true,
@@ -161,6 +171,7 @@ describe("guest chats", { timeout: 60_000 }, () => {
       guide: true,
       bounds: true,
       tools: false,
+      member: false,
       history: [true, true],
       // Opened once however often it opens; each turn by the guest, each
       // model call as the guest, reading back by the App.

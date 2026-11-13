@@ -31,6 +31,7 @@ import {
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
+  packItemTokens,
   refusalPrefix,
   restoringNow,
   personalBrainOf,
@@ -275,6 +276,9 @@ const newSourceSchema = z.strictObject({
   text: wellFormedString(),
   readers: sourceReadersSchema,
 });
+
+/** The most characters of a question `recallAs` takes, as the Brain's contract says. */
+export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
 
 /** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
@@ -727,6 +731,47 @@ export const recallAs = async (
   };
 };
 
+/** Where an item of a pack is: its source, version and place. */
+const placeOf = ({ source, version, position }: RecalledItem): string =>
+  JSON.stringify([sourceKeyOf(source), version, position]);
+
+/**
+ * Two recalls for one reader as one pack within `budget.tokens`: the
+ * first's items in their order, then the second's that the first doesn't
+ * hold (the same passage of the same version), best first, each while it
+ * fits as the Brain counts it (`packItemTokens`); cut short when either
+ * was or one of the second's didn't fit. What was not found is the
+ * second's: it was asked for what the first meant. Both must be packs of
+ * the same reader's, as `recallAs` gave them.
+ */
+export const mergeRecalled = (
+  first: RecalledPack,
+  second: RecalledPack,
+  budget: { tokens: number }
+): RecalledPack => {
+  const tokensOf = (item: RecalledItem): number =>
+    packItemTokens({ ...item, source: sourceKeyOf(item.source) });
+  const held = new Set(first.items.map((item) => placeOf(item)));
+  const items = [...first.items];
+  let used = items.reduce((sum, item) => sum + tokensOf(item), 0);
+  let truncated = first.truncated || second.truncated;
+  for (const item of second.items) {
+    const place = placeOf(item);
+    if (held.has(place)) {
+      continue;
+    }
+    const tokens = tokensOf(item);
+    if (used + tokens > budget.tokens) {
+      truncated = true;
+      continue;
+    }
+    held.add(place);
+    items.push(item);
+    used += tokens;
+  }
+  return { items, notFound: second.notFound, truncated };
+};
+
 /**
  * Version `version` of `source`, current or history, whole, for the
  * member `personId`: only if they are among that version's readers and
@@ -909,14 +954,46 @@ export const listVersionsAs = async (
 
 const versionRefsSchema = z.array(versionRefSchema);
 
+/** A version as a key of the Brain names it, as one string. */
+const versionKeyOf = ({
+  source,
+  version,
+}: {
+  source: string;
+  version: number;
+}): string => `${version}:${source}`;
+
+/** Of `versions` (keys), those `reader` may read in `store` now. */
+const readableIn = async (
+  store: Brain,
+  reader: Reader,
+  versions: readonly { source: string; version: number }[]
+): Promise<{ source: string; version: number }[]> => {
+  const parts = Array.from(
+    { length: Math.ceil(versions.length / readableCheckMax) },
+    (_, at) =>
+      versions.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
+  );
+  const readable = await Promise.all(
+    parts.map(
+      async (part) =>
+        await store.readableVersions({ versions: [...part], reader })
+    )
+  );
+  return readable.flat();
+};
+
 /**
  * Of `versions`, those the member `personId` may read now, as
  * `readSourceVersionAs` decides it, in the order given and each once,
  * without reading their text: for core to check what a chat once read
  * before it sends it again (history-access.ts), or a run what it
  * recalled (workflows/resource-reads.ts): as far as `reach` goes, as the
- * recall that handed them read. Refused once they are no longer a member.
- * For the server only, as `addSource`.
+ * recall that handed them read. Of the shared store, and of their own for
+ * those the shared one doesn't answer (with the `person` reach alone): a
+ * source is in one of them (`keptIn`). Their own store failing answers
+ * none of its own (`ownOr`): what can't be checked is withheld. Refused
+ * once they are no longer a member. For the server only, as `addSource`.
  */
 export const readableVersionsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -929,28 +1006,26 @@ export const readableVersionsAs = async (
     return [];
   }
   const reader = await readerOf(env, personId, reach);
-  const parts = Array.from(
-    { length: Math.ceil(asked.length / readableCheckMax) },
-    (_, at) => asked.slice(at * readableCheckMax, (at + 1) * readableCheckMax)
-  );
-  const readable = await Promise.all(
-    parts.map(
-      async (part) =>
-        await brain(env).readableVersions({
-          versions: part.map(({ source, version }) => ({
-            source: sourceKeyOf(source),
-            version,
-          })),
-          reader,
-        })
-    )
-  );
-  const kept = new Set(
-    readable.flat().map(({ source, version }) => `${version}:${source}`)
-  );
+  const keys = [
+    ...new Map(
+      asked.map(({ source, version }) => {
+        const key = { source: sourceKeyOf(source), version };
+        return [versionKeyOf(key), key] as const;
+      })
+    ).values(),
+  ];
+  const inShared = await readableIn(brain(env), reader, keys);
+  const shared = new Set(inShared.map((key) => versionKeyOf(key)));
+  const rest = keys.filter((key) => !shared.has(versionKeyOf(key)));
+  const own = ownBrainOf(env, reader);
+  const inOwn =
+    rest.length === 0 || own === undefined
+      ? []
+      : await ownOr(async () => await readableIn(own, reader, rest), []);
+  const kept = new Set([...shared, ...inOwn.map((key) => versionKeyOf(key))]);
   const seen = new Set<string>();
   return asked.filter(({ source, version }) => {
-    const key = `${version}:${sourceKeyOf(source)}`;
+    const key = versionKeyOf({ source: sourceKeyOf(source), version });
     if (!kept.has(key) || seen.has(key)) {
       return false;
     }

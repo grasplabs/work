@@ -179,8 +179,8 @@ const startsTurn = (entry: EntryRecord): boolean => {
   return kind === questionKind || kind === UserEntry.kind;
 };
 
-// A question carries what the recall before it found (`recallFor` in
-// agent.ts, GRA-1544) as a part of its own, headed by the recall's run: pi
+// A question carries what the recall before it found (`recallForTurn` in
+// turn-recall.ts) as a part of its own, headed by the recall's run: pi
 // takes nothing between an input and the run's first request, and the run
 // is what a revocation withholds it by, as a code step's result.
 
