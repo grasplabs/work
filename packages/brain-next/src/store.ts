@@ -19,6 +19,7 @@ import {
   newMemoriesSchema,
   retireRequestSchema,
   currentRequestSchema,
+  readableRequestSchema,
   deploymentSchema,
   embedModelSchema,
   exportFileRequestSchema,
@@ -62,6 +63,7 @@ import type {
   RetireRequest,
   AskModel,
   CurrentRequest,
+  ReadableRequest,
   Embedders,
   ErasureReason,
   ExportFileRequest,
@@ -162,7 +164,12 @@ import { find, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
-import { addVersion, readCurrent, readVersion } from "./sources.ts";
+import {
+  addVersion,
+  readCurrent,
+  readVersion,
+  readableVersions,
+} from "./sources.ts";
 import type { SourcesStore } from "./sources.ts";
 import {
   putVectors,
@@ -275,9 +282,12 @@ const notInstructions =
   "The Brain refused it: an instruction file or a skill is added with addInstructions";
 const onlyInstructions =
   "The Brain refused it: addInstructions takes only an instruction file's or a skill's key";
-/** What the shared store answers memories only one person may read. */
+/**
+ * What the shared store answers memories or an instruction file only one
+ * person may read: they are kept only in that person's own store.
+ */
 const sharedNotOwn =
-  "The Brain refused it: memories only one person may read are kept in that person's own store";
+  "The Brain refused it: what only one person may read is kept in that person's own store";
 
 /** What a read of memories under an attribute it can't have answers. */
 const noSuchAttribute =
@@ -757,6 +767,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       throw new Error(onlyInstructions);
     }
     this.#mayKeep(adding.access);
+    // A person's own instruction file or skill lies only in their own
+    // store: never in the shared one, which the company's export carries
+    // and their erasure doesn't take whole.
+    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
+      throw new Error(sharedNotOwn);
+    }
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(
@@ -954,6 +970,17 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return (await this.#readable())
       ? listVersions(this.ctx.storage.sql, asked)
       : { versions: [], more: false };
+  }
+
+  /** Of some versions, those the reader may read now: no text read. */
+  async readableVersions(
+    request: ReadableRequest
+  ): Promise<SourceVersionRef[]> {
+    const asked = checked(readableRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? readableVersions(this.#sources, asked)
+      : [];
   }
 
   /**
