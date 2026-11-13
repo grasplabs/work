@@ -70,7 +70,7 @@ import {
   outboxedIfChanged,
   storedEvent,
 } from "./audit-outbox.ts";
-import { activeMember } from "./auth/auth.ts";
+import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf, requireOfferedConnection } from "./connections.ts";
@@ -980,6 +980,87 @@ const leftoverStoreGrantsRevoked = (
   );
 
 /**
+ * That `userId` is in each of `teams` now, a team of this organization,
+ * as SQL: what a request naming teams (an App's grant to read the Brain)
+ * needs, so a requester names only teams whose content they may read,
+ * and an ID that is no team, or another company's, is refused the same.
+ * One bound list, whatever the number of teams.
+ */
+const inEveryTeamSql = (userId: string, teams: readonly string[]): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(teams)}) AS named
+    WHERE NOT EXISTS (SELECT 1 FROM team_members AS held
+      JOIN teams AS team ON team.id = held.team_id
+      WHERE held.team_id = named.value AND held.user_id = ${userId}
+        AND team.organization_id = ${organizationId}))`;
+
+/**
+ * That App `app` has a grant to read the Brain naming teams, asked for or
+ * ever granted, as SQL (GRA-1842). Its data may hold a team's content,
+ * which nothing checks once a workflow's run holds it, so no workflow
+ * calls it until GRA-1843 rules what runs may carry.
+ */
+export const teamBrainOfAppSql = (app: SQLWrapper | string): SQL =>
+  sql`EXISTS (SELECT 1 FROM permissions AS brain
+    WHERE brain.subject_type = 'app' AND brain.subject_id = ${app}
+      AND brain.object_type = 'platform' AND brain.teams IS NOT NULL
+      AND (brain.status <> 'revoked' OR brain.granted_at IS NOT NULL))`;
+
+/** That a workflow may call one of App `app`'s functions, asked for or granted, as SQL. */
+const workflowCallsAppSql = (app: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM permissions AS caller
+    WHERE caller.subject_type = 'workflow' AND caller.object_type = 'app'
+      AND caller.object_id = ${app} AND caller.resource IS NOT NULL
+      AND caller.status <> 'revoked')`;
+
+/**
+ * What a request must hold as it is written, each with the refusal that
+ * says it doesn't (GRA-1842): a request naming teams only by someone in
+ * all of them, and only for an App no workflow may call; a workflow's
+ * grant to call an App's function only on an App whose Brain grant names
+ * no team.
+ */
+const teamGuardsOf = (
+  by: Acting,
+  subject: PermissionSubject,
+  object: PermissionObject
+): { holds: SQL; refusal: () => Error }[] => {
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    subject.type === "app"
+  ) {
+    return [
+      {
+        holds: inEveryTeamSql(by.userId, object.teams),
+        refusal: () =>
+          permissionErrors.create("permission.invalid", {
+            issues: ["object: Name only teams you are in."],
+          }),
+      },
+      {
+        holds: sql`NOT ${workflowCallsAppSql(subject.appId)}`,
+        refusal: () =>
+          permissionErrors.create("permission.team_brain_workflow"),
+      },
+    ];
+  }
+  if (
+    subject.type === "workflow" &&
+    object.type === "app" &&
+    object.function !== undefined
+  ) {
+    return [
+      {
+        holds: sql`NOT ${teamBrainOfAppSql(object.appId)}`,
+        refusal: () =>
+          permissionErrors.create("permission.team_brain_workflow"),
+      },
+    ];
+  }
+  return [];
+};
+
+/**
  * Asks for a permission for an App, an agent, or an independent workflow
  * or trigger. It allows nothing until an admin grants it. Only the
  * subject's builders ask; a workflow only someone with a role in it names,
@@ -1044,6 +1125,9 @@ export const requestPermission = async (
   };
   const permission = toPermission(row);
   const db = drizzle(env.DB);
+  // Held in the insert itself, so a membership or a grant landing
+  // meanwhile is decided with it.
+  const guards = teamGuardsOf(by, subject, object);
   // Not under a name one of a chat's own permissions has
   // (`noBindingClash`), in the insert itself: the unique indexes each
   // cover one side only.
@@ -1063,7 +1147,9 @@ export const requestPermission = async (
       insertWhere(
         db,
         row,
-        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')${live}`
+        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')${live}${sql.join(
+          guards.map(({ holds }) => sql` AND ${holds}`)
+        )}`
       ),
       outboxedIfChanged(
         db,
@@ -1079,9 +1165,26 @@ export const requestPermission = async (
   if ((await findRow(env, row.id)) === undefined) {
     // A trigger deleted meanwhile is refused as one gone is.
     await requireSubjectBuilder(subject, roles);
+    // Which guard didn't hold, as read now: only which refusal to give.
+    for (const { holds, refusal } of guards) {
+      // oxlint-disable-next-line no-await-in-loop -- at most two, in order
+      const held = await db.get<{ held: number }>(sql`SELECT ${holds} AS held`);
+      if (held.held === 0) {
+        throw refusal();
+      }
+    }
     throw permissionErrors.create("permission.conflict", { binding });
   }
   return permission;
+};
+
+/** `object` without a Brain grant's teams. */
+const withoutTeams = (object: PermissionObject): PermissionObject => {
+  if (object.type !== "platform") {
+    return object;
+  }
+  const { teams: _teams, ...rest } = object;
+  return rest;
 };
 
 /**
@@ -1112,7 +1215,9 @@ export const declarableOf = async (
   // collection to write, which no App does): never an internal error.
   return rows.map((row) =>
     permissionErrors.parse("permission.invalid", declaredPermissionSchema, {
-      object: objectOf(row),
+      // A Brain grant's teams are its requester's: a copy asks for the
+      // company alone, and its builders name their own teams.
+      object: withoutTeams(objectOf(row)),
       actions: stringListSchema.parse(JSON.parse(row.actions)),
       binding: row.binding,
     })

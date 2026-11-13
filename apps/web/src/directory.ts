@@ -4,15 +4,17 @@ import { timeoutMs, withTimeout } from "./core.ts";
 import type { Session } from "./core.ts";
 import { formatDateTime } from "./format.ts";
 
-// Who and what a page names by ID: people and Apps, read beside the page's
-// own data, only for their names. Either list may be refused (Grasp staff
+// Who and what a page names by ID: people, teams and Apps, read beside
+// the page's own data, only for their names. Either list may be refused (Grasp staff
 // don't list members) or slow; IDs then stand in for the names, and the
 // page still shows what it read. A page that decides anything by these
 // lists reads them itself, and fails with them.
 
-/** People's names and the Apps, by ID. */
+/** People's and teams' names, and the Apps, by ID. */
 export interface Directory {
   people: ReadonlyMap<string, string>;
+  /** Teams' names, for an admin (only admins list them). */
+  teams: ReadonlyMap<string, string>;
   apps: ReadonlyMap<string, App>;
 }
 
@@ -39,22 +41,35 @@ export const readPeople = async (
   return new Map(members.map(({ userId, name }) => [userId, name]));
 };
 
+/** Teams' names by ID, as far as the person may list them in time. */
+export const readTeams = async (
+  session: Session
+): Promise<ReadonlyMap<string, string>> => {
+  const teams = await listedOrNone(session.members.teams());
+  return new Map(teams.map(({ id, name }) => [id, name]));
+};
+
 /** Apps by ID. */
 export const appsById = (apps: readonly App[]): ReadonlyMap<string, App> =>
   new Map(apps.map((app) => [app.id, app]));
 
-/** The people and Apps the person may list in time, by ID: for names only. */
+/** The people, teams and Apps the person may list in time, by ID: for names only. */
 export const readDirectory = async (session: Session): Promise<Directory> => {
-  const [people, apps] = await Promise.all([
+  const [people, teams, apps] = await Promise.all([
     readPeople(session),
+    readTeams(session),
     listedOrNone(session.apps.list()),
   ]);
-  return { people, apps: appsById(apps) };
+  return { people, teams, apps: appsById(apps) };
 };
 
 /** A person's name, or their ID when it isn't known. */
 export const personName = (directory: Directory, userId: string): string =>
   directory.people.get(userId) ?? userId;
+
+/** A team's name, or its ID when it isn't known (or no longer exists). */
+export const teamName = (directory: Directory, teamId: string): string =>
+  directory.teams.get(teamId) ?? teamId;
 
 /** An App's name, or its ID when it isn't known. */
 export const appName = (directory: Directory, appId: string): string =>

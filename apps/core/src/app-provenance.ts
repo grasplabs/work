@@ -111,10 +111,20 @@ export const readerOf = (
 const actionsSchema = z.array(z.string());
 
 /** A Brain grant's teams as stored (`teams`): IDs, or none. */
-const teamsSchema = z
-  .array(teamIdSchema)
-  .nullable()
-  .transform((teams) => teams ?? []);
+const teamsSchema = z.array(teamIdSchema).nullable();
+
+/**
+ * A team nobody is in: what a stored `teams` that isn't team IDs counts
+ * as, so the App holding it is closed to everyone (fail closed), and no
+ * other App's check is broken by it.
+ */
+const unreadableTeam = "*";
+
+/** The teams a stored `teams` value names; `unreadableTeam` for one that doesn't read as IDs. */
+const teamsIn = (stored: unknown): string[] => {
+  const parsed = teamsSchema.safeParse(stored);
+  return parsed.success ? (parsed.data ?? []) : [unreadableTeam];
+};
 
 /**
  * The graph of calls between Apps is walked this deep, and this wide, and
@@ -566,8 +576,7 @@ export const sourcesOfApps = async (
     }: { object: string; id: string; actions: string; teams: unknown }
   ): void => {
     if (object === "platform") {
-      // A value that isn't team IDs fails the whole check, never less.
-      for (const team of teamsSchema.parse(teams)) {
+      for (const team of teamsIn(teams)) {
         of?.teams.add(team);
       }
     } else if (object === "connection") {
@@ -725,6 +734,107 @@ export const recallsTheBrain = async (
   return found !== undefined;
 };
 
+/**
+ * The teams whose Brain content each of `apps` may hold (`brainTeams`):
+ * every team a grant to read the Brain ever named, of it or of the Apps
+ * and workflows whose data it may hold through grants
+ * (`reachedThroughCalls`), revoked or not; an App past the walk's caps
+ * counts `unreadableTeam`. For deciding its owner and admins, whom the
+ * other sources don't bind (`sourcesOfApps` holds the same for everyone
+ * else): no call to connect.
+ */
+export const brainTeamsOfApps = async (
+  env: Env,
+  apps: readonly AppId[]
+): Promise<Map<AppId, string[]>> => {
+  if (apps.length === 0) {
+    return new Map();
+  }
+  const reach = await reachedThroughCalls(env, apps);
+  const nodes = [
+    ...new Set([...reach.values()].flatMap((of) => [...of.nodes])),
+  ];
+  const rows = await drizzle(env.DB)
+    .select({
+      type: permissions.subjectType,
+      subject: permissions.subjectId,
+      teams: permissions.teams,
+    })
+    .from(permissions)
+    .where(
+      and(
+        isNotNull(permissions.grantedAt),
+        eq(permissions.objectType, "platform"),
+        isNotNull(permissions.teams),
+        or(
+          and(
+            eq(permissions.subjectType, "app"),
+            inList(
+              permissions.subjectId,
+              nodes.filter((node) => !node.startsWith(workflowPrefix))
+            )
+          ),
+          and(
+            eq(permissions.subjectType, "workflow"),
+            inList(
+              permissions.subjectId,
+              nodes.flatMap((node) =>
+                node.startsWith(workflowPrefix)
+                  ? [node.slice(workflowPrefix.length)]
+                  : []
+              )
+            )
+          )
+        )
+      )
+    );
+  const own = new Map<string, string[]>();
+  for (const { type, subject, teams } of rows) {
+    const node = type === "workflow" ? workflowNode(subject) : appNode(subject);
+    own.set(node, [...(own.get(node) ?? []), ...teamsIn(teams)]);
+  }
+  return new Map(
+    apps.map((app) => {
+      const of = reach.get(app);
+      const capped =
+        of?.unresolved.has(sourceId("app", "*")) === true
+          ? [unreadableTeam]
+          : [];
+      const teams = [...(of?.nodes ?? [app])].flatMap(
+        (node) => own.get(node) ?? []
+      );
+      return [app, [...new Set([...teams, ...capped])]];
+    })
+  );
+};
+
+/**
+ * The Brain teams of `teams` that `reader` isn't in, as `brain:<team id>`:
+ * none when they are in all. A team's content in the Brain is its
+ * members' alone, an admin's and an App's owner's too.
+ */
+export const unreadableTeamsBy = (
+  teams: readonly string[],
+  reader: { readonly teamIds: readonly string[] }
+): string[] =>
+  teams.flatMap((team) =>
+    reader.teamIds.includes(team) ? [] : [sourceId("brain", team)]
+  );
+
+/**
+ * Whether someone in the teams `teamIds` may read every team's Brain
+ * content App `app` may hold (`brainTeamsOfApps`): what its owner and
+ * admins are held to.
+ */
+export const mayReadBrainTeamsOf = async (
+  env: Env,
+  app: AppId,
+  teamIds: readonly string[]
+): Promise<boolean> => {
+  const teams = await brainTeamsOfApps(env, [app]);
+  return unreadableTeamsBy(teams.get(app) ?? [], { teamIds }).length === 0;
+};
+
 /** Whether an App has read from anything at all. */
 export const hasSources = (sources: AppSources): boolean =>
   sources.connections.length > 0 ||
@@ -747,8 +857,6 @@ export const unreadableBy = (sources: AppSources, reader: Reader): string[] => [
   ...sources.collections.flatMap((collection) =>
     mayRead(reader, collection) ? [] : [sourceId("collection", collection.id)]
   ),
-  ...sources.brainTeams.flatMap((team) =>
-    reader.teamIds.includes(team) ? [] : [sourceId("brain", team)]
-  ),
+  ...unreadableTeamsBy(sources.brainTeams, reader),
   ...sources.unresolved,
 ];

@@ -489,6 +489,15 @@ export const declaredPermissionSchema = z
         message: "An App only reads a collection",
       });
     }
+    // Teams are its requester's, as a connection is someone's: whoever
+    // creates from it names their own.
+    if (object.type === "platform" && object.teams !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["object", "teams"],
+        message: "A blueprint names no teams",
+      });
+    }
   });
 export type DeclaredPermission = z.infer<typeof declaredPermissionSchema>;
 
@@ -721,6 +730,8 @@ export const permissionErrors = defineErrorFamily({
     "A shared connection is granted by an admin. You can withdraw the request.",
   "permission.denied_before":
     "The person already turned this down in this chat. Don't ask again unless they say so.",
+  "permission.team_brain_workflow":
+    "An App whose permission to read the Brain names teams can't be called from a workflow, and an App a workflow may call can't name teams.",
   "permission.too_many_requests":
     "This chat already has too many connection requests waiting. Wait until the person decides them.",
 });
