@@ -74,7 +74,7 @@ import {
 } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { sealedWorkflowPins } from "./bound-workflows.ts";
+import { sealedWorkflowBindings } from "./bound-workflows.ts";
 import { checkEvidenceText, evidenceMatches } from "./check-evidence.ts";
 import { appStoreFor, openStore } from "./data-stores.ts";
 import {
@@ -1047,13 +1047,13 @@ const inspectForSeal = async (
 
   // The real modules, then the same code built with them: the references
   // from the functions its syntax declares, each one it registers among
-  // them, and the workflow versions it binds once current, sealed with it.
+  // them, and the workflows it binds once current, sealed with it.
   const functions = serverFunctionsIn(files);
   requireDeclaredFunctions(manifest, functions);
   const generated = await generateModules(
     manifest,
     functions,
-    await sealedWorkflowPins(env, key.app, manifest, definition)
+    sealedWorkflowBindings(manifest, definition)
   );
   // Type-checked with them, against the SDK's server side: nothing is
   // sealed that doesn't check.

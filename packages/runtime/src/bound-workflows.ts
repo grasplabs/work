@@ -38,29 +38,24 @@ export interface BoundWorkflow {
   readonly listens: Readonly<Record<string, readonly string[]>>;
   readonly decisions: Readonly<Record<string, BoundWorkflowDecision>>;
   /**
-   * The workflow the host resolved the App's binding to, as a seal
+   * The workflow the App's version binds under the alias, as its seal
    * records it: its pages start and read runs of it, at whichever version
    * each run is of, while the App's binding still names it, so a rebind
    * to another workflow never reads one's journal against another's
-   * contract. None for an alias nothing was bound to. Never part of a
-   * generated reference.
+   * contract. None for an alias the version binds nothing to. Never part
+   * of a generated reference.
    */
-  readonly pinned?: WorkflowPin;
-}
-
-/** The workflow the host resolved a workflow permission's binding to. */
-export interface WorkflowPin {
-  readonly workflowId: string;
+  readonly workflowId?: string;
 }
 
 /**
  * What the host resolved of a workflow the App declares, beside the
  * contract the declaration gives (`BoundWorkflow`): the workflow its
- * binding names. Never from App code.
+ * version binds. Never from App code.
  */
 export interface WorkflowBindingExtras {
   readonly alias: string;
-  readonly pinned: WorkflowPin;
+  readonly workflowId: string;
 }
 
 /** A workflow's events, listen tasks and decisions: what an App relies on. */
@@ -69,29 +64,41 @@ export type WorkflowEventContract = Pick<
   "events" | "listens" | "decisions"
 >;
 
-/** `contract`, canonically: each listen task's events in name order. */
-const canonicalContract = (contract: WorkflowEventContract): string =>
-  canonicalText({
-    events: contract.events,
-    decisions: contract.decisions,
-    listens: Object.fromEntries(
-      Object.entries(contract.listens).map(([task, events]) => [
-        task,
-        events.toSorted(),
-      ])
-    ),
-  });
-
 /**
- * Whether `declared`, what the App declares of a workflow, and `bound`,
- * what a version of it has, are the same events (each's type and data),
- * listen tasks (each's events, in any order) and decisions (each's value
- * and context): what binding a version must keep.
+ * What `declared`, what an App declares of a workflow, relies on that
+ * `provided`, what a version of it has, doesn't give as declared, each
+ * named for people: an event (its type and data), a decision (its value
+ * and context) or a listen task (waiting on at least the events
+ * declared). None when the version gives everything the App declares,
+ * whatever else it has: so a workflow adds to its contract without
+ * waiting for the Apps that bind it, and drops something only once no
+ * App declares it.
  */
-export const sameEventContract = (
+export const contractGaps = (
   declared: WorkflowEventContract,
-  bound: WorkflowEventContract
-): boolean => canonicalContract(declared) === canonicalContract(bound);
+  provided: WorkflowEventContract
+): string[] => [
+  ...Object.entries(declared.events).flatMap(([alias, event]) =>
+    Object.hasOwn(provided.events, alias) &&
+    canonicalText(provided.events[alias]) === canonicalText(event)
+      ? []
+      : [`event \`${alias}\``]
+  ),
+  ...Object.entries(declared.decisions).flatMap(([alias, decision]) =>
+    Object.hasOwn(provided.decisions, alias) &&
+    canonicalText(provided.decisions[alias]) === canonicalText(decision)
+      ? []
+      : [`decision \`${alias}\``]
+  ),
+  ...Object.entries(declared.listens).flatMap(([task, events]) => {
+    const waits = Object.hasOwn(provided.listens, task)
+      ? provided.listens[task]
+      : undefined;
+    return waits !== undefined && events.every((event) => waits.includes(event))
+      ? []
+      : [`listen task \`${task}\``];
+  }),
+];
 
 /**
  * The workflows the App declares, in alias order, each with the contract
@@ -103,7 +110,7 @@ export const declaredWorkflows = (
   manifest: Pick<AppManifest, "permissions">,
   bound: readonly WorkflowBindingExtras[]
 ): BoundWorkflow[] => {
-  const pins = new Map<string, WorkflowPin>();
+  const bindings = new Map<string, string>();
   for (const resolved of bound) {
     if (
       declaredPermission(manifest, resolved.alias, "workflows") === undefined
@@ -112,12 +119,12 @@ export const declaredWorkflows = (
         `${JSON.stringify(resolved.alias)} isn't a workflow the App declares.`
       );
     }
-    if (pins.has(resolved.alias)) {
+    if (bindings.has(resolved.alias)) {
       throw new TypeError(
         `A bound workflow's alias is unique: ${JSON.stringify(resolved.alias)}`
       );
     }
-    pins.set(resolved.alias, resolved.pinned);
+    bindings.set(resolved.alias, resolved.workflowId);
   }
   return declaredPermissions(manifest, "workflows").map((declared) => {
     const workflow: BoundWorkflow = {
@@ -128,7 +135,7 @@ export const declaredWorkflows = (
       listens: declared.listens,
       decisions: declared.decisions,
     };
-    const pinned = pins.get(declared.alias);
-    return pinned === undefined ? workflow : { ...workflow, pinned };
+    const workflowId = bindings.get(declared.alias);
+    return workflowId === undefined ? workflow : { ...workflow, workflowId };
   });
 };

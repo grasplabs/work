@@ -46,7 +46,12 @@ export default defineApp({
 
 A workflow that waits for events from the App, or asks people to decide, declares them too: the `events` its Pages and mutations send (each event's `type` and `data`), the `listens` tasks waiting on them, and the `decisions` people answer (each one's `value` and the `context` they review). They are the contract the App relies on, and what `workflows.<alias>` in `@server/_generated/api` names and types. Binding the workflow in the draft writes them in from its live version, with the `bindWorkflow` definition tool, as `review` above declares them.
 
-A workflow whose live version's events, decisions or listen tasks differ from what the App's current version declares can't be bound directly. Bind it in the App's draft, which declares the new contract, and publish the App: the workflow is bound as that App version becomes current, and an older App version's workflows are bound again if you roll back to it. Once bound, a version of the workflow whose events, decisions or listen tasks differ from what a bound App declares can't go live: change the App's declaration first.
+An App binds a workflow only through its draft: the workflow is bound as the App version you publish becomes current, and an older App version's workflows are bound again if you roll back to it. Publishing checks that the workflow's live version still has everything the App declares, with the same shapes; what else it has is no concern of the App's.
+
+So a workflow and the Apps bound to it change without downtime:
+
+- **Adding** an event, decision or listen task: publish the workflow; the Apps bound to it keep working. Then bind the workflow again in an App's draft, which declares the addition, and publish the App to use it.
+- **Removing** one: first bind the workflow again in each App's draft, leaving it out (`bindWorkflow` takes the `events`, `listens` and `decisions` to declare by name), and publish those Apps. Then publish the workflow without it. Until then, publishing the workflow is refused, naming each App and what it still uses.
 
 Then any of the App's actions and mutations can start it:
 

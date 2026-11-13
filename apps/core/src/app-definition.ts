@@ -537,12 +537,16 @@ export type DraftOperation =
       /**
        * Declares, for workflow permission `alias`, the events, listen
        * tasks and decisions the live version of workflow `workflow` has,
-       * and records the workflow as the one the App binds there once the
-       * App version is current.
+       * or only those named (`events`, `listens`, `decisions`), and
+       * records the workflow as the one the App binds there once the App
+       * version is current.
        */
       readonly op: "bindWorkflow";
       readonly alias: string;
       readonly workflow: string;
+      readonly events?: readonly string[];
+      readonly listens?: readonly string[];
+      readonly decisions?: readonly string[];
     };
 
 /** The operations the definition tools make, as `define` takes them. */
@@ -606,6 +610,9 @@ export const definitionOperationSchema: z.ZodType<DraftOperation> =
       op: z.literal("bindWorkflow"),
       alias: text,
       workflow: text,
+      events: z.array(text).optional(),
+      listens: z.array(text).optional(),
+      decisions: z.array(text).optional(),
     }),
     z.strictObject({
       op: z.literal("moveField"),

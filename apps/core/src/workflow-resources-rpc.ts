@@ -24,11 +24,7 @@ import type {
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
 
-import {
-  bindWorkflowToApp,
-  listAppWorkflowBindings,
-  unbindWorkflowFromApp,
-} from "./app-workflow-bindings.ts";
+import { listAppWorkflowBindings } from "./app-workflow-bindings.ts";
 import { askableFor } from "./channels/askable-workflows.ts";
 import { EventSourcesRpc } from "./event-sources-rpc.ts";
 import { makeInProject } from "./projects.ts";
@@ -53,7 +49,7 @@ import {
   editWorkflowStep,
   workflowDraft,
 } from "./workflow-editor.ts";
-import { WorkflowMembersRpc } from "./workflow-members-rpc.ts";
+import { WorkflowMembersRpc } from "./workflow-members.ts";
 import { workflowActivity, workflowFiles } from "./workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
 import { pauseWorkflow, resumeWorkflow } from "./workflow-pause.ts";
@@ -412,19 +408,6 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) => await workflowPendingBindings(this.#env, person, id)
     );
-  }
-
-  async bindToApp(id: string, input: unknown): Promise<AppWorkflowBinding> {
-    return await withPerson(
-      this.#check,
-      async (person) => await bindWorkflowToApp(this.#env, person, id, input)
-    );
-  }
-
-  async unbindFromApp(binding: string): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await unbindWorkflowFromApp(this.#env, person, binding);
-    });
   }
 
   async appBindings(app: string): Promise<AppWorkflowBinding[]> {

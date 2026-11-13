@@ -1,21 +1,9 @@
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { appWorkflowBindingSchema } from "@grasp-os/shared/workflow-resources";
 import type {
   AppWorkflowBinding,
   WorkflowResource,
 } from "@grasp-os/shared/workflow-resources";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -25,13 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   Select,
   SelectContent,
@@ -59,66 +41,66 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { buildsApp } from "./app-role.ts";
 
-// The workflows an App's App starts, on the App's Resources tab, for
-// its builders (`workflowResources.appBindings`, which core lets them read
+// The workflows an App starts, on the App's Resources tab, for its
+// builders (`workflowResources.appBindings`, which core lets them read
 // and nobody else, never Grasp staff): each alias the App's code starts a
-// workflow by, whose live version it starts. Its builders bind an alias
-// to a workflow they have a role in (`bindToApp`), which
-// replaces what the alias bound before, and remove a binding
-// (`unbindFromApp`), once confirmed. A binding grants nothing: starting
-// through it still takes the App's own permission on the workflow, which
-// an admin grants. An archived App's bindings are kept and shown, but not
-// changed.
-
-/** What a binding binds, as the dialog was given it or chose it. */
-interface Binding {
-  alias: string;
-  workflow: string | null;
-}
+// workflow by, whose live version it starts. A binding is part of the
+// App's version: a builder changes what an alias binds in the App's
+// draft (`apps.define` with `bindWorkflow`, to a workflow they have a
+// role in), which declares what the App relies on of its live version
+// and binds it once they publish the draft; the chat does the same, and
+// ends a binding by publishing a version that no longer binds it. A
+// binding grants nothing: starting through it still takes the App's own
+// permission on the workflow, which an admin grants. An archived App's
+// bindings are kept and shown, but not changed.
 
 /** The workflows the person has a role in, with a published version. */
 const bindable = (workflows: readonly WorkflowResource[]): WorkflowResource[] =>
   workflows.filter((workflow) => workflow.currentVersion !== null);
 
-/** Binding an alias to a workflow, or changing what it binds. */
+/** Changing which workflow an alias binds, in the App's draft. */
 const BindDialog = ({
   app,
-  start,
+  binding,
   workflows,
   onClose,
-  onBound,
+  onDrafted,
 }: {
   app: string;
-  /** What it starts from: an alias already bound, or a new one. */
-  start: Binding;
+  /** The binding it changes. */
+  binding: AppWorkflowBinding;
   workflows: readonly WorkflowResource[];
   onClose: () => void;
-  onBound: () => void;
+  onDrafted: () => void;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [alias, setAlias] = useState(start.alias);
-  const [workflow, setWorkflow] = useState(start.workflow);
-  const aliasId = useId();
+  const [problem, setProblem] = useState<string>();
+  const [workflow, setWorkflow] = useState<string | null>(
+    workflows.some((each) => each.id === binding.workflowId)
+      ? binding.workflowId
+      : null
+  );
   const workflowId = useId();
-  const naming = start.alias === "";
-  const aliasValid =
-    appWorkflowBindingSchema.shape.alias.safeParse(alias).success;
+  const { alias } = binding;
   const bind = async (): Promise<void> => {
     if (workflow === null) {
       return;
     }
-    const bound = await run(
+    setProblem(undefined);
+    const changed = await run(
       async (session) =>
-        await session.workflowResources.bindToApp(workflow, {
-          app,
-          alias,
-        })
+        await session.apps.define(app, { op: "bindWorkflow", alias, workflow })
     );
-    if (bound !== undefined) {
-      onBound();
-      onClose();
+    if (changed === undefined) {
+      return;
     }
+    if (!changed.ok) {
+      setProblem(changed.problem);
+      return;
+    }
+    onDrafted();
+    onClose();
   };
   const workflowItems = workflows.map((each) => ({
     value: each.id,
@@ -136,50 +118,18 @@ const BindDialog = ({
       <DialogContent closeLabel={t`Close`}>
         <DialogHeader>
           <DialogTitle>
-            {naming ? (
-              <Trans>Bind a workflow</Trans>
-            ) : (
-              <Trans>Change what {alias} starts</Trans>
-            )}
+            <Trans>Change what {alias} starts</Trans>
           </DialogTitle>
           <DialogDescription>
             <Trans>
-              The App starts the workflow&apos;s live version by its name, until
-              a builder binds another. Starting it still takes the App&apos;s
-              own permission on the workflow, which an admin grants.
+              The change goes into the App&apos;s draft, which declares what the
+              workflow&apos;s live version has. Once you publish the draft, the
+              App starts that workflow&apos;s live version by this name.
+              Starting it still takes the App&apos;s own permission on the
+              workflow, which an admin grants.
             </Trans>
           </DialogDescription>
         </DialogHeader>
-        {naming ? (
-          <Field>
-            <FieldLabel htmlFor={aliasId}>
-              <Trans>Name in the App&apos;s code</Trans>
-            </FieldLabel>
-            <Input
-              id={aliasId}
-              maxLength={64}
-              onChange={(event) => {
-                setAlias(event.target.value);
-              }}
-              value={alias}
-            />
-            {alias === "" || aliasValid ? (
-              <FieldDescription>
-                <Trans>
-                  A letter, then letters, digits or underscores, such as
-                  summary.
-                </Trans>
-              </FieldDescription>
-            ) : (
-              <FieldError>
-                <Trans>
-                  Start with a letter, then use only letters, digits or
-                  underscores.
-                </Trans>
-              </FieldError>
-            )}
-          </Field>
-        ) : null}
         <Field>
           <FieldLabel htmlFor={workflowId}>
             <Trans>Workflow</Trans>
@@ -205,18 +155,18 @@ const BindDialog = ({
             </SelectContent>
           </Select>
         </Field>
-        <ErrorText>{failure}</ErrorText>
+        <ErrorText>{failure ?? problem}</ErrorText>
         <DialogFooter>
           <Button disabled={busy} onClick={onClose} variant="outline">
             <Trans>Cancel</Trans>
           </Button>
           <Button
-            disabled={busy || !aliasValid || workflow === null}
+            disabled={busy || workflow === null}
             onClick={() => {
               void bind();
             }}
           >
-            <Trans>Bind</Trans>
+            <Trans>Change in the draft</Trans>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -224,101 +174,35 @@ const BindDialog = ({
   );
 };
 
-/** Removing a binding, once confirmed. */
-const Unbind = ({
-  binding,
-  onUnbound,
-}: {
-  binding: AppWorkflowBinding;
-  onUnbound: () => void;
-}) => {
-  const { busy, failure, run } = useCoreAction();
-  const { alias } = binding;
-  const unbind = async (): Promise<void> => {
-    const done = await run(async (session) => {
-      await session.workflowResources.unbindFromApp(binding.id);
-      return true;
-    });
-    if (done === true) {
-      onUnbound();
-    }
-  };
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <AlertDialog>
-        <AlertDialogTrigger
-          disabled={busy}
-          render={<Button size="sm" variant="outline" />}
-        >
-          <Trans>Unbind</Trans>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Unbind {alias}?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <Trans>
-                The App can no longer start a workflow by this name, until a
-                builder binds it again. Runs already started go on.
-              </Trans>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void unbind();
-              }}
-              variant="destructive"
-            >
-              <Trans>Unbind</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
-};
-
-/** The bindings as read, with binding and unbinding for who may. */
+/** The bindings as read, with changing one in the draft for who may. */
 const BindingsView = ({
   app,
   bindings,
   workflows,
   changes,
-  onChanged,
 }: {
   app: string;
   bindings: readonly AppWorkflowBinding[];
   workflows: readonly WorkflowResource[];
-  /** Whether the person may bind and unbind: not on an archived App. */
+  /** Whether the person may change them: not on an archived App. */
   changes: boolean;
-  onChanged: () => void;
 }) => {
-  const [binding, setBinding] = useState<Binding | null>(null);
+  const [binding, setBinding] = useState<AppWorkflowBinding | null>(null);
+  const [drafted, setDrafted] = useState(false);
   const names = new Map(workflows.map((each) => [each.id, each.name]));
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">
-          <Trans>Workflows the App starts</Trans>
-        </h2>
-        {changes ? (
-          <Button
-            onClick={() => {
-              setBinding({ alias: "", workflow: null });
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Bind a workflow</Trans>
-          </Button>
-        ) : null}
-      </div>
+      <h2 className="text-sm font-medium">
+        <Trans>Workflows the App starts</Trans>
+      </h2>
+      {drafted ? (
+        <p className="text-muted-foreground">
+          <Trans>
+            Changed in the draft: publish the App for it to start the new
+            workflow.
+          </Trans>
+        </p>
+      ) : null}
       {bindings.length === 0 ? (
         <p className="text-muted-foreground">
           <Trans>The App starts no workflow of its own.</Trans>
@@ -338,7 +222,7 @@ const BindingsView = ({
                   <Trans>Bound</Trans>
                 </TableHead>
                 {changes ? (
-                  <TableHead className="w-48" variant="card">
+                  <TableHead className="w-24" variant="card">
                     <span className="sr-only">
                       <Trans>Actions</Trans>
                     </span>
@@ -364,22 +248,16 @@ const BindingsView = ({
                   </TableCell>
                   {changes ? (
                     <TableCell variant="card">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end">
                         <Button
                           onClick={() => {
-                            setBinding({
-                              alias: each.alias,
-                              workflow: names.has(each.workflowId)
-                                ? each.workflowId
-                                : null,
-                            });
+                            setBinding(each);
                           }}
                           size="sm"
                           variant="ghost"
                         >
                           <Trans>Change</Trans>
                         </Button>
-                        <Unbind binding={each} onUnbound={onChanged} />
                       </div>
                     </TableCell>
                   ) : null}
@@ -392,11 +270,13 @@ const BindingsView = ({
       {binding === null ? null : (
         <BindDialog
           app={app}
-          onBound={onChanged}
+          binding={binding}
           onClose={() => {
             setBinding(null);
           }}
-          start={binding}
+          onDrafted={() => {
+            setDrafted(true);
+          }}
           workflows={bindable(workflows)}
         />
       )}
@@ -411,8 +291,8 @@ interface Read {
 }
 
 /**
- * The workflows an App's App binds, for its builders, read when the
- * Resources tab opens and again after each change.
+ * The workflows an App binds, for its builders, read when the Resources
+ * tab opens.
  */
 export const AppWorkflows = ({
   app,
@@ -424,8 +304,6 @@ export const AppWorkflows = ({
   const core = useCore();
   const builds = buildsApp(app, identity);
   const [read, setRead] = useState<Loaded<Read>>();
-  // Counts the changes made here, so each reads the bindings again.
-  const [changed, setChanged] = useState(0);
   useEffect(() => {
     const left = new AbortController();
     const load = async (): Promise<void> => {
@@ -451,8 +329,7 @@ export const AppWorkflows = ({
     return () => {
       left.abort();
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changed` says when to read again
-  }, [app.id, builds, changed, core]);
+  }, [app.id, builds, core]);
   if (!builds) {
     return null;
   }
@@ -467,9 +344,6 @@ export const AppWorkflows = ({
       app={app.id}
       bindings={read.data.bindings}
       changes={!app.archived}
-      onChanged={() => {
-        setChanged((count) => count + 1);
-      }}
       workflows={read.data.workflows}
     />
   );

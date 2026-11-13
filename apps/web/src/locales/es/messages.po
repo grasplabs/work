@@ -1432,10 +1432,6 @@ msgstr "{who}: «{answer}»"
 msgid "{work, plural, one {# piece of work} other {# pieces of work}}"
 msgstr "{work, plural, one {# trabajo} other {# trabajos}}"
 
-#: src/apps/draft-changes.tsx
-msgid "{workflow} calls {path}"
-msgstr "{workflow} llama a {path}"
-
 #: src/routes/_shell.settings.spend.tsx
 msgid "{workflow} in {app}"
 msgstr "{workflow} en {app}"
@@ -1598,10 +1594,6 @@ msgstr "Una búsqueda en Conocimiento desde {about} no encontró nada {searches,
 msgctxt "memory record kind"
 msgid "A lesson"
 msgstr "Una lección"
-
-#: src/apps/app-workflows.tsx
-msgid "A letter, then letters, digits or underscores, such as summary."
-msgstr "Una letra y luego letras, dígitos o guiones bajos, como summary."
 
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
@@ -2417,10 +2409,6 @@ msgstr "Un administrador"
 msgid "An admin abandoned the data change this version needs, so it can't be shared. Ask Grasp to build the change again."
 msgstr "Un administrador abandonó el cambio de datos que necesita esta versión, así que no se puede compartir. Pide a Grasp que vuelva a construir el cambio."
 
-#: src/drafts/share-with-team.tsx
-msgid "An admin approves its access again before it works for your team."
-msgstr "Un administrador vuelve a aprobar su acceso antes de que funcione para tu equipo."
-
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Lo cambia un administrador, en Miembros y roles."
@@ -3058,14 +3046,6 @@ msgctxt "what a decision asks"
 msgid "Asked"
 msgstr "Pregunta"
 
-#: src/activity/pending.tsx
-msgid "Asked again (previously granted by {person} on {date})"
-msgstr "Pedido de nuevo (concedido antes por {person} el {date})"
-
-#: src/activity/pending.tsx
-msgid "Asked again after {label} was published (previously granted by {person} on {date})"
-msgstr "Solicitado de nuevo tras publicarse {label} (concedido antes por {person} el {date})"
-
 #: src/connections/requested-apps.tsx
 msgid "Asked by {asker}"
 msgstr "Solicitado por {asker}"
@@ -3299,17 +3279,9 @@ msgstr "Correos de facturación"
 msgid "Billing runs through Stripe. You see it here and change it there."
 msgstr "La facturación pasa por Stripe. La ves aquí y la cambias allí."
 
-#: src/apps/app-workflows.tsx
-msgid "Bind"
-msgstr "Vincular"
-
 #: src/apps/resource-bindings.tsx
 msgid "Bind {alias}"
 msgstr "Vincular {alias}"
-
-#: src/apps/app-workflows.tsx
-msgid "Bind a workflow"
-msgstr "Vincular un flujo de trabajo"
 
 #: src/inbox/items.ts
 msgid "Binding"
@@ -3635,6 +3607,10 @@ msgstr "Cambiar {name}"
 msgid "Change {title}"
 msgstr "Cambiar {title}"
 
+#: src/apps/app-workflows.tsx
+msgid "Change in the draft"
+msgstr "Cambiar en el borrador"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
 msgstr "Cambiar plan"
@@ -3753,6 +3729,10 @@ msgstr "Modificado por <0/>, de las filas que pueden leer"
 #: src/apps/draft-changes.tsx
 msgid "Changed by nobody"
 msgstr "No lo modifica nadie"
+
+#: src/apps/app-workflows.tsx
+msgid "Changed in the draft: publish the App for it to start the new workflow."
+msgstr "Cambiado en el borrador: publica la aplicación para que inicie el nuevo flujo de trabajo."
 
 #: src/activity/audit-words.ts
 msgid "Changed knowledge"
@@ -7695,10 +7675,6 @@ msgstr "Sus páginas y su código de servidor pueden pasar archivos que las pers
 #: src/drafts/draft-history.tsx
 msgid "Its pages and workflows run on it from now on. Grasp checks and builds it first."
 msgstr "Sus páginas y flujos de trabajo funcionan con ella a partir de ahora. Grasp la comprueba y la compila primero."
-
-#: src/drafts/draft-history.tsx
-msgid "Its permissions on connections, to start workflows and to call other Apps wait for an admin to grant them again."
-msgstr "Sus permisos sobre conexiones, para iniciar flujos de trabajo y para llamar a otras aplicaciones esperan a que un administrador los conceda de nuevo."
 
 #: src/workflows/files-and-apps.tsx
 msgid "Its runs have written no file you may see."
@@ -13332,10 +13308,6 @@ msgstr "Iniciar la ejecución"
 msgid "Start the tour"
 msgstr "Empezar el recorrido"
 
-#: src/apps/app-workflows.tsx
-msgid "Start with a letter, then use only letters, digits or underscores."
-msgstr "Empiece con una letra y use después solo letras, dígitos o guiones bajos."
-
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -14056,10 +14028,6 @@ msgstr "La respuesta se cortó en el límite del modelo."
 msgid "The answer, and who gave it, are taken away for good. The question stays closed."
 msgstr "La respuesta, y quién la dio, se eliminan para siempre. La pregunta sigue cerrada."
 
-#: src/apps/app-workflows.tsx
-msgid "The App can no longer start a workflow by this name, until a builder binds it again. Runs already started go on."
-msgstr "La aplicación ya no puede iniciar un flujo de trabajo con este nombre hasta que un creador lo vuelva a vincular. Las ejecuciones ya iniciadas continúan."
-
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to invite guests. Grant one first."
 msgstr "La aplicación no tiene permiso para invitar a invitados. Concede uno primero."
@@ -14079,10 +14047,6 @@ msgstr "La aplicación tiene demasiadas integraciones para comprobarlas todas en
 #: src/apps/app-workflows.tsx
 msgid "The App starts no workflow of its own."
 msgstr "La aplicación no inicia ningún flujo de trabajo propio."
-
-#: src/apps/app-workflows.tsx
-msgid "The App starts the workflow's live version by its name, until a builder binds another. Starting it still takes the App's own permission on the workflow, which an admin grants."
-msgstr "La App inicia la versión publicada del flujo de trabajo con este nombre, hasta que un creador vincule otro. Para iniciarlo, la App sigue necesitando su propio permiso sobre el flujo de trabajo, que concede un administrador."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App's actions can't use it until an admin binds it."
@@ -14237,6 +14201,10 @@ msgstr "El catálogo no incluye {app}, así que no se pueden mostrar sus herrami
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "No se pudo leer el catálogo de integraciones, así que esta página muestra solo lo que tus cuentas dicen de ella."
+
+#: src/apps/app-workflows.tsx
+msgid "The change goes into the App's draft, which declares what the workflow's live version has. Once you publish the draft, the App starts that workflow's live version by this name. Starting it still takes the App's own permission on the workflow, which an admin grants."
+msgstr "El cambio va al borrador de la aplicación, que declara lo que tiene la versión publicada del flujo de trabajo. Cuando publiques el borrador, la aplicación iniciará la versión publicada de ese flujo de trabajo con este nombre. Para iniciarlo, la aplicación sigue necesitando su propio permiso sobre el flujo de trabajo, que concede un administrador."
 
 #: src/drafts/publish-errors.ts
 msgid "The change to the App's data can't be applied: a record already holds a value a new field doesn't accept. An admin can see the record in the App's settings."
@@ -15509,14 +15477,6 @@ msgstr "Escribe tu respuesta"
 #: src/dashboard/signals.tsx
 msgid "Unanswered question"
 msgstr "Pregunta sin respuesta"
-
-#: src/apps/app-workflows.tsx
-msgid "Unbind"
-msgstr "Desvincular"
-
-#: src/apps/app-workflows.tsx
-msgid "Unbind {alias}?"
-msgstr "¿Desvincular {alias}?"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
@@ -17113,10 +17073,6 @@ msgstr "Los workflows se crean en el chat: describe lo que debe funcionar solo y
 msgid "Workflows of {title}"
 msgstr "Flujos de trabajo de {title}"
 
-#: src/apps/draft-changes.tsx
-msgid "Workflows that call it again once an admin grants it again for the new version"
-msgstr "Workflows que la vuelven a llamar cuando un administrador lo conceda de nuevo para la nueva versión"
-
 #: src/brain/goals-editor.tsx
 msgid "Workflows that serve {title}"
 msgstr "Flujos de trabajo que sirven a {title}"
@@ -17145,10 +17101,6 @@ msgstr "En marcha desde el {date}"
 #: src/settings/ai-providers.tsx
 msgid "Working. Last used {when}."
 msgstr "Funciona. Último uso: {when}."
-
-#: src/apps/draft-changes.tsx
-msgid "Works again once an admin grants it again for the new version"
-msgstr "Vuelve a funcionar cuando un administrador lo conceda de nuevo para la nueva versión"
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Works in"

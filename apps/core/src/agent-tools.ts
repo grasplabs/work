@@ -852,12 +852,15 @@ const definitions = (known: Map<string, string>) => {
       name: "bindWorkflow",
       label: "Bind a workflow",
       api: "build",
-      description: `Binds workflow \`workflow\` under the App's workflow permission \`alias\` (added first with \`addPermission\`), with this draft: declares the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, exactly as the workflow's live version has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them, and binds the workflow once the App version this draft becomes is published, in the same step. Its starts run the workflow's live version. Use it for a workflow whose events, decisions or listen tasks differ from what the App's live version declares, which can't be bound directly. ${definitionAnswer}`,
+      description: `Binds workflow \`workflow\` under the App's workflow permission \`alias\` (added first with \`addPermission\`), with this draft: declares the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, as the workflow's live version has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them, and binds the workflow once the App version this draft becomes is published, in the same step. Its starts run the workflow's live version. Bind it again to declare what a new version of the workflow added. \`events\`, \`listens\` and \`decisions\`, each optional, declare only those of the live version by name (a listen task only with its declared events): leave out what the App no longer uses, so the workflow can drop it once this is published. ${definitionAnswer}`,
       parameters: Type.Object(
         {
           app: appParameter,
           alias: Type.String({ minLength: 1, maxLength: 64 }),
           workflow: Type.String({ minLength: 1, maxLength: 256 }),
+          events: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+          listens: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+          decisions: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
         },
         { additionalProperties: false }
       ),

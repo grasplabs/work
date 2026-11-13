@@ -8,6 +8,7 @@ import type {
   AppDefinition,
   DefinitionOperation,
 } from "@grasp-os/runtime/definition";
+import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 import { appErrors, fileChangesSchema } from "@grasp-os/shared/apps";
 import type {
   App,
@@ -49,10 +50,7 @@ import {
 } from "./app-definition.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
-import {
-  bindableContract,
-  carriedOverBinding,
-} from "./app-workflow-bindings.ts";
+import { bindableContract } from "./app-workflow-bindings.ts";
 import {
   appFor,
   appKind,
@@ -835,6 +833,64 @@ export const draftDefinitions = async (
 };
 
 /**
+ * What `all` has of `names`, all of it without them; or the problem, for
+ * a name of a `kind` it doesn't have.
+ */
+const picked = <Value>(
+  kind: string,
+  all: Readonly<Record<string, Value>>,
+  names: readonly string[] | undefined
+): Record<string, Value> | string => {
+  const missing = names?.find((name) => !Object.hasOwn(all, name));
+  if (missing !== undefined) {
+    return `The workflow's live version has no ${kind} \`${missing}\`.`;
+  }
+  return Object.fromEntries(
+    Object.entries(all).filter(
+      ([name]) => names === undefined || names.includes(name)
+    )
+  );
+};
+
+/**
+ * What of `live`, the contract of a workflow's live version, a draft's
+ * `bindWorkflow` declares: all of it, or only the events, listen tasks
+ * and decisions it names, each listen task with only the declared events
+ * it waits on. So an App stops relying on what a workflow is about to
+ * drop. A name the live version doesn't have is the problem.
+ */
+const chosenContract = (
+  live: WorkflowEventContract,
+  chosen: {
+    readonly events?: readonly string[];
+    readonly listens?: readonly string[];
+    readonly decisions?: readonly string[];
+  }
+): WorkflowEventContract | string => {
+  const events = picked("event", live.events, chosen.events);
+  if (typeof events === "string") {
+    return events;
+  }
+  const decisions = picked("decision", live.decisions, chosen.decisions);
+  if (typeof decisions === "string") {
+    return decisions;
+  }
+  const listens = picked("listen task", live.listens, chosen.listens);
+  if (typeof listens === "string") {
+    return listens;
+  }
+  const waiting: Record<string, string[]> = {};
+  for (const [task, waits] of Object.entries(listens)) {
+    const declared = waits.filter((event) => Object.hasOwn(events, event));
+    if (declared.length === 0) {
+      return `Listen task \`${task}\` waits on none of the events declared.`;
+    }
+    waiting[task] = declared;
+  }
+  return { events, decisions, listens: waiting };
+};
+
+/**
  * Changes the App's definition in its draft
  * (app-definition.ts): applies `operation` to it, checked whole, and
  * saves it with `save` (`saveDraftChanges`, by whoever writes) with the
@@ -887,18 +943,16 @@ export const defineInDraft = async <Saved>(
       // One after the other: each operation applies to the last.
       // oxlint-disable-next-line no-await-in-loop -- see above
       const bindable = await bindableContract(env, by, each.workflow);
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      const carried = await carriedOverBinding(
-        env,
-        app.id,
-        held.before,
-        each.alias,
-        bindable.bound
-      );
-      if (carried !== undefined) {
-        return { ok: false, problem: carried };
+      const contract = chosenContract(bindable.contract, each);
+      if (typeof contract === "string") {
+        return { ok: false, problem: contract };
       }
-      applied = { op: "setWorkflowContract", alias: each.alias, ...bindable };
+      applied = {
+        op: "setWorkflowContract",
+        alias: each.alias,
+        contract,
+        bound: bindable.bound,
+      };
     } else {
       applied = each;
     }
@@ -1593,8 +1647,8 @@ const buildDeclaration = `/**
  * its own or takes steps, build an independent workflow with
  * \`env.workflowBuild\`, add it to the App's permissions
  * (\`define\` with \`addPermission\`, \`permission.workflow("alias", { args, returns })\`,
- * started with \`ctx.workflows.alias.start(args)\`) and bind it to the App
- * under that alias.
+ * started with \`ctx.workflows.alias.start(args)\`) and bind it in the
+ * App's draft under that alias (\`define\` with \`bindWorkflow\`).
  *
  * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded
  * by what one read examines (10,000 index entries, \`data.scan_limit\`

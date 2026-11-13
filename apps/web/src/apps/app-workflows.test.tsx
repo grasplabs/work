@@ -20,10 +20,11 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppWorkflows } from "./app-workflows.tsx";
 
-// The workflows an App's App starts, on its Resources tab, against
-// core's `workflowResources` as the page reaches it over RPC (the boundary
-// from the web app), faked: it keeps the App's active bindings, replaces
-// an alias's binding when it is bound again, and forgets one unbound.
+// The workflows an App starts, on its Resources tab, against core's
+// `workflowResources` and `apps.define` as the page reaches them over RPC
+// (the boundary from the web app), faked: it keeps the App's active
+// bindings, and answers a change of the draft as core does, refusing one
+// whose workflow the draft can't bind.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -65,7 +66,7 @@ const workflow = (
 /** Core's workflows and the App's bindings, and each change asked. */
 const fakeWorkflows = () => {
   const asked: unknown[][] = [];
-  let bindings: AppWorkflowBinding[] = [
+  const bindings: AppWorkflowBinding[] = [
     {
       id: "binding-1",
       app: appId,
@@ -89,35 +90,20 @@ const fakeWorkflows = () => {
         workflow("flow-draft", "Never published", null),
       ];
     },
-    bindToApp: async (
-      id: string,
-      input: { app: string; alias: string }
-    ): Promise<AppWorkflowBinding> => {
+  };
+  const apps = {
+    define: async (
+      app: string,
+      operation: { op: string; alias: string; workflow: string }
+    ): Promise<{ ok: false; problem: string } | { ok: true }> => {
       await Promise.resolve();
-      asked.push(["bindToApp", id, input]);
-      const bound = {
-        id: `binding-${bindings.length + 2}`,
-        app: input.app,
-        alias: input.alias,
-        workflowId: id,
-        // Its live version, as core binds it.
-        version: id === "flow-invoice" ? 3 : 2,
-        boundBy: "user-owner",
-        boundAt: "2026-10-30T09:00:00.000Z",
-      };
-      bindings = [
-        ...bindings.filter((each) => each.alias !== input.alias),
-        bound,
-      ];
-      return bound;
-    },
-    unbindFromApp: async (binding: string): Promise<void> => {
-      await Promise.resolve();
-      asked.push(["unbindFromApp", binding]);
-      bindings = bindings.filter((each) => each.id !== binding);
+      asked.push(["define", app, operation]);
+      return operation.workflow === "flow-summary"
+        ? { ok: false, problem: "The draft binds this workflow already." }
+        : { ok: true };
     },
   };
-  return { session: { workflowResources }, asked };
+  return { session: { workflowResources, apps }, asked };
 };
 
 let root: Root | undefined;
@@ -207,22 +193,6 @@ const choose = async (label: string, option: string): Promise<void> => {
   );
 };
 
-/** Types `text` into the field labelled `label`. */
-const type = async (label: string, text: string): Promise<void> => {
-  const box = field(label);
-  if (!(box instanceof HTMLInputElement)) {
-    throw new TypeError(`No field ${label}`);
-  }
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value"
-    )?.set?.call(box, text);
-    box.dispatchEvent(new Event("input", { bubbles: true }));
-    await Promise.resolve();
-  });
-};
-
 /** Each binding listed: its alias and workflow. */
 const listed = (): string[][] =>
   [...document.querySelectorAll("tbody tr")].map((row) =>
@@ -236,62 +206,48 @@ describe("The workflows an App starts, for its builders", () => {
     unmount();
   });
 
-  it("binds a new name to a published workflow, whose live version it starts", async () => {
-    const { session, asked } = fakeWorkflows();
-    await shown(session);
-    expect(listed()).toStrictEqual([["summary", "Summarise the week"]]);
-
-    await press(button("Bind a workflow"));
-    await type("Name in the App's code", "invoice");
-    await choose("Workflow", "Send an invoice");
-    await press(button("Bind"));
-
-    expect({ asked, listed: listed() }).toStrictEqual({
-      asked: [
-        ["appBindings", "app-1"],
-        ["bindToApp", "flow-invoice", { app: "app-1", alias: "invoice" }],
-        ["appBindings", "app-1"],
-      ],
-      listed: [
-        ["invoice", "Send an invoice"],
-        ["summary", "Summarise the week"],
-      ],
-    });
-  });
-
-  it("moves a name to another workflow, and unbinds one only once confirmed", async () => {
+  it("changes what a name starts in the App's draft, which publishing makes live", async () => {
     const { session, asked } = fakeWorkflows();
     await shown(session);
 
     await press(button("Change"));
     await choose("Workflow", "Send an invoice");
-    await press(button("Bind"));
-    const moved = listed();
-    await press(button("Unbind"));
-    await press(button("Cancel"));
-    const afterCancel = asked.filter(([call]) => call === "unbindFromApp");
-    await press(button("Unbind"));
-    await press(button("Unbind"));
+    await press(button("Change in the draft"));
 
-    expect({ moved, afterCancel, listed: listed() }).toStrictEqual({
-      moved: [["summary", "Send an invoice"]],
-      afterCancel: [],
-      listed: [],
+    expect({
+      asked,
+      listed: listed(),
+      told: document.body.textContent?.includes(
+        "Changed in the draft: publish the App"
+      ),
+    }).toStrictEqual({
+      asked: [
+        ["appBindings", "app-1"],
+        [
+          "define",
+          "app-1",
+          { op: "bindWorkflow", alias: "summary", workflow: "flow-invoice" },
+        ],
+      ],
+      // What runs is what's published: the binding is the live version's.
+      listed: [["summary", "Summarise the week"]],
+      told: true,
     });
   });
 
-  it("refuses a name the App's code couldn't use", async () => {
+  it("says why the draft took no change", async () => {
     const { session } = fakeWorkflows();
     await shown(session);
 
-    await press(button("Bind a workflow"));
-    await type("Name in the App's code", "2nd-flow");
-    await choose("Workflow", "Send an invoice");
+    await press(button("Change"));
+    await press(button("Change in the draft"));
 
     expect({
-      told: document.body.textContent?.includes("Start with a letter"),
-      bindable: button("Bind")?.disabled,
-    }).toStrictEqual({ told: true, bindable: true });
+      told: document.body.textContent?.includes(
+        "The draft binds this workflow already."
+      ),
+      drafted: document.body.textContent?.includes("Changed in the draft"),
+    }).toStrictEqual({ told: true, drafted: false });
   });
 
   it("shows an archived App's bindings without changing them, and none to who doesn't build it", async () => {
@@ -299,7 +255,7 @@ describe("The workflows an App starts, for its builders", () => {
     await shown(archived.session, { app: { ...ledger, archived: true } });
     const kept = {
       listed: listed(),
-      changes: button("Bind a workflow") !== undefined,
+      changes: button("Change") !== undefined,
     };
     unmount();
     const user = fakeWorkflows();
