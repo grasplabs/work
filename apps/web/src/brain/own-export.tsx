@@ -120,10 +120,12 @@ export const OwnExportSection = () => {
 
   // Each read that lands (a new one: `useCoreRead` keeps the last while
   // the next is under way) lets a start's follow-up read go on, and, while
-  // the export may be being written, sets the next read a few seconds on,
-  // and one when the page is seen again. One read at a time: none starts
-  // over one under way. It may be being written while the last read that
-  // reached core said so, or since core took a start; a read that failed to
+  // the export may be being written, makes the next read due a few seconds
+  // on: read then if the page is seen, else once it is seen again. One read
+  // at a time: none starts over one under way, as a read is only made due
+  // once the last landed, and made once. It may be being written while the
+  // last read that reached core said so, or since a start was sent (core
+  // may have taken it though its answer was lost); a read that failed to
   // reach core (out of reach, or slower than a read's deadline, as every
   // read of the app) changes neither, and a refusal from core stops it.
   const landed = useRef<(() => void) | null>(null);
@@ -139,18 +141,25 @@ export const OwnExportSection = () => {
     const following =
       read !== undefined &&
       (writing || (read.state === "offline" && mayBeWriting.current));
-    const readNow = (): void => {
-      if (document.visibilityState === "visible") {
+    let due = false;
+    const readIfDue = (): void => {
+      if (due && document.visibilityState === "visible") {
+        due = false;
         setReads((before) => before + 1);
       }
     };
-    const timer = following ? setTimeout(readNow, followEveryMs) : undefined;
+    const timer = following
+      ? setTimeout(() => {
+          due = true;
+          readIfDue();
+        }, followEveryMs)
+      : undefined;
     if (following) {
-      document.addEventListener("visibilitychange", readNow);
+      document.addEventListener("visibilitychange", readIfDue);
     }
     return () => {
       clearTimeout(timer);
-      document.removeEventListener("visibilitychange", readNow);
+      document.removeEventListener("visibilitychange", readIfDue);
     };
   }, [read, writing]);
   // A follow-up read the page left before it landed holds up nothing.
@@ -190,12 +199,10 @@ export const OwnExportSection = () => {
     setFailed(undefined);
     await run(
       async () => {
-        await changeThenRefresh(async () => {
-          await startOwnExport();
-          // Core took it: being written until a read that reaches core says
-          // otherwise.
-          mayBeWriting.current = true;
-        }, readAgain);
+        // Sent: core may take it though its answer is lost, so it may be
+        // being written until a read that reaches core says otherwise.
+        mayBeWriting.current = true;
+        await changeThenRefresh(startOwnExport, readAgain);
       },
       (reason) => {
         setFailed({ reason, after: onScreen.current });
@@ -216,9 +223,14 @@ export const OwnExportSection = () => {
   };
   // Said only while the read on screen is the one that followed it: a
   // start whose answer was lost shows as being written, and any later read
-  // drops it.
+  // drops it. Once: not when the read on screen already says the same
+  // (core out of reach, for both).
+  const unread = read === undefined ? undefined : notLoadedText(read, i18n);
   const failure =
-    failed !== undefined && failed.after === read && !writing
+    failed !== undefined &&
+    failed.after === read &&
+    !writing &&
+    failed.reason !== unread
       ? failed.reason
       : undefined;
 
