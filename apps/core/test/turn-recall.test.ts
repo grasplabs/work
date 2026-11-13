@@ -902,7 +902,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
                 kind: "group",
                 audience: { members: [person.userId], outsiders: false },
               }
-            : undefined
+            : { kind: "direct" }
         );
 
     const ownChat = await recallingChatOf(person.userId, says("Noted."));

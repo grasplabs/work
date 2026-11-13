@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "adfd9f5f-30ce-4b90-9e9d-3347552c4108",
+  "id": "17459488-a159-4e64-982c-55d05693a0a9",
   "prevId": "26f4cdf9-559e-43ae-ac3c-8e7b96acdfde",
   "tables": {
     "chunks": {
@@ -268,15 +268,6 @@
             "type",
             "folded",
             "entity"
-          ],
-          "isUnique": false
-        },
-        "entity_names_entity_idx": {
-          "name": "entity_names_entity_idx",
-          "columns": [
-            "entity",
-            "type",
-            "folded"
           ],
           "isUnique": false
         },
@@ -574,6 +565,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "memories": {
+          "name": "memories",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "bytes": {
           "name": "bytes",
           "type": "integer",
@@ -632,6 +630,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "written": {
+          "name": "written",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
@@ -746,6 +751,27 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "phase": {
+          "name": "phase",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stamp": {
+          "name": "stamp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "changes_up_to": {
+          "name": "changes_up_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "state": {
@@ -1037,24 +1063,6 @@
           "name": "memories_object_idx",
           "columns": [
             "object"
-          ],
-          "isUnique": false
-        },
-        "memories_entity_object_idx": {
-          "name": "memories_entity_object_idx",
-          "columns": [
-            "entity",
-            "object"
-          ],
-          "isUnique": false
-        },
-        "memories_lineage_value_idx": {
-          "name": "memories_lineage_value_idx",
-          "columns": [
-            "entity",
-            "attribute",
-            "lineage",
-            "value_key"
           ],
           "isUnique": false
         },
@@ -1543,6 +1551,13 @@
         },
         "held_to": {
           "name": "held_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "held_stamp": {
+          "name": "held_stamp",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

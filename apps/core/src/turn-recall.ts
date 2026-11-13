@@ -166,9 +166,11 @@ interface Recalling {
   turn: Pick<CodeTurn, "scope" | "runs">;
   /**
    * Who reads the answer: the person asking alone (`own`: their own chat
-   * in Grasp), or others too (`shared`: a chat app's thread, which core
-   * counts as shared whoever is in it). A recall where others read the
-   * answer must never hand over what only the asker may read.
+   * in Grasp, or their direct message on a chat app, whose recall is not
+   * `personal`), or others too
+   * (`shared`: a group chat's or channel's thread, which core counts as
+   * shared whoever is in it). A recall where others read the answer must
+   * never hand over what only the asker may read.
    */
   conversation: "own" | "shared";
   /**

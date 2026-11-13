@@ -9,7 +9,8 @@ import m0006 from './0006_erasure.sql';
 import m0007 from './0007_embedding.sql';
 import m0008 from './0008_memories.sql';
 import m0009 from './0009_exports.sql';
-import m0010 from './0010_entity_indexes.sql';
+import m0010 from './0010_export_memories.sql';
+import m0011 from './0011_entity_indexes.sql';
 
   export default {
     journal,
@@ -24,7 +25,8 @@ m0006,
 m0007,
 m0008,
 m0009,
-m0010
+m0010,
+m0011
     }
   }
   
