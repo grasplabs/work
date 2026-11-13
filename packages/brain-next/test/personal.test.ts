@@ -1363,6 +1363,8 @@ const leavingNone = [
   "addMemories",
   "confirmMemory",
   "erasePerson",
+  "exportFile",
+  "exportStatus",
   "findEntities",
   "handOver",
   "keyState",
@@ -1375,8 +1377,13 @@ const leavingNone = [
   "readMemories",
   "readVersion",
   "repackVectors",
+  "restoreStatus",
   "retireMemory",
   "searchVectors",
+  "startExport",
+  // A person's own store refuses every export and restore.
+  "checkRestore",
+  "startRestore",
   "workOverview",
 ];
 
