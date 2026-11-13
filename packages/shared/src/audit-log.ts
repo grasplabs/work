@@ -162,14 +162,12 @@ const typeRules: readonly {
   // Sharing a skill with the company (GRA-1754), by the share's ID or the
   // skill's name, never its text. A person asking; an admin's decision
   // (approving or declining) and, after approving, its outcome: added
-  // (with the version), failed, or superseded by a later approval. An
-  // admin's retirement of a company skill, and its outcome: done (with
-  // the version retired) or failed. A decision without an outcome is one
-  // whose attempt stopped half-way.
+  // (with the version) or failed. An admin's retirement of a company
+  // skill, and its outcome: done (with the version retired) or failed. A
+  // decision without an outcome is one whose attempt stopped half-way.
   { action: "skill.share.requested", type: "action" },
   { action: "skill.share.added", type: "action" },
   { action: "skill.share.approve_failed", type: "action" },
-  { action: "skill.share.superseded", type: "action" },
   { action: "skill.share", type: "decision" },
   { action: "skill.retired", type: "config" },
   { action: "skill.retire_done", type: "config" },

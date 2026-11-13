@@ -91,8 +91,7 @@ The steps.
 /**
  * Where the person's share stands, as its row says: waiting; approved and
  * added (a later add may replace it since: the last to land is live);
- * approved but not added yet; superseded, never added and a later
- * approval of the same name taking its place; or declined.
+ * approved but not added yet; or declined.
  */
 const ShareStatus = ({ share }: { share: SkillShare }) => {
   switch (share.status) {
@@ -107,15 +106,6 @@ const ShareStatus = ({ share }: { share: SkillShare }) => {
       return (
         <Badge variant="outline">
           <Trans>Declined</Trans>
-        </Badge>
-      );
-    }
-    case "superseded": {
-      return (
-        <Badge variant="outline">
-          <Trans>
-            Not added: a later approval of this name takes its place.
-          </Trans>
         </Badge>
       );
     }

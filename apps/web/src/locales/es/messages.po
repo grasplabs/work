@@ -9027,10 +9027,6 @@ msgstr "Ninguno: su proveedor se eliminó."
 msgid "None."
 msgstr "Ninguno."
 
-#: src/brain/skills-page.tsx
-msgid "Not added: a later approval of this name takes its place."
-msgstr "No añadida: una aprobación posterior con este nombre ocupa su lugar."
-
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"

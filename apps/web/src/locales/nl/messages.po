@@ -9027,10 +9027,6 @@ msgstr "Geen: de provider ervan is verwijderd."
 msgid "None."
 msgstr "Geen."
 
-#: src/brain/skills-page.tsx
-msgid "Not added: a later approval of this name takes its place."
-msgstr "Niet toegevoegd: een latere goedkeuring met deze naam neemt zijn plaats in."
-
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"

@@ -261,7 +261,6 @@ describe("the skills page", () => {
         at("waiting", "pending", null),
         at("added", "approved", 3),
         at("stuck", "approved", null),
-        at("overtaken", "superseded", null),
         at("refused", "declined", null),
       ],
     });
@@ -270,13 +269,11 @@ describe("the skills page", () => {
       waiting: stateOf("waiting"),
       added: stateOf("added"),
       stuck: stateOf("stuck"),
-      overtaken: stateOf("overtaken"),
       refused: stateOf("refused"),
     }).toStrictEqual({
       waiting: "Waiting for an admin",
       added: "Added to the company's skills.",
       stuck: "Approved, but not added to the company's skills yet.",
-      overtaken: "Not added: a later approval of this name takes its place.",
       refused: "Declined",
     });
   });

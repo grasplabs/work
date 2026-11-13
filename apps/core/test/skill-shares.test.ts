@@ -1078,7 +1078,7 @@ describe("writing and sharing skills", setUpTime, () => {
     });
   });
 
-  it("supersedes an older approval whose add a newer one overtook, and a retry of it adds nothing", async () => {
+  it("fails an older approval whose add a newer one overtook, and lands it over the newer once approved again", async () => {
     const [a, b, admin, member] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -1116,23 +1116,25 @@ describe("writing and sharing skills", setUpTime, () => {
       ]),
       events: await skillEventsAfter(head),
     }).toStrictEqual({
-      first: "skills.superseded",
-      retry: "skills.superseded",
-      live: [["Newer", 1]],
+      first: "skills.changed",
+      retry: "ok",
+      // The last add to land is live.
+      live: [["Older", 2]],
       rows: [
-        ["superseded", null],
+        ["approved", 2],
         ["approved", 1],
       ],
       events: [
         "skill.share.approved",
         "skill.share.approved",
         "skill.share.added",
-        "skill.share.superseded",
+        "skill.share.approve_failed",
+        "skill.share.added",
       ],
     });
   });
 
-  it("leaves the newest of three approvals of one name live, whatever order their adds land in", async () => {
+  it("leaves only the add that landed live when three approvals of one name race, the others approved and not added", async () => {
     const [a, b, c, admin, member] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -1182,11 +1184,12 @@ describe("writing and sharing skills", setUpTime, () => {
       ]),
       events: await skillEventsAfter(head),
     }).toStrictEqual({
-      first: "skills.superseded",
+      first: "skills.changed",
       live: [["C", 1]],
+      // A's and B's adds never landed: approved, not added yet.
       rows: [
-        ["superseded", null],
-        ["superseded", null],
+        ["approved", null],
+        ["approved", null],
         ["approved", 1],
       ],
       events: [
@@ -1194,13 +1197,13 @@ describe("writing and sharing skills", setUpTime, () => {
         "skill.share.approved",
         "skill.share.approved",
         "skill.share.added",
-        "skill.share.superseded",
-        "skill.share.superseded",
+        "skill.share.approve_failed",
+        "skill.share.approve_failed",
       ],
     });
   });
 
-  it("never undoes a retirement with an older add that lands after it", async () => {
+  it("never undoes a retirement with an older add on its way, which fails and waits to be approved again", async () => {
     const [a, b, admin, member] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -1240,11 +1243,11 @@ describe("writing and sharing skills", setUpTime, () => {
       ]),
       events: await skillEventsAfter(head),
     }).toStrictEqual({
-      first: "skills.superseded",
+      first: "skills.changed",
       live: [],
       memberUses: [],
       rows: [
-        ["superseded", null],
+        ["approved", null],
         ["approved", 1],
       ],
       events: [
@@ -1253,7 +1256,7 @@ describe("writing and sharing skills", setUpTime, () => {
         "skill.share.added",
         "skill.retired",
         "skill.retire_done",
-        "skill.share.superseded",
+        "skill.share.approve_failed",
       ],
     });
   });
@@ -1642,6 +1645,164 @@ describe("writing and sharing skills", setUpTime, () => {
         ["skill.retired", {}],
         ["skill.retired", {}],
         ["skill.retire_done", { version: 1 }],
+      ],
+    });
+  });
+
+  it("records the add a retry lands while the first attempt of the same share is refused as stale", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("retry-in-flight");
+    const older = await a.api.skills.save(skillText(name, "A"));
+    const sa = await a.api.skills.share(name, older.version);
+    const newer = await b.api.skills.save(skillText(name, "B"));
+    const sb = await b.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+    const gate = Promise.withResolvers<boolean>();
+    const atGate = Promise.withResolvers<boolean>();
+    let second: Promise<string> | undefined;
+
+    // While A's first add is on its way: B lands, and a retry of A reads
+    // the current version and waits at its own add.
+    const first = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () => {
+            await admin.api.skills.approve(sb.id);
+            second = outcome(
+              approveShare(
+                sharedStoreHooks({
+                  1: async () => {
+                    atGate.resolve(true);
+                    await gate.promise;
+                  },
+                }),
+                deciding,
+                sa.id
+              )
+            );
+            await atGate.promise;
+          },
+        }),
+        deciding,
+        sa.id
+      )
+    );
+    gate.resolve(true);
+    const retry = await second;
+
+    expect({
+      first,
+      retry,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: sa.id },
+        { api: b.api, id: sb.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "skills.changed",
+      retry: "ok",
+      live: [["A", 2]],
+      rows: [
+        ["approved", 2],
+        ["approved", 1],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.share.approve_failed",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("fails an add made stale by another add, whatever became of later approvals, and keeps it to approve again", async () => {
+    const [a, b, c, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("later-failed");
+    const shareOfText = async (api: SessionApi, text: string) => {
+      const saved = await api.skills.save(skillText(name, text));
+      return await api.skills.share(name, saved.version);
+    };
+    const sa = await shareOfText(a.api, "A");
+    const sb = await shareOfText(b.api, "B");
+    const sc = await shareOfText(c.api, "C");
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // C is decided first and its add fails. While A's add is on its way,
+    // B is approved and its add fails, and C is approved again and lands.
+    const cFirst = await outcome(
+      approveShare(sharedStoreFailing("addInstructions"), deciding, sc.id)
+    );
+    const first = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () => {
+            await outcome(
+              approveShare(
+                sharedStoreFailing("addInstructions"),
+                deciding,
+                sb.id
+              )
+            );
+            await admin.api.skills.approve(sc.id);
+          },
+        }),
+        deciding,
+        sa.id
+      )
+    );
+    const halfway = {
+      cFirst,
+      first,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: sa.id },
+        { api: b.api, id: sb.id },
+        { api: c.api, id: sc.id },
+      ]),
+    };
+    // A is still there to approve: it lands over C.
+    const again = await outcome(admin.api.skills.approve(sa.id));
+
+    expect({
+      ...halfway,
+      again,
+      liveAfter: await liveOf(member.api, name),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      cFirst: "Error: Out of reach, for the test",
+      first: "skills.changed",
+      live: [["C", 1]],
+      rows: [
+        ["approved", null],
+        ["approved", null],
+        ["approved", 1],
+      ],
+      again: "ok",
+      liveAfter: [["A", 2]],
+      events: [
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.added",
+        "skill.share.approve_failed",
+        "skill.share.added",
       ],
     });
   });

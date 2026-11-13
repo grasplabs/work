@@ -9027,10 +9027,6 @@ msgstr "Aucun : son fournisseur a été supprimé."
 msgid "None."
 msgstr "Aucun."
 
-#: src/brain/skills-page.tsx
-msgid "Not added: a later approval of this name takes its place."
-msgstr "Non ajouté : une approbation plus récente sous ce nom prend sa place."
-
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"

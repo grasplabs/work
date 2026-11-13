@@ -11,8 +11,6 @@ export const skillErrors = defineErrorFamily({
   "skills.not_found": "There's no such skill, or not at that version.",
   "skills.changed":
     "The skill changed while this was on its way: nothing was written. Try again.",
-  "skills.superseded":
-    "This wasn't added: the skill changed while it was being added, and a later approval of that name takes its place.",
   "skills.name_erased":
     "You deleted a skill of that name for good: give this one another name.",
 });
@@ -33,15 +31,10 @@ export interface SkillText {
 
 /**
  * Where a share of a skill stands: waiting for an admin; approved (added
- * once its `version` is set); declined; or superseded: approved, but the
- * company's skill changed while its text was being added, so it never
- * was, and a later approval of the same name takes its place.
+ * once its `version` is set; until then, approving it again adds it); or
+ * declined.
  */
-export type SkillShareStatus =
-  | "pending"
-  | "approved"
-  | "declined"
-  | "superseded";
+export type SkillShareStatus = "pending" | "approved" | "declined";
 
 /** A person's ask to share one of their own skills with the company. */
 export interface SkillShare {

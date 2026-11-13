@@ -13,7 +13,7 @@ import type {
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, gt, isNull, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -64,10 +64,10 @@ import { shippedSkills } from "./shipped-skills.ts";
 //   has with the version it made) and auditing nothing twice. Of several
 //   approvals of one name, the last add to land is live, and every row and
 //   event says at which version: the store writes an add only over the
-//   version it was read at, so one refused as stale never landed, and is
-//   superseded when a later approval exists. Retiring is audited before
-//   the Brain write too. Nothing uses a company skill but from the Brain,
-//   so none is used before it is in.
+//   version it was read at, so one refused as stale never landed, ends as
+//   failed, and lands once approved again. Retiring is audited before the
+//   Brain write too. Nothing uses a company skill but from the Brain, so
+//   none is used before it is in.
 // - A skill granting access: none does. Writing, sharing, approving or
 //   retiring one creates no permission, binding or grant.
 // - Audit: requests and decisions by the share's ID; a company skill's
@@ -376,83 +376,25 @@ const sayOutcome = async (
 };
 
 /**
- * Whether an approval of the same name decided after `share`'s exists:
- * asked only once the store refused `share`'s add as stale, so it never
- * landed and that later approval takes its place. Two decided in the same
- * millisecond count as neither later: then the stale refusal ends as
- * failed, and approving again settles it, which is harmless.
- */
-const laterApprovalExists = async (
-  env: Env,
-  share: Pick<ShareRow, "id" | "name" | "decidedAt">
-): Promise<boolean> => {
-  if (share.decidedAt === null) {
-    return false;
-  }
-  const [later] = await drizzle(env.DB)
-    .select({ id: skillShares.id })
-    .from(skillShares)
-    .where(
-      and(
-        eq(skillShares.name, share.name),
-        eq(skillShares.status, "approved"),
-        ne(skillShares.id, share.id),
-        gt(skillShares.decidedAt, share.decidedAt)
-      )
-    )
-    .limit(1);
-  return later !== undefined;
-};
-
-/**
- * Marks `share` superseded, its text dropped, with its outcome
- * (`skill.share.superseded`), once: while it is still approved and not
- * added.
- */
-const supersede = async (
-  env: Env,
-  by: Identity,
-  share: Pick<ShareRow, "id">
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db
-      .update(skillShares)
-      .set({ status: "superseded", text: null })
-      .where(
-        and(
-          eq(skillShares.id, share.id),
-          eq(skillShares.status, "approved"),
-          isNull(skillShares.version)
-        )
-      ),
-    outboxedIfChanged(db, shareEntry(by, "superseded", share.id)),
-  ]);
-};
-
-/**
  * Approves the share `id` as the admin `by`, as a pair of audit events:
  * the decision (`skill.share.approved`), written with the decision before
  * anything reaches the Brain, and its outcome, one per attempt.
  *
- * The rule: the last add to land is live, and every row and event says
- * at which version. The add is made over the company skill's current
- * version as read here; the store writes it only while that is still
- * current (in its own transaction), and answers a change it already has
- * (this share's, `share:<id>`) with the version it made, first. So:
- * - landed: the version it answered holds this share's text and was
- *   current when it landed; recorded on the row with
- *   `skill.share.added`, always, however late (a retry after a lost
- *   reply included).
- * - refused as stale: this change never landed. With a later approval of
- *   the same name, the share is `superseded` (`skill.share.superseded`);
- *   without one, `skill.share.approve_failed`, and the admin approves
- *   again.
- * - any other failure: `skill.share.approve_failed`; approving again
- *   finishes it, without a second decision.
- * A decision with no outcome is one whose attempt stopped half-way.
+ * The rule: the last add to land is live, and every row and event says at
+ * which version. The add is made over the company skill's current version
+ * as read here; the store writes it only while that is still current (in
+ * its own transaction), and answers a change it already has (this
+ * share's, `share:<id>`) with the version it made, first. Landed, the
+ * version it answered is recorded on the row with `skill.share.added`,
+ * always, however late. Anything else, a stale refusal included (the
+ * change never landed), ends the attempt as `skill.share.approve_failed`:
+ * the share stays approved with its text, and approving it again reads
+ * the current version afresh and lands it, without a second decision. A
+ * decision with no outcome is one whose attempt stopped half-way.
  * `skills.not_found` for a share there isn't or that was declined or
- * replaced; `skills.superseded` for one superseded.
+ * replaced. A decline acts only on a waiting share, and an add only
+ * follows a decision that moved it on from waiting, so a declined share
+ * never has an add on its way.
  */
 export const approveShare = async (
   env: Env,
@@ -481,9 +423,6 @@ export const approveShare = async (
   }
   // As it is now: approved by this call or one before, or not at all.
   const decided = await shareById(env, row.id);
-  if (decided.status === "superseded") {
-    throw skillErrors.create("skills.superseded");
-  }
   if (decided.status !== "approved" || decided.text === null) {
     if (decided.status === "approved") {
       return shareOf(decided);
@@ -500,15 +439,6 @@ export const approveShare = async (
       after,
     }));
   } catch (error) {
-    // Refused as stale: this change never landed. A later approval of
-    // the name takes its place.
-    if (
-      skillErrors.codeOf(error) === "skills.changed" &&
-      (await laterApprovalExists(env, decided))
-    ) {
-      await supersede(env, by, decided);
-      throw skillErrors.create("skills.superseded");
-    }
     await sayOutcome(
       env,
       shareEntry(by, "approve_failed", decided.id),
