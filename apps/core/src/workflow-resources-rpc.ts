@@ -25,7 +25,6 @@ import type {
   WorkflowVersionSource,
   WorkflowActivity,
   WorkflowFile,
-  WorkflowKnowledge,
 } from "@grasp-os/shared/workflow-resources";
 
 import {
@@ -59,11 +58,7 @@ import {
   workflowDraft,
 } from "./workflow-drafts.ts";
 import { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
-import {
-  workflowActivity,
-  workflowFiles,
-  workflowKnowledge,
-} from "./workflow-own.ts";
+import { workflowActivity, workflowFiles } from "./workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
 import {
   createWorkflowResource,
@@ -291,13 +286,6 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await listResourceRuns(this.#env, person, id)
-    );
-  }
-
-  async knowledge(id: string): Promise<WorkflowKnowledge[]> {
-    return await withPerson(
-      this.#check,
-      async (person) => await workflowKnowledge(this.#env, person, id)
     );
   }
 

@@ -204,13 +204,24 @@ export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
 /**
  * Who reads, as the host resolves them now: the person, and each group the
- * host counts them in.
+ * host counts them in. No person (`null`) reads as the groups alone, so
+ * no `owner` source matches: what the host's code recalls for someone
+ * never holds what only they may read.
  */
 export const readerSchema = z.strictObject({
-  person: principalSchema,
+  person: principalSchema.nullable(),
   groups: z.array(principalSchema).max(readerGroupsMax),
 });
 export type Reader = z.infer<typeof readerSchema>;
+
+/**
+ * A reader who acts as their person, as a change made in their name (a
+ * memory they retire or confirm) needs: never one with no person.
+ */
+export const personReaderSchema = readerSchema.extend({
+  person: principalSchema,
+});
+export type PersonReader = z.infer<typeof personReaderSchema>;
 
 /** Which model and build made a vector, as the host's embedder says. */
 export const embedModelSchema = z.strictObject({
@@ -1567,7 +1578,7 @@ export const nameSchema = someText(valueMaxLength).refine(
  * its exact identifiers, the first entity of its kind holding any of
  * them; or else, given no identifier, the one entity of its kind holding
  * one of its names of two words or more through memories read by exactly
- * the add's readers ("Cards and proposals" below); or else a new one.
+ * the add's readers ("Cards and links" below); or else a new one.
  * Its names and identifiers are kept as given by each memory of the add
  * that mentions it, so each is visible only to those who can read such a
  * memory.
@@ -1888,14 +1899,14 @@ export interface ContestedFact {
  */
 export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
-  reader: readerSchema,
+  reader: personReaderSchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
 
 /** A memory the reader confirms, as their own word. */
 export const confirmRequestSchema = z.strictObject({
   memory: memoryIdSchema,
-  reader: readerSchema,
+  reader: personReaderSchema,
 });
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
 
@@ -2018,7 +2029,7 @@ export interface EntityNamesPage {
  */
 export type MemoryChangeOutcome = "done" | "nothing";
 
-// Cards and proposals (cards.ts, linking.ts).
+// Cards and links (cards.ts, linking.ts).
 //
 // An entity's card is a view, built for each reader when asked, from the
 // memories that reader may read: never stored, so nothing has to be kept
@@ -2028,10 +2039,8 @@ export type MemoryChangeOutcome = "done" | "nothing";
 // known id, an exact identifier, or else an exact name, only where one
 // entity of its kind alone holds that name through memories read by
 // exactly the add's readers (so a link is never decided on what other
-// readers hold). A likely match short of that (one name's words all among
-// the other's, whole) is a proposal, never a link: worked out when a
-// reader asks, from the names they may read alone, never stored.
-// Accepting one is not built here (GRA-1835).
+// readers hold). A likely match short of that is never a link: proposing
+// one is GRA-1857's, joining two GRA-1835's.
 //
 // The order of adds decides a link. An entity given an identifier links
 // by its identifiers alone; one given none links by its exact name. So
@@ -2100,37 +2109,6 @@ export interface Card {
   notes: Memory[];
   more: boolean;
   next?: MemoriesCursor;
-}
-
-/**
- * Proposals to list for a reader: those for one entity, a page at a
- * time, after the candidate `after` (the last of the page before).
- */
-export const proposalsRequestSchema = z.strictObject({
-  entity: entityIdSchema,
-  reader: readerSchema,
-  after: entityIdSchema.optional(),
-  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
-});
-export type ProposalsRequest = z.input<typeof proposalsRequestSchema>;
-
-/**
- * A proposal that two entities may be one: the entity asked about
- * (`entity`) and one it may be (`candidate`), each as the reader sees
- * it, with the names that matched, as memories the reader may read gave
- * them.
- */
-export interface Proposal {
-  entity: Entity;
-  candidate: Entity;
-  name: string;
-  candidateName: string;
-}
-
-/** A page of proposals, by the candidate's id, and whether more follow. */
-export interface ProposalPage {
-  proposals: Proposal[];
-  more: boolean;
 }
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).
@@ -2274,6 +2252,12 @@ export interface Brain {
    * (across.ts `packAcross`): `recall` is that, over this store alone.
    */
   find: (request: RecallRequest) => Promise<Finding>;
+  /**
+   * What `find` finds of passages alone: no memory is read, so no memory
+   * way runs, counts or can fail it (`memories` is empty). For a host
+   * that hands on passages alone.
+   */
+  findPassages: (request: RecallRequest) => Promise<Finding>;
   /**
    * A version of a source, current or history, whole as it was added, for
    * a reader among that version's readers and the source's current
@@ -2554,12 +2538,6 @@ export interface Brain {
    * read mentioned it by then.
    */
   readCard: (request: CardRequest) => Promise<Card | null>;
-  /**
-   * A page of the proposals for an entity the reader may see, worked out
-   * now from the names they may read: an entity they may not see has
-   * none, alike for one nobody holds.
-   */
-  listProposals: (request: ProposalsRequest) => Promise<ProposalPage>;
 }
 
 /** The shared store's name: everything readable by more than one person. */

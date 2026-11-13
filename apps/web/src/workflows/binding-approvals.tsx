@@ -110,8 +110,8 @@ export const targetWords = (
       );
       return i18n._(msg`Answered by ${deciders}`);
     }
-    case "knowledge": {
-      return i18n._(msg`A Brain collection it may read`);
+    case "brain": {
+      return i18n._(msg`The Brain, as each run's person may read it`);
     }
     case "event": {
       return target.source === undefined

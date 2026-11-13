@@ -25,7 +25,7 @@ const model: EmbedModel = { name: "counts-test", build: "1" };
 const dimensions = 4;
 const vector = [1, 0.1, 0.1, 0.1];
 
-const reader: Reader = { person: "reader", groups: [] };
+const reader: Reader & { person: string } = { person: "reader", groups: [] };
 const own: Access = { kind: "owner", person: reader.person };
 
 /** Adds `text` to a source of its own, with a vector for its first chunk. */

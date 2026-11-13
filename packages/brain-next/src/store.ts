@@ -10,7 +10,6 @@ import type { BrainBucket } from "./bucket.ts";
 import { readCard } from "./cards.ts";
 import {
   cardRequestSchema,
-  proposalsRequestSchema,
   attributeRuleOf,
   entityKinds,
   confirmRequestSchema,
@@ -51,8 +50,6 @@ import {
 import type {
   Card,
   CardRequest,
-  ProposalPage,
-  ProposalsRequest,
   AddedMemories,
   ConfirmRequest,
   ContestedPage,
@@ -152,7 +149,6 @@ import {
   vectorsPrefix,
 } from "./files.ts";
 import { enqueueHandOvers } from "./handover.ts";
-import { listProposals } from "./linking.ts";
 import { listSources, listVersions } from "./listing.ts";
 import {
   confirmMemory,
@@ -168,7 +164,7 @@ import {
   newRecallCounts,
   recallOverviewOf,
 } from "./recall-counts.ts";
-import { find, recall } from "./recall.ts";
+import { find, findPassages, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
@@ -875,6 +871,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * each way counted as `recall` counts it.
    */
   async find(request: RecallRequest): Promise<Finding> {
+    return await this.#find(request, find);
+  }
+
+  /**
+   * What `find` finds of passages alone: no memory way runs or counts
+   * (recall.ts `findPassages`).
+   */
+  async findPassages(request: RecallRequest): Promise<Finding> {
+    return await this.#find(request, findPassages);
+  }
+
+  /** `request` checked and found by `finding`, each way counted. */
+  async #find(request: RecallRequest, finding: typeof find): Promise<Finding> {
     const asked = checked(recallRequestSchema, request);
     this.#mayRead(asked.reader);
     const readable = await this.#readable();
@@ -883,7 +892,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       return nothingFound;
     }
     await this.#wakeForModel(asked);
-    return find(this.ctx.storage.sql, asked, countingInto(this.#recallCounts));
+    return finding(
+      this.ctx.storage.sql,
+      asked,
+      countingInto(this.#recallCounts)
+    );
   }
 
   /**
@@ -1919,21 +1932,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           limit: asked.limit,
         })
       : null;
-  }
-
-  /** A page of the proposals for an entity the reader may see (linking.ts). */
-  async listProposals(request: ProposalsRequest): Promise<ProposalPage> {
-    const asked = checked(proposalsRequestSchema, request);
-    this.#mayRead(asked.reader);
-    if (!(await this.#readable())) {
-      return { proposals: [], more: false };
-    }
-    return listProposals(this.ctx.storage.sql, {
-      entity: asked.entity,
-      reader: asked.reader,
-      ...(asked.after === undefined ? {} : { after: asked.after }),
-      limit: asked.limit,
-    });
   }
 
   /** One block repacked, in its own transaction: true when more are left. */

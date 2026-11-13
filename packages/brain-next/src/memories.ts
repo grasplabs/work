@@ -15,6 +15,7 @@ import type {
   EntityId,
   Memory,
   MemoryChangeOutcome,
+  PersonReader,
   Reader,
 } from "./contract.ts";
 import { readableSql } from "./reader-sets.ts";
@@ -731,7 +732,7 @@ const currentOfAttributeSql = memoriesSql({
  */
 export const confirmMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: Reader }
+  { id, reader }: { id: string; reader: PersonReader }
 ): MemoryChangeOutcome => {
   const at = readMoment(sql);
   const [target] = memoryRows(sql, currentOneSql, id, reader, at, 1);
@@ -796,7 +797,7 @@ export const confirmMemory = (
  */
 export const retireMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: Reader }
+  { id, reader }: { id: string; reader: PersonReader }
 ): MemoryChangeOutcome => {
   const asked = [
     id,

@@ -17,6 +17,7 @@ import type { Handed, Producers, SourceRef } from "./brain-next.ts";
 import { workflowStartReceipts } from "./db/core/schema.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
+import { evidenceOf } from "./workflows/run-evidence.ts";
 
 // What core hands over to the new Brain (GRA-1727), each source with who
 // may read it, read from core's own records when the Brain's work queue
@@ -33,7 +34,11 @@ import { detailsRemoved } from "./workflows/retention.ts";
 //   through the Brain than the run read for them. Core shows a run's raw
 //   result only while that person still holds the workflow's user role;
 //   the Brain's copy has no such check, so they keep recalling it after
-//   they lose the workflow (accepted for now: GRA-1829).
+//   they lose the workflow (accepted for now: GRA-1829). A run that
+//   recalled from the Brain (its recall evidence, run-evidence.ts) hands
+//   over only how it ended, never what it returned: the Brain never holds
+//   a second copy of what it recalled, which would outlive that source
+//   being narrowed or erased (GRA-1731).
 //
 // Nothing for a person whose erasure has begun (core's `personErasures`):
 // a reader answers `erased`, with the readers it would have named, and the
@@ -80,7 +85,11 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   ) {
     return gone;
   }
-  const { result, error } = await resultOf(env, row);
+  const [{ result, error }, recalled] = await Promise.all([
+    resultOf(env, row),
+    evidenceOf(env, row.id),
+  ]);
+  const returned = recalled.length > 0 ? undefined : result;
   // How it ended, and a failure by its code alone, which the run's row
   // keeps: the same text whether the engine still answers or not.
   const ending = [
@@ -94,7 +103,7 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
     change: "end",
     text: [
       ...ending,
-      ...(result === undefined ? [] : [JSON.stringify(result)]),
+      ...(returned === undefined ? [] : [JSON.stringify(returned)]),
     ].join("\n\n"),
     // Never a cut part of a result, which would read as half a document.
     whenTooLarge: [...ending, "Its result was too large to keep."].join("\n\n"),

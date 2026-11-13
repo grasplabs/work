@@ -11,7 +11,8 @@
  * in: a module (or the store's class) and its probes, one per member:
  * `coreProbes` one per export of core's `brain-next.ts`,
  * `instructionProbes` one per export of core's `instruction-files.ts` (the
- * rules over the instruction files brain-next.ts names), `storeProbes` one
+ * rules over the instruction files brain-next.ts names), `recallProbes`
+ * one per export of core's `brain-recall.ts` (code's recall), `storeProbes` one
  * per public method of the Brain's store (its contract, and anything else
  * a holder of its namespace could call), `sourcesProbes` one per method of
  * the Brain's Sources page's RPC (`session.brainSources`, as the signed-in
@@ -65,6 +66,11 @@ import {
   enqueueWork,
   workAttemptsMax,
 } from "@grasp-os/brain-next/work";
+import {
+  chatIdSchema,
+  permissionIdSchema,
+  workspaceIdSchema,
+} from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -82,6 +88,7 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import * as codeRecall from "../src/brain-recall.ts";
 import * as brainSkills from "../src/brain-skills.ts";
 import { BrainSourcesRpc } from "../src/brain-sources-rpc.ts";
 import { producersOf } from "../src/brain-sources.ts";
@@ -101,7 +108,7 @@ export interface Probing {
    * their teams as core names its groups (`team:<id>`, core's
    * brain-next.ts).
    */
-  reader: Reader;
+  reader: Reader & { person: string };
   /**
    * Whether core's recall reads the reader's own store too, as their own
    * web chat does, or the shared store alone, as an App's does.
@@ -1171,50 +1178,6 @@ const recallFixture = async (probing: Probing): Promise<MemoryFixture> => {
 };
 
 /**
- * The proposal probes' fixture: the memory fixture, and two customers of
- * the reader's whose names likely match ("Seen <word>" and "Seen <word>
- * Holding"), with a third name that matches them only in a memory the
- * reader may not read, every marker in it. Asked for the first, a
- * reader's proposals must name the second alone.
- */
-const proposalFixture = async (
-  probing: Probing
-): Promise<MemoryFixture & { own: string }> => {
-  const { reader, markers } = probing;
-  const fixture = await memoryFixture(probing);
-  const named = (name: string, access: Access) => ({
-    change: crypto.randomUUID(),
-    access,
-    entities: [{ key: "c", kind: "customer" as const, names: [name] }],
-    memories: [
-      {
-        about: "c",
-        type: "fact" as const,
-        statement: name,
-        speaker: { kind: "system" as const },
-        basis: { kind: "writer" as const, writer: stranger() },
-      },
-    ],
-  });
-  // A group the reader is in, as the memory fixture's: what one person
-  // alone may read is never in the shared store.
-  const mine: Access = {
-    kind: "audience",
-    group: reader.groups[0] ?? stranger(),
-  };
-  const word = crypto.randomUUID().slice(0, 8);
-  const own = await store().addMemories(named(`Seen ${word}`, mine));
-  await store().addMemories(named(`Seen ${word} Holding`, mine));
-  await store().addMemories(
-    named(`Seen ${word} ${markedText(markers)}`, {
-      kind: "audience",
-      group: stranger(),
-    })
-  );
-  return { ...fixture, own: own.entities.c ?? "" };
-};
-
-/**
  * `personId`, once a first erasure of them settled and its time passed: a
  * person's own store answers that it is still deleting until an add under
  * way could have written its file, so each is compared after that, as if
@@ -1543,6 +1506,24 @@ export const coreProbes = {
         "nothing"
       ),
       await check("the hidden versions", hiddenVersions, personId, "hidden"),
+      // As a chat's code pinned them: the reader's teams alone.
+      await answer(
+        "the hidden versions, as the teams",
+        async () =>
+          await coreBrain.readableVersionsAs(env, personId, hiddenVersions, {
+            reach: "teams",
+          }),
+        "hidden"
+      ),
+      // As an App's or a run's recall pinned them: the company alone.
+      await answer(
+        "the hidden versions, as the company",
+        async () =>
+          await coreBrain.readableVersionsAs(env, personId, hiddenVersions, {
+            reach: "company",
+          }),
+        "hidden"
+      ),
       await check(
         "as someone who isn't a member",
         [{ source: hidden, version: 1 }],
@@ -1626,6 +1607,34 @@ export const coreProbes = {
         "a field the scope hasn't",
         unchecked({ scope: "company", name: "facts", appId: text })
       ),
+    ];
+  },
+  // Pure: a request as code sends it, read; what is refused holds the
+  // markers, and is refused alike.
+  codeRecallOf: async ({ markers, sharedWord }) => {
+    const of = async (name: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return coreBrain.codeRecallOf(input);
+      });
+    const hidden = markers.join(" ");
+    return [
+      await of("a request", {
+        question: sharedWord,
+        budget: { tokens: 1 },
+        asOf: "2026-03-14T23:59:59.999+01:00",
+      }),
+      await of("a reader of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        reader: hidden,
+      }),
+      await of("a moment of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        asOf: hidden,
+      }),
+      await of("no tokens", { question: hidden, budget: { tokens: 0 } }),
     ];
   },
   instructionFileOf: async ({ markers }) => {
@@ -2160,39 +2169,6 @@ export const coreProbes = {
             name: "draw-a-workflow",
             version: 1,
           })
-      ),
-    ];
-  },
-  entityProposalsAs: async (probing) => {
-    const fixture = await proposalFixture(probing);
-    const list = async (
-      name: string,
-      entity: string,
-      about?: Answer["about"],
-      after?: string
-    ) =>
-      await answer(
-        name,
-        async () =>
-          await coreBrain.entityProposalsAs(env, probing.personId, {
-            entity,
-            ...(after === undefined ? {} : { after: unchecked(after) }),
-          }),
-        about
-      );
-    return [
-      await list("an entity no one added", crypto.randomUUID(), "nothing"),
-      await list(
-        "an entity only hidden memories name",
-        fixture.hidden,
-        "hidden"
-      ),
-      await list("the reader's own, which a hidden name matches", fixture.own),
-      await list(
-        "after an id of markers",
-        fixture.own,
-        undefined,
-        probing.markers.join("")
       ),
     ];
   },
@@ -2907,7 +2883,7 @@ const firstChunksOf = (versions: Probing["hiddenVersions"]): ChunkRef[] =>
  * place or moved a score would show), and a model holding those alone,
  * whose answer is what the reader gets when nothing hidden is stored.
  */
-const vectorScene = async (reader: Reader) => {
+const vectorScene = async (reader: Reader & { person: string }) => {
   const question = randomVector();
   const own = await chunkedSource(
     { kind: "owner", person: reader.person },
@@ -3062,6 +3038,155 @@ const meaningProbes = async ({
     ),
   ].map((answered) => echoesHidden(answered, markers));
 };
+
+/** Each export of core's brain-recall.ts. */
+type RecallMember = keyof typeof codeRecall;
+
+/** An App's code acting for `personId`: an App's recall reads as the company. */
+const readersApp = (personId: string): Authority =>
+  authoritySchema.parse({
+    subject: { type: "app", appId: `app-${crypto.randomUUID()}` },
+    onBehalfOf: personId,
+    mode: "interactive",
+    appVersion: 1,
+  });
+
+/**
+ * An App acting for `personId`, holding an active grant to read the
+ * Brain, as an App's recall needs one (brain-recall.ts): its authority,
+ * and the grant's ID. Code's recall from an App or a workflow reads only
+ * what everyone in the company may, so nothing of a team's or a person's
+ * may come back, whoever it acts for.
+ */
+const appWithBrain = async (
+  personId: string
+): Promise<{ authority: Authority; permissionId: string }> => {
+  const authority = readersApp(personId);
+  const permissionId = crypto.randomUUID();
+  if (authority.subject.type !== "app") {
+    throw new Error("Not an App");
+  }
+  await env.DB.prepare(
+    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
+  )
+    .bind(permissionId, authority.subject.appId, personId, Date.now())
+    .run();
+  return { authority, permissionId };
+};
+
+/** An App recalling as `as`, in its own context, under `grant`. */
+const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
+  authority: as,
+  context:
+    as.subject.type === "app"
+      ? { type: "app", appId: as.subject.appId }
+      : {
+          type: "chat",
+          workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+        },
+  permissionId: permissionIdSchema.parse(grant),
+  actor: { type: "system" },
+});
+
+/** A recall as code asks for one, from what a probe asks. */
+const codeAsk = ({ question, budget, asOf }: PackAsk) => ({
+  question,
+  budget,
+  ...(asOf === undefined ? {} : { asOf: asOf.toISOString() }),
+});
+
+/** One probe per export of core's brain-recall.ts. */
+export const recallProbes = {
+  // Code's recall, as an App or a workflow makes it: under an App's
+  // grant, acting for the reader, asked every way the store is, as code
+  // sends it, then every way it refuses, the markers in what is refused.
+  recallFor: async (probing) => {
+    const { authority, permissionId } = await appWithBrain(probing.personId);
+    const recall = async (
+      input: unknown,
+      as = authority,
+      grant = permissionId
+    ) => await codeRecall.recallFor(env, callerOf(as, grant), input);
+    const hidden = probing.markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(
+        probing,
+        momentsOf(probing),
+        async (asking) => await recall(codeAsk(asking))
+      )),
+      await answer(
+        "the shared word",
+        async () =>
+          await recall({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "too long a question",
+        async () =>
+          await recall({
+            question: `${hidden} `
+              .repeat(questionMaxLength)
+              .slice(0, questionMaxLength + 1),
+            budget: whole,
+          })
+      ),
+      await answer(
+        "no tokens",
+        async () => await recall({ question: hidden, budget: { tokens: 0 } })
+      ),
+      await answer(
+        "a moment named by the markers",
+        async () =>
+          await recall({ question: hidden, budget: whole, asOf: hidden })
+      ),
+      await answer(
+        "a reader named by the markers",
+        async () =>
+          await recall({ question: hidden, budget: whole, reader: hidden })
+      ),
+      await answer(
+        "the markers, under a grant the App doesn't hold",
+        async () =>
+          await recall(
+            { question: hidden, budget: whole },
+            authority,
+            crypto.randomUUID()
+          )
+      ),
+      await answer(
+        "the markers, for someone who isn't a member",
+        async () =>
+          await recall(
+            { question: hidden, budget: whole },
+            readersApp(stranger())
+          )
+      ),
+    ];
+  },
+  // Pure: what a request is, never what it holds.
+  isBrainRecall: async ({ markers, sharedWord }) => {
+    const is = async (name: string, input: unknown) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return codeRecall.isBrainRecall(input);
+      });
+    const hidden = markers.join(" ");
+    return [
+      await is("a request", { question: sharedWord, budget: { tokens: 1 } }),
+      await is("one naming a reader of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        reader: hidden,
+      }),
+      await is("a moment of the markers", {
+        question: hidden,
+        budget: { tokens: 1 },
+        asOf: hidden,
+      }),
+    ];
+  },
+} satisfies Record<RecallMember, Probe>;
 
 /** The probes of the store's memories and entities. */
 const memoryProbes = {
@@ -3650,7 +3775,7 @@ export const memoriesProbes = (() => {
   return { rememberFor: probes.remember, forgetFor: probes.forget };
 })() satisfies Record<keyof typeof brainMemories, Probe>;
 
-/** The probes of cards and proposals. */
+/** The probes of cards. */
 const linkingProbes = {
   readCard: async (probing) => {
     const { reader } = probing;
@@ -3761,41 +3886,6 @@ const linkingProbes = {
             reader,
             after: unchecked({ memory: probing.markers.join("") }),
           })
-      ),
-    ];
-  },
-  listProposals: async (probing) => {
-    const { reader } = probing;
-    const fixture = await proposalFixture(probing);
-    const list = async (
-      name: string,
-      entity: string,
-      about?: Answer["about"],
-      after?: string
-    ) =>
-      await answer(
-        name,
-        async () =>
-          await store().listProposals({
-            entity,
-            reader,
-            ...(after === undefined ? {} : { after: unchecked(after) }),
-          }),
-        about
-      );
-    return [
-      await list("an entity no one added", crypto.randomUUID(), "nothing"),
-      await list(
-        "an entity only hidden memories name",
-        fixture.hidden,
-        "hidden"
-      ),
-      await list("the reader's own, which a hidden name matches", fixture.own),
-      await list(
-        "after an id of markers",
-        fixture.own,
-        undefined,
-        probing.markers.join("")
       ),
     ];
   },
@@ -3982,6 +4072,24 @@ export const storeProbes = {
       ),
     ];
   },
+  // What recall finds of passages alone: no memory, the same questions.
+  findPassages: async (probing) => {
+    await recallFixture(probing);
+    const find = async (asking: PackAsk) =>
+      await store().findPassages({ ...asking, reader: probing.reader });
+    const whole = { tokens: recallBudgetMax };
+    return [
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await find({ question: "Plain", budget: whole })
+      ),
+      ...(await askedOfMarkers(probing, momentsOf(probing), find)),
+      await answer(
+        "the shared word",
+        async () => await find({ question: probing.sharedWord, budget: whole })
+      ),
+    ];
+  },
   // What recall finds before it is packed: the same questions, answered
   // as lists with their order keys, must hold no marker either.
   find: async (probing) => {
@@ -4055,7 +4163,82 @@ export const storeProbes = {
       );
       return [before, after].map((answered) => ({ ...answered, like }));
     };
+    // A reader who names no person (a chat's code, an App's: `teams` or
+    // `company`), of the same groups: the shared store holds nothing one
+    // person alone may read, so every memory and entity read answers them
+    // byte for byte as it answers the person, and none throws on null.
+    const asNoPerson = async (): Promise<Answer[]> => {
+      const noPerson: Reader = { person: null, groups: probing.reader.groups };
+      const reads: [string, (reader: Reader) => Promise<unknown>][] = [
+        [
+          "finding Plain",
+          async (reader) =>
+            await store().find({ question: "Plain", budget: whole, reader }),
+        ],
+        [
+          "finding the markers",
+          async (reader) =>
+            await store().find({
+              question: probing.markers.join(" "),
+              budget: whole,
+              reader,
+            }),
+        ],
+        [
+          "the card of their own",
+          async (reader) =>
+            await store().readCard({ entity: fixture.seen, reader }),
+        ],
+        [
+          "the card of a hidden entity",
+          async (reader) =>
+            await store().readCard({ entity: fixture.hidden, reader }),
+        ],
+        [
+          "the memories of their own",
+          async (reader) =>
+            await store().readMemories({ entity: fixture.seen, reader }),
+        ],
+        [
+          "their own entity",
+          async (reader) =>
+            await store().readEntity({ entity: fixture.seen, reader }),
+        ],
+        [
+          "entities named Plain",
+          async (reader) =>
+            await store().findEntities({ name: "Plain", reader }),
+        ],
+        [
+          "entities by the hidden reference",
+          async (reader) =>
+            await store().findEntities({
+              identifier: { type: "ref", value: fixture.hiddenRef },
+              reader,
+            }),
+        ],
+      ];
+      const answers: Answer[] = [];
+      for (const [name, read] of reads) {
+        const like = `as no person: ${name}`;
+        // oxlint-disable-next-line no-await-in-loop -- one read at a time
+        const asPerson = await answer(
+          `${name}, as the person`,
+          async () => await read(probing.reader),
+          "nothing"
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one read at a time
+        const asNone = await answer(
+          `${name}, as no person`,
+          async () => await read(noPerson),
+          "hidden"
+        );
+        answers.push({ ...asPerson, like }, { ...asNone, like });
+      }
+      return answers;
+    };
     return [
+      ...(await asNoPerson()),
       ...(await reachedThroughHidden()),
       await answer(
         "the reader's own entity, which hidden relations name",
@@ -4566,11 +4749,13 @@ export const storeProbes = {
       more: Partial<{
         after: { addedAt: Date; source: string };
         limit: number;
-      }> = {}
+      }> = {},
+      as: Reader = reader
     ) =>
       await answer(
         name,
-        async () => await store().listSources({ reader, prefixes, ...more }),
+        async () =>
+          await store().listSources({ reader: as, prefixes, ...more }),
         about
       );
     const hidden = whollyHidden(hiddenVersions).map(keyOf);
@@ -4592,7 +4777,16 @@ export const storeProbes = {
         await list("every hidden source at once", atOnce, "hidden"),
         await list("every hidden source, one a page", atOnce, "hidden", {
           limit: 1,
-        })
+        }),
+        // As a reader with no person, as code's recall reads: their
+        // groups alone, so nothing of theirs alone either.
+        await list(
+          "every hidden source at once, as no person",
+          atOnce,
+          "hidden",
+          {},
+          { ...reader, person: null }
+        )
       );
     }
     asked.push(
@@ -4644,14 +4838,15 @@ export const storeProbes = {
       name: string,
       source: string,
       before?: number,
-      about?: Answer["about"]
+      about?: Answer["about"],
+      as: Reader = reader
     ) =>
       await answer(
         name,
         async () =>
           await store().listVersions({
             source,
-            reader,
+            reader: as,
             ...(before === undefined ? {} : { before }),
           }),
         about
@@ -4672,7 +4867,16 @@ export const storeProbes = {
         undefined,
         "hidden"
       );
-      asked.push(answered);
+      // As a reader with no person, as code's recall reads.
+      // oxlint-disable-next-line no-await-in-loop -- one listing at a time
+      const asNoPerson = await list(
+        `hidden source ${index}, as no person`,
+        keyOf(source),
+        undefined,
+        "hidden",
+        { ...reader, person: null }
+      );
+      asked.push(answered, asNoPerson);
     }
     for (const [index, { source, version }] of hiddenVersions.entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one listing at a time
@@ -5424,6 +5628,7 @@ export const brainSurfaces = [
   },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
   { name: "skills", module: brainSkills, probes: skillProbes },
+  { name: "recall", module: codeRecall, probes: recallProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
   { name: "sources", module: BrainSourcesRpc, probes: sourcesProbes },
   { name: "memories", module: brainMemories, probes: memoriesProbes },

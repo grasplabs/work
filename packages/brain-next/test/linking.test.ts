@@ -255,7 +255,7 @@ describe("an entity's card", () => {
 
 describe("linking entities", () => {
   // Threat 2: an exact name links within the add's own set of readers only.
-  it("links an entity by its exact name within the same readers, and proposes it across others", async () => {
+  it("links an entity by its exact name within the same readers, never across others", async () => {
     const [group, other] = [unique("team"), unique("other")];
     const name = `${word()} ${word()}`;
     const first = await remember(
@@ -273,47 +273,14 @@ describe("linking entities", () => {
       [{ key: "c", kind: "supplier", names: [name] }],
       [fact("c", `${name} sends invoices`)]
     );
-    // Threat 3: seen only by a reader of both names that matched.
-    const forGroup = await shared().listProposals({
-      entity: first.entities.c ?? "",
-      reader: readerOf(unique("ann"), group),
-    });
-    const forBoth = await shared().listProposals({
-      entity: elsewhere.entities.c ?? "",
-      reader: readerOf(unique("bob"), group, other),
-    });
 
     expect({
       linked: again.entities.c === first.entities.c,
       apart: elsewhere.entities.c !== first.entities.c,
-      forGroup,
-      forBoth: forBoth.proposals.map(
-        ({ entity, candidate, name: matched, candidateName }) => ({
-          entity: entity.id,
-          candidate: candidate.id,
-          matched,
-          candidateName,
-        })
-      ),
-      more: forBoth.more,
-    }).toStrictEqual({
-      linked: true,
-      apart: true,
-      forGroup: { proposals: [], more: false },
-      forBoth: [
-        {
-          entity: elsewhere.entities.c,
-          candidate: first.entities.c,
-          matched: name,
-          // The first of the candidate's spellings the reader may read.
-          candidateName: name.toUpperCase(),
-        },
-      ],
-      more: false,
-    });
+    }).toStrictEqual({ linked: true, apart: true });
   });
 
-  // A name of one word is no exact evidence: a proposal, never a link.
+  // A name of one word is no exact evidence: never a link.
   // The order of adds decides: an entity given an identifier links only
   // by its identifiers, one given none by its exact name. So a name and
   // an email, then the name alone, are one entity; the name alone first,
@@ -350,9 +317,8 @@ describe("linking entities", () => {
     }).toStrictEqual({ emailFirst: true, nameFirst: false });
   });
 
-  it("never links two entities by a name of one word, and proposes them", async () => {
+  it("never links two entities by a name of one word", async () => {
     const group = unique("team");
-    const reader = readerOf(unique("ann"), group);
     const name = word();
     const first = await remember(
       audience(group),
@@ -364,135 +330,7 @@ describe("linking entities", () => {
       [{ key: "p", kind: "person", names: [name] }],
       [fact("p", `${name} works in sales`)]
     );
-    const proposals = await shared().listProposals({
-      entity: second.entities.p ?? "",
-      reader,
-    });
 
-    expect({
-      apart: first.entities.p !== second.entities.p,
-      candidates: proposals.proposals.map(({ candidate }) => candidate.id),
-    }).toStrictEqual({ apart: true, candidates: [first.entities.p] });
-  });
-
-  // A repeated word counts once, on either side: "X X" and "X" match.
-  it("matches a name with a repeated word both ways", async () => {
-    const group = unique("team");
-    const reader = readerOf(unique("ann"), group);
-    const name = word();
-    const { entities } = await remember(
-      audience(group),
-      [
-        { key: "a", kind: "customer", names: [`${name} ${name}`] },
-        { key: "b", kind: "customer", names: [name] },
-      ],
-      [fact("a", `${name} twice`), fact("b", `${name} once`)]
-    );
-    const fromRepeated = await shared().listProposals({
-      entity: entities.a ?? "",
-      reader,
-    });
-    const fromSingle = await shared().listProposals({
-      entity: entities.b ?? "",
-      reader,
-    });
-
-    expect({
-      fromRepeated: fromRepeated.proposals.map(({ candidate }) => candidate.id),
-      fromSingle: fromSingle.proposals.map(({ candidate }) => candidate.id),
-    }).toStrictEqual({
-      fromRepeated: [entities.b],
-      fromSingle: [entities.a],
-    });
-  });
-
-  // Threat 3: a likely match is whole words, one name's all among the other's.
-  it("proposes the names whose words are all among another's, a page at a time", async () => {
-    const group = unique("team");
-    const reader = readerOf(unique("ann"), group);
-    const name = word();
-    const add = async (names: string[]) =>
-      await remember(
-        audience(group),
-        names.map((one, index) => ({
-          key: `c${index}`,
-          kind: "customer" as const,
-          names: [one],
-        })),
-        names.map((one, index) => fact(`c${index}`, `${one} is a customer`))
-      );
-    const { entities } = await add([name]);
-    const likely = await add([
-      `${name} Holding`,
-      `The ${name} Group`,
-      `${name}s Holding`,
-    ]);
-    const entity = entities.c0 ?? "";
-    const first = await shared().listProposals({ entity, reader, limit: 1 });
-    const rest = await shared().listProposals({
-      entity,
-      reader,
-      after: first.proposals.at(-1)?.candidate.id,
-    });
-    // By id, as the store compares them: byte by byte (ids are ASCII).
-    const expected = [
-      likely.entities.c0 ?? "",
-      likely.entities.c1 ?? "",
-    ].toSorted((a, b) => (a < b ? -1 : 1));
-
-    expect({
-      pages: [first, rest].map(({ proposals, more }) => ({
-        candidates: proposals.map(({ candidate }) => candidate.id),
-        more,
-      })),
-    }).toStrictEqual({
-      pages: [
-        { candidates: [expected[0]], more: true },
-        { candidates: [expected[1]], more: false },
-      ],
-    });
-  });
-
-  // Threat 3: hidden versus absent. Names a reader may not read, matching
-  // or sharing a word, neither add, remove nor move a proposal of theirs.
-  it("gives a reader the proposals of a store without the names hidden from them", async () => {
-    const [seen, hidden] = [unique("seen"), unique("hidden")];
-    const reader = readerOf(unique("ann"), seen);
-    const [a, common, b] = [word(), word(), word()];
-    const name = `${a} ${common} ${b}`;
-    const { entities } = await remember(
-      audience(seen),
-      [
-        { key: "n", kind: "customer", names: [name] },
-        { key: "v", kind: "customer", names: [`${name} Holding`] },
-      ],
-      [fact("n", `${name} is new`), fact("v", `${name} Holding is known`)]
-    );
-    const entity = entities.n ?? "";
-    const before = await shared().listProposals({ entity, reader });
-    // More hidden names than any page holds: sharing one word and not
-    // matching, and matching likely.
-    for (const names of [
-      Array.from({ length: 100 }, () => `${word()} ${common}`),
-      Array.from({ length: 100 }, () => `${name} ${word()}`),
-      Array.from({ length: 100 }, () => common),
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one add at a time
-      await remember(
-        audience(hidden),
-        names.map((one, index) => ({
-          key: `h${index}`,
-          kind: "customer" as const,
-          names: [one],
-        })),
-        names.map((one, index) => fact(`h${index}`, `${one} is hidden`))
-      );
-    }
-    const after = await shared().listProposals({ entity, reader });
-
-    expect(after).toStrictEqual(before);
-    expect(before.proposals.map(({ candidate }) => candidate.id)).toStrictEqual(
-      [entities.v]
-    );
+    expect(first.entities.p).not.toBe(second.entities.p);
   });
 });

@@ -24,9 +24,9 @@ import { foldForSearch } from "./words.ts";
 // a relation relates to. Checked inside every statement, before anything
 // is capped.
 //
-// An add links an entity on exact identifiers alone, never on a name: the
-// first entity of the same kind holding one (`linkedBy`). Linking by name
-// and proposals of likely matches are the linker's (GRA-1740).
+// An add links an entity on its exact identifiers: the first entity of
+// the same kind holding one (`linkedBy`); given none, by an exact name of
+// two words or more (linking.ts `linkedByName`).
 
 /** An entity's kind as stored. */
 const kindSchema = z.enum(entityKinds);

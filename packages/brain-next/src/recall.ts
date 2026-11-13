@@ -434,12 +434,16 @@ const byMeaning = (
  * by meaning never as of a moment: vectors are kept for current versions
  * only, so the scan can't tell which were current then, and nearer chunks
  * added since would take every place. A way that throws fails the recall.
+ * Of `passages` alone (`findPassages`), no memory is read at all: none
+ * of the memory ways runs, nor counts.
  */
-export const find = (
+const findOf = (
   sql: SqlStorage,
   { question, reader, asOf, meaning }: RecallRequest,
-  way: WayRunner
+  way: WayRunner,
+  of: "passages" | "passages and memories"
 ): Finding => {
+  const withMemories = of === "passages and memories";
   const exacts = exactsOf(question);
   const terms = termsOf(question);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
@@ -458,11 +462,13 @@ export const find = (
       ? { words: [], stopWords: [], terms: [], memoryWords: [] }
       : way("words", () => ({
           ...byWords(sql, terms, reader, at),
-          memoryWords: memoriesByTheirWords(sql, {
-            question,
-            reader,
-            at: memoriesAt,
-          }),
+          memoryWords: withMemories
+            ? memoriesByTheirWords(sql, {
+                question,
+                reader,
+                at: memoriesAt,
+              })
+            : [],
         }));
   const exact =
     exacts.length === 0
@@ -474,13 +480,32 @@ export const find = (
     asOf !== undefined
       ? []
       : way("meaning", () => byMeaning(sql, meaning, reader));
-  const memories = findMemories(
-    sql,
-    { question, reader, at: memoriesAt, words: memoryWords },
-    way
-  );
+  const memories = withMemories
+    ? findMemories(
+        sql,
+        { question, reader, at: memoriesAt, words: memoryWords },
+        way
+      )
+    : { words: [], entities: [], rivals: [] };
   return { ...words, ...exact, meaning: meant, memories };
 };
+
+/** What the reader may read for the question, passages and memories (`findOf`). */
+export const find = (
+  sql: SqlStorage,
+  request: RecallRequest,
+  way: WayRunner
+): Finding => findOf(sql, request, way, "passages and memories");
+
+/**
+ * The passages alone the reader may read for the question (`findOf`):
+ * what core hands where memories don't reach yet (its `recallPassagesAs`).
+ */
+export const findPassages = (
+  sql: SqlStorage,
+  request: RecallRequest,
+  way: WayRunner
+): Finding => findOf(sql, request, way, "passages");
 
 /**
  * What the reader may read for the question, as a pack within its budget

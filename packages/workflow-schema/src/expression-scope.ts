@@ -216,13 +216,10 @@ const filesTypes: Readonly<Record<FilesAction, string>> = {
   delete: "null",
 };
 
-/** What each action on a Brain collection answers (the SDK's `BrainActions`). */
+/** What each action on the Brain answers (the SDK's `BrainActions`). */
 const brainTypes: Readonly<Record<BrainAction, string>> = {
-  search:
-    "readonly { readonly id: string; readonly title: string; readonly excerpt: string }[]",
-  read: "{ readonly title: string; readonly text: string }",
   recall:
-    "{ readonly items: readonly { readonly [field: string]: any }[]; readonly [field: string]: any }",
+    '{ readonly items: readonly { readonly source: { readonly producer: "upload" | "chat" | "run"; readonly id: string }; readonly version: number; readonly position: number; readonly text: string; readonly whole: boolean; readonly found: "exact" | "words" | "stop words" | "meaning" }[]; readonly notFound: readonly string[]; readonly truncated: boolean }',
 };
 
 /**

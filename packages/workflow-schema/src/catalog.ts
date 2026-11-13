@@ -4,8 +4,6 @@ import { isEventType } from "@grasp-os/shared/sealed-builds";
 import { catalogBindingKinds } from "@grasp-os/shared/workflow-resources";
 import type { CatalogBindingKind } from "@grasp-os/shared/workflow-resources";
 
-import type { BindingKind } from "./format.ts";
-
 // The host catalog's contracts, as a definition's bindings resolve them:
 // a definition names contracts; the host's approved catalog says what
 // each one is. A binding is a requirement, never a grant: this reads what
@@ -14,14 +12,6 @@ import type { BindingKind } from "./format.ts";
 
 /** Every kind of contract the host catalog holds. */
 export type ContractKind = CatalogBindingKind;
-
-/**
- * The kind of contract a binding of `kind` names in the catalog: its own,
- * but for a `brain` binding, whose collection the catalog and the
- * approvals know as `knowledge`.
- */
-export const contractKindOf = (kind: BindingKind): ContractKind =>
-  kind === "brain" ? "knowledge" : kind;
 
 /** A value contract: the JSON text of an SDK value descriptor. */
 export type DescriptorText = string;
@@ -263,8 +253,8 @@ const requiredFields: Readonly<
   model: [],
   decision: ["input", "response"],
   event: ["events"],
-  // Served by the host's own contract (search, read and recall).
-  knowledge: [],
+  // Served by the host's own contract (recall).
+  brain: [],
   // The run's own files (GRA-724): the host's own contract too.
   files: [],
 };
