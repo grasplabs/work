@@ -447,13 +447,14 @@ export const isStale = (sql: SqlStorage, id: string): boolean =>
 
 /**
  * Whether export `id` is still being written and holds nothing erased:
- * asked right before each of its puts, with no await between, so none
- * starts once the ledger names what it holds, nor once its store was
+ * asked right before each of its puts, with no await between, so a run
+ * stops writing once the ledger names what it holds, or once its store was
  * erased whole (its rows gone with it, so asking throws, which says no).
- * Not what keeps an erased store's files from outliving its erasure: the
- * erasure isn't done while a handler still runs (store.ts `#eraseWhole`).
- * This only stops a run from writing a private file more once an erasure
- * began, while that erasure is still pending.
+ * It doesn't keep an erased store's files from outliving its erasure: the
+ * store's bucket refuses every put once it forgot itself, and its erasure
+ * isn't done while a put it sent is still on its way (bucket.ts
+ * `countingWrites`, store.ts `#eraseWhole`). This stops a run early, and
+ * an export's part from being written over what the ledger erased.
  */
 const stillWriting = (sql: SqlStorage, id: string): boolean => {
   try {

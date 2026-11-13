@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import { fileGraceMs } from "../src/contract.ts";
 import { ledgerRetryMs } from "../src/store.ts";
+import { defineWork, enqueueWork } from "../src/work.ts";
 import type { Store } from "./export-reads.ts";
 import { kill } from "./store-copy.ts";
 
@@ -206,6 +207,39 @@ const expected = {
   done: "fulfilled",
   left: [],
 };
+
+/** The record of `person`'s erasure: its moment. */
+const momentOf = async (person: string): Promise<number> => {
+  const record = await env.BRAIN_OBJECTS.get(
+    `people/${await sha256(person)}/erased`
+  );
+  return z
+    .object({ at: z.number() })
+    .parse(JSON.parse((await record?.text()) ?? "null")).at;
+};
+
+/** Gates a handler of `writeLate` waits at, by its key. */
+const gates = new Map<
+  string,
+  { reached: () => void; open: Promise<boolean> }
+>();
+
+/**
+ * Work that waits at its gate, then puts an object under its store's
+ * prefix without reading the store first: what a writer that doesn't ask
+ * whether its store was erased would do.
+ */
+const writeLate = defineWork({
+  kind: `test.write_late_${crypto.randomUUID().replaceAll("-", "")}`,
+  payload: z.strictObject({ key: z.string() }),
+  timeLimitMs: 60_000,
+  run: async ({ key }, { bucket }) => {
+    const gate = gates.get(key);
+    gate?.reached();
+    await gate?.open;
+    await bucket.put(`sources/${key}`, "written late");
+  },
+});
 
 describe("a person's own store erased whole, against writes that land late", () => {
   // The reviewer's probe: a ledger write the store stopped waiting for
@@ -430,6 +464,122 @@ describe("a person's own store erased whole, against writes that land late", () 
       recorded: "rejected",
       withinTheGrace: "rejected",
       done: "fulfilled",
+      left: [],
+    });
+  });
+
+  // Review round 6, finding 1: an erasure's own delete is no write that may
+  // never answer. Two calls overlapping: the second neither restarts the
+  // store nor moves the moment, and both end done.
+  it("isn't held up or restarted by another call's delete, when two of its calls overlap", async () => {
+    const person = unique();
+    await own(person).addSource({
+      source: `test:${unique()}`,
+      change: unique(),
+      text: "Mine alone",
+      access: alone(person),
+    });
+    await erase(person);
+    await aGraceLater(person);
+    const moment = await momentOf(person);
+    await env.BRAIN_OBJECTS.put(
+      `people/${await sha256(person)}/sources/late`,
+      "landed late"
+    );
+    // The first call's delete is held on its way.
+    const reached = Promise.withResolvers<boolean>();
+    const released = Promise.withResolvers<boolean>();
+    const real = env.BRAIN_OBJECTS;
+    let deletes = 0;
+    await runInDurableObject(own(person), (instance) => {
+      Reflect.set(instance, "env", {
+        ...env,
+        BRAIN_OBJECTS: {
+          get: async (key: string) => await real.get(key),
+          head: async (key: string) => await real.head(key),
+          list: async (options?: R2ListOptions) => await real.list(options),
+          put: async (
+            key: string,
+            value: ArrayBuffer | string,
+            options?: R2PutOptions
+          ) => await real.put(key, value, options),
+          delete: async (keys: string | string[]) => {
+            deletes += 1;
+            if (deletes === 1) {
+              reached.resolve(true);
+              await released.promise;
+            }
+            await real.delete(keys);
+          },
+        },
+      });
+    });
+    const first = Promise.allSettled([
+      called(own(person).erasePerson({ person, reason: "person_erased" })),
+    ]);
+    await reached.promise;
+    const second = await erase(person);
+    released.resolve(true);
+    const [firstOutcome] = await first;
+    expect({
+      first: firstOutcome?.status,
+      second,
+      moment: (await momentOf(person)) === moment,
+      left: await leftOf(person),
+    }).toStrictEqual({
+      first: "fulfilled",
+      second: "fulfilled",
+      moment: true,
+      left: [],
+    });
+  });
+
+  // Review round 6, finding 2: once the store forgot itself, its bucket
+  // refuses every put but its erasure's record, whatever the writer read.
+  it("sends no put of a handler that was still running when the store was erased", async () => {
+    const person = unique();
+    await own(person).addSource({
+      source: `test:${unique()}`,
+      change: unique(),
+      text: "Mine alone",
+      access: alone(person),
+    });
+    const key = `late-${unique()}`;
+    const reached = Promise.withResolvers<boolean>();
+    const open = Promise.withResolvers<boolean>();
+    gates.set(key, {
+      reached: () => {
+        reached.resolve(true);
+      },
+      open: open.promise,
+    });
+    await runInDurableObject(own(person), (_instance, state) => {
+      enqueueWork(state.storage, writeLate, {
+        key,
+        payload: { key },
+        priority: "asked",
+      });
+    });
+    const ticking = Promise.allSettled([tick(person)]);
+    await reached.promise;
+    const recorded = await erase(person);
+    open.resolve(true);
+    await ticking;
+    // Before any later call of the erasure could delete it.
+    const landed = await env.BRAIN_OBJECTS.head(
+      `people/${await sha256(person)}/sources/${key}`
+    );
+    await aGraceLater(person);
+    const done = await erase(person);
+    expect({
+      recorded,
+      done,
+      landed,
+      left: await leftOf(person),
+    }).toStrictEqual({
+      recorded: "rejected",
+      done: "fulfilled",
+      landed: null,
       left: [],
     });
   });
