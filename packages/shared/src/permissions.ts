@@ -128,6 +128,20 @@ const collectionObjectSchema = z.strictObject({
 export const brainTeamsMax = 999;
 
 /**
+ * The teams an App's `brain` permission names: what a request may name,
+ * and the only shape core reads back from storage (core's
+ * brain-grant-teams.ts). Team IDs, at least one, at most `brainTeamsMax`,
+ * each once.
+ */
+export const brainTeamsSchema = z
+  .array(teamIdSchema)
+  .min(1)
+  .max(brainTeamsMax)
+  .refine((teams) => new Set(teams).size === teams.length, {
+    message: "Each team once",
+  });
+
+/**
  * What the platform itself offers an App, as a permission's object, one
  * action per permission (its stub does that one thing):
  *
@@ -157,14 +171,7 @@ const platformObjectSchema = z.strictObject({
    * app-provenance.ts). Absent, it reaches the company alone. At most
    * `brainTeamsMax`, each once; only on an App's `brain` permission.
    */
-  teams: z
-    .array(teamIdSchema)
-    .min(1)
-    .max(brainTeamsMax)
-    .refine((teams) => new Set(teams).size === teams.length, {
-      message: "Each team once",
-    })
-    .optional(),
+  teams: brainTeamsSchema.optional(),
 });
 
 /**

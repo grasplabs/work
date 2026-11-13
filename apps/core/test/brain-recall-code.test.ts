@@ -21,6 +21,7 @@ import { z } from "zod";
 import { appsReadableBy } from "../src/app-access.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, listMembers, removeMember } from "../src/app-members.ts";
+import { anyTeamGrant, mayReadBrainTeamsOf } from "../src/app-provenance.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { removeApp } from "../src/app-removal.ts";
@@ -1761,33 +1762,93 @@ describe("an App whose grant names teams", setUpTime, () => {
     });
   });
 
-  it("refuses a recall under a grant whose stored teams aren't JSON, never reading it as less or more", async () => {
-    const { word, ada } = await company();
-    const appId = appIdSchema.parse(`app-${crypto.randomUUID()}`);
-    const grant = crypto.randomUUID();
-    await env.DB.prepare(
-      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?, 'not json')"
-    )
-      .bind(grant, appId, ada.userId, Date.now())
-      .run();
-    const authority = authoritySchema.parse({
-      subject: { type: "app", appId },
-      onBehalfOf: ada.userId,
-      mode: "interactive",
-      appVersion: 1,
+  it("reads a stored teams value no request could make as the team nobody is in, every shape alike: listed so, closing its App, refusing its recall", async () => {
+    const { word, admin, ada, teams } = await company();
+    const app = await askOf(ada, []);
+    const shapes: Record<string, string> = {
+      empty: "[]",
+      twice: JSON.stringify([teams.adas, teams.adas]),
+      tooMany: JSON.stringify(
+        Array.from({ length: 1000 }, (_, at) => `team-${at}`)
+      ),
+      notAnId: "[1]",
+      nullInside: JSON.stringify([teams.adas, null]),
+      notJson: "not json",
+      aString: JSON.stringify(teams.adas),
+      aNumber: "5",
+      anObject: JSON.stringify({ teams: [teams.adas] }),
+    };
+    const insert = env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', ?, 'active', ?, 0, ?, 0, ?)"
+    );
+    const rows = Object.entries(shapes).map(([name, stored]) => ({
+      name,
+      stored,
+      listedGrant: crypto.randomUUID(),
+      // An App of its own, to hold the gate and recall to it alone.
+      appId: appIdSchema.parse(`app-${crypto.randomUUID()}`),
+      grant: crypto.randomUUID(),
+    }));
+    await env.DB.batch(
+      rows.flatMap(({ name, stored, listedGrant, appId, grant }) => [
+        insert.bind(
+          listedGrant,
+          app.app,
+          `TEAMS_${name.toUpperCase()}`,
+          ada.userId,
+          admin.userId,
+          stored
+        ),
+        insert.bind(grant, appId, "BRAIN", ada.userId, admin.userId, stored),
+      ])
+    );
+    const listed = await permissionsOpenTo(env, await now(admin), {
+      type: "app",
+      appId: app.app,
     });
-    await expect(
-      recallFor(
-        env,
-        {
-          authority,
-          context: { type: "app", appId },
-          permissionId: permissionIdSchema.parse(grant),
-          actor: { type: "system" },
-        },
-        requestOf(word)
-      )
-    ).rejects.toMatchObject({ code: "permission.denied" });
+    const adaNow = await now(ada);
+    const adaTeams = adaNow.teams.map(({ id }) => id);
+    const outcomes: Record<string, unknown> = {};
+    for (const { name, listedGrant, appId, grant } of rows) {
+      // oxlint-disable-next-line no-await-in-loop -- one shape at a time
+      const opens = await mayReadBrainTeamsOf(env, appId, adaTeams);
+      // oxlint-disable-next-line no-await-in-loop -- one shape at a time
+      const recalled = await outcomeOf(
+        async () =>
+          await recallFor(
+            env,
+            {
+              authority: authoritySchema.parse({
+                subject: { type: "app", appId },
+                onBehalfOf: ada.userId,
+                mode: "interactive",
+                appVersion: 1,
+              }),
+              context: { type: "app", appId },
+              permissionId: permissionIdSchema.parse(grant),
+              actor: { type: "system" },
+            },
+            requestOf(word)
+          )
+      );
+      outcomes[name] = {
+        listedAs: listed.find(({ id }) => id === listedGrant)?.object,
+        opens,
+        recalled,
+      };
+    }
+    const unreadable = {
+      listedAs: { type: "platform", teams: ["*"] },
+      opens: false,
+      recalled: {
+        code: "permission.denied",
+        details: { action: "brain" },
+      },
+    };
+    expect({ outcomes, counted: await anyTeamGrant(env) }).toStrictEqual({
+      outcomes: Object.fromEntries(rows.map(({ name }) => [name, unreadable])),
+      counted: true,
+    });
   });
 
   it("closes only the App whose stored teams don't read as teams, never another's listing", async () => {

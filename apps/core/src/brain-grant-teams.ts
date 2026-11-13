@@ -1,5 +1,4 @@
-import { teamIdSchema } from "@grasp-os/shared/ids";
-import { z } from "zod";
+import { brainTeamsSchema } from "@grasp-os/shared/permissions";
 
 // The teams an App's grant to read the Brain names (GRA-1842), as the
 // `permissions.teams` column stores them: JSON text, read by hand, never by
@@ -15,8 +14,11 @@ import { z } from "zod";
 export const unreadableTeam = "*";
 
 /**
- * The team IDs `stored` names: none for NULL, undefined for a value that
- * isn't a JSON list of team IDs.
+ * The team IDs `stored` names: none for NULL, and otherwise exactly what
+ * `brainTeamsSchema` accepts, the schema a request is checked with, or
+ * undefined for anything else (not JSON, not a list, empty, too long, a
+ * team twice, an element that isn't a team ID). One schema decides, so no
+ * shape a request couldn't make reaches a reader.
  */
 export const storedTeamsOf = (stored: string | null): string[] | undefined => {
   if (stored === null) {
@@ -28,6 +30,6 @@ export const storedTeamsOf = (stored: string | null): string[] | undefined => {
   } catch {
     return undefined;
   }
-  const parsed = z.array(teamIdSchema).safeParse(value);
+  const parsed = brainTeamsSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 };

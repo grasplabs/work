@@ -326,18 +326,17 @@ const auditDetail = ({
   chat,
 }: Permission): Record<string, AuditDetailValue> => {
   // The object's IDs by name: connectionId and resource, collectionId,
-  // workflowId, or appId; a Brain permission's teams by how many, which
-  // the permission itself names.
+  // workflowId, or appId. A Brain permission's teams aren't counted: the
+  // permission the event names holds them, and a count read by SQL (a
+  // revocation's event) couldn't check them as `storedTeamsOf` does.
   const { type: objectType, ...ids } =
     object.type === "platform" ? { type: object.type } : object;
-  const teams = object.type === "platform" ? object.teams?.length : undefined;
   const { subjectType, subjectId } = subjectColumns(subject);
   return {
     subjectType,
     subjectId,
     objectType,
     ...ids,
-    ...(teams === undefined ? {} : { teams }),
     actions: actions.join(" "),
     binding,
     // A chat's own permission: which chat, as its person's other events
@@ -893,7 +892,6 @@ const auditDetailSql = sql`json_patch(
       CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('function', ${permissions.resource}) END
     )
     WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
-    WHEN 'platform' THEN CASE WHEN ${permissions.teams} IS NULL THEN '{}' WHEN json_valid(${permissions.teams}) AND json_type(${permissions.teams}) = 'array' THEN json_object('teams', json_array_length(${permissions.teams})) ELSE json_object('teams', -1) END
     ELSE '{}'
   END
 )`;
