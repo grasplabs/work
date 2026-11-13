@@ -1240,4 +1240,31 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       now: { group: ids.team, recalled: [], listed: [] },
     });
   });
+
+  it("are erased by a content purge whose term is in their own sentence, from one who backs none of them, before the purge reports done", async () => {
+    const { ids, max } = await drawnTeam();
+    // The model puts Rik's "noon" into the claim, though Rik backs none.
+    const noonClaim = {
+      kind: "tool",
+      text: "Tickets come in through Zendesk by noon.",
+      cites: zendeskSaid,
+    };
+    await intakeOf(ids, [noonClaim]);
+    await handOverNow();
+    const before = await recalled(max, "noon", "claim");
+    await interviewErasure(env).rewrite(
+      { actor: { type: "system" }, userId: "system" },
+      (text) => text.replaceAll("noon", "(removed)")
+    );
+    const owedAfter = await onboardingStore(env).owedErasures({ claims: true });
+    expect({
+      before,
+      now: await readableBy(max),
+      owed: owedAfter,
+    }).toStrictEqual({
+      before: [noonClaim.text],
+      now: { group: ids.team, recalled: [], listed: [] },
+      owed: [],
+    });
+  });
 });

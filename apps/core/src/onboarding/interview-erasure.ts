@@ -4,7 +4,10 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { interviewLimits } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 
-import { eraseOnboardingInterview } from "./new-brain.ts";
+import {
+  eraseOnboardingInterview,
+  eraseOwedOnboardingSources,
+} from "./new-brain.ts";
 import { onboardingStore } from "./store.ts";
 
 // The interviews as a Knowledge purge reaches them (GRA-528): what people
@@ -218,12 +221,27 @@ export const interviewErasure = (
         // oxlint-disable-next-line no-await-in-loop -- one interview after another
         await rewriteOne(store, person, stored, rewrite, actor);
       }
+      // A team claim's sentence was put together from the whole team's
+      // interviews, so it may hold a purged word whoever backs it: every
+      // standing claim the purge's own rewrite changes is owed an erasure,
+      // hidden from its team at once.
+      const claims = await store.standingClaims();
+      await store.purgeClaims(
+        claims.flatMap(({ source, text }) =>
+          rewrite(text) === text ? [] : [source]
+        )
+      );
       // The new Brain's copies hold the purged words too: each is replaced
-      // by the rewritten text before the purge reports done, or it fails
-      // and is run again.
+      // by the rewritten text, and each claim holding one erased, before the
+      // purge reports done, or it fails and is run again.
       for (const person of people) {
         // oxlint-disable-next-line no-await-in-loop -- one interview after another
         await eraseOnboardingInterview(env, person);
+      }
+      await eraseOwedOnboardingSources(env, { claims: true });
+      const owedClaims = await store.owedErasures({ claims: true });
+      if (owedClaims.length > 0) {
+        throw new Error("The Brain still holds a purged team claim.");
       }
     },
     forgetActor: async () => {

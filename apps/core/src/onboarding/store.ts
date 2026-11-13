@@ -6671,6 +6671,35 @@ export class Onboarding extends DurableObject<Env> {
     return row?.team ?? null;
   }
 
+  /**
+   * The sentence of every team claim standing (not owed an erasure), by
+   * its source: what a content purge reads to find claims holding a
+   * purged word (interview-erasure.ts).
+   */
+  standingClaims(): { source: string; text: string }[] {
+    return this.#db
+      .select({ source: brainClaims.source, text: brainClaims.text })
+      .from(brainClaims)
+      .where(eq(brainClaims.erase, false))
+      .all();
+  }
+
+  /**
+   * Marks the claims `sources` owed an erasure: a content purge found a
+   * purged word in their sentence. Hidden from their teams at once
+   * (`interviewTeamOf`); a claim comes back only from its team's next
+   * intake, from the purged text, under a new key.
+   */
+  purgeClaims(sources: readonly string[]): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(brainClaims)
+        .set({ erase: true })
+        .where(inList(brainClaims.source, sources))
+        .run();
+    });
+  }
+
   /** Whose interview the source `source` is; null for none. */
   #interviewPersonOf(source: string): string | null {
     const [row] = this.#db
