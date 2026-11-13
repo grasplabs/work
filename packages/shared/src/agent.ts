@@ -1,4 +1,4 @@
-import { agentDocumentsMax } from "./agents.ts";
+import { agentDocumentsMax, ownAgentsMax } from "./agents.ts";
 import {
   chatFileMaxBytes,
   chatFilesMax,
@@ -17,6 +17,9 @@ export const agentErrors = defineErrorFamily({
   "agent.record_invalid": "That isn't an agent's name, job or instructions.",
   "agent.unknown": "The company has no such agent.",
   "agent.name_taken": "Another agent already has that name.",
+  "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,
+  "agent.own_off":
+    "Your company has turned off agents of people's own. An admin can turn them back on.",
   "agent.first_stays":
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":

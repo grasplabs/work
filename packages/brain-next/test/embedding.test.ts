@@ -37,14 +37,9 @@ import type {
   BreakableEmbedder,
   Breakage,
 } from "../../embed/test/test-models.ts";
-import { vectorModelNameOf } from "../src/contract.ts";
+import { fileGraceMs, vectorModelNameOf } from "../src/contract.ts";
 import { bucketCallMs, embedBatch } from "../src/embedding.ts";
-import {
-  fileGraceMs,
-  hashOf,
-  sweepDeleteMs,
-  vectorKeyOf,
-} from "../src/files.ts";
+import { hashOf, sweepDeleteMs, vectorKeyOf } from "../src/files.ts";
 import { workAttemptsMax } from "../src/work.ts";
 
 /** No hand-overs: these tests hand nothing over. */

@@ -16,6 +16,7 @@ import {
   newMemorySchema,
   principalMaxLength,
   quoteMaxLength,
+  restoringNow,
   sourceIdSchema,
   speakerSchema,
   statementMaxLength,
@@ -38,6 +39,7 @@ import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
 import { isOneReaderKey } from "./reader-sets.ts";
 import { addMemories } from "./remember.ts";
+import { isRestoring } from "./restoring.ts";
 import { dayOf, endOfDay, resolveWhen, whenSchema } from "./when.ts";
 import type { Resolved, When } from "./when.ts";
 import { sequenceOf } from "./words.ts";
@@ -977,13 +979,34 @@ const addsOf = (entities: NewEntity[], memories: NewMemory[]): Candidates[] => {
  * through the store is; the store stamps it.
  */
 const add = async (
-  { storage, shared }: WorkContext,
+  { storage, owner }: WorkContext,
   adding: z.input<typeof newMemoriesSchema>
 ): Promise<AddedMemories> =>
   await addMemories(
-    { storage, db: drizzle(storage), shared },
+    // The shared store's tick names no owner (`WorkContext.owner`).
+    { storage, db: drizzle(storage), shared: owner === undefined },
     newMemoriesSchema.parse(adding)
   );
+
+/**
+ * `add`, its refusal while a restore runs (`restoringNow`, one that began
+ * during the calls) failing the item as `restoring`: the queue tries it
+ * again, as after any failure, and what the piece kept is written then
+ * without a call.
+ */
+const addRetried = async (
+  context: WorkContext,
+  adding: z.input<typeof newMemoriesSchema>
+): Promise<AddedMemories> => {
+  try {
+    return await add(context, adding);
+  } catch (error) {
+    if (error instanceof Error && error.message === restoringNow) {
+      throw new WorkError("restoring");
+    }
+    throw error;
+  }
+};
 
 /**
  * Writes `adds` of a piece, in order, under `change` and `:1`, `:2` and
@@ -1009,7 +1032,7 @@ const writeAdds = async (
   const ids = new Map<string, string>();
   for (const [index, adding] of adds.entries()) {
     // oxlint-disable-next-line no-await-in-loop -- one add after another, in order
-    const added = await add(context, {
+    const added = await addRetried(context, {
       change: index === 0 ? change : `${change}:${index}`,
       access,
       memories: adding.memories,
@@ -1154,9 +1177,15 @@ const extractWork: WorkDefinition<Payload> = defineWork({
     // person's own store draws from what it holds.
     if (
       access.kind === "none" ||
-      (context.shared && isOneReaderKey(found.readers))
+      (context.owner === undefined && isOneReaderKey(found.readers))
     ) {
       return;
+    }
+    // A restore under way adds nothing: no call is spent on what it would
+    // refuse. The queue tries the item again, as after any failure; what
+    // the piece kept, kept with it, is written then without a call.
+    if (isRestoring(sql)) {
+      throw new WorkError("restoring");
     }
     const change = await changeOf(source, version, from);
     // A rerun of a piece whose adds began: what the first run kept, and

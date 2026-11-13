@@ -35,7 +35,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
   beforeEach(chooseModel);
 
   it("lists what the current version declares, and offers an admin only what may serve it", async () => {
-    const { sealed, admin, handbook, permission } = await deskApp();
+    const { sealed, admin, permission } = await deskApp();
     // Neither another App's grant nor one held in a chat only is offered.
     await deskApp();
     await chatScopedCopy(permission);
@@ -52,7 +52,6 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           contract: null,
           actions: [],
           operations: [],
-          collections: [],
           maxOutputTokens: 300,
           state: "unbound",
           binding: null,
@@ -64,24 +63,17 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
         },
         {
           alias: "brain",
-          kind: "knowledge",
+          kind: "brain",
           contract: null,
           actions: [],
-          operations: ["search"],
-          collections: ["handbook", "salaries"],
+          operations: ["recall"],
           maxOutputTokens: null,
           state: "unbound",
           binding: null,
-          // The App's own grant to read, and no other collection.
+          // The App's own grant to read the Brain, and no other.
           choices: {
-            kind: "knowledge",
-            permissions: [
-              {
-                permissionId: permission,
-                collectionId: handbook.id,
-                name: "Handbook",
-              },
-            ],
+            kind: "brain",
+            permissions: [{ permissionId: permission }],
             truncated: false,
           },
         },
@@ -151,20 +143,20 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     const desk = await deskApp();
     const { sealed, admin, permission } = desk;
     await bindDesk(desk);
-    // The collection grant is revoked, and the organization chooses
+    // The Brain's grant is revoked, and the organization chooses
     // another model: both targets are lost.
     await revokePermission(env, admin, permission);
     const { providerEnv: narrowed } = await providerEnv([], ["openai/gpt-5.4"]);
     const lost = await reviewResourceBindings(narrowed, admin, sealed.app);
     const found = await call(env, sealed, "desk.find", { text: "leave" });
-    // A version that reads one collection less, and no AI at all.
+    // A version whose AI may answer more, and no Brain at all.
     const next = await nextVersion(
       sealed,
-      deskFiles({ withWriter: false, collections: ["handbook"] }),
+      deskFiles({ maxOutputTokens: 400, withBrain: false, sneak: true }),
       2
     );
     const changed = await reviewResourceBindings(env, admin, sealed.app);
-    const read = await call(env, next, "desk.find", { text: "leave" });
+    const read = await call(env, next, "desk.draft", { prompt: "Hi" });
     expect({
       lost: statesOf(lost),
       found: outcomeOf(found),
@@ -174,8 +166,8 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       lost: { ai: "grant_lost", brain: "grant_lost" },
       found: { failed: "permission.unavailable" },
-      changed: { brain: "declaration_changed" },
-      undeclared: ["ai"],
+      changed: { ai: "declaration_changed" },
+      undeclared: ["brain"],
       read: { failed: "permission.unavailable" },
     });
   });
@@ -254,7 +246,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     expect({
       states: statesOf(builders),
       choices: builders.resources.map(({ choices }) => choices),
-      // The bound target named, for builders too: only the collection bound.
+      // The bound target named, for builders too: neither names a connection.
       labels: builders.resources.map(({ binding }) => binding?.label),
       staff: staff.resources.map(({ choices }) => choices),
       member: await failure(
@@ -267,13 +259,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       states: { ai: "served", brain: "served" },
       choices: [null, null],
-      labels: [
-        { connection: null, collections: {} },
-        {
-          connection: null,
-          collections: { handbook: "Handbook", salaries: "Handbook" },
-        },
-      ],
+      labels: [{ connection: null }, { connection: null }],
       staff: [null, null],
       member: "app.not_found",
       otherBuilder: "app.not_found",

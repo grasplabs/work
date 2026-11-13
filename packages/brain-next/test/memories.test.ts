@@ -10,6 +10,7 @@ import type {
   MemoriesCursor,
   NewEntity,
   NewMemory,
+  PersonReader,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
@@ -28,7 +29,7 @@ const own = (person: string): Store =>
   env.BRAIN_STORE.getByName(`person:${person}`);
 
 const unique = (name: string): string => `${name}-${crypto.randomUUID()}`;
-const readerOf = (person: string, ...groups: string[]): Reader => ({
+const readerOf = (person: string, ...groups: string[]): PersonReader => ({
   person,
   groups,
 });

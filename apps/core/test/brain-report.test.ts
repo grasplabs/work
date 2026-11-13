@@ -31,6 +31,8 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { usageRecorded } from "../src/model-usage.ts";
+import { models } from "../src/models.ts";
 import {
   copyOfStore,
   killStore,
@@ -38,6 +40,8 @@ import {
 } from "./brain-next-store-copy.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProviderFor, testModel } from "./model-provider.ts";
+import { usageRows } from "./model-usage.ts";
 import { noProducers } from "./no-producers.ts";
 import { auditedDuring, routed, signedInWithRole } from "./sign-in.ts";
 
@@ -549,6 +553,109 @@ describe("recall, as staff see it", () => {
       later: true,
       after: { words: [0, 0], exact: [0, 0], meaning: [0, 0], without: 0 },
     });
+  });
+});
+
+/** Core's env counting spend in `month`: each test its own, clear of other files'. */
+const spendEnv = (month: string): Env => ({ ...env, SPEND_MONTH: month });
+
+/** US dollars in whole micros, so sums added in another order compare. */
+const micros = (dollars: number): number => Math.round(dollars * 1_000_000);
+
+describe("the Brain's model spend, as staff see it", () => {
+  it("sums what the gateway recorded for the Brain's purposes alone, with nothing of who asked or what was said, and records the read", async () => {
+    const month = "2400-03";
+    const coreEnv = spendEnv(month);
+    const marked = marker();
+    const person = `person-${marked}`;
+    // The outside provider answers each call with its own usage.
+    await fakeProviderFor(
+      [testModel],
+      { text: "{}", inputTokens: 1200, outputTokens: 30 },
+      { text: "{}", inputTokens: 900, outputTokens: 20 },
+      { text: "{}", inputTokens: 5000, outputTokens: 400 },
+      { text: "{}", inputTokens: 700, outputTokens: 70 },
+      { text: "{}", inputTokens: 300, outputTokens: 10 }
+    );
+    // Two of today's Brain purposes, one no code here names (a new
+    // feature's), and two that aren't the Brain's: one shares its first
+    // letters.
+    const purposes = [
+      "brain.recall_analysis",
+      "brain.recall_analysis",
+      "brain.extract.check",
+      "chat.turn",
+      "brainstorm.notes",
+    ];
+    for (const purpose of purposes) {
+      // oxlint-disable-next-line no-await-in-loop -- one call after another
+      await models(coreEnv).call({
+        model: testModel,
+        input: `${marked}: what did the board decide about the merger?`,
+        maxTokens: 500,
+        purpose,
+        trigger: { type: "person", userId: person },
+        work: { platform: "brain_upkeep" },
+      });
+    }
+    await usageRecorded();
+    const rows = await usageRows(month);
+
+    const reads: Awaited<ReturnType<typeof readReport>>[] = [];
+    const events = await auditedDuring(async () => {
+      reads.push(await readReport(coreEnv));
+    });
+    const [{ status, text, report } = { status: 0, text: "", report: null }] =
+      reads;
+    // What the gateway recorded, purpose by purpose.
+    const recorded = (purpose: string) => {
+      const of = rows.filter((row) => row.purpose === purpose);
+      return {
+        purpose,
+        calls: of.length,
+        inputTokens: of.reduce((sum, row) => sum + row.inputTokens, 0),
+        outputTokens: of.reduce((sum, row) => sum + row.outputTokens, 0),
+        cost: micros(of.reduce((sum, row) => sum + row.cost, 0)),
+      };
+    };
+    const extract = recorded("brain.extract.check");
+    const analysis = recorded("brain.recall_analysis");
+
+    expect({
+      status,
+      everyCallRecorded: rows.length,
+      content: [marked, person].filter((each) => text.includes(each)),
+      spend:
+        report?.modelSpend === undefined
+          ? null
+          : {
+              ...report.modelSpend,
+              purposes: report.modelSpend.purposes.map((used) => ({
+                ...used,
+                cost: micros(used.cost),
+              })),
+            },
+      events: brainEvents(events),
+    }).toStrictEqual({
+      status: 200,
+      everyCallRecorded: purposes.length,
+      content: [],
+      spend: {
+        month,
+        // The dearest first.
+        purposes: [extract, { ...analysis, calls: 2 }],
+      },
+      events: [{ action: "admin.brain.read", actor: staffActor, detail: {} }],
+    });
+    expect(extract.cost).toBeGreaterThan(analysis.cost);
+  });
+
+  it("shows no purposes in a month the Brain called no model", async () => {
+    const month = "2400-04";
+
+    const { report } = await readReport(spendEnv(month));
+
+    expect(report?.modelSpend).toStrictEqual({ month, purposes: [] });
   });
 });
 

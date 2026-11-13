@@ -257,7 +257,7 @@ export const PauseButton = ({
     <CommandButton
       clientId={clientId}
       command={{ type: "onboarding.pause", payload: {} }}
-      variant="ghost"
+      variant="outline"
     >
       Pause the interviews
     </CommandButton>

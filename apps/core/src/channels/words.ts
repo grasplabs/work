@@ -79,6 +79,18 @@ const lines = {
     fr: "Je ne vous connais pas encore. Connectez-vous une fois à Grasp avec votre compte professionnel, et je vous répondrai juste après.",
     es: "Todavía no te conozco. Inicia sesión una vez en Grasp con tu cuenta del trabajo y te responderé justo después.",
   },
+  /**
+   * Someone Grasp hasn't seen yet, writing where others read (a group chat
+   * or channel), above the sign-in button: what they asked there isn't
+   * kept, so they are asked to ask again.
+   */
+  signInAskAgain: {
+    en: "I don't know you yet. Sign in to Grasp once with your work account, then ask me again.",
+    nl: "Ik ken je nog niet. Log één keer in bij Grasp met je werkaccount en vraag het me dan opnieuw.",
+    de: "Ich kenne Sie noch nicht. Melden Sie sich einmal mit Ihrem Arbeitskonto bei Grasp an, und fragen Sie mich dann noch einmal.",
+    fr: "Je ne vous connais pas encore. Connectez-vous une fois à Grasp avec votre compte professionnel, puis posez-moi à nouveau votre question.",
+    es: "Todavía no te conozco. Inicia sesión una vez en Grasp con tu cuenta del trabajo y vuelve a preguntarme.",
+  },
   signInButton: {
     en: "Sign in",
     nl: "Inloggen",

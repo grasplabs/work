@@ -58,7 +58,7 @@ const dimensions = 8;
 const along = (axis: number): number[] =>
   Array.from({ length: dimensions }, (_, at) => (at === axis ? 1 : 0.05));
 
-const reader: Reader = { person: "reader", groups: [] };
+const reader: Reader & { person: string } = { person: "reader", groups: [] };
 const own: Access = { kind: "owner", person: reader.person };
 const whole = { tokens: recallBudgetMax };
 
@@ -282,7 +282,7 @@ describe("recall by meaning", () => {
     // 300 chunks of the asking's own (more than the scan re-scores) at the
     // question itself, and a passage their team reads one bit farther off.
     const team = `team-${crypto.randomUUID()}`;
-    const asking: Reader = {
+    const asking: Reader & { person: string } = {
       person: `person-${crypto.randomUUID()}`,
       groups: [team],
     };

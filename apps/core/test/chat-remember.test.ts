@@ -483,7 +483,9 @@ describe("the agent remembering in a person's own chat", () => {
         member.userId,
         agentId,
         "teams",
-        said
+        said,
+        undefined,
+        { kind: "direct" }
       );
       const own = await stub.createChat("Questions", member.userId, agentId);
       await stub.sendUnattended(own.id, { text: said, model });

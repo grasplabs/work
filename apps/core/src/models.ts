@@ -1484,6 +1484,7 @@ const record = async (
       : {
           id: answering,
           model: call.model,
+          purpose: call.purpose,
           credential: way.credential,
           ...(way.feature === undefined ? {} : { feature: way.feature }),
           inputTokens: used.inputTokens,
@@ -2918,6 +2919,7 @@ const recordSpeech = async (
           usage: {
             id: answering,
             model: call.model,
+            purpose: call.purpose,
             credential: way.credential,
             feature: "speech",
             inputTokens: characters,
@@ -3124,6 +3126,7 @@ const listenThrough = async (
           usage: {
             id,
             model: call.model,
+            purpose: call.purpose,
             credential: way.credential,
             feature: "transcription",
             inputTokens: seconds,

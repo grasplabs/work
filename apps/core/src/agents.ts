@@ -1,11 +1,14 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { Agent } from "@grasp-os/shared/agents";
+import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { workspaceAgentIdSchema } from "./agent-scope.ts";
 import { organizationId } from "./auth/membership-sql.ts";
 import { agents } from "./db/core/schema.ts";
+import { ownAgentsOn } from "./own-agents-switch.ts";
 
 // The company's agents, as records. Until now there was one agent for
 // the whole organization, known only by its ID (`chatAgentId` in
@@ -39,6 +42,7 @@ const firstAgent: Agent = {
   modelRole: null,
   model: null,
   state: "on",
+  ownerId: null,
   changedBy: null,
   changedAt: null,
 };
@@ -58,6 +62,7 @@ export const agentOfRow = (
         modelRole: row.modelRole,
         model: row.model,
         state: row.state,
+        ownerId: row.ownerId,
         changedBy: row.changedBy,
         changedAt: row.changedAt.toISOString(),
       };
@@ -115,6 +120,95 @@ export const turnAgent = async (
   }
   if (agent?.state === "paused") {
     throw agentErrors.create("agent.paused");
+  }
+  // A person's own takes no turn while the company has them off.
+  const own = agent !== undefined && agent.ownerId !== null;
+  if (own && !(await ownAgentsOn(env))) {
+    throw agentErrors.create("agent.own_off");
+  }
+  return agent;
+};
+
+// Whose an agent is. One of the company's is made and changed by the
+// company's own admins, and read by admins, Grasp's staff among them. A
+// person's own agent (`ownerId`) is theirs alone: only they read, change
+// and ask it, and to anyone else, an admin included, it is an agent the
+// company doesn't have. Every read and change of an agent by a person
+// goes through one of the three below, so none forgets the other kind.
+
+/** Whether `agent` is `identity`'s own. Never Grasp staff's: they are no one of the company. */
+export const isOwnAgent = (agent: Agent, identity: Identity): boolean =>
+  agent.ownerId !== null &&
+  agent.ownerId === identity.userId &&
+  !identity.staff;
+
+/** Refuses anyone but the company's own admin. */
+const requireCompanysAdmin = (identity: Identity): void => {
+  requireAdmin(identity);
+  if (identity.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+};
+
+/**
+ * The company's agent `agentId`, for what only a company's agent has: an
+ * audience, places, classes, wake-ups. Throws `agent.unknown` for none,
+ * and for a person's own agent, whoever asks.
+ */
+export const companyAgent = async (
+  env: Env,
+  agentId: unknown
+): Promise<Agent> => {
+  const agent =
+    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
+  if (agent === undefined || agent.ownerId !== null) {
+    throw agentErrors.create("agent.unknown");
+  }
+  return agent;
+};
+
+/**
+ * The agent `agentId`, for `identity` to change: their own, or one of the
+ * company's for its own admin. Anyone else is refused as they were before
+ * people had agents of their own (`role.forbidden`), whatever the ID, so
+ * the refusal tells nobody which IDs name an agent; another person's own
+ * agent is `agent.unknown` to an admin, as an ID nobody made.
+ */
+export const changeableAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown
+): Promise<Agent> => {
+  const agent =
+    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
+  if (agent !== undefined && isOwnAgent(agent, identity)) {
+    return agent;
+  }
+  requireCompanysAdmin(identity);
+  if (agent === undefined || agent.ownerId !== null) {
+    throw agentErrors.create("agent.unknown");
+  }
+  return agent;
+};
+
+/**
+ * The agent `agentId`, for `identity` to read: their own, or one of the
+ * company's for an admin, Grasp's staff among them. Refused as
+ * {@link changeableAgent} refuses.
+ */
+export const readableAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown
+): Promise<Agent> => {
+  const agent =
+    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
+  if (agent !== undefined && isOwnAgent(agent, identity)) {
+    return agent;
+  }
+  requireAdmin(identity);
+  if (agent === undefined || agent.ownerId !== null) {
+    throw agentErrors.create("agent.unknown");
   }
   return agent;
 };

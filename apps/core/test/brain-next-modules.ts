@@ -27,10 +27,12 @@ export const brainModules = {
   // probed as the signed-in person.
   "apps/core/src/brain-sources-rpc.ts": "sources",
   // Answers an admin's request with core's export and restore functions,
-  // whose probes hold what they return, as they return it.
+  // and a person's for their own export, whose probes hold what they
+  // return, as they return it.
   "apps/core/src/brain-next-exports.ts": "core",
-  // Erases the sources of runs past their retention with core's
-  // eraseSource, and answers nothing of it.
+  // Erases the sources of runs past their retention, and a deleted chat's
+  // turns (its group), with core's eraseSource, and answers nothing of
+  // it; names a chat's and its turns' sources.
   "apps/core/src/brain-next-origins.ts": "core",
   // Core's producers for the Brain's hand-overs and their relay: puts keys
   // on the queue with core's queueHandOvers, and reads the sources it
@@ -39,6 +41,22 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Writing and sharing skills (GRA-1754): its own surface, each export
+  // probed as the signed-in person.
+  "apps/core/src/skill-shares.ts": "shares",
+  // Code's recall: an App's action, a workflow's step and a chat's code.
+  "apps/core/src/brain-recall.ts": "recall",
+  // Checks with core's readableVersionsAs that a run may still read what
+  // it recalled, and hands on only a refusal.
+  "apps/core/src/workflows/resource-reads.ts": "core",
+  // A chat's recall before its question: hands the model what core's
+  // recallAs gave the chat's own person, two of its packs merged at most
+  // (mergeRecalled, which only drops and orders what both hold), as data;
+  // what an analysis says only ever becomes that same person's question.
+  "apps/core/src/turn-recall.ts": "core",
+  // Checks what a chat once handed over with core's readableVersionsAs, and
+  // hands on only which of those it may still send, never what they say.
+  "apps/core/src/history-access.ts": "core",
   // Remembers, forgets and corrects for a person, and reads entities for
   // them: its own surface, each export probed as the person.
   "apps/core/src/brain-memories.ts": "memories",

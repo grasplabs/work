@@ -412,14 +412,10 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   writes under the step's key, so an attempt, a round or a replay that
 //   writes again answers the file the first wrote, never a second one.
 // - The Brain reached past what the build seals (`grasp.brain`,
-//   `ctx.brain.<alias>.<action>`). The permission's one collection and
-//   the action (search, read, recall) are sealed; what the run reads is
-//   what Knowledge's access rules let the run read as a delegate, under
-//   the permission, for its person: a document outside the collection, or
-//   one the person may not read, is refused as one that isn't there, and
-//   restricted data never reaches an unrestricted run (resource-reads.ts).
-//   What it read is pinned to the run (run-evidence.ts), so nothing it
-//   read leaves the run once the person may no longer read it.
+//   `ctx.brain.<alias>.recall`). The permission and the action are
+//   sealed; a recall reads, under the workflow's own permission to read
+//   the Brain, checked as it recalls, what the run's person may read,
+//   never more (brain-calls.ts).
 // - A connection call keeping a file, or attaching run files, where it
 //   mustn't. Where a read's file goes (`into`) and where a write's
 //   attachments come from (`from`) are the sealed call's, each a files
@@ -3035,7 +3031,7 @@ class SealedRun implements SealedRunKind {
           calling,
           task.id,
           {
-            name: "grasp.knowledge",
+            name: "grasp.brain",
             binding: call.binding,
             operation: call.operation,
             arguments: value,

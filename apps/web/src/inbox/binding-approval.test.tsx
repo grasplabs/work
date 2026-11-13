@@ -67,7 +67,7 @@ const item: BindingApprovalItem = {
       },
       {
         alias: "docs",
-        kind: "knowledge",
+        kind: "brain",
         contractId: "docs-v1",
         offered: [],
       },

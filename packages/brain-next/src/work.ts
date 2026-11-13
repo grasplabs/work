@@ -248,15 +248,15 @@ export interface WorkContext {
    */
   contextTokens: number | null;
   /**
-   * Whether the store is the shared one, which keeps nothing only one
-   * person may read; else a person's own.
-   */
-  shared: boolean;
-  /**
    * The host's side of hand-overs (contract.ts `HandOvers`): the shared
    * store's tick only, as hand-overs are queued there alone.
    */
   handOvers?: HandOvers;
+  /**
+   * The person whose own store this is, by its name; undefined in the
+   * shared store. What an export of it may hold (exports.ts `ExportScope`).
+   */
+  owner?: string;
   /**
    * Says more is left once this run returns (rule 7), having written
    * `progress` pieces of the work (more than 0, or the attempt fails): the
@@ -285,10 +285,10 @@ export interface WorkHost {
   embedders: Embedders;
   bucket: BrainBucket;
   contextTokens: number | null;
-  /** Whether the store is the shared one (`WorkContext.shared`). */
-  shared: boolean;
   /** The shared store's tick only (`WorkContext.handOvers`). */
   handOvers?: HandOvers;
+  /** A person's own store's tick only (`WorkContext.owner`). */
+  owner?: string;
 }
 
 /** A kind of work, and how one item of it is done. */
@@ -461,6 +461,12 @@ export interface WorkState {
   restart: () => void;
   /** Whether a restart is on its way: nothing more is claimed meanwhile. */
   restarting: boolean;
+  /**
+   * Whether the store deleted all it holds (a person's own store erased
+   * whole, store.ts `#forget`): a handler that ends after settles nothing,
+   * as its row, and its table, are gone.
+   */
+  forgotten: boolean;
 }
 
 /** An instance's state of its queue, as it starts; `restart` restarts its store. */
@@ -470,6 +476,7 @@ export const newWorkState = (restart: () => void): WorkState => ({
   underWay: new Map(),
   restart,
   restarting: false,
+  forgotten: false,
 });
 
 /**
@@ -496,7 +503,7 @@ export const stopWorkOn = (state: WorkState, keys: readonly string[]): void => {
 };
 
 /** Restarts the store (rule 6), once however often asked. */
-const restartStore = (state: WorkState): void => {
+export const restartStore = (state: WorkState): void => {
   if (!state.restarting) {
     state.restarting = true;
     state.restart();
@@ -1189,8 +1196,8 @@ const runItem = async (
         signal,
         bucket: host.bucket,
         contextTokens: host.contextTokens,
-        shared: host.shared,
         handOvers: host.handOvers,
+        owner: host.owner,
         again: (progress) => {
           again = { progress };
         },
@@ -1246,7 +1253,9 @@ const runItem = async (
   const ended = await Promise.race([handled, graceOver]);
   clearTimeout(grace);
   if (ended !== "grace") {
-    settle(storage, item, ended, now(), ended.done);
+    if (!state.forgotten) {
+      settle(storage, item, ended, now(), ended.done);
+    }
     return;
   }
   const zombie = zombieOf(item);
@@ -1255,13 +1264,15 @@ const runItem = async (
     key: item.key,
     connection: item.connection,
   });
-  settle(
-    storage,
-    item,
-    { error: new WorkError("timed_out"), timedOut: true },
-    now(),
-    false
-  );
+  if (!state.forgotten) {
+    settle(
+      storage,
+      item,
+      { error: new WorkError("timed_out"), timedOut: true },
+      now(),
+      false
+    );
+  }
   void (async () => {
     await handled;
     state.zombies.delete(zombie);

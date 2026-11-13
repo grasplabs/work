@@ -14,7 +14,11 @@
 import { expectTypeOf } from "vite-plus/test";
 
 import { defineApp, permission } from "../src/index.ts";
-import type { ConnectorAction, ConnectorContract } from "../src/index.ts";
+import type {
+  BrainPack,
+  ConnectorAction,
+  ConnectorContract,
+} from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type { ActionCtx } from "../src/server.ts";
 import type { JsonValue } from "../src/value-descriptor.ts";
@@ -274,17 +278,27 @@ expectTypeOf(
 ).resolves.toEqualTypeOf<{ tags: string[] }>();
 
 // The Brain and guest chats: the operations each declares, and no other.
-const brain = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
+const brain = permission.brain({ operations: ["recall"] });
 const guests = permission.guests({ operations: ["list", "revoke"] });
 declare const brainCtx: ActionCtx<typeof brain | typeof guests>;
-expectTypeOf(brainCtx.brain.search({ text: "leave" })).resolves.toEqualTypeOf<
-  { title: string; excerpt: string }[]
->();
+expectTypeOf(
+  brainCtx.brain.recall({ question: "leave", budget: { tokens: 800 } })
+).resolves.toEqualTypeOf<BrainPack>();
+// The question, the budget and, to read the past, the moment: nothing else.
+await brainCtx.brain.recall({
+  question: "leave",
+  budget: { tokens: 800 },
+  asOf: "2026-03-14T23:59:59.999+01:00",
+});
+// @ts-expect-error -- a recall has a budget
+await brainCtx.brain.recall({ question: "leave" });
+await brainCtx.brain.recall({
+  question: "leave",
+  budget: { tokens: 800 },
+  // @ts-expect-error -- it reads as the person the call acts for, never another
+  person: "someone",
+});
 // Only the operations each declares.
-expectTypeOf(brainCtx.brain).not.toHaveProperty("read");
 await brainCtx.guests.revoke("chat");
 expectTypeOf(brainCtx.guests).not.toHaveProperty("invite");
 

@@ -524,15 +524,33 @@ export const erasingVersions = sqliteTable(
  * A source's key as the erasure ledger names it: its SHA-256, written
  * with the source's first version, so a replay finds the source the
  * ledger names in SQL, and a person's erasure names the sources it hid.
+ * With it, the SHA-256 of the group it was added in (`NewSource.group`),
+ * for good: null for a source in none. A group's erasure finds its
+ * sources by it.
  */
 export const sourceSubjects = sqliteTable(
   "source_subjects",
   {
     source: text().primaryKey(),
     subject: text().notNull(),
+    group: text("group_subject"),
   },
-  (table) => [index("source_subjects_subject_idx").on(table.subject)]
+  (table) => [
+    index("source_subjects_subject_idx").on(table.subject),
+    index("source_subjects_group_idx").on(table.group),
+  ]
 );
+
+/**
+ * The SHA-256 of every key an add named as its group (`NewSource.group`),
+ * kept for good, as the erasure ledger names keys: so once such a key is
+ * erased, every key under it (`<group>/…`) stays refused, whether an add
+ * names the group or not (sources.ts). A key no add ever named as a group
+ * is none: erasing it closes it alone.
+ */
+export const knownGroups = sqliteTable("known_groups", {
+  subject: text().primaryKey(),
+});
 
 /**
  * What a person's erasure hid, a row a version: by number under the
@@ -593,8 +611,22 @@ export const exportsTable = sqliteTable(
     deployment: text().notNull(),
     /** The last version's row it takes: what was there when it started. */
     upTo: integer("up_to").notNull(),
-    /** The last version's row written to a part. */
+    /**
+     * The last row written to a part, of the table its step reads
+     * (`phase`): a version's, then a memory's, a confirmation's, an
+     * extraction mark's, a change's (exports.ts `memoryPhases`).
+     */
     cursor: integer().notNull(),
+    /** The step being written: null for versions, then each of `memoryPhases` by its number. */
+    phase: integer(),
+    /**
+     * The store's latest write stamp of memories as it started
+     * (`memory_stamps`): it takes only what was learned by then, and its
+     * manifest carries it, so a restore never lowers the store's.
+     */
+    stamp: integer(),
+    /** The last change of memories' row (`memory_changes.rowid`) it takes. */
+    changesUpTo: integer("changes_up_to"),
     state: text({
       enum: ["writing", "restoring", "done", "failed", "erased", "expired"],
     }).notNull(),
@@ -622,6 +654,12 @@ export const exportSources = sqliteTable(
       .references(() => exportsTable.id),
     subject: text().notNull(),
     version: integer().notNull(),
+    /**
+     * Whether a part of the export as written holds this version (exports.ts
+     * `writePart`): recorded ahead of a part, a version is only held once
+     * the part is. What its memories may rest on.
+     */
+    written: integer({ mode: "boolean" }),
   },
   (table) => [
     primaryKey({ columns: [table.export, table.subject, table.version] }),
@@ -640,6 +678,8 @@ export const exportParts = sqliteTable(
     part: integer().notNull(),
     hash: text().notNull(),
     versions: integer().notNull(),
+    /** Lines of memories it holds (exports.ts `memoryPhases`): null for none. */
+    memories: integer(),
     /** Its size in bytes, as written. */
     bytes: integer().notNull(),
   },
@@ -663,6 +703,11 @@ export const restores = sqliteTable("restores", {
    * is refused once anything was added past it.
    */
   heldTo: integer("held_to"),
+  /**
+   * When it failed: the store's latest write stamp of memories then. A
+   * restart is refused once any write of memories moved it.
+   */
+  heldStamp: integer("held_stamp"),
   /** The next part to write, once every part is checked. */
   part: integer().notNull(),
   restored: integer().notNull(),

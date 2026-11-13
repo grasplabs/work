@@ -207,7 +207,7 @@ export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
  */
 export const setObjectEnv = async (
   stub: WorkspaceStub,
-  vars: Record<string, string>
+  vars: Record<string, unknown>
 ): Promise<() => Promise<void>> => {
   const before = await runInDurableObject(stub, (instance) => {
     const objectEnv: unknown = Reflect.get(instance, "env");

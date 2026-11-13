@@ -14,7 +14,6 @@ import {
 } from "@grasp-os/ui/components/page-header";
 import { SiteHeader } from "@grasp-os/ui/components/site-header";
 import type { SiteCrumb } from "@grasp-os/ui/components/site-header";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import type { ReactElement, ReactNode } from "react";
 
@@ -81,22 +80,13 @@ export const PageHeading = ({
 );
 
 /**
- * The page body: centred, with the workspace's room around it, as wide as
- * the prototype's overview when `wide`, for its table.
+ * The page body: centred, with the workspace's room around it, and one
+ * width for every page of the admin, so going from one to the next never
+ * moves where the page starts. What should stay narrower than the page (a
+ * form, a line of text) holds its own measure inside it.
  */
-export const PageBody = ({
-  wide = false,
-  children,
-}: {
-  wide?: boolean;
-  children: ReactNode;
-}) => (
-  <div
-    className={cn(
-      "mx-auto flex w-full flex-col gap-6 px-6 pt-7 pb-6",
-      wide ? "max-w-7xl" : "max-w-5xl"
-    )}
-  >
+export const PageBody = ({ children }: { children: ReactNode }) => (
+  <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6">
     {children}
   </div>
 );
@@ -124,7 +114,7 @@ export const AdminPage = ({
 }) => (
   <>
     <AdminHeader page={overview ? null : title} parents={parents} />
-    <PageBody wide={overview}>
+    <PageBody>
       <PageHeader>
         <PageHeading description={description} title={title} />
         {action === undefined ? null : (

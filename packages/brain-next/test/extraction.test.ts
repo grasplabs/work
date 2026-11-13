@@ -2248,4 +2248,112 @@ describe("extracting memories", () => {
       error: "window_too_small",
     });
   });
+
+  it("tries again a piece a restore refused, writing what it kept without asking again", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Restored");
+    const source = unique("doc");
+    const restore = unique("export");
+    let reads = 0;
+    const answer = answering({
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [
+        customerFact(
+          `${name} is active.`,
+          `${name} is active`,
+          "status",
+          "active"
+        ),
+      ],
+    });
+    answers.set(token, async (request) => {
+      if (request.purpose === "brain.extract") {
+        reads += 1;
+        // A restore of an export begins while the model is asked.
+        await runInDurableObject(shared(), (_instance, state) => {
+          state.storage.sql.exec(
+            `INSERT INTO restores (export, checked, part, restored, state, started_at)
+            VALUES (?, 0, 0, 0, 'running', ?)`,
+            restore,
+            Date.now()
+          );
+        });
+      }
+      return answer(request);
+    });
+    await added(`${token}: ${name} is active.`, audience(group), {
+      extract: fromOutside(),
+      source,
+    });
+    await tick();
+    const [refused] = await runInDurableObject(shared(), (_instance, state) =>
+      state.storage.sql
+        .exec<{ last_error: string | null }>(
+          "SELECT last_error FROM work_items WHERE key = ?",
+          source
+        )
+        .toArray()
+    );
+    // The restore is over.
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM restores WHERE export = ?", restore);
+    });
+    await tick(2);
+    const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
+    expect({
+      refused: refused?.last_error,
+      reads,
+      read: read.map(({ value }) => value),
+    }).toStrictEqual({ refused: "restoring", reads: 1, read: ["active"] });
+  });
+
+  it("never keeps a reference the model gives an entity, only an email the text writes", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Ref");
+    const person = `grasp:person:${unique("p")}`;
+    answers.set(
+      token,
+      answering({
+        entities: [
+          {
+            key: "c",
+            kind: "person",
+            names: [name],
+            // A reference the core reserves for linking, as a model might
+            // copy it from the text: never an identifier of the entity.
+            emails: [person],
+            identifiers: [{ type: "ref", value: person }],
+            refs: [person],
+          },
+        ],
+        memories: [
+          {
+            about: "c",
+            attribute: "role",
+            value: "buyer",
+            type: "fact",
+            statement: `${name} is the buyer.`,
+            quote: `${name} is the buyer`,
+          },
+        ],
+      })
+    );
+    await added(
+      `${token}: ${name} is the buyer. See ${person} or ${person}@acme.example.`,
+      audience(group),
+      { extract: fromOutside() }
+    );
+    await tick();
+    const reader = { person: unique("r"), groups: [group] };
+    const [entity] = await entitiesNamed(reader, name);
+    const names = entity === undefined ? [] : await namesOf(entity.id, reader);
+
+    expect({
+      kept: entity !== undefined,
+      identifiers: names.filter(({ type }) => type !== "name"),
+    }).toStrictEqual({ kept: true, identifiers: [] });
+  });
 });
