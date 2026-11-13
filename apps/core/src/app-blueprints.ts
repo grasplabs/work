@@ -542,9 +542,6 @@ export const createFromBlueprint = async (
     blueprint.id
   );
   refuseAppWorkflows(files.keys());
-  const tree = await storedVersion(env, app, files, definition);
-  await storeTree(env, app, tree);
-  await storeTree(env, app, takenCode);
   // What the blueprint ships, as the release stored it: refused whole if
   // any of it isn't, with nothing made.
   const shipped = blueprintWorkflowSchema.array().parse(blueprint.workflows);
@@ -558,6 +555,32 @@ export const createFromBlueprint = async (
     blueprint.id,
     shipped
   );
+  // The copy's first version binds each workflow it got that its code
+  // declares, as a version binds one (`workflowBindings`): what its
+  // activation binds, and keeps bound (app-workflow-bindings.ts).
+  const declared = workflows.filter(({ alias }) =>
+    definition.permissions.some(
+      (held) => held.alias === alias && held["~permission"] === "workflows"
+    )
+  );
+  const bound: AppDefinition =
+    declared.length === 0
+      ? definition
+      : {
+          ...definition,
+          workflowBindings: declared
+            .map(({ alias, workflowId }) => ({ alias, workflowId }))
+            .toSorted((a, b) => (a.alias < b.alias ? -1 : 1)),
+        };
+  let tree: Awaited<ReturnType<typeof storedVersion>>;
+  try {
+    tree = await storedVersion(env, app, files, bound);
+    await storeTree(env, app, tree);
+    await storeTree(env, app, takenCode);
+  } catch (error) {
+    await discardShipped(env, by, workflows);
+    throw error;
+  }
   const starts = workflowStartRequests(by, app, workflows, blueprint.id);
 
   const now = new Date();
