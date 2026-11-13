@@ -374,6 +374,10 @@ const answersOf = async (
   return answered;
 };
 
+/** An item found by meaning, as `textOf` writes it: its source's id. */
+const foundByMeaningPattern =
+  /"source":\{"producer":"[^"]+","id":"(?<id>[^"]+)"\}[^{}]*?"found":"meaning"/gu;
+
 /** How many items of `answers` were found by meaning. */
 const foundByMeaning = (answers: Iterable<readonly Answer[]>): number =>
   [...answers]
@@ -383,6 +387,17 @@ const foundByMeaning = (answers: Iterable<readonly Answer[]>): number =>
       0
     );
 
+/** The sources of every item of `answers` found by meaning, by id. */
+const meaningSourcesIn = (answers: Iterable<readonly Answer[]>): string[] =>
+  [...answers]
+    .flat()
+    .flatMap(({ got }) =>
+      Array.from(
+        textOf(got).matchAll(foundByMeaningPattern),
+        ({ groups }) => groups?.id ?? ""
+      )
+    );
+
 /** The queue's clock for ticks of this file: only forward. */
 const clock = { at: Date.now() };
 
@@ -390,20 +405,32 @@ const clock = { at: Date.now() };
 const embedTicksMost = 50;
 
 /**
- * Ticks the shared store, as core's clock does, until everything it holds
- * is embedded, nothing waits and no erasure is under way, and runs each
- * of `people`'s own stores' alarms until they sleep: the shared store's
- * embedding then.
+ * Runs each of `people`'s own stores' alarms until they sleep, then ticks
+ * the shared store, as core's clock does, until everything it holds is
+ * embedded, nothing waits and no erasure is under way: the shared store's
+ * embedding then. Fails, naming the store, when a person's own store
+ * still wakes after `embedTicksMost` alarms, or sleeps with a passage of
+ * its own not embedded.
  */
 const allEmbedded = async (
   people: readonly string[]
 ): Promise<WorkOverview["embedding"]> => {
   for (const person of people) {
-    for (let run = 0; run < embedTicksMost; run += 1) {
+    let awake = true;
+    for (let run = 0; awake && run < embedTicksMost; run += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one alarm after another
-      if (!(await runDurableObjectAlarm(ownStoreOf(person)))) {
-        break;
-      }
+      awake = await runDurableObjectAlarm(ownStoreOf(person));
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one store at a time
+    const { embedding } = await ownStoreOf(person).workOverview();
+    const done =
+      embedding.chunks === 0 ||
+      (embedding.rebuilt &&
+        embedding.embedded + embedding.unembeddable === embedding.chunks);
+    if (awake || !done) {
+      throw new Error(
+        `person:${person}'s own store wasn't embedded in ${embedTicksMost} alarms: ${JSON.stringify(embedding)}`
+      );
     }
   }
   for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
@@ -702,7 +729,7 @@ describe(
       const chatCodeBefore = await answersOf(probing, chatCode);
 
       // The reader's own note, in their store: the reader's before.
-      await add(`Notes on ${sharedWord} for the reader`, {
+      const readersNote = await add(`Notes on ${sharedWord} for the reader`, {
         kind: "owner",
         personId: reader,
       });
@@ -743,12 +770,15 @@ describe(
       // More hidden passages than recall takes by meaning, each exactly a
       // question the surfaces ask: the markers, and the shared word.
       const hiddenTexts = [words.join(" "), sharedWord];
+      /** The holder's own copies, in their own store. */
+      const holdersOwn = new Set<string>();
       for (const text of hiddenTexts) {
         for (let copy = 0; copy <= recallLimit; copy += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one source at a time
           await add(text, { kind: "team", teamId: secretTeam });
           // oxlint-disable-next-line no-await-in-loop -- one source at a time
-          await add(text, { kind: "owner", personId: holder });
+          const own = await add(text, { kind: "owner", personId: holder });
+          holdersOwn.add(own.id);
         }
       }
       await add(`Board minutes ${sharedWord} ${teamMarker}`, {
@@ -870,11 +900,17 @@ describe(
             },
           ])
         ),
+        // The reader's own note, from their own store, by meaning.
+        readersNoteByMeaning: meaningSourcesIn(before.values()).includes(
+          readersNote.id
+        ),
         hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
         hiddenChunks: hidden.chunks - readable.chunks,
         afterErasure: afterErasure.rebuilt,
+        // By meaning, from their own store, apart from the team's copies.
         holdersByMeaning: holders.items.some(
-          ({ found, text }) => found === "meaning" && text === words.join(" ")
+          ({ found, source }) =>
+            found === "meaning" && holdersOwn.has(source.id)
         ),
         joined,
       }).toStrictEqual({
@@ -912,6 +948,7 @@ describe(
         hidden: true,
         hiddenChunks: (recallLimit + 1) * hiddenTexts.length + 5,
         afterErasure: true,
+        readersNoteByMeaning: true,
         holdersByMeaning: true,
         joined: true,
       });
