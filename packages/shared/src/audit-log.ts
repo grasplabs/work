@@ -146,7 +146,8 @@ const typeRules: readonly {
   // Ids and codes only, never what a memory says.
   { action: "brain.memory", type: "action" },
   // Core handing a source over to the new Brain (GRA-1727): started, handed
-  // over or refused, by ids alone.
+  // over, refused, or skipped with why (a chat's noted question it may no
+  // longer keep: restricted, deleted, not a member, no text), by ids alone.
   { action: "brain.source", type: "action" },
   // A Grasp staff member reading the client's Brain report, and asking for
   // an action on it and its outcome (core's brain-report.ts).
@@ -169,7 +170,10 @@ const typeRules: readonly {
   { action: "knowledge.signal.dismissed", type: "decision" },
   { action: "knowledge.collection", type: "config" },
   { action: "knowledge", type: "action" },
-  // A person making, renaming or deleting one of their chats.
+  // A person making, renaming or deleting one of their chats; and a
+  // question of their own chat noted to keep in their own Brain
+  // (`chat.turn_noted`, GRA-1805), whose hand-over records how it ended
+  // (`brain.source.*`).
   { action: "chat", type: "action" },
   // A call of the chat agent's code that nothing else records: a listing,
   // a catalog or a run's status, or a call refused before it did anything.

@@ -115,10 +115,14 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Removed a file from a chat before sending it`,
   },
   {
-    action: "chat.turn_kept",
-    text: msg`Kept a question asked in a chat for its person's own Brain`,
+    action: "chat.turn_noted",
+    text: msg`Noted a question asked in a chat, to keep in its person's own Brain`,
   },
   { action: "chat", text: msg`Changed a chat` },
+  {
+    action: "brain.source.handover_skipped",
+    text: msg`Didn't keep something noted for the Brain, and recorded why`,
+  },
   { action: "agent.call", text: msg`The agent looked something up` },
   { action: "model.refused", text: msg`A model call was refused` },
   { action: "model", text: msg`Called a model` },

@@ -128,12 +128,27 @@ const outcomesFor = async (id: string): Promise<string[]> => {
     .map(({ action }) => action);
 };
 
-/** The `chat.turn_kept` events of `personId`'s chats, of chat `chatId` if given. */
-const keptEvents = async (personId: string, chatId = "") => {
+/** How the hand-over of source `id` ended in the log: each event, with its reason. */
+const endingsFor = async (id: string): Promise<string[]> => {
+  const logged = await allEvents();
+  return logged
+    .filter(
+      ({ action, target }) =>
+        action.startsWith("brain.source.") &&
+        action !== "brain.source.handover_started" &&
+        target?.id === id
+    )
+    .map(({ action, detail }) =>
+      typeof detail?.reason === "string" ? `${action}:${detail.reason}` : action
+    );
+};
+
+/** The `chat.turn_noted` events of `personId`'s chats, of chat `chatId` if given. */
+const notedEvents = async (personId: string, chatId = "") => {
   const logged = await allEvents();
   return logged.filter(
     ({ action, target }) =>
-      action === "chat.turn_kept" &&
+      action === "chat.turn_noted" &&
       target?.id.startsWith(`${personId}/${chatId}`) === true
   );
 };
@@ -171,6 +186,31 @@ const brainOutOfReach = async (
   return async () => {
     await runInDurableObject(stub, (instance) => {
       Reflect.set(envOf(instance), "BRAIN_STORE", real);
+    });
+  };
+};
+
+/**
+ * The Workspace object's Knowledge database (today's Brain, which a
+ * delete erases its captures from after the new Brain's part) failing
+ * every batch until the returned function puts it back.
+ */
+const knowledgeOutOfReach = async (
+  stub: ReturnType<typeof workspace>
+): Promise<() => Promise<void>> => {
+  const real: unknown = await runInDurableObject(stub, (instance) => {
+    const objectEnv = envOf(instance);
+    const was: unknown = Reflect.get(objectEnv, "KNOWLEDGE");
+    Reflect.set(objectEnv, "KNOWLEDGE", {
+      prepare: outOfReach,
+      batch: outOfReach,
+      exec: outOfReach,
+    });
+    return was;
+  });
+  return async () => {
+    await runInDurableObject(stub, (instance) => {
+      Reflect.set(envOf(instance), "KNOWLEDGE", real);
     });
   };
 };
@@ -232,9 +272,9 @@ describe("a person's chat turn", () => {
       `Say it for ${marker}?`
     );
     await expect(recalled(person.userId, answered)).resolves.toStrictEqual([]);
-    expect(JSON.stringify(await keptEvents(person.userId, chatId))).not.toMatch(
-      new RegExp(marker, "u")
-    );
+    expect(
+      JSON.stringify(await notedEvents(person.userId, chatId))
+    ).not.toMatch(new RegExp(marker, "u"));
   });
 
   // The reviewer's probe A1 (round 2): an earlier turn's step, quoted by
@@ -329,7 +369,7 @@ describe("a person's chat turn", () => {
       return instance.turnForBrain(chatId, person.userId, last);
     });
 
-    expect(kept).toStrictEqual({ question: "Second?" });
+    expect(kept).toStrictEqual({ kind: "question", question: "Second?" });
   });
 
   // The reviewer's probe (round 1): what the recall before the question
@@ -391,13 +431,13 @@ describe("a person's chat turn", () => {
   });
 
   // The re-check as it is handed over (threat 5): the reviewer's probe.
-  it("is not handed over once its chat was restricted after it was noted", async () => {
+  it("is not handed over once its chat was restricted after it was noted, and its note ends in why", async () => {
     const marker = word();
     const { person, stub, chatId, ask } = await chatter(says("Before."));
     await ask(`Before ${marker}?`);
     await vi.waitFor(
       async () => {
-        await expect(keptEvents(person.userId, chatId)).resolves.toHaveLength(
+        await expect(notedEvents(person.userId, chatId)).resolves.toHaveLength(
           1
         );
       },
@@ -408,7 +448,12 @@ describe("a person's chat turn", () => {
     await handOverNow();
     await handOverNow();
 
+    const [noted] = await notedEvents(person.userId, chatId);
     await expect(recalled(person.userId, marker)).resolves.toStrictEqual([]);
+    // Once: the item was done, so the second tick hands nothing over.
+    await expect(endingsFor(noted?.target?.id ?? "")).resolves.toStrictEqual([
+      "brain.source.handover_skipped:restricted",
+    ]);
   });
 
   it("is never handed over from a chat app's chat, a turn nothing but a wake asked for, or a restricted chat", async () => {
@@ -437,7 +482,7 @@ describe("a person's chat turn", () => {
     // A turn of their own chat after them, handed over as ever.
     await ask(`Asked ${marker}?`);
     const found = await handedTo(person.userId, marker);
-    const kept = await keptEvents(person.userId);
+    const kept = await notedEvents(person.userId);
 
     expect({
       found: found.length,
@@ -459,7 +504,7 @@ describe("a deleted chat", () => {
       },
       { timeout: 15_000, interval: 200 }
     );
-    const [event] = await keptEvents(person.userId, chatId);
+    const [event] = await notedEvents(person.userId, chatId);
     const turn = chatTurnOf(event?.target?.id ?? "");
 
     await person.api.chats.remove(chatId);
@@ -470,6 +515,11 @@ describe("a deleted chat", () => {
     await handOverNow();
 
     await expect(recalled(person.userId, marker)).resolves.toStrictEqual([]);
+    // The note made again ends in why it is not kept.
+    await expect(endingsFor(event?.target?.id ?? "")).resolves.toStrictEqual([
+      "brain.source.handed_over",
+      "brain.source.handover_skipped:deleted",
+    ]);
     // Added after the delete by any path, it is refused for good.
     await expect(
       outcome(
@@ -490,7 +540,7 @@ describe("a deleted chat", () => {
     await ask(`Race ${marker}?`);
     await vi.waitFor(
       async () => {
-        await expect(keptEvents(person.userId, chatId)).resolves.toHaveLength(
+        await expect(notedEvents(person.userId, chatId)).resolves.toHaveLength(
           1
         );
       },
@@ -511,7 +561,7 @@ describe("a deleted chat", () => {
 
     await handOverNow(racing);
 
-    const [event] = await keptEvents(person.userId, chatId);
+    const [event] = await notedEvents(person.userId, chatId);
     await expect(outcomesFor(event?.target?.id ?? "")).resolves.toStrictEqual([
       "brain.source.handover_started",
       "brain.source.handover_refused",
@@ -521,20 +571,79 @@ describe("a deleted chat", () => {
 
   it("stays when its turns can't be erased from the Brain, and goes once they can", async () => {
     const marker = word();
-    const { person, stub, chatId, ask } = await chatter(says("Kept."));
+    const { person, stub, chatId, ask } = await chatter(
+      says("Kept."),
+      says("Still here.")
+    );
     await ask(`Keep ${marker}?`);
     await handedTo(person.userId, marker);
     const putBack = await brainOutOfReach(stub);
 
     const refused = await outcome(person.api.chats.remove(chatId));
     const listed = await person.api.chats.list();
+    // Nothing of it was touched: it answers, and keeps its questions.
+    const again = await outcome(ask(`Again ${marker}?`));
     await putBack();
+    await handedTo(person.userId, `Again ${marker}`);
     await person.api.chats.remove(chatId);
 
     expect({
       refused: refused === "ok" ? "deleted" : "refused",
       kept: listed.map(({ id }) => id),
+      again,
       after: await recalled(person.userId, marker),
-    }).toStrictEqual({ refused: "refused", kept: [chatId], after: [] });
+    }).toStrictEqual({
+      refused: "refused",
+      kept: [chatId],
+      again: "ok",
+      after: [],
+    });
+  });
+
+  // The mirror (review round 3): the Brain's part done, a later step
+  // failing. The chat stays and answers; its questions are no longer kept,
+  // each ending refused as erased, never tried for ever; a second delete
+  // completes.
+  it("stays and answers when a step after the Brain's erasure fails, keeps none of its later questions, and goes when deleted again", async () => {
+    const marker = word();
+    const { person, stub, chatId, ask } = await chatter(
+      says("Kept."),
+      says("Still here.")
+    );
+    await ask(`Keep ${marker}?`);
+    await handedTo(person.userId, marker);
+    const putBack = await knowledgeOutOfReach(stub);
+
+    const refused = await outcome(person.api.chats.remove(chatId));
+    await putBack();
+    const again = await outcome(ask(`Again ${marker}?`));
+    await vi.waitFor(
+      async () => {
+        await handOverNow();
+        await expect(notedEvents(person.userId, chatId)).resolves.toHaveLength(
+          2
+        );
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    await handOverNow();
+    const [, laterNote] = await notedEvents(person.userId, chatId);
+    const ended = await endingsFor(laterNote?.target?.id ?? "");
+    await person.api.chats.remove(chatId);
+    const left = await person.api.chats.list();
+
+    expect({
+      refused: refused === "ok" ? "deleted" : "refused",
+      again,
+      ended,
+      found: await recalled(person.userId, marker),
+      listed: left.map(({ id }) => id),
+    }).toStrictEqual({
+      refused: "refused",
+      again: "ok",
+      ended: ["brain.source.handover_refused:erased"],
+      found: [],
+      listed: [],
+    });
   });
 });

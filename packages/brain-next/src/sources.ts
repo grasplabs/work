@@ -25,10 +25,13 @@ import {
   erasuresSoFar,
   groupOfSource,
   isErased,
+  isUnderErasedGroup,
+  keepGroup,
   lastErasedVersion,
   isPersonErasedSince,
   keepSubject,
   subjectOf,
+  subjectsOver,
 } from "./erasure.ts";
 import {
   fileKeyOf,
@@ -93,6 +96,8 @@ interface Adding {
   readonly onlyFor?: { subject: string; soFar: number };
   /** Its group's key as the erasure ledger names it: null for none. */
   readonly group: string | null;
+  /** The keys its key lies under, as the ledger names them (`subjectsOver`). */
+  readonly over: readonly string[];
   readonly hash: string;
   readonly readers: string;
   /** Its chunks when it is indexed, each with its text's SHA-256: none when not. */
@@ -104,13 +109,17 @@ const otherGroup =
   "The Brain refused it: a source keeps the group it was first added in";
 
 /**
- * Refuses `adding` when its group's key was erased (as an erased key's
+ * Refuses `adding` when its group's key was erased, or a group its key
+ * lies under was (`isUnderErasedGroup`, named or not: as an erased key's
  * add, `erasedSource`), or when its source was first added in another group,
  * or in none: a source keeps its group for good, so a group's erasure
  * finds every version of it.
  */
 const refuseByGroup = (sql: SqlStorage, adding: Adding): void => {
-  if (adding.group !== null && isErased(sql, adding.group)) {
+  if (
+    (adding.group !== null && isErased(sql, adding.group)) ||
+    isUnderErasedGroup(sql, adding.over)
+  ) {
     throw new Error(erasedSource);
   }
   const held = groupOfSource(sql, adding.added.source);
@@ -273,6 +282,9 @@ const record = (
     .values({ source: added.source, change: added.change, versionRow: row })
     .run();
   keepSubject(storage.sql, added.source, adding.subject, adding.group);
+  if (adding.group !== null) {
+    keepGroup(storage.sql, adding.group);
+  }
   // The version before stops being found by meaning as it stops being
   // current: its chunks' vector codes go with the pointer.
   const replaced = db
@@ -332,6 +344,7 @@ export const addVersion = async (
       ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
       : {}),
     group: added.group === undefined ? null : await subjectOf(added.group),
+    over: await subjectsOver(added.source),
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     chunks: await Promise.all(

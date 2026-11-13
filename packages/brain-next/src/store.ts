@@ -116,9 +116,11 @@ import {
   erasureDue,
   erasuresUnfinished,
   isErased,
+  isUnderErasedGroup,
   isStoreErased,
   storeErasedAt,
   subjectOf,
+  subjectsOver,
   keepMissingSubjects,
   replayMemoryErasures,
   ledgerPrefix,
@@ -957,7 +959,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (!this.#schema) {
       return "free";
     }
-    if (isErased(this.ctx.storage.sql, await subjectOf(key))) {
+    const { sql } = this.ctx.storage;
+    if (
+      isErased(sql, await subjectOf(key)) ||
+      isUnderErasedGroup(sql, await subjectsOver(key))
+    ) {
       return "erased";
     }
     const held =

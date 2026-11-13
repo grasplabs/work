@@ -60,7 +60,11 @@ import { detailsRemoved } from "./workflows/retention.ts";
 // before its text leaves core, then `brain.source.handed_over` with the
 // Brain's version, or `brain.source.handover_refused` when it was refused
 // for good (what it adds was erased, or its one reader's erasure began:
-// brain-next.ts `handOver`). Each attempt records its own. Each is added
+// brain-next.ts `handOver`). A chat's turn its producer finds it may no
+// longer hand over ends in `brain.source.handover_skipped` with why
+// (`HandOverSkip`), so its `chat.turn_noted` never stands alone; a run
+// that is gone records nothing (its noting events say only that it
+// ended). Each attempt records its own. Each is added
 // through core's `addSource`, which picks the store its readers belong in;
 // nothing here assumes which.
 
@@ -122,7 +126,7 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
 const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
   const turn = chatTurnOf(id);
   if (turn === undefined) {
-    return gone;
+    return { kind: "gone", skipped: "deleted" };
   }
   const { personId, chatId, answerId } = turn;
   const readers = { kind: "owner", personId } as const;
@@ -130,15 +134,15 @@ const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
     return { kind: "erased", readers };
   }
   if ((await memberRole(env.DB, personId)) === undefined) {
-    return gone;
+    return { kind: "gone", skipped: "not_a_member" };
   }
   const said = await workspace(env, personalWorkspaceId(personId)).turnForBrain(
     chatId,
     personId,
     answerId
   );
-  if (said === null) {
-    return gone;
+  if (said.kind === "skipped") {
+    return { kind: "gone", skipped: said.reason };
   }
   return {
     kind: "source",
@@ -203,6 +207,16 @@ const record = async (env: Env, entry: AuditEntry): Promise<void> => {
 export const producersOf = (env: Env): Producers => ({
   read: async (source) => {
     const handed = await handedOf(env, source);
+    // A noted source that is not handed over after all ends in why, so a
+    // note never stands alone in the log (the chat's: GRA-1805).
+    if (handed.kind === "gone" && handed.skipped !== undefined) {
+      await record(env, {
+        actor: { type: "system" },
+        action: "brain.source.handover_skipped",
+        target: targetOf(source),
+        detail: { producer: source.producer, reason: handed.skipped },
+      });
+    }
     if (handed.kind === "source") {
       await record(env, {
         actor: { type: "system" },

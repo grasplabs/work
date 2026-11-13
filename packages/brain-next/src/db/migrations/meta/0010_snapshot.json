@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7ca72fd8-ce93-483b-bdbc-0701d421895c",
+  "id": "a097a37d-5415-4272-919c-127d93a9ddb4",
   "prevId": "26f4cdf9-559e-43ae-ac3c-8e7b96acdfde",
   "tables": {
     "chunks": {
@@ -841,6 +841,23 @@
           "value": "\"files\".\"refs\" >= 0"
         }
       }
+    },
+    "known_groups": {
+      "name": "known_groups",
+      "columns": {
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "memories": {
       "name": "memories",

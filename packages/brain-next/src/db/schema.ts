@@ -542,6 +542,17 @@ export const sourceSubjects = sqliteTable(
 );
 
 /**
+ * The SHA-256 of every key an add named as its group (`NewSource.group`),
+ * kept for good, as the erasure ledger names keys: so once such a key is
+ * erased, every key under it (`<group>/…`) stays refused, whether an add
+ * names the group or not (sources.ts). A key no add ever named as a group
+ * is none: erasing it closes it alone.
+ */
+export const knownGroups = sqliteTable("known_groups", {
+  subject: text().primaryKey(),
+});
+
+/**
  * What a person's erasure hid, a row a version: by number under the
  * SHA-256 of its source's key, as its ledger entry holds it (erasure.ts),
  * kept after the version is deleted, so the entry can be written again

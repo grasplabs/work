@@ -1869,6 +1869,65 @@ describe("a group in a person's own store", () => {
     );
   });
 
+  // Review round 3 (P2): the store holds an erased group's keys closed
+  // itself, whatever a later add names: not each producer.
+  it("refuses a key under an erased group, and answers it erased, though an add names no group", async () => {
+    const group = newGroup();
+    await addIn(group, "1", "Dingo turn");
+    await own().eraseSource({ source: group, reason: "deleted" });
+    await tick();
+    await tick();
+
+    const states = await Promise.all(
+      [`${group}/1`, `${group}/2`].map(async (key) => await own().keyState(key))
+    );
+    const added = await Promise.all(
+      [`${group}/1`, `${group}/2`].map(
+        async (source) =>
+          await called(
+            own().addSource({
+              source,
+              change: "2",
+              text: "Dingo back without its group",
+              access: theirs(),
+            })
+          ).then(
+            () => "added",
+            (error: unknown) =>
+              error instanceof Error ? error.message : String(error)
+          )
+      )
+    );
+
+    expect({ states, added, found: await foundFor("Dingo") }).toStrictEqual({
+      states: ["erased", "erased"],
+      added: [erasedSource, erasedSource],
+      found: [],
+    });
+  });
+
+  // ...and only a key an add named as a group: an erased key alone closes
+  // nothing under it.
+  it("leaves a key under a plainly erased key free", async () => {
+    const plain = `upload:${crypto.randomUUID()}`;
+    await own().addSource({
+      source: plain,
+      change: "1",
+      text: "Kiwi itself",
+      access: theirs(),
+    });
+    await own().eraseSource({ source: plain, reason: "deleted" });
+
+    await own().addSource({
+      source: `${plain}/x`,
+      change: "1",
+      text: "Kiwi under it",
+      access: theirs(),
+    });
+
+    await expect(foundFor("Kiwi")).resolves.toStrictEqual([`${plain}/x`]);
+  });
+
   // Threat 6: a group erased before anything was added to it is closed too.
   it("closes a group nothing was added to yet", async () => {
     const group = newGroup();

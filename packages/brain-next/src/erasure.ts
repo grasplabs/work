@@ -325,6 +325,44 @@ export const groupOfSource = (
     .at(0)?.group;
 
 /**
+ * The subjects of the keys `key` lies under: each part of it that ends
+ * before a "/", as the ledger names them. At most as many as its "/".
+ */
+export const subjectsOver = async (key: string): Promise<string[]> =>
+  await Promise.all(
+    [...key.matchAll(/\//gu)].map(
+      async ({ index }) => await subjectOf(key.slice(0, index))
+    )
+  );
+
+/**
+ * Whether a key lies under a group that was erased: one of the keys over
+ * it (`subjectsOver`) an add named as a group (`known_groups`) and an
+ * erasure closed. Such a key is refused as an erased key is, named in its
+ * group or not, so the promise holds whatever a producer passes.
+ */
+export const isUnderErasedGroup = (
+  sql: SqlStorage,
+  over: readonly string[]
+): boolean =>
+  over.length > 0 &&
+  sql
+    .exec(
+      `SELECT 1 FROM known_groups
+      JOIN erasures ON erasures.kind = 'source'
+        AND erasures.subject = known_groups.subject
+      WHERE known_groups.subject IN (SELECT value FROM json_each(?))
+      LIMIT 1`,
+      JSON.stringify(over)
+    )
+    .toArray().length > 0;
+
+/** Keeps `subject` as a group's, as an add names it, in the add's transaction. */
+export const keepGroup = (sql: SqlStorage, subject: string): void => {
+  sql.exec("INSERT OR IGNORE INTO known_groups (subject) VALUES (?)", subject);
+};
+
+/**
  * Where the store's record of erasures is now: an add notes it as it
  * begins, so an erasure recorded after that is known by its place, not by
  * a clock (`isPersonErasedSince`).

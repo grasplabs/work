@@ -2198,7 +2198,11 @@ export interface Brain {
    * left to delete, the store's tick finishes. The source's key is closed:
    * an add to it is refused from then on. Every source added in the key
    * as its group (`NewSource.group`) is erased with it, in the same one
-   * entry, and an add naming the key as its group is refused alike. It
+   * entry. Once a key an add named as a group is erased, every key under
+   * it (`<group>/…`) is refused and answers `erased` (`keyState`), named
+   * in the group or not; a key no add named as a group closes alone, so
+   * `upload:1` erased leaves `upload:1/x` free. Never an erasure by
+   * prefix: what is erased is the key and its group's members. It
    * answers alike whether the source held anything, and is safe to
    * repeat.
    */

@@ -4804,6 +4804,10 @@ msgstr "No entregó un evento de webhook a la ejecución que lo esperaba"
 msgid "Didn't keep a webhook event: its source keeps as many as it may"
 msgstr "No guardó un evento de webhook: su fuente ya guarda todos los que puede"
 
+#: src/activity/audit-words.ts
+msgid "Didn't keep something noted for the Brain, and recorded why"
+msgstr "No guardó algo anotado para el Brain y registró por qué"
+
 #: src/agents/agent-wakes.tsx
 msgid "Didn't run {when}: no AI provider is connected"
 msgstr "No se ejecutó el {when}: no hay ningún proveedor de IA conectado"
@@ -7468,10 +7472,6 @@ msgid "Kept"
 msgstr "Conservada"
 
 #: src/activity/audit-words.ts
-msgid "Kept a question asked in a chat for its person's own Brain"
-msgstr "Guardó una pregunta hecha en un chat en el Brain propio de la persona"
-
-#: src/activity/audit-words.ts
 msgid "Kept access at the provider for an account connected again"
 msgstr "Mantuvo el acceso en el proveedor para una cuenta conectada de nuevo"
 
@@ -9156,6 +9156,10 @@ msgstr "Nota no encontrada"
 #: src/onboarding/connect-steps.tsx
 msgid "Noted"
 msgstr "Anotado"
+
+#: src/activity/audit-words.ts
+msgid "Noted a question asked in a chat, to keep in its person's own Brain"
+msgstr "Anotó una pregunta hecha en un chat, para guardarla en el Brain propio de la persona"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted: {name}. Sign in to connect it now, or we’ll connect it with you. I’ll only read what you share with me."

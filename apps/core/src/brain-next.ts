@@ -1850,7 +1850,14 @@ const embeddersOf = async (env: Env): Promise<Embedders> => ({
  * may have landed after that erasure.
  */
 export type Handed =
-  | { kind: "gone" }
+  | {
+      kind: "gone";
+      /**
+       * Why a source its producer noted is not handed over, for those that
+       * record it (brain-sources.ts): what a note promised ends in this.
+       */
+      skipped?: HandOverSkip;
+    }
   | { kind: "erased"; readers: SourceReaders }
   | {
       kind: "source";
@@ -1861,6 +1868,17 @@ export type Handed =
       /** The group it is added in (`addSource`): none for most. */
       group?: SourceRef;
     };
+
+/**
+ * Why a noted source is not handed over after all: its record restricted
+ * since, deleted or gone, its reader no longer a member, or nothing of it
+ * to keep (a question of no words).
+ */
+export type HandOverSkip =
+  | "restricted"
+  | "deleted"
+  | "not_a_member"
+  | "no_text";
 
 /** How a hand-over that did something ended: added, or refused for good. */
 export type HandOverEnd = Exclude<HandOverResult, { kind: "nothing" }>;
