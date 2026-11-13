@@ -99,20 +99,28 @@ const credentials: readonly (readonly [
 // outside a link (`R&D`, `code=42`) is never one. JSON escapes are not
 // decoded: what is redacted (a tool's output as JSON text, a chat's text)
 // holds `&` as itself.
-// Not caught: a credential in a URL's path, and an opaque download URL
-// that grants by its whole self. What is left is bounded: such text
+// Its user name and password (`https://u:p@h`) are redacted too.
+// Not caught: a credential in a URL's path; an opaque download URL that
+// grants by its whole self; a grant in a fragment other than what the
+// named-value rule above catches (`#access_token=…` is; `#sig=…` and
+// `#code=…` are not); a link `URL` can't parse; a link with no scheme
+// (`www.…`, `//host/…`); and an AWS secret key written as
+// `aws_secret_access_key = …` or bare (only its key ID, `AKIA…`, has a
+// shape of its own). What is left is bounded: such text
 // reaches only the person who read it (the Brain keeps a connection's
 // reads for their reader alone), and connectors select the fields they
 // return.
 
 /**
  * A link: a scheme, `://`, and what may follow in a URL, up to a space or
- * a character no URL holds. A scheme is short (`https`, `ms-excel`): held
+ * a character no URL holds. `[` and `]` end one too: RFC 3986 allows them
+ * only around an IP-literal host (§3.2.2), and a Markdown link's text,
+ * `[https://…](target)`, ends at its `]`. A scheme is short (`https`, `ms-excel`): held
  * to 32 characters, so a flood of word characters and dashes (`sk-sk-…`),
  * tried from every word in it, never scans to its end each time, which
  * would be quadratic.
  */
-const linkPattern = /\b[a-z][a-z\d+.-]{0,31}:\/\/[^\s"'<>\\^`{|}]+/giu;
+const linkPattern = /\b[a-z][a-z\d+.-]{0,31}:\/\/[^\s"'<>\\^`{|}[\]]+/giu;
 
 /** The query parameters that sign or grant a link, by name. */
 const grantingName = /^(?:[\w-]*signature|sig|code|tempauth|pwd)$/iu;
@@ -200,6 +208,12 @@ const serialized = (url: URL): string =>
  */
 const redactParams = (url: URL, nested: boolean): boolean => {
   let changed = false;
+  // A user name and password in the link itself (`https://u:p@h`).
+  if (url.username !== "" || url.password !== "") {
+    url.username = url.username === "" ? "" : "[redacted]";
+    url.password = url.password === "" ? "" : "[redacted]";
+    changed = true;
+  }
   const pairs = [...url.searchParams].map(([name, value]): [string, string] => {
     if (grantingName.test(name)) {
       changed = true;

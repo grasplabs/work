@@ -218,8 +218,11 @@ export const instructionsTextSchema = wellFormedString()
  * source, but never cut into chunks or indexed, so recall never finds it:
  * it is read whole (`readCurrent`).
  */
+// Neither a group nor when it was read: an instruction file is written by
+// a person over the version they saw (`after`), never a read that a later
+// one may hold off.
 export const newInstructionsSchema = newSourceSchema
-  .omit({ group: true })
+  .omit({ group: true, readAt: true })
   .extend({
     text: instructionsTextSchema,
     /**

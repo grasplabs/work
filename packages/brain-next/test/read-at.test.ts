@@ -1,4 +1,8 @@
-import type { Access, NewSource } from "@grasp-os/brain-next/contract";
+import type {
+  Access,
+  NewInstructions,
+  NewSource,
+} from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -146,5 +150,41 @@ describe("an add that says when its text was read", () => {
       { version: 2, newer: undefined, current: "B" },
       { version: 2, newer: undefined, current: "B" },
     ]);
+  });
+
+  it("is not an instruction file's: an add of one that says when it was read is refused, writing nothing", async () => {
+    const source = `instructions:${crypto.randomUUID()}`;
+    const first = await store().addInstructions({
+      source,
+      change: "1",
+      text: "one",
+      access,
+    });
+    // An add as a caller the types don't hold may send it: `readAt` beside
+    // `after`, which a literal of the type would refuse at compile time.
+    const sent = {
+      source,
+      change: "2",
+      text: "two",
+      access,
+      after: first.version,
+      readAt: Date.now(),
+    };
+    const asked: NewInstructions = sent;
+    const refused = await store()
+      .addInstructions(asked)
+      .then(
+        () => "written",
+        () => "refused"
+      );
+    const [current] = await store().readCurrent({
+      sources: [source],
+      reader: { person: crypto.randomUUID(), groups: [group] },
+    });
+
+    expect({ refused, current: current?.text }).toStrictEqual({
+      refused: "refused",
+      current: "one",
+    });
   });
 });

@@ -191,6 +191,19 @@ describe("redacting credentials", () => {
     ]);
   });
 
+  it("redacts a link's user name and password, and keeps a Markdown link's target apart from the link it names", () => {
+    expect(
+      [
+        // Built from parts, so the source holds no credential to scan.
+        `Pull from ${["https://deploy", "hunter2@git.acme.test/repo.git"].join(":")} today`,
+        "[https://h/q?sig=S](https://h/doc)",
+      ].map(redact)
+    ).toStrictEqual([
+      "Pull from https://%5Bredacted%5D:%5Bredacted%5D@git.acme.test/repo.git today",
+      "[https://h/q?sig=%5Bredacted%5D](https://h/doc)",
+    ]);
+  });
+
   it("leaves a link with nothing to redact, and prose, exactly as they were", () => {
     const texts = [
       '<a href="https://acme.test/report?x=1&amp;y=2&#38;z=3">Report</a>',
