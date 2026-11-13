@@ -857,10 +857,13 @@ export const ShareWithTeam = ({
   const recipients = (offered ?? []).filter((each) =>
     chosen.includes(keyOf(each))
   );
-  // Something to share: someone new, or changes for whom it is shared with.
+  // Something to share: someone new, or changes for whom it is shared
+  // with; a workflow's changes for its owner alone too, as its triggers and
+  // Run start its live version, whoever else has it.
+  const forSomeone = members.length > 0 || subject.kind === "workflow";
   const something =
     recipients.length > 0 ||
-    (members.length > 0 &&
+    (forSomeone &&
       (shareable.changing || versionToShare(live, draft) !== undefined));
   const canShare = something && shareable.ready && !busy && !running;
   const readOffered = async (): Promise<void> => {

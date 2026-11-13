@@ -89,13 +89,6 @@ const fakeWorkflows = () => {
         workflow("flow-draft", "Never published", null),
       ];
     },
-    versions: async (id: string) => {
-      await Promise.resolve();
-      const count = id === "flow-invoice" ? 3 : 2;
-      return Array.from({ length: count }, (_, index) => ({
-        version: index + 1,
-      }));
-    },
     bindToApp: async (
       id: string,
       input: { app: string; alias: string; version: number }
@@ -123,7 +116,18 @@ const fakeWorkflows = () => {
       bindings = bindings.filter((each) => each.id !== binding);
     },
   };
-  return { session: { workflowResources }, asked };
+  // A workflow's versions, as `versions` lists them: newest first.
+  const versions = {
+    list: async ({ id }: { kind: string; id: string }) => {
+      await Promise.resolve();
+      const count = id === "flow-invoice" ? 3 : 2;
+      return Array.from({ length: count }, (_, index) => ({
+        resourceId: id,
+        version: count - index,
+      }));
+    },
+  };
+  return { session: { workflowResources, versions }, asked };
 };
 
 let root: Root | undefined;

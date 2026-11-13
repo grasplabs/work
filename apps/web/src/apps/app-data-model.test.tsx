@@ -23,7 +23,7 @@ import { AppDataModel } from "./app-data-model.tsx";
 import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
 
 // An App's data model in its workspace's Data view (app-data-model.tsx),
-// against core's `apps.drafts.dataModel` and `apps.drafts.define` as the page
+// against core's `apps.dataModel` and `apps.define` as the page
 // reaches them: what a person does becomes the definition's own
 // operations, each previewed first, and what publishing does to the
 // records the App holds is said before a change that needs a value,
@@ -134,8 +134,8 @@ const shown = async (
       fields: { title: "Call the bank" },
     },
   ];
-  const drafts = {
-    testTables: async () => {
+  const testData = {
+    tables: async () => {
       await Promise.resolve();
       return [
         {
@@ -148,14 +148,16 @@ const shown = async (
         },
       ];
     },
-    testRecords: async () => {
+    records: async () => {
       await Promise.resolve();
       return { records: notes, cursor: null };
     },
-    resetTestData: async () => {
+    resetData: async () => {
       await Promise.resolve();
       notes = [];
     },
+  };
+  const definitions = {
     dataModel: async () => {
       await Promise.resolve();
       return { model: held, plan: nothingPlanned, uses };
@@ -183,7 +185,7 @@ const shown = async (
       return { ok: true, model: after, plan, change: plan };
     },
   };
-  const apps = { drafts };
+  const apps = { ...definitions, preview: testData };
   const core = {
     withSession: async <T,>(
       action: (session: { apps: typeof apps }) => Promise<T>

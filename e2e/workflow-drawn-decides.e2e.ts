@@ -14,8 +14,8 @@ import { origin } from "./stack.ts";
 // builder makes it from Make something, saying what they want done, and
 // Grasp's chat draws it once they say Build it (the stack's scripted
 // model saves an invoice approval, a person's decision, as its draft,
-// e2e/model-scripts.ts); the builder publishes it from its Settings'
-// Definition; an admin names who answers its decision in its Settings'
+// e2e/model-scripts.ts); the builder shares it with Share with your team
+// in its bar; an admin names who answers its decision in its Settings'
 // Files and apps; the builder starts a run with Run, naming the
 // approver, whose nav counts the workflow that needs them, and who decides
 // from their inbox, on the decision's own page: its link, which anyone
@@ -75,7 +75,7 @@ const decisionIn = async (page: Page, name: string): Promise<void> => {
 
 /**
  * Makes a new workflow saying what it should do, which Grasp's chat draws
- * as the approval on its Flow, and publishes it as version 1, as the
+ * as the approval on its Flow, and shares it, its first version, as the
  * builder on `page`: its ID and name.
  */
 const drawnAndPublished = async (
@@ -109,17 +109,15 @@ const drawnAndPublished = async (
     pageRead
   );
 
-  // Its definition, in its Settings, is where it is published.
+  // Share with your team, in its bar, makes the draft its first version.
   await page
-    .getByRole("navigation", { name: "Workflow views" })
-    .getByRole("link", { name: "Settings" })
-    .click();
+    .getByRole("button", { name: "Share with your team" })
+    .click(pageRead);
   await page
-    .getByRole("navigation", { name: "Settings sections" })
-    .getByRole("link", { name: "Definition" })
-    .click();
-  await page.getByRole("button", { name: "Publish revision 1" }).click();
-  await expect(page.getByText("Published as version 1.")).toBeVisible(pageRead);
+    .getByRole("dialog")
+    .getByRole("button", { name: "Share", exact: true })
+    .click(pageRead);
+  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
   return { workflow, name };
 };
 
