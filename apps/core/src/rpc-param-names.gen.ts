@@ -115,7 +115,6 @@ export const rpcParamNames: ParamNames = {
     "contested": ["next"],
     "correct": ["correction"],
     "entities": ["kind","next"],
-    "entity": ["entity"],
     "forget": ["memory"],
     "memories": ["entity","next"],
   },

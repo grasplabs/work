@@ -2774,27 +2774,6 @@ const entityRefSchema = z.strictObject({
 });
 
 /**
- * The entity `entity` as the member `personId` may see it: its kind and
- * earliest name. Null alike when there is none or they may not. Refused
- * once they are no longer a member.
- */
-export const entityAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  entity:
-    | { store: MemoryStoreName; id: string }
-    | Readonly<Record<string, unknown>>
-): Promise<StoredEntity | null> => {
-  const { store, id } = checked(entityRefSchema, entity);
-  const reader = await readerOf(env, personId);
-  const read = await storeNamed(env, reader, store).readEntity({
-    entity: id,
-    reader,
-  });
-  return read === null ? null : await liveNamed(env, reader, store, read);
-};
-
-/**
  * A memory as the page shows it: the store's own, with the source it was
  * drawn from as its producer named it, and the entity it relates to with
  * its earliest name the reader may see.
@@ -2945,6 +2924,11 @@ const memoryRefSchema = z.strictObject({
 /** A memory, by its store and id, with the entity it is about. */
 export type StoredMemoryRef = z.infer<typeof memoryRefSchema>;
 
+const memoryPlaceSchema = memoryRefSchema.omit({ entity: true });
+
+/** A memory, by its store and id. */
+export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
+
 /**
  * The member `personId` confirms memory `memory`, current and one they may
  * read, over the current memories they may read that say otherwise, as
@@ -2955,9 +2939,9 @@ export type StoredMemoryRef = z.infer<typeof memoryRefSchema>;
 export const confirmAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  memory: StoredMemoryRef | Readonly<Record<string, unknown>>
+  memory: StoredMemoryPlace | Readonly<Record<string, unknown>>
 ): Promise<MemoryChangeOutcome> => {
-  const { store, memory: id } = checked(memoryRefSchema, memory);
+  const { store, memory: id } = checked(memoryPlaceSchema, memory);
   const reader = await readerOf(env, personId);
   try {
     return await storeNamed(env, reader, store).confirmMemory({
@@ -2995,14 +2979,17 @@ export type Correction = z.input<typeof correctionSchema>;
  * The shared store is left as it is: a correction others may read would
  * widen what the person read, theirs to publish, not this. What is saved
  * is built from what never changes for one correction (the entity's id
- * and kind, the memory's attribute and type, the text), so
- * the same `change` again answers what it saved, whatever has happened
- * to the wrong memory since (ended by it, or retired), and confirms and
- * retires again, each a repeat that records nothing new. The same
- * `change` with other text is refused (`brain.correction_reused`). Null
- * alike when the memory isn't one they may read and when it is a relation.
- * Refused once they are
- * no longer a member.
+ * and kind, the memory's attribute and type, the text), so the same
+ * `change` again answers what it saved while the wrong memory is one they
+ * may still read, whatever else has happened to it since (ended by it, or
+ * retired), and confirms and retires again, each a repeat that records
+ * nothing new. Once they may no longer read it (its source narrowed or
+ * erased), a retry answers null, as for any memory they may not read: a
+ * correction an earlier try saved stays in their own store, where the
+ * page shows it and they can confirm it themselves. The same `change`
+ * with other text is refused (`brain.correction_reused`). Null alike when
+ * the memory isn't one they may read and when it is a relation. Refused
+ * once they are no longer a member.
  */
 export const correctAs = async (
   env: BrainEnv & Pick<Env, "DB">,

@@ -214,6 +214,12 @@ export interface BrainContestedPage {
   next: BrainMemoryPageNext | null;
 }
 
+/** A memory, by its store and id. */
+export interface BrainMemoryPlace {
+  store: BrainMemoryStore;
+  memory: string;
+}
+
 /** A memory, by its store and id, with the entity it is about. */
 export interface BrainMemoryRef {
   store: BrainMemoryStore;
@@ -251,8 +257,6 @@ export interface BrainMemoriesApi {
     kind: BrainEntityKind,
     next?: BrainMemoryPageNext | null
   ) => Promise<BrainEntityPage>;
-  /** An entity, as they may see it: null when there is none or they may not, alike. */
-  entity: (entity: BrainEntityRef) => Promise<BrainEntityListed | null>;
   /** A page of what the Brain remembers about an entity that they may read, history included. */
   memories: (
     entity: BrainEntityRef,
@@ -261,7 +265,7 @@ export interface BrainMemoriesApi {
   /** A page of the facts sources disagree on that they may read: their own store's first. */
   contested: (next?: BrainMemoryPageNext | null) => Promise<BrainContestedPage>;
   /** Confirms a current memory they may read, over the sides they may read that say otherwise. */
-  confirm: (memory: BrainMemoryRef) => Promise<BrainMemoryOutcome>;
+  confirm: (memory: BrainMemoryPlace) => Promise<BrainMemoryOutcome>;
   /** Says a memory is wrong, with what is right: saved as their own word, for them alone, and confirmed. */
   correct: (correction: BrainCorrection) => Promise<BrainCorrected>;
 }

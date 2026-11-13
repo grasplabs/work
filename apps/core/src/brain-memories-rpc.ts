@@ -12,14 +12,14 @@ import type {
   BrainMemoryOutcome,
   BrainMemoryPage,
   BrainMemoryPageNext,
-  BrainMemoryRef,
+  BrainMemoryPlace,
   BrainMemoryShown,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
 
 import { confirmFor, correctFor, forgetFor } from "./brain-memories.ts";
 import type { MemoryCaller } from "./brain-memories.ts";
-import { contestedAs, entitiesAs, entityAs, memoriesAs } from "./brain-next.ts";
+import { contestedAs, entitiesAs, memoriesAs } from "./brain-next.ts";
 import type { StoredEntity, StoredMemory, StorePlace } from "./brain-next.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -185,13 +185,6 @@ export class BrainMemoriesRpc
     });
   }
 
-  async entity(entity: BrainEntityRef): Promise<BrainEntityListed | null> {
-    return await withPerson(this.#check, async (person) => {
-      const read = await entityAs(this.#env, person.userId, entity);
-      return read === null ? null : entityOut(read);
-    });
-  }
-
   async memories(
     entity: BrainEntityRef,
     next?: BrainStoreCursor | null
@@ -227,7 +220,7 @@ export class BrainMemoriesRpc
     });
   }
 
-  async confirm(memory: BrainMemoryRef): Promise<BrainMemoryOutcome> {
+  async confirm(memory: BrainMemoryPlace): Promise<BrainMemoryOutcome> {
     return await this.#asCaller(
       async (caller) => await confirmFor(this.#env, caller, memory)
     );

@@ -9,6 +9,7 @@ import type {
   Correction,
   Remembered,
   RememberedMemory,
+  StoredMemoryPlace,
   StoredMemoryRef,
 } from "./brain-next.ts";
 
@@ -142,7 +143,7 @@ const placeOf = (memory: Partial<Record<keyof StoredMemoryRef, unknown>>) => ({
 export const confirmFor = async (
   env: Env,
   caller: MemoryCaller,
-  memory: StoredMemoryRef | Readonly<Record<string, unknown>>
+  memory: StoredMemoryPlace | Readonly<Record<string, unknown>>
 ) =>
   await audited(
     env,

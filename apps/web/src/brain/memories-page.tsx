@@ -49,8 +49,9 @@ import {
   PageHeaderTitle,
 } from "@grasp-os/ui/components/page-header";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
@@ -113,6 +114,15 @@ const once = <T,>(items: readonly T[], keyOf: (item: T) => string): T[] => {
 /** A memory's key, for React and for `once`. */
 const memoryKeyOf = ({ store, id }: BrainMemoryShown): string =>
   `${store}:${id}`;
+
+/**
+ * Says, where the person sees it whatever they scrolled to, that what
+ * they acted on changed or is no longer theirs to read: the page reads
+ * everything again beside it (`onChanged`).
+ */
+const sayChanged = (text: string): void => {
+  toast.add({ type: "info", title: text });
+};
 
 /** An entity's key, for React. */
 const keyOf = ({ store, id }: BrainEntityRef): string => `${store}:${id}`;
@@ -400,7 +410,7 @@ const CorrectDialog = ({
   // The text of a save that failed: new words after it are a new
   // correction, with a new id, while the same words retry the same one.
   const [tried, setTried] = useState<string>();
-  const [gone, setGone] = useState(false);
+  const changedText = t`This memory has changed or is no longer yours to read. Look at it again first.`;
   const ready = right.trim() !== "";
   const correct = async (): Promise<void> => {
     setTried(undefined);
@@ -417,7 +427,11 @@ const CorrectDialog = ({
         })
     );
     if (saved === null) {
-      setGone(true);
+      // Not theirs to correct now: say so, close, and read the page again,
+      // so it shows what stands (their own earlier save of this one too).
+      setOpen(false);
+      sayChanged(changedText);
+      onCorrected();
       return;
     }
     if (saved === undefined) {
@@ -433,7 +447,6 @@ const CorrectDialog = ({
         if (opening) {
           setRight("");
           setTried(undefined);
-          setGone(false);
           setChange(crypto.randomUUID());
         }
         setOpen(opening);
@@ -493,9 +506,6 @@ const CorrectDialog = ({
               <Trans>In your own words, as you would tell a colleague.</Trans>
             </FieldDescription>
           </Field>
-          {gone ? (
-            <ErrorText>{t`This memory has changed or is no longer yours to read. Look at it again first.`}</ErrorText>
-          ) : null}
           <ErrorText>{failure}</ErrorText>
           <DialogFooter>
             <DialogClose
@@ -524,7 +534,6 @@ const ConfirmButton = ({
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [gone, setGone] = useState(false);
   const { statement } = memory;
   return (
     <>
@@ -537,13 +546,16 @@ const ConfirmButton = ({
               async (session) =>
                 await session.brainMemories.confirm({
                   store: memory.store,
-                  entity: memory.about,
                   memory: memory.id,
                 })
             );
             if (outcome === "nothing") {
-              setGone(true);
-            } else if (outcome === "done") {
+              sayChanged(
+                t`This memory has changed or is no longer yours to read. Look at it again first.`
+              );
+            }
+            // Read again on either answer: what stands now shows.
+            if (outcome !== undefined) {
               onConfirmed();
             }
           })();
@@ -554,11 +566,50 @@ const ConfirmButton = ({
       >
         <Trans>This one is right</Trans>
       </Button>
-      {gone ? (
-        <ErrorText>{t`This memory has changed or is no longer yours to read. Look at it again first.`}</ErrorText>
-      ) : null}
       <ErrorText>{failure}</ErrorText>
     </>
+  );
+};
+
+/** A memory's marks: whose it is, disagreement, confirmation, origin and its dates. */
+const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
+  const { endedAt, confirmed } = memory;
+  const learned = formatDateTime(memory.learnedAt);
+  const ended = endedAt === null ? null : formatDateTime(endedAt);
+  const current = endedAt === null;
+  return (
+    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+      {memory.store === "own" ? (
+        <Badge variant="outline">
+          <Trans context="a memory nobody else may read">Only you</Trans>
+        </Badge>
+      ) : null}
+      {current && memory.contested ? (
+        <Badge variant="attention">
+          <Trans>Sources disagree</Trans>
+        </Badge>
+      ) : null}
+      {confirmed === null ? null : (
+        <Badge variant="passed">
+          {confirmed.byYou ? (
+            <Trans>Confirmed by you</Trans>
+          ) : (
+            <Trans>Confirmed</Trans>
+          )}
+        </Badge>
+      )}
+      <span>
+        <MemoryOrigin memory={memory} />
+      </span>
+      <span>
+        <Trans>Learned {learned}</Trans>
+      </span>
+      {ended === null ? null : (
+        <span>
+          <Trans>No longer held since {ended}</Trans>
+        </span>
+      )}
+    </span>
   );
 };
 
@@ -579,61 +630,51 @@ const MemoryLine = ({
   if (object !== null) {
     held = object.name ?? t`something without a name`;
   }
-  const learned = formatDateTime(memory.learnedAt);
-  const ended = endedAt === null ? null : formatDateTime(endedAt);
   const current = endedAt === null;
+  // Offered on a side that disagrees with another until the person said
+  // it is right, and on their own word not yet confirmed (a correction
+  // whose confirmation never landed), so it can still come first.
+  const confirmable =
+    current &&
+    confirmed?.byYou !== true &&
+    (memory.contested || (memory.store === "own" && memory.yours));
+  // Where focus goes once confirmed, as the button goes: the memory itself.
+  const said = useRef<HTMLSpanElement>(null);
   return (
     <Item size="sm">
       <ItemContent>
-        {label === null ? null : (
-          <span className="text-sm">
-            {held === null ? (
-              <span className="font-medium">{label}</span>
-            ) : (
-              <Trans>
-                <span className="font-medium">{label}</span>: {held}
-              </Trans>
-            )}
-          </span>
-        )}
-        <span className="text-sm whitespace-pre-wrap">{memory.statement}</span>
-        <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-          {memory.store === "own" ? (
-            <Badge variant="outline">
-              <Trans context="a memory nobody else may read">Only you</Trans>
-            </Badge>
-          ) : null}
-          {current && memory.contested ? (
-            <Badge variant="attention">
-              <Trans>Sources disagree</Trans>
-            </Badge>
-          ) : null}
-          {confirmed === null ? null : (
-            <Badge variant="passed">
-              {confirmed.byYou ? (
-                <Trans>Confirmed by you</Trans>
+        {/* What it says, focusable so focus can stay here once its
+            button goes. A correction holds its words as value and
+            statement alike: they show once. */}
+        <span className="flex flex-col gap-1" ref={said} tabIndex={-1}>
+          {label === null ? null : (
+            <span className="text-sm">
+              {held === null ? (
+                <span className="font-medium">{label}</span>
               ) : (
-                <Trans>Confirmed</Trans>
+                <Trans>
+                  <span className="font-medium">{label}</span>: {held}
+                </Trans>
               )}
-            </Badge>
+            </span>
           )}
-          <span>
-            <MemoryOrigin memory={memory} />
-          </span>
-          <span>
-            <Trans>Learned {learned}</Trans>
-          </span>
-          {ended === null ? null : (
-            <span>
-              <Trans>No longer held since {ended}</Trans>
+          {memory.statement === held ? null : (
+            <span className="text-sm whitespace-pre-wrap">
+              {memory.statement}
             </span>
           )}
         </span>
+        <MemoryMarks memory={memory} />
         {current ? (
           <span className="flex flex-wrap items-center gap-2">
-            {/* Offered until the person has said this side is right. */}
-            {memory.contested && confirmed?.byYou !== true ? (
-              <ConfirmButton memory={memory} onConfirmed={onChanged} />
+            {confirmable ? (
+              <ConfirmButton
+                memory={memory}
+                onConfirmed={() => {
+                  said.current?.focus();
+                  onChanged();
+                }}
+              />
             ) : null}
             {/* A relation names another entity, which the person's own
                 word can't: core would keep it under no attribute, beside
@@ -671,9 +712,12 @@ const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
 
 /** The facts sources disagree on that the person may read, a page at a time. */
 const ContestedList = ({
+  changes,
   onOpen,
   onChanged,
 }: {
+  /** How many changes the person made: each reads the list again. */
+  changes: number;
   onOpen: (entity: BrainEntityListed) => void;
   onChanged: () => void;
 }) => {
@@ -698,7 +742,8 @@ const ContestedList = ({
     return () => {
       left = true;
     };
-  }, [core]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changes` says when to read again
+  }, [core, changes]);
   if (listed.state === "refused") {
     return <ErrorText>{listed.message}</ErrorText>;
   }
@@ -706,7 +751,8 @@ const ContestedList = ({
     return null;
   }
   const { facts, next } = listed.data;
-  if (facts.length === 0) {
+  // A page can hold no fact and still have more after it.
+  if (facts.length === 0 && next === null) {
     return (
       <p className="text-muted-foreground text-sm">
         <Trans>Nothing you may read is disputed.</Trans>
@@ -770,13 +816,22 @@ const ContestedList = ({
               );
               setMore(answer.state === "refused" ? answer : undefined);
               if (answer.state === "ready") {
-                setListed({
-                  state: "ready",
-                  data: {
-                    facts: once([...facts, ...answer.data.facts], keyOfFact),
-                    next: answer.data.next,
-                  },
-                });
+                // Only onto the list it was asked for: one read again
+                // since starts over.
+                setListed((now) =>
+                  now === listed
+                    ? {
+                        state: "ready",
+                        data: {
+                          facts: once(
+                            [...facts, ...answer.data.facts],
+                            keyOfFact
+                          ),
+                          next: answer.data.next,
+                        },
+                      }
+                    : now
+                );
               }
             })();
           }}
@@ -792,10 +847,13 @@ const ContestedList = ({
 
 /** The entities of `kind` the person may see, a page at a time: their own first. */
 const EntityList = ({
+  changes,
   kind,
   picked,
   onPick,
 }: {
+  /** How many changes the person made: each reads the list again. */
+  changes: number;
   kind: BrainEntityKind;
   picked: BrainEntityRef | undefined;
   onPick: (entity: BrainEntityListed) => void;
@@ -820,7 +878,8 @@ const EntityList = ({
     return () => {
       left = true;
     };
-  }, [core, kind]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changes` says when to read again
+  }, [core, kind, changes]);
   if (listed.state === "refused") {
     return <ErrorText>{listed.message}</ErrorText>;
   }
@@ -897,16 +956,21 @@ const EntityList = ({
               );
               setMore(answer.state === "refused" ? answer : undefined);
               if (answer.state === "ready") {
-                setListed({
-                  state: "ready",
-                  data: {
-                    entities: once(
-                      [...entities, ...answer.data.entities],
-                      ({ entity }) => keyOf(entity)
-                    ),
-                    next: answer.data.next,
-                  },
-                });
+                // Only onto the list it was asked for (above).
+                setListed((now) =>
+                  now === listed
+                    ? {
+                        state: "ready",
+                        data: {
+                          entities: once(
+                            [...entities, ...answer.data.entities],
+                            ({ entity }) => keyOf(entity)
+                          ),
+                          next: answer.data.next,
+                        },
+                      }
+                    : now
+                );
               }
             })();
           }}
@@ -922,9 +986,12 @@ const EntityList = ({
 
 /** What the Brain remembers about one entity that the person may read, history included. */
 const EntityPanel = ({
+  changes,
   entity,
   onChanged,
 }: {
+  /** How many changes the person made: each reads the panel again. */
+  changes: number;
   entity: BrainEntityListed;
   onChanged: () => void;
 }) => {
@@ -950,7 +1017,8 @@ const EntityPanel = ({
     return () => {
       left = true;
     };
-  }, [core, ref]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changes` says when to read again
+  }, [core, ref, changes]);
   const heading = useId();
   const kind = kindLabel(entity.kind);
   return (
@@ -994,6 +1062,7 @@ const EntityPanel = ({
             className="self-start"
             disabled={more?.state === "loading"}
             onClick={() => {
+              const asked = page;
               const { memories, next } = page.data;
               setMore({ state: "loading" });
               void (async () => {
@@ -1003,16 +1072,21 @@ const EntityPanel = ({
                 );
                 setMore(answer.state === "refused" ? answer : undefined);
                 if (answer.state === "ready") {
-                  setPage({
-                    state: "ready",
-                    data: {
-                      memories: once(
-                        [...memories, ...answer.data.memories],
-                        memoryKeyOf
-                      ),
-                      next: answer.data.next,
-                    },
-                  });
+                  // Only onto the page it was asked for (above).
+                  setPage((now) =>
+                    now === asked
+                      ? {
+                          state: "ready",
+                          data: {
+                            memories: once(
+                              [...memories, ...answer.data.memories],
+                              memoryKeyOf
+                            ),
+                            next: answer.data.next,
+                          },
+                        }
+                      : now
+                  );
                 }
               })();
             }}
@@ -1032,11 +1106,13 @@ export const MemoriesPage = () => {
   const kindLabel = useKindLabel();
   const [kind, setKind] = useState<BrainEntityKind>("customer");
   const [opened, setOpened] = useState<BrainEntityListed>();
-  // Each change the person makes reads everything again, so what they
-  // confirmed or corrected shows where it now stands.
+  // Each change the person makes reads everything again, in place, so
+  // what they confirmed or corrected shows where it now stands, and an
+  // action still running elsewhere on the page keeps its state. Counted
+  // from the latest count: two changes at once are two reads.
   const [changes, setChanges] = useState(0);
   const changed = () => {
-    setChanges(changes + 1);
+    setChanges((count) => count + 1);
   };
   const contestedHeading = useId();
   const entitiesHeading = useId();
@@ -1069,7 +1145,7 @@ export const MemoriesPage = () => {
             <Trans>Where sources disagree</Trans>
           </h2>
           <ContestedList
-            key={changes}
+            changes={changes}
             onChanged={changed}
             onOpen={(entity) => {
               setKind(entity.kind);
@@ -1085,9 +1161,9 @@ export const MemoriesPage = () => {
             <Trans>What the Brain remembers</Trans>
           </h2>
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm" htmlFor={kindId}>
+            <FieldLabel htmlFor={kindId}>
               <Trans>Kind</Trans>
-            </label>
+            </FieldLabel>
             <NativeSelect
               id={kindId}
               onChange={(event) => {
@@ -1110,15 +1186,17 @@ export const MemoriesPage = () => {
           </div>
           <div className="grid min-h-0 gap-6 lg:grid-cols-2">
             <EntityList
-              key={`${kind}#${changes}`}
+              changes={changes}
+              key={kind}
               kind={kind}
               onPick={setOpened}
               picked={opened?.entity}
             />
             {opened === undefined ? null : (
               <EntityPanel
+                changes={changes}
                 entity={opened}
-                key={`${keyOf(opened.entity)}#${changes}`}
+                key={keyOf(opened.entity)}
                 onChanged={changed}
               />
             )}

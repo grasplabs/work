@@ -242,6 +242,19 @@ const unordered = <T>(steps: readonly T[]): T[] =>
     byCodeUnits(JSON.stringify(one), JSON.stringify(two))
   );
 
+/** Entity `ref` as `api`'s person's customers list it (`allEntities`), or null. */
+const listedAs = async (
+  api: Api,
+  ref: { store: "own" | "shared"; id: string }
+): Promise<BrainEntityListed | null> => {
+  const { entities } = await allEntities(api);
+  return (
+    entities.find(
+      ({ entity }) => entity.store === ref.store && entity.id === ref.id
+    ) ?? null
+  );
+};
+
 /** Every memory about `entity` `api`'s person may read (`allMemories`). */
 const memoriesAbout = async (
   api: Api,
@@ -289,7 +302,7 @@ describe("the Brain's memories, as a person reads them", () => {
     const { memories } = await allMemories(anna.api, entity);
     expect({
       listed,
-      read: await anna.api.brainMemories.entity(entity),
+      read: await listedAs(anna.api, entity),
       memories: shown(memories),
     }).toStrictEqual({
       listed: [{ entity, kind: "customer", name: "Acme", unreadable: false }],
@@ -313,9 +326,9 @@ describe("the Brain's memories, as a person reads them", () => {
     const answersOf = async (api: Api) =>
       await Promise.all([
         allEntities(api),
-        api.brainMemories.entity(entity),
+        listedAs(api, entity),
         api.brainMemories.memories(entity),
-        api.brainMemories.entity(nobody),
+        listedAs(api, nobody),
         api.brainMemories.memories(nobody),
       ]);
     const nothing = [
@@ -507,7 +520,6 @@ describe("the Brain's memories, as a person reads them", () => {
 
     const churned = {
       store: "shared" as const,
-      entity: id,
       memory: second.memories[0] ?? "",
     };
     const nobody = { ...churned, memory: crypto.randomUUID() };
@@ -594,13 +606,13 @@ describe("the Brain's memories, as a person reads them", () => {
         confirmed: confirmed?.byYou ?? null,
         ended: endedAt !== null,
       })),
-      entity: await anna.api.brainMemories.entity(own),
+      entity: await listedAs(anna.api, own),
       // The shared memory stays as it was.
       sharedStill: shown(
         await memoriesAbout(anna.api, { store: "shared", id: wrong.entity })
       ).map(({ value, ended }) => ({ value, ended })),
       // Nobody else sees her correction.
-      bens: await ben.api.brainMemories.entity(own),
+      bens: await listedAs(ben.api, own),
     }).toStrictEqual({
       kept: [
         {
@@ -816,7 +828,7 @@ describe("the Brain's memories, as a person reads them", () => {
     });
     const own = { store: "own" as const, id: saved?.entity ?? "" };
     const nameOf = async () => {
-      const read = await anna.api.brainMemories.entity(own);
+      const read = await listedAs(anna.api, own);
       return { name: read?.name, unreadable: read?.unreadable };
     };
     const before = await nameOf();
@@ -893,7 +905,7 @@ describe("the Brain's memories, as a person reads them", () => {
           },
         ],
       });
-      const read = await anna.api.brainMemories.entity({
+      const read = await listedAs(anna.api, {
         store: "own",
         id: added.entities.c ?? "",
       });
@@ -992,6 +1004,82 @@ describe("the Brain's memories, as a person reads them", () => {
         step(said.memory, "refused"),
         step(said.memory, "attempted"),
         { ...step(said.memory, "done", "done"), saved: saved?.memory },
+      ]),
+    });
+  });
+
+  it("shows a correction a retry can no longer reach, saved before the source was narrowed, for the person to confirm themselves", async () => {
+    const anna = await signedInApi(idp, "user");
+    const [sales, other] = await Promise.all([teamOf(anna.userId), teamOf()]);
+    const { id, cited } = await sourceOf(sales, "Initech renews");
+    const added = await remember(
+      sales,
+      { kind: "customer", names: ["Initech"] },
+      [statusFrom(cited, "Renewing")]
+    );
+    const wrong = {
+      store: "shared" as const,
+      entity: added.entities.c ?? "",
+      memory: added.memories[0] ?? "",
+    };
+    const change = crypto.randomUUID();
+    const caller = {
+      person: anna.userId,
+      actor: { type: "person" as const, userId: anna.userId },
+    };
+    // Saved, then the confirmation fails: to the page, a lost reply.
+    await expect(
+      correctFor(withFailingOnce("confirmMemory"), caller, {
+        wrong,
+        right: "Churned",
+        change,
+      })
+    ).rejects.toThrow(failedCall);
+    // The source is narrowed away from her before she saves again.
+    await addSource(env, {
+      source: { producer: "upload", id },
+      change: crypto.randomUUID(),
+      text: "Initech renews, for others",
+      readers: { kind: "team", teamId: other },
+    });
+    const retried = await anna.api.brainMemories.correct({
+      wrong,
+      right: "Churned",
+      change,
+    });
+    const { entities } = await allEntities(anna.api);
+    const own = entities.find(({ entity }) => entity.store === "own");
+    const ref = { store: "own" as const, id: own?.entity.id ?? "" };
+    const [kept] = await memoriesAbout(anna.api, ref);
+    // Not confirmed: she confirms her own word herself.
+    const confirmed = await anna.api.brainMemories.confirm({
+      store: "own",
+      memory: kept?.id ?? "",
+    });
+    const [after] = await memoriesAbout(anna.api, ref);
+    expect({
+      retried,
+      own: { name: own?.name, unreadable: own?.unreadable },
+      kept: { value: kept?.value, confirmed: kept?.confirmed ?? null },
+      confirmed,
+      after: after?.confirmed?.byYou,
+      corrected: await auditedOf(anna.userId, "brain.memory.corrected"),
+      confirmations: await auditedOf(anna.userId, "brain.memory.confirmed"),
+    }).toStrictEqual({
+      retried: null,
+      own: { name: null, unreadable: true },
+      kept: { value: "Churned", confirmed: null },
+      confirmed: "done",
+      after: true,
+      corrected: unordered([
+        step(wrong.memory, "attempted"),
+        step(wrong.memory, "refused"),
+        step(wrong.memory, "attempted"),
+        step(wrong.memory, "done", "nothing"),
+      ]),
+      confirmations: unordered([
+        step(kept?.id ?? "", "attempted"),
+        step(kept?.id ?? "", "done", "done"),
       ]),
     });
   });

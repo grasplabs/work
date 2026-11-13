@@ -15992,7 +15992,7 @@ msgstr "Wat gemarkeerd is, heb ik opgeschreven. Je controleert het aan het eind.
 
 #: src/brain/memories-page.tsx
 msgid "What is right"
-msgstr "Wat klopt er"
+msgstr "Wat wel klopt"
 
 #: src/brain/memories-page.tsx
 msgid "What is right?"
@@ -17141,7 +17141,7 @@ msgstr "Het btw-nummer van je bedrijf, zoals het op facturen staat."
 
 #: src/brain/memories-page.tsx
 msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
-msgstr "Je correctie wordt bewaard als je eigen woord, alleen voor jou, en getoond naast wat het Brain vasthoudt. Wat anderen lezen, blijft zoals het is."
+msgstr "Je correctie wordt bewaard als je eigen woord, alleen voor jou, en naast wat het Brain weet getoond. Wat anderen lezen, blijft zoals het is."
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."

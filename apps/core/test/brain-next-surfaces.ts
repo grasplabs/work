@@ -899,7 +899,6 @@ type CorePersonMember =
   | "memoryChoices"
   | "ownEntityAs"
   | "entitiesAs"
-  | "entityAs"
   | "memoriesAs"
   | "contestedAs"
   | "confirmAs"
@@ -3407,10 +3406,6 @@ interface MemoryPageCalls {
     kind: unknown,
     from?: Readonly<Record<string, unknown>>
   ) => Promise<unknown>;
-  entity: (
-    personId: string,
-    entity: Readonly<Record<string, unknown>>
-  ) => Promise<unknown>;
   memories: (
     personId: string,
     entity: Readonly<Record<string, unknown>>,
@@ -3558,40 +3553,6 @@ const memoryPageProbes = (calls: MemoryPageCalls) => {
         }),
       ];
     },
-    entity: async (probing: Probing): Promise<Answer[]> => {
-      const { personId, markers } = probing;
-      const [fixture, others] = await scene(probing);
-      return [
-        ...(await Promise.all(
-          pageEntities(fixture, others).map(
-            async ([name, entity, about]) =>
-              await answer(
-                name,
-                async () => await calls.entity(personId, entity),
-                about
-              )
-          )
-        )),
-        await answer(
-          "their own entity, seen",
-          async () =>
-            await calls.entity(personId, { store: "shared", id: fixture.seen })
-        ),
-        await answer(
-          "as someone who isn't a member",
-          async () =>
-            await calls.entity(stranger(), { store: "own", id: others.entity })
-        ),
-        await answer(
-          "an id of the markers",
-          async () =>
-            await calls.entity(personId, {
-              store: "shared",
-              id: markers.join(""),
-            })
-        ),
-      ];
-    },
     memories: async (probing: Probing): Promise<Answer[]> => {
       const { personId, markers } = probing;
       const [fixture, others] = await scene(probing);
@@ -3681,7 +3642,12 @@ const memoryPageProbes = (calls: MemoryPageCalls) => {
         // oxlint-disable-next-line no-await-in-loop -- one write at a time
         const answered = await answer(
           name,
-          async () => await calls.confirm(personId, memory),
+          // A confirmation names the memory by its store and id alone.
+          async () =>
+            await calls.confirm(personId, {
+              store: memory.store,
+              memory: memory.memory,
+            }),
           about
         );
         asked.push(answered);
@@ -3692,7 +3658,6 @@ const memoryPageProbes = (calls: MemoryPageCalls) => {
           async () =>
             await calls.confirm(stranger(), {
               store: "own",
-              entity: others.entity,
               memory: others.memory,
             })
         ),
@@ -3701,7 +3666,6 @@ const memoryPageProbes = (calls: MemoryPageCalls) => {
           async () =>
             await calls.confirm(personId, {
               store: "shared",
-              entity: fixture.hidden,
               memory: markers.join(""),
             })
         )
@@ -3760,8 +3724,6 @@ const corePageCalls: MemoryPageCalls = {
       kind,
       ...(from === undefined ? {} : { from }),
     }),
-  entity: async (personId, entity) =>
-    await coreBrain.entityAs(env, personId, entity),
   memories: async (personId, entity, after) =>
     await coreBrain.memoriesAs(env, personId, {
       entity,
@@ -3795,7 +3757,6 @@ const corePersonMemories = {
   rememberAs: corePersonProbes.remember,
   forgetAs: corePersonProbes.forget,
   entitiesAs: corePageProbes.entities,
-  entityAs: corePageProbes.entity,
   memoriesAs: corePageProbes.memories,
   contestedAs: corePageProbes.contested,
   confirmAs: corePageProbes.confirm,
@@ -5419,8 +5380,6 @@ export const memoriesRpcProbes = {
         unchecked(kind),
         unchecked(from === undefined ? undefined : onTheWire(from))
       ),
-    entity: async (personId, entity) =>
-      await memoriesAs(personId).entity(unchecked(entity)),
     memories: async (personId, entity, after) =>
       await memoriesAs(personId).memories(
         unchecked(entity),
@@ -5436,13 +5395,7 @@ export const memoriesRpcProbes = {
       await memoriesAs(personId).correct(unchecked(correction)),
   }),
 } satisfies Record<
-  | "forget"
-  | "entities"
-  | "entity"
-  | "memories"
-  | "contested"
-  | "confirm"
-  | "correct",
+  "forget" | "entities" | "memories" | "contested" | "confirm" | "correct",
   Probe
 >;
 

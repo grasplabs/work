@@ -790,6 +790,7 @@
   "@grasp-os/web src/brain/forget-effect.test.ts": 0.1,
   "@grasp-os/web src/brain/goal-records.test.ts": 0,
   "@grasp-os/web src/brain/lessons-view.test.tsx": 0.2,
+  "@grasp-os/web src/brain/memories-page-actions.test.tsx": 0.4,
   "@grasp-os/web src/brain/memories-page.test.tsx": 0.3,
   "@grasp-os/web src/brain/memory-page.test.tsx": 0.3,
   "@grasp-os/web src/brain/questions.test.ts": 0,
