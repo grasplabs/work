@@ -148,7 +148,13 @@ export const sourceChanges = sqliteTable(
      */
     readAt: integer("read_at", { mode: "timestamp_ms" }),
   },
-  (table) => [primaryKey({ columns: [table.source, table.change] })]
+  (table) => [
+    primaryKey({ columns: [table.source, table.change] }),
+    // A version's changes, and the latest read of them, without a scan:
+    // `newerThan` inside the store's write, and the export's latest read
+    // and change keys of each version.
+    index("source_changes_version_idx").on(table.versionRow, table.readAt),
+  ]
 );
 
 /**

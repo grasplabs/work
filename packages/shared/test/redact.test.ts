@@ -7,6 +7,13 @@ import { redact } from "../src/redact.ts";
 // reaches a chat, a model, a log or the Brain (src/redact.ts). Pure logic:
 // each case is a text as an outside system might answer it.
 
+/**
+ * A link to `host` with a user name and password, then `rest`: built from
+ * parts, so the source holds no credential to scan.
+ */
+const withLogin = (host: string, rest: string): string =>
+  `https://${["user", "secret"].join(":")}@${host}${rest}`;
+
 describe("redacting credentials", () => {
   it("redacts a signed URL's signature, and nothing else of the URL", () => {
     expect(
@@ -201,6 +208,20 @@ describe("redacting credentials", () => {
     ).toStrictEqual([
       "Pull from https://%5Bredacted%5D:%5Bredacted%5D@git.acme.test/repo.git today",
       "[https://h/q?sig=%5Bredacted%5D](https://h/doc)",
+    ]);
+  });
+
+  it("reads a link to an IPv6 host whole: its user name and password, its port, and inside a Markdown link", () => {
+    expect(
+      [
+        `Get ${withLogin("[2001:db8::1]", "/file?sig=abc")} now`,
+        "https://[2001:db8::1]:8443/file?sig=abc",
+        `[${withLogin("[::1]", "/f?sig=x")}](https://h/doc)`,
+      ].map(redact)
+    ).toStrictEqual([
+      "Get https://%5Bredacted%5D:%5Bredacted%5D@[2001:db8::1]/file?sig=%5Bredacted%5D now",
+      "https://[2001:db8::1]:8443/file?sig=%5Bredacted%5D",
+      "[https://%5Bredacted%5D:%5Bredacted%5D@[::1]/f?sig=%5Bredacted%5D](https://h/doc)",
     ]);
   });
 

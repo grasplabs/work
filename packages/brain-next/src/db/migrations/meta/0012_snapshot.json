@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f0f77e91-7af0-477e-80e2-421956d0c2d9",
+  "id": "54de0393-0012-4bd6-afe2-ecef1cd4f426",
   "prevId": "870ddfb8-9fb5-4fb6-927f-a54ed4ada5f2",
   "tables": {
     "chunks": {
@@ -1654,7 +1654,16 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "source_changes_version_idx": {
+          "name": "source_changes_version_idx",
+          "columns": [
+            "version_row",
+            "read_at"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "source_changes_version_row_source_versions_row_fk": {
           "name": "source_changes_version_row_source_versions_row_fk",

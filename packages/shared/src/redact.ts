@@ -113,14 +113,19 @@ const credentials: readonly (readonly [
 
 /**
  * A link: a scheme, `://`, and what may follow in a URL, up to a space or
- * a character no URL holds. `[` and `]` end one too: RFC 3986 allows them
- * only around an IP-literal host (§3.2.2), and a Markdown link's text,
- * `[https://…](target)`, ends at its `]`. A scheme is short (`https`, `ms-excel`): held
- * to 32 characters, so a flood of word characters and dashes (`sk-sk-…`),
- * tried from every word in it, never scans to its end each time, which
- * would be quadratic.
+ * a character no URL holds. `[` and `]` hold only an IP-literal host
+ * (RFC 3986 §3.2.2: `https://[2001:db8::1]:8443/`, after any user name and
+ * password), and end a link anywhere else: a Markdown link's text,
+ * `[https://…](target)`, ends at its `]`. Neither `URL` nor GFM decides
+ * this end: `URL` parses a path holding `](target)`, and GFM's autolink
+ * ends only at a space or `<`, leaving `]` to the link text around it. A
+ * scheme is short (`https`, `ms-excel`): held to 32 characters, so a flood
+ * of word characters and dashes (`sk-sk-…`), tried from every word in it,
+ * never scans to its end each time, which would be quadratic; a user name
+ * and password stop at the first `/`, `?` or `#`, as an authority does.
  */
-const linkPattern = /\b[a-z][a-z\d+.-]{0,31}:\/\/[^\s"'<>\\^`{|}[\]]+/giu;
+const linkPattern =
+  /\b[a-z][a-z\d+.-]{0,31}:\/\/(?:[^\s"'<>\\^`{|}[\]/?#]*@)?(?:\[[\da-z.:%~-]{2,64}\])?[^\s"'<>\\^`{|}[\]]*/giu;
 
 /** The query parameters that sign or grant a link, by name. */
 const grantingName = /^(?:[\w-]*signature|sig|code|tempauth|pwd)$/iu;
