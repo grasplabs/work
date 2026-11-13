@@ -193,6 +193,64 @@ describe("an entity's card", () => {
       now: now?.notes.map(({ statement }) => statement),
     }).toStrictEqual({ before: null, now: [`${name} is a customer`] });
   });
+
+  // A card's pages are one snapshot: a name a related entity gains
+  // between pages is not on the next page, even read as of a moment
+  // ahead (when facts are judged true then, not what was learned since).
+  it("names related entities on every page as of the first page's moment", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const name = word();
+    const { entities } = await remember(
+      audience(group),
+      [
+        { key: "c", kind: "customer", names: [name] },
+        { key: "p", kind: "person", names: [] },
+        { key: "q", kind: "person", names: [] },
+      ],
+      [
+        fact("c", `${name} is reached through one contact`, {
+          attribute: "contact",
+          object: "p",
+        }),
+        fact("c", `${name} is reached through another contact`, {
+          attribute: "contact",
+          object: "q",
+        }),
+      ]
+    );
+    const entity = entities.c ?? "";
+    const ahead = new Date(Date.now() + 86_400_000);
+    const first = await shared().readCard({
+      entity,
+      reader,
+      asOf: ahead,
+      limit: 1,
+    });
+    await remember(
+      audience(group),
+      ["p", "q"].map((key) => ({
+        key,
+        id: entities[key] ?? "",
+        kind: "person" as const,
+        names: [`${word()} Named`],
+      })),
+      ["p", "q"].map((key) => fact(key, "A contact got a name"))
+    );
+    const second = await shared().readCard({
+      entity,
+      reader,
+      asOf: ahead,
+      limit: 1,
+      ...(first?.next === undefined ? {} : { after: first.next }),
+    });
+
+    expect(
+      [first, second].map((card) =>
+        card?.relations.map(({ other }) => other.name)
+      )
+    ).toStrictEqual([[null], [null]]);
+  });
 });
 
 describe("linking entities", () => {

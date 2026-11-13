@@ -59,7 +59,8 @@ const seenOf = (
  * A page of the card of the entity `entity` as `reader` sees it as of
  * `at` (milliseconds, the store's read moment or the cursor's: store.ts
  * `#pageMoments`, as `readMemories` is read), after `after`, from at most
- * `limit` memories; or null when they may see no such entity then.
+ * `limit` memories; or null when they may see no such entity by what the
+ * store had learned then (`learned`).
  */
 export const readCard = (
   sql: SqlStorage,
@@ -85,7 +86,15 @@ export const readCard = (
   if (found === undefined) {
     return null;
   }
-  const [card] = asSeen(sql, seenOf(sql, reader, [found.row], at), reader, at);
+  // Seen and named as of what the store had learned at the first page
+  // (`learned`), as its memories are read: one snapshot across pages,
+  // however far ahead `at` judges when facts are true.
+  const [card] = asSeen(
+    sql,
+    seenOf(sql, reader, [found.row], learned),
+    reader,
+    learned
+  );
   if (card === undefined) {
     return null;
   }
@@ -140,7 +149,7 @@ export const readCard = (
         )
         .toArray(),
       reader,
-      at
+      learned
     ).map((other) => [other.id, other])
   );
   return {

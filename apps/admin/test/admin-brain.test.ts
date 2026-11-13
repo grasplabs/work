@@ -766,7 +766,7 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
-  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores nor model spend, and says they aren't available yet", async () => {
+  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, model spend nor recall by entities, and says they aren't available yet", async () => {
     const older = await liveClient();
     older.core.admin = heardSnapshot("Older");
     const {
@@ -774,7 +774,8 @@ describe("how an organization's Brain is doing", () => {
       modelSpend: _spend,
       ...report
     } = brainReport(1_000_000);
-    older.core.brain = report;
+    const { entities: _entities, ...ways } = report.recall.ways;
+    older.core.brain = { ...report, recall: { ...report.recall, ways } };
 
     const { status, html } = await page(
       `/organizations/${older.clientId}/brain`
@@ -785,6 +786,9 @@ describe("how an organization's Brain is doing", () => {
     expect({
       status,
       rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      entitiesNotYet: textOf(recallPartOf(html)).includes(
+        "Entities Not available yet"
+      ),
       notYet: own.includes(
         "This client’s release doesn’t report people’s own stores yet."
       ),
@@ -795,6 +799,7 @@ describe("how an organization's Brain is doing", () => {
     }).toStrictEqual({
       status: 200,
       rest: true,
+      entitiesNotYet: true,
       notYet: true,
       totals: false,
       spendNotYet: true,
