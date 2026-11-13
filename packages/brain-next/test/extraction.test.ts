@@ -2120,32 +2120,55 @@ describe("extracting memories", () => {
       const token = unique("t");
       const group = unique("g");
       const name = unique("Many");
-      const count = 45;
+      // Twenty check messages of two statements: one call past what one
+      // attempt may make, its read included.
+      const count = 40;
       const factOf = (index: number) => `${name} fact ${index}`;
       const text = `${token}: ${Array.from(
         { length: count },
         (_, index) => `${factOf(index)}.`
       ).join(" ")}`;
-      answers.set(
-        token,
-        answering({
-          entities: [{ key: "c", kind: "customer", names: [name] }],
-          // Statements long enough that a check message holds about two.
-          memories: Array.from({ length: count }, (_, index) => ({
-            about: "c",
-            type: "fact",
-            statement: `${factOf(index)} ${"7".repeat(950)}`,
-            quote: factOf(index),
-          })),
-        })
-      );
+      const source = unique("doc");
+      let checks = 0;
+      // The attempts the queue counts against the item when the run goes
+      // on, as the continued run's first check call finds them: 1 for a
+      // run handed back (`again`), more for a counted failure.
+      let attemptsGoingOn;
+      const answer = answering({
+        entities: [{ key: "c", kind: "customer", names: [name] }],
+        // Statements long enough that a check message holds two.
+        memories: Array.from({ length: count }, (_, index) => ({
+          about: "c",
+          type: "fact",
+          statement: `${factOf(index)} ${"7".repeat(950)}`,
+          quote: factOf(index),
+        })),
+      });
+      answers.set(token, async (request) => {
+        if (request.purpose === "brain.extract.check") {
+          checks += 1;
+          if (checks === 20) {
+            attemptsGoingOn = await runInDurableObject(
+              shared(),
+              (_instance, state) =>
+                state.storage.sql
+                  .exec<{ attempts: number }>(
+                    "SELECT attempts FROM work_items WHERE key = ?",
+                    source
+                  )
+                  .one().attempts
+            );
+          }
+        }
+        return answer(request);
+      });
       const window =
         2 *
         (tokensOf(proposeInstructions) +
           tokensOf(checkInstructions) +
           tokensOf(text) +
           10);
-      await added(text, audience(group), { extract: fromOutside() });
+      await added(text, audience(group), { extract: fromOutside(), source });
       for (let round = 0; round < 5; round += 1) {
         // oxlint-disable-next-line no-await-in-loop -- an attempt a tick at most
         await tick(1, window);
@@ -2159,11 +2182,16 @@ describe("extracting memories", () => {
       expect({
         reads: asked.filter(({ purpose }) => purpose === "brain.extract")
           .length,
-        checks:
-          asked.filter(({ purpose }) => purpose === "brain.extract.check")
-            .length >= 20,
+        checks: asked.filter(({ purpose }) => purpose === "brain.extract.check")
+          .length,
+        attemptsGoingOn,
         memories: memories.length,
-      }).toStrictEqual({ reads: 1, checks: true, memories: count });
+      }).toStrictEqual({
+        reads: 1,
+        checks: 20,
+        attemptsGoingOn: 1,
+        memories: count,
+      });
     },
     paceBoundMs
   );
