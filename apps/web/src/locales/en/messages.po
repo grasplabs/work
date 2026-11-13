@@ -1244,6 +1244,10 @@ msgstr "{teams, plural, one {# team} other {# teams}}"
 msgid "{teams, plural, one {# team} other {# teams}}, {statements, plural, one {# statement} other {# statements}}, {candidates, plural, one {# workflow} other {# workflows}}"
 msgstr "{teams, plural, one {# team} other {# teams}}, {statements, plural, one {# statement} other {# statements}}, {candidates, plural, one {# workflow} other {# workflows}}"
 
+#: src/activity/pending.tsx
+msgid "{teams, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what # team may read, as far as the person it works for is in that team. It can be shared only with people in that team. It can never write to the Brain. Every recall is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what # teams may read, as far as the person it works for is in them. It can be shared only with people in all of them. It can never write to the Brain. Every recall is recorded}}"
+msgstr "{teams, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what # team may read, as far as the person it works for is in that team. It can be shared only with people in that team. It can never write to the Brain. Every recall is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what # teams may read, as far as the person it works for is in them. It can be shared only with people in all of them. It can never write to the Brain. Every recall is recorded}}"
+
 #: src/brain/brain.ts
 msgid "{teams, plural, one {Named by # team. Not seen in use yet, so its use is reported, not observed.} other {Named by # teams. Not seen in use yet, so its use is reported, not observed.}}"
 msgstr "{teams, plural, one {Named by # team. Not seen in use yet, so its use is reported, not observed.} other {Named by # teams. Not seen in use yet, so its use is reported, not observed.}}"
@@ -4030,8 +4034,8 @@ msgid "Company"
 msgstr "Company"
 
 #: src/activity/pending.tsx
-msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
-msgstr "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgid "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
+msgstr "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
 
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx

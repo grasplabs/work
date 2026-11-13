@@ -1785,16 +1785,19 @@ build: {
    * name the App's code reaches it by, such as \`MAIL\`. To recall the
    * Brain (\`ctx.brain.recall\`, declared as \`permission.brain({ operations:
    * ["recall"] })\`), it asks for \`{ type: "platform" }\` with actions
-   * \`["brain"]\`. A recall answers only what everyone in the company may
-   * read, whoever calls, never a team's content; and an App that recalls
-   * answers no visitor and invites no guest. Today nothing readable by the
+   * \`["brain"]\`. A recall answers what everyone in the company may read,
+   * never anyone's own content. To recall teams' content too, name those
+   * teams by ID (\`{ type: "platform", teams: ["<team id>"] }\`): a recall
+   * then also answers, of them, the teams the person it is for is in, and
+   * the App can be shared only with people in all of them. An App that
+   * recalls answers no visitor and invites no guest. Today nothing readable by the
    * whole company is in the Brain, so a recall returns an empty pack: say
    * so, and never build a feature that depends on it finding something.
    */
   requestPermission(app: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
-      | { type: "platform" }
+      | { type: "platform"; teams?: string[] }
       | { type: "workflow"; workflowId: string };
     actions: string[];
     binding: string;

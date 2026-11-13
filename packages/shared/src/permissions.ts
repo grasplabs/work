@@ -11,6 +11,7 @@ import {
   identifierMaxLength,
   identifierSchema,
   runIdSchema,
+  teamIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
   workspaceIdSchema,
@@ -120,6 +121,13 @@ const collectionObjectSchema = z.strictObject({
 });
 
 /**
+ * Most teams one `brain` permission names: the Brain reads as at most
+ * 1,000 groups (`readerGroupsMax` in `@grasp-os/brain-next/contract`), and
+ * the company is always one of them.
+ */
+export const brainTeamsMax = 999;
+
+/**
  * What the platform itself offers an App, as a permission's object, one
  * action per permission (its stub does that one thing):
  *
@@ -139,7 +147,25 @@ const collectionObjectSchema = z.strictObject({
  *   (remember, proposals) will be an action of its own, with its own
  *   consent, so an approved read grant never gains writes.
  */
-const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
+const platformObjectSchema = z.strictObject({
+  type: z.literal("platform"),
+  /**
+   * The teams an App's `brain` permission reaches beyond what everyone in
+   * the company may read, by ID (a rename changes nothing): its recall
+   * reads, of these, the teams the person it acts for is in, and the App
+   * is shared only with people in all of them (core's brain-recall.ts and
+   * app-provenance.ts). Absent, it reaches the company alone. At most
+   * `brainTeamsMax`, each once; only on an App's `brain` permission.
+   */
+  teams: z
+    .array(teamIdSchema)
+    .min(1)
+    .max(brainTeamsMax)
+    .refine((teams) => new Set(teams).size === teams.length, {
+      message: "Each team once",
+    })
+    .optional(),
+});
 
 /**
  * What a permission gives access to: a connection (all of it, or one
@@ -403,6 +429,18 @@ const checkGrant = (
       code: "custom",
       path: ["actions"],
       message: "A platform permission has one action",
+    });
+  }
+  // Only the Brain is read as far as teams go.
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    !actions.includes("brain")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["object", "teams"],
+      message: "Only a permission to read the Brain names teams",
     });
   }
   // The audit log records the actions as one identifier-sized value.

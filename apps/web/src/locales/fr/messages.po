@@ -1244,6 +1244,10 @@ msgstr "{teams, plural, one {# équipe} other {# équipes}}"
 msgid "{teams, plural, one {# team} other {# teams}}, {statements, plural, one {# statement} other {# statements}}, {candidates, plural, one {# workflow} other {# workflows}}"
 msgstr "{teams, plural, one {# équipe} other {# équipes}}, {statements, plural, one {# propos} other {# propos}}, {candidates, plural, one {# workflow} other {# workflows}}"
 
+#: src/activity/pending.tsx
+msgid "{teams, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what # team may read, as far as the person it works for is in that team. It can be shared only with people in that team. It can never write to the Brain. Every recall is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what # teams may read, as far as the person it works for is in them. It can be shared only with people in all of them. It can never write to the Brain. Every recall is recorded}}"
+msgstr "{teams, plural, one {Company Brain, en lecture seule. Cette App peut retrouver ce que tout le monde dans l’entreprise peut lire et ce que # équipe peut lire, dans la mesure où la personne pour qui elle travaille fait partie de cette équipe. Elle ne peut être partagée qu’avec des personnes de cette équipe. Elle ne peut jamais écrire dans le Brain. Chaque recherche est enregistrée} other {Company Brain, en lecture seule. Cette App peut retrouver ce que tout le monde dans l’entreprise peut lire et ce que # équipes peuvent lire, dans la mesure où la personne pour qui elle travaille en fait partie. Elle ne peut être partagée qu’avec des personnes qui font partie de toutes ces équipes. Elle ne peut jamais écrire dans le Brain. Chaque recherche est enregistrée}}"
+
 #: src/brain/brain.ts
 msgid "{teams, plural, one {Named by # team. Not seen in use yet, so its use is reported, not observed.} other {Named by # teams. Not seen in use yet, so its use is reported, not observed.}}"
 msgstr "{teams, plural, one {Cité par # équipe. Pas encore vu en usage : son utilisation est déclarée, non mesurée.} other {Cité par # équipes. Pas encore vu en usage : son utilisation est déclarée, non mesurée.}}"
@@ -4030,8 +4034,8 @@ msgid "Company"
 msgstr "Entreprise"
 
 #: src/activity/pending.tsx
-msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
-msgstr "Company Brain, en lecture seule. Il peut lire les éléments et les questions ouvertes du Company Brain, dans les collections qui lui ont été accordées et seulement ce que la personne pour qui il travaille peut aussi lire. Il ne peut jamais écrire dans le Brain. Chaque lecture est enregistrée"
+msgid "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
+msgstr "Company Brain, en lecture seule. Ceci peut retrouver ce que tout le monde dans l’entreprise peut lire, jamais le contenu d’une équipe ni celui d’une seule personne. Il ne peut jamais écrire dans le Brain. Chaque recherche est enregistrée"
 
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx

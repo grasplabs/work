@@ -147,6 +147,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: object.connectionId,
         resource: object.resource ?? null,
+        teams: null,
       };
     }
     case "collection": {
@@ -154,6 +155,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: object.collectionId,
         resource: null,
+        teams: null,
       };
     }
     case "workflow": {
@@ -161,6 +163,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: object.workflowId,
         resource: null,
+        teams: null,
       };
     }
     case "app": {
@@ -169,6 +172,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: object.appId,
         resource: object.function ?? null,
+        teams: null,
       };
     }
     case "platform": {
@@ -177,6 +181,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: "platform",
         resource: null,
+        teams: object.teams ?? null,
       };
     }
     default: {
@@ -216,7 +221,10 @@ const objectOf = (row: Row): PermissionObject => {
       });
     }
     case "platform": {
-      return permissionObjectSchema.parse({ type: row.objectType });
+      return permissionObjectSchema.parse({
+        type: row.objectType,
+        ...(row.teams === null ? {} : { teams: row.teams }),
+      });
     }
     default: {
       throw new Error(`Unknown permission object ${String(row.objectType)}`);
@@ -313,14 +321,18 @@ const auditDetail = ({
   chat,
 }: Permission): Record<string, AuditDetailValue> => {
   // The object's IDs by name: connectionId and resource, collectionId,
-  // workflowId, or appId.
-  const { type: objectType, ...ids } = object;
+  // workflowId, or appId; a Brain permission's teams by how many, which
+  // the permission itself names.
+  const { type: objectType, ...ids } =
+    object.type === "platform" ? { type: object.type } : object;
+  const teams = object.type === "platform" ? object.teams?.length : undefined;
   const { subjectType, subjectId } = subjectColumns(subject);
   return {
     subjectType,
     subjectId,
     objectType,
     ...ids,
+    ...(teams === undefined ? {} : { teams }),
     actions: actions.join(" "),
     binding,
     // A chat's own permission: which chat, as its person's other events
@@ -688,6 +700,18 @@ const requireObjectFits = (
   if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
+  // Teams only for an App: what it recalls of a team is checked against
+  // whoever it is shared with (app-provenance.ts); nothing checks a
+  // workflow's runs or an agent's chats so.
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    subject.type !== "app"
+  ) {
+    refuseRequest(
+      "object: Only an App's permission to read the Brain names teams."
+    );
+  }
   requireAppCallerFits(subject, object);
   // A connector trigger also hears its connection's events: which, the
   // one its version names, is `requireTriggerPins`'s to check.
@@ -864,6 +888,7 @@ const auditDetailSql = sql`json_patch(
       CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('function', ${permissions.resource}) END
     )
     WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
+    WHEN 'platform' THEN CASE WHEN ${permissions.teams} IS NULL THEN '{}' ELSE json_object('teams', json_array_length(${permissions.teams})) END
     ELSE '{}'
   END
 )`;

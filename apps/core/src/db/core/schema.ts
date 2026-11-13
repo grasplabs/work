@@ -615,6 +615,13 @@ export const permissions = sqliteTable(
      * changes, so this is read from connect once, as it is asked for.
      */
     personal: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The teams an App's `brain` permission reaches, by ID (JSON array,
+     * `PermissionObject`'s `teams`); null for every other permission, and
+     * for a `brain` one that reaches the company alone. Set as it is
+     * asked for, never changed after.
+     */
+    teams: text({ mode: "json" }).$type<string[]>(),
   },
   (table) => [
     index("permissions_subject_idx").on(

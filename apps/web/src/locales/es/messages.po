@@ -1244,6 +1244,10 @@ msgstr "{teams, plural, one {# equipo} other {# equipos}}"
 msgid "{teams, plural, one {# team} other {# teams}}, {statements, plural, one {# statement} other {# statements}}, {candidates, plural, one {# workflow} other {# workflows}}"
 msgstr "{teams, plural, one {# equipo} other {# equipos}}, {statements, plural, one {# afirmación} other {# afirmaciones}}, {candidates, plural, one {# flujo de trabajo} other {# flujos de trabajo}}"
 
+#: src/activity/pending.tsx
+msgid "{teams, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what # team may read, as far as the person it works for is in that team. It can be shared only with people in that team. It can never write to the Brain. Every recall is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what # teams may read, as far as the person it works for is in them. It can be shared only with people in all of them. It can never write to the Brain. Every recall is recorded}}"
+msgstr "{teams, plural, one {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que # equipo puede leer, en la medida en que la persona para la que trabaja esté en ese equipo. Solo se puede compartir con personas de ese equipo. Nunca puede escribir en el Brain. Cada recuperación queda registrada} other {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que # equipos pueden leer, en la medida en que la persona para la que trabaja esté en ellos. Solo se puede compartir con personas que estén en todos ellos. Nunca puede escribir en el Brain. Cada recuperación queda registrada}}"
+
 #: src/brain/brain.ts
 msgid "{teams, plural, one {Named by # team. Not seen in use yet, so its use is reported, not observed.} other {Named by # teams. Not seen in use yet, so its use is reported, not observed.}}"
 msgstr "{teams, plural, one {La menciona # equipo. Aún no se ha visto en uso, así que su uso es declarado, no observado.} other {La mencionan # equipos. Aún no se ha visto en uso, así que su uso es declarado, no observado.}}"
@@ -4030,8 +4034,8 @@ msgid "Company"
 msgstr "Empresa"
 
 #: src/activity/pending.tsx
-msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
-msgstr "Company Brain, solo lectura. Puede leer evidencias y preguntas abiertas del Company Brain, de las colecciones que se le concedieron y solo lo que también puede leer la persona para la que trabaja. Nunca puede escribir en el Brain. Cada lectura queda registrada"
+msgid "Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded"
+msgstr "Company Brain, solo lectura. Esto puede recuperar lo que todos en la empresa pueden leer, nunca el contenido de un equipo ni el de una sola persona. Nunca puede escribir en el Brain. Cada recuperación queda registrada"
 
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx

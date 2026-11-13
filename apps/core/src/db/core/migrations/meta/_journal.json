@@ -1716,6 +1716,13 @@
       "when": 1794571029166,
       "tag": "0244_colorful_lake",
       "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "6",
+      "when": 1794573420273,
+      "tag": "0245_curly_midnight",
+      "breakpoints": true
     }
   ]
 }

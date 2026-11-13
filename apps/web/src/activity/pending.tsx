@@ -4,7 +4,7 @@ import type {
   PermissionSubject,
 } from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
-import { msg, ph } from "@lingui/core/macro";
+import { msg, ph, plural } from "@lingui/core/macro";
 
 import type { Session } from "../core.ts";
 import {
@@ -147,9 +147,20 @@ export const objectOf = (
     );
   }
   if (object.type === "platform" && actions.includes("brain")) {
-    // Consent in plain words: what it reads, and whose access bounds it.
+    // Consent in plain words: what it reads, whose access bounds it, and
+    // who it may then be shared with (core's brain-recall.ts).
+    const teams = object.teams?.length ?? 0;
+    if (teams === 0) {
+      return i18n._(
+        msg`Company Brain, read only. This can recall what everyone in the company may read, never a team's or anyone's own content. It can never write to the Brain. Every recall is recorded`
+      );
+    }
     return i18n._(
-      msg`Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded`
+      msg`${plural(teams, {
+        one: "Company Brain, read only. This App can recall what everyone in the company may read and what # team may read, as far as the person it works for is in that team. It can be shared only with people in that team. It can never write to the Brain. Every recall is recorded",
+        other:
+          "Company Brain, read only. This App can recall what everyone in the company may read and what # teams may read, as far as the person it works for is in them. It can be shared only with people in all of them. It can never write to the Brain. Every recall is recorded",
+      })}`
     );
   }
   if (object.type === "platform") {
