@@ -54,21 +54,22 @@ export const modelFilesOf = (
 ];
 
 /**
- * bekko-embedding-v1-a8m (hotchpotch, MIT): 4 layers of width 384, 256,000
- * tokens, int8, calibrated (scripts/export.py).
+ * Engram 1, our own: bekko-embedding-v1-a25m (hotchpotch, MIT) cut to 10
+ * layers of width 384 and trained again on public text, 256,000 tokens,
+ * int8, calibrated (scripts/export.py). The model core ships (GRA-1767).
  */
-export const bekkoA8m: EmbedModel = {
-  name: "bekko-embedding-v1-a8m",
+export const engram1: EmbedModel = {
+  name: "engram-1",
   tokenizer: {
     sha256: "e3d06fcbb0cb1e9f0e08051cf1ce82a0f22b679db3aa058458903d646907db44",
     size: 6_891_222,
   },
   encoder: {
-    sha256: "43662f5b7dd31378ddc793b6c67e64f1333ccbd9af7a39ab60fe978eac811f3d",
-    size: 7_967_840,
+    sha256: "587bfd8550cd66ece6f12757bf4eddea33a76d64148eb7e1617cb87def74f6b5",
+    size: 19_690_688,
   },
   tokens: {
-    sha256: "5aebd1a04902551573cce96abae376d88bef5ba527fe009f69f2d6d818f1cfc9",
+    sha256: "8dcee5d9a6a2e1189bc3ea03e6394b4f4f9c7110275ddb68541b813ddf655f67",
     size: 99_328_032,
   },
 };
@@ -114,12 +115,12 @@ export interface TokensHeader {
 
 /**
  * The model core runs and every release names, the one an `Embedder`
- * loads unless told otherwise: none until the choice is made (GRA-1767).
- * Naming one (`bekkoA8m`, say) is this line, in the same change as its
- * files are put in the releases bucket (`vp run release:model-files`):
- * a release that names files the bucket lacks isn't published.
+ * loads unless told otherwise. Changing it is this line, in the same
+ * change as the new model's files are put in the releases bucket
+ * (`vp run release:model-files`): a release that names files the bucket
+ * lacks isn't published.
  */
-export const shippedModel: EmbedModel | null = null;
+export const shippedModel: EmbedModel = engram1;
 
 /** Reads the token table file's header; null when it isn't one of this version. */
 export const readTokensHeader = (bytes: Uint8Array): TokensHeader | null => {
