@@ -58,6 +58,15 @@ export interface AgentScope {
    * side effect is refused (`admitEffect`).
    */
   unattended?: boolean;
+  /**
+   * A turn whose answer reaches its person alone (workspace.ts
+   * `answersAlone`: their own web chat, asked there and then; never a
+   * thread others share, nor a chat app's direct message until GRA-1821
+   * decides it may be): the only scope their own skills steer
+   * (brain-skills.ts `skillsReachOf`). Set by that turn alone; any scope
+   * without it gets none of them.
+   */
+  ownChat?: boolean;
   /** The code run the stub was made for: it answers only while that runs. */
   runId: string;
 }

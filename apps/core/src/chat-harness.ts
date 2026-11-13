@@ -142,6 +142,11 @@ export interface TurnRequest {
     model: string;
     /** A shared chat's members as the turn read for them; null for one's own. */
     audience: string[] | null;
+    /**
+     * Whether its person asked it there and then: never so for a turn
+     * something woke (`Workspace.askUnattended`).
+     */
+    attended: boolean;
   };
 }
 
@@ -149,7 +154,8 @@ export interface TurnRequest {
 export type TurnCapture = Pick<
   TurnFacts,
   "turnId" | "outcome" | "answerId" | "model" | "audience"
->;
+> &
+  Pick<TurnRequest["capture"], "attended">;
 
 /** Why a turn stopped before it answered, when no model said so. */
 export type TurnStop = "history_revoked" | "person_inactive" | "unreadable";
@@ -928,6 +934,8 @@ export class ChatHarness {
           answerId: turn.answerId,
           model: request.capture.model,
           audience: request.capture.audience,
+          // A request kept before it said is no one's there and then.
+          attended: request.capture.attended,
         };
         await tx.doc(CaptureDoc, turnId, owed);
         turn.captureOwed = true;
@@ -1714,6 +1722,8 @@ export class ChatHarness {
           answerId,
           model: request.capture.model,
           audience: request.capture.audience,
+          // A request kept before it said is no one's there and then.
+          attended: request.capture.attended,
         });
         owed.answerId = answerId;
       }

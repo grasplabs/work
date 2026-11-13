@@ -13,9 +13,10 @@ import { skillErrors } from "@grasp-os/shared/skills";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { codeRecallOf, recallAs, skillVersionRefOf } from "./brain-next.ts";
-import type { SkillVersionRef } from "./brain-next.ts";
+import type { SkillAt, SkillVersionRef } from "./brain-next.ts";
 import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
+import type { SkillsReach } from "./brain-skills.ts";
 import { authorize } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -162,6 +163,29 @@ const inHostSkillWords = (error: unknown): unknown => {
   return inHostWords(error);
 };
 
+/**
+ * Whose skills code reads: Grasp's and the company's, never a person's
+ * own, which only ever reach that person's own chat (brain-skills.ts).
+ * Code's input is refused for naming a person's skill before this is
+ * asked (`skillReadSchema`, `grasp` and `company` alone).
+ */
+const codeSkills: SkillsReach = { personal: false };
+
+/**
+ * `skill` as code may be handed it: Grasp's or the company's. A person's
+ * own is never asked for (`codeSkills`); one coming back anyway fails the
+ * call, never passed on.
+ */
+const forCode = <Skill extends { scope: SkillAt["scope"] }>(
+  skill: Skill
+): Omit<Skill, "scope"> & { scope: "grasp" | "company" } => {
+  const { scope } = skill;
+  if (scope === "person") {
+    throw new Error("A person's own skill reached code");
+  }
+  return { ...skill, scope };
+};
+
 /** Who reads the Brain's skills: a recall's caller, with its own pins. */
 export interface SkillsCaller extends Omit<RecallCaller, "keep"> {
   /**
@@ -177,7 +201,7 @@ export interface SkillsCaller extends Omit<RecallCaller, "keep"> {
  * The Brain's skills for an App's action or a workflow's step (GRA-1830):
  * `skills.select` the skills for `input.task`, `skills.read` one at the
  * version a selection gave, the same a chat's code selects and reads for
- * the same person (brain-skills.ts). Checked, kept and audited as a recall
+ * the same person (brain-skills.ts), never the person's own (`codeSkills`). Checked, kept and audited as a recall
  * is (`recallFor`, the threat model on GRA-1830): the input first, then
  * the caller's grant to read the Brain, now, and the person it acts for
  * still a member. Refused as `permission.invalid_args` for input that
@@ -223,15 +247,22 @@ export const skillsCallFor = async (
       caller.context
     );
     if (operation === "skills.select") {
-      const skills = await selectSkillsFor(env, caller.authority, input);
-      await caller.keep?.(skills.map((skill) => skillVersionRefOf(skill)));
-      await audit({ skills: skills.length });
-      return { skills };
+      const skills = await selectSkillsFor(
+        env,
+        caller.authority,
+        codeSkills,
+        input
+      );
+      const handed = skills.map((skill) => forCode(skill));
+      await caller.keep?.(handed.map((skill) => skillVersionRefOf(skill)));
+      await audit({ skills: handed.length });
+      return { skills: handed };
     }
-    const read = await readSkillFor(env, caller.authority, input);
-    await caller.keep?.([skillVersionRefOf(read)]);
-    await audit({ scope: read.scope, version: read.version });
-    return read;
+    const read = await readSkillFor(env, caller.authority, codeSkills, input);
+    const handed = forCode(read);
+    await caller.keep?.([skillVersionRefOf(handed)]);
+    await audit({ scope: handed.scope, version: handed.version });
+    return handed;
   } catch (error) {
     const refused = inHostSkillWords(error);
     await audit({

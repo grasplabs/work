@@ -430,6 +430,17 @@ export const rpcParamNames: ParamNames = {
   "SignalsRpc": {
     "list": ["filter"],
   },
+  "SkillsRpc": {
+    "approve": ["id"],
+    "decline": ["id"],
+    "overview": [],
+    "read": ["scope","name"],
+    "remove": ["name"],
+    "retire": ["name"],
+    "save": ["text"],
+    "share": ["name","version"],
+    "waiting": [],
+  },
   "StephenRequestsRpc": {
     "billed": [],
     "needs": ["locale"],

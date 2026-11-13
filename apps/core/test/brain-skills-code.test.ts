@@ -1,6 +1,7 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
 import { v } from "@grasp-os/runtime/app";
 import type { FunctionResult } from "@grasp-os/shared/functions";
+import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
@@ -14,7 +15,8 @@ import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
-import { installShippedSkills } from "../src/brain-skills.ts";
+import { addOwnSkill } from "../src/brain-next.ts";
+import { installShippedSkills, selectSkillsFor } from "../src/brain-skills.ts";
 import {
   answerDecision,
   confirmDecision,
@@ -33,6 +35,7 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
@@ -616,6 +619,66 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
       after: true,
       answered: 1,
     });
+  });
+
+  it("never hands an App or a workflow the acting person's own skill, nor tells it exists: the same answer as for someone without one", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const uma = await person("user");
+    const word = `own${unique().replaceAll(/\W/gu, "").toLowerCase()}`;
+    // Ada's own skill, whose words are the task's; Uma has none.
+    const own = await addOwnSkill(env, ada.userId, {
+      change: crypto.randomUUID(),
+      text: `---\nname: ${word}\ndescription: Filing ${word} receipts.\n---\n\nFile ${word} receipts by Friday.\n`,
+    });
+    const app = await boundAppOf(ada, admin);
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
+    const { workflow } = await skillsWorkflow(ada, admin);
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
+    const asked = { task: `${word} receipts` };
+    const askedBy = async (by: Member) => ({
+      select: await calledOf(app, by, "skills.ask", selecting(asked)),
+      read: await calledOf(app, by, "skills.ask", reading({ skill: own })),
+      run: await ranOf(by, workflow.id, asked),
+    });
+    const [forAda, forUma] = [await askedBy(ada), await askedBy(uma)];
+    // Her own chat does find it for the same task.
+    const inOwnChat = await selectSkillsFor(
+      env,
+      authoritySchema.parse({
+        subject: { type: "agent", agentId: crypto.randomUUID() },
+        onBehalfOf: ada.userId,
+        mode: "interactive",
+      }),
+      { personal: true },
+      asked
+    );
+    expect(inOwnChat.map(({ scope, name }) => [scope, name])).toStrictEqual([
+      ["person", word],
+    ]);
+    expect({
+      forAda,
+      said: JSON.stringify(forAda).includes(word),
+    }).toStrictEqual({
+      forAda: {
+        // Nothing selected, as for anyone with no skill for it.
+        select: { skills: [] },
+        // A person's skill is no input code may give.
+        read: { failed: "permission.invalid_args" },
+        // The step reads the first skill selected: there is none.
+        run: { failed: "permission.invalid_args" },
+      },
+      said: false,
+    });
+    expect(forUma).toStrictEqual(forAda);
   });
 
   it("withholds what a run read of a skill once its grant is revoked or the skill erased while it waits, and lets it through when nothing changed", async () => {

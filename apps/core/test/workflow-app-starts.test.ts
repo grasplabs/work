@@ -675,6 +675,24 @@ const settledOf = async (store: OpenStore) => {
   }));
 };
 
+/**
+ * Runs the store's alarm and waits until its outbox has no entry left
+ * owed. A commit arms the store's own alarm a second later, which on a
+ * busy machine can fire first: `runDurableObjectAlarm` then finds none
+ * set and returns while that alarm is still handing the entries over.
+ */
+const delivered = async (store: OpenStore) => {
+  await runDurableObjectAlarm(objectOf(store));
+  await vi.waitFor(
+    async () => {
+      const entries = await settledOf(store);
+      // Whatever is still owed shows in the failure, not just that one is.
+      expect(entries.filter(({ settled }) => !settled)).toStrictEqual([]);
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+};
+
 /** A dispatch that admits the start, then dies before it acknowledges. */
 const killedDispatch: OutboxConsumer = async (entry) => {
   await dispatchStartIntent(env, entry);
@@ -1011,7 +1029,7 @@ describe("a mutation starting a workflow after it commits", () => {
       { key }
     );
     const staged = await outboxOf(fx.store);
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const receipts = await receiptsOf(fx.app);
     const run = await ended(fx, receipts[0]?.id ?? null);
     expect({
@@ -1096,7 +1114,7 @@ describe("a mutation starting a workflow after it commits", () => {
               (error: unknown) => codeOf(error)
             )
         : "unclaimed";
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const receipts = await receiptsOf(fx.app);
     const outbox = await outboxOf(fx.store);
     expect({
@@ -1158,7 +1176,7 @@ describe("a mutation starting a workflow after it commits", () => {
     await env.DB.prepare(archiveApp)
       .bind(Date.now(), archivedBy(fx), fx.app)
       .run();
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     expect({
       committed: staged.ok,
       receipts: await receiptsOf(fx.app),
@@ -1178,12 +1196,12 @@ describe("a mutation starting a workflow after it commits", () => {
     )
       .bind(fx.app, fx.bob.userId)
       .run();
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const afterRemoval = await receiptsOf(fx.app);
 
     const adas = await call(fx, fx.ada, "requests.submit", { who: "Ada" });
     await revokePermission(env, fx.admin, fx.permissionId);
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const logged = await allEvents();
     const events = logged.filter(
       (event) =>
@@ -1351,7 +1369,7 @@ describe("what a start rechecks, and records", () => {
     await appHost(env, fx.app).restrict();
     // Dispatched after the App read restricted data: what it staged may
     // carry it.
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const after = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     const { results } = await env.DB.prepare(
       "SELECT receipt.idempotency_key AS key, receipt.restricted AS receipt, run.restricted AS run FROM workflow_start_receipts AS receipt JOIN workflow_resource_runs AS run ON run.id = receipt.id WHERE receipt.invoker_type = 'app' AND receipt.invoker_id = ? ORDER BY receipt.created_at, receipt.id"
@@ -1399,7 +1417,7 @@ describe("what a start rechecks, and records", () => {
       { agent }
     );
     await revokePermission(env, fx.admin, permissionId);
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const afterAgent = await settledOf(fx.store);
     const admitted = await detailsOf("workflow.start.admitted", fx.workflowId);
     const refused = await detailsOf("workflow.start_intent.refused", fx.app);
@@ -1411,7 +1429,7 @@ describe("what a start rechecks, and records", () => {
     )
       .bind(Date.now(), fx.app)
       .run();
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     expect({
       kept: kept.ok,
       staged: staged.ok,
@@ -1446,7 +1464,7 @@ describe("what a start rechecks, and records", () => {
       { who: "Bob" },
       { agent }
     );
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const before = await settledOf(fx.store);
     const staged = await call(
       fx,
@@ -1462,7 +1480,7 @@ describe("what a start rechecks, and records", () => {
       await personOf(env, fx.bob),
       { type: "person", userId: fx.bob.userId }
     );
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
 
     expect({
       calls: [kept.ok, staged.ok],
@@ -1765,7 +1783,7 @@ describe("what a start rechecks, and records", () => {
     const fx = await fixture();
     const started = await call(fx, fx.bob, "requests.kickOffPlain", {});
     const staged = await call(fx, fx.bob, "requests.submitPlain", {});
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const { results } = await env.DB.prepare(
       "SELECT input FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ? ORDER BY created_at, id"
     )
