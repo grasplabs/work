@@ -242,30 +242,25 @@ describe("what a function may use", () => {
 
 describe("permissions", () => {
   test("are frozen all the way down, so nothing checked can change before registration", () => {
-    const brain = permission.brain({
-      operations: ["search"],
-      collections: ["handbook"],
-    });
+    const brain = permission.brain({ operations: ["recall"] });
     const connection = permission.connection("mail", {
       contract: "microsoft-365.mail@1",
       actions: ["send"],
     });
     const ai = permission.ai({ maxOutputTokens: 100 });
     expect({
-      operation: Reflect.set(brain.operations, 0, "read"),
-      added: Reflect.set(brain.operations, 1, "read"),
-      collection: Reflect.set(brain.collections, 0, "secret"),
+      operation: Reflect.set(brain.operations, 0, "remember"),
+      added: Reflect.set(brain.operations, 1, "remember"),
       action: Reflect.set(connection.actions, 0, "delete"),
       tokens: Reflect.set(ai, "maxOutputTokens", 100_000),
     }).toStrictEqual({
       operation: false,
       added: false,
-      collection: false,
       action: false,
       tokens: false,
     });
     expect([brain.operations, connection.actions, ai.alias]).toStrictEqual([
-      ["search"],
+      ["recall"],
       ["send"],
       "ai",
     ]);

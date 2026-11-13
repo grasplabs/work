@@ -229,10 +229,6 @@ msgstr "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgid "{className}, for {name}"
 msgstr "{className}, for {name}"
 
-#: src/apps/resource-bindings.tsx
-msgid "{collection}: {name}"
-msgstr "{collection}: {name}"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "{coming} expected return"
 msgstr "{coming} expected return"
@@ -1456,10 +1452,6 @@ msgstr "2 Inventory"
 #: src/connections/http-connections.tsx
 msgid "A bearer token"
 msgstr "A bearer token"
-
-#: src/workflows/binding-approvals.tsx
-msgid "A Brain collection it may read"
-msgstr "A Brain collection it may read"
 
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
@@ -3806,10 +3798,6 @@ msgctxt "a kind of field"
 msgid "Choice"
 msgstr "Choice"
 
-#: src/apps/resource-bindings.tsx
-msgid "Choose a collection"
-msgstr "Choose a collection"
-
 #: src/workflows/workflow-triggers.tsx
 msgid "Choose a connection."
 msgstr "Choose a connection."
@@ -4005,15 +3993,10 @@ msgstr "Collection {collectionId}"
 msgid "Collection actions"
 msgstr "Collection actions"
 
-#: src/apps/resource-bindings.tsx
-msgid "Collection for {collection}"
-msgstr "Collection for {collection}"
-
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection not found"
 msgstr "Collection not found"
 
-#: src/apps/resource-bindings.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Collections"
@@ -7160,10 +7143,6 @@ msgstr "It may read the name, email and teams of everyone in the organization."
 msgid "It opens for the member who created it, the admins, and whoever it is shared with."
 msgstr "It opens for the member who created it, the admins, and whoever it is shared with."
 
-#: src/workflows/files-and-apps.tsx
-msgid "It reads no Knowledge."
-msgstr "It reads no Knowledge."
-
 #: src/brain/memory-page.tsx
 msgid "It rests on nothing you can see."
 msgstr "It rests on nothing you can see."
@@ -7406,10 +7385,6 @@ msgstr "Its URL takes nothing more, and no workflow starts on its events. This c
 msgid "Its version"
 msgstr "Its version"
 
-#: src/workflows/files-and-apps.tsx
-msgid "Its versions call it {aliases}"
-msgstr "Its versions call it {aliases}"
-
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
 msgstr "Its work"
@@ -7549,10 +7524,6 @@ msgstr "Knowledge"
 msgctxt "tab: what Grasp knows about a piece of work"
 msgid "Knowledge"
 msgstr "Knowledge"
-
-#: src/workflows/files-and-apps.tsx
-msgid "Knowledge it reads"
-msgstr "Knowledge it reads"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Known"
@@ -8820,10 +8791,6 @@ msgstr "No teams"
 #: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "No teams yet."
-
-#: src/workflows/files-and-apps.tsx
-msgid "No version uses it yet"
-msgstr "No version uses it yet"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
@@ -10307,6 +10274,10 @@ msgstr "Permission for the platform's statistics"
 msgid "Permission to invite guests"
 msgstr "Permission to invite guests"
 
+#: src/apps/resource-bindings.tsx
+msgid "Permission to read the Brain"
+msgstr "Permission to read the Brain"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Person"
@@ -10810,6 +10781,10 @@ msgstr "Real run"
 #: src/chat/thread.tsx
 msgid "Reasoning"
 msgstr "Reasoning"
+
+#: src/activity/audit-words.ts
+msgid "Recalled from the Brain"
+msgstr "Recalled from the Brain"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
@@ -13507,8 +13482,8 @@ msgid "The App has no permission to invite guests. Grant one first."
 msgstr "The App has no permission to invite guests. Grant one first."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App has no permission to read a collection. Grant one first."
-msgstr "The App has no permission to read a collection. Grant one first."
+msgid "The App has no permission to read the Brain. Grant one first."
+msgstr "The App has no permission to read the Brain. Grant one first."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the platform's statistics. Grant one first."
@@ -13639,6 +13614,10 @@ msgstr "The brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "The brain has no teams to group yet."
+
+#: src/workflows/binding-approvals.tsx
+msgid "The Brain, as each run's person may read it"
+msgstr "The Brain, as each run's person may read it"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
