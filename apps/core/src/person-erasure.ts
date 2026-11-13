@@ -32,7 +32,6 @@ import {
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
 import { erasePerson as eraseFromBrain } from "./brain-next.ts";
-import type { OwedErasure } from "./brain-owed-erasures.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
@@ -600,41 +599,6 @@ const brainSources: ErasureStep = {
       await completed(drizzle(env.DB), userId, "brain_sources");
     }
   },
-};
-
-/**
- * The Brain erasures people's erasures owe (brain-owed-erasures.ts), at
- * most `limit`, oldest first: one for each person whose `brain_sources`
- * area is pending. Asking the Brain again is safe; the area stays this
- * step's to mark.
- */
-export const owedPersonErasures = async (
-  env: Env,
-  limit: number
-): Promise<OwedErasure[]> => {
-  const rows = await drizzle(env.DB)
-    .select({ userId: personErasures.userId })
-    .from(personErasures)
-    .innerJoin(
-      personErasureAreas,
-      and(
-        eq(personErasureAreas.userId, personErasures.userId),
-        eq(personErasureAreas.area, brainSources.area)
-      )
-    )
-    .where(
-      and(
-        isNull(personErasures.completedAt),
-        eq(personErasureAreas.state, "pending")
-      )
-    )
-    .orderBy(asc(personErasures.requestedAt), asc(personErasures.userId))
-    .limit(limit);
-  return rows.map(({ userId }) => ({
-    kind: "person",
-    personId: userId,
-    reason: "person_erased",
-  }));
 };
 
 /**

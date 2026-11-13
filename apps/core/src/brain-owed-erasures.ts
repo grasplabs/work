@@ -1,114 +1,102 @@
 import { log } from "@grasp-os/shared/log";
 
-import { erasePerson, eraseSource } from "./brain-next.ts";
-import type { SourceReaders, SourceRef } from "./brain-next.ts";
-import { owedPersonErasures } from "./person-erasure.ts";
-import { owedRunErasures } from "./workflows/retention.ts";
+import { eraseSources } from "./brain-next-origins.ts";
+import type { eraseSource, SourceReaders, SourceRef } from "./brain-next.ts";
 
-// The erasures core owes the Brain (GRA-1848), in one place. Each producer
-// keeps its own record of an erasure it asked for until the Brain's call
-// returned (a run's receipt left unmarked, a person's erasure area left
-// pending): only a call that returned is in the Brain's ledger. Until then
-// what it covers can still be read, and so written into a company export
-// and downloaded. So an export starts, and each of its files is answered,
-// only once nothing is owed (brain-next-exports.ts), and this file is
-// where "what is owed" is known:
+// The erasures core owes the Brain of what a company export can hold
+// (GRA-1848), in one place. A producer keeps its own record of an erasure
+// it asked for until the Brain's call returned (a row left unmarked):
+// only a call that returned is in the Brain's ledger. Until then what it
+// covers can still be read, and so written into a company export and
+// downloaded. So an export starts, and each of its files with content is
+// answered, only once none of it is owed (brain-next-exports.ts).
 //
-// - Every producer that can owe the Brain an erasure lists what it owes
-//   now in `owing`, as the Brain calls that settle it. A new kind of
-//   erasure (an upload's deletion once uploads are handed over, an
-//   interview's) adds its list here, or exports can serve what it owes.
-// - `settleOwedErasures` makes those calls now, and answers whether
-//   anything is still owed. It never marks a producer's own record: the
-//   producer's next run asks the Brain again, which is safe, and marks
-//   it. An erasure is settled once its call returned, whatever it was owed
-//   for: that is when the Brain's ledger has it, and from then on the
-//   store serves none of it and every export holding it is stale.
+// Only sources more than one person may read count: a company export
+// leaves out what one person alone may read (`owner`), which is kept in
+// their own store, and no company export reads that. So the rule follows
+// from the readers each erasure is made with, never from a producer's own
+// judgement, and an erasure owed of one person's content (a run past its
+// retention, a person's erasure) holds up no export.
+//
+// - Every producer that can owe the Brain an erasure of such a source
+//   lists it in `owedErasureLists`, filtered to those readers in its own
+//   query, with the readers its producer adds the source with. None does
+//   on main yet: a run's source and a person's own content are one
+//   person's. The first will be a team's uploads (#2203) and an
+//   interview's team claims (#2206).
+// - `settleOwedErasures` makes those calls now, and answers whether any
+//   is still owed. It never marks a producer's own record: the producer's
+//   next run asks the Brain again, which is safe (a source erased before
+//   is not recorded again), and marks it. An erasure made here is
+//   recorded in the Brain's ledger, as the producer's own would be, not in
+//   core's audit log.
 // - A call whose reply was lost counts as failed: owed, so refused, until
 //   the next settle or the producer's own retry returns.
+
+/** Readers that are not one person alone: what a company export can hold. */
+type SharedReaders = Exclude<SourceReaders, { kind: "owner" }>;
 
 /** Why an erasure is made, as the Brain's ledger records it. */
 type ErasureReason = Parameters<typeof eraseSource>[1]["reason"];
 
-/** One Brain call core owes, as its producer would make it. */
-export type OwedErasure =
-  | {
-      kind: "source";
-      source: SourceRef;
-      readers: SourceReaders;
-      reason: ErasureReason;
-    }
-  | { kind: "person"; personId: string; reason: ErasureReason };
+/** One erasure of a source core owes the Brain, as its producer would make it. */
+export interface OwedErasure {
+  source: SourceRef;
+  readers: SharedReaders;
+  reason: ErasureReason;
+}
 
 /** A producer's list of what it owes the Brain at `now`, at most `limit`. */
-type OwedList = (env: Env, now: Date, limit: number) => Promise<OwedErasure[]>;
+export type OwedErasureList = (
+  env: Env,
+  now: Date,
+  limit: number
+) => Promise<OwedErasure[]>;
 
-/** Every producer that can owe the Brain an erasure. */
-const owing: readonly OwedList[] = [
-  owedRunErasures,
-  async (env, _now, limit) => await owedPersonErasures(env, limit),
-];
+/** Every producer that can owe the Brain an erasure a company export can hold. */
+export const owedErasureLists: readonly OwedErasureList[] = [];
 
 /**
  * Most erasures one settle makes: half the 1,000 subrequests a Worker's
- * request may make, at two store calls each (a person's own store, then
- * the shared one), so the request it runs in keeps the rest. More owed
- * than that answers `owed`, and the producers' own clock runs work it down.
+ * request may make, at one call to the shared store each (no person's own
+ * store holds a source others read), so the request it runs in keeps the
+ * rest. More owed than that answers `owed` before any call, and the
+ * producers' own clock runs work it down.
  */
-export const owedErasuresMax = 250;
-
-/** How many erasures one settle has under way at once. */
-const erasingAtOnce = 8;
-
-/** Makes the Brain call `owed` is. */
-const settle = async (env: Env, owed: OwedErasure): Promise<void> => {
-  if (owed.kind === "source") {
-    const { source, readers, reason } = owed;
-    await eraseSource(env, { source, readers, reason });
-    return;
-  }
-  // `still_deleting` is landed too: the shared store's erasure returned,
-  // and their own store recorded its own before it deletes its files; it
-  // answers nothing from then on, and no export reads it.
-  await erasePerson(env, { personId: owed.personId, reason: owed.reason });
-};
+export const owedErasuresMax = 500;
 
 /**
- * Makes every Brain erasure core owes now, a few at a time, and answers
- * `settled` when every one returned, `owed` when one failed (those after
- * its few are not made) or more were owed than one settle makes
- * ({@link owedErasuresMax}).
+ * Makes every erasure `lists` owe now, a few at a time, and answers
+ * `settled` once every one returned, or `owed` when one failed (none
+ * after its few are made) or more were owed than one settle makes
+ * ({@link owedErasuresMax}), in which case none is made: they could not
+ * change the answer.
  */
 export const settleOwedErasures = async (
   env: Env,
-  now: Date
+  now: Date,
+  lists: readonly OwedErasureList[]
 ): Promise<"settled" | "owed"> => {
   const owed: OwedErasure[] = [];
-  for (const list of owing) {
-    const room = owedErasuresMax + 1 - owed.length;
-    if (room <= 0) {
-      break;
-    }
+  for (const list of lists) {
     // oxlint-disable-next-line no-await-in-loop -- one producer after another, within the room left
-    owed.push(...(await list(env, now, room)));
-  }
-  const settling = owed.slice(0, owedErasuresMax);
-  let failed = owed.length > settling.length;
-  for (let at = 0; at < settling.length; at += erasingAtOnce) {
-    // oxlint-disable-next-line no-await-in-loop -- a few at a time
-    const settled = await Promise.allSettled(
-      settling.slice(at, at + erasingAtOnce).map(async (each) => {
-        await settle(env, each);
-      })
-    );
-    // Refused whatever the rest do: none started after one failed.
-    if (settled.some(({ status }) => status === "rejected")) {
-      failed = true;
-      break;
+    owed.push(...(await list(env, now, owedErasuresMax + 1 - owed.length)));
+    if (owed.length > owedErasuresMax) {
+      log.warn("brain.erasures_owed", {});
+      return "owed";
     }
   }
-  if (failed) {
-    // A fixed name alone: what is owed names sources and people.
+  try {
+    for (const reason of new Set(owed.map((each) => each.reason))) {
+      // oxlint-disable-next-line no-await-in-loop -- one reason after another
+      await eraseSources(
+        env,
+        owed.filter((each) => each.reason === reason),
+        reason
+      );
+    }
+  } catch {
+    // A fixed name alone: what is owed names sources.
     log.warn("brain.erasures_owed", {});
     return "owed";
   }

@@ -14,9 +14,18 @@ import {
   readSourceVersionAs,
   workBrain,
 } from "../src/brain-next.ts";
+import {
+  owedErasuresMax,
+  settleOwedErasures,
+} from "../src/brain-owed-erasures.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { soleReadersOf } from "./brain-next-sole-readers.ts";
-import { newMark, nextBucketPut, wordOf } from "./brain-next-traces.ts";
+import { sweepRunDetails } from "../src/workflows/retention.ts";
+import {
+  ledgerOf,
+  newMark,
+  nextBucketPut,
+  wordOf,
+} from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
 import {
   endedRun,
@@ -28,6 +37,7 @@ import {
 import { noProducers } from "./no-producers.ts";
 import {
   auditedDuring,
+  outcome,
   routed,
   signedIn,
   signedInApi,
@@ -58,10 +68,7 @@ const failNextBucketPut = async (): Promise<void> => {
 
 /**
  * A builder's run that ended, its result handed to the Brain with `mark`
- * for a team of the builder alone, so it is in the shared store and in a
- * company export. (Core hands a run over as its person's alone today; a
- * run read by a team is the case where its erasure decides what an
- * export holds.)
+ * as its producer hands a run over: the person it ran for alone.
  */
 const runInBrain = async (mark: string) => {
   const builder = await workflowApps.signedIn("builder");
@@ -72,9 +79,22 @@ const runInBrain = async (mark: string) => {
     source: runSource(runId),
     change: crypto.randomUUID(),
     text: `What the run said: ${wordOf(mark)}.`,
-    readers: await soleReadersOf(builder.userId),
+    readers: { kind: "owner", personId: builder.userId },
   });
   return { runId, builderId: builder.userId };
+};
+
+/** A team's source with `mark`, in the shared store, as a company export holds it. */
+const teamSource = async (mark: string) => {
+  const source = { producer: "upload", id: crypto.randomUUID() } as const;
+  const readers = { kind: "team", teamId: crypto.randomUUID() } as const;
+  await addSource(env, {
+    source,
+    change: "1",
+    text: `What the team said: ${wordOf(mark)}.`,
+    readers,
+  });
+  return { source, readers };
 };
 
 /**
@@ -416,118 +436,84 @@ describe(
       }
     });
 
-    it("starts no company export while a person's erasure in the Brain is owed, and starts one once it returned", async () => {
-      const admin = await signedInApi(idp, "admin");
-      const person = await signedInWithRole(idp, "user");
-      await admin.api.members.remove(person.userId);
-      await failNextBucketPut();
-      const pending = await admin.api.members.erase(
-        person.userId,
-        String(person.person.name)
-      );
-
-      await failNextBucketPut();
-      const refused = await request(admin.session, brainExportsPath, {
-        method: "POST",
-      });
-      const started = await request(admin.session, brainExportsPath, {
-        method: "POST",
-      });
-
-      expect({
-        pending: pending.areas.find(({ area }) => area === "brain_sources"),
-        refused: refused.status,
-        code: z.object({ code: z.string() }).parse(await refused.json()).code,
-        started: started.status,
-      }).toStrictEqual({
-        pending: { area: "brain_sources", state: "pending" },
-        refused: 409,
-        code: "brain.erasures_owed",
-        started: 200,
-      });
-    });
-
-    it("starts no company export while an erasure is owed, naming nothing, and once it returned starts one that holds none of it", async () => {
-      const mark = newMark();
-      const { runId, builderId } = await runInBrain(mark);
-      // Past its retention, its erasure owed: the clock's sweep hasn't run.
-      const { refused, refusal, events, bodies } = await pastRetention(
-        async () => {
-          const admin = await signedInWithRole(idp, "admin");
-          await failNextBucketPut();
-          let answered: Response | undefined;
-          const audited = await auditedDuring(async () => {
-            answered = await request(admin.session, brainExportsPath, {
-              method: "POST",
-            });
-          });
-          const text = await answered?.text();
-          const id = await start(admin.session);
-          return {
-            refused: answered,
-            refusal: text,
-            events: audited,
-            bodies: await writtenFiles(admin.session, id),
-          };
-        }
-      );
-
-      expect({
-        status: refused?.status,
-        code: z.object({ code: z.string() }).parse(JSON.parse(refusal ?? ""))
-          .code,
-        names: [runId, builderId, mark].filter((each) =>
-          `${refusal}${JSON.stringify(events)}`.includes(each)
-        ),
-        audited: events
-          .filter(({ action }) => action.startsWith("brain.export."))
-          .map(({ action, detail }) => [action, detail?.outcome ?? null]),
-        held: bodies.join("\n").includes(wordOf(mark)),
-      }).toStrictEqual({
-        status: 409,
-        code: "brain.erasures_owed",
-        names: [],
-        audited: [
-          ["brain.export.asked", null],
-          ["brain.export.answered", "failed"],
-        ],
-        held: false,
-      });
-    });
-
-    it("serves no file of a done export while an erasure is owed, and none of it once the erasure returned and the export holds what it erased", async () => {
+    it("makes an owed erasure of what a team reads before it answers, owed while the Brain can't record it, and an export started once it returned holds none of it", async () => {
       const admin = await signedInWithRole(idp, "admin");
       const mark = newMark();
-      await runInBrain(mark);
+      const owed = await teamSource(mark);
+      const lists = [
+        async () =>
+          await Promise.resolve([{ ...owed, reason: "deleted" as const }]),
+      ];
+
+      await failNextBucketPut();
+      const failing = await settleOwedErasures(env, new Date(), lists);
+      const returned = await settleOwedErasures(env, new Date(), lists);
       const id = await start(admin.session);
-      const before = await writtenFiles(admin.session, id);
-      const response = await request(admin.session, queryOf(id));
-      const { files } = statusSchema.parse(await response.json());
-      const part = files.find((file) => file !== "manifest.json") ?? "";
-      // The run's erasure becomes owed after the export was done, and fails.
-      const { owed, code, landed } = await pastRetention(async () => {
-        const later = await signedInWithRole(idp, "admin");
+      const bodies = await writtenFiles(admin.session, id);
+
+      expect({
+        failing,
+        returned,
+        held: bodies.join("\n").includes(wordOf(mark)),
+      }).toStrictEqual({ failing: "owed", returned: "settled", held: false });
+    });
+
+    it("answers owed, making no erasure, when more are owed than one settle makes", async () => {
+      const mark = newMark();
+      const first = await teamSource(mark);
+      const rest = Array.from({ length: owedErasuresMax }, () => ({
+        source: { producer: "upload", id: crypto.randomUUID() } as const,
+        readers: first.readers,
+        reason: "deleted" as const,
+      }));
+      const lists = [
+        async () =>
+          await Promise.resolve([{ ...first, reason: "deleted" as const }]),
+        async (_env: Env, _now: Date, limit: number) =>
+          await Promise.resolve(rest.slice(0, limit)),
+      ];
+
+      const answer = await settleOwedErasures(env, new Date(), lists);
+
+      expect({
+        answer,
+        recorded: await ledgerOf(`upload:${first.source.id}`),
+      }).toStrictEqual({ answer: "owed", recorded: [] });
+    });
+
+    it("holds up no export for an erasure owed of what one person alone may read: a run past its retention, a person's erasure, while the Brain can't record them", async () => {
+      const mark = newMark();
+      await runInBrain(mark);
+      const { started, swept, bodies } = await pastRetention(async () => {
+        const admin = await signedInApi(idp, "admin");
+        const person = await signedInWithRole(idp, "user");
+        await admin.api.members.remove(person.userId);
         await failNextBucketPut();
-        const refused = await request(later.session, queryOf(id, part));
-        const again = await request(later.session, queryOf(id, part));
+        // Pending: the Brain couldn't record their erasure.
+        await admin.api.members.erase(
+          person.userId,
+          String(person.person.name)
+        );
+        await failNextBucketPut();
+        const answered = await request(admin.session, brainExportsPath, {
+          method: "POST",
+        });
+        // The Brain still failing, met by the run retention's own sweep,
+        // which leaves the run's erasure owed.
+        const sweep = await outcome(sweepRunDetails(env, new Date()));
+        const { id } = startedSchema.parse(await answered.json());
         return {
-          owed: refused.status,
-          code: z.object({ code: z.string() }).parse(await refused.json()).code,
-          landed: again.status,
+          started: answered.status,
+          swept: sweep === "ok" ? "swept" : "failed",
+          bodies: await writtenFiles(admin.session, id),
         };
       });
 
       expect({
-        held: before.join("\n").includes(wordOf(mark)),
-        owed,
-        code,
-        landed,
-      }).toStrictEqual({
-        held: true,
-        owed: 409,
-        code: "brain.erasures_owed",
-        landed: 404,
-      });
+        started,
+        swept,
+        held: bodies.join("\n").includes(wordOf(mark)),
+      }).toStrictEqual({ started: 200, swept: "failed", held: false });
     });
   }
 );
