@@ -270,7 +270,7 @@ const upgradeBoard = async (
   if (Object.keys(changed).length === 0) {
     return;
   }
-  const [latest] = await owner.api.apps.versions.list(app.id);
+  const [latest] = await owner.api.versions.list({ kind: "app", id: app.id });
   if (latest !== undefined && latest.version !== current) {
     const later = await owner.api.apps.files.read(app.id, latest.version);
     if (Object.entries(changed).some(([path, code]) => later[path] !== code)) {
@@ -279,7 +279,10 @@ const upgradeBoard = async (
       );
       return;
     }
-    await adminSession.api.apps.versions.publish(app.id, latest.version);
+    await adminSession.api.versions.rollback(
+      { kind: "app", id: app.id },
+      latest.version
+    );
     return;
   }
   const { version } = await owner.api.apps.files.commit(
@@ -288,7 +291,10 @@ const upgradeBoard = async (
     "Add the App's board",
     JSON.parse(appDefinitionText(appDefinition(seed)))
   );
-  await adminSession.api.apps.versions.publish(app.id, version);
+  await adminSession.api.versions.rollback(
+    { kind: "app", id: app.id },
+    version
+  );
 };
 
 /**
@@ -349,7 +355,9 @@ const seedWorkflow = async (
   const listed = await adminSession.api.workflowResources.list();
   const found = listed.find(({ name }) => name === workflow.id);
   const published =
-    found === undefined ? [] : await resources.versions(found.id);
+    found === undefined
+      ? []
+      : await owner.api.versions.list({ kind: "workflow", id: found.id });
   if (found !== undefined && published.length > 0) {
     return found.id;
   }
@@ -381,10 +389,17 @@ const seedWorkflow = async (
       }
     }
   }
-  await resources.publish(created.id, {
-    definition: definitionText(workflow.parts),
-    basedOn: null,
+  // Its draft as the seed defines it, published as its first version.
+  const draft = await resources.draft(created.id);
+  const drafted = await resources.editDraft(created.id, {
+    revision: draft.revision,
+    source: definitionText(workflow.parts),
   });
+  await owner.api.drafts.publish(
+    { kind: "workflow", id: created.id },
+    drafted.revision,
+    "Seeded."
+  );
   if (decision !== undefined) {
     const teamId = teams.get(decision.team);
     if (teamId === undefined) {
@@ -523,7 +538,10 @@ const seedApp = async (
     );
     // An admin publishes it, which approves its code, once its workflow
     // tests pass: live, the people it is shared with use it.
-    await adminSession.api.apps.versions.publish(app.id, version);
+    await adminSession.api.versions.rollback(
+      { kind: "app", id: app.id },
+      version
+    );
   } else {
     // Its board needs the App's own files and workflow bindings: one
     // seeded before them keeps what it has (nothing has shipped, so no

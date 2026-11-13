@@ -255,10 +255,12 @@ const boundApp = async (
     const workflow = await builds.api.workflowResources.create(
       `greet-${crypto.randomUUID().slice(0, 8)}`
     );
-    await builds.api.workflowResources.publish(workflow.id, {
-      definition: definitionOf(key),
-      basedOn: null,
+    // A new workflow's draft is at revision 0: written, then published.
+    await builds.api.workflowResources.editDraft(workflow.id, {
+      revision: 0,
+      source: definitionOf(key),
     });
+    await builds.api.drafts.publish({ kind: "workflow", id: workflow.id }, 1);
     await decides.api.workflowResources.approveBinding(workflow.id, {
       alias: "approval",
       target: {
@@ -278,7 +280,7 @@ const boundApp = async (
       appFiles(admin.userId, colleague.userId),
       "Requests"
     );
-    await builds.api.apps.versions.publish(app, version);
+    await builds.api.versions.rollback({ kind: "app", id: app }, version);
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

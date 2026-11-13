@@ -129,10 +129,12 @@ const boundApp = async (
     const workflow = await builds.api.workflowResources.create(
       `follow-up-${crypto.randomUUID().slice(0, 8)}`
     );
-    await builds.api.workflowResources.publish(workflow.id, {
-      definition,
-      basedOn: null,
+    // A new workflow's draft is at revision 0: written, then published.
+    await builds.api.workflowResources.editDraft(workflow.id, {
+      revision: 0,
+      source: definition,
     });
+    await builds.api.drafts.publish({ kind: "workflow", id: workflow.id }, 1);
     await builds.api.workflowResources.bindToApp(workflow.id, {
       app,
       alias: "followUp",
@@ -144,7 +146,7 @@ const boundApp = async (
       appFiles(),
       "Requests"
     );
-    await builds.api.apps.versions.publish(app, version);
+    await builds.api.versions.rollback({ kind: "app", id: app }, version);
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },

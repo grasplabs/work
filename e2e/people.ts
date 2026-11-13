@@ -827,11 +827,11 @@ export const revokeNewestRelease = async (app: string): Promise<void> => {
   }
   const { core, api } = apiOf({ cookie });
   try {
-    const [newest] = await api.apps.versions.releases(app);
+    const [newest] = await api.apps.releases.list(app);
     if (newest === undefined) {
       throw new Error(`The App ${app} has no release to revoke`);
     }
-    await api.apps.versions.revoke(app, newest.version, {
+    await api.apps.releases.revoke(app, newest.version, {
       reason: "An end-to-end test revokes it",
     });
   } finally {
@@ -872,5 +872,5 @@ export const release = async (
   const { version } = await commitApp(api.apps.files, app, files, message);
   // Live, for the people it is shared with (until then, its
   // builders' alone).
-  await api.apps.versions.publish(app, version);
+  await api.versions.rollback({ kind: "app", id: app }, version);
 };

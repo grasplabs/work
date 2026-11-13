@@ -72,7 +72,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
     );
     // Live, for the people it is shared with (until then, its
     // builders' alone).
-    await api.apps.versions.publish(app.id, version);
+    await api.versions.rollback({ kind: "app", id: app.id }, version);
     const chat = await api.chats.create(`Build ${tag}`);
     const page = await pageOf(builder);
 
@@ -194,7 +194,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
       tallyFiles("in the App"),
       "A tally"
     );
-    await api.apps.versions.publish(app.id, version);
+    await api.versions.rollback({ kind: "app", id: app.id }, version);
     const published = page
       .getByRole("region", { name: `${name}, as your team sees it` })
       .frameLocator("iframe");
@@ -345,7 +345,7 @@ test("an App's workspace previews the App before its chat changes anything, then
       tallyFiles("in the App"),
       "A tally"
     );
-    await api.apps.versions.publish(app.id, version);
+    await api.versions.rollback({ kind: "app", id: app.id }, version);
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
 
@@ -369,7 +369,7 @@ test("an App's workspace previews the App before its chat changes anything, then
       tallyFiles("in version 2"),
       "Elsewhere"
     );
-    await api.apps.versions.publish(app.id, second.version);
+    await api.versions.rollback({ kind: "app", id: app.id }, second.version);
     await expect(live.getByRole("status")).toHaveText("0 in version 2", {
       timeout: 30_000,
     });
@@ -412,7 +412,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
       tallyFiles("in the App"),
       "A tally"
     );
-    await api.apps.versions.publish(app.id, version);
+    await api.versions.rollback({ kind: "app", id: app.id }, version);
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
     await expect(

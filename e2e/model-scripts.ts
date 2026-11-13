@@ -300,7 +300,7 @@ export const modelScripts = {
       (said) =>
         calls("editswf01", "editWorkflow", {
           workflow: readIn(said, besideWorkflow),
-          expectedRevision: 0,
+          revision: 0,
           source: invoiceApproval(),
         }),
       says(approvalDrawn),

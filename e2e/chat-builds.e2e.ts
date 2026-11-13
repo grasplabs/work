@@ -73,7 +73,7 @@ test("a builder publishes the draft a chat built from the App's workspace, which
       testApp({ name: "Invoice desk" }, { "src/routes/index.tsx": appPage }),
       "An invoice desk"
     );
-    await api.apps.versions.publish(app.id, version);
+    await api.versions.rollback({ kind: "app", id: app.id }, version);
     // Shared with a colleague, who uses the live version.
     await api.apps.members.add(app.id, {
       type: "person",
@@ -120,7 +120,7 @@ test("a builder publishes the draft a chat built from the App's workspace, which
       )
       .toBeGreaterThan(version);
     const live = await api.apps.get(app.id);
-    expect(await api.apps.drafts.get(app.id)).toMatchObject({
+    expect(await api.drafts.get({ kind: "app", id: app.id })).toMatchObject({
       base: live.currentVersion,
       changed: [],
     });

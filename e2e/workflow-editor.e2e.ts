@@ -440,7 +440,7 @@ test("a builder makes something that runs on its own by saying what they want do
   const { core, api } = apiOf(builder);
   try {
     await api.workflowResources.editDraft(workflow, {
-      expectedRevision: 0,
+      revision: 0,
       source: definition("received"),
     });
     // Once a draft passes, it is set up: its Flow draws it.

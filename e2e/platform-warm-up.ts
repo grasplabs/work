@@ -55,7 +55,7 @@ export const warmPlatform = async (builder: Person): Promise<void> => {
       // oxlint-disable-next-line no-await-in-loop -- until the turn ends
       ({ running } = await api.chats.summary(chat.id));
     }
-    const draft = await api.apps.drafts.get(app.id);
+    const draft = await api.drafts.get({ kind: "app", id: app.id });
     if (draft.changed.length === 0) {
       throw new Error(
         `The platform's warm-up turn in chat ${chat.id} wrote no App files, so it loaded nothing`

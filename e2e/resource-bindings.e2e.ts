@@ -56,7 +56,7 @@ const appOf = async (
     const { version } = await commitApp(api.apps.files, id, files, name);
     // Live, for the people it is shared with (until then, its
     // builders' alone).
-    await api.apps.versions.publish(id, version);
+    await api.versions.rollback({ kind: "app", id }, version);
     return id;
   } finally {
     core[Symbol.dispose]();
