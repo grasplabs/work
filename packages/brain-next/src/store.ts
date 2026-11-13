@@ -252,7 +252,7 @@ const ledgerCatchingUp =
   "The Brain is applying its erasure ledger after a restore, so it answers nothing yet: try again shortly";
 
 /** How long after a failed read of the ledger a call reads it again. */
-const ledgerRetryMs = 30_000;
+export const ledgerRetryMs = 30_000;
 
 /**
  * The soonest a person's own store wakes itself again (`alarm`): a

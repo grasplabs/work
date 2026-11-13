@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { fileGraceMs } from "../src/files.ts";
+import { ledgerRetryMs } from "../src/store.ts";
 import type { Store } from "./export-reads.ts";
 import { kill } from "./store-copy.ts";
 
@@ -312,81 +313,96 @@ describe("a person's own store erased whole, against writes that land late", () 
     }
   });
 
-  // Review finding 2: the instance the restart makes can't read the record
-  // as it starts, writes it again, and finds no schema: it is no store
-  // that was never written, and while it can't read the record it is
-  // never done.
-  it("isn't done at once by the instance a restart made, though it finds no schema and can't read the record as it starts", async () => {
-    const person = unique();
-    const source = `test:${unique()}`;
-    await own(person).addSource({
-      source,
-      change: unique(),
-      text: "Mine alone",
-      access: alone(person),
-    });
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    try {
-      const held = await holdWrite(
-        person,
-        (key) => key.includes("/erasures/"),
-        11_000
-      );
-      await Promise.allSettled([
-        called(own(person).eraseSource({ source, reason: "retention" })),
-      ]);
-      await erase(person);
-      await aGraceLater(person);
-      // Past the grace, the write still on its way: the store restarts.
-      const restarting = await erase(person);
-      await land(held);
-      // The next instance can't read the record as it starts.
-      const bucket = env.BRAIN_OBJECTS;
-      let heads = 0;
-      Reflect.set(env, "BRAIN_OBJECTS", {
-        get: async (key: string) => await bucket.get(key),
-        list: async (options?: R2ListOptions) => await bucket.list(options),
-        put: async (
-          key: string,
-          value: ArrayBuffer | string,
-          options?: R2PutOptions
-        ) => await bucket.put(key, value, options),
-        delete: async (keys: string | string[]) => {
-          await bucket.delete(keys);
-        },
-        head: async (key: string) => {
-          heads += 1;
-          if (heads === 1) {
-            await Promise.resolve();
-            throw new Error("R2 out of reach");
-          }
-          return await bucket.head(key);
-        },
+  // Review finding 2: the instance a restart makes can't read the record
+  // as it starts, writes it again, and finds no schema. It is no store
+  // that was never written (an erasure was recorded before), and while it
+  // can't read whether it was erased it is never done.
+  it.each([
+    ["can't read the record as it starts", 1],
+    ["can't read whether it was erased at all", Number.POSITIVE_INFINITY],
+  ])(
+    "isn't done by the instance a restart made, which finds no schema and %s",
+    async (_case, failing) => {
+      const person = unique();
+      const source = `test:${unique()}`;
+      await own(person).addSource({
+        source,
+        change: unique(),
+        text: "Mine alone",
+        access: alone(person),
       });
-      let fresh = "";
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
       try {
+        const held = await holdWrite(
+          person,
+          (key) => key.includes("/erasures/"),
+          11_000
+        );
+        await Promise.allSettled([
+          called(own(person).eraseSource({ source, reason: "retention" })),
+        ]);
+        await erase(person);
+        await aGraceLater(person);
+        // Past the grace, the write still on its way: the store restarts.
+        const restarting = await erase(person);
+        await land(held);
         await kill(own(person));
-        fresh = await erase(person);
+        // The next instance's reads of whether it was erased fail.
+        const bucket = env.BRAIN_OBJECTS;
+        let heads = 0;
+        Reflect.set(env, "BRAIN_OBJECTS", {
+          get: async (key: string) => await bucket.get(key),
+          list: async (options?: R2ListOptions) => await bucket.list(options),
+          put: async (
+            key: string,
+            value: ArrayBuffer | string,
+            options?: R2PutOptions
+          ) => await bucket.put(key, value, options),
+          delete: async (keys: string | string[]) => {
+            await bucket.delete(keys);
+          },
+          head: async (key: string) => {
+            heads += 1;
+            if (heads <= failing) {
+              await Promise.resolve();
+              throw new Error("R2 out of reach");
+            }
+            return await bucket.head(key);
+          },
+        });
+        let fresh = "";
+        let aGraceOn = "";
+        try {
+          fresh = await erase(person);
+          await aGraceLater(person);
+          aGraceOn =
+            failing === 1 ? "not asked: it can read it" : await erase(person);
+        } finally {
+          Reflect.set(env, "BRAIN_OBJECTS", bucket);
+        }
+        await aGraceLater(person);
+        // R2 answers again: the store reads it once its wait after a
+        // failed read is over.
+        vi.setSystemTime(Date.now() + ledgerRetryMs);
+        const done = await erase(person);
+        expect({
+          restarting,
+          fresh,
+          aGraceOn,
+          done,
+          left: await leftOf(person),
+        }).toStrictEqual({
+          restarting: "rejected",
+          fresh: "rejected",
+          aGraceOn: failing === 1 ? "not asked: it can read it" : "rejected",
+          done: "fulfilled",
+          left: [],
+        });
       } finally {
-        Reflect.set(env, "BRAIN_OBJECTS", bucket);
+        vi.useRealTimers();
       }
-      await aGraceLater(person);
-      const done = await erase(person);
-      expect({
-        restarting,
-        fresh,
-        done,
-        left: await leftOf(person),
-      }).toStrictEqual({
-        restarting: "rejected",
-        fresh: "rejected",
-        done: "fulfilled",
-        left: [],
-      });
-    } finally {
-      vi.useRealTimers();
     }
-  });
+  );
 
   // Review finding 3: no rule of an instance's own time. One evicted
   // between every call still finishes, by the record's moment alone.
