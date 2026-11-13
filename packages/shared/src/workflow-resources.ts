@@ -445,7 +445,11 @@ export interface WorkflowBindingApproval {
   contractId: string;
   fingerprint: string;
   target: WorkflowBindingTarget;
-  /** The one version of the workflow it serves: the version reviewed. */
+  /**
+   * The version the admin reviewed as they approved it: a record of what
+   * they saw. The approval serves every version that declares the
+   * binding.
+   */
   reviewedVersion: number;
   status: "active" | "revoked";
   approvedBy: string;
@@ -715,7 +719,7 @@ export interface WorkflowResource {
   namespace: string;
   name: string;
   owner: string;
-  /** The version published last; null before the first. */
+  /** The live version; null before the first is published. */
   currentVersion: number | null;
   /** The caller's role in it. */
   role: MemberRole;

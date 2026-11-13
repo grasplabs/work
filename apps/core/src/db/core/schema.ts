@@ -1103,7 +1103,7 @@ export const appVersions = sqliteTable(
     /**
      * What people call it, `YY.MM.N` as the platform's releases are
      * (@grasp-os/shared/release-id): given in the statement that first
-     * makes it live (apps.ts, `makeCurrent`), so only a version that went
+     * makes it live (apps.ts, `activateVersion`), so only a version that went
      * live has one and the count has no gaps; kept when a roll back makes
      * it live again. Null for a version never live. The integer `version`
      * stays its ID.

@@ -32,8 +32,7 @@ import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 // that same kind's own call, its checks and audit included: the feed adds
 // no way to decide anything. An item goes by itself once what it is
 // about is settled, wherever that was. A kind settled on its own page (a
-// decision, which is confirmed there; an App's version to
-// review; a connection to sign in to again; a question of the brain)
+// decision, which is confirmed there; a connection to sign in to again; a question of the brain)
 // takes no verdict here.
 
 /** Why a call on what waits was refused. */

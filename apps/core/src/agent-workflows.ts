@@ -81,7 +81,7 @@ const followsWorkflow =
 export interface AgentIndependentWorkflow {
   id: string;
   name: string;
-  /** The version published last; null before the first. */
+  /** The live version; null before the first is published. */
   currentVersion: number | null;
   /** The person's role in it. */
   role: MemberRole;

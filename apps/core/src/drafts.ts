@@ -52,7 +52,7 @@ import { draftWatch } from "./durable-objects.ts";
 //   App, a deleted workflow, a builder who lost their role since they
 //   were let in). The revision a write takes is NULL, failing the batch,
 //   once its kind's `stillEditable` no longer holds (`nextRevision`); a
-//   removed App's draft takes no row at all (migration 0245's triggers).
+//   removed App's draft takes no row at all (migration 0246's triggers).
 // - Growth. A checkpoint holds each path's content by its SHA-256, each
 //   content once per subject, so most writes add a file or two; what a
 //   turn wrote and then wrote over is dropped once no checkpoint holds it.

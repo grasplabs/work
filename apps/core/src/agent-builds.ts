@@ -97,8 +97,8 @@ import {
 // chat's agent creates Apps (new, or from a blueprint the person may
 // create from, by the rules people follow: app-blueprints.ts), and
 // changes one in the App's draft (drafts.ts): one per App, shared by
-// every builder of it and their chats' agents, over the App's latest
-// version when it began. Each write lands only over the revision it read,
+// every builder of it and their chats' agents, over the App's live
+// version. Each write lands only over the revision it read,
 // so two agents', or an agent's and a person's, never overwrite each
 // other: the second is refused, and its agent reads the draft again. A
 // draft reaches the App only as a version, committed over its base.
@@ -107,8 +107,8 @@ import {
 // under `workflows/`. What runs on its own is an independent workflow,
 // built with `env.workflowBuild` (agent-workflow-build.ts) and bound to the
 // App under an alias; each call it makes outside itself is a binding of
-// its validated definition, which an admin approves for that exact
-// version. So nothing the agent writes reaches a binding that no review
+// its validated definition, which an admin approves once, for every
+// version that declares it. So nothing the agent writes reaches a binding that no review
 // lists.
 //
 // Every write answers with what its pages compile to, as the App's preview

@@ -96,6 +96,13 @@ const memberOf = (
   addedAt: "2026-10-20T08:00:00.000Z",
 });
 
+/** What a publish or roll back made live, as core answers it. */
+const liveOf = (made: App): LiveVersion => ({
+  subject: { kind: "app", id: made.id },
+  version: made.currentVersion ?? 0,
+  label: made.liveLabel ?? "",
+});
+
 /** Core's `apps` for one App, as someone with `role` in it reads it. */
 const fakeApps = ({
   role = "builder",
@@ -150,7 +157,7 @@ const fakeApps = ({
       versions: {
         // A version as core answers it: labelled once it was live.
         get: async (
-          _id: string,
+          _subject: Subject,
           version: number
         ): Promise<{ label: string | null }> =>
           await Promise.resolve({
@@ -160,11 +167,11 @@ const fakeApps = ({
         // Rolling back to a version: `version` live, over the draft at
         // `revision`, only over `expected`, the version the person saw live.
         rollback: async (
-          id: string,
+          { id }: Subject,
           version: number,
           revision?: number,
           expected?: number | null
-        ): Promise<App> => {
+        ): Promise<LiveVersion> => {
           calls.push(
             `rollback ${id} ${version} over ${revision} from ${expected}`
           );
@@ -174,7 +181,7 @@ const fakeApps = ({
             currentVersion: version,
             liveLabel: `26.11.${version}`,
           };
-          return app;
+          return liveOf(app);
         },
       },
       list: async (): Promise<ViewedApp[]> => await Promise.resolve([app]),
@@ -212,31 +219,33 @@ const fakeApps = ({
           );
         },
       },
-      /** The draft's checkpoints, newest first. */
-      draftPoints: async (): Promise<DraftCheckpoint[]> =>
-        await Promise.resolve(points),
-      /** Makes checkpoint `point` the draft again, over `revision`. */
-      restoreDraftPoint: async (
-        _app: string,
-        point: number,
-        revision: number
-      ): Promise<void> => {
-        calls.push(`restore point ${point} over ${revision}`);
-        await Promise.resolve();
-        if (conflicts > 0) {
-          conflicts -= 1;
-          throw Object.assign(
-            new Error(
-              "Someone else changed the draft at the same time. Read it again and retry."
-            ),
-            { code: "draft.conflict" }
-          );
-        }
-      },
-      /** Discards the draft's changes, over the revision the person saw. */
-      discardDraft: async (_app: string, revision: number): Promise<void> => {
-        calls.push(`discard over ${revision}`);
-        await Promise.resolve();
+      drafts: {
+        /** The draft's checkpoints, newest first. */
+        checkpoints: async (): Promise<DraftCheckpoint[]> =>
+          await Promise.resolve(points),
+        /** Makes checkpoint `point` the draft again, over `revision`. */
+        restore: async (
+          _subject: Subject,
+          point: number,
+          revision: number
+        ): Promise<void> => {
+          calls.push(`restore point ${point} over ${revision}`);
+          await Promise.resolve();
+          if (conflicts > 0) {
+            conflicts -= 1;
+            throw Object.assign(
+              new Error(
+                "Someone else changed the draft at the same time. Read it again and retry."
+              ),
+              { code: "draft.conflict" }
+            );
+          }
+        },
+        /** Discards the draft's changes, over the revision the person saw. */
+        discard: async (_subject: Subject, revision: number): Promise<void> => {
+          calls.push(`discard over ${revision}`);
+          await Promise.resolve();
+        },
       },
     },
   };
@@ -301,13 +310,6 @@ const watching = () => ({
   [Symbol.dispose]: () => {},
 });
 
-/** What a publish or roll back made live, as core answers it. */
-const liveOf = (made: App): LiveVersion => ({
-  subject: { kind: "app", id: made.id },
-  version: made.currentVersion ?? 0,
-  label: made.liveLabel ?? "",
-});
-
 const opened = async (
   apps: ReturnType<typeof fakeApps>["apps"],
   identity: Identity = identityOf(false),
@@ -355,8 +357,10 @@ const opened = async (
     summary: async () => await Promise.withResolvers<never>().promise,
   };
   const pendingActions = { list: async () => await Promise.resolve([]) };
-  const withReview = { ...apps, review: changes };
+  const { drafts: kept, versions, ...rest } = apps;
+  const withReview = { ...rest, review: changes };
   const drafts = {
+    ...kept,
     get: draft,
     check: async (): Promise<DraftCheck> => {
       const { revision, check } = await changes();
@@ -364,23 +368,6 @@ const opened = async (
     },
     publish: async ({ id }: Subject, revision: number) =>
       liveOf(await publish(id, revision)),
-    checkpoints: apps.draftPoints,
-    restore: async ({ id }: Subject, point: number, revision: number) => {
-      await apps.restoreDraftPoint(id, point, revision);
-    },
-    discard: async ({ id }: Subject, revision: number) => {
-      await apps.discardDraft(id, revision);
-    },
-  };
-  const versions = {
-    get: async ({ id }: Subject, version: number) =>
-      await apps.versions.get(id, version),
-    rollback: async (
-      { id }: Subject,
-      version: number,
-      revision?: number,
-      expected?: number | null
-    ) => liveOf(await apps.versions.rollback(id, version, revision, expected)),
   };
   const core = {
     withSession: async <T,>(

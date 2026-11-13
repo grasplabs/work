@@ -29,7 +29,7 @@ import {
 // - A version that removes a function a workflow calls, or changes what
 //   it takes or answers so the workflow's calls no longer fit, made
 //   current by a publish, a rollback or any older version made current:
-//   all go through `makeCurrent` (apps.ts), which checks every bound
+//   all go through `activateVersion` (apps.ts), which checks every bound
 //   function of the version against the one current now
 //   (`requireBoundFunctionsServed`), by ID, and is refused, naming each
 //   workflow and function, before anything changes. A rename keeps the

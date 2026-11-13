@@ -650,7 +650,7 @@ export const loadRelease = async (
  * verified as `loadRelease` verifies it (`verifiedRelease`), pages
  * included, but never from or into the isolate's cache of verified
  * releases, so a later load still reads storage: what sealing a version
- * again and making one current check (`makeCurrent`).
+ * again and making one current check (`activateVersion`).
  * `version.artifact_corrupt` for an artifact missing or changed.
  */
 export const readBackRelease = async (
