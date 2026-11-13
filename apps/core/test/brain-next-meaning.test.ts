@@ -221,12 +221,14 @@ describe("recall by meaning, through core", () => {
       english: value.items
         .filter(({ text }) => text === english)
         .map(({ found }) => found),
+      hiddenCited: value.items.filter(({ source }) => hidden.has(source.id)),
       byWords: byWords.items,
       warned,
       meaning: after.meaning - before.meaning,
       without: after.without - before.without,
     }).toStrictEqual({
       english: ["meaning"],
+      hiddenCited: [],
       byWords: [],
       warned: [],
       meaning: 1,

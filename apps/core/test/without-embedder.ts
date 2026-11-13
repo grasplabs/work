@@ -11,22 +11,27 @@
 
 /** `value`, as the binding it stands in for. */
 const asBinding = (value: unknown): never =>
-  // SAFETY: core reaches its question embedder by `getByName` and calls
+  // SAFETY: core reaches its question embedder by `jurisdiction` (unless
+  // the env turns jurisdictions off) and `getByName`, and calls
   // `embedMany` alone (@grasp-os/embed/question), which this one refuses.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   value as never;
+
+/** A namespace whose every object refuses every text, in any jurisdiction. */
+const refusing = {
+  jurisdiction: () => refusing,
+  getByName: () => ({
+    embedMany: async () => {
+      await Promise.resolve();
+      throw new Error("No question embedder here");
+    },
+  }),
+};
 
 /** `env`, its question embedder refusing every question. */
 export const withoutEmbedder = <T extends { EMBEDDER: unknown }>(
   env: T
 ): T => ({
   ...env,
-  EMBEDDER: asBinding({
-    getByName: () => ({
-      embedMany: async () => {
-        await Promise.resolve();
-        throw new Error("No question embedder here");
-      },
-    }),
-  }),
+  EMBEDDER: asBinding(refusing),
 });
