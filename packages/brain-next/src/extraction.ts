@@ -45,6 +45,7 @@ import {
   defineWork,
   enqueueWork,
   WorkError,
+  workCallsMax,
   workRequestMaxLength,
 } from "./work.ts";
 import type { WorkContext, WorkDefinition } from "./work.ts";
@@ -133,6 +134,29 @@ const payloadSchema = z.strictObject({
   /** Where the piece of `kept` ended, and whether it was the version's last. */
   cut: z
     .strictObject({ next: z.int().nonnegative(), last: z.boolean() })
+    .optional(),
+  /**
+   * A piece part-way through its checks, recorded after its read call and
+   * after each check call (`WorkContext.keep`): where the piece ends, how
+   * many memories the read proposed, what code kept of them (each a
+   * statement the checker is shown, by its place in `candidates`), and
+   * of those the ones checked so far and the ones supported. A run that
+   * reaches the queue's calls for one attempt goes on in the next, from
+   * here, asking nothing again; the same statements and entities are
+   * shown, as they are replayed, never asked anew.
+   */
+  checking: z
+    .strictObject({
+      next: z.int().nonnegative(),
+      last: z.boolean(),
+      proposed: z.int().nonnegative(),
+      candidates: z.strictObject({
+        entities: z.array(newEntitySchema),
+        memories: z.array(z.record(z.string(), z.unknown())),
+      }),
+      checked: z.array(z.int().nonnegative()),
+      supported: z.array(z.int().nonnegative()),
+    })
     .optional(),
 });
 type Payload = z.infer<typeof payloadSchema>;
@@ -390,7 +414,7 @@ const resolvedIn = (
  * `proposed` as a memory to add, or none: its quote must be in the text
  * (the plan's check in code), and it is no preference or instruction, by
  * type or by attribute. Its value and dates are the checker call's to
- * judge, which is shown them (`supportedOf`).
+ * judge, which is shown them (`checkOn`).
  */
 const memoryOf = (
   seen: Seen,
@@ -580,7 +604,8 @@ const checkCharsMax = workRequestMaxLength - checkInstructions.length;
 const checkMessagesOf = (
   text: string,
   drawing: Drawing,
-  { entities, memories }: Candidates,
+  entities: readonly NewEntity[],
+  pending: readonly (readonly [number, NewMemory])[],
   tokens: number | null
 ): CheckMessage[] => {
   const messageOf = (statements: ReturnType<typeof statementOf>[]) =>
@@ -594,7 +619,7 @@ const checkMessagesOf = (
     });
     batch = [];
   };
-  for (const [index, memory] of memories.entries()) {
+  for (const [index, memory] of pending) {
     const statement = statementOf(memory, entities, index, drawing.timeZone);
     const fits = (shown: ReturnType<typeof statementOf>[]) => {
       const message = messageOf(shown);
@@ -619,20 +644,77 @@ const checkMessagesOf = (
   return messages;
 };
 
-/** The memories of `candidates` the second call says the text supports. */
-const supportedOf = async (
+/** An add as the item keeps it: its memories' ends as milliseconds. */
+const keptJsonOf = ({ entities, memories }: Candidates) => ({
+  entities,
+  memories: memories.map(({ validUntil, ...memory }) => ({
+    ...memory,
+    ...(validUntil === undefined ? {} : { validUntil: validUntil.getTime() }),
+  })),
+});
+
+/** `checking` as the item keeps it. */
+const checkingJsonOf = (
+  checking: Checking
+): NonNullable<Payload["checking"]> => {
+  const [candidates] = [checking.candidates].map(keptJsonOf);
+  return {
+    next: checking.next,
+    last: checking.last,
+    proposed: checking.proposed,
+    candidates: candidates ?? { entities: [], memories: [] },
+    checked: [...checking.checked],
+    supported: [...checking.supported],
+  };
+};
+
+/** A piece part-way through its checks (`Payload["checking"]`), as a run works with it. */
+interface Checking {
+  next: number;
+  last: boolean;
+  proposed: number;
+  candidates: Candidates;
+  checked: Set<number>;
+  supported: Set<number>;
+}
+
+/**
+ * Checks what of `checking.candidates` is not checked yet, a message a
+ * call, keeping each verdict with the item as it comes: each statement by
+ * its place among the candidates, never by its place in a message, so a
+ * window that cuts the messages otherwise next time finds the same ones.
+ * A verdict counts only for the statements its own message showed. Ends
+ * true once every candidate is checked; false when the next call would
+ * pass what one attempt may ask (`workCallsMax`, `called` of them asked
+ * already): then the item goes on, from here, in its next run
+ * (`WorkContext.again`), its attempts its own again, never failing.
+ */
+const checkOn = async (
   context: WorkContext,
+  payload: Payload,
   text: string,
   drawing: Drawing,
-  { entities, memories }: Candidates
-): Promise<Candidates> => {
-  const supported = new Set<number>();
+  checking: Checking,
+  called: number
+): Promise<boolean> => {
+  const { entities, memories } = checking.candidates;
+  const pending = memories.flatMap((memory, index) =>
+    checking.checked.has(index) ? [] : [[index, memory] as const]
+  );
+  let calls = called;
+  let progress = 0;
   for (const { input, indexes } of checkMessagesOf(
     text,
     drawing,
-    { entities, memories },
+    entities,
+    pending,
     checkTokensOf(context.contextTokens)
   )) {
+    if (calls >= workCallsMax) {
+      context.again(progress);
+      return false;
+    }
+    calls += 1;
     // oxlint-disable-next-line no-await-in-loop -- one check call at a time, each its turn in the queue's rate
     const answer = await context.ask({
       step: "check",
@@ -644,18 +726,20 @@ const supportedOf = async (
     if (!verdict.success) {
       throw new WorkError("invalid_answer");
     }
+    for (const index of indexes) {
+      checking.checked.add(index);
+    }
     // Only what this message showed: a verdict never speaks for a
     // statement it wasn't shown.
     for (const index of verdict.data.supported) {
       if (indexes.has(index)) {
-        supported.add(index);
+        checking.supported.add(index);
       }
     }
+    context.keep({ ...payload, checking: checkingJsonOf(checking) });
+    progress += 1;
   }
-  return keeping(
-    entities,
-    memories.filter((_memory, index) => supported.has(index))
-  );
+  return true;
 };
 
 /**
@@ -949,17 +1033,9 @@ const writeAdds = async (
 const withoutKept = ({
   kept: _kept,
   cut: _cut,
+  checking: _checking,
   ...payload
 }: Payload): Payload => payload;
-
-/** An add as the item keeps it: its memories' ends as milliseconds. */
-const keptJsonOf = ({ entities, memories }: Candidates) => ({
-  entities,
-  memories: memories.map(({ validUntil, ...memory }) => ({
-    ...memory,
-    ...(validUntil === undefined ? {} : { validUntil: validUntil.getTime() }),
-  })),
-});
 
 /** The adds an item kept (`keptJsonOf`), as an add takes them again. */
 const keptOf = (kept: NonNullable<Payload["kept"]>): Candidates[] =>
@@ -983,47 +1059,78 @@ const keptRecordOf = (
     ? { kept: undefined, cut: undefined }
     : { kept: keptOf(payload.kept ?? []), cut: payload.cut };
 
+/** What the item knows of whose words its piece is, and when, as checks read it. */
+const drawingOf = (payload: Payload): Drawing => ({
+  source: payload.source,
+  version: payload.version,
+  speaker: payload.speaker,
+  timeZone: payload.timeZone,
+  said: dayOf(new Date(payload.saidAt), payload.timeZone),
+});
+
 /**
- * What the model draws from `piece`, as code and the checker keep it, in
- * as many adds as the contract's bounds take: none when nothing was kept,
- * but on the last piece, whose add says the version is extracted.
+ * The read call over `piece`, and what code keeps of its proposal, as a
+ * piece to check (`Checking`), nothing checked yet.
  */
-const drawn = async (
+const proposalOf = async (
   context: WorkContext,
   payload: Payload,
-  piece: Piece
-): Promise<Candidates[]> => {
-  const { version, from } = payload;
+  piece: Piece & { next: number }
+): Promise<Checking> => {
   const seen: Seen = {
     words: sequenceOf(piece.text),
     emails: emailsOf(piece.text),
   };
-  const drawing: Drawing = {
-    source: payload.source,
-    version,
-    speaker: payload.speaker,
-    timeZone: payload.timeZone,
-    said: dayOf(new Date(payload.saidAt), payload.timeZone),
-  };
-  const proposed = candidatesOf(
+  const proposal = candidatesOf(
     seen,
-    drawing,
+    drawingOf(payload),
     await context.ask({ system: proposeInstructions, input: piece.text })
   );
-  const candidates = keeping(proposed.entities, proposed.memories);
-  const kept =
-    candidates.memories.length === 0
-      ? candidates
-      : await supportedOf(context, piece.text, drawing, candidates);
-  // One event for the piece: counts alone, nothing of the text.
+  return {
+    next: piece.next,
+    last: piece.last,
+    proposed: proposal.proposed,
+    candidates: keeping(proposal.entities, proposal.memories),
+    checked: new Set(),
+    supported: new Set(),
+  };
+};
+
+/** A piece part-way through its checks, as the item kept it; none when it isn't. */
+const checkingOf = (payload: Payload): Checking | undefined => {
+  if (payload.checking === undefined) {
+    return undefined;
+  }
+  const { candidates, checked, supported, ...rest } = payload.checking;
+  const [revived] = keptOf([candidates]);
+  return {
+    ...rest,
+    candidates: revived ?? { entities: [], memories: [] },
+    checked: new Set(checked),
+    supported: new Set(supported),
+  };
+};
+
+/**
+ * What a checked piece writes: the supported memories in as many adds as
+ * the contract's bounds take; none when nothing was kept, but on the last
+ * piece, whose add says the version is extracted. One event for the
+ * piece: counts alone, nothing of the text.
+ */
+const addsOfChecked = (payload: Payload, checking: Checking): Candidates[] => {
+  const { entities, memories } = checking.candidates;
+  const kept = keeping(
+    entities,
+    memories.filter((_memory, index) => checking.supported.has(index))
+  );
   log.info("brain.extract", {
-    version,
-    from,
-    proposed: proposed.proposed,
-    quoted: candidates.memories.length,
+    version: payload.version,
+    from: payload.from,
+    proposed: checking.proposed,
+    quoted: memories.length,
     supported: kept.memories.length,
   });
-  return kept.memories.length > 0 || piece.last
+  return kept.memories.length > 0 || checking.last
     ? addsOf(kept.entities, kept.memories)
     : [];
 };
@@ -1061,24 +1168,59 @@ const extractWork: WorkDefinition<Payload> = defineWork({
       if (whole === null) {
         return;
       }
-      const piece = pieceOf(whole, from, pieceTokensOf(context.contextTokens));
-      cut = { next: piece.next, last: piece.last };
-      // A piece whose add landed (an item put on the queue again): only
-      // the next piece is left; else the model's.
-      if (!(await addedBefore(sql, change))) {
-        adds = await drawn(context, payload, piece);
+      // A piece part-way through its checks: as the item kept it, where
+      // it ends included, whatever window applies now. Else the piece as
+      // the window cuts it now, and its read call, unless its add landed
+      // already (an item put on the queue again): then only the next
+      // piece is left.
+      let checking = checkingOf(payload);
+      let called = 0;
+      if (checking === undefined) {
+        const piece = pieceOf(
+          whole,
+          from,
+          pieceTokensOf(context.contextTokens)
+        );
+        cut = { next: piece.next, last: piece.last };
+        if (!(await addedBefore(sql, change))) {
+          checking = await proposalOf(context, payload, piece);
+          called = 1;
+          context.keep({ ...payload, checking: checkingJsonOf(checking) });
+        }
+      }
+      if (checking !== undefined) {
+        const done = await checkOn(
+          context,
+          payload,
+          whole.slice(from, checking.next),
+          drawingOf(payload),
+          checking,
+          called
+        );
+        if (!done) {
+          return;
+        }
+        cut = { next: checking.next, last: checking.last };
+        adds = addsOfChecked(payload, checking);
         // What is to be written, and where the piece ended, are kept with
         // the item first: a store that stops before the last add writes
         // the rest on the rerun, never a second wording of the same facts,
         // and every rerun goes on from the same place, whatever window
         // applies by then.
-        context.keep({ ...payload, kept: adds.map(keptJsonOf), cut });
+        context.keep({
+          ...withoutKept(payload),
+          kept: adds.map(keptJsonOf),
+          cut,
+        });
       }
     }
     // Asked again after the calls: a newer version or an erasure (its
     // versions erasing, then gone) may have landed meanwhile. (A version's
-    // readers never change.)
-    if (adds !== undefined && currentOf(sql, source, version) === undefined) {
+    // readers never change.) A piece always ends somewhere by now.
+    if (
+      cut === undefined ||
+      (adds !== undefined && currentOf(sql, source, version) === undefined)
+    ) {
       return;
     }
     await writeAdds(context, {

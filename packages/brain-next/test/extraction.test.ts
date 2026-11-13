@@ -378,6 +378,13 @@ const instructingProposal = (name: string) => ({
   ],
 });
 
+/**
+ * How long a test of more model calls than the queue's burst may take:
+ * its pace (a burst of 10, then 30 calls a minute, work.ts
+ * `workModelRate`) holds each call past the burst about 2 s.
+ */
+const paceBoundMs = 90_000;
+
 /** How long the store may take to start, its schema made and its first tick run. */
 const startMs = 30_000;
 
@@ -2104,6 +2111,113 @@ describe("extracting memories", () => {
     }).toStrictEqual({
       shownAbout: [{ kind: "person", names: [alice], emails: [bobsMail] }],
       bob: [`${bob} works in sales.`],
+    });
+  });
+
+  it(
+    "checks a proposal that needs more check messages than one attempt may call, going on where it stopped, asking the read once",
+    async () => {
+      const token = unique("t");
+      const group = unique("g");
+      const name = unique("Many");
+      const count = 45;
+      const factOf = (index: number) => `${name} fact ${index}`;
+      const text = `${token}: ${Array.from(
+        { length: count },
+        (_, index) => `${factOf(index)}.`
+      ).join(" ")}`;
+      answers.set(
+        token,
+        answering({
+          entities: [{ key: "c", kind: "customer", names: [name] }],
+          // Statements long enough that a check message holds about two.
+          memories: Array.from({ length: count }, (_, index) => ({
+            about: "c",
+            type: "fact",
+            statement: `${factOf(index)} ${"7".repeat(950)}`,
+            quote: factOf(index),
+          })),
+        })
+      );
+      const window =
+        2 *
+        (tokensOf(proposeInstructions) +
+          tokensOf(checkInstructions) +
+          tokensOf(text) +
+          10);
+      await added(text, audience(group), { extract: fromOutside() });
+      for (let round = 0; round < 5; round += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- an attempt a tick at most
+        await tick(1, window);
+      }
+      const asked = callsOf(token);
+      const reader = { person: unique("p"), groups: [group] };
+      const [entity] = await entitiesNamed(reader, name);
+      const memories =
+        entity === undefined ? [] : await memoriesAbout(entity.id, reader);
+
+      expect({
+        reads: asked.filter(({ purpose }) => purpose === "brain.extract")
+          .length,
+        checks:
+          asked.filter(({ purpose }) => purpose === "brain.extract.check")
+            .length >= 20,
+        memories: memories.length,
+      }).toStrictEqual({ reads: 1, checks: true, memories: count });
+    },
+    paceBoundMs
+  );
+
+  it("fails a piece one of whose statements no check message can hold, before any check call", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    // Twenty names at the contract's longest, each a word of digits.
+    const names = Array.from(
+      { length: 20 },
+      (_, index) => `${index}${"9".repeat(499 - String(index).length)}`
+    );
+    const text = `${token}: ${names.join(" ")} is active.`;
+    answers.set(
+      token,
+      answering({
+        entities: [{ key: "c", kind: "customer", names }],
+        memories: [
+          {
+            about: "c",
+            attribute: "status",
+            value: "active",
+            type: "fact",
+            statement: "It is active.",
+            quote: `${names.at(-1) ?? ""} is active`,
+          },
+        ],
+      })
+    );
+    // Just above what the piece needs: the text is one piece.
+    const window =
+      2 *
+      (tokensOf(proposeInstructions) +
+        tokensOf(checkInstructions) +
+        tokensOf(text) +
+        2);
+    const source = unique("doc");
+    await added(text, audience(group), { extract: fromOutside(), source });
+    await tick(1, window);
+    const [item] = await runInDurableObject(shared(), (_instance, state) =>
+      state.storage.sql
+        .exec<{ last_error: string | null }>(
+          "SELECT last_error FROM work_items WHERE key = ?",
+          source
+        )
+        .toArray()
+    );
+
+    expect({
+      calls: callsOf(token).map(({ purpose }) => purpose),
+      error: item?.last_error,
+    }).toStrictEqual({
+      calls: ["brain.extract"],
+      error: "window_too_small",
     });
   });
 });
