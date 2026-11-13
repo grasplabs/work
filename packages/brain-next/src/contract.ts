@@ -103,7 +103,9 @@ export const wellFormedString = () =>
     abort: true,
   });
 
-const principalSchema = wellFormedString().min(1).max(principalMaxLength);
+export const principalSchema = wellFormedString()
+  .min(1)
+  .max(principalMaxLength);
 
 const encoder = new TextEncoder();
 
@@ -1546,7 +1548,7 @@ const someText = (max: number) =>
  * compatibility forms such as "ﬃ" expand), so every name an add keeps
  * fits a `readEntityNames` cursor, which holds a name folded.
  */
-const nameSchema = someText(valueMaxLength).refine(
+export const nameSchema = someText(valueMaxLength).refine(
   (name) => foldForSearch(name).length <= valueMaxLength,
   { message: `At most ${valueMaxLength} characters once folded` }
 );

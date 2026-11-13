@@ -8,12 +8,17 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
+import {
+  brainExportsPath,
+  brainRestorePath,
+} from "../src/brain-next-exports.ts";
 import {
   addInstructionFile,
   addSource,
@@ -40,6 +45,7 @@ import { published, requestGranted } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
+import type { StoreCopy } from "./brain-next-store-copy.ts";
 import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { actingFor, newChat } from "./contexts.ts";
@@ -47,7 +53,7 @@ import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
-import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import {
   member as teamsMember,
   memberAnsweredBy,
@@ -350,6 +356,51 @@ const everyVersionOf = (...sources: SourceRef[]) =>
     [1, 2, 3].map((version) => ({ source, version }))
   );
 
+/** The shared store, as core reaches it. */
+const sharedStore = () =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/**
+ * A request of core's own page as the admin signed in on `cookie`: its
+ * answer's JSON, whose `state` it holds.
+ */
+const adminRequest = async (
+  cookie: string,
+  path: string,
+  body?: unknown
+): Promise<{ id?: string; state?: string }> => {
+  const response = await routed(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      cookie,
+      "sec-fetch-site": "same-origin",
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  return z
+    .looseObject({ id: z.string().optional(), state: z.string().optional() })
+    .parse(await response.json());
+};
+
+/** Ticks the Brain until `path` no longer answers `state`: at most 20 ticks. */
+const tickedPast = async (
+  cookie: string,
+  path: string,
+  state: string
+): Promise<string | undefined> => {
+  for (let ticks = 0; ticks < 20; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await workBrain(env, new Date(), noProducers);
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const status = await adminRequest(cookie, path);
+    if (status.state !== state) {
+      return status.state;
+    }
+  }
+  throw new Error(`Still ${state} after 20 ticks`);
+};
+
 /** A source of its own, as an upload names it. */
 const newSource = (): SourceRef => ({
   producer: "upload",
@@ -388,6 +439,13 @@ describe(
   "the new Brain leaks nothing to a reader without access",
   { timeout: 120_000 },
   () => {
+    /** The shared store before any test of this file added to it: empty. */
+    let emptyStore: StoreCopy = { tables: [], triggers: [] };
+
+    beforeAll(async () => {
+      emptyStore = await copyOfStore();
+    });
+
     it("has a probe for every member of every surface, and a surface for every module that reaches the Brain", () => {
       const names = new Set<string>(brainSurfaces.map(({ name }) => name));
       // Core's module and the store are the Brain itself; every module the
@@ -1515,6 +1573,144 @@ describe(
       }).toStrictEqual({
         added: { stores: 2, waiting: 5, parked: 2 },
         same: oneHoldsAll,
+      });
+    });
+
+    // Last: it empties the shared store, as a loss of its storage would.
+    it("gives away nothing of a company's export once it is restored into an empty store, memories and entities among it (GRA-1840)", async () => {
+      await answeringProvider(() => {});
+      const [admin, { userId: outsider }, { userId: insider }] =
+        await Promise.all([
+          signedInWithRole(idp, "admin"),
+          signedInWithRole(idp, "user"),
+          signedInWithRole(idp, "user"),
+        ]);
+      const secretTeam = await newTeam(insider);
+      const ownTeam = await newTeam(outsider, insider);
+      const sharedWord = `s${unique()}`;
+      const markers = {
+        "a team's source the outsider isn't in": markerWord(),
+        "a team's memory the outsider isn't in": markerWord(),
+        "a memory drawn from that team's source": markerWord(),
+      };
+      const {
+        "a team's source the outsider isn't in": sourceMarker,
+        "a team's memory the outsider isn't in": memoryMarker,
+        "a memory drawn from that team's source": drawnMarker,
+      } = markers;
+      const secret = `team:${secretTeam}`;
+      const own = `team:${ownTeam}`;
+      const teamSource = await add(
+        `Board minutes ${sharedWord} ${sourceMarker}`,
+        {
+          kind: "team",
+          teamId: secretTeam,
+        }
+      );
+      // The store's key of it, as core names a source to the Brain.
+      const key = `${teamSource.producer}:${teamSource.id}`;
+      const marked = (marker: string) => ({
+        key: "c",
+        kind: "customer" as const,
+        names: [`${sharedWord} ${marker}`],
+        identifiers: [{ type: "ref" as const, value: `ref:${marker}` }],
+      });
+      await sharedStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: secret },
+        entities: [marked(memoryMarker)],
+        memories: [
+          {
+            about: "c",
+            attribute: "status",
+            value: memoryMarker,
+            type: "fact",
+            statement: `${sharedWord} ${memoryMarker}`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: insider },
+          },
+        ],
+      });
+      // Readable by a team the outsider is in, but drawn from a source of
+      // a team they aren't: theirs neither.
+      const drawn = await sharedStore().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: own },
+        entities: [marked(drawnMarker)],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: `${sharedWord} ${drawnMarker}`,
+            speaker: { kind: "system" },
+            basis: {
+              kind: "source",
+              source: key,
+              version: 1,
+              quote: sharedWord,
+            },
+          },
+        ],
+        extracted: { source: key, version: 1 },
+      });
+      const { id = "" } = await adminRequest(
+        admin.session,
+        brainExportsPath,
+        {}
+      );
+      const exported = await tickedPast(
+        admin.session,
+        `${brainExportsPath}?id=${id}`,
+        "writing"
+      );
+
+      // The shared store's storage lost, its bucket kept: as it was
+      // before anything was added.
+      await restoreStore(emptyStore);
+      const started = await adminRequest(admin.session, brainRestorePath, {
+        exportId: id,
+      });
+      const restored = await tickedPast(
+        admin.session,
+        `${brainRestorePath}?id=${id}`,
+        "running"
+      );
+      // What the export held came back, for whoever may read it.
+      const insiders = await sharedStore().readMemories({
+        entity: drawn.entities.c ?? "",
+        reader: { person: insider, groups: [own, secret] },
+      });
+
+      const findings = await findingsOf(
+        "the outsider, after a restore of an export",
+        {
+          personId: outsider,
+          reader: { person: outsider, groups: [own] },
+          personal: true,
+          sharedWord,
+          markers: Object.values(markers),
+          hiddenVersions: everyVersionOf(teamSource),
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        markers
+      );
+      const carried = await Promise.all(Object.values(markers).map(carrying));
+
+      expect({
+        exported,
+        started: started.state,
+        restored,
+        insiders: insiders.memories.map(({ statement }) => statement),
+        findings,
+        prompted: carried.flat(),
+      }).toStrictEqual({
+        exported: "done",
+        started: "running",
+        restored: "done",
+        insiders: [`${sharedWord} ${drawnMarker}`],
+        findings: [],
+        prompted: [],
       });
     });
   }
