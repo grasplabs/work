@@ -4,7 +4,11 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { brainHandOvers, personErasures } from "./db/core/schema.ts";
+import {
+  auditOutbox,
+  brainHandOvers,
+  personErasures,
+} from "./db/core/schema.ts";
 import { statementsWithin } from "./db/d1.ts";
 
 // What core has still to hand over to the new Brain: a source by its
@@ -224,6 +228,50 @@ export const stillOpen = (taken: TakenHandOver): SQL =>
 /** The statement that ends `taken`'s hand-over, if it is still open as noted then. */
 export const endedHandOver = (db: DrizzleD1Database, taken: TakenHandOver) =>
   db.delete(brainHandOvers).where(stillNoted(taken));
+
+/** A hand-over ended with its outcome's event (brain-sources.ts `endHandOversOf`). */
+export interface EndedHandOver extends TakenHandOver {
+  event: AuditEvent;
+}
+
+/**
+ * That the hand-over a row `e` of `json_each` names (its producer, source
+ * and noting) is still open, as noted then, as SQL.
+ */
+const openAsNamed = sql`${brainHandOvers.producer} = json_extract(e.value, '$.producer') AND ${brainHandOvers.sourceId} = json_extract(e.value, '$.sourceId') AND ${brainHandOvers.noting} = json_extract(e.value, '$.noting')`;
+
+/**
+ * The statements that store each of `ended`'s events in core's outbox and
+ * end its hand-over, each only while it is still open as noted then, as
+ * an attempt's own do (`stillOpen`, `endedHandOver`): two, however many
+ * there are, `ended` bound as one value to each (`partsBoundAsOne`).
+ */
+export const endedHandOvers = (
+  db: DrizzleD1Database,
+  ended: readonly EndedHandOver[]
+) => {
+  const named = JSON.stringify(
+    ended.map(({ producer, sourceId, noting, event }) => ({
+      producer,
+      sourceId,
+      noting,
+      id: event.id,
+      event: JSON.stringify(event),
+    }))
+  );
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT json_extract(e.value, '$.id'), json_extract(e.value, '$.event'), ${Date.now()} FROM json_each(${named}) AS e WHERE EXISTS (SELECT 1 FROM ${brainHandOvers} WHERE ${openAsNamed})`
+      ),
+    db
+      .delete(brainHandOvers)
+      .where(
+        sql`EXISTS (SELECT 1 FROM json_each(${named}) AS e WHERE ${openAsNamed})`
+      ),
+  ] as const;
+};
 
 /** Whether core's records say `personId`'s erasure has begun. */
 export const erasureBegun = async (

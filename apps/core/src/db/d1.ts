@@ -93,13 +93,16 @@ export const chunks = <T>(items: readonly T[], size: number): T[][] =>
 /** The most parameters D1 binds to one statement. */
 export const boundParametersMax = 100;
 
+/** The most bytes of one string D1 binds or stores. */
+export const boundValueBytesMax = 2_000_000;
+
 /**
- * `rows` written as statements `statementOf` makes, each with as many rows
- * as D1 binds (`boundParametersMax`): counted from the statement itself,
- * its parameters for one row and for two, so both what each row binds and
- * what the statement binds once (a conflict clause, say) are counted, also
- * after a column or a bound value is added. Throws when one row alone
- * binds more than D1 takes.
+ * `rows` written as statements `statementOf` makes, each as many rows as
+ * D1 binds (`boundParametersMax`): each statement's own parameters are
+ * counted, and one over the limit is made again with fewer rows, so rows
+ * of any shape fit (a row without an optional column binds less than one
+ * with it), and so does what a statement binds once (a conflict clause).
+ * Throws when one row alone binds more than D1 takes.
  */
 export const statementsWithin = <Row, Statement>(
   rows: readonly Row[],
@@ -107,18 +110,54 @@ export const statementsWithin = <Row, Statement>(
     toSQL: () => { params: unknown[] };
   }
 ): Statement[] => {
-  const [first] = rows;
-  if (first === undefined) {
-    return [];
+  const statements: Statement[] = [];
+  let at = 0;
+  while (at < rows.length) {
+    let size = rows.length - at;
+    let statement = statementOf(rows.slice(at, at + size));
+    let bound = statement.toSQL().params.length;
+    while (bound > boundParametersMax) {
+      if (size === 1) {
+        throw new Error("One row binds more parameters than D1 takes");
+      }
+      // Fewer rows by the share over the limit: always fewer, at least one.
+      size = Math.max(1, Math.floor((size * boundParametersMax) / bound));
+      statement = statementOf(rows.slice(at, at + size));
+      bound = statement.toSQL().params.length;
+    }
+    statements.push(statement);
+    at += size;
   }
-  const once = statementOf([first]).toSQL().params.length;
-  const perRow = statementOf([first, first]).toSQL().params.length - once;
-  if (once > boundParametersMax) {
-    throw new Error("One row binds more parameters than D1 takes");
+  return statements;
+};
+
+/**
+ * `items` in parts whose JSON each fits in one value D1 binds
+ * (`boundValueBytesMax`): for a statement that reads a part as one value
+ * (`json_each`), however many items. Throws when one item alone doesn't.
+ */
+export const partsBoundAsOne = <T>(items: readonly T[]): T[][] => {
+  const encoder = new TextEncoder();
+  const parts: T[][] = [];
+  let part: T[] = [];
+  // The brackets of the array.
+  let bytes = 2;
+  for (const item of items) {
+    // The item and the comma before it.
+    const size = encoder.encode(JSON.stringify(item)).byteLength + 1;
+    if (size + 2 > boundValueBytesMax) {
+      throw new Error("One item is larger than D1 binds as one value");
+    }
+    if (part.length > 0 && bytes + size > boundValueBytesMax) {
+      parts.push(part);
+      part = [];
+      bytes = 2;
+    }
+    part.push(item);
+    bytes += size;
   }
-  const size =
-    perRow === 0
-      ? rows.length
-      : Math.floor((boundParametersMax - (once - perRow)) / perRow);
-  return chunks(rows, size).map(statementOf);
+  if (part.length > 0) {
+    parts.push(part);
+  }
+  return parts;
 };

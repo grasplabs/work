@@ -22,6 +22,7 @@ import {
 import type { Producers, SourceRef } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { brainHandOvers, personErasures } from "../src/db/core/schema.ts";
+import { statementsWithin } from "../src/db/d1.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { shareWorkflowResource } from "../src/workflow-resources.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
@@ -850,6 +851,32 @@ describe("how a hand-over fails closed", () => {
     }).toStrictEqual({
       left: 0,
       noted: { open: ids.toSorted(), unrelayed: ids.toSorted() },
+    });
+  });
+
+  it("writes rows of any shape in statements within D1's bound parameters, each statement's own counted", async () => {
+    const db = drizzle(env.DB);
+    const at = new Date();
+    // The first row leaves its optional column out, which binds nothing;
+    // the 40 after it bind it.
+    const rows = Array.from({ length: 41 }, (_, index) => ({
+      producer: "run",
+      sourceId: crypto.randomUUID(),
+      noting: crypto.randomUUID(),
+      notedAt: at,
+      ...(index === 0 ? {} : { relayedAt: at }),
+    }));
+    const [first, ...rest] = statementsWithin(rows, (part) =>
+      db.insert(brainHandOvers).values(part)
+    );
+    if (first !== undefined) {
+      await db.batch([first, ...rest]);
+    }
+    const ids = rows.map(({ sourceId }) => sourceId);
+
+    await expect(openAmong(ids)).resolves.toStrictEqual({
+      open: ids.toSorted(),
+      unrelayed: [rows[0]?.sourceId],
     });
   });
 

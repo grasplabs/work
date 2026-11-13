@@ -927,4 +927,60 @@ describe("a deleted chat", () => {
       ended: ["brain.source.handover_refused:erased"],
     });
   });
+
+  it("ends every hand-over still open of a person with hundreds of them in one erasure step, each in exactly one outcome", async () => {
+    const { person, chatId } = await chatter();
+    const admin = await signedInApi(idp, "admin");
+    // Three hundred of their questions noted, as their outbox's drain notes
+    // them, none handed over yet.
+    const ids = Array.from(
+      { length: 300 },
+      (_, index) => `${person.userId}/${chatId}/${index + 1}`
+    );
+    await noteHandOvers(
+      env,
+      ids.map((id) => ({
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        source: "core",
+        actor: { type: "system" },
+        action: "chat.turn_noted",
+        target: { type: "chat_turn", id },
+        provenance: [],
+        detail: {},
+      }))
+    );
+    const openBefore = await openFor(person.userId);
+
+    await admin.api.members.remove(person.userId);
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+    const logged = await allEvents();
+    const endings = new Set(
+      ids.map((id) =>
+        JSON.stringify(
+          logged
+            .filter(
+              ({ action, target }) =>
+                action.startsWith("brain.source.") && target?.id === id
+            )
+            .map(({ action, detail }) => `${action}:${String(detail?.reason)}`)
+        )
+      )
+    );
+
+    expect({
+      openBefore: openBefore.length,
+      completed: typeof erased.completedAt,
+      open: await openFor(person.userId),
+      endings: [...endings],
+    }).toStrictEqual({
+      openBefore: ids.length,
+      completed: "string",
+      open: [],
+      endings: [JSON.stringify(["brain.source.handover_refused:erased"])],
+    });
+  });
 });
