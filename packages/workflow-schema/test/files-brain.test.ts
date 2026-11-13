@@ -168,12 +168,12 @@ const listed = {
   args: {},
 };
 
-const searched = {
-  id: "searched",
+const recalled = {
+  id: "recalled",
   type: "call",
   brain: "handbook",
-  action: "search",
-  args: { text: "refunds" },
+  action: "recall",
+  args: { question: "refunds", budget: { tokens: 800 } },
 };
 
 const attachment = {
@@ -210,11 +210,11 @@ describe("calls on the run's files and the Brain", () => {
         // by), or another kind's, is no member of `ctx.files` or
         // `ctx.brain`.
         open: withFiles({ ...listed, action: "open" }),
-        brainDelete: withFiles({ ...searched, action: "delete" }),
+        brainDelete: withFiles({ ...recalled, action: "delete" }),
         both: withFiles({ ...listed, connection: "mail" }),
         // `into` and `from` are a connection call's alone.
         filesInto: withFiles({ ...listed, into: "runFiles" }),
-        brainFrom: withFiles({ ...searched, from: "runFiles" }),
+        brainFrom: withFiles({ ...recalled, from: "runFiles" }),
       })
     ).toStrictEqual({
       open: { "/steps/5/action": "workflow.unknown_action" },
@@ -229,7 +229,7 @@ describe("calls on the run's files and the Brain", () => {
     expect(
       codesOf({
         filesOnBrain: withFiles({ ...listed, files: "handbook" }),
-        brainOnFiles: withFiles({ ...searched, brain: "runFiles" }),
+        brainOnFiles: withFiles({ ...recalled, brain: "runFiles" }),
         filesNowhere: withFiles({ ...listed, files: "elsewhere" }),
         intoConnection: withFiles({ ...attachment, into: "mail" }),
         intoBrain: withFiles({ ...attachment, into: "handbook" }),
@@ -248,9 +248,9 @@ describe("calls on the run's files and the Brain", () => {
   it("refuses a sensitive parameter anywhere but a connection call's arguments", () => {
     expect(
       codesOf({
-        search: withFiles({
-          ...searched,
-          args: { text: { $expr: "params.token" } },
+        recall: withFiles({
+          ...recalled,
+          args: { question: { $expr: "params.token" }, budget: { tokens: 8 } },
         }),
         write: withFiles({
           id: "written",
@@ -265,7 +265,7 @@ describe("calls on the run's files and the Brain", () => {
         }),
       })
     ).toStrictEqual({
-      search: { "/steps/5/args/text/$expr": "workflow.sensitive" },
+      recall: { "/steps/5/args/question/$expr": "workflow.sensitive" },
       write: { "/steps/5/args/text/$expr": "workflow.sensitive" },
     });
   });
@@ -290,8 +290,6 @@ describe("generating calls on the run's files and the Brain", () => {
     expect(callsOf(generated().source)).toMatchObject({
       listed: { member: "ctx.files.runFiles.list" },
       notes: { member: "ctx.files.runFiles.read" },
-      searched: { member: "ctx.brain.handbook.search" },
-      doc: { member: "ctx.brain.handbook.read" },
       recalled: { member: "ctx.brain.handbook.recall" },
       summary: { member: "ctx.files.runFiles.write" },
       attachment: {
@@ -307,13 +305,13 @@ describe("generating calls on the run's files and the Brain", () => {
     const declared = (...steps: unknown[]) =>
       permissionsOf(generateWorkflow(checked(withFiles(...steps))).source);
     expect({
-      some: declared({ ...listed }, { ...searched }),
+      some: declared({ ...listed }, { ...recalled }),
       every: declared(...fileSteps()),
     }).toMatchObject({
-      some: { files: { runFiles: ["list"] }, brain: { handbook: ["search"] } },
+      some: { files: { runFiles: ["list"] }, brain: { handbook: ["recall"] } },
       every: {
         files: { runFiles: ["list", "read", "write", "delete"] },
-        brain: { handbook: ["search", "read", "recall"] },
+        brain: { handbook: ["recall"] },
       },
     });
   });
@@ -329,7 +327,7 @@ describe("generating calls on the run's files and the Brain", () => {
     expect({
       listed: task("listed"),
       notes: task("notes"),
-      searched: task("searched"),
+      recalled: task("recalled"),
       files: {
         attachment: filesOf("attachment"),
         forwarded: filesOf("forwarded"),
@@ -352,8 +350,8 @@ describe("generating calls on the run's files and the Brain", () => {
           arguments: { object: [["file", { slot: aSlot }]] },
         },
       },
-      searched: {
-        call: { name: "grasp.brain", binding: "handbook", operation: "search" },
+      recalled: {
+        call: { name: "grasp.brain", binding: "handbook", operation: "recall" },
       },
       files: {
         attachment: { into: "runFiles", from: null },

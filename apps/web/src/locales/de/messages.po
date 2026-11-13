@@ -229,10 +229,6 @@ msgstr "Dann {chosen}. Das dauert etwa {minutes} Minuten. Wollen wir anfangen?"
 msgid "{className}, for {name}"
 msgstr "{className}, für {name}"
 
-#: src/apps/resource-bindings.tsx
-msgid "{collection}: {name}"
-msgstr "{collection}: {name}"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "{coming} expected return"
 msgstr "{coming} erwarteter Ertrag"
@@ -267,6 +263,10 @@ msgstr "{count, plural, one {{label}: # Eintrag} other {{label}: # Einträge}}"
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} arbeiten hier, an # Arbeit, die in dem, was Menschen erzählt haben, vorkam.} other {{names} arbeiten hier, an # Arbeiten, die in dem, was Menschen erzählt haben, vorkamen.}}"
+
+#: src/agents/own-agents-admin.tsx
+msgid "{count, plural, one {# agent} other {# agents}}"
+msgstr "{count, plural, one {# Agent} other {# Agenten}}"
 
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
@@ -1132,6 +1132,7 @@ msgid "{sources, plural, one {Time-consuming work that could be automated, raise
 msgstr "{sources, plural, one {Zeitraubende Arbeit, die sich automatisieren ließe, angesprochen in # Quelle, noch von keinem Team.} other {Zeitraubende Arbeit, die sich automatisieren ließe, angesprochen in # Quellen, noch von keinem Team.}}"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/own-agents-admin.tsx
 msgid "{spent} this month"
 msgstr "{spent} in diesem Monat"
 
@@ -1456,10 +1457,6 @@ msgstr "2 Bestandsaufnahme"
 #: src/connections/http-connections.tsx
 msgid "A bearer token"
 msgstr "Ein Bearer-Token"
-
-#: src/workflows/binding-approvals.tsx
-msgid "A Brain collection it may read"
-msgstr "Eine Brain-Sammlung, die er lesen darf"
 
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
@@ -2196,12 +2193,17 @@ msgid "Agent not found"
 msgstr "Agent nicht gefunden"
 
 #: src/agents/agents-overview.tsx
+#: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
 #: src/routes/_shell.agents.index.tsx
 #: src/routes/_shell.agents.new.tsx
 msgid "Agents"
 msgstr "Agenten"
+
+#: src/agents/own-agents-admin.tsx
+msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
+msgstr "Agenten, die Personen für sich selbst erstellen. Nur ihr Eigentümer sieht und fragt sie, und sie tun höchstens, was Grasp für diese Person tun darf. Du siehst, wie viele jede Person hat und was sie kosten, nie, was ihnen gesagt wird."
 
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
@@ -2389,6 +2391,10 @@ msgstr "Ein Agent für das Unternehmen oder einer, den nur du nutzt."
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "Ein eigener Agent für eine Aufgabe, die du oft erledigst. Nur du siehst ihn und fragst ihn, im Chat von Grasp."
 
+#: src/chat/thread.tsx
+msgid "An agent you can no longer ask"
+msgstr "Ein Agent, den du nicht mehr fragen kannst"
+
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
 msgstr "Ein Betrag in einer Währung"
@@ -2575,6 +2581,10 @@ msgstr "Jedes Ereignis, das seine Webhook-Quelle sendet, von den Typen, die sein
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Jeder Typ"
+
+#: src/agents/own-agents-admin.tsx
+msgid "Anyone in the company can make agents of their own."
+msgstr "Jede Person im Unternehmen kann eigene Agenten erstellen."
 
 #: src/apps/blueprints.tsx
 msgid "Anyone who builds and has a role in {name} can now start a new app from it. {name} itself stays as it is."
@@ -3809,10 +3819,6 @@ msgctxt "a kind of field"
 msgid "Choice"
 msgstr "Auswahl"
 
-#: src/apps/resource-bindings.tsx
-msgid "Choose a collection"
-msgstr "Sammlung wählen"
-
 #: src/workflows/workflow-triggers.tsx
 msgid "Choose a connection."
 msgstr "Wählen Sie eine Verbindung."
@@ -4008,15 +4014,10 @@ msgstr "Sammlung {collectionId}"
 msgid "Collection actions"
 msgstr "Aktionen für die Sammlung"
 
-#: src/apps/resource-bindings.tsx
-msgid "Collection for {collection}"
-msgstr "Sammlung für {collection}"
-
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection not found"
 msgstr "Sammlung nicht gefunden"
 
-#: src/apps/resource-bindings.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Sammlungen"
@@ -4823,6 +4824,10 @@ msgstr "Hat ein Webhook-Ereignis nicht an den Lauf übergeben, der darauf wartet
 #: src/activity/audit-words.ts
 msgid "Didn't keep a webhook event: its source keeps as many as it may"
 msgstr "Hat ein Webhook-Ereignis nicht aufbewahrt: Seine Quelle bewahrt bereits so viele auf, wie sie darf"
+
+#: src/activity/audit-words.ts
+msgid "Didn't keep something noted for the Brain, and recorded why"
+msgstr "Etwas für das Brain Vermerktes nicht gespeichert und den Grund festgehalten"
 
 #: src/agents/agent-wakes.tsx
 msgid "Didn't run {when}: no AI provider is connected"
@@ -7176,10 +7181,6 @@ msgstr "Sie kann Name, E-Mail-Adresse und Teams aller Personen in der Organisati
 msgid "It opens for the member who created it, the admins, and whoever it is shared with."
 msgstr "Es öffnet sich für das Mitglied, das es erstellt hat, die Admins und alle, mit denen es geteilt ist."
 
-#: src/workflows/files-and-apps.tsx
-msgid "It reads no Knowledge."
-msgstr "Er liest kein Wissen."
-
 #: src/brain/memory-page.tsx
 msgid "It rests on nothing you can see."
 msgstr "Es stützt sich auf nichts, was du sehen kannst."
@@ -7422,10 +7423,6 @@ msgstr "Ihre URL nimmt nichts mehr an, und kein Workflow startet mehr bei ihren 
 msgid "Its version"
 msgstr "Seine Version"
 
-#: src/workflows/files-and-apps.tsx
-msgid "Its versions call it {aliases}"
-msgstr "Seine Versionen nennen es {aliases}"
-
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
 msgstr "Die Arbeit"
@@ -7565,10 +7562,6 @@ msgstr "Wissen"
 msgctxt "tab: what Grasp knows about a piece of work"
 msgid "Knowledge"
 msgstr "Wissen"
-
-#: src/workflows/files-and-apps.tsx
-msgid "Knowledge it reads"
-msgstr "Wissen, das er liest"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Known"
@@ -7727,6 +7720,10 @@ msgstr "Ich setze jetzt alles für Sie zusammen."
 #: src/workflows/ask-stephen.tsx
 msgid "Let people ask Stephen to start it"
 msgstr "Leute Stephen bitten lassen, ihn zu starten"
+
+#: src/agents/own-agents-admin.tsx
+msgid "Let people make agents of their own"
+msgstr "Eigene Agenten erlauben"
 
 #: src/activity/audit-words.ts
 msgid "Let someone visit an App"
@@ -8359,6 +8356,10 @@ msgstr "Nennen Sie unten ein Modell, das dieser Endpunkt bereitstellt, wählen S
 msgid "Name in the App's code"
 msgstr "Name im Code der App"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Name not shown"
+msgstr "Name nicht angezeigt"
+
 #: src/apps/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Name der Aufbewahrung, etwa ein Aktenzeichen"
@@ -8837,10 +8838,6 @@ msgstr "Keine Teams"
 msgid "No teams yet."
 msgstr "Noch keine Teams."
 
-#: src/workflows/files-and-apps.tsx
-msgid "No version uses it yet"
-msgstr "Noch keine Version nutzt es"
-
 #: src/workflows/workflow-triggers.tsx
 msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
 msgstr "Noch keine Webhook-Quelle: Ein Admin fügt eine in den Einstellungen hinzu, mit der URL und dem Geheimnis, die ihr Absender verwendet."
@@ -8903,6 +8900,10 @@ msgstr "Noch hat ihn niemand etwas gefragt."
 msgid "Nobody by that name"
 msgstr "Niemand mit diesem Namen"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Nobody can make one, and those people have don't answer until you turn this back on."
+msgstr "Niemand kann einen erstellen, und vorhandene antworten nicht, bis du dies wieder einschaltest."
+
 #: src/workflows/delete-workflow.tsx
 msgid "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
 msgstr "Niemand kann ihn wieder öffnen oder starten. Seine Versionen bleiben erhalten, werden aber nie mehr ausgeliefert. Das lässt sich nicht rückgängig machen."
@@ -8924,6 +8925,10 @@ msgstr "Niemand sonst zum Teilen."
 #: src/settings/staff-access.tsx
 msgid "Nobody from Grasp can sign in to this workspace now."
 msgstr "Niemand von Grasp kann sich jetzt bei diesem Workspace anmelden."
+
+#: src/agents/own-agents-admin.tsx
+msgid "Nobody has an agent of their own yet."
+msgstr "Noch niemand hat einen eigenen Agenten."
 
 #: src/workflows/definition-editor.tsx
 msgid "Nobody has edited it since its current version."
@@ -9201,6 +9206,10 @@ msgstr "Notiz nicht gefunden"
 #: src/onboarding/connect-steps.tsx
 msgid "Noted"
 msgstr "Notiert"
+
+#: src/activity/audit-words.ts
+msgid "Noted a question asked in a chat, to keep in its person's own Brain"
+msgstr "Eine im Chat gestellte Frage vermerkt, um sie im eigenen Brain der Person zu speichern"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted: {name}. Sign in to connect it now, or we’ll connect it with you. I’ll only read what you share with me."
@@ -10302,6 +10311,10 @@ msgstr "Personen, die gefragt haben"
 msgid "People you removed can’t sign in. Erasing someone also takes their personal data, for good, keeping their name on what they did."
 msgstr "Entfernte Personen können sich nicht anmelden. Wer gelöscht wird, verliert auch seine persönlichen Daten, endgültig; sein Name bleibt bei dem, was er getan hat."
 
+#: src/agents/own-agents-admin.tsx
+msgid "People's own agents"
+msgstr "Eigene Agenten der Personen"
+
 #: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Berechtigung"
@@ -10322,6 +10335,10 @@ msgstr "Berechtigung für die Plattformstatistiken"
 #: src/apps/resource-bindings.tsx
 msgid "Permission to invite guests"
 msgstr "Berechtigung, Gäste einzuladen"
+
+#: src/apps/resource-bindings.tsx
+msgid "Permission to read the Brain"
+msgstr "Berechtigung, das Gehirn zu lesen"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
@@ -10826,6 +10843,10 @@ msgstr "Echter Lauf"
 #: src/chat/thread.tsx
 msgid "Reasoning"
 msgstr "Überlegungen"
+
+#: src/activity/audit-words.ts
+msgid "Recalled from the Brain"
+msgstr "Aus dem Gehirn abgerufen"
 
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
@@ -12708,6 +12729,7 @@ msgid "Someone no longer here"
 msgstr "Jemand, der nicht mehr da ist"
 
 #: src/agents/agent-wakes.tsx
+#: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Jemand, der nicht mehr im Unternehmen ist"
 
@@ -13527,8 +13549,8 @@ msgid "The App has no permission to invite guests. Grant one first."
 msgstr "Die App hat keine Berechtigung, Gäste einzuladen. Erteile zuerst eine."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App has no permission to read a collection. Grant one first."
-msgstr "Die App hat keine Berechtigung, eine Sammlung zu lesen. Erteile zuerst eine."
+msgid "The App has no permission to read the Brain. Grant one first."
+msgstr "Die App hat keine Berechtigung, das Gehirn zu lesen. Erteile zuerst eine."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the platform's statistics. Grant one first."
@@ -13663,6 +13685,10 @@ msgstr "Das Brain hat noch keine Teams zum Gruppieren."
 #: src/brain/own-export.tsx
 msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
 msgstr "Das Brain bewahrt noch nichts auf, was nur Sie lesen dürfen, daher enthält Ihr Export nichts."
+
+#: src/workflows/binding-approvals.tsx
+msgid "The Brain, as each run's person may read it"
+msgstr "Das Gehirn, so wie die Person jedes Laufs es lesen darf"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
@@ -15879,6 +15905,10 @@ msgstr "Was der Workspace für Grasp bezahlt."
 #: src/workflows/requests/request-detail.tsx
 msgid "What they ask"
 msgstr "Was sie fragen"
+
+#: src/agents/own-agents-admin.tsx
+msgid "What they cost couldn't be loaded."
+msgstr "Die Kosten konnten nicht geladen werden."
 
 #: src/settings/erasures.tsx
 msgid "What they sent through App forms, and usage signals of their collections"

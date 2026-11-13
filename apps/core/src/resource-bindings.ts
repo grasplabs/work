@@ -1,4 +1,3 @@
-import { collections } from "@grasp-os/brain/schema";
 import type { AnyPermission } from "@grasp-os/runtime/app";
 import { actionPermission, actionPermissions } from "@grasp-os/runtime/host";
 import { appErrors } from "@grasp-os/shared/apps";
@@ -6,7 +5,6 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import { functionErrors } from "@grasp-os/shared/functions";
-import { identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -31,7 +29,6 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import { appFor, findApp } from "./apps.ts";
@@ -39,8 +36,8 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf } from "./connections.ts";
 import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
-// Each list bound as one parameter: a review may name more permissions or
-// collections than D1's 100 bound parameters.
+// Each list bound as one parameter: a review may name more permissions
+// than D1's 100 bound parameters.
 import { inList } from "./db/d1.ts";
 import type { BoundResource, ResourceBindings } from "./function-host.ts";
 import { bindingKey, bindingSpendOf } from "./model-spend.ts";
@@ -58,6 +55,7 @@ import type {
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
+import { brainAdapter } from "./resource-brain.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
@@ -66,7 +64,6 @@ import type {
 import { declarationHash } from "./resource-declarations.ts";
 import { graspAdapter } from "./resource-grasp.ts";
 import { guestsAdapter } from "./resource-guests.ts";
-import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter, modelAnswers } from "./resource-model.ts";
 import { platformGrantsOf } from "./resource-platform.ts";
 import type { PlatformAction } from "./resource-platform.ts";
@@ -87,7 +84,7 @@ import type { PlatformAction } from "./resource-platform.ts";
 //   declaration the admin approved, by its SHA-256 as the reviewed version
 //   sealed it (`declarationHash`), and resolves only for a release whose
 //   declaration hashes the same. A later version that widens it (another
-//   contract, more actions or collections, another output) gets
+//   contract, more actions or operations, another output) gets
 //   `permission.unavailable` until an admin approves again.
 // - A provider's contract drifts: a row pins the contract its target served
 //   at approval (`contractId`, `fingerprint`), and each request asks the
@@ -97,7 +94,7 @@ import type { PlatformAction } from "./resource-platform.ts";
 // - Revocation between calls: nothing is resolved once per invocation.
 //   Each resource request reads the row and asks its adapter again, and
 //   each adapter goes through the live grant (the permission check, the
-//   delegate read, the gateway's rules) on every call. So revoking the
+//   gateway's rules) on every call. So revoking the
 //   binding or what it names stops the next request, even within one
 //   action.
 // - A binding of one App serves another: rows are found by the release's
@@ -123,7 +120,7 @@ const adapters: {
   readonly [Kind in BindingTarget["kind"]]: ResourceAdapter<Kind>;
 } = {
   model: modelAdapter,
-  knowledge: knowledgeAdapter,
+  brain: brainAdapter,
   connector: connectorAdapter,
   grasp: graspAdapter,
   guests: guestsAdapter,
@@ -241,15 +238,6 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
   }
   if (target.kind === "connector") {
     return { permissionId: target.permissionId };
-  }
-  if (target.kind === "knowledge") {
-    // A detail is one identifier-sized value: the permissions, joined,
-    // when they fit; their number otherwise (the row keeps them all).
-    const ids = [...new Set(Object.values(target.collections))].toSorted();
-    const joined = ids.join(" ");
-    return joined.length <= identifierMaxLength
-      ? { permissionIds: joined }
-      : { permissionCount: ids.length };
   }
   return { permissionId: target.permissionId };
 };
@@ -594,7 +582,15 @@ const choicesMax = 100;
  */
 const reviewContractAsksMax = 50;
 
-const actionListSchema = z.array(z.string());
+/**
+ * What each kind bound to one of the App's `{ type: "platform" }`
+ * permissions needs that permission to allow.
+ */
+const platformActionOf = {
+  grasp: "statistics",
+  guests: "guests",
+  brain: "brain",
+} as const satisfies Record<string, PlatformAction>;
 
 /**
  * The App's own active permissions on objects of `objectType`, newest
@@ -603,7 +599,7 @@ const actionListSchema = z.array(z.string());
 const appGrants = async (
   env: Env,
   app: AppId,
-  objectType: "connection" | "collection"
+  objectType: "connection"
 ): Promise<{ rows: ConnectionGrantRow[]; truncated: boolean }> => {
   const rows = await drizzle(env.DB)
     .select({
@@ -633,43 +629,25 @@ const appGrants = async (
 /** What one review reads once, for every declared resource's choices. */
 interface ReviewGrants {
   readonly connections: Awaited<ReturnType<typeof appGrants>>;
-  readonly collections: Awaited<ReturnType<typeof appGrants>>;
-  /** The collections' names, by ID. */
-  readonly names: ReadonlyMap<string, string>;
   readonly contracts: ContractReader;
   /**
    * The App's own active `{ type: "platform" }` permissions of `action`,
    * newest first, at most `choicesMax`: read once for each action, when
-   * the platform's functions (`grasp`) or a guests permission asks.
+   * the platform's functions (`grasp`), a guests or a brain permission
+   * asks.
    */
   readonly platform: (
     action: PlatformAction
   ) => Promise<{ ids: string[]; truncated: boolean }>;
 }
 
-/** The App's grants and their collections' names, read once for a review. */
+/** The App's grants, read once for a review. */
 const reviewGrants = async (
   env: Env,
   app: AppId,
   contracts: ContractReader
 ): Promise<ReviewGrants> => {
-  const [connections, collectionGrants] = await Promise.all([
-    appGrants(env, app, "connection"),
-    appGrants(env, app, "collection"),
-  ]);
-  const readable = collectionGrants.rows.filter(
-    ({ actions }) =>
-      actionListSchema.safeParse(JSON.parse(actions)).data?.includes("read") ===
-      true
-  );
-  const ids = [...new Set(readable.map(({ objectId }) => objectId))];
-  const named =
-    ids.length === 0
-      ? []
-      : await drizzle(env.KNOWLEDGE)
-          .select({ id: collections.id, name: collections.name })
-          .from(collections)
-          .where(inList(collections.id, ids));
+  const connections = await appGrants(env, app, "connection");
   const platform = new Map<PlatformAction, Promise<string[]>>();
   return {
     platform: async (action) => {
@@ -684,8 +662,6 @@ const reviewGrants = async (
       };
     },
     connections,
-    collections: { rows: readable, truncated: collectionGrants.truncated },
-    names: new Map(named.map(({ id, name }) => [id, name])),
     contracts,
   };
 };
@@ -733,24 +709,13 @@ const choicesFor = async (
         truncated || serving.some(([, serves]) => serves === undefined),
     };
   }
-  if (kind === "grasp" || kind === "guests") {
-    const granted = await grants.platform(
-      kind === "grasp" ? "statistics" : "guests"
-    );
-    return {
-      kind,
-      permissions: granted.ids.map((permissionId) => ({ permissionId })),
-      truncated: granted.truncated,
-    };
-  }
+  // The rest are bound to one of the App's platform permissions.
+  const platformKind = kind === "brain" || kind === "guests" ? kind : "grasp";
+  const granted = await grants.platform(platformActionOf[platformKind]);
   return {
-    kind: "knowledge",
-    permissions: grants.collections.rows.map((row) => ({
-      permissionId: row.id,
-      collectionId: row.objectId,
-      name: grants.names.get(row.objectId) ?? null,
-    })),
-    truncated: grants.collections.truncated,
+    kind: platformKind,
+    permissions: granted.ids.map((permissionId) => ({ permissionId })),
+    truncated: granted.truncated,
   };
 };
 
@@ -758,9 +723,8 @@ const choicesFor = async (
  * How a review names each of `rows`' own bound target, for anyone who may
  * read the review, builders included: a connector binding's connection,
  * as `by` can see it in their own connections (connect lists them a
- * person's personal ones and the shared ones), and a knowledge binding's
- * collections by name. Only the targets bound, never what else the App
- * holds: that is an admin's choices.
+ * person's personal ones and the shared ones). Only the targets bound,
+ * never what else the App holds: that is an admin's choices.
  */
 const targetLabels = async (
   env: Env,
@@ -776,14 +740,9 @@ const targetLabels = async (
   }
   const permissionIds = [
     ...new Set(
-      [...targets.values()].flatMap((target) => {
-        if (target.kind === "connector") {
-          return [target.permissionId];
-        }
-        return target.kind === "knowledge"
-          ? Object.values(target.collections)
-          : [];
-      })
+      [...targets.values()].flatMap((target) =>
+        target.kind === "connector" ? [target.permissionId] : []
+      )
     ),
   ];
   const objects =
@@ -800,21 +759,6 @@ const targetLabels = async (
   const visible = connectorBound
     ? await env.CONNECT.listConnections(await personOf(env, by))
     : [];
-  const collectionIds = [...targets.values()].flatMap((target) =>
-    target.kind === "knowledge"
-      ? Object.values(target.collections).flatMap(
-          (id) => objectOf.get(id) ?? []
-        )
-      : []
-  );
-  const named =
-    collectionIds.length === 0
-      ? []
-      : await drizzle(env.KNOWLEDGE)
-          .select({ id: collections.id, name: collections.name })
-          .from(collections)
-          .where(inList(collections.id, [...new Set(collectionIds)]));
-  const nameOf = new Map(named.map(({ id, name }) => [id, name]));
   return (row) => {
     const target = targets.get(row.id);
     if (target?.kind === "connector") {
@@ -828,26 +772,9 @@ const targetLabels = async (
                 account: connection.accountName,
                 provider: connection.provider,
               },
-        collections: {},
       };
     }
-    if (target?.kind === "knowledge") {
-      return {
-        connection: null,
-        collections: Object.fromEntries(
-          Object.entries(target.collections).map(([name, permission]) => {
-            const collection = objectOf.get(permission);
-            return [
-              name,
-              collection === undefined
-                ? null
-                : (nameOf.get(collection) ?? null),
-            ];
-          })
-        ),
-      };
-    }
-    return { connection: null, collections: {} };
+    return { connection: null };
   };
 };
 
@@ -878,8 +805,6 @@ const declaredOf = (declaration: AnyPermission) => ({
       ? [...declaration.actions]
       : [],
   operations: operationsOf(declaration),
-  collections:
-    declaration["~permission"] === "brain" ? [...declaration.collections] : [],
   maxOutputTokens:
     declaration["~permission"] === "ai" ? declaration.maxOutputTokens : null,
 });

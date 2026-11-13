@@ -550,7 +550,7 @@ describe("a workflow's ctx", () => {
     const workflow = defineWorkflow({
       permissions: {
         files: { runFiles: ["read"] },
-        brain: { handbook: ["search"] },
+        brain: { handbook: ["recall"] },
       },
       handler: async (ctx) => {
         held = ctx;
@@ -567,19 +567,19 @@ describe("a workflow's ctx", () => {
       data: members.map((member) => isFrozenData(member)),
       files: keysOf(read(held, "files", "runFiles")),
       brain: keysOf(read(held, "brain", "handbook")),
-      // An action no step takes is no member: deleting, writing, a read of
-      // the Brain, or a name of the prototype's.
+      // An action no step takes is no member: deleting, writing, an action
+      // the Brain doesn't have, or a name of the prototype's.
       undeclared: [
         read(held, "files", "runFiles", "delete"),
         read(held, "files", "runFiles", "write"),
-        read(held, "brain", "handbook", "read"),
+        read(held, "brain", "handbook", "search"),
         read(held, "files", "runFiles", "constructor"),
         read(held, "brain", "__proto__"),
       ],
     }).toStrictEqual({
       data: [true, true, true],
       files: ["read"],
-      brain: ["search"],
+      brain: ["recall"],
       undeclared: [undefined, undefined, undefined, undefined, undefined],
     });
   });
@@ -591,7 +591,7 @@ describe("a workflow's ctx", () => {
           mail: { readAttachment: "mail.readAttachment", send: "mail.send" },
         },
         files: { runFiles: ["read"] },
-        brain: { handbook: ["search"] },
+        brain: { handbook: ["recall"] },
       },
       handler: async (ctx) => {
         await ctx.connections.mail.readAttachment(
@@ -604,7 +604,10 @@ describe("a workflow's ctx", () => {
         );
         await ctx.connections.mail.send({ to: "ada" }, { step: "plain" });
         await ctx.files.runFiles.read({ file: "f1" }, { step: "notes" });
-        await ctx.brain.handbook.search({ text: "refunds" }, { step: "found" });
+        await ctx.brain.handbook.recall(
+          { question: "refunds", budget: { tokens: 800 } },
+          { step: "found" }
+        );
         return null;
       },
     });
@@ -625,7 +628,11 @@ describe("a workflow's ctx", () => {
       },
       { binding: "mail", operation: "mail.send", args: { to: "ada" } },
       { binding: "runFiles", operation: "read", args: { file: "f1" } },
-      { binding: "handbook", operation: "search", args: { text: "refunds" } },
+      {
+        binding: "handbook",
+        operation: "recall",
+        args: { question: "refunds", budget: { tokens: 800 } },
+      },
     ]);
   });
 

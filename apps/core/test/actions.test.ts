@@ -86,10 +86,7 @@ const mailTo = (to: string) => ({
   to: [to],
 });
 const ai = permission.ai({ maxOutputTokens: 200 });
-const brain = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
+const brain = permission.brain({ operations: ["recall"] });
 // Guest chats it lists and reads, and never invites.
 const guests = permission.guests({ operations: ["list", "read"] });
 // The platform's functions, which serve only the paths they declare.
@@ -245,13 +242,16 @@ const summarize = action({
     }),
 });
 
-const searchHelp = action({
+const recallHelp = action({
   args: { text: v.string().min(1) },
-  returns: v
-    .array(v.object({ title: v.string(), excerpt: v.string() }))
-    .max(20),
-  handler: async (ctx, args) =>
-    await ctx.brain.search({ text: args.text, limit: 5 }),
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    const pack = await ctx.brain.recall({
+      question: args.text,
+      budget: { tokens: 500 },
+    });
+    return pack.items.map(({ text }) => text);
+  },
 });
 
 const listGuests = action({
@@ -571,7 +571,7 @@ const notesApp = registerApp({
       recover,
       sendMail,
       summarize,
-      searchHelp,
+      recallHelp,
       streaming,
       nestsStreaming,
       emitsAnyway,
@@ -1336,6 +1336,15 @@ describe("resources", () => {
 
   it("check what AI and the Brain answer against their contracts", async () => {
     const fixture = await notes();
+    const item = {
+      source: { producer: "upload", id: "handbook" },
+      version: 1,
+      position: 0,
+      text: "Ask your lead before you take leave.",
+      whole: true,
+      found: "words",
+    };
+    const pack = { items: [item], notFound: [], truncated: false };
     const summarizeWith = async (answer: unknown) =>
       await call(
         fixture,
@@ -1348,11 +1357,11 @@ describe("resources", () => {
           }),
         }
       );
-    const searchWith = async (answer: unknown) =>
+    const recallWith = async (answer: unknown) =>
       await call(
         fixture,
         "action",
-        "actions.searchHelp",
+        "actions.recallHelp",
         { text: "leave" },
         {
           resources: bindingsOf({
@@ -1367,17 +1376,17 @@ describe("resources", () => {
     expect({
       summary: valueOf(await summarizeWith({ summary: "Short" })),
       summaryWrong: codeOf(await summarizeWith({ summary: 1 })),
-      hits: valueOf(
-        await searchWith([{ title: "Leave", excerpt: "Days off" }])
-      ),
-      hitsWithMore: codeOf(
-        await searchWith([{ title: "Leave", excerpt: "Days off", secret: "x" }])
+      pack: valueOf(await recallWith(pack)),
+      packWithMore: codeOf(await recallWith({ ...pack, secret: "x" })),
+      itemWithMore: codeOf(
+        await recallWith({ ...pack, items: [{ ...item, secret: "x" }] })
       ),
     }).toStrictEqual({
       summary: { summary: "Short" },
       summaryWrong: "contract.invalid_permission_result",
-      hits: [{ title: "Leave", excerpt: "Days off" }],
-      hitsWithMore: "contract.invalid_permission_result",
+      pack: ["Ask your lead before you take leave."],
+      packWithMore: "contract.invalid_permission_result",
+      itemWithMore: "contract.invalid_permission_result",
     });
   });
 });

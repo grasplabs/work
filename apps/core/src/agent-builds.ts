@@ -1309,9 +1309,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Asks for a permission for `app` (a connection, a collection or a
-   * workflow), as its builders do: it allows
-   * nothing until an admin grants it.
+   * Asks for a permission for `app` (a connection, the platform's `brain`
+   * or a workflow), as its builders do: it allows nothing until an admin
+   * grants it.
    */
   async requestPermission(app: unknown, request: unknown): Promise<Permission> {
     return await this.#build(
@@ -1749,7 +1749,7 @@ build: {
    * draft sealed as a release, on the App's preview's one store of test
    * data, which its builders share and which keeps what calls write
    * across your writes until a builder resets it, with no connections,
-   * Knowledge or models (\`permission.unavailable\`); what it wrote with
+   * Brain or models (\`permission.unavailable\`); what it wrote with
    * \`console\`, in the next \`check\`'s \`preview.logs\`. A failure
    * the draft's to fix comes back as \`ok: false\`: a path that names none
    * of its functions, code that doesn't seal (\`message\` names why: each
@@ -1771,7 +1771,7 @@ build: {
    * (React's development warnings); \`preview.seen\` is false when nobody
    * has the preview open, so its pages weren't run: say so, or \`call\`
    * the server yourself. A preview reaches nothing outside it: a
-   * function's call through a permission (a connection, Knowledge, a
+   * function's call through a permission (a connection, the Brain, a
    * model) rejects with \`permission.unavailable\`, and a page's workflow
    * run with \`app.preview_side_effect\`. Handle either as a failed call,
    * as a page must live. You never publish: once it passes, tell the
@@ -1782,14 +1782,19 @@ build: {
   /**
    * Asks for a permission the App needs, as its builders do: an admin
    * grants it or not, and it allows nothing until then. \`binding\` is the
-   * name the App's code reaches it by, such as \`MAIL\`. On a collection,
-   * an App asks only to \`read\`: it never writes one (what it writes goes
-   * to its own store).
+   * name the App's code reaches it by, such as \`MAIL\`. To recall the
+   * Brain (\`ctx.brain.recall\`, declared as \`permission.brain({ operations:
+   * ["recall"] })\`), it asks for \`{ type: "platform" }\` with actions
+   * \`["brain"]\`. A recall answers only what everyone in the company may
+   * read, whoever calls, never a team's content; and an App that recalls
+   * answers no visitor and invites no guest. Today nothing readable by the
+   * whole company is in the Brain, so a recall returns an empty pack: say
+   * so, and never build a feature that depends on it finding something.
    */
   requestPermission(app: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
-      | { type: "collection"; collectionId: string }
+      | { type: "platform" }
       | { type: "workflow"; workflowId: string };
     actions: string[];
     binding: string;

@@ -4,6 +4,8 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
+  brainActions,
+  filesActions,
   stepListPaths,
   workflowSchemaUrl,
 } from "@grasp-os/workflow-schema/format";
@@ -37,6 +39,28 @@ import { signedInApi, unique } from "./sign-in.ts";
 // changes isn't recorded as its own; and it follows runs it wasn't let to.
 
 const idp = mockIdp();
+
+/**
+ * An action a call form of the declaration names, as it lists each: its
+ * name, then (past a line break, as the JSON body escapes it) its request.
+ */
+const declaredAction = /`(?<action>[a-z]+)`(?:\\n +\*)? +\(/gu;
+
+/** A call form of the declaration, `{ <kind>, action, args }`, at a line's start. */
+const callForm = /\\n +\* +`\{ [a-z]+, (?:action|function),/gu;
+
+/**
+ * The actions the declaration's call form `{ <kind>, action, args }`
+ * names: those of its clause, up to the next call form.
+ */
+const declaredActionsOf = (declared: string, kind: string): string[] => {
+  const start = declared.indexOf(`\`{ ${kind}, action, args }\``);
+  const [next] = declared.slice(start).matchAll(callForm);
+  const clause = declared.slice(start, start + (next?.index ?? 0));
+  return [...clause.matchAll(declaredAction)].map(
+    (match) => match.groups?.action ?? ""
+  );
+};
 
 /** An example `{ "$expr": "…" }` in a request's body, as JSON escapes it. */
 const exampleExpression = /\\"\$expr\\": \\"(?<source>[^"\\]*)\\"/gu;
@@ -269,6 +293,12 @@ describe("the agent building an independent workflow", () => {
         (type) => !declared.includes(`\`${type}\`: `)
       )
     ).toStrictEqual([]);
+    // And the actions of the run's files and the Brain it teaches are
+    // exactly the ones the format takes.
+    expect({
+      files: declaredActionsOf(declared, "files"),
+      brain: declaredActionsOf(declared, "brain"),
+    }).toStrictEqual({ files: [...filesActions], brain: [...brainActions] });
     // And each example expression in it is one the format takes, reading
     // the steps its examples name by their IDs.
     const exampleSteps = ["send", "invoice", "extract", "invoiceBody"];
