@@ -308,9 +308,6 @@ const Summary = ({ changes }: { changes: AppReview }) => (
 /** What applies to an App's changes being shared: their data, an admin's approval. */
 const AppNotes = ({ changes }: { changes: AppReview }) => {
   const { i18n } = useLingui();
-  const asksAgain = [...changes.grants, ...changes.callers].some(
-    ({ askedAgain }) => askedAgain
-  );
   const waiting = changes.permissions.length;
   return (
     <>
@@ -327,13 +324,6 @@ const AppNotes = ({ changes }: { changes: AppReview }) => {
             other="It uses # new kinds of access. An admin approves those once."
             value={waiting}
           />
-        </Line>
-      ) : null}
-      {asksAgain ? (
-        <Line icon={<KeyRoundIcon className="size-4" />}>
-          <Trans>
-            An admin approves its access again before it works for your team.
-          </Trans>
         </Line>
       ) : null}
     </>

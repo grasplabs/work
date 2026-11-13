@@ -93,18 +93,6 @@ export interface AppReview {
    */
   permissions: Permission[];
   /**
-   * What the App holds now, which the draft's code uses once live;
-   * `askedAgain` for each that publishing it would ask an admin for
-   * again, as this person can't grant it (`DraftsApi.publish`).
-   */
-  grants: { permission: Permission; askedAgain: boolean }[];
-  /**
-   * The workflows' grants to call the App's functions, which trust its
-   * code as its own grants do; `askedAgain` likewise. Only those this
-   * person may see.
-   */
-  callers: { permission: Permission; askedAgain: boolean }[];
-  /**
    * What publishing does to the App's records, from its definition; null
    * when the definition can't be read.
    */

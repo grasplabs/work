@@ -132,10 +132,8 @@ const agentAllowedSql = (
   }
   const allowing = allowingPermissionSql(
     subject,
-    undefined,
     { type: "app", appId: app },
     "write",
-    true,
     { context: chatContext(agent), onBehalfOf: principal }
   );
   return sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;

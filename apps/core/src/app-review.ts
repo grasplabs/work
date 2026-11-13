@@ -11,14 +11,15 @@ import type {
   WorkflowBindingExtras,
 } from "@grasp-os/runtime/host";
 import type { AppReview } from "@grasp-os/shared/app-review";
-import { appErrors } from "@grasp-os/shared/apps";
+import { appErrors, fileChangesSchema } from "@grasp-os/shared/apps";
 import type { App, ReviewChange, TableRowRules } from "@grasp-os/shared/apps";
 import type {
   DataModelChange,
   DraftDataModel,
   IndexUse,
 } from "@grasp-os/shared/data-model";
-import type { AppId } from "@grasp-os/shared/ids";
+import type { Draft } from "@grasp-os/shared/drafts";
+import { draftErrors } from "@grasp-os/shared/drafts";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -46,23 +47,21 @@ import {
   draftDefinition,
   editableApp,
   findVersion,
-  nextLabel,
+  givenDefinition,
   readStored,
   versionFiles,
 } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
 import {
-  appWorkflowBindings,
   workflowResources,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { draftRelease } from "./draft-runs.ts";
-import { draftOf, filesOf } from "./drafts.ts";
+import { draftOf, draftSummary, filesOf, nextLabel } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
 import { buildAppCode, buildPages } from "./pages.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
-import { askedAgainBy } from "./permissions.ts";
 import { takesFile } from "./workflows/start-files.ts";
 
 // What is App-only about an App's draft, for its builders (`apps.review`,
@@ -88,45 +87,16 @@ import { takesFile } from "./workflows/start-files.ts";
 const boundContractSchema = z.object({ args: z.json() });
 
 /**
- * Whether the live version of any workflow the draft of App `app` may
- * bind once live takes a file in its args, as that version's contract
- * says: what its release seals (`pins`, bound-workflows.ts), so a binding
- * the draft records counts as it will bind, and what the App binds now.
+ * Whether the live version of any workflow the draft of an App binds once
+ * live takes a file in its args, as that version's contract says: what
+ * its release seals (`sealed`, bound-workflows.ts).
  */
 const boundTakesFile = async (
   env: Env,
-  app: AppId,
-  pins: readonly WorkflowBindingExtras[],
-  manifest: AppManifest
+  sealed: readonly WorkflowBindingExtras[]
 ): Promise<boolean> => {
-  // And what the App binds now under each alias the version declares: a
-  // binding of the same contract made since its seal stays bound
-  // (app-workflow-bindings.ts, `versionBindingChanges`).
-  const declared = new Set(
-    declaredPermissions(manifest, "workflows").map(({ alias }) => alias)
-  );
-  const active = await drizzle(env.DB)
-    .select({
-      alias: appWorkflowBindings.alias,
-      workflowId: appWorkflowBindings.workflowResourceId,
-    })
-    .from(appWorkflowBindings)
-    .where(
-      and(
-        eq(appWorkflowBindings.appId, app),
-        eq(appWorkflowBindings.status, "active")
-      )
-    );
-  // One read for every distinct workflow, however many bindings name it:
-  // the pins and the active bindings often name the same ones.
-  const workflows = [
-    ...new Set([
-      ...pins.map(({ pinned }) => pinned.workflowId),
-      ...active
-        .filter(({ alias }) => declared.has(alias))
-        .map(({ workflowId }) => workflowId),
-    ]),
-  ];
+  // One read for every distinct workflow, however many aliases name it.
+  const workflows = [...new Set(sealed.map(({ workflowId }) => workflowId))];
   if (workflows.length === 0) {
     return false;
   }
@@ -194,7 +164,6 @@ const rowRulesOf = (manifest: AppManifest): TableRowRules[] =>
  */
 const handsFilesOf = async (
   env: Env,
-  app: AppId,
   { app: manifest, workflows }: Pick<Release, "app" | "workflows">
 ): Promise<boolean> => {
   const readsFiles =
@@ -215,7 +184,7 @@ const handsFilesOf = async (
   // (`handFiles`), whatever the App declares for its alias: read from the
   // live version of the workflow each alias is bound to once the draft is
   // live.
-  return await boundTakesFile(env, app, workflows, manifest);
+  return await boundTakesFile(env, workflows);
 };
 
 /**
@@ -342,7 +311,7 @@ const manifestReviewOf = async (
         : await versionManifest(env, found.id, before.version, before.files);
     return {
       migrations: migrationsOf(release.app, previous, serverChanged),
-      handsFilesToWorkflows: await handsFilesOf(env, found.id, release),
+      handsFilesToWorkflows: await handsFilesOf(env, release),
       readsPeople:
         declaredPermission(release.app, "people", "people") !== undefined,
       rowRules: rowRulesOf(release.app),
@@ -397,9 +366,8 @@ const definitionReviewOf = async (
 /**
  * What publishing App `found`'s `draft` would change against its live
  * version, for `by`, one of its builders (see the header): its server
- * code, what its manifest declares, and the access the App holds and asks
- * for, with which of it publishing would ask an admin for again
- * (`askedAgainBy`), as the permissions API shows them to `by`.
+ * code, what its manifest declares, and the access the App asks for that
+ * no admin granted yet, as the permissions API shows it to `by`.
  */
 export const reviewDraft = async (
   env: Env,
@@ -416,8 +384,6 @@ export const reviewDraft = async (
     | "readsPeople"
     | "rowRules"
     | "permissions"
-    | "grants"
-    | "callers"
     | "plan"
   >
 > => {
@@ -473,15 +439,15 @@ export const reviewDraft = async (
           name.startsWith("server/")
       )
   );
-  // What the App holds, and the workflows' grants to call its functions,
-  // which trust its code alike (`madeCurrent`), as the permissions API
-  // shows them to this person. Never kept as a blueprint copy's first
-  // version is: a draft is someone's change of it.
-  const [held, callers, requested] = await Promise.all([
-    permissionsOpenTo(env, by, { type: "app", appId: found.id }, "active"),
-    permissionsOpenTo(env, by, undefined, "active", found.id),
-    permissionsOpenTo(env, by, { type: "app", appId: found.id }, "requested"),
-  ]);
+  // What the App asks for that waits on an admin, as the permissions API
+  // shows it to this person: what it holds stays granted, whichever
+  // version runs.
+  const requested = await permissionsOpenTo(
+    env,
+    by,
+    { type: "app", appId: found.id },
+    "requested"
+  );
   return {
     server,
     plan,
@@ -491,14 +457,6 @@ export const reviewDraft = async (
     })),
     ...manifest,
     permissions: requested,
-    grants: held.map((permission) => ({
-      permission,
-      askedAgain: askedAgainBy(by, permission),
-    })),
-    callers: callers.map((permission) => ({
-      permission,
-      askedAgain: askedAgainBy(by, permission),
-    })),
   };
 };
 
@@ -524,7 +482,7 @@ export const reviewChanges = async (
   );
   const [review, next] = await Promise.all([
     reviewDraft(env, by, found, draft),
-    nextLabel(env, id, new Date()),
+    nextLabel(env, { kind: "app", id }, new Date()),
   ]);
   return {
     ...review,
@@ -584,6 +542,54 @@ export const draftDataModel = async (
     plan: definitionPlan(held.before, held.own),
     uses: await indexUses(env, found.id, held.files),
   };
+};
+
+/** A person's write of an App's draft (`AppsApi.editDraft`). */
+const appDraftEditSchema = z.strictObject({
+  revision: z.int().min(0),
+  changes: fileChangesSchema,
+  definition: z.json().optional(),
+});
+
+/**
+ * Writes `input` (`appDraftEditSchema`) into App `app`'s draft for `by`,
+ * one of its builders, over the revision they read (`draft.conflict`
+ * otherwise), as their own checkpoint, refused as a chat's agent's write
+ * is (agent-builds.ts, `saveDraftChanges`): its changes, TypeScript fixed
+ * and formatted as the lint does safely, with its definition whole when
+ * given (`givenDefinition`).
+ * Answers the draft as saved.
+ */
+export const editAppDraft = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  input: unknown
+): Promise<Draft> => {
+  const found = await editableApp(env, by, app);
+  const { revision, changes, definition } = appErrors.parse(
+    "app.invalid",
+    appDraftEditSchema,
+    input
+  );
+  const draft = await draftOf(env, appKind, found.id);
+  if (draft.revision !== revision) {
+    throw draftErrors.create("draft.conflict");
+  }
+  await saveDraftChanges(
+    env,
+    { by, detail: { files: Object.keys(changes).length } },
+    found,
+    {
+      draft,
+      files: await filesOf(env, appKind, found.id, draft),
+      changes,
+      ...(definition === undefined
+        ? {}
+        : { definition: givenDefinition(definition) }),
+    }
+  );
+  return await draftSummary(env, appKind, found.id);
 };
 
 /**

@@ -2,7 +2,6 @@ import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import type { AppRelease, FileDiff } from "@grasp-os/shared/apps";
 import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { Subject } from "@grasp-os/shared/subject";
 import {
@@ -35,7 +34,6 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
@@ -101,10 +99,6 @@ const VersionName = ({ version }: { version: Version }) =>
   ) : (
     <span className="font-mono">{version.label}</span>
   );
-
-/** A version's note, in its author's words: an App's alone has one. */
-const messageOf = (version: Version): string | null =>
-  version.kind === "app" ? version.message : null;
 
 /**
  * The version `version` was made from, to compare it with: an App's
@@ -512,17 +506,10 @@ const MoveTitle = ({
 };
 
 /**
- * What a move does: an App's pages and workflows run on it, and its
- * permissions are asked for again for anyone but an admin; a workflow's
+ * What a move does: an App's pages and workflows run on it; a workflow's
  * triggers start it, while runs going keep their version.
  */
-const MoveText = ({
-  kind,
-  admin,
-}: {
-  kind: Subject["kind"];
-  admin: boolean;
-}) => {
+const MoveText = ({ kind }: { kind: Subject["kind"] }) => {
   if (kind === "workflow") {
     return (
       <Trans>
@@ -532,21 +519,10 @@ const MoveText = ({
     );
   }
   return (
-    <>
-      <Trans>
-        Its pages and workflows run on it from now on. Grasp checks and builds
-        it first.
-      </Trans>
-      {admin ? null : (
-        <>
-          {" "}
-          <Trans>
-            Its permissions on connections, to start workflows and to call other
-            Apps wait for an admin to grant them again.
-          </Trans>
-        </>
-      )}
-    </>
+    <Trans>
+      Its pages and workflows run on it from now on. Grasp checks and builds it
+      first.
+    </Trans>
   );
 };
 
@@ -554,13 +530,11 @@ const MoveText = ({
 const MoveDialog = ({
   kind,
   move,
-  admin,
   onConfirm,
   onOpenChange,
 }: {
   kind: Subject["kind"];
   move: AskedMove | null;
-  admin: boolean;
   onConfirm: (move: AskedMove) => void;
   onOpenChange: (open: boolean) => void;
 }) => {
@@ -583,7 +557,7 @@ const MoveDialog = ({
                 </strong>{" "}
               </>
             ) : null}
-            <MoveText admin={admin} kind={kind} />
+            <MoveText kind={kind} />
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -669,7 +643,6 @@ const VersionChanges = ({
               What <VersionName version={version} /> changed
             </Trans>
           </SheetTitle>
-          <SheetDescription>{messageOf(version)}</SheetDescription>
         </SheetHeader>
         <div className="overflow-y-auto px-4 pb-4">
           {read === undefined ? <LoadingLines lines={4} /> : null}
@@ -806,7 +779,6 @@ const VersionItem = ({
           ) : null}
           {release === undefined ? null : <ReleaseBadges release={release} />}
         </ItemTitle>
-        <ItemDescription>{messageOf(version)}</ItemDescription>
         {details}
         <span className="text-muted-foreground text-xs">
           {/* A version never live (the first of an App made from a
@@ -972,7 +944,6 @@ const VersionsView = ({
         </div>
       )}
       <MoveDialog
-        admin={isAdmin(identity.role)}
         kind={subject.kind}
         move={move}
         onConfirm={(confirmed) => {

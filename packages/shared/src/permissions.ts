@@ -568,11 +568,7 @@ export interface Permission {
   /** User IDs, and when (ISO 8601). */
   requestedBy: string;
   requestedAt: string;
-  /**
-   * Who granted it last, and when. On a requested permission, it was
-   * granted before and is asked for again (`drafts.publish`);
-   * only `status` says what it allows.
-   */
+  /** Who granted it, and when: only `status` says what it allows. */
   grantedBy: string | null;
   grantedAt: string | null;
   revokedBy: string | null;

@@ -70,9 +70,9 @@ import type { PublishSteps } from "./publish.ts";
 //   audited with its code (`internal.unexpected` for an error no code
 //   names), and is thrown as it came.
 // - Someone without the right: only the App's builders publish
-//   (`editableApp`, and again in `activateVersion` and `sealRelease`);
-//   made current by someone who couldn't grant the App's permissions, its
-//   version is unapproved until an admin approves (permissions.ts).
+//   (`editableApp`, and again in `activateVersion` and `sealRelease`).
+//   What an admin granted the App stays granted, whichever version runs;
+//   new access a version declares waits for an admin (permissions.ts).
 // - A store another App's data is in, or a second store of its own: no
 //   request names a store. Sealing binds the App's one store, keyed by the
 //   App (data-stores.ts, `appStoreFor`), and a rollback to a published

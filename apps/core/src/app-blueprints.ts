@@ -415,10 +415,8 @@ export const markBlueprint = async (
         definition: definitionText(definition),
         appId: found.id,
         version: row.version,
-        // A copy's first version is approved only when this one was
-        // (`madeCurrent`), so code no admin approved doesn't pass as
-        // approved in its copies.
-        approved: row.approved === 1,
+        // Unused (schema.ts): what an admin grants is the access.
+        approved: false,
         permissions: await declarableOf(env, found.id),
         markedBy: by.userId,
         markedAt: new Date(),
@@ -598,12 +596,11 @@ export const createFromBlueprint = async (
     definitionHash: tree.definition.hash,
     files: files.size,
     authorId: by.userId,
-    message: `Created from the blueprint ${blueprint.name}.`,
+    // Unused (schema.ts).
+    message: "",
     createdAt: now,
-    // The blueprint's code, which its requests came with: approved
-    // (`madeCurrent`) only when an admin approved it, unlike a version its
-    // builder commits; otherwise approved as any version is.
-    approved: blueprint.approved ? 1 : null,
+    // Unused (schema.ts): what an admin grants is the access.
+    approved: null,
     pages: hasPages(files),
     proposedBy: null,
     label: null,
@@ -1090,7 +1087,8 @@ export const acceptBlueprintUpdate = async (
     definitionHash: tree.definition.hash,
     files: files.size,
     authorId: by.userId,
-    message: `Updated from the blueprint ${blueprint.name}.`,
+    // Unused (schema.ts).
+    message: "",
     createdAt: new Date(),
     approved: null,
     pages: hasPages(files),
@@ -1230,7 +1228,7 @@ export const installBuiltinBlueprint = async (
               definition: definition.text,
               appId: null,
               version: null,
-              approved: true,
+              approved: false,
               permissions: declared,
               workflows: shipped,
               markedBy: null,

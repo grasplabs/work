@@ -195,19 +195,17 @@ const invokerSql = (run: CallingRun): SQL => {
             AND live.workflow_resource_id = ${run.workflowId})
         AND EXISTS (SELECT 1 FROM permissions WHERE ${allowingPermissionSql(
           { type: "trigger", triggerId: trigger.data },
-          undefined,
           object,
           "start"
         )}))`;
     }
     case "app": {
       const app = appIdSchema.safeParse(invoker.id);
-      if (!app.success || invoker.appVersion === null) {
+      if (!app.success) {
         return sql`0`;
       }
       return sql`EXISTS (SELECT 1 FROM permissions WHERE ${allowingPermissionSql(
         { type: "app", appId: app.data },
-        invoker.appVersion,
         object,
         "start"
       )})`;

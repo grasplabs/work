@@ -204,22 +204,6 @@ const permissionText = (permission: Permission, i18n: I18n): string => {
   return i18n._(msg`${what}, as ${binding} in its code: ${actions}`);
 };
 
-/**
- * A workflow's grant to call one of the App's functions, in a line: the
- * workflow's name and the function's path, where core gives them.
- */
-const callerText = (permission: Permission, i18n: I18n): string => {
-  const { subject, object, workflowNames, functionName } = permission;
-  const workflow =
-    subject.type === "workflow"
-      ? (workflowNames?.[subject.workflowId] ?? subject.workflowId)
-      : "";
-  const path =
-    functionName ??
-    (object.type === "app" ? (object.function ?? object.appId) : "");
-  return i18n._(msg`${workflow} calls ${path}`);
-};
-
 /** Lines of access, each with its icon. */
 const AccessLines = ({ lines }: { lines: { key: string; text: string }[] }) => (
   <ItemGroup render={<ul />} spacing="tight">
@@ -319,26 +303,13 @@ export const AccessChanges = ({
 }: {
   changes: Pick<
     AppReview,
-    | "permissions"
-    | "grants"
-    | "callers"
-    | "readsPeople"
-    | "handsFilesToWorkflows"
-    | "rowRules"
+    "permissions" | "readsPeople" | "handsFilesToWorkflows" | "rowRules"
   >;
 }) => {
   const { i18n } = useLingui();
-  const askedAgain = changes.grants.filter((grant) => grant.askedAgain);
-  // The workflows that call the App trust its code as its own grants do:
-  // publishing asks an admin for those grants again likewise.
-  const callersAskedAgain = changes.callers.filter(
-    (caller) => caller.askedAgain
-  );
   // What core can't read, it can't rule out: only false is nothing new.
   const nothing =
     changes.permissions.length === 0 &&
-    askedAgain.length === 0 &&
-    callersAskedAgain.length === 0 &&
     changes.readsPeople === false &&
     changes.handsFilesToWorkflows === false &&
     changes.rowRules !== null;
@@ -358,37 +329,6 @@ export const AccessChanges = ({
             lines={changes.permissions.map((permission) => ({
               key: permission.id,
               text: permissionText(permission, i18n),
-            }))}
-          />
-        </div>
-      )}
-      {askedAgain.length === 0 ? null : (
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            <Trans>
-              Works again once an admin grants it again for the new version
-            </Trans>
-          </span>
-          <AccessLines
-            lines={askedAgain.map(({ permission }) => ({
-              key: permission.id,
-              text: permissionText(permission, i18n),
-            }))}
-          />
-        </div>
-      )}
-      {callersAskedAgain.length === 0 ? null : (
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            <Trans>
-              Workflows that call it again once an admin grants it again for the
-              new version
-            </Trans>
-          </span>
-          <AccessLines
-            lines={callersAskedAgain.map(({ permission }) => ({
-              key: permission.id,
-              text: callerText(permission, i18n),
             }))}
           />
         </div>

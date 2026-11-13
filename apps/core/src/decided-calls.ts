@@ -50,8 +50,7 @@ export const refusedForBinding = (error: unknown): boolean =>
 
 /**
  * The capability carrying `decision` on `call`, for `identity`, the person
- * it acts for: refused (`permission.denied`) for an App's call that names
- * no approved version, or once its permission, context or resource
+ * it acts for: refused (`permission.denied`) once its permission, context or resource
  * binding no longer allows it, as `signedCall` and `requireHeldBinding`
  * would refuse the call itself now.
  */

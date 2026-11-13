@@ -972,8 +972,9 @@ export const blueprints = sqliteTable(
     appId: text("app_id").references(() => apps.id),
     version: integer(),
     /**
-     * Whether an admin approved its code: a copy's first version is
-     * approved only then (`madeCurrent`).
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written false. Dropped in a later release
+     * (expand, then contract).
      */
     approved: integer({ mode: "boolean" }).notNull(),
     /**
@@ -1065,15 +1066,17 @@ export const appVersions = sqliteTable(
     definitionHash: text("definition_hash"),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
+    /**
+     * Unused since every version is a published draft, which says nothing
+     * of its own: written empty. Dropped in a later release (expand, then
+     * contract).
+     */
     message: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     /**
-     * Whether an admin approved this version's code for the App's
-     * permissions to change things with (permissions.ts, `authorize`): 1
-     * once an admin made it current or granted a permission while it was,
-     * or it is an App's first version copied from a blueprint; 0 once
-     * someone who couldn't grant made it current, until then. Null for one
-     * never made current, which never runs.
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written null. Dropped in a later release
+     * (expand, then contract).
      */
     approved: integer(),
     /**
