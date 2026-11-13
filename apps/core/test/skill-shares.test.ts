@@ -1310,11 +1310,12 @@ describe("sharing a skill with a team", setUpTime, () => {
   });
 
   it("lists every team's skill in use to an admin outside the team, from core's decisions, and lets them retire it for its members alone, audited by its team and name", async () => {
-    const [author, admin] = await Promise.all([
+    const [author, admin, mate] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
     ]);
-    const team = await newTeam(author.userId);
+    const team = await newTeam(author.userId, mate.userId);
     const name = nameOf("book-travel");
     const saved = await author.api.skills.save(skillText(name, "Book it"));
     const forCompany = await author.api.skills.share(
@@ -1336,14 +1337,23 @@ describe("sharing a skill with a team", setUpTime, () => {
       admin: await listedFor(admin.api),
       author: await listedFor(author.api),
     };
+    /** Whether the author's team share is in use, as their page says. */
+    const inUse = async () => {
+      const { shares } = await overviewOf(author.api);
+      return shares.find(({ id }) => id === forTeam.id)?.inUse;
+    };
+    // Out of the team now: their page still says, from core's records.
+    await leaveTeam(team, author.userId);
+    const inUseBefore = await inUse();
     const head = await logHead();
     await admin.api.skills.retire(name, { team });
     const { events } = await eventsAfterWithHead(head);
 
     expect({
       listed,
+      inUse: [inUseBefore, await inUse()],
       afterRetiring: await listedFor(admin.api),
-      given: await usable(author.userId, false, [name]),
+      given: await usable(mate.userId, false, [name]),
       events: events
         .filter(({ action }) => action.startsWith("skill."))
         .map(({ action, target }) => [action, target?.type, target?.id]),
@@ -1353,8 +1363,9 @@ describe("sharing a skill with a team", setUpTime, () => {
         admin: [{ team: { id: team, name: `Team ${team}` }, name, version: 1 }],
         author: null,
       },
+      inUse: [true, false],
       afterRetiring: [],
-      // Theirs again is the company's: the team's is retired.
+      // A team-mate's is the company's again: the team's is retired.
       given: [["company", name]],
       events: [
         ["skill.retired", "team_skill", `${team}:${name}`],

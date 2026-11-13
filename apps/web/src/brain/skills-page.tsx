@@ -534,16 +534,6 @@ const ShareRequest = ({
   );
 };
 
-/** Whether `share`'s audience has a skill of its name now, as the page lists them. */
-const isLive = (data: SkillsOverview, share: SkillShare): boolean => {
-  const { audience, name } = share;
-  return audience.kind === "company"
-    ? data.company.some((skill) => skill.name === name)
-    : data.team.some(
-        (skill) => skill.name === name && skill.team.id === audience.team.id
-      );
-};
-
 /** One of the person's teams' skills, as their agents use it. */
 const TeamSkill = ({ skill }: { skill: ListedTeamSkill }) => {
   const { name, version } = skill;
@@ -675,7 +665,7 @@ const AskedShares = ({ data }: { data: SkillsOverview | undefined }) => {
                 </span>
               </ItemContent>
               <ItemActions>
-                <ShareStatus live={isLive(data, share)} share={share} />
+                <ShareStatus live={share.inUse} share={share} />
               </ItemActions>
             </Item>
           </li>

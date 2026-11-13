@@ -91,6 +91,7 @@ const shareOf = (
   version: null,
   superseded: false,
   outdated: false,
+  inUse: false,
 });
 
 /** Shows the page on a faked core, as an admin or not, refusing saves with `refusal`. */
@@ -401,10 +402,9 @@ describe("the skills page", () => {
     });
     await shown({
       admin: false,
-      company: ["added"],
       existing: [
         at("waiting", "pending", null),
-        at("added", "approved", 3),
+        { ...at("added", "approved", 3), inUse: true },
         at("stuck", "approved", null),
         at("overtaken", "approved", null, true),
         at("refused", "declined", null),

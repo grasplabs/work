@@ -422,7 +422,7 @@ export const skillsOverview = async (
         .where(decidable())
         .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
     : null;
-  const decided = requests === null ? [] : await decidedLive(env);
+  const decided = await decidedLive(env);
   const live = new Set(
     decided.map(({ audience, name }) => `${audience} ${name}`)
   );
@@ -448,15 +448,20 @@ export const skillsOverview = async (
     if (share === undefined) {
       return [];
     }
+    const inUse = live.has(`${row.audience} ${row.name}`);
     if (row.status !== "pending" || row.text === null) {
-      return [{ ...share, outdated: false }];
+      return [{ ...share, outdated: false, inUse }];
     }
     const current = await readCurrentSkillAs(env, by.userId, {
       scope: "person",
       name: row.name,
     });
     return [
-      { ...share, outdated: current !== null && current.text !== row.text },
+      {
+        ...share,
+        outdated: current !== null && current.text !== row.text,
+        inUse,
+      },
     ];
   };
   const asked = await Promise.all(shares.map(ownOf));

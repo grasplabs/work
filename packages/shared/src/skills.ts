@@ -81,6 +81,12 @@ export interface OwnSkillShare extends SkillShare {
    * saved a newer version since asking, so asking again shares that one.
    */
   outdated: boolean;
+  /**
+   * Whether its audience has a skill of its name in use now, as core's
+   * decisions have it (its own or a later one), whether or not the person
+   * is still in that audience.
+   */
+  inUse: boolean;
 }
 
 /** A share waiting for an admin, with the exact text an approval adds. */
