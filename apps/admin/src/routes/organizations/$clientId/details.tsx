@@ -10,7 +10,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { MailIcon } from "lucide-react";
+import { MailIcon, UserIcon } from "lucide-react";
 
 import { AttioLink } from "../../../admin/attio-link.tsx";
 import { OrgContract } from "../../../admin/org-contract.tsx";
@@ -98,10 +98,13 @@ const Contacts = () => {
                     <AvatarFallback>{initialsOf(contact.name)}</AvatarFallback>
                   </Avatar>
                 ) : (
+                  // Nobody yet: a quiet place for a person, never an outline that reads as something that failed to load.
                   <span
                     aria-hidden
-                    className="size-8 flex-none rounded-full border border-dashed"
-                  />
+                    className="bg-muted text-muted-foreground flex size-8 flex-none items-center justify-center rounded-full"
+                  >
+                    <UserIcon className="size-4" />
+                  </span>
                 )}
                 <div className="flex min-w-0 flex-col">
                   <span className="text-muted-foreground text-xs">{label}</span>
@@ -129,7 +132,7 @@ const Contacts = () => {
                     />
                   }
                   size="icon-sm"
-                  variant="ghost"
+                  variant="outline"
                 >
                   <MailIcon />
                 </Button>

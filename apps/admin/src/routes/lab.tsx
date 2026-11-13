@@ -28,9 +28,12 @@ const isChannel = (value: unknown): value is Channel =>
 const Switches = ({ search }: { search: LabSearch }) => {
   const navigate = useNavigate({ from: Route.fullPath });
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-3">
       <ToggleGroup
         aria-label="Which channel"
+        size="sm"
+        spacing={0}
+        variant="outline"
         onValueChange={(value: string[]) => {
           const where = value.find(isChannel);
           void navigate({
@@ -46,6 +49,9 @@ const Switches = ({ search }: { search: LabSearch }) => {
       </ToggleGroup>
       <ToggleGroup
         aria-label="Whose numbers"
+        size="sm"
+        spacing={0}
+        variant="outline"
         onValueChange={(value: string[]) => {
           void navigate({
             search: {

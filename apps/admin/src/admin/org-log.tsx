@@ -61,6 +61,7 @@ import {
 import { useState } from "react";
 
 import { actorWords, logLine, topicWords } from "./log-words.ts";
+import { Attention } from "./parts.tsx";
 import { Section } from "./section.tsx";
 import { formatDate } from "./words.ts";
 
@@ -500,13 +501,8 @@ export const OrgLog = ({
                   </span>
                   {item.at === null ? "" : timeOf(item.at)}
                 </span>
-                <span
-                  className={cn(
-                    "min-w-0 flex-1",
-                    item.problem && "text-status-attention"
-                  )}
-                >
-                  {text}
+                <span className="min-w-0 flex-1">
+                  {item.problem ? <Attention>{text}</Attention> : text}
                 </span>
                 <span className="text-muted-foreground hidden w-48 flex-none truncate text-right text-xs @2xl:block">
                   {item.actor === "person" && item.person !== undefined
@@ -525,7 +521,7 @@ export const OrgLog = ({
                 setLimit(limit + page);
               }}
               size="sm"
-              variant="ghost"
+              variant="outline"
             >
               Show more
             </Button>
