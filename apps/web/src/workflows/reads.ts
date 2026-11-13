@@ -93,6 +93,6 @@ export const workflowVersions = async (
     id: workflow,
   });
   return versions.filter(
-    (version): version is WorkflowResourceVersion => "resourceId" in version
+    (version): version is WorkflowResourceVersion => version.kind === "workflow"
   );
 };

@@ -809,6 +809,8 @@ export interface WorkflowVersionBuild {
 
 /** One published version of a workflow. */
 export interface WorkflowResourceVersion {
+  /** What it is a version of, as drafts and versions name it. */
+  kind: "workflow";
   resourceId: string;
   version: number;
   /**

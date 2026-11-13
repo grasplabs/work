@@ -186,6 +186,7 @@ const shown = async (
     list: async () =>
       await Promise.resolve(
         [2, 1].map((version) => ({
+          kind: "workflow",
           resourceId: "workflow-1",
           version,
           label: `26.11.${version}`,

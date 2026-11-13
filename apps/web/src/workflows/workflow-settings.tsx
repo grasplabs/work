@@ -316,7 +316,7 @@ const SectionBody = ({
         <DraftHistory
           builds={builder && !identity.staff}
           renderDetails={(version) =>
-            "resourceId" in version ? (
+            version.kind === "workflow" ? (
               <VersionDetails version={version} />
             ) : null
           }

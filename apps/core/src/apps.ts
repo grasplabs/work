@@ -214,6 +214,7 @@ export const toApp = (row: AppRow): App => ({
 });
 
 export const toVersion = (row: VersionRow): AppVersion => ({
+  kind: "app",
   app: appIdSchema.parse(row.appId),
   version: row.version,
   label: row.label,

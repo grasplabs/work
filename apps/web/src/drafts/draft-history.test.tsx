@@ -34,6 +34,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const appId = appIdSchema.parse("app-1");
 
 const versionOf = (number: number): AppVersion => ({
+  kind: "app",
   app: appId,
   version: number,
   label: `26.10.${number}`,

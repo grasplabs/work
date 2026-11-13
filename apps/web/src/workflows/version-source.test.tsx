@@ -37,6 +37,7 @@ const settled = async (): Promise<void> => {
 
 /** A published version, as `versions` lists it, with only what the tab reads. */
 const published = (version: number): WorkflowResourceVersion => ({
+  kind: "workflow",
   resourceId: "workflow-1",
   version,
   contractVersion: `1.${version}.0`,

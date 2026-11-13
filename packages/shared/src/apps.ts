@@ -233,6 +233,8 @@ export interface AppIntegrationsApi {
 
 /** One committed version of an App. */
 export interface AppVersion {
+  /** What it is a version of, as drafts and versions name it. */
+  kind: "app";
   app: AppId;
   /** Its ID within the App, counting up from 1. */
   version: number;

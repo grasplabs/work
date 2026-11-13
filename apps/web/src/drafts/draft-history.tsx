@@ -104,14 +104,14 @@ const VersionName = ({ version }: { version: Version }) =>
 
 /** A version's note, in its author's words: an App's alone has one. */
 const messageOf = (version: Version): string | null =>
-  "app" in version ? version.message : null;
+  version.kind === "app" ? version.message : null;
 
 /**
  * The version `version` was made from, to compare it with: an App's
  * parent, or a workflow's version before it; none for a first.
  */
 const parentOf = (version: Version): number | null => {
-  if ("app" in version) {
+  if (version.kind === "app") {
     return version.parent;
   }
   return version.version > 1 ? version.version - 1 : null;

@@ -1448,6 +1448,7 @@ const versionOf = async (
   const refused = formatRefusalOf(row);
   if (refused !== undefined) {
     return {
+      kind: "workflow",
       resourceId: row.workflowResourceId,
       version: row.version,
       contractVersion: row.contractVersion,
@@ -1471,6 +1472,7 @@ const versionOf = async (
     await versionTasksOf(env, row, sealedBindings)
   );
   return {
+    kind: "workflow",
     resourceId: row.workflowResourceId,
     version: row.version,
     contractVersion: row.contractVersion,
@@ -1727,6 +1729,7 @@ const buildVersion = async (
     throw error;
   }
   return {
+    kind: "workflow",
     resourceId: workflow.id,
     version,
     contractVersion,

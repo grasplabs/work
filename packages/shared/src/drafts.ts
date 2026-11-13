@@ -143,9 +143,9 @@ export interface DraftsApi {
 }
 
 /**
- * A subject's version, as its kind has it: an App's (`app`) or a
- * workflow's (`resourceId`). Not narrowed by the subject's kind in the
- * API's types: a generic method's types don't survive an RPC stub.
+ * A subject's version, as its kind has it: an App's or a workflow's, told
+ * apart by its `kind`. Not narrowed by the subject's kind in the API's
+ * types: a generic method's types don't survive an RPC stub.
  */
 export type Version = AppVersion | WorkflowResourceVersion;
 

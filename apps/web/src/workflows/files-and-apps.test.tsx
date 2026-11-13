@@ -60,6 +60,7 @@ const waiting: PendingWorkflowBindings["bindings"] = [
 
 /** Version 2, which declares `approval` and `crm` as catalog bindings. */
 const versionTwo: WorkflowResourceVersion = {
+  kind: "workflow",
   resourceId: workflow,
   version: 2,
   contractVersion: "1.0.0",
