@@ -1357,8 +1357,8 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
     await add(own(who), "A source to embed", theirs(who));
   },
   // Their own export: written by the queue, a part a run.
-  startOwnExport: async () => {
-    await own().startOwnExport({ person, deployment: "test" });
+  startOwnExport: async (who) => {
+    await own(who).startOwnExport({ person: who, deployment: "test" });
   },
   // Failed: its file is noted before it is written, and nothing holds it.
   addInstructions: async (who) => {
