@@ -50,7 +50,9 @@ const keptMs = 60 * 60 * 1000;
 /** How often the card is offered to one person: once a day. */
 const offerEveryMs = 24 * 60 * 60 * 1000;
 
-const keptKey = (userId: string): string => `connect-own:kept:${userId}`;
+// `asked`, not the `kept` an earlier build wrote: that build kept the
+// question from group chats too, so its records are never read.
+const keptKey = (userId: string): string => `connect-own:asked:${userId}`;
 const offeredKey = (userId: string): string => `connect-own:offered:${userId}`;
 
 /**

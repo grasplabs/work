@@ -144,7 +144,11 @@ const maxKeptChars = 4000;
 /** The web's sign-in page (apps/web/src/routes/sign-in.tsx). */
 const signInPath = "/sign-in";
 
-/** Where a newcomer's first question waits, by their object id. */
+/**
+ * Where a newcomer's first question waits, by their object id. Read only
+ * in their direct message (`keptIn`), so even one an earlier build kept
+ * from a group chat is answered to them alone.
+ */
 const keptKey = (oid: string): string => `door:teams:kept:${oid}`;
 
 /** How long the directory's word that it holds someone is taken. */
