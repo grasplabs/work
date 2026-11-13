@@ -1058,6 +1058,130 @@ export const personErasureSchema = z.strictObject({
 });
 export type PersonErasure = z.infer<typeof personErasureSchema>;
 
+/**
+ * What every refusal of the store starts with: a call refused for what it
+ * asked, never a fault. A host answers one as such (a conflict), not as an
+ * error of its own.
+ */
+export const refusalPrefix = "The Brain refused it:";
+
+/**
+ * What an add answers while a restore runs (restoring.ts): a refusal to
+ * make again shortly, once the restore is done, as a producer makes an add
+ * again after any failure.
+ */
+export const restoringNow = `${refusalPrefix} it is restoring an export, so it adds nothing until that is done: add it again shortly`;
+
+/**
+ * The keys of what is kept whole, never indexed: instruction files
+ * (`instructions:`) and skills (`skill:`, core's skills, #2198), both added
+ * with `addInstructions`. `addInstructions` takes only such keys and
+ * `addSource` none, so nothing kept whole is ever indexed, and nothing
+ * indexed is kept whole.
+ */
+export const wholeKeyPrefixes = ["instructions:", "skill:"] as const;
+
+/** Whether `source` is a key of what is kept whole (`wholeKeyPrefixes`). */
+export const isWholeKey = (source: string): boolean =>
+  wholeKeyPrefixes.some((prefix) => source.startsWith(prefix));
+
+/**
+ * The keys of Grasp's own skills, shipped with each release (core's
+ * `addShippedSkill`): never in an export, as each release adds them again.
+ */
+export const shippedSkillsPrefix = "skill:grasp:";
+
+/**
+ * The deployment an export is of, as the host names it: its manifest says
+ * so, and a restore refuses another deployment's export.
+ */
+export const deploymentSchema = wellFormedString().min(1).max(256);
+
+/** An export, by its id: random, made by the store. */
+export const exportIdSchema = z.uuid();
+
+/** An export to ask about. */
+export const exportRequestSchema = z.strictObject({
+  id: exportIdSchema,
+});
+export type ExportRequest = z.infer<typeof exportRequestSchema>;
+
+/**
+ * The name of part `index`'s file of an export (`jsonl`), or of what it
+ * holds (`holds.json`): its number in four digits at least, more past
+ * 9,999. The one rule of a part's name, for its writer and every reader
+ * (`exportPartOf`): nothing sorts parts by their names.
+ */
+export const exportPartNameOf = (
+  index: number,
+  kind: "jsonl" | "holds.json"
+): string => `part-${String(index).padStart(4, "0")}.${kind}`;
+
+const exportPartPattern =
+  /^part-(?<index>\d{4,})\.(?<kind>jsonl|holds\.json)$/u;
+
+/**
+ * The part a file's name says, and whether it is what the part holds:
+ * only for a name in the writer's own form (`exportPartNameOf`), so no two
+ * names are one part.
+ */
+export const exportPartOf = (
+  name: string
+): { index: number; holds: boolean } | undefined => {
+  const groups = exportPartPattern.exec(name)?.groups;
+  const kind = groups?.kind === "holds.json" ? "holds.json" : "jsonl";
+  const index = Number(groups?.index);
+  return groups !== undefined &&
+    Number.isSafeInteger(index) &&
+    exportPartNameOf(index, kind) === name
+    ? { index, holds: kind === "holds.json" }
+    : undefined;
+};
+
+/** An export's file a download asks for: its manifest, or one of its parts. */
+export const exportFileNameSchema = z
+  .string()
+  .max(64)
+  .refine(
+    (name) => name === "manifest.json" || exportPartOf(name)?.holds === false,
+    { message: "Not a file of an export" }
+  );
+
+/** A file of an export to read. */
+export const exportFileRequestSchema = exportRequestSchema.extend({
+  file: exportFileNameSchema,
+});
+export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
+
+/**
+ * Where an export is: being written; adopted by a restore that hasn't yet
+ * checked every part (`restoring`: served to no one); done, with its files (the manifest
+ * first); failed (a file it was to read was gone: its files deleted);
+ * erased, as the erasure ledger names a version it holds, and its files
+ * are deleted; or expired, replaced by a newer one of its scope, its files
+ * deleted. Start a new one.
+ */
+export interface ExportStatus {
+  id: string;
+  state: "writing" | "restoring" | "done" | "failed" | "erased" | "expired";
+  /** Versions written so far. */
+  versions: number;
+  /** Its files, once done: none before. */
+  files: string[];
+}
+
+/** Where a restore of a company export is, and how many versions it restored. */
+export interface RestoreStatus {
+  export: string;
+  /**
+   * Failed restores start again while the store holds nothing but what they
+   * wrote; abandoned once it took anything, or the ledger names what the
+   * export holds.
+   */
+  state: "running" | "done" | "failed" | "abandoned";
+  restored: number;
+}
+
 /** Most vectors one put takes. */
 export const vectorsPerPutMax = 256;
 
@@ -2257,6 +2381,39 @@ export interface Brain {
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
   /**
+   * Starts an export of the company's Brain for `deployment`, written by
+   * the queue a part a run as files in the store's part of the bucket
+   * (exports.ts): what the store holds as it starts, every version a group
+   * may read, with its readers, current or history. While one is being
+   * written, it answers with that one. A person's own store refuses.
+   */
+  startExport: (deployment: string) => Promise<{ id: string }>;
+  /** Where an export is: null when there is none. */
+  exportStatus: (request: ExportRequest) => Promise<ExportStatus | null>;
+  /**
+   * A file of a done export, as written: null for any other, alike, and
+   * for one the ledger made stale.
+   */
+  exportFile: (request: ExportFileRequest) => Promise<string | null>;
+  /**
+   * Starts restoring the company export `id` of `deployment` from the
+   * bucket into this shared store, which must hold no version: a part a
+   * run of the queue, every part checked against the manifest before any
+   * is written, and each version left out when the erasure ledger names
+   * it. Nothing is added to the store while it runs. Answers with the
+   * restore of that export when one was started already; a failed one
+   * starts again.
+   */
+  startRestore: (id: string, deployment: string) => Promise<RestoreStatus>;
+  /**
+   * Whether a restore of the company export `id` of `deployment` may start
+   * now, starting nothing: throws as `startRestore` refuses. So the host
+   * can prepare the store first.
+   */
+  checkRestore: (id: string, deployment: string) => Promise<void>;
+  /** Where the restore of export `id` is: null when none was started. */
+  restoreStatus: (id: string) => Promise<RestoreStatus | null>;
+  /**
    * Adds memories and the entities they name, in one transaction, all
    * readable by `access` (above). Each entity is the known `id` (as
    * `reader` may see it), else the first of its kind holding one of its
@@ -2302,11 +2459,13 @@ export interface Brain {
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
    * Retires one of the reader's own memories (its lineage is the reader's
-   * person, as writer) that they may read and that is current for them: it
-   * stops being current from now on, and stays as history. It no longer
-   * ends older memories, which may become current again. One already retired
-   * answers `done` again, so a retry never reads as not found; one ended
-   * otherwise, expired included, answers `nothing`, as one not theirs.
+   * person, as writer) that they may read and that is not retired: current,
+   * or ended by a newer one of theirs. It stops being current from now on,
+   * or can never become current again, and stays as history. It no longer
+   * ends older memories, which may become current again unless retired
+   * too. One already retired answers `done` again, so a retry never reads
+   * as not found; one outside its time (expired) answers `nothing`, as one
+   * not theirs.
    */
   retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
   /**

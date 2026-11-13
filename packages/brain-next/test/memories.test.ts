@@ -1740,6 +1740,51 @@ describe("pages, attributes, and a retired newer memory", () => {
     });
   });
 
+  // A writer's own memory a newer one of theirs ended can be retired too:
+  // it then never becomes current again, whatever happens to the newer one.
+  it("retires a writer's earlier memory a newer one ended, so retiring the newer one later brings nothing back", async () => {
+    const group = unique("g");
+    const writer = unique("w");
+    const made = await remember(
+      audience(group),
+      [{ key: "c", kind: "person" }],
+      [
+        fact(
+          { kind: "writer", writer },
+          { about: "c", attribute: "role", value: "A", statement: "Role A" }
+        ),
+      ]
+    );
+    const entity = made.entities.c ?? "";
+    const newer = await remember(
+      audience(group),
+      [{ key: "c", kind: "person", id: entity }],
+      [
+        fact(
+          { kind: "writer", writer },
+          { about: "c", attribute: "role", value: "B", statement: "Role B" }
+        ),
+      ]
+    );
+    const writerReader = readerOf(writer, group);
+    const retired = [
+      await shared().retireMemory({
+        memory: made.memories[0] ?? "",
+        reader: writerReader,
+      }),
+      await shared().retireMemory({
+        memory: newer.memories[0] ?? "",
+        reader: writerReader,
+      }),
+    ];
+
+    expect({
+      retired,
+      writer: await statementsAbout(entity, writerReader),
+      third: await statementsAbout(entity, readerOf(unique("third"), group)),
+    }).toStrictEqual({ retired: ["done", "done"], writer: [], third: [] });
+  });
+
   it("pages memories, contested facts and entities on their own order, one page after another, nothing skipped or repeated", async () => {
     const group = unique("g");
     const reader = readerOf(unique("r"), group);
@@ -2071,7 +2116,8 @@ describe("pages read at one moment, and what a start replays", () => {
     const person = unique("p");
     const group = unique("g");
     const theirs: Access = audience(group);
-    const doc = unique("doc");
+    // An instruction file's key: what addInstructions takes.
+    const doc = `instructions:${unique("doc")}`;
     await shared().addInstructions({
       source: doc,
       change: crypto.randomUUID(),

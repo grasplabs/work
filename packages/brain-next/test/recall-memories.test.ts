@@ -13,6 +13,7 @@ import type { Pack, Reader } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { foldName } from "../src/entities.ts";
 import { hubRelationsMax, stepsMax } from "../src/recall-memories.ts";
 import {
   audience,
@@ -692,14 +693,19 @@ const plainWalk = (planned: readonly Planned[], named: readonly string[]) => {
 const kindOf = (key: string) =>
   key.startsWith("c") ? ("customer" as const) : ("person" as const);
 
+/** The attribute a planned relation is filed under: a person's relation to themselves is `manager`. */
+const attributeOf = (about: string, object: string): string => {
+  if (about === object) {
+    return "manager";
+  }
+  return about.startsWith("c") ? "contact" : "owns";
+};
+
 /** A planned memory as the add takes it. */
 const toMemory = ({ about, object, statement }: Omit<Planned, "id">) =>
   object === undefined
     ? fact(about, statement)
-    : fact(about, statement, {
-        attribute: about.startsWith("c") ? "contact" : "owns",
-        object,
-      });
+    : fact(about, statement, { attribute: attributeOf(about, object), object });
 
 describe("recall through memories, against a plain walk", () => {
   // Seeded scenarios: people and customers, a hub, random relations and
@@ -751,6 +757,25 @@ describe("recall through memories, against a plain walk", () => {
           }
         }
         return made;
+      };
+      // A person related to themselves (GRA-1742: a relation is a memory
+      // about both its ends, here one): once a person, as `manager` holds
+      // one value.
+      const selfRelation = (add: number) => {
+        const person = people[draw(people.length)] ?? "p0";
+        if (pairs.has(`${person} ${person}`)) {
+          return [];
+        }
+        pairs.add(`${person} ${person}`);
+        return [
+          {
+            statement: `${names.get(person)} manages themselves ${add}`,
+            about: person,
+            object: person,
+            add,
+            visible: true,
+          },
+        ];
       };
       const randomFacts = (add: number, visible: boolean) =>
         [...people, ...customers]
@@ -806,6 +831,7 @@ describe("recall through memories, against a plain walk", () => {
             visible: true,
           })),
           ...randomRelations(10, 1, true),
+          ...selfRelation(1),
           ...randomFacts(1, true),
         ],
         seenGroup,
@@ -834,7 +860,11 @@ describe("recall through memories, against a plain walk", () => {
         false
       );
       await add(
-        [...randomRelations(5, 3, true), ...randomFacts(3, true)],
+        [
+          ...randomRelations(5, 3, true),
+          ...selfRelation(3),
+          ...randomFacts(3, true),
+        ],
         seenGroup,
         false
       );
@@ -857,6 +887,165 @@ describe("recall through memories, against a plain walk", () => {
           ({ step, statement }) => `${step}|${statement}`
         )
       ).toStrictEqual(plainWalk(planned, asked));
+    }
+  );
+});
+
+/** A CJK character of its own, by index. */
+const cjk = (index: number) => String.fromCodePoint(0x4e_00 + index);
+
+describe("recall through memories, long questions", () => {
+  // A question at the contract's 2,000 characters answers, whatever its
+  // words: what the question may name an entity by grows with its words,
+  // never with every run of them (review round 6 of #2209).
+
+  it.each([
+    [
+      "500 numbers",
+      (name: string) =>
+        `${name} ${Array.from({ length: 500 }, (_, index) => `${1000 + index}`).join(" ")}`,
+    ],
+    [
+      "short words",
+      (name: string) =>
+        `${name} ${Array.from(
+          { length: 700 },
+          (_, index) =>
+            `${["de", "het", "en", "ik", "je", "we", "op", "in", "is", "om"][index % 10]}${String.fromCodePoint(97 + (index % 26))}`
+        ).join(" ")}`,
+    ],
+    [
+      "1,000 spaced CJK characters",
+      (name: string) =>
+        `${name} ${Array.from({ length: 1000 }, (_, index) => cjk(index)).join(" ")}`,
+    ],
+    [
+      "667 CJK characters with commas",
+      (name: string) =>
+        `${name} ${Array.from({ length: 667 }, (_, index) => `${cjk(index)},`).join(" ")}`,
+    ],
+  ] as const)(
+    "answers a question of %s at 2,000 characters",
+    async (_shape, ask) => {
+      const group = unique("team");
+      const reader = readerOf(unique("ann"), group);
+      const name = word();
+      await remember(
+        audience(group),
+        [{ key: "a", kind: "person", names: [name] }],
+        [fact("a", `${name} keeps a note`)]
+      );
+      const question = ask(name).slice(0, 2000);
+      const pack = await recallAs(reader, question);
+
+      expect({
+        length: question.length,
+        found: statementsOf(pack).includes(`${name} keeps a note`),
+      }).toStrictEqual({ length: 2000, found: true });
+    }
+  );
+});
+
+/**
+ * Whether the question names `folded` (a folded name), written out
+ * plainly: the name, between spaces, is in the question's words folded
+ * as written or without the punctuation at either end of each word.
+ */
+const namesPlainly = (question: string, folded: string): boolean => {
+  const words = question.split(/\s+/u).filter((one) => one.length > 0);
+  const bare = words.map((one) =>
+    one.replaceAll(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "")
+  );
+  const written = ` ${foldName(words.join(" "))} `;
+  const stripped = ` ${foldName(bare.join(" "))} `;
+  return (
+    folded !== "" &&
+    (written.includes(` ${folded} `) || stripped.includes(` ${folded} `))
+  );
+};
+
+describe("recall through memories, the names a question holds", () => {
+  // The entities way finds the entities a question names by a seek on
+  // their names' first words; it must find exactly those the plain test
+  // above finds, over generated names and questions: accents, marks that
+  // fold into a space ("x´y" is "x y"), punctuation, scripts, case.
+  const tokens = [
+    "Anna",
+    "anna",
+    "O'Brien",
+    "Jean-Luc",
+    "Müller",
+    "Muller",
+    "Zoë",
+    "Straße",
+    "東京",
+    "東京タワー",
+    "(Acme)",
+    "Acme,",
+    "Inc.",
+    "e.g.",
+    "x´y",
+    "x",
+    "y",
+    "ﬁne",
+    "İstanbul",
+    "a",
+    "b",
+    "&",
+    "C++",
+    "'s",
+  ];
+
+  it.each([1, 2, 3, 4, 5])(
+    "finds exactly the names a question holds (seed %i)",
+    async (seed) => {
+      const draw = drawsOf(seed);
+      const pick = () => tokens[draw(tokens.length)] ?? "a";
+      const phrase = (most: number) =>
+        Array.from({ length: 1 + draw(most) }, pick).join(
+          draw(2) === 0 ? " " : "  "
+        );
+      const differences: string[] = [];
+      for (let round = 0; round < 12; round += 1) {
+        const group = unique("team");
+        const reader = readerOf(unique("ann"), group);
+        const question = phrase(8);
+        const names = [
+          ...Array.from({ length: 4 }, () => phrase(3)),
+          question.split(/\s+/u).slice(0, 2).join(" "),
+        ];
+        // oxlint-disable-next-line no-await-in-loop -- one scenario at a time
+        await remember(
+          audience(group),
+          names.map((name, index) => ({
+            key: `n${index}`,
+            kind: "customer" as const,
+            names: [name],
+          })),
+          names.map((_, index) => fact(`n${index}`, `name ${index}`))
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one scenario at a time
+        const finding = await shared().find({
+          question,
+          reader,
+          budget: { tokens: 20_000 },
+        });
+        const found = finding.memories.entities
+          .map(({ statement }) => statement)
+          .toSorted();
+        const expected = names
+          .flatMap((name, index) =>
+            namesPlainly(question, foldName(name)) ? [`name ${index}`] : []
+          )
+          .toSorted();
+        if (JSON.stringify(found) !== JSON.stringify(expected)) {
+          differences.push(
+            JSON.stringify({ question, names, found, expected })
+          );
+        }
+      }
+
+      expect(differences).toStrictEqual([]);
     }
   );
 });

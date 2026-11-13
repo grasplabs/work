@@ -110,18 +110,31 @@ const newerSql = (
   learned: string,
   valid: string,
   visible: boolean
-): string => `
-  SELECT ${startSql("newer")} AS at FROM memories AS newer
-  WHERE newer.entity = ${alias}.entity
-    AND newer.attribute = ${alias}.attribute
-    AND newer.lineage = ${alias}.lineage
-    AND (${alias}.one_value = 1 OR newer.value_key = ${alias}.value_key)
+): string => {
+  // Two seeks, one for each kind of attribute, never an OR between them:
+  // an OR kept `value_key` out of the index (`memories_lineage_value_idx`),
+  // so a memory of many values read every memory of its lineage.
+  const rest = `
     AND (newer.lineage_order > ${alias}.lineage_order
       OR (newer.lineage_order = ${alias}.lineage_order AND newer.row > ${alias}.row))
     AND newer.learned_at <= ${learned}
     AND ${startSql("newer")} <= ${valid}
     AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
     ${visible ? `AND ${visibleSql("newer")}` : ""}`;
+  return `
+  SELECT ${startSql("newer")} AS at FROM memories AS newer
+  WHERE ${alias}.one_value = 1
+    AND newer.entity = ${alias}.entity
+    AND newer.attribute = ${alias}.attribute
+    AND newer.lineage = ${alias}.lineage${rest}
+  UNION ALL
+  SELECT ${startSql("newer")} AS at FROM memories AS newer
+  WHERE ${alias}.one_value = 0
+    AND newer.entity = ${alias}.entity
+    AND newer.attribute = ${alias}.attribute
+    AND newer.lineage = ${alias}.lineage
+    AND newer.value_key = ${alias}.value_key${rest}`;
+};
 
 /**
  * The later versions of `alias`'s source marked fully extracted by `?4`,
@@ -775,12 +788,11 @@ export const confirmMemory = (
 
 /**
  * Retires the memory `id` if its lineage is the reader's person's own (as
- * writer), the reader may
- * read it, and it is current as they see it: not retired, in its world
- * time now, and no newer memory of its lineage that they may read ended
- * it by now, so one hidden from them neither blocks the retire nor shows.
- * One they already retired answers `done` again (contract.ts
- * `retireMemory`).
+ * writer), the reader may read it, it is not retired, and it is in its
+ * world time now: current, or ended by a newer memory of its lineage,
+ * which a person forgets as well, so it never becomes current again when
+ * the newer one is retired too. One they already retired answers `done`
+ * again (contract.ts `retireMemory`).
  */
 export const retireMemory = (
   sql: SqlStorage,
@@ -800,8 +812,7 @@ export const retireMemory = (
     WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
       AND (m.valid_from IS NULL OR m.valid_from <= ?5)
       AND (m.valid_until IS NULL OR m.valid_until > ?5)
-      AND ${visibleSql("m")}
-      AND NOT EXISTS (${newerSql("m", "?5", "?5", true)})`,
+      AND ${visibleSql("m")}`,
     ...asked,
     stamp
   );

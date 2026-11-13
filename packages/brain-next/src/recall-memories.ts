@@ -1,4 +1,4 @@
-import { recallLimit, valueMaxLength } from "./contract.ts";
+import { recallLimit } from "./contract.ts";
 import type { Finding, FoundMemory, Reader } from "./contract.ts";
 import { foldIdentifier, foldName } from "./entities.ts";
 import {
@@ -64,77 +64,100 @@ const edges = /^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu;
 /** Runs of white space. */
 const spaces = /\s+/u;
 
-/**
- * Every run of whole words of `words` (each folded already) whose name, its
- * words joined by one space, is no longer than a name may be
- * (`valueMaxLength`: the store refuses a longer folded name), each once.
- */
-const spansOf = (words: readonly string[]): Set<string> => {
-  const spans = new Set<string>();
-  for (let start = 0; start < words.length; start += 1) {
-    let span = "";
-    for (let end = start; end < words.length; end += 1) {
-      span = end === start ? (words[end] ?? "") : `${span} ${words[end]}`;
-      if (span.length > valueMaxLength) {
-        break;
-      }
-      if (span.length > 0) {
-        spans.add(span);
-      }
-    }
-  }
-  return spans;
-};
+/** What the question may name an entity by (`namedBy`). */
+interface Named {
+  /** Each word of the question as names are folded, as written and bare. */
+  words: string[];
+  /** The question's words as written, folded, between spaces. */
+  written: string;
+  /** The same without the punctuation at either end of each word. */
+  bare: string;
+  /** Its identifiers, each `[type, folded]`. */
+  identifiers: [string, string][];
+}
 
 /**
  * What the question may name an entity by, as names and identifiers are
- * compared (entities.ts): each run of its whole words, as written and
- * without the punctuation at either end of each word, folded as names
- * are; and each word as an email and as a reference. Each `[type,
- * folded]`, for the index of names to seek. No recogniser of names: an
- * entity is found only by a name or identifier a memory gave it, exactly.
+ * compared (entities.ts): its words folded as names are, as written and
+ * without the punctuation at either end of each word, each between spaces
+ * so a name is found only as whole words; the words of those two, which
+ * a name must begin with; and each word as an email and as a reference.
+ * No recogniser of names: an entity is found only by a name or identifier
+ * a memory gave it, exactly. Its size is the question's, which the
+ * contract bounds (`questionMaxLength`).
  */
-const namedBy = (question: string): [string, string][] => {
+const namedBy = (question: string): Named => {
   const words = question.split(spaces).filter((word) => word.length > 0);
   const bareWords = words.map((word) => word.replaceAll(edges, ""));
-  const asked = new Map<string, [string, string]>();
-  for (const variant of [words, bareWords]) {
-    for (const span of spansOf(
-      variant.map((word) => foldName(word)).filter((word) => word.length > 0)
-    )) {
-      asked.set(`name ${span}`, ["name", span]);
-    }
-  }
+  const written = foldName(words.join(" "));
+  const bare = foldName(bareWords.join(" "));
+  const identifiers = new Map<string, [string, string]>();
   for (const word of new Set([...words, ...bareWords])) {
     if (word.includes("@")) {
       const email = foldIdentifier({ type: "email", value: word });
-      asked.set(`email ${email}`, ["email", email]);
+      identifiers.set(`email ${email}`, ["email", email]);
     }
     if (word.includes(":")) {
-      asked.set(`ref ${word}`, ["ref", word]);
+      identifiers.set(`ref ${word}`, ["ref", word]);
     }
   }
-  return [...asked.values()];
+  return {
+    // A folded name's words are its spaces' pieces: every name the
+    // question holds begins with one of these.
+    words: [
+      ...new Set(
+        [...written.split(" "), ...bare.split(" ")].filter(
+          (word) => word.length > 0
+        )
+      ),
+    ],
+    written: ` ${written} `,
+    bare: ` ${bare} `,
+    identifiers: [...identifiers.values()],
+  };
 };
 
 /**
- * `?1` what the question may name an entity by (JSON, each `[type,
- * folded]`), `?4` the moment: the entities a memory the reader may read,
- * learned by then, gives one of those names or identifiers. Each is
- * sought in the index of names (`entity_names_folded_idx`), then each
- * name found is checked against the reader: never a scan of the names, so
- * names the reader may not read cost a seek that finds them, no more.
+ * `?1` the question's words (JSON), `?4` the moment, `?5` its words as
+ * written, folded, between spaces, `?6` the same bare, `?7` its
+ * identifiers (JSON, each `[type, folded]`): the entities a memory the
+ * reader may read, learned by then, gives a name the question holds as
+ * whole words, or one of its identifiers. A name is sought in the index of
+ * names (`entity_names_folded_idx`) by its first word: the names equal to
+ * a word of the question, and those beginning with one and a space; each
+ * found is kept only if the question holds it whole, then checked against
+ * the reader. Never a scan of the names: what it reads is a seek a word,
+ * and the names beginning with a word the question holds.
  */
 const namedSql = `
 WITH ${readableSql},
-asked AS MATERIALIZED (
-  SELECT value ->> 0 AS type, value ->> 1 AS folded FROM json_each(?1)
+asked AS MATERIALIZED (SELECT DISTINCT value AS word FROM json_each(?1)),
+named AS MATERIALIZED (
+  SELECT entity_names.entity AS entity, entity_names.memory AS memory,
+    entity_names.folded AS folded
+  FROM asked CROSS JOIN entity_names
+    ON entity_names.type = 'name' AND entity_names.folded = asked.word
+  UNION ALL
+  SELECT entity_names.entity, entity_names.memory, entity_names.folded
+  FROM asked CROSS JOIN entity_names
+    ON entity_names.type = 'name'
+    AND entity_names.folded > asked.word || ' '
+    AND entity_names.folded < asked.word || ' ' || char(1114111)
+),
+held AS MATERIALIZED (
+  SELECT entity, memory FROM named
+  WHERE instr(?5, ' ' || folded || ' ') > 0
+    OR instr(?6, ' ' || folded || ' ') > 0
+  UNION ALL
+  SELECT entity_names.entity, entity_names.memory
+  FROM json_each(?7) AS identifier
+  CROSS JOIN entity_names
+    ON entity_names.type = identifier.value ->> 0
+    AND entity_names.folded = identifier.value ->> 1
 )
-SELECT DISTINCT entity_names.entity AS entity
-FROM asked
-CROSS JOIN entity_names
-  ON entity_names.type = asked.type AND entity_names.folded = asked.folded
-CROSS JOIN memories AS m ON m.row = entity_names.memory
+SELECT DISTINCT held.entity AS entity
+FROM held
+CROSS JOIN memories AS m ON m.row = held.memory
 WHERE m.learned_at <= ?4 AND ${visibleSql("m")}`;
 
 /**
@@ -162,7 +185,9 @@ SELECT asked.value AS entity, (
       AND ${currentRelationSql}
     UNION ALL
     SELECT 1 FROM memories AS m
-    WHERE m.object = asked.value AND ${currentRelationSql}
+    -- A relation of the entity to itself is counted once, above.
+    WHERE m.object = asked.value AND m.entity != asked.value
+      AND ${currentRelationSql}
     LIMIT ?5
   )
 ) AS relations
@@ -222,11 +247,11 @@ reached AS MATERIALIZED (
     UNION SELECT m.row FROM here CROSS JOIN reached
     CROSS JOIN memories AS m
       ON m.entity = here.entity AND m.object = reached.entity
-    WHERE here.whole = 0 AND reached.entity != here.entity
+    WHERE here.whole = 0
     UNION SELECT m.row FROM here CROSS JOIN reached
     CROSS JOIN memories AS m
       ON m.entity = reached.entity AND m.object = here.entity
-    WHERE here.whole = 0 AND reached.entity != here.entity`,
+    WHERE here.whole = 0`,
   filter: `judged.is_current = 1
     AND m.entity NOT IN (SELECT entity FROM before)
     AND (m.object IS NULL OR m.object NOT IN (SELECT entity FROM before))`,
@@ -308,13 +333,17 @@ const byEntities = (
   reader: Reader,
   at: number
 ): Reached[] => {
+  const asked = namedBy(question);
   const named = sql
     .exec<{ entity: number }>(
       namedSql,
-      JSON.stringify(namedBy(question)),
+      JSON.stringify(asked.words),
       reader.person,
       JSON.stringify(reader.groups),
-      at
+      at,
+      asked.written,
+      asked.bare,
+      JSON.stringify(asked.identifiers)
     )
     .toArray();
   if (named.length === 0) {

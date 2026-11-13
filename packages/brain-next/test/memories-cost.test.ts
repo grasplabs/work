@@ -262,12 +262,14 @@ describe("what reading memories costs", () => {
     // Adding 20,000 memories, a hundred an add, takes its time.
   }, 120_000);
 
-  // A hub the walk reaches: its relations pointing at it (`in`, reached a
-  // step on, where its relations are counted) and from it (`out`, reached
-  // two steps on, where none are), read a page of, never whole: the rows a
-  // walk reads with 100 of them and with 5,000 are the same.
+  // A hub the walk reaches: its relations pointing at it (`in`) or from it
+  // (`out`, one writer's, each a value of one attribute), a step on (where
+  // its relations are counted) and, out, two steps on (where they are
+  // not), read a page of, never whole: the rows a walk reads with 100 of
+  // them and with 5,000 are the same.
   it.each([
     ["in", 1],
+    ["out", 1],
     ["out", 2],
   ] as const)(
     "reads a hub's relations (%s, step %i) by seek, never whole",
@@ -291,7 +293,8 @@ describe("what reading memories costs", () => {
         step === 1
           ? [
               fact("a", `${name} uses the hub`, {
-                attribute: "owns",
+                // A person's relation to a person (the out hub) is `manager`.
+                attribute: direction === "in" ? "owns" : "manager",
                 object: "h",
               }),
               fact("h", "The hub is big"),

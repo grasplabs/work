@@ -2,21 +2,35 @@ import { packAcross, sourcesAcross } from "@grasp-os/brain-next/across";
 import {
   brainOf,
   currentReadMax,
+  entityAttributes,
+  entityIdSchema,
+  entityKinds,
   fitsSourceText,
   erasedSource,
   listPageMax,
   erasureReasons,
+  exportFileNameSchema,
+  exportIdSchema,
   handOversMax,
+  identifierSchema,
   instructionsMaxLength,
   instructionsTextSchema,
   isOverInstructionsLimit,
+  memoryIdSchema,
+  memoryTypes,
+  namesPerEntityMax,
   isStillDeleting,
   principalMaxLength,
+  quoteMaxLength,
   questionMaxLength,
   sourceIdMaxLength,
+  statementMaxLength,
+  valueMaxLength,
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
+  refusalPrefix,
+  restoringNow,
   personalBrainOf,
   storeBytesMax,
   storeKindOf,
@@ -24,30 +38,39 @@ import {
 import type {
   Access,
   AskModel,
+  AttributeRule,
   Brain,
   ErasureReason,
   Embedders,
+  EntityKind,
+  EntityNamesCursor,
+  Identifier,
+  EntityId,
+  Memory,
+  MemoriesCursor,
+  MemoryChangeOutcome,
+  MemoryId,
+  ExportStatus,
   KeyState,
   HandOverPriority,
   HandOverResult,
   HandOvers,
   ModelReply,
   Card,
-  EntityId,
-  MemoriesCursor,
-  Memory,
   Pack,
   PackItem,
   PackMemory,
   ProposalPage,
   Reader,
   RecallRequest,
+  RestoreStatus,
   SourceId,
   StepFailure,
   WayCounts,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
 import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
+import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import {
   brainReportSchema,
   brainSearchWays,
@@ -111,6 +134,22 @@ import type { SkillCardText } from "./skill-cards.ts";
 // a source nobody can reach would be added without a word. Every string is
 // well-formed (the Brain's own rule, `wellFormedString`), so no two become
 // one once encoded.
+
+/**
+ * `add`, its refusal while the Brain restores an export (contract.ts
+ * `restoringNow`) answered as `brain.restoring`: a code a producer makes
+ * the add again for, later, as after any failure of an add.
+ */
+const whileNotRestoring = async <T>(add: () => Promise<T>): Promise<T> => {
+  try {
+    return await add();
+  } catch (error) {
+    if (error instanceof Error && error.message === restoringNow) {
+      throw brainExportErrors.create("brain.restoring");
+    }
+    throw error;
+  }
+};
 
 /** A team's group name starts with this; the rest is the team's ID. */
 const teamPrefix = "team:";
@@ -519,12 +558,15 @@ export const addSource = async (
   const key = sourceKeyOf(source);
   let version: number;
   try {
-    ({ version } = await keptIn(
-      env,
-      key,
-      access,
-      async (store) =>
-        await store.addSource({ source: key, change, text, access })
+    ({ version } = await whileNotRestoring(
+      async () =>
+        await keptIn(
+          env,
+          key,
+          access,
+          async (store) =>
+            await store.addSource({ source: key, change, text, access })
+        )
     ));
   } catch (error) {
     // The Brain's own refusals of what an erasure closed, by their whole
@@ -639,8 +681,6 @@ export const recallAs = async (
     truncated,
   };
 };
-
-const entityIdSchema = z.uuid();
 
 /**
  * The card of the entity `entity` as the member `personId` may see it,
@@ -971,6 +1011,116 @@ export const erasePerson = async (
   return "erased";
 };
 
+// Exports and restores (@grasp-os/brain-next exports.ts, restore.ts): the
+// company's Brain, for an admin; core's route checks who asks
+// (brain-next-exports.ts). A person's own export is for later, with the
+// store per person.
+
+const exportRefSchema = z.strictObject({ id: exportIdSchema });
+
+/** An export, by its id. */
+export type ExportRef = z.infer<typeof exportRefSchema>;
+
+const exportFileRefSchema = exportRefSchema.extend({
+  file: exportFileNameSchema,
+});
+
+/** A file of an export, by its id and name. */
+export type ExportFileRef = z.infer<typeof exportFileRefSchema>;
+
+type ExportEnv = Pick<
+  Env,
+  "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION" | "CLIENT_ID"
+>;
+
+/**
+ * The deployment an export is of, as its manifest names it: the client
+ * the admin deployed, or `local` where none is set (local development and
+ * on-prem, a deployment of its own). A restore refuses another's. On-prem
+ * every install is `local`, so there the check tells little: an export
+ * moved from one install's bucket to another's would pass it.
+ */
+const deploymentOf = (env: Pick<Env, "CLIENT_ID">): string =>
+  env.CLIENT_ID ?? "local";
+
+/**
+ * Starts an export of the company's Brain, or answers with the one being
+ * written. Refused as `brain.export_refused` while a restore runs.
+ */
+export const startBrainExport = async (
+  env: ExportEnv
+): Promise<{ id: string }> => {
+  try {
+    return await brain(env).startExport(deploymentOf(env));
+  } catch (error) {
+    // Refused for the state the Brain is in (a restore runs).
+    if (error instanceof Error && error.message.startsWith(refusalPrefix)) {
+      throw brainExportErrors.create("brain.export_refused");
+    }
+    throw error;
+  }
+};
+
+/** Where export `ref` is: null when there is none. */
+export const brainExportStatus = async (
+  env: ExportEnv,
+  ref: ExportRef
+): Promise<ExportStatus | null> =>
+  await brain(env).exportStatus(checked(exportRefSchema, ref));
+
+/**
+ * A file of done export `ref`: null for any other, alike, and for one the
+ * ledger made stale.
+ */
+export const brainExportFile = async (
+  env: ExportEnv,
+  ref: ExportFileRef
+): Promise<string | null> => {
+  // A name the Brain's one rule of an export's files doesn't take names
+  // no file: answered as such.
+  const asked = exportFileRefSchema.safeParse(ref);
+  return asked.success ? await brain(env).exportFile(asked.data) : null;
+};
+
+/**
+ * Starts restoring the company's export `exportId` into the shared store,
+ * which must hold nothing, the erasure ledger applied over all it brings
+ * back; nothing is added to the store while it runs. `prepare` runs once
+ * the Brain says the restore may start, before it does (core's route
+ * installs Grasp's own skills there), and answers whether it is done: when
+ * it isn't, the restore doesn't start, refused as
+ * `brain.restore_unprepared`, to try again. A restore the Brain won't start (the store holds something, one is under way, or no whole
+ * export of this deployment's company has that id) is refused as
+ * `brain.restore_refused`. For an admin only: core's route checks.
+ */
+export const startBrainRestore = async (
+  env: ExportEnv,
+  exportId: string,
+  prepare?: () => Promise<boolean>
+): Promise<RestoreStatus> => {
+  const id = checked(exportIdSchema, exportId);
+  try {
+    // Checked first, so `prepare` runs only for a restore that may start.
+    await brain(env).checkRestore(id, deploymentOf(env));
+    if (prepare !== undefined && !(await prepare())) {
+      throw brainExportErrors.create("brain.restore_unprepared");
+    }
+    return await brain(env).startRestore(id, deploymentOf(env));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(refusalPrefix)) {
+      throw brainExportErrors.create("brain.restore_refused");
+    }
+    throw error;
+  }
+};
+
+/** Where the restore of the company's export `exportId` is: null when none was started. */
+export const brainRestoreStatus = async (
+  env: BrainEnv,
+  exportId: string
+): Promise<RestoreStatus | null> =>
+  await brain(env).restoreStatus(checked(exportIdSchema, exportId));
+
 // Instruction files: what people write for every chat to start with (the
 // company's instructions and lasting facts, a person's own file, an App's
 // and an agent's), each a source of its own under `instructions:`, kept
@@ -1103,17 +1253,20 @@ export const addInstructionFile = async (
   const { file, change } = checked(newInstructionsSchema, added);
   const access = instructionAccessOf(file);
   const key = instructionKeyOf(file);
-  const { version } = await keptIn(
-    env,
-    key,
-    access,
-    async (store) =>
-      await store.addInstructions({
-        source: key,
-        change,
-        text: added.text,
+  const { version } = await whileNotRestoring(
+    async () =>
+      await keptIn(
+        env,
+        key,
         access,
-      })
+        async (store) =>
+          await store.addInstructions({
+            source: key,
+            change,
+            text: added.text,
+            access,
+          })
+      )
   );
   return { file, version };
 };
@@ -1306,12 +1459,15 @@ export const addShippedSkill = async (
   if (current?.text === text) {
     return { ...skill, version: current.version, changed: false };
   }
-  const { version } = await brain(env).addInstructions({
-    source,
-    change,
-    text,
-    access: skillAccess,
-  });
+  const { version } = await whileNotRestoring(
+    async () =>
+      await brain(env).addInstructions({
+        source,
+        change,
+        text,
+        access: skillAccess,
+      })
+  );
   return { ...skill, version, changed: true };
 };
 
@@ -2083,5 +2239,265 @@ export const actOnBrainForStaff = async (
       const unhandled: never = action;
       throw new Error(`No such action (${typeof unhandled})`);
     }
+  }
+};
+
+// Memories, for a person core verified (GRA-1743): what a person's own
+// chat saves of what they said (agent-remember.ts, through
+// brain-memories.ts), and their undo. Everything written here is the
+// person's own word (writer and speaker both them), readable by them
+// alone, and kept in their own store (`person:<id>`), never in the shared
+// one: the plan's rule is that a memory an agent writes is readable only
+// by those who can read everything its chat read, and a person's own chat
+// read only what they may. An instruction is the Brain's to keep its
+// writer's own (`owner` of that writer), which this is.
+
+/**
+ * The attributes a memory a person says can hold, as the Brain lists them:
+ * those whose value is a text, never a relation to another entity (which
+ * a memory names by the related entity, not a value). No attribute is a
+ * relation for one kind and a value for another.
+ */
+const valueRules = Object.values(entityAttributes).flatMap((rules) =>
+  Object.entries(rules).flatMap(([name, rule]: [string, AttributeRule]) =>
+    rule.relation === undefined ? [{ name, many: rule.values === "many" }] : []
+  )
+);
+const attributeNames = [...new Set(valueRules.map(({ name }) => name))];
+
+/** Of those, the ones that hold many values side by side. */
+const manyValueAttributes = [
+  ...new Set(valueRules.flatMap(({ name, many }) => (many ? [name] : []))),
+];
+
+/**
+ * What a memory a person says may name, as the Brain lists them, and the
+ * Brain's own bounds on its texts: for the chat's tool to offer, so the
+ * model chooses from these and no other number is invented.
+ */
+export const memoryChoices = {
+  kinds: entityKinds,
+  types: memoryTypes,
+  attributes: attributeNames,
+  manyValueAttributes,
+  valueMaxLength,
+  statementMaxLength,
+  quoteMaxLength,
+} as const;
+
+/** A text of a memory: some text, at most `max` characters (the Brain's bounds). */
+const memoryText = (max: number) => wellFormedString().regex(/\S/u).max(max);
+
+/**
+ * What a memory is about: an entity by its id in the person's own store,
+ * or by its kind and the names and exact identifiers given, linked to one
+ * the store holds on an identifier alone.
+ */
+const memoryAboutSchema = z.strictObject({
+  id: entityIdSchema.optional(),
+  kind: z.enum(entityKinds),
+  names: z.array(memoryText(valueMaxLength)).max(namesPerEntityMax).default([]),
+  identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
+});
+
+const rememberedSchema = z.strictObject({
+  change: changeSchema,
+  about: memoryAboutSchema,
+  attribute: z.enum(attributeNames).optional(),
+  value: memoryText(valueMaxLength).optional(),
+  type: z.enum(memoryTypes),
+  statement: memoryText(statementMaxLength),
+  quote: memoryText(quoteMaxLength),
+});
+
+/** A memory a person said, to save for them (`rememberAs`), as its schema takes it. */
+export type Remembered = z.input<typeof rememberedSchema>;
+
+/**
+ * What `rememberAs` saved: the memory and the entity it is about, and the
+ * memory's own fields as the store holds them (`kept`), read back from
+ * it: what the person is shown, never what the caller asked for.
+ */
+export interface RememberedMemory {
+  memory: MemoryId;
+  entity: EntityId;
+  kept: Pick<Memory, "type" | "attribute" | "value" | "statement">;
+}
+
+/**
+ * `error`, an erased store's or key's refusal (the Brain's own words), as
+ * the code core gives it everywhere (`brain.source_erased`): final, never
+ * tried again. Any other error as it is.
+ */
+const erasedAs = (error: unknown): unknown =>
+  error instanceof Error &&
+  (error.message === erasedSource || error.message === storeErased)
+    ? brainSourceErrors.create("brain.source_erased")
+    : error;
+
+/**
+ * Memory `memory` about `entity` in `store`, as `reader` reads it, history
+ * included: every page, read at the first page's moment, until it is
+ * found. Undefined when none holds it.
+ */
+const keptMemory = async (
+  store: Brain,
+  reader: Reader,
+  entity: EntityId,
+  memory: MemoryId
+): Promise<Memory | undefined> => {
+  let after: MemoriesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readMemories({
+      entity,
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    });
+    const found = page.memories.find(({ id }) => id === memory);
+    if (found !== undefined) {
+      return found;
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return undefined;
+};
+
+/**
+ * Saves what the member `personId` said as their own memory, readable by
+ * them alone, in their own store: about an entity of theirs (by id, as
+ * they may see it), or one found by an exact identifier there, or a new
+ * one. Their new word on the same entity and one-value attribute ends
+ * their earlier memory, which stays as history. `change` names this one
+ * save, minted by core (a chat's tool call): the same change again
+ * answers what it saved. Refused once they are no longer a member, and by
+ * the Brain for what its rules refuse (an attribute their entity's kind
+ * doesn't have, say).
+ */
+export const rememberAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  remembered: Remembered | Readonly<Record<string, unknown>>
+): Promise<RememberedMemory> => {
+  const { change, about, quote, ...memory } = checked(
+    rememberedSchema,
+    remembered
+  );
+  const reader = await readerOf(env, personId);
+  const { person } = reader;
+  const store = ownBrain(env, person);
+  let added: Awaited<ReturnType<Brain["addMemories"]>>;
+  try {
+    added = await store.addMemories({
+      change,
+      access: { kind: "owner", person },
+      // An entity's id is taken only as they may see it.
+      reader,
+      entities: [{ key: "about", ...about }],
+      memories: [
+        {
+          about: "about",
+          ...memory,
+          speaker: { kind: "internal", person },
+          basis: { kind: "writer", writer: person, quote },
+        },
+      ],
+    });
+  } catch (error) {
+    throw erasedAs(error);
+  }
+  const [saved] = added.memories;
+  const entity = added.entities.about;
+  const kept =
+    saved === undefined || entity === undefined
+      ? undefined
+      : await keptMemory(store, reader, entity, saved);
+  if (saved === undefined || entity === undefined || kept === undefined) {
+    throw new Error("The Brain kept no memory");
+  }
+  const { type, attribute, value, statement } = kept;
+  return {
+    memory: saved,
+    entity,
+    kept: { type, attribute, value, statement },
+  };
+};
+
+/**
+ * An entity of a person's own store, as they may read it: its kind, the
+ * earliest name they may see (`name`), and every name and exact
+ * identifier they may see.
+ */
+export interface OwnEntity {
+  kind: EntityKind;
+  name: string | null;
+  names: string[];
+  identifiers: Identifier[];
+}
+
+/**
+ * The entity `entity` of the member `personId`'s own store, as they may
+ * read it: what a memory about it is about, named as the store holds it,
+ * every page of its names read at the first page's moment. Null alike
+ * when there is none or they may not. Refused once they are no longer a
+ * member.
+ */
+export const ownEntityAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  entity: string
+): Promise<OwnEntity | null> => {
+  const id = checked(entityIdSchema, entity);
+  const reader = await readerOf(env, personId);
+  const store = ownBrain(env, reader.person);
+  const read = await store.readEntity({ entity: id, reader });
+  if (read === null) {
+    return null;
+  }
+  const names: string[] = [];
+  const identifiers: Identifier[] = [];
+  let after: EntityNamesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readEntityNames({
+      entity: id,
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const { type, value } of page.names) {
+      if (type === "name") {
+        names.push(value);
+      } else {
+        identifiers.push({ type, value });
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return { kind: read.kind, name: read.name, names, identifiers };
+};
+
+/**
+ * Retires one of the member `personId`'s own memories (`rememberAs`),
+ * current or ended by a newer one of theirs: it never becomes current
+ * again, and stays as history; `done` again for one they retired before,
+ * so a retry never reads as not found. `nothing` alike when there is no
+ * such memory (an erased one included), when it isn't theirs, and when it
+ * has expired. Refused once they are no longer a member.
+ */
+export const forgetAs = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  memory: string
+): Promise<MemoryChangeOutcome> => {
+  const id = checked(memoryIdSchema, memory);
+  const reader = await readerOf(env, personId);
+  try {
+    return await ownBrain(env, reader.person).retireMemory({
+      memory: id,
+      reader,
+    });
+  } catch (error) {
+    throw erasedAs(error);
   }
 };
