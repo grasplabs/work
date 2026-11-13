@@ -451,7 +451,8 @@ const findOf = (
   // (memories.ts `readMoment`), never the caller's clock: a memory written
   // in the same millisecond is seen. Their two clocks say what was
   // believed and true then, one moment for both (recall-memories.ts).
-  const memoriesAt = asOf?.getTime() ?? readMoment(sql);
+  // Read only when memories are: passages alone need no moment of theirs.
+  const memoriesAt = withMemories ? (asOf?.getTime() ?? readMoment(sql)) : 0;
   const {
     memoryWords,
     ...words

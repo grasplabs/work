@@ -2034,37 +2034,6 @@ export const coreProbes = {
       ),
     ];
   },
-  entityCardAs: async (probing) => {
-    const fixture = await recallFixture(probing);
-    const read = async (
-      name: string,
-      entity: string,
-      about?: Answer["about"]
-    ) =>
-      await answer(
-        name,
-        async () =>
-          await coreBrain.entityCardAs(env, probing.personId, { entity }),
-        about
-      );
-    return [
-      await read("an entity no one added", crypto.randomUUID(), "nothing"),
-      await read(
-        "an entity only hidden memories name",
-        fixture.hidden,
-        "hidden"
-      ),
-      await read("the reader's own", fixture.seen),
-      await read("an id of markers", probing.markers.join("")),
-      await answer(
-        "the reader's own, as someone who isn't a member",
-        async () =>
-          await coreBrain.entityCardAs(env, stranger(), {
-            entity: fixture.seen,
-          })
-      ),
-    ];
-  },
   // Adds Grasp's own skills only, by the names the release ships, a
   // skill every member may read: the release's own text, which holds no
   // marker, then refusals each holding the markers. A skill added with

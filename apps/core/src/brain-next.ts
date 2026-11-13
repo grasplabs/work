@@ -60,7 +60,6 @@ import type {
   HandOverResult,
   HandOvers,
   ModelReply,
-  Card,
   Pack,
   PackItem,
   PackMemory,
@@ -395,27 +394,6 @@ export interface RecalledPassages {
   truncated: boolean;
 }
 
-/** A memory, citing its source as its producer named it. */
-export interface BrainMemory extends Omit<Memory, "source"> {
-  source: SourceVersionRef | null;
-}
-
-/** An entity's card, its memories citing sources as producers named them. */
-export interface EntityCard extends Omit<
-  Card,
-  "attributes" | "relations" | "notes"
-> {
-  attributes: {
-    attribute: string;
-    memories: BrainMemory[];
-    contested: boolean;
-  }[];
-  relations: (Omit<Card["relations"][number], "memory"> & {
-    memory: BrainMemory;
-  })[];
-  notes: BrainMemory[];
-}
-
 /** `source` of the Brain as its producer named it, or none. */
 const versionRefOf = (
   source: { source: SourceId; version: number } | null
@@ -423,12 +401,6 @@ const versionRefOf = (
   source === null
     ? null
     : { source: sourceRefOf(source.source), version: source.version };
-
-/** `memory`, citing its source as its producer named it. */
-const brainMemoryOf = (memory: Memory): BrainMemory => ({
-  ...memory,
-  source: versionRefOf(memory.source),
-});
 
 /** A version of a source, whole. */
 export interface SourceVersion extends SourceVersionRef {
@@ -890,47 +862,6 @@ export const mergeRecalled = (
     used += tokens;
   }
   return { items, notFound: second.notFound, truncated };
-};
-
-/**
- * The card of the entity `entity` as the member `personId` may see it,
- * as core counts their teams now: built when asked from the memories they
- * may read (the Brain's `readCard`), or null when they may see no such
- * entity. With `asOf`, as it read then; a page at a time, after `after`
- * (the page before's `next`). The `after` is checked by the Brain.
- * Refused once they are no longer a member. For GRA-1743's
- * `entities.get`.
- */
-export const entityCardAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  {
-    entity,
-    asOf,
-    after,
-  }: { entity: EntityId; asOf?: Date; after?: MemoriesCursor }
-): Promise<EntityCard | null> => {
-  const card = await brain(env).readCard({
-    entity: checked(entityIdSchema, entity),
-    reader: await readerOf(env, personId, "person"),
-    ...(asOf === undefined ? {} : { asOf }),
-    ...(after === undefined ? {} : { after }),
-  });
-  if (card === null) {
-    return null;
-  }
-  return {
-    ...card,
-    attributes: card.attributes.map((attribute) => ({
-      ...attribute,
-      memories: attribute.memories.map(brainMemoryOf),
-    })),
-    relations: card.relations.map((relation) => ({
-      ...relation,
-      memory: brainMemoryOf(relation.memory),
-    })),
-    notes: card.notes.map(brainMemoryOf),
-  };
 };
 
 /**
