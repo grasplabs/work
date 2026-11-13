@@ -10,6 +10,11 @@ import {
   brainRestorePath,
 } from "../src/brain-next-exports.ts";
 import {
+  chatSource,
+  chatTurnSource,
+  eraseChat,
+} from "../src/brain-next-origins.ts";
+import {
   addSource,
   erasePerson,
   readSourceVersionAs,
@@ -510,6 +515,40 @@ describe(
         on: [member.userId],
         answeredWith: { scope: "own", outcome: "started", exportId: id },
         named: false,
+      });
+    });
+
+    // #2221: deleting a chat erases its turns by the chat's key alone. An
+    // export holding a turn is stale then, and serves nothing.
+    it("makes a person's own export holding a chat's turns stale once the chat is deleted", async () => {
+      const member = await signedInWithRole(idp, "user");
+      const chatId = crypto.randomUUID();
+      for (const answerId of [1, 2]) {
+        // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+        await addSource(env, {
+          source: chatTurnSource(member.userId, chatId, answerId),
+          change: "answer",
+          text: `A question of mine, turn ${answerId}`,
+          readers: { kind: "owner", personId: member.userId },
+          group: chatSource(member.userId, chatId),
+        });
+      }
+      const id = await ownExported(member.session, member.userId);
+      const before = await ownStatusOf(member.session);
+      await eraseChat(env, member.userId, chatId);
+      const after = await ownStatusOf(member.session);
+      const served = await request(
+        member.session,
+        ownFileOf(id, "manifest.json")
+      );
+      expect({
+        before: before?.state,
+        after: [after?.id === id, after?.state],
+        served: served.status,
+      }).toStrictEqual({
+        before: "done",
+        after: [true, "erased"],
+        served: 404,
       });
     });
 

@@ -22,6 +22,7 @@ import {
   exportIdSchema,
   exportRequestSchema,
   fileGraceMs,
+  isInGroup,
   handOverRequestSchema,
   handOverResultSchema,
   isWholeKey,
@@ -123,9 +124,11 @@ import {
   erasureDue,
   erasuresUnfinished,
   isErased,
+  isUnderErasedGroup,
   isStoreErased,
   storeErasedAt,
   subjectOf,
+  subjectsOver,
   keepMissingSubjects,
   replayMemoryErasures,
   ledgerPrefix,
@@ -279,6 +282,18 @@ const ownOnly = "The Brain refused it: only a person's own store takes this";
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
   "The Brain refused it: this store keeps only what its person alone may read";
+
+/**
+ * What the shared store answers an add naming a group: groups are a
+ * person's own store's alone, as no export or restore of the shared store
+ * carries them.
+ */
+const groupsOwnOnly =
+  "The Brain refused it: only a person's own store keeps groups";
+
+/** What an add answers whose key isn't under the group it names. */
+const notInGroup =
+  "The Brain refused it: a source's key must start with its group's, then /";
 
 /** What a person's own store answers a restore: restores go into the shared store. */
 const restoresShared =
@@ -756,7 +771,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** The parts erasure.ts works with: the store's part of the bucket. */
   get #erasures(): ErasureStore {
-    return { storage: this.ctx.storage, bucket: this.#bucket };
+    return {
+      storage: this.ctx.storage,
+      bucket: this.#bucket,
+      groups: this.#kind.kind === "person",
+    };
   }
 
   /** The parts sources.ts works with: the store's part of the bucket. */
@@ -765,6 +784,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       storage: this.ctx.storage,
       db: this.#db,
       bucket: this.#bucket,
+      groups: this.#kind.kind === "person",
     };
   }
 
@@ -779,6 +799,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       throw new Error(notInstructions);
     }
     this.#mayKeep(adding.access);
+    if (adding.group !== undefined) {
+      if (this.#kind.kind !== "person") {
+        throw new Error(groupsOwnOnly);
+      }
+      if (!isInGroup(adding.source, adding.group)) {
+        throw new Error(notInGroup);
+      }
+    }
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(
@@ -962,7 +990,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (!this.#schema) {
       return "free";
     }
-    if (isErased(this.ctx.storage.sql, await subjectOf(key))) {
+    const { sql } = this.ctx.storage;
+    // The shared store holds no group: nothing under one to look up.
+    if (
+      isErased(sql, await subjectOf(key)) ||
+      (this.#kind.kind === "person" &&
+        isUnderErasedGroup(sql, await subjectsOver(key)))
+    ) {
       return "erased";
     }
     const held =
@@ -1015,15 +1049,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * that person's sources after them isn't held pending for good.
    */
   async eraseSource(request: SourceErasure): Promise<void> {
-    const { source, reason } = checked(sourceErasureSchema, request);
+    const { source, reason, asGroup } = checked(sourceErasureSchema, request);
     if (await this.#erasedWhole()) {
       return;
     }
     await this.#changing(async () => {
       await this.#readyToWrite();
-      await erase(this.#erasures, "source", source, reason, (sources) => {
-        stopWorkOn(this.#work, sources);
-      });
+      await erase(
+        this.#erasures,
+        "source",
+        source,
+        reason,
+        (sources) => {
+          stopWorkOn(this.#work, sources);
+        },
+        { asGroup: asGroup === true }
+      );
     });
   }
 

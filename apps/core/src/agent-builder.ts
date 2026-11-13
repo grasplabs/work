@@ -32,6 +32,7 @@ import {
   agentWakes,
 } from "./db/core/schema.ts";
 import { modelSettings } from "./models.ts";
+import { ownAgentsOn, ownAgentsOnSql } from "./own-agents-switch.ts";
 import {
   requireCompanyAdmin,
   requireKnownTeams,
@@ -325,6 +326,9 @@ export const makeOwnAgent = async (
     throw roleErrors.create("role.forbidden");
   }
   const made = inputOf(input);
+  if (!(await ownAgentsOn(env))) {
+    throw agentErrors.create("agent.own_off");
+  }
   const id = `agent-${crypto.randomUUID()}`;
   const ownerId = identity.userId;
   const [own] = await Promise.all([
@@ -347,7 +351,7 @@ export const makeOwnAgent = async (
       sql`SELECT ${id}, ${made.name}, NULL, ${made.face}, ${made.job},
           ${made.instructions}, ${made.modelRole}, ${made.model}, 'on',
           ${ownerId}, ${ownerId}, ${now.getTime()}, ${ownerId},
-          ${now.getTime()} WHERE ${room} AND ${member}`
+          ${now.getTime()} WHERE ${room} AND ${member} AND ${ownAgentsOnSql}`
     ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
@@ -358,9 +362,15 @@ export const makeOwnAgent = async (
   ]);
   const kept = await readAgent(env, id);
   if (kept === undefined) {
-    // The insert's condition failed: full since the check, or its owner
-    // is no longer one of the company.
-    const still = await listOwnAgents(env, ownerId);
+    // The insert's condition failed: full since the check, turned off,
+    // or its owner is no longer one of the company.
+    const [still, on] = await Promise.all([
+      listOwnAgents(env, ownerId),
+      ownAgentsOn(env),
+    ]);
+    if (!on) {
+      throw agentErrors.create("agent.own_off");
+    }
     throw still.length >= ownAgentsMax
       ? agentErrors.create("agent.too_many_own")
       : roleErrors.create("role.forbidden");

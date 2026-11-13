@@ -79,8 +79,10 @@ import {
   desc,
   eq,
   gt,
+  lt,
   inArray,
   isNull,
+  ne,
   or,
   max,
   sql,
@@ -116,6 +118,7 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor } from "./brain-skills.ts";
 import {
   channelText,
@@ -124,6 +127,7 @@ import {
   withoutLinks,
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
+import { questionText } from "./chat-agent.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import type {
   TurnCapture,
@@ -211,6 +215,13 @@ export type Chat = typeof chats.$inferSelect;
  */
 interface LiveTurn {
   id: string;
+  /** The agent it runs as: the one its answers are kept under. */
+  agentId: string;
+  /**
+   * Gives the chat back the agent it had before this turn: set while the
+   * turn may still be refused before it starts, and run as it ends then.
+   */
+  unstarted?: () => void;
   /** What the turn read through connections, for its check line. */
   reads: TurnCheck[];
   /**
@@ -334,7 +345,7 @@ export const questionSchema = z.strictObject({
     .array(
       z.discriminatedUnion("kind", [
         z.strictObject({
-          kind: z.enum(["app", "workflow"]),
+          kind: z.enum(["app", "workflow", "agent"]),
           id: z.string().min(1),
           name: z.string().min(1),
         }),
@@ -349,6 +360,11 @@ export const questionSchema = z.strictObject({
     )
     .max(chatMentionsMax)
     .optional(),
+  /**
+   * The person's question again, for the next agent they addressed in it:
+   * kept for the model, never shown as a question of its own (`send`).
+   */
+  followUp: z.literal(true).optional(),
   /**
    * Build it, said to the chat's plan (by its call): what core made of it
    * (`ChatsApi.build`), never the page's word.
@@ -386,6 +402,33 @@ const builtOf = (stored: string | null): ShownBuilt | undefined => {
 };
 
 /**
+ * What `#keep` keeps with a turn's message: the files and Build it of a
+ * question, how long an answer thought, and the agent whose turn it is
+ * from, for all but the person's own words.
+ */
+const keptWith = (
+  message: Message,
+  agentId: string,
+  {
+    files,
+    thinkingMs,
+    built,
+  }: { files: readonly string[]; thinkingMs?: number; built?: ShownBuilt }
+) => ({
+  files,
+  ...(thinkingMs === undefined ? {} : { thinkingMs }),
+  ...(built === undefined ? {} : { built }),
+  ...(message.role === "user" ? {} : { agentId }),
+});
+
+/**
+ * What the next agent the person addressed in a question reads, after the
+ * answers before it: core's words, with its name as the chat lists it.
+ */
+const followUpText = (name: string): string =>
+  `The person addressed you too, ${JSON.stringify(name)}, in their question above. Answer it now as yourself, from what you know and may do. Don't repeat what another agent already said: add to it, or say where you differ.`;
+
+/**
  * The turn's question (`TurnRequest`): as asked, with the files it carries,
  * and what the chat was started to make (`make`), if anything.
  */
@@ -397,10 +440,12 @@ const turnQuestion = (
     subject,
     mentions,
     built,
+    followUp,
   }: z.output<typeof questionSchema>,
   files: { id: string; type: string }[],
   make: ChatMake | null
 ): TurnRequest["question"] => ({
+  ...(followUp === undefined ? {} : { followUp }),
   text,
   model,
   ...(effort === undefined ? {} : { effort }),
@@ -804,6 +849,22 @@ const answersAlone = (
   unattended: boolean
 ): boolean => via === "web" && thread === null && !unattended;
 
+/** A turn's rows `turnForBrain` reads at a time, back from its answer. */
+const turnRowsPerRead = 20;
+
+/**
+ * Whether `chat`'s turns go to its person's own Brain (GRA-1805): a chat
+ * whose turns answer them alone (`answersAlone`), not restricted. Whether
+ * its person asked the turn there and then is the turn's own (its
+ * capture's `attended`).
+ */
+const handsTurnsOver = ({
+  via,
+  thread,
+  restricted,
+}: Pick<Chat, "via" | "thread" | "restricted">): boolean =>
+  answersAlone({ via, thread }, false) && !restricted;
+
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -857,7 +918,7 @@ export class Workspace extends DurableObject<Env> {
    * for them, so the object stays up while its agent works with nobody
    * waiting on a call.
    */
-  readonly #sent = new Set<Promise<void>>();
+  readonly #sent = new Set<Promise<unknown>>();
 
   /** The deliveries of capture intents under way (`#deliverCaptures`). */
   readonly #delivering = new Set<Promise<void>>();
@@ -928,7 +989,8 @@ export class Workspace extends DurableObject<Env> {
     chatId: ChatId,
     message: Message,
     thinkingMs: number | null = null,
-    built: ShownBuilt | null = null
+    built: ShownBuilt | null = null,
+    agentId: string | null = null
   ): { id: number; createdAt: Date } {
     const stored = this.#db
       .insert(chatMessages)
@@ -937,6 +999,7 @@ export class Workspace extends DurableObject<Env> {
         message: JSON.stringify(message),
         createdAt: new Date(),
         thinkingMs,
+        agentId,
         built: built === null ? null : JSON.stringify(built),
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
@@ -1090,23 +1153,33 @@ export class Workspace extends DurableObject<Env> {
       thinkingMs,
       files = [],
       built,
+      agentId,
     }: {
       thinkingMs?: number;
       files?: readonly string[];
       built?: ShownBuilt;
+      /** The agent whose turn it is from; none for the person's own words. */
+      agentId?: string;
     } = {}
   ): number {
     // A question and the files it carries are kept together: each file is
     // its, and no other's.
     const { id, createdAt } =
       files.length === 0
-        ? this.#store(chatId, message, thinkingMs ?? null, built ?? null)
+        ? this.#store(
+            chatId,
+            message,
+            thinkingMs ?? null,
+            built ?? null,
+            agentId ?? null
+          )
         : this.ctx.storage.transactionSync(() => {
             const stored = this.#store(
               chatId,
               message,
               thinkingMs ?? null,
-              built ?? null
+              built ?? null,
+              agentId ?? null
             );
             this.#db
               .update(chatFiles)
@@ -1129,7 +1202,8 @@ export class Workspace extends DurableObject<Env> {
         message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
         thinkingMs ?? null,
         message.role === "assistant" && this.#asksIn(chatId),
-        built
+        built,
+        agentId
       ),
       files.length === 0 ? undefined : this.#filesAfter(chatId, id - 1)
     );
@@ -1490,7 +1564,13 @@ export class Workspace extends DurableObject<Env> {
    */
   captureTurn(chatId: ChatId, capture: TurnCapture): void {
     const chat = this.#db
-      .select({ personId: chats.personId, agentId: chats.agentId })
+      .select({
+        personId: chats.personId,
+        agentId: chats.agentId,
+        via: chats.via,
+        thread: chats.thread,
+        restricted: chats.restricted,
+      })
       .from(chats)
       .where(eq(chats.id, chatId))
       .get();
@@ -1512,17 +1592,137 @@ export class Workspace extends DurableObject<Env> {
       model: capture.model,
       occurredAt: new Date().toISOString(),
     };
-    this.#db
-      .insert(brainCaptureIntents)
-      .values({
-        eventId: turnEventId(facts),
-        evidenceId: chatId,
-        facts: JSON.stringify(facts),
-        createdAt: new Date(),
-      })
-      .onConflictDoNothing({ target: brainCaptureIntents.eventId })
-      .run();
+    const { answerId } = capture;
+    const kept = this.ctx.storage.transactionSync(() => {
+      const noted = this.#db
+        .insert(brainCaptureIntents)
+        .values({
+          eventId: turnEventId(facts),
+          evidenceId: chatId,
+          facts: JSON.stringify(facts),
+          createdAt: new Date(),
+        })
+        .onConflictDoNothing({ target: brainCaptureIntents.eventId })
+        .returning({ seq: brainCaptureIntents.seq })
+        .all();
+      // The turn for its person's own Brain (GRA-1805), noted by this
+      // event (a note: whether it is kept is the hand-over's to record,
+      // `brain.source.*`), in the same transaction, once a turn as
+      // delivered: an
+      // answered turn they asked there and then, in a chat whose turns go
+      // there. The hand-over reads the chat again as it runs.
+      if (
+        noted.length === 0 ||
+        !capture.attended ||
+        capture.outcome !== "answered" ||
+        answerId === null ||
+        !handsTurnsOver(chat)
+      ) {
+        return false;
+      }
+      this.#outboxEntry({
+        actor: { type: "system" },
+        action: "chat.turn_noted",
+        target: {
+          type: "chat_turn",
+          id: chatTurnSource(chat.personId, chatId, answerId).id,
+        },
+        detail: { workspace: this.ctx.id.name ?? null },
+      });
+      return true;
+    });
+    if (kept) {
+      this.#deliverAudit();
+    }
     this.ctx.waitUntil(this.#captureSoon());
+  }
+
+  /**
+   * What `personId` asked in the turn of their chat `chatId` that ended
+   * with message `answerId`, for their own Brain (brain-sources.ts): the
+   * last question of theirs before that answer, their words alone (as
+   * `questionText` reads them: no note of files, no recall). Never the
+   * answer: it can quote anything the turn's prompt held (a step's result,
+   * this turn's or an earlier one's; the recall; instruction files,
+   * memories, skills), and a copy of it in their store would outlive that
+   * being erased or their losing it (GRA-1855 gives an answer a record of
+   * what it used). Read back from the answer, this turn's rows alone,
+   * never the chat's history before it.
+   *
+   * `deleting` while a deletion of the chat is under way: the hand-over
+   * is tried again later, as that deletion may yet fail. Skipped, with
+   * why, otherwise: `deleted` once the chat is gone or someone else's, or the message isn't one of its answers;
+   * `restricted` once it is no longer one whose turns go to the Brain
+   * (`handsTurnsOver`: restricted since, say); `no_text` for a turn with
+   * no words of theirs before its answer (files alone).
+   */
+  turnForBrain(
+    chatId: string,
+    personId: string,
+    answerId: number
+  ):
+    | { kind: "question"; question: string }
+    | { kind: "deleting" }
+    | { kind: "skipped"; reason: "restricted" | "deleted" | "no_text" } {
+    const deleted = { kind: "skipped", reason: "deleted" } as const;
+    const id = chatIdSchema.safeParse(chatId);
+    if (!id.success) {
+      return deleted;
+    }
+    // Being deleted, which may yet fail: not gone, so not `deleted`.
+    if (this.#deleting.has(id.data)) {
+      return { kind: "deleting" };
+    }
+    const chat = this.#db
+      .select()
+      .from(chats)
+      .where(eq(chats.id, id.data))
+      .get();
+    if (chat === undefined || chat.personId !== personId) {
+      return deleted;
+    }
+    if (!handsTurnsOver(chat)) {
+      return { kind: "skipped", reason: "restricted" };
+    }
+    const parsed = (row: { message: string }) =>
+      storedMessageSchema.parse(JSON.parse(row.message));
+    const answer = this.#db
+      .select()
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, id.data), eq(chatMessages.id, answerId))
+      )
+      .get();
+    if (answer === undefined || parsed(answer).role !== "assistant") {
+      return deleted;
+    }
+    // Back from the answer, a page at a time, to the person's question.
+    let before = answerId;
+    for (;;) {
+      const page = this.#db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(eq(chatMessages.chatId, id.data), lt(chatMessages.id, before))
+        )
+        .orderBy(desc(chatMessages.id))
+        .limit(turnRowsPerRead)
+        .all();
+      const asked = page
+        .map((row) => parsed(row))
+        .find((message) => message.role === "user");
+      if (asked?.role === "user") {
+        const question = questionText(asked).trim();
+        return question === ""
+          ? { kind: "skipped", reason: "no_text" }
+          : { kind: "question", question };
+      }
+      const last = page.at(-1);
+      if (last === undefined || page.length < turnRowsPerRead) {
+        return { kind: "skipped", reason: "no_text" };
+      }
+      before = last.id;
+    }
   }
 
   async #captureSoon(): Promise<void> {
@@ -1819,6 +2019,7 @@ export class Workspace extends DurableObject<Env> {
     // and the chat isn't deleted under it (`deleteChat`).
     const live: LiveTurn = {
       id: crypto.randomUUID(),
+      agentId: chat.agentId,
       reads: [],
       calls,
       cache: { requests: 0, inputTokens: 0, cacheReadTokens: 0 },
@@ -1832,6 +2033,18 @@ export class Workspace extends DurableObject<Env> {
         throw agentErrors.create("agent.busy");
       }
       await this.#mayTakeTurn(chat.id, personId);
+      // The agent this turn runs as becomes the chat's, before anything is
+      // checked of it: the chat is the context its reads and code work in
+      // (restricted.ts), which is its agent's alone. A next question that
+      // addresses none then goes to it, and a turn a restart cut short
+      // keeps its answers under it (`keepTurnMessages`). After the checks
+      // above, so no turn under way loses its chat to another agent.
+      const was = this.#chat(chat.id).agentId;
+      this.#setChatAgent(chat.id, chat.agentId);
+      // Put back if the turn is refused before it starts (`#endLive`).
+      live.unstarted = () => {
+        this.#setChatAgent(chat.id, was);
+      };
       // The chat's agent as the company has it now: a paused one takes no
       // turn, nor one an admin deleted, and nothing is read for either.
       // Before its reach is asked, so each is refused for what it is.
@@ -1887,6 +2100,8 @@ export class Workspace extends DurableObject<Env> {
         () => this.#sources(chat.id)
       );
       this.#stopped.delete(chat.id);
+      // Under way: the chat keeps the agent it answers as.
+      delete live.unstarted;
       started?.();
       this.#changed(chat.id);
       if (onText !== undefined) {
@@ -1907,6 +2122,7 @@ export class Workspace extends DurableObject<Env> {
         capture: {
           model: model.id,
           audience: audience === undefined ? null : [...audience.members],
+          attended: !unattended,
         },
       });
       if (end.stopped !== undefined) {
@@ -1939,6 +2155,8 @@ export class Workspace extends DurableObject<Env> {
    * ended: its cache share logged, its partial answer and output dropped.
    */
   #endLive(chatId: ChatId, live: LiveTurn): void {
+    // Refused before it started: the chat stays with the agent it had.
+    live.unstarted?.();
     const { cache } = live;
     if (cache.requests > 0) {
       // A log line, as the compiler's cache logs its own (`build.cache`):
@@ -2021,12 +2239,60 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const started = Promise.withResolvers<boolean>();
-    const ended = this.#sentTurn(chat, question, started, false);
+    const ended = this.#sentTurns(chat, question, started);
     this.#sent.add(ended);
     void this.#forget(ended);
     await started.promise;
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * The turns of a question `send` was asked: one for each agent the
+   * person addressed in it (an agent `mentions` names, as core found each
+   * one they may ask, chats-rpc.ts), in the order they named them, each
+   * answering as itself, with its own reach, classes and documents; else
+   * one for the chat's agent. The first takes the question; each next one
+   * takes it again, after the answers before it, which the person doesn't
+   * see twice. The chat's agent becomes each in turn as its turn starts,
+   * so a next question that addresses none goes to the last that answered.
+   * A next turn starts only after the one before it ended as it should.
+   */
+  async #sentTurns(
+    chat: Chat,
+    question: Question,
+    started: PromiseWithResolvers<boolean>
+  ): Promise<void> {
+    const addressed = (question.mentions ?? []).flatMap((mention) =>
+      mention.kind === "agent" ? [mention] : []
+    );
+    const [first, ...rest] = addressed;
+    let answered = await this.#sentTurn(
+      first === undefined ? chat : { ...chat, agentId: first.id },
+      question,
+      started,
+      false
+    );
+    for (const next of rest) {
+      if (!answered) {
+        return;
+      }
+      // Nobody waits on a next turn's start: one refused before it
+      // starts (an agent paused meanwhile) says why on the chat, as one
+      // stopped short does (`#sentTurn`, with no `started`).
+      // oxlint-disable-next-line no-await-in-loop -- each agent answers after the one before it
+      answered = await this.#sentTurn(
+        { ...chat, agentId: next.id },
+        {
+          text: followUpText(next.name),
+          model: question.model,
+          ...(question.effort === undefined ? {} : { effort: question.effort }),
+          followUp: true,
+        },
+        undefined,
+        false
+      );
+    }
   }
 
   /**
@@ -2052,29 +2318,44 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurn(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>,
+    /**
+     * Told once the turn is under way, or why it couldn't start; none for
+     * a turn nobody waits on, whose reason goes on the chat instead.
+     */
+    started: PromiseWithResolvers<boolean> | undefined,
     unattended: boolean
-  ): Promise<void> {
+  ): Promise<boolean> {
     let underWay = false;
     try {
-      await this.#turn(chat, question, unattended, {
+      const answer = await this.#turn(chat, question, unattended, {
         started: () => {
           underWay = true;
-          started.resolve(true);
+          started?.resolve(true);
         },
       });
+      return answer.outcome === "answered";
     } catch (error) {
-      if (!underWay) {
+      if (!underWay && started !== undefined) {
         started.reject(error);
-        return;
+        return false;
       }
       this.#stopped.set(chat.id, stopReason(chat.id, error));
       this.#changed(chat.id);
+      return false;
     }
   }
 
+  /** Makes `agentId` the agent of the chat `chatId`, unless it already is. */
+  #setChatAgent(chatId: ChatId, agentId: string): void {
+    this.#db
+      .update(chats)
+      .set({ agentId })
+      .where(and(eq(chats.id, chatId), ne(chats.agentId, agentId)))
+      .run();
+  }
+
   /** Forgets a turn `send` started once it has ended. */
-  async #forget(ended: Promise<void>): Promise<void> {
+  async #forget(ended: Promise<unknown>): Promise<void> {
     try {
       await ended;
     } finally {
@@ -2440,8 +2721,12 @@ export class Workspace extends DurableObject<Env> {
     if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
       return undefined;
     }
-    const { via } = this.#chat(chatId);
+    const { via, agentId: chatAgent } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
+    // What the model said is its turn's agent's: the live turn's, or, for
+    // a turn a restart cut short, the chat's, which the turn set as it
+    // started (`send`).
+    const turnAgentId = live?.agentId ?? chatAgent;
     const copiedKey = `${copiedKeyPrefix}${chatId}`;
     const copied = copiedSchema.safeParse(this.ctx.storage.kv.get(copiedKey));
     const before = copied.success ? copied.data : { through: 0 };
@@ -2473,11 +2758,7 @@ export class Workspace extends DurableObject<Env> {
       const id = this.#keep(
         chatId,
         via === "web" ? message : inOwnWords(message),
-        {
-          files,
-          ...(thinkingMs === undefined ? {} : { thinkingMs }),
-          ...(built === undefined ? {} : { built }),
-        }
+        keptWith(message, turnAgentId, { files, thinkingMs, built })
       );
       if (message.role === "assistant") {
         answer = id;
@@ -3807,8 +4088,9 @@ export class Workspace extends DurableObject<Env> {
    * Deletes `personId`'s own chat once its agent isn't working on it:
    * rejects every write its agent holds for `person` (connect's
    * `declineChatActions`, each recorded there) and revokes every
-   * connection granted or asked for in it, each audited, then deletes it with its
-   * messages and sources, audited as `by`'s. While it does, the chat is
+   * connection granted or asked for in it, each audited, erases its turns
+   * from its person's own Brain (`eraseChat`), then deletes it with its
+   * messages and sources, audited as `by`'s. The Brain's part runs first. While it does, the chat is
    * marked deleting and takes no question, so no write can be held after
    * the rejecting; if rejecting or revoking fails, the mark goes and the
    * chat stays.
@@ -3829,6 +4111,13 @@ export class Workspace extends DurableObject<Env> {
     }
     this.#deleting.add(id);
     try {
+      // Its turns in its person's own Brain (GRA-1805), first: one call,
+      // which closes the chat there too, so a turn handed over after is
+      // refused. Should it fail, nothing of the chat was touched: it stays
+      // and works. Should a step after it fail, the chat stays and still
+      // answers, but its questions are no longer kept (each later one
+      // ends refused as erased), and deleting it again completes.
+      await eraseChat(this.env, personId, id);
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
       const declined = await this.env.CONNECT.declineChatActions({
         person,
@@ -4236,7 +4525,15 @@ export class Workspace extends DurableObject<Env> {
     const partial = this.#partials.get(chatId);
     const stopped = this.#stopped.get(chatId);
     return {
-      partial: partial === undefined ? null : partialOf(partial),
+      partial:
+        partial === undefined
+          ? null
+          : {
+              // Whose it is, so the page names the agent writing it.
+              agentId:
+                this.#turns.get(chatId)?.agentId ?? this.#chat(chatId).agentId,
+              ...partialOf(partial),
+            },
       output: outputOf(this.#outputs.get(chatId)),
       running: this.#isRunning(chatId),
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,
@@ -4275,7 +4572,7 @@ export class Workspace extends DurableObject<Env> {
       .where(and(eq(chatMessages.chatId, chatId), gt(chatMessages.id, after)))
       .orderBy(asc(chatMessages.id))
       .all()
-      .flatMap(({ id, message, createdAt, thinkingMs, built }) => {
+      .flatMap(({ id, message, createdAt, thinkingMs, built, agentId }) => {
         const shown = withFiles(
           chatMessageOf(
             id,
@@ -4284,7 +4581,8 @@ export class Workspace extends DurableObject<Env> {
             givenBy(id),
             thinkingMs,
             asking,
-            builtOf(built)
+            builtOf(built),
+            agentId ?? undefined
           ),
           carried
         );

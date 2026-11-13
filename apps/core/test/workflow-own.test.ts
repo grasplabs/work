@@ -1,4 +1,3 @@
-import { collections } from "@grasp-os/brain/schema";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -11,21 +10,20 @@ import {
   workflowResourceRuns,
   workflowStartReceipts,
 } from "../src/db/core/schema.ts";
-import { workflowActivity, workflowKnowledge } from "../src/workflow-own.ts";
+import { workflowActivity } from "../src/workflow-own.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 
-// A workflow's own knowledge, files and activity (src/workflow-own.ts),
-// as its page reads them. These tests start from the ways they can fail:
-// someone with no role in the workflow learning of it; a run's files
-// reaching someone its results aren't shown to; a collection named that
-// the workflow may not read, or no longer holds; a user seeing others'
-// runs in the activity. What the workflow's runs, bindings and permissions
+// A workflow's own files and activity (src/workflow-own.ts), as its page
+// reads them. These tests start from the ways they can fail: someone with
+// no role in the workflow learning of it; a run's files reaching someone
+// its results aren't shown to; a user seeing others' runs in the
+// activity. What the workflow's runs, bindings and permissions
 // are is set up as core keeps them, as their own tests make them.
 
 /** A member of the organization in `role`, as their session has them. */
@@ -62,33 +60,8 @@ const greeting = async () => {
   return { ada, uma, workflow };
 };
 
-/** A collection in Knowledge, readable as `access` says. */
-const collection = async (
-  name: string,
-  access: "everyone" | "me" = "everyone"
-): Promise<string> => {
-  const id = crypto.randomUUID();
-  await drizzle(env.KNOWLEDGE).insert(collections).values({
-    id,
-    name,
-    description: "",
-    owner: "someone",
-    access,
-    source: "here",
-    createdAt: new Date(),
-  });
-  return id;
-};
-
-/** A permission workflow `workflowId` holds on collection `collectionId`. */
-const held = async (
-  workflowId: string,
-  collectionId: string,
-  {
-    actions = ["read"],
-    status = "active",
-  }: { actions?: string[]; status?: "active" | "revoked" } = {}
-): Promise<string> => {
+/** A permission workflow `workflowId` holds to read the Brain. */
+const held = async (workflowId: string): Promise<string> => {
   const id = crypto.randomUUID();
   await drizzle(env.DB)
     .insert(permissions)
@@ -96,18 +69,18 @@ const held = async (
       id,
       subjectType: "workflow",
       subjectId: workflowId,
-      objectType: "collection",
-      objectId: collectionId,
-      actions: JSON.stringify(actions),
-      binding: `DOCS_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
-      status,
+      objectType: "platform",
+      objectId: "platform",
+      actions: JSON.stringify(["brain"]),
+      binding: `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
+      status: "active",
       requestedBy: "someone",
       requestedAt: new Date(),
     });
   return id;
 };
 
-/** A knowledge binding of version 1 to permission `permissionId`, approved by `by`. */
+/** A brain binding of version 1 to permission `permissionId`, approved by `by`. */
 const bound = async (
   workflowId: string,
   alias: string,
@@ -121,10 +94,10 @@ const bound = async (
       id: crypto.randomUUID(),
       workflowResourceId: workflowId,
       alias,
-      kind: "knowledge",
-      contractId: "grasp.knowledge@1",
+      kind: "brain",
+      contractId: "grasp.brain@1",
       fingerprint: unique(),
-      target: JSON.stringify({ kind: "knowledge", permissionId }),
+      target: JSON.stringify({ kind: "brain", permissionId }),
       reviewedVersion: 1,
       status: revoked ? "revoked" : "active",
       approvedBy: by.userId,
@@ -170,50 +143,11 @@ const ran = async (
   return id;
 };
 
-describe("a workflow's own knowledge, files and activity", () => {
-  it("names the collections it may read itself, with the bindings that use them, to anyone with a role in it", async () => {
-    const { ada, uma, workflow } = await greeting();
-    const stranger = await person("builder");
-    const handbook = await collection(`Handbook ${unique()}`);
-    const prices = await collection(`Prices ${unique()}`);
-    const handbookPermission = await held(workflow.id, handbook);
-    await held(workflow.id, prices);
-    await bound(workflow.id, "handbook", handbookPermission, ada);
-    await bound(workflow.id, "old", handbookPermission, ada, true);
-    // Not the workflow's to read: revoked, write only, someone's own.
-    await held(workflow.id, await collection("Revoked"), {
-      status: "revoked",
-    });
-    await held(workflow.id, await collection("Write only"), {
-      actions: ["write"],
-    });
-    await held(workflow.id, await collection("Private", "me"));
-
-    const forAda = await workflowKnowledge(env, ada, workflow.id);
-    const forUma = await workflowKnowledge(env, uma, workflow.id);
-
-    expect({
-      forAda: forAda.map(({ collectionId, aliases, actions }) => ({
-        collectionId,
-        aliases,
-        actions,
-      })),
-      sameForUma: forUma.length === forAda.length,
-      stranger: await outcome(workflowKnowledge(env, stranger, workflow.id)),
-    }).toStrictEqual({
-      forAda: [
-        { collectionId: handbook, aliases: ["handbook"], actions: ["read"] },
-        { collectionId: prices, aliases: [], actions: ["read"] },
-      ],
-      sameForUma: true,
-      stranger: "workflow.resource_unavailable",
-    });
-  });
-
+describe("a workflow's own files and activity", () => {
   it("tells what happened to it, newest first: versions, bindings approved and revoked, and runs as the reader may see them", async () => {
     const { ada, uma, workflow } = await greeting();
-    const handbook = await held(workflow.id, await collection("Handbook"));
-    await bound(workflow.id, "handbook", handbook, ada, true);
+    const brain = await held(workflow.id);
+    await bound(workflow.id, "handbook", brain, ada, true);
     const now = Date.now() + 60_000;
     const umas = await ran(workflow.id, uma, now);
     const adas = await ran(workflow.id, ada, now + 5000, "running");

@@ -1279,9 +1279,6 @@ importers:
 
   packages/runtime:
     dependencies:
-      '@grasp-os/brain':
-        specifier: workspace:*
-        version: link:../brain
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1316,6 +1313,9 @@ importers:
       '@cloudflare/vitest-plugin':
         specifier: 'catalog:'
         version: 1.6.0(@cloudflare/workers-types@5.20261104.1)(@types/node@26.6.2)(vitest@4.1.11)
+      '@grasp-os/brain-next':
+        specifier: workspace:*
+        version: link:../brain-next
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0

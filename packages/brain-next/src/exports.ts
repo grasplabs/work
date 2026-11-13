@@ -91,7 +91,9 @@ import type { WorkContext } from "./work.ts";
 // is the company's to read as any version the export selects.)
 //
 // Erasure, one rule: an export is stale exactly when the erasure ledger
-// names a version it holds. Each part records the versions it holds, and
+// names a version it holds. A version of a source added in a group (a
+// person's chat) is held under its group's key too, so erasing the group,
+// which the ledger names by that key alone, makes it stale the same way. Each part records the versions it holds, and
 // those its memories and extraction marks rest on, by their source's key as
 // the ledger names it and their number (`export_sources`); a source's erasure names every version of its source,
 // a person's names each version it hid (`erased_versions`), whoever's export
@@ -489,6 +491,8 @@ interface Selected extends Record<string, SqlStorageValue> {
   current: number;
   indexed: number;
   changes: string;
+  /** Its source's group's key as the ledger names it, if it was added in one. */
+  group_subject: string | null;
 }
 
 /**
@@ -527,7 +531,9 @@ SELECT source_versions.row AS row, source_versions.source AS source,
   ) AS current,
   EXISTS (SELECT 1 FROM chunks WHERE chunks.version_row = source_versions.row) AS indexed,
   (SELECT json_group_array(change) FROM source_changes
-    WHERE source_changes.version_row = source_versions.row) AS changes
+    WHERE source_changes.version_row = source_versions.row) AS changes,
+  (SELECT group_subject FROM source_subjects
+    WHERE source_subjects.source = source_versions.source) AS group_subject
 FROM source_versions
 JOIN reader_sets ON reader_sets.id = source_versions.reader_set
 LEFT JOIN current_versions ON current_versions.source = source_versions.source
@@ -1694,7 +1700,17 @@ const versionsPart = async (
   }
   const read = await linesOf(bucket, selected);
   const lines: Uint8Array[] = [];
-  const versions: { source: string; version: number }[] = [];
+  const groupOf = new Map(
+    selected.map(({ row: versionRow, group_subject }) => [
+      versionRow,
+      group_subject,
+    ])
+  );
+  const versions: {
+    source: string;
+    version: number;
+    group: string | null;
+  }[] = [];
   let last = row.cursor;
   for (const { row: versionRow, source, version, line } of read) {
     if (line === null) {
@@ -1709,14 +1725,21 @@ const versionsPart = async (
       return "failed";
     }
     lines.push(line);
-    versions.push({ source, version });
+    versions.push({ source, version, group: groupOf.get(versionRow) ?? null });
     last = versionRow;
   }
-  const held: Held[] = await Promise.all(
-    versions.map(
-      async ({ source, version }) => [await subjectOf(source), version] as const
-    )
+  // Each version by its source's key, and, for one added in a group (a
+  // person's chat, say), by its group's key too: erasing the group names
+  // that key alone in the ledger, so the one rule (`namedSql`) finds it the
+  // same way. Held here, as the part is written: the store forgets which
+  // group a source was in once its versions are gone.
+  const heldEach = await Promise.all(
+    versions.map(async ({ source, version, group }): Promise<Held[]> => [
+      [await subjectOf(source), version],
+      ...(group === null ? [] : [[group, version] as const]),
+    ])
   );
+  const held: Held[] = heldEach.flat();
   return {
     lines,
     phase: null,

@@ -63,7 +63,7 @@ export interface AppPermissions {
   readonly ai?: AiPermission;
   /** Connections' actions, each under its alias (`ctx.connections.<alias>`). */
   readonly connections?: readonly ConnectionPermission[];
-  /** The Brain's collections (`ctx.brain`). */
+  /** Recall from the Brain (`ctx.brain`). */
   readonly brain?: BrainPermission;
   /** The workflows it starts, each under its alias (`ctx.workflows.<alias>`). */
   // oxlint-disable-next-line typescript/no-explicit-any -- any workflow's args and returns

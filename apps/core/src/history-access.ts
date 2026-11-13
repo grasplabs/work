@@ -155,6 +155,49 @@ const readableBrainVersions = async (
   return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
 };
 
+// What a chat's code recalled (`env.brain.recall`, agent-brain.ts) is
+// pinned the same way under a prefix of its own: code reads as the
+// person's teams and the company, never what only they may read
+// (brain-recall.ts), so it is checked as they read it, and withheld once
+// those may no longer read it, even if the person alone still may.
+
+const brainTeamVersionPrefix = "brain-team-version:";
+
+/** The source a version code's recall handed a run is recorded as. */
+export const brainTeamVersionRead = (ref: SourceVersionRef): string =>
+  `${brainTeamVersionPrefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`;
+
+/**
+ * Of the versions code's recall handed over in `sources`, those the
+ * person's teams and the company may still read (`readableVersionsAs`,
+ * as `teams`), in one read of the Brain per 500.
+ */
+const readableBrainTeamVersions = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  const pins = sources.flatMap((source) => {
+    const pin = source.startsWith(brainTeamVersionPrefix)
+      ? brainVersionOf(
+          `${brainVersionPrefix}${source.slice(brainTeamVersionPrefix.length)}`
+        )
+      : undefined;
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  if (pins.length === 0) {
+    return [];
+  }
+  const versions = await readableVersionsAs(
+    env,
+    scope.personId,
+    pins.map(({ pin }) => pin),
+    { reach: "teams" }
+  );
+  const readable = new Set(versions.map((ref) => brainTeamVersionRead(ref)));
+  return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
+};
+
 /** Whether `error` refuses the Brain's read, rather than failing it. */
 const isBrainRefusal = (error: unknown): boolean =>
   brainErrors.codeOf(error) === "brain.denied" ||
@@ -403,7 +446,8 @@ const readableApps = async (
  * agent's grants and the person's role in the App allow now; a Brain
  * read, while the Brain's recall admits the agent and each document it
  * was handed is still in its collection for it to read, unpurged; a
- * version of the new Brain, while the person may read it. Anything
+ * version of the new Brain, while the person may read it (their teams and
+ * the company, for what code's recall handed over). Anything
  * else, an unknown source or a bare connection included, is not. Throws
  * what the reads throw (a person who left, a database away): the caller
  * withholds everything then.
@@ -430,11 +474,12 @@ export const readableSources = async (
     .from(collections)
     .where(inList(collections.id, sourceIds));
   // `readableBrain` reads today's Brain, and goes with it (GRA-1735).
-  const [apps, connections, brain, versions] = await Promise.all([
+  const [apps, connections, brain, versions, teamVersions] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
     readableBrain(env, scope, sourceIds),
     readableBrainVersions(env, scope, sourceIds),
+    readableBrainTeamVersions(env, scope, sourceIds),
   ]);
   return new Set([
     ...known.flatMap(({ id, readable }) => (readable === 1 ? [id] : [])),
@@ -442,5 +487,6 @@ export const readableSources = async (
     ...connections,
     ...brain,
     ...versions,
+    ...teamVersions,
   ]);
 };

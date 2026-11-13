@@ -2,7 +2,7 @@
 // own store holds, which only they may read, written in their store's part
 // of the bucket and erased with them. The threat model is on GRA-1839; each
 // test names the threat it holds.
-import type { Access, Reader } from "@grasp-os/brain-next/contract";
+import type { Access, PersonReader } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -19,7 +19,7 @@ const own = (person: string): Store =>
   env.BRAIN_STORE.getByName(`person:${person}`);
 const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 const alone = (person: string): Access => ({ kind: "owner", person });
-const readerOf = (person: string): Reader => ({ person, groups: [] });
+const readerOf = (person: string): PersonReader => ({ person, groups: [] });
 
 /**
  * An RPC call's answer as a plain promise, awaited: a refused call's
@@ -437,6 +437,59 @@ describe("a person's own export", () => {
   });
 
   // Threat 5: stale exactly when the ledger names what it holds.
+  // #2221: a person's chat is a group; deleting it erases its turns by
+  // the group's key alone. An export holding a turn is stale then, also
+  // once the store has forgotten which group the turn was in.
+  it("is erased once a group it holds a source of is erased, and stays so after a restore that replays the ledger", async () => {
+    const person = unique();
+    const group = `test:${unique()}`;
+    for (const turn of ["1", "2"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+      await own(person).addSource({
+        source: `${group}/${turn}`,
+        change: unique(),
+        text: `Turn ${turn}, mine alone`,
+        access: alone(person),
+        group,
+      });
+    }
+    const id = await start(person);
+    await settled(person);
+    const backup = await copyOf(own(person));
+    await own(person).eraseSource({ source: group, reason: "deleted" });
+    const erased = await own(person).ownExport({ person });
+    const served = await own(person).ownExportFile({
+      person,
+      id,
+      file: "manifest.json",
+    });
+    // Its turns deleted, and with them which group they were in.
+    await tick(own(person));
+    await tick(own(person));
+    const afterTicks = await own(person).ownExport({ person });
+    // An older copy of the store, before the erasure: the ledger replays.
+    await restore(own(person), backup);
+    const restored = await own(person).ownExport({ person });
+    const servedRestored = await own(person).ownExportFile({
+      person,
+      id,
+      file: "manifest.json",
+    });
+    expect({
+      erased: erased?.state,
+      served,
+      afterTicks: afterTicks?.state,
+      restored: [restored?.id === id, restored?.state],
+      servedRestored,
+    }).toStrictEqual({
+      erased: "erased",
+      served: null,
+      afterTicks: "erased",
+      restored: [true, "erased"],
+      servedRestored: null,
+    });
+  });
+
   it("is erased once their ledger names what it holds, never served, its files deleted; an erasure of anything else leaves it be", async () => {
     const person = unique();
     await add(person, "Kept words");
