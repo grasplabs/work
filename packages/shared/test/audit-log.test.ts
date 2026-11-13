@@ -36,6 +36,17 @@ describe("audit event types", () => {
     ).toStrictEqual(["action", "action", "action", "action", "action"]);
   });
 
+  it("files what was captured from a connection, and its erasure when it is disconnected, as actions", () => {
+    expect(
+      [
+        "brain.capture.kept",
+        "brain.capture.skipped",
+        "brain.capture.failed",
+        "brain.capture.erased",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action"]);
+  });
+
   it("gives an audit action no rule names no type, rather than filing it as a read", () => {
     expect(typeOf("audit.something_new")).toBeNull();
   });

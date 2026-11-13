@@ -8,7 +8,9 @@ import type { SourceReaders, SourceRef } from "./brain-next.ts";
 // sources. Every id is the server's own (an upload's, a run's), never
 // anything a person typed. A chat's turns go only into its person's own
 // store (GRA-1762, GRA-1805): a source per turn, each in its chat's group,
-// so deleting the chat erases them all in one call (`eraseChat`).
+// so deleting the chat erases them all in one call (`eraseChat`). So do a
+// connection's captures (GRA-1730, GRA-1827), in the group of their
+// connection, erased when it is disconnected (`eraseCaptures`).
 //
 // Erasing what an origin had in the Brain comes before core lets go of
 // what names its keys, and a failure leaves the origin as it was, so the
@@ -100,6 +102,43 @@ export const eraseChat = async (
     reason: "deleted",
     // Erased as a group though no turn of it was kept yet, so none can be
     // added under it after, whatever names it.
+    asGroup: true,
+  });
+};
+
+/**
+ * The group every capture through the connection `connectionId` is added
+ * in, in its person's own store (connection-capture.ts), and what
+ * disconnecting the connection erases (`eraseCaptures`). Throws for an id
+ * holding "/", which could make one connection's group another's capture:
+ * connect's ids never do.
+ */
+export const captureGroupOf = (connectionId: string): SourceRef => {
+  if (!isKeyPart(connectionId)) {
+    throw new Error("A connection's captures are keyed by an id without /");
+  }
+  return { producer: "capture", id: connectionId };
+};
+
+/**
+ * Erases every capture through `personId`'s own connection `connectionId`
+ * from their own store, the only store that holds any, and closes the
+ * connection's group there, so a capture landing after is refused: one
+ * call, however many captures it had, as `eraseChat`. Throws when it
+ * failed, and the connection must stay connected until a repeat returns.
+ * Safe to repeat.
+ */
+export const eraseCaptures = async (
+  env: Pick<Env, "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
+  personId: string,
+  connectionId: string
+): Promise<void> => {
+  await eraseSource(env, {
+    source: captureGroupOf(connectionId),
+    readers: { kind: "owner", personId },
+    reason: "deleted",
+    // As a group though nothing may have been captured yet, so nothing is
+    // added in it after.
     asGroup: true,
   });
 };

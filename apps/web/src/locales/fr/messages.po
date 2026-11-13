@@ -5316,6 +5316,10 @@ msgstr "Effacé"
 msgid "Erased a removed member"
 msgstr "A effacé un membre retiré"
 
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a connection, as it was disconnected"
+msgstr "A effacé ce que le Brain avait conservé d’une connexion, lors de sa déconnexion"
+
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
 msgstr "Effacement, {done} sur {total}"

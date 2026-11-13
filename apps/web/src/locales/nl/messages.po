@@ -5316,6 +5316,10 @@ msgstr "Gewist"
 msgid "Erased a removed member"
 msgstr "Een verwijderd lid gewist"
 
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a connection, as it was disconnected"
+msgstr "Gewist wat het Brain van een verbinding had bewaard, toen die werd losgekoppeld"
+
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
 msgstr "Wordt gewist, {done} van {total}"

@@ -9,6 +9,7 @@ import { z } from "zod";
 import { chatAuthority } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
+import { captureGroupOf } from "./brain-next-origins.ts";
 import { addSource } from "./brain-next.ts";
 import { captureIdOf } from "./connection-capture-key.ts";
 import { connectionOwnersOf } from "./connections.ts";
@@ -67,10 +68,30 @@ import { nativeClasses } from "./tool-classes.ts";
 //   ends loses the capture and its audit event alike. A lost reply from
 //   the Brain is counted as failed even when the add landed.
 // - A capture is the item's copy, not the chat's text: deleting the chat
-//   it was read in leaves it. Disconnecting the connection leaves it too,
-//   until GRA-1827 erases a connection's captures; so does deleting the
-//   item at its source (nothing tells core). A person can't remove one
-//   short of their own erasure, which removes all of theirs.
+//   it was read in leaves it, and so does deleting the item at its source
+//   (nothing tells core). A person removes them by disconnecting the
+//   connection, which erases all of its captures (connections.ts
+//   `eraseOwnCaptures`), or
+//   by their own erasure, which removes all of theirs.
+//
+// Disconnecting (GRA-1827; the threat model is on the issue): every
+// capture through a connection is added in its group
+// (brain-next-origins.ts `captureGroupOf`),
+// in its owner's own store, the only store that ever holds one. Core's
+// disconnect erases that group there first, in one call that closes it,
+// then asks connect: a capture landing after is refused by the store, one
+// under way goes with the group, and a restore of an older copy replays
+// the erasure. Should the erasure fail, connect is never asked: the
+// connection stays connected, its captures with it, and the person's
+// disconnect fails until a retry gets through (as a chat's delete does).
+// Should connect fail after it, the connection stays connected with its
+// group closed: nothing more of it is kept until a retry disconnects it.
+// A reconnect is a new connection (connect never revives a disconnected
+// one), so a new group: nothing erased comes back. Not on a disconnect:
+// a person's removal (connect stops their connections; their captures
+// stay in their own store, which nobody reads, until their erasure), and
+// a connection needing sign-in again (`needs_reauth`: not ended, the same
+// connection when its person reconnects it).
 
 type CaptureEvent =
   | "brain.capture.kept"
@@ -184,6 +205,9 @@ const captured = async (
     // store, never the shared one.
     const added = await addSource(env, {
       source: { producer: "capture", id },
+      // Erased with it when the connection is disconnected, and refused
+      // from then on.
+      group: captureGroupOf(connectionId),
       // A change of its own each time: the same text again is the current
       // version (the Brain's rule), so reading an unchanged item adds
       // nothing, and an item that changed back is a version again.

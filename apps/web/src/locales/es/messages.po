@@ -5316,6 +5316,10 @@ msgstr "Borrado"
 msgid "Erased a removed member"
 msgstr "Borró a un miembro eliminado"
 
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a connection, as it was disconnected"
+msgstr "Borró lo que el Brain había guardado de una conexión, al desconectarla"
+
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
 msgstr "Borrando, {done} de {total}"

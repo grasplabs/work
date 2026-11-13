@@ -42,6 +42,7 @@ import type {
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
+import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -83,6 +84,7 @@ import {
 } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
+import { eraseCaptures } from "./brain-next-origins.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
 import {
   accounts,
@@ -184,6 +186,43 @@ export const connectionOwnersOf = async (
     pages.map(async (page) => await env.CONNECT.connectionOwners(page))
   );
   return owners.flat();
+};
+
+/**
+ * Erases what the Brain captured through `connectionId` (connection-
+ * capture.ts) as `person` disconnects it, before connect is asked to
+ * (GRA-1827; the threat model is on the issue). When it is their own
+ * connection: the group of its captures (`eraseCaptures`), in their own
+ * store, the only one that holds any, in one call that closes it, so a
+ * capture landing after is refused and a restore of an older copy erases
+ * it again; then one audit event, by ids alone. Anyone else's connection,
+ * a shared one or one connect doesn't know holds no capture of theirs:
+ * nothing is erased, and connect refuses or disconnects as ever. Throws
+ * when the erasure failed: the disconnect doesn't go ahead, so the
+ * captures stay with a connection that is still connected until a retry
+ * erases them. Safe to repeat.
+ */
+const eraseOwnCaptures = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: unknown
+): Promise<void> => {
+  // Connect names what is wrong with an id that is none.
+  const id = identifierSchema.safeParse(connectionId);
+  if (!id.success) {
+    return;
+  }
+  const [owner] = await connectionOwnersOf(env, [id.data]);
+  if (owner === undefined || owner.ownerUserId !== person.userId) {
+    return;
+  }
+  await eraseCaptures(env, person.userId, id.data);
+  await keepAuditEvent(env, drizzle(env.DB), {
+    actor: actorOf(person),
+    action: "brain.capture.erased",
+    target: { type: "connection", id: id.data },
+    detail: {},
+  });
 };
 
 /** The organization's tenant at `provider`, from the sign-in config. */
@@ -595,6 +634,9 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
     const person = await this.#person();
+    // What the Brain captured through it goes first: should that fail,
+    // it stays connected (`eraseOwnCaptures`).
+    await eraseOwnCaptures(this.#env, person, connectionId);
     return await this.#env.CONNECT.disconnect({ person, connectionId });
   }
 

@@ -1,19 +1,28 @@
+import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import { provenanceMetaKey } from "@grasp-os/connector-kit/manifest";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
+import { brainOwnExportPath } from "../src/brain-next-exports.ts";
 import {
   addSource,
   erasePerson,
   eraseSource,
   recallAs,
 } from "../src/brain-next.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
 import { captureIdOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import {
   consentCode,
   stephenGoogleUrl,
@@ -22,7 +31,7 @@ import {
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
-import { routed, signedInApi } from "./sign-in.ts";
+import { openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
 // Capture (GRA-1730, src/connection-capture.ts): what a chat's agent reads
@@ -815,5 +824,416 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       "Error: Refused: a capture is for one person alone",
       "Error: Refused: a capture is for one person alone",
     ]);
+  });
+});
+
+// Disconnecting a connection (GRA-1827, src/connections.ts
+// `eraseOwnCaptures`): every capture through it is erased from its
+// person's own store first, in one call that closes the connection's
+// group. From the threat model on the issue, each way it can fail: a
+// capture stays, or lands after the disconnect; a restore of an older copy
+// of the store brings one back; an export taken before still serves one;
+// a failed erasure lets the disconnect go ahead; someone else's disconnect
+// erases what is not theirs; a reconnect sees what was erased.
+
+/** A chat's agent of `personId`, as capture records whose read it kept. */
+const scopeOf = (personId: string) => ({
+  workspaceId: personalWorkspaceId(personId),
+  agentId: chatAgentId,
+  chatId: chatIdSchema.parse(crypto.randomUUID()),
+  personId,
+  runId: crypto.randomUUID(),
+});
+
+/**
+ * Captures the message `id` (`subject`) read with `mail.get` through
+ * `connectionId` for `personId`, as connect answered it: the source it is
+ * kept as, if it is.
+ */
+const capturedRead = async (
+  personId: string,
+  connectionId: string,
+  mailbox: string,
+  id: string,
+  subject: string
+): Promise<string> => {
+  await captureRead(
+    env,
+    scopeOf(personId),
+    connectionId,
+    "mail.get",
+    { mailbox, message: id },
+    {
+      result: {
+        output: JSON.stringify({ message: { id, subject } }),
+        provenance: [id],
+        keep: true,
+      },
+      readAt: new Date(),
+    }
+  );
+  return `capture:${await captureIdOf(connectionId, personId, "mail.get", id)}`;
+};
+
+/** The keys of the sources `personId`'s own chat recalls for `question`. */
+const recalledKeys = async (
+  personId: string,
+  question: string
+): Promise<Set<string>> => {
+  const { items } = await recallAs(env, personId, {
+    personal: true,
+    question,
+    budget,
+  });
+  return new Set(items.map(({ source }) => `${source.producer}:${source.id}`));
+};
+
+/** What `personId`'s own store says of each of `keys`. */
+const ownKeyStates = async (
+  personId: string,
+  keys: readonly string[]
+): Promise<string[]> => {
+  const store = personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), personId);
+  return await Promise.all(keys.map(async (key) => await store.keyState(key)));
+};
+
+/** The events of `action` about `connectionId`. */
+const eventsOf = async (
+  action: string,
+  connectionId: string
+): Promise<AuditEvent[]> => {
+  const events = await allEvents();
+  return events.filter(
+    (event) => event.action === action && event.target?.id === connectionId
+  );
+};
+
+/**
+ * Core's env with `personId`'s own Brain store failing `eraseSource` once,
+ * as a store out of reach would; every other call reaches the store.
+ */
+const ownEraseFailingOnce = (personId: string): Env => {
+  let failed = false;
+  const binding = env.BRAIN_STORE;
+  const getByName = (name: string) => {
+    const stub = binding.getByName(name);
+    if (name !== `person:${personId}`) {
+      return stub;
+    }
+    return new Proxy(stub, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]) => {
+          if (property === "eraseSource" && !failed) {
+            failed = true;
+            throw new Error("Out of reach, for the test");
+          }
+          const answered: unknown = await Reflect.apply(value, target, args);
+          return answered;
+        };
+      },
+    });
+  };
+  return {
+    ...env,
+    BRAIN_STORE: new Proxy(binding, {
+      get: (target, property): unknown =>
+        property === "getByName" ? getByName : Reflect.get(target, property),
+    }),
+  };
+};
+
+/** The state of `cookie`'s person's own export, once written: its id and state. */
+const ownExportOf = async (cookie: string) => {
+  const response = await routed(brainOwnExportPath, {
+    headers: { cookie, "sec-fetch-site": "same-origin" },
+  });
+  const { export: own } = z
+    .object({
+      export: z.object({ id: z.uuid(), state: z.string() }).nullable(),
+    })
+    .parse(await response.json());
+  return own;
+};
+
+/** Starts `person`'s own export and lets their store write it: its id. */
+const ownExported = async (person: Person): Promise<string> => {
+  const started = await routed(brainOwnExportPath, {
+    method: "POST",
+    headers: { cookie: person.session, "sec-fetch-site": "same-origin" },
+  });
+  const { id } = z.object({ id: z.uuid() }).parse(await started.json());
+  const store = inJurisdiction(env, env.BRAIN_STORE).getByName(
+    `person:${person.userId}`
+  );
+  for (let alarms = 0; alarms < 10; alarms += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- an alarm at a time
+    const own = await ownExportOf(person.session);
+    if (own?.state !== "writing") {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- an alarm at a time
+    await runDurableObjectAlarm(store);
+  }
+  return id;
+};
+
+describe("a disconnected connection", setUpTime, () => {
+  it("takes every capture of it from its person's own store, refuses one landing after, and is recorded once, by ids", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const kept = [
+      await capturedRead(
+        person.userId,
+        connectionId,
+        mailbox,
+        `quote-${marker}`,
+        `Quote ${marker}`
+      ),
+      await capturedRead(
+        person.userId,
+        connectionId,
+        mailbox,
+        `order-${marker}`,
+        `Order ${marker}`
+      ),
+    ];
+    const before = await recalledKeys(person.userId, marker);
+
+    await person.api.connections.disconnect(connectionId);
+    // A read connect answered before the disconnect, captured after it.
+    const late = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `late-${marker}`,
+      `Late ${marker}`
+    );
+    const after = await recalledKeys(person.userId, marker);
+    const erased = await eventsOf("brain.capture.erased", connectionId);
+    const [lateEnded] = await eventsOf("brain.capture.skipped", connectionId);
+
+    expect({
+      before: kept.map((key) => before.has(key)),
+      after: [...kept, late].map((key) => after.has(key)),
+      states: await ownKeyStates(person.userId, [...kept, late]),
+      late: lateEnded === undefined ? undefined : shown(lateEnded),
+      erased: erased.map(({ actor, detail }) => ({ actor, detail })),
+    }).toStrictEqual({
+      before: [true, true],
+      after: [false, false, false],
+      states: ["erased", "erased", "erased"],
+      late: {
+        action: "brain.capture.skipped",
+        onBehalfOf: person.userId,
+        detail: { reason: "erased", items: 1, kept: 0, failed: 0, skipped: 1 },
+      },
+      erased: [
+        { actor: { type: "person", userId: person.userId }, detail: {} },
+      ],
+    });
+    expect(JSON.stringify(erased)).not.toContain(marker);
+  });
+
+  it("stays connected, its captures kept, when the Brain can't erase them, and takes them once disconnected again", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const first = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+    const { core } = await openRpc(person.session, {
+      coreEnv: ownEraseFailingOnce(person.userId),
+    });
+
+    const refused = await outcome(
+      core.authenticate().connections.disconnect(connectionId)
+    );
+    const listed = await person.api.connections.list();
+    // Still connected, its reads still kept.
+    const second = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `order-${marker}`,
+      `Order ${marker}`
+    );
+    const meanwhile = await recalledKeys(person.userId, marker);
+    const erasedMeanwhile = await eventsOf(
+      "brain.capture.erased",
+      connectionId
+    );
+    await person.api.connections.disconnect(connectionId);
+    const after = await recalledKeys(person.userId, marker);
+    const erased = await eventsOf("brain.capture.erased", connectionId);
+
+    expect({
+      refused: refused === "ok" ? "disconnected" : "refused",
+      connected: listed.some(({ id }) => id === connectionId),
+      meanwhile: [first, second].map((key) => meanwhile.has(key)),
+      erasedMeanwhile: erasedMeanwhile.length,
+      after: [first, second].map((key) => after.has(key)),
+      states: await ownKeyStates(person.userId, [first, second]),
+      erased: erased.length,
+    }).toStrictEqual({
+      refused: "refused",
+      connected: true,
+      meanwhile: [true, true],
+      erasedMeanwhile: 0,
+      after: [false, false],
+      states: ["erased", "erased"],
+      erased: 1,
+    });
+  });
+
+  it("keeps its captures erased after a restore of an older copy of its person's store, and an export taken before serves none", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const kept = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+    const exported = await ownExported(person);
+    const before = await ownExportOf(person.session);
+    const copy = await copyOfStore(`person:${person.userId}`);
+
+    await person.api.connections.disconnect(connectionId);
+    const stale = await ownExportOf(person.session);
+    await restoreStore(copy, `person:${person.userId}`);
+    // The restored copy held the capture and knew no erasure of it.
+    const late = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `late-${marker}`,
+      `Late ${marker}`
+    );
+    const restored = await recalledKeys(person.userId, marker);
+
+    expect({
+      export: [before?.state, stale?.id === exported, stale?.state],
+      restored: [kept, late].map((key) => restored.has(key)),
+      states: await ownKeyStates(person.userId, [kept, late]),
+    }).toStrictEqual({
+      export: ["done", true, "erased"],
+      restored: [false, false],
+      states: ["erased", "erased"],
+    });
+  });
+
+  it("is disconnected once and its captures erased when two disconnects run at once", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const kept = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+
+    const outcomes = await Promise.all([
+      outcome(person.api.connections.disconnect(connectionId)),
+      outcome(person.api.connections.disconnect(connectionId)),
+    ]);
+    const after = await recalledKeys(person.userId, marker);
+    const stopped = await eventsOf("connection.disconnect", connectionId);
+    const listed = await person.api.connections.list();
+
+    expect({
+      outcomes,
+      after: after.has(kept),
+      states: await ownKeyStates(person.userId, [kept]),
+      stopped: stopped.filter(({ detail }) => detail.outcome === "ok").length,
+      connected: listed.some(({ id }) => id === connectionId),
+    }).toStrictEqual({
+      outcomes: ["ok", "ok"],
+      after: false,
+      states: ["erased"],
+      stopped: 1,
+      connected: false,
+    });
+  });
+
+  it("captures afresh when the same account is connected again, and brings nothing erased back", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const old = await ownGmail(person);
+    const message = `quote-${marker}`;
+    const erased = await capturedRead(
+      person.userId,
+      old.connectionId,
+      old.mailbox,
+      message,
+      `Quote ${marker}`
+    );
+    await person.api.connections.disconnect(old.connectionId);
+
+    const again = await ownGmail(person);
+    const fresh = await capturedRead(
+      person.userId,
+      again.connectionId,
+      again.mailbox,
+      message,
+      `Quote ${marker} again`
+    );
+    const found = await recalledKeys(person.userId, marker);
+
+    expect({
+      newConnection: again.connectionId !== old.connectionId,
+      found: [erased, fresh].map((key) => found.has(key)),
+      states: await ownKeyStates(person.userId, [erased, fresh]),
+    }).toStrictEqual({
+      newConnection: true,
+      found: [false, true],
+      states: ["erased", "held"],
+    });
+  });
+
+  it("erases nothing of a person's when someone else disconnects their connection, or tries to", async () => {
+    const [person, stranger, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const kept = await capturedRead(
+      person.userId,
+      connectionId,
+      mailbox,
+      `quote-${marker}`,
+      `Quote ${marker}`
+    );
+
+    const refused = await Promise.all([
+      outcome(stranger.api.connections.disconnect(connectionId)),
+      outcome(admin.api.connections.disconnect(connectionId)),
+    ]);
+    const found = await recalledKeys(person.userId, marker);
+    const erased = await eventsOf("brain.capture.erased", connectionId);
+
+    expect({
+      refused,
+      found: found.has(kept),
+      erased: erased.length,
+    }).toStrictEqual({
+      refused: ["connect.not_owner", "connect.not_owner"],
+      found: true,
+      erased: 0,
+    });
   });
 });
