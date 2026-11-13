@@ -53,6 +53,7 @@ describe("a person's own agents", slow, () => {
       env.DB.prepare("DELETE FROM agent_reach"),
       env.DB.prepare("DELETE FROM agent_tool_classes"),
       env.DB.prepare("DELETE FROM agent_documents"),
+      env.DB.prepare("DELETE FROM org_settings WHERE kind = 'own_agents'"),
     ]);
   });
 
@@ -279,6 +280,88 @@ describe("a person's own agents", slow, () => {
     expect({ made, rows }).toStrictEqual({
       made: "role.forbidden",
       rows: { n: 0 },
+    });
+  });
+
+  it("are made and answer only while the company has them on, which its own admins alone decide", async () => {
+    const ann = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
+    const chat = await ann.api.chats.create("Notes", mine.id);
+    await fakeProvider(says("Noted."));
+
+    const byAnn = await outcome(
+      ann.api.orgSettings.updateOwnAgents({ on: false })
+    );
+    await admin.api.orgSettings.updateOwnAgents({ on: false });
+    const off = {
+      read: await ann.api.orgSettings.ownAgents(),
+      make: await outcome(ann.api.connections.makeOwnAgent(said("Other"))),
+      listed: await ann.api.chats.agents(),
+      // Kept, for their owner to see and delete.
+      kept: await ann.api.connections.ownAgents(),
+      ask: await outcome(
+        ann.api.chats.send(chat.id, { text: "Draft this week.", model })
+      ),
+    };
+    await admin.api.orgSettings.updateOwnAgents({ on: true });
+    const on = await ann.api.chats.agents();
+
+    expect({
+      byAnn,
+      off: {
+        ...off,
+        listed: off.listed.some(({ id }) => id === mine.id),
+        kept: off.kept.map(({ id }) => id),
+      },
+      on: on.some(({ id }) => id === mine.id),
+    }).toStrictEqual({
+      byAnn: "role.forbidden",
+      off: {
+        read: { on: false },
+        make: "agent.own_off",
+        listed: false,
+        kept: [mine.id],
+        ask: "agent.own_off",
+      },
+      on: true,
+    });
+    await admin.api.orgSettings.updateOwnAgents({ on: true });
+  });
+
+  it("show admins, per person, how many they have and what they cost, never what they are", async () => {
+    const ann = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
+    await ann.api.connections.makeOwnAgent(said("Other"));
+    const month = new Date().toISOString().slice(0, 7);
+    await env.DB.prepare(
+      `INSERT INTO model_usage (id, period, person_id, trigger_type, agent_id,
+         model, credential, input_tokens, output_tokens, cache_read_tokens,
+         cache_write_tokens, cost, estimated, created_at)
+       VALUES (?, ?, ?, 'agent', ?, 'anthropic/claude-sonnet-4-5',
+         'organization', 10, 10, 0, 0, 2.5, 0, ?)`
+    )
+      .bind(crypto.randomUUID(), month, ann.userId, mine.id, Date.now())
+      .run();
+
+    const read = await admin.api.connections.ownAgentsUsage();
+    const hers = read.find(({ personId }) => personId === ann.userId);
+    expect({
+      byAnn: await outcome(ann.api.connections.ownAgentsUsage()),
+      hers,
+      named: /Scribe|weekly notes/u.test(JSON.stringify(read)),
+    }).toStrictEqual({
+      byAnn: "role.forbidden",
+      hers: {
+        personId: ann.userId,
+        agents: 2,
+        month,
+        spent: 2.5,
+        spentBefore: 0,
+        requests: 1,
+      },
+      named: false,
     });
   });
 

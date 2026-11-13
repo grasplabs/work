@@ -4,6 +4,7 @@ import type {
   AgentSettings,
   AgentUsage,
   AgentWake,
+  OwnAgentsUsage,
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
@@ -67,7 +68,7 @@ import {
   listAgentDocuments,
   removeAgentDocument,
 } from "./agent-documents.ts";
-import { agentsUsage } from "./agent-usage.ts";
+import { agentsUsage, ownAgentsUsage } from "./agent-usage.ts";
 import {
   deleteAgentWake,
   listAgentWakes,
@@ -777,6 +778,13 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       this.#check,
       async (identity) => await makeOwnAgent(this.#env, identity, input)
     );
+  }
+
+  async ownAgentsUsage(): Promise<OwnAgentsUsage[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await ownAgentsUsage(this.#env, spendMonth(this.#env));
+    });
   }
 
   async makeAgent(input: unknown): Promise<Agent> {

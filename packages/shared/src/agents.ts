@@ -174,6 +174,24 @@ export interface AgentUsage {
 }
 
 /**
+ * What one person's own agents used of the organization's models in a
+ * month, for admins: how many they have and what they cost, never what
+ * they are called, told or asked.
+ */
+export interface OwnAgentsUsage {
+  personId: string;
+  /** How many agents of their own they have now. */
+  agents: number;
+  /** The UTC month counted, such as `2026-11`. */
+  month: string;
+  /** US dollars at the providers' list prices, in `month` and the month before. */
+  spent: number;
+  spentBefore: number;
+  /** The requests to a model their agents made in `month`. */
+  requests: number;
+}
+
+/**
  * The agents over `/rpc`, on `connections`: the company's own admins
  * only, never Grasp staff; every change audited.
  */
@@ -241,6 +259,11 @@ export interface AgentsApi {
    * month before, in the order of `agents`.
    */
   agentsUsage: () => Promise<AgentUsage[]>;
+  /**
+   * For admins: per person with agents of their own, how many, and what
+   * they used this month and the month before, the most spent first.
+   */
+  ownAgentsUsage: () => Promise<OwnAgentsUsage[]>;
   /** An agent's wake-ups, the oldest first. */
   agentWakes: (agentId: string) => Promise<AgentWake[]>;
   /**

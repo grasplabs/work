@@ -161,10 +161,20 @@ const mounted = async (shown: ReactNode): Promise<Asked> => {
       asked.push(["deleted", id]);
     },
   };
+  const orgSettings = {
+    updateOwnAgents: async (settings: { on: boolean }) => {
+      await Promise.resolve();
+      asked.push(["own agents", settings]);
+      return settings;
+    },
+  };
   const core = {
     withSession: async <T,>(
-      action: (session: { connections: typeof connections }) => Promise<T>
-    ): Promise<T> => await action({ connections }),
+      action: (session: {
+        connections: typeof connections;
+        orgSettings: typeof orgSettings;
+      }) => Promise<T>
+    ): Promise<T> => await action({ connections, orgSettings }),
   };
   const rootRoute = createRootRoute({ component: () => <main>{shown}</main> });
   const router = createRouter({
@@ -335,6 +345,89 @@ describe("the company's agents, on pages of their own", () => {
         newAgent: true,
         alone: true,
       });
+    });
+
+    it("shows an admin how many agents of their own each person has and what they cost, never their names, and turns them off", async () => {
+      const people = [
+        {
+          userId: "user-anna",
+          name: "Anna de Vries",
+          email: "anna@acme.test",
+          role: "user" as const,
+          joinedAt: "2026-01-05T09:00:00.000Z",
+        },
+      ];
+      const asked = await mounted(
+        <AgentsOverview
+          makes
+          makesOwn
+          managed={managed}
+          own={[]}
+          ownAdmin={{
+            on: true,
+            people,
+            usage: [
+              {
+                personId: "user-anna",
+                agents: 2,
+                month: "2026-11",
+                spent: 1.5,
+                spentBefore: 0,
+                requests: 4,
+              },
+              {
+                personId: "user-gone",
+                agents: 1,
+                month: "2026-11",
+                spent: 0,
+                spentBefore: 0,
+                requests: 0,
+              },
+            ],
+          }}
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      const text = document.body.textContent ?? "";
+      const toggle = document.querySelector(
+        "[role='switch'][aria-label='Let people make agents of their own']"
+      );
+      await press(toggle);
+      expect({
+        anna: text.includes("Anna de Vries") && text.includes("2 agents"),
+        spent: text.includes("$1.50 this month"),
+        gone: text.includes("Someone no longer in the company"),
+        asked,
+      }).toStrictEqual({
+        anna: true,
+        spent: true,
+        gone: true,
+        asked: [["own agents", { on: false }]],
+      });
+    });
+
+    it("gives an admin among Grasp's staff no way to turn people's own agents off", async () => {
+      const asked = await mounted(
+        <AgentsOverview
+          makes={false}
+          makesOwn={false}
+          managed={managed}
+          own={[]}
+          ownAdmin={{ on: true, people: [], usage: [] }}
+          usable={[]}
+        />
+      );
+      const toggle = document.querySelector(
+        "[role='switch'][aria-label='Let people make agents of their own']"
+      );
+      await press(toggle);
+      expect({
+        disabled:
+          toggle instanceof HTMLElement &&
+          (Object.hasOwn(toggle.dataset, "disabled") ||
+            toggle.getAttribute("aria-disabled") === "true"),
+        asked,
+      }).toStrictEqual({ disabled: true, asked: [] });
     });
 
     it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {

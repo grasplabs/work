@@ -48,6 +48,8 @@ import {
   useAudienceLine,
   wakesOn,
 } from "./agent-facts.tsx";
+import { OwnAgentsCard } from "./own-agents-admin.tsx";
+import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
 
 // The Agents page: the company's agents as a grid of cards, as the Apps
 // page has its Apps (apps/apps-overview.tsx). Everyone sees the agents
@@ -341,6 +343,7 @@ export const AgentsOverview = ({
   own,
   makes,
   makesOwn,
+  ownAdmin,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
@@ -348,8 +351,10 @@ export const AgentsOverview = ({
   own: readonly Agent[];
   /** Whether the person may make an agent for the company: its own admins. */
   makes: boolean;
-  /** Whether the person may make one of their own: anyone of the company. */
+  /** Whether the person may make one of their own: anyone of the company, while the company lets them. */
   makesOwn: boolean;
+  /** What an admin reads of people's own agents; undefined for anyone else. */
+  ownAdmin?: OwnAgentsAdmin | undefined;
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -505,6 +510,9 @@ export const AgentsOverview = ({
             </section>
           )}
         </>
+      )}
+      {ownAdmin === undefined ? null : (
+        <OwnAgentsCard admin={ownAdmin} editable={makes} />
       )}
     </Page>
   );

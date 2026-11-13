@@ -192,6 +192,7 @@ export const rpcParamNames: ParamNames = {
     "makeAgentWake": ["agentId","input"],
     "makeOwnAgent": ["input"],
     "ownAgents": [],
+    "ownAgentsUsage": [],
     "pointApp": ["request"],
     "pointSharedMailbox": ["mailbox","audience"],
     "removeAgentDocument": ["agentId","documentId"],
@@ -360,8 +361,10 @@ export const rpcParamNames: ParamNames = {
   },
   "OrgSettingsRpc": {
     "billing": [],
+    "ownAgents": [],
     "signIn": [],
     "updateBilling": ["input"],
+    "updateOwnAgents": ["input"],
   },
   "OrganizationRpc": {
     "get": [],
