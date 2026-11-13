@@ -14,10 +14,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { revokePermission } from "../src/permissions.ts";
-import {
-  createTriggerResource,
-  updateTriggerVersion,
-} from "../src/trigger-resources.ts";
+import { createTriggerResource } from "../src/trigger-resources.ts";
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { workflowDefinition } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -419,7 +416,6 @@ describe("model calls", () => {
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: byTrigger.workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     const triggerGrant = await startOf(
@@ -511,20 +507,22 @@ describe("model calls", () => {
     });
   });
 
-  it("refuses the next call of a trigger's run once the trigger is moved off its version, and goes on while it still targets it", async () => {
+  it("refuses the next call of a trigger's run once the trigger aims elsewhere, and goes on on its version through a publish", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     // Each run's call answered, if it is made.
     const hello = answer('{"line":"Hello Ada"}');
     await providerAnswering(hello, hello, hello, hello);
-    // A wait before its call that only the test ends, once the trigger
-    // moved: the call can't come before the move.
+    // A wait before its call that only the test ends, once what it
+    // stands on changed: the call can't come before the change.
     const waits = { id: "hold", type: "wait", for: "1 day" };
-    const runOf = async (move: (trigger: string) => Promise<void>) => {
+    const runOf = async (
+      change: (trigger: string, workflow: string) => Promise<void>
+    ) => {
       const { workflow } = await greetingWorkflow(ada, admin, {
         before: [waits],
       });
-      // A version 2 to move the trigger to: a step's title alone changed.
+      // A version 2, live, for its run: a step's title alone changed.
       const first = z
         .looseObject({ steps: z.array(z.looseObject({})) })
         .parse(JSON.parse(await workflowDefinition(env, ada, workflow.id, 1)));
@@ -542,7 +540,6 @@ describe("model calls", () => {
       const trigger = await createTriggerResource(env, ada, {
         kind: "webhook",
         workflowId: workflow.id,
-        version: 1,
         config: await webhookConfig(),
       });
       await granted(ada, admin, {
@@ -561,26 +558,24 @@ describe("model calls", () => {
         env,
         { type: "trigger", triggerId: trigger.id },
         workflow.id,
-        adaStart()
+        adaStart(2)
       );
       const run = runId ?? "";
-      // Asleep before its call; moved meanwhile; then woken.
+      // Asleep before its call; changed meanwhile; then woken.
       const sleep = await sleepOf(run);
-      await move(trigger.id);
+      await change(trigger.id, workflow.id);
       await woken(run, sleep);
       return endOf(await ended(ada, workflow.id, run));
     };
-    const moved = await runOf(async (trigger) => {
-      await updateTriggerVersion(env, ada, trigger, 2);
-    });
-    // A new trigger version with the same target, and a move away and
-    // back: it targets the run's workflow and version as the call is made.
-    const sameTarget = await runOf(async (trigger) => {
-      await updateTriggerVersion(env, ada, trigger, 1);
-    });
-    const movedBack = await runOf(async (trigger) => {
-      await updateTriggerVersion(env, ada, trigger, 2);
-      await updateTriggerVersion(env, ada, trigger, 1);
+    // A version 3 published while it sleeps: the run keeps version 2.
+    const published = await runOf(async (_trigger, workflow) => {
+      const current = await workflowDefinition(env, ada, workflow, 2);
+      await publishDefinition(
+        env,
+        ada,
+        workflow,
+        current.replace("Wait a day", "Wait a while")
+      );
     });
     // Aimed at another workflow (no call does this today: a trigger keeps
     // its workflow, so the database is written as one would).
@@ -595,11 +590,9 @@ describe("model calls", () => {
         ).bind(trigger),
       ]);
     });
-    expect({ moved, elsewhere, sameTarget, movedBack }).toStrictEqual({
-      moved: { status: "failed", code: "workflow.call_denied" },
+    expect({ published, elsewhere }).toStrictEqual({
+      published: { status: "completed", output: { status: "Hello Ada" } },
       elsewhere: { status: "failed", code: "workflow.call_denied" },
-      sameTarget: { status: "completed", output: { status: "Hello Ada" } },
-      movedBack: { status: "completed", output: { status: "Hello Ada" } },
     });
   });
 

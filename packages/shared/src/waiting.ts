@@ -17,6 +17,7 @@ import type {
   GapAskedNotification,
   PackageNotification,
   TriggerStoppedNotification,
+  TriggerWorkflowChangedNotification,
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
@@ -103,6 +104,13 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
+/** A workflow the person's triggers start, of which someone else made another version live: their triggers start it, acting as them. */
+export interface WorkflowChangedItem extends ItemBase {
+  kind: "workflowChanged";
+  verdicts: never[];
+  notification: TriggerWorkflowChangedNotification;
+}
+
 /** Packages of an App the person builds, revoked as malware or newly advised against. */
 export interface PackageNoticeItem extends ItemBase {
   kind: "packageNotice";
@@ -178,6 +186,7 @@ export type WaitingItem =
   | PermissionRequestItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | WorkflowChangedItem
   | PackageNoticeItem
   | StoppedEventsItem
   | AppMessageItem

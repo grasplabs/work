@@ -17,6 +17,7 @@ import {
   triggerResources,
   triggerResourceVersions,
   triggerSchedules,
+  workflowResources,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { stopNoticed } from "../notifications.ts";
@@ -34,14 +35,16 @@ import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 // - An occurrence starting its run twice: two clock runs at once, a lost
 //   answer, a clock killed between the start and writing the next
 //   occurrence. Each start is keyed by the concrete occurrence, the
-//   instant in UTC, under the trigger and its version (`startKeyOf`), and
+//   instant in UTC, under the trigger (`startKeyOf`), whatever version of
+//   the workflow is live by then, and
 //   a start's receipt is one per trigger, person and key
 //   (workflow-starts.ts): the same occurrence started again is the same
 //   start, its run the same run, whatever became of it. A run cancelled
 //   since stays cancelled.
 // - A schedule acting on authority it lost. Each start is a trigger's
-//   start as any other (workflow-starts.ts): the trigger live, enabled
-//   and pinning that version, its person still with a role, and its own
+//   start as any other (workflow-starts.ts): the trigger live and
+//   enabled, of the workflow's live version, its person still with a
+//   role, and its own
 //   `start` grant active, all read again in the statement that admits it.
 //   A start refused for good is audited (`trigger.schedule.refused`) and
 //   the schedule goes on from its next occurrence. Only the refusals named
@@ -56,7 +59,8 @@ import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 //   `maxFailedStarts` in a row it stops, keeping no next occurrence,
 //   audited once (`trigger.schedule.stopped`), and its owner is told
 //   (notifications.ts), until they enable it again (whether or not it was
-//   disabled) or move it to another version. Core's own failures (its
+//   disabled): a version published since doesn't start it again, as the
+//   failures may not be the workflow's. Core's own failures (its
 //   database away, a decision gone stale as it was admitted) never count:
 //   an outage of core's stops no schedule, it only delays it.
 // - A backlog after an outage. Occurrences missed while the clock didn't
@@ -68,10 +72,9 @@ import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 //   expression: a schedule fires once per local wall-clock time it names,
 //   so in the repeated hour `*/30` fires at 2:00 and 2:30 once each (in
 //   summer time), not four times, and `0 *` fires at 2:00 once.
-// - A disabled, deleted or moved trigger starting its old occurrences.
-//   Only a live, enabled trigger whose current version is the one its
-//   schedule was worked out for is read as due; enabling or moving it
-//   works out its next occurrence again, from then, so what it missed
+// - A disabled or deleted trigger starting its old occurrences. Only a
+//   live, enabled trigger is read as due; enabling it works out its next
+//   occurrence again, from then, so what it missed
 //   meanwhile starts nothing. Two clock runs trying one occurrence at once
 //   can't count it failed once either has started it: a failure is
 //   recorded only while no start of it was admitted (`unadmitted`), and
@@ -91,9 +94,8 @@ const minuteMs = 60_000;
  * their role, whose `start` grant was revoked, or whose workflow is gone;
  * `start_invalid` an input the version no longer takes; `paused` a workflow
  * paused (workflow-pause.ts), whose occurrences are skipped and never
- * counted toward stopping. A trigger disabled,
- * deleted or moved meanwhile (`trigger_unavailable`) is read as due no
- * more, so it is let be.
+ * counted toward stopping. A trigger disabled or deleted meanwhile
+ * (`trigger_unavailable`) is read as due no more, so it is let be.
  */
 const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.start_denied",
@@ -104,7 +106,7 @@ const refusedForGood: ReadonlySet<string> = new Set([
 /** The most times a failed try's wait doubles: 2^6 minutes, capped at an hour. */
 const maxBackoffDoublings = 6;
 
-/** A due schedule trigger, as its current version pins it. */
+/** A due schedule trigger, as its current version keeps it. */
 interface DueSchedule {
   triggerId: string;
   version: number;
@@ -118,13 +120,14 @@ interface DueSchedule {
    */
   awaitingStart: boolean;
   workflowId: string;
+  /** The workflow's live version, which its occurrence starts. */
   workflowVersion: number;
   cron: string;
   timeZone: string;
   input: string;
 }
 
-/** The start key of trigger version `schedule`'s occurrence at its `nextAt`. */
+/** The start key of `schedule`'s occurrence at its `nextAt`. */
 const startKeyOf = (schedule: DueSchedule): string =>
   `${coreStartKeyPrefix}schedule:${schedule.triggerId}:${schedule.version}:${schedule.nextAt.toISOString()}`;
 
@@ -362,8 +365,8 @@ const skipped = async (
 /**
  * One clock run's turn at `schedule`'s due occurrence, as a small state
  * machine, so whatever stopped an earlier turn (core dying anywhere) and
- * whatever changed since (a grant revoked, the trigger disabled or moved,
- * the run limit full), it ends in one of three places:
+ * whatever changed since (a grant revoked, the trigger disabled, a
+ * version published, the run limit full), it ends in one of three places:
  *
  * 1. Started already (a start of it was admitted, by an earlier turn
  *    that stopped before moving on, or another turn at once): it moves on,
@@ -402,8 +405,8 @@ const startScheduled = async (
         key: startKeyOf(schedule),
       },
       // Admitted only while this occurrence is still the schedule's next:
-      // disabled and enabled again since it was read, or moved, the
-      // schedule was worked out again, and this one starts nothing.
+      // disabled and enabled again since it was read, the schedule was
+      // worked out again, and this one starts nothing.
       stillNext(schedule),
       {
         scheduledAt: schedule.nextAt.toISOString(),
@@ -418,8 +421,8 @@ const startScheduled = async (
     }
     const failure = failureOf(error);
     if (failure === "gone") {
-      // Disabled, deleted or moved since it was read: it is read as due no
-      // more, so nothing is left to try.
+      // Disabled or deleted since it was read: it is read as due no more,
+      // so nothing is left to try.
       log.info("trigger.schedule.gone", { trigger: schedule.triggerId });
       return;
     }
@@ -438,8 +441,8 @@ const startScheduled = async (
 
 /**
  * Starts the runs of the schedule triggers due by `now`, oldest first, of
- * live, enabled triggers on the version their schedule was worked out
- * for. Core's clock calls it every minute.
+ * live, enabled triggers, each on its workflow's live version. Core's
+ * clock calls it every minute.
  */
 export const startDueScheduleTriggers = async (
   env: Env,
@@ -455,7 +458,7 @@ export const startDueScheduleTriggers = async (
       attempts: triggerSchedules.attempts,
       awaitingStart: sql`${startStatusSql} = 'requested'`.mapWith(Boolean),
       workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
+      workflowVersion: workflowResources.currentVersion,
       cron: triggerResourceVersions.scheduleCron,
       timeZone: triggerResourceVersions.scheduleTimeZone,
       input: triggerResourceVersions.scheduleInput,
@@ -478,20 +481,29 @@ export const startDueScheduleTriggers = async (
         eq(triggerResourceVersions.version, triggerSchedules.version)
       )
     )
+    .innerJoin(
+      workflowResources,
+      eq(workflowResources.id, triggerResourceVersions.workflowResourceId)
+    )
     .where(and(lte(triggerSchedules.nextAt, now), tryNow(now)))
     .orderBy(asc(triggerSchedules.nextAt))
     .limit(schedulesPerRun);
   await Promise.all(
-    due.flatMap(({ nextAt, cron, timeZone, input, ...schedule }) =>
-      nextAt === null || cron === null || timeZone === null || input === null
-        ? []
-        : [
-            startScheduled(
-              env,
-              { ...schedule, nextAt, cron, timeZone, input },
-              now
-            ),
-          ]
+    due.flatMap(
+      ({ nextAt, cron, timeZone, input, workflowVersion, ...schedule }) =>
+        nextAt === null ||
+        cron === null ||
+        timeZone === null ||
+        input === null ||
+        workflowVersion === null
+          ? []
+          : [
+              startScheduled(
+                env,
+                { ...schedule, nextAt, cron, timeZone, input, workflowVersion },
+                now
+              ),
+            ]
     )
   );
 };

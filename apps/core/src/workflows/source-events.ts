@@ -271,7 +271,6 @@ const takersOf = async (env: Env, event: SourceEvent): Promise<Taker[]> =>
       id: triggerResources.id,
       version: triggerResources.currentVersion,
       workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
       inputMapping: triggerResourceVersions.inputMapping,
     })
     .from(triggerResources)

@@ -62,6 +62,11 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
+  workflowChanged: msg({
+    message: "Workflow changed",
+    context:
+      "inbox item kind: another version of a workflow the person's triggers start went live",
+  }),
   packageNotice: msg({
     message: "Packages",
     context: "inbox item kind: what a scan found of approved packages",
@@ -101,6 +106,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
   stoppedSchedule: CalendarOffIcon,
+  workflowChanged: GitCompareArrowsIcon,
   packageNotice: ShieldAlertIcon,
   stoppedEvents: MailWarningIcon,
   appMessage: BellIcon,

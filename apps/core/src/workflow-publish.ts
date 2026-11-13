@@ -22,7 +22,7 @@ import {
 import { retriedBatch } from "./db/d1.ts";
 import { subjectEntry } from "./drafts.ts";
 import type { DraftKind } from "./drafts.ts";
-import { triggersMovedTo } from "./trigger-resources.ts";
+import { triggersFollowing } from "./trigger-resources.ts";
 import {
   buildWorkflowVersion,
   liveWorkflow,
@@ -40,8 +40,8 @@ import {
 // `workflow.json`; building it checks it as the profile and the catalog
 // do and compiles it once into the version's sealed build
 // (workflow-resources.ts, `buildWorkflowVersion`); activating a version
-// makes it the one the workflow runs: what a start by hand, an App's
-// binding and its triggers start from then on.
+// makes it the one the workflow runs: what a start by hand, an agent's,
+// an App's binding and its triggers start from then on, for everyone.
 //
 // Threat model, and how each is closed:
 //
@@ -51,11 +51,11 @@ import {
 // - A run changing under its feet: a run keeps the version it started on
 //   to its end, whatever goes live since; only new starts take the new
 //   one.
-// - A trigger left on a version nobody runs, or moved to one that doesn't
-//   take its input: every trigger, enabled or not, moves onto the version
-//   in the batch that makes it live, or none does, and a schedule's input is
-//   checked against the version first (trigger-resources.ts,
-//   `triggersMovedTo`).
+// - Another builder changing what runs as a trigger's person: a trigger
+//   starts the version live (trigger-resources.ts), so making one live
+//   changes what each trigger runs as its owner. Allowed, and audited for
+//   each trigger it affects, by whoever made it live, in the batch that
+//   does; each owner other than them is told (`triggersFollowing`).
 // - New access without an admin: an approval is of one binding (alias,
 //   kind, contract key and fingerprint), whichever version declares it
 //   (workflow-bindings.ts), so going live copies nothing: a version that
@@ -100,8 +100,8 @@ const nextLabel = async (env: Env, id: string, at: Date): Promise<string> => {
  * Makes `version` of workflow `id` live for `by`, who builds it, over
  * `basedOn`, the version live when the publish began, audited as
  * `action`, with `alongside` in the batch (`PublishSteps.activate`): its
- * label, given now the first time it goes live; its triggers moved onto
- * it. A version live already is answered its label.
+ * label, given now the first time it goes live; its triggers' owners
+ * told. A version live already is answered its label.
  */
 const activate = async (
   env: Env,
@@ -153,7 +153,13 @@ const activate = async (
   );
   const live = storedEvent(event.id);
   const db = drizzle(env.DB);
-  const triggers = await triggersMovedTo(env, workflow.id, version, live, at);
+  const triggers = await triggersFollowing(
+    env,
+    by,
+    workflow.id,
+    { version, previous: basedOn },
+    live
+  );
   const statements = [
     db
       .update(workflowResources)
@@ -181,7 +187,7 @@ const activate = async (
           live
         )
       ),
-    ...triggers.statements,
+    ...triggers,
     ...(await alongside(live)),
   ] as const;
   const [changed] = await retriedBatch(

@@ -767,21 +767,20 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     }).toStrictEqual({ full: true, runsWhileFull: 0, freed: 202, runs: 1 });
   });
 
-  it("try a message again, never refuse it for good, when its trigger moves to another version as it starts, then start it at that version", async () => {
+  it("try a message again, never refuse it for good, when a version is published as it starts, then start it on that version", async () => {
     const { builder, workflow, trigger, address } = await emailTrigger();
-    await publishOverRpc(
-      builder.api,
-      workflow,
-      definitionOf("args.subject.trim()")
-    );
     const message = invoiceMail({
       to: address,
-      messageId: `moved-${unique()}@acme.test`,
+      messageId: `published-${unique()}@acme.test`,
     });
-    // Moved to version 2 after core read the trigger, just as the start
-    // checks what the trigger may do.
+    // Version 2 published after core read the live version, just as the
+    // start checks what the trigger may do.
     const moving = racedAt(/trigger_resources AS live/u, async () => {
-      await builder.api.workflowResources.triggers.setVersion(trigger.id, 2);
+      await publishOverRpc(
+        builder.api,
+        workflow,
+        definitionOf("args.subject.trim()")
+      );
     });
     const failed = vi.spyOn(console, "error").mockReturnValue();
 
@@ -916,7 +915,6 @@ const createEmailTrigger = async (
   await builder.api.workflowResources.triggers.create({
     kind: "email",
     workflowId: workflow,
-    version: 1,
     config: {
       input: mapping,
       ...(address === undefined ? {} : { address }),
@@ -1025,7 +1023,6 @@ describe(
             {
               kind: "email",
               workflowId: workflow,
-              version: 1,
               config: { input: mapping, address: name },
             }
           )

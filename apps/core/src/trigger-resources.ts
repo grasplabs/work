@@ -1,4 +1,4 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { connectorEventActions } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -36,8 +36,10 @@ import { z } from "zod";
 import {
   auditedBatch,
   outboxed,
+  outboxedEventWhere,
   outboxedIfChanged,
   outboxedWhere,
+  storedEvent,
 } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -46,9 +48,9 @@ import {
   triggerResources,
   triggerResourceVersions,
   triggerSchedules,
-  workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { triggerWorkflowNoticed } from "./notifications.ts";
 import { revokedWith, triggerRequests } from "./permissions.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
@@ -61,9 +63,9 @@ import {
 import { quotaLimits } from "./workflows/quotas.ts";
 
 // Independent triggers (platform specification 15, 24): each a resource of
-// its own that starts one exact workflow version on its own. This is their
-// registry: listing, creating one, moving it to another version of its
-// workflow, disabling and deleting it, each served to a signed-in person
+// its own that starts one workflow on its own, at the version live as it
+// starts. This is their registry: listing, creating one, disabling and
+// deleting it, each served to a signed-in person
 // over `/rpc` (workflow-triggers-rpc.ts). What it may start is decided as
 // for any other subject, by a permission of its own (`start` on the workflow), granted
 // by an admin, and checked at every start (workflow-starts.ts).
@@ -74,21 +76,18 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   person bound when it was created (`principal_binding`): whoever created
 //   it, never the workflow's owner, and only while they are still in the
 //   organization.
-// - A trigger starting a version nobody made live. Each trigger version
-//   pins an exact, published workflow version. Publishing or rolling back
-//   the workflow moves each of its triggers, enabled or not, onto the
-//   version it makes live, as a new trigger version in the batch that
-//   makes it live (`triggersMovedTo`), audited with it, so none enabled
-//   later starts a version no longer live. A schedule's occurrence keeps
-//   its time as it moves: a start of it tried on the version before is
-//   refused, and the next clock run starts it on the version moved to. Moving a trigger by hand is a new
-//   trigger version too, audited, of the same workflow only. A run keeps
-//   the version it started on.
+// - A trigger starting a version nobody made live. A trigger names its
+//   workflow, never a version: each start is of the version live as it
+//   is admitted (workflow-starts.ts), so what is published is what every
+//   trigger runs, and a run keeps the version it started on. A publish or
+//   roll back by someone else changes what runs as the trigger's person:
+//   allowed, audited for each trigger it affects (`trigger.updated`, by
+//   whoever made it live), and its owner told (`triggersFollowing`).
 // - Creating a trigger grants it something. Nothing: its creator must
 //   build the workflow, and its starts still need a permission an admin
-//   grants, naming the workflow it pins. Creating it only asks for that.
+//   grants, naming the workflow it starts. Creating it only asks for that.
 // - A trigger nobody may stop: the workflow's builders, and admins, may
-//   disable or delete any trigger that starts it; only its owner moves or
+//   disable or delete any trigger that starts it; only its owner
 //   re-enables it. Only an enabled trigger holding an active `start`
 //   grant keeps the workflow from being deleted.
 // - A trigger acting for someone who lost access: each start requires its
@@ -103,9 +102,11 @@ import { quotaLimits } from "./workflows/quotas.ts";
 //   after either never lands. Runs already started go on (spec 15.3).
 // - Grasp staff deciding what starts a client's workflow: they never
 //   create, change or delete a trigger.
-// - A schedule trigger starting what its workflow version doesn't take:
-//   its input is literal JSON, checked against the version's input schema
-//   when the trigger is created and again for each version it moves to;
+// - A schedule trigger starting what its workflow doesn't take: its input
+//   is literal JSON, checked against the live version's input schema when
+//   the trigger is created, and by every start against the version it
+//   starts (a refusal audited, and after `maxFailedStarts` in a row the
+//   schedule stops and its owner is told, workflows/schedule-triggers.ts);
 //   its expression and time zone are checked to name a time to come.
 //   Nothing in it is evaluated. Its runs start as workflows/schedule-
 //   triggers.ts says.
@@ -179,8 +180,9 @@ export const nextOccurrence = (
 ): Date | undefined => nextScheduledRun({ cron, timeZone }, after, "skip");
 
 /**
- * `input` as version `version` of workflow `workflowId` takes it, as
- * canonical JSON; `workflow.resource_invalid` with the issues otherwise.
+ * `input` as version `version` of workflow `workflowId` (its live one)
+ * takes it, as canonical JSON; `workflow.resource_invalid` with the
+ * issues otherwise.
  */
 const scheduleInputFor = async (
   env: Env,
@@ -194,7 +196,7 @@ const scheduleInputFor = async (
   } catch (error) {
     if (isExpectedError(error)) {
       throw workflowResourceErrors.create("workflow.resource_invalid", {
-        issues: [`config.input: Not an input version ${version} takes.`],
+        issues: ["config.input: Not an input the workflow takes."],
       });
     }
     throw error;
@@ -261,8 +263,8 @@ const webhookFieldsOf = async (
 
 /**
  * What a trigger of `kind` with `config` keeps in its version, checked
- * (`workflow.resource_invalid`): a schedule trigger's schedule and input, accepted by version `version` of workflow
- * `workflowId`, a connector trigger's connection, event and mapping, for
+ * (`workflow.resource_invalid`): a schedule trigger's schedule and input,
+ * accepted by version `version` of workflow `workflowId`, its live one, a connector trigger's connection, event and mapping, for
  * `principal`, a webhook trigger's source and type; an email trigger's
  * mapping.
  */
@@ -328,9 +330,9 @@ export interface TriggerResource {
   id: TriggerId;
   kind: TriggerKind;
   owner: string;
+  /** Its own version, whose configuration it keeps. */
   version: number;
   workflowId: string;
-  workflowVersion: number;
   principal: string;
   enabled: boolean;
 }
@@ -349,27 +351,6 @@ const entry = (
   target: { type: "trigger", id },
   detail,
 });
-
-/** Refuses a workflow version that wasn't published. */
-const requirePublished = async (
-  env: Env,
-  workflowId: string,
-  version: number
-): Promise<void> => {
-  const row = await drizzle(env.DB)
-    .select({ version: workflowResourceVersions.version })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, workflowId),
-        eq(workflowResourceVersions.version, version)
-      )
-    )
-    .get();
-  if (row === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-};
 
 /**
  * Why creating a trigger (at the address `chosen`, if one was) failed with
@@ -399,9 +380,10 @@ const creationRefusal = async (
 };
 
 /**
- * Creates a trigger of `input.kind` that starts exactly version
- * `input.version` of workflow `input.workflowId`, acting for `by`, who must
- * build the workflow. It may start nothing until an admin grants it
+ * Creates a trigger of `input.kind` that starts workflow
+ * `input.workflowId`, at the version live as each run starts, acting for
+ * `by`, who must build the workflow; one never published has no version to
+ * start (`workflow.version_not_found`). It may start nothing until an admin grants it
  * `start` on the workflow, which it asks for as it is created, in the same
  * batch (`triggerRequests`); a connector trigger hears nothing until an
  * admin grants it its event's read on its connection, which it asks for
@@ -416,13 +398,16 @@ export const createTriggerResource = async (
 ): Promise<TriggerResource> => {
   requireBuilder(by);
   requireNotStaff(by);
-  const { kind, workflowId, version, config } = workflowResourceErrors.parse(
+  const { kind, workflowId, config } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowTriggerCreateSchema,
     input
   );
   const workflow = await requireWorkflowRole(env, by, workflowId, "builder");
-  await requirePublished(env, workflow.id, version);
+  const version = workflow.currentVersion;
+  if (version === null) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
   const fields = await kindFieldsOf(
     env,
     kind,
@@ -479,6 +464,8 @@ export const createTriggerResource = async (
       // batch, so a deletion and a new trigger never both land.
       workflowResourceId: sql`(SELECT id FROM workflow_resources
         WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
+      // Read by nothing since a trigger starts the live version: the
+      // version live as it was created (expand, then contract).
       workflowResourceVersion: version,
       configHash,
       principalBinding: by.userId,
@@ -506,7 +493,6 @@ export const createTriggerResource = async (
       entry(by, "trigger.created", id, {
         kind,
         workflowId: workflow.id,
-        workflowVersion: version,
         configHash,
         // A name chosen is no secret, as an App's address isn't; a random
         // address is never audited.
@@ -529,7 +515,6 @@ export const createTriggerResource = async (
     owner: by.userId,
     version: 1,
     workflowId: workflow.id,
-    workflowVersion: version,
     principal: by.userId,
     enabled: true,
   };
@@ -539,8 +524,8 @@ export const createTriggerResource = async (
  * The live trigger `id`, if `by` may act on it as `as` says, never Grasp
  * staff: to `manage` it (see it, disable or delete it), its owner, an
  * admin, or a builder of the workflow it starts, so no trigger keeps a
- * workflow's builders from stopping it; to `own` it (move it to another
- * version, enable it again), its owner alone, whose person it acts for,
+ * workflow's builders from stopping it; to `own` it (enable it again), its
+ * owner alone, whose person it acts for,
  * and only while they still build the workflow, read now, as creating one
  * needs: an owner demoted or unshared can't undo a builder's disable.
  * Anyone else gets `workflow.trigger_unavailable`, as for one that
@@ -564,7 +549,6 @@ export const requireTriggerManager = async (
       version: triggerResources.currentVersion,
       enabled: triggerResources.enabled,
       workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
       principal: triggerResourceVersions.principalBinding,
     })
     .from(triggerResources)
@@ -642,129 +626,27 @@ const scheduleOf = async (
 };
 
 /**
- * Moves trigger `id` to version `version` of its own workflow, for `by`,
- * its owner, who must still build the workflow: a new trigger
- * version, audited, used by future starts only. Its principal stays. A
- * schedule trigger's input must be one the new version takes; it goes on
- * from its next occurrence after now, never one the old version missed.
+ * What tells of workflow `workflowId`'s version `version` going live
+ * over `previous`, made live by `by` (workflow-publish.ts): its live
+ * triggers, enabled or not, start it from then on, so each is audited
+ * (`trigger.updated`, by `by`, with the version and the one before), and
+ * each owner other than `by`, whose person those triggers act for, is told
+ * (`triggerWorkflowNoticed`). Written by the statements answered, each only
+ * while `live` (SQL) holds, in the batch that makes the version live; a
+ * try of the batch again after one that landed audits nothing twice.
  */
-export const updateTriggerVersion = async (
+export const triggersFollowing = async (
   env: Env,
   by: Acting,
-  id: unknown,
-  version: unknown
-): Promise<TriggerResource> => {
-  const trigger = await requireTriggerManager(env, by, id, "own");
-  const target = workflowResourceErrors.parse(
-    "workflow.resource_invalid",
-    z.number().int().positive(),
-    version
-  );
-  await requirePublished(env, trigger.workflowId, target);
-  const schedule =
-    trigger.kind === "schedule"
-      ? await scheduleOf(env, trigger.id, trigger.version)
-      : undefined;
-  if (schedule !== undefined) {
-    await scheduleInputFor(
-      env,
-      trigger.workflowId,
-      target,
-      JSON.parse(schedule.input)
-    );
-  }
-  const next = trigger.version + 1;
-  const nextAt =
-    schedule === undefined
-      ? null
-      : (nextOccurrence(schedule.cron, schedule.timeZone, new Date()) ?? null);
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db.insert(triggerResourceVersions).values({
-      triggerId: trigger.id,
-      version: next,
-      workflowResourceId: trigger.workflowId,
-      workflowResourceVersion: target,
-      configHash: sql`(SELECT config_hash FROM trigger_resource_versions
-        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
-      principalBinding: trigger.principal,
-      createdAt: new Date(),
-      // Its configuration stays, as its hash does: only the version moves.
-      eventType: sql`(SELECT event_type FROM trigger_resource_versions
-        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
-      connectionId: sql`(SELECT connection_id FROM trigger_resource_versions
-        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
-      connectionResource: sql`(SELECT connection_resource FROM trigger_resource_versions
-        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
-      inputMapping: sql`(SELECT input_mapping FROM trigger_resource_versions
-        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
-      eventSourceId: sql`(SELECT event_source_id FROM trigger_resource_versions
-        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
-      scheduleCron: schedule?.cron ?? null,
-      scheduleTimeZone: schedule?.timeZone ?? null,
-      scheduleInput: schedule?.input ?? null,
-    }),
-    ...(schedule === undefined
-      ? []
-      : [
-          db
-            .insert(triggerSchedules)
-            .values({
-              triggerId: trigger.id,
-              version: next,
-              nextAt,
-              failedStarts: 0,
-            })
-            .onConflictDoUpdate({
-              target: triggerSchedules.triggerId,
-              set: {
-                version: next,
-                nextAt,
-                failedStarts: 0,
-                attempts: 0,
-                lastAttemptAt: null,
-              },
-            }),
-        ]),
-    db
-      .update(triggerResources)
-      .set({ currentVersion: next })
-      .where(eq(triggerResources.id, trigger.id)),
-    outboxed(
-      db,
-      entry(by, "trigger.updated", trigger.id, {
-        version: next,
-        workflowVersion: target,
-      })
-    ),
-  ]);
-  return { ...trigger, version: next, workflowVersion: target };
-};
-
-/**
- * What moves every trigger of workflow `workflowId`, enabled or not, onto
- * its version `version`, as that version goes live (workflow-publish.ts): a
- * new trigger version each, pinning it, its configuration and principal
- * as they were, written by the statements answered, each only while
- * `live` (SQL) holds, in the batch that makes the version live. A
- * schedule trigger's input must be one the version takes
- * (`workflow.resource_invalid` otherwise, before anything is written); it
- * goes on from its next occurrence. A trigger already pinning the
- * version, as after a try of the batch whose answer was lost, isn't moved
- * again. Answers how many it moves.
- */
-export const triggersMovedTo = async (
-  env: Env,
   workflowId: string,
-  version: number,
-  live: SQL,
-  at: Date
+  { version, previous }: { version: number; previous: number | null },
+  live: SQL
 ) => {
   const db = drizzle(env.DB);
-  const moving = await db
+  const following = await db
     .select({
       id: triggerResources.id,
-      scheduleInput: triggerResourceVersions.scheduleInput,
+      owner: triggerResources.ownerId,
     })
     .from(triggerResources)
     .innerJoin(
@@ -777,71 +659,41 @@ export const triggersMovedTo = async (
     .where(
       and(
         isNull(triggerResources.deletedAt),
-        eq(triggerResourceVersions.workflowResourceId, workflowId),
-        sql`${triggerResourceVersions.workflowResourceVersion} IS NOT ${version}`
+        eq(triggerResourceVersions.workflowResourceId, workflowId)
       )
     )
+    .orderBy(asc(triggerResources.id))
     .all();
-  for (const { scheduleInput } of moving) {
-    if (scheduleInput !== null) {
-      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-      await scheduleInputFor(
-        env,
-        workflowId,
-        version,
-        JSON.parse(scheduleInput)
-      );
+  const told = new Map<string, string>();
+  for (const { id, owner } of following) {
+    if (owner !== by.userId && !told.has(owner)) {
+      told.set(owner, id);
     }
   }
-  const ids = JSON.stringify(moving.map(({ id }) => id));
-  const moved = sql`trigger_resources.id IN (SELECT value FROM json_each(${ids}))`;
-  return {
-    count: moving.length,
-    statements:
-      moving.length === 0
-        ? []
-        : [
-            // In the table's column order.
-            db.insert(triggerResourceVersions).select(
-              sql`SELECT current.trigger_id, current.version + 1,
-                current.workflow_resource_id, ${version}, current.config_hash,
-                current.principal_binding, ${at.getTime()}, current.event_contract,
-                current.event_type, current.schedule_cron,
-                current.schedule_time_zone, current.schedule_input,
-                current.connection_id, current.connection_resource,
-                current.input_mapping, current.event_source_id
-              FROM trigger_resources
-              JOIN trigger_resource_versions AS current
-                ON current.trigger_id = trigger_resources.id
-                AND current.version = trigger_resources.current_version
-              WHERE ${moved} AND trigger_resources.deleted_at IS NULL
-                AND current.workflow_resource_id = ${workflowId}
-                AND current.workflow_resource_version IS NOT ${version}
-                AND ${live}`
-            ),
-            db
-              .update(triggerResources)
-              .set({
-                currentVersion: sql`${triggerResources.currentVersion} + 1`,
-              })
-              .where(
-                sql`${moved} AND EXISTS (SELECT 1 FROM trigger_resource_versions AS next
-                  WHERE next.trigger_id = trigger_resources.id
-                    AND next.version = trigger_resources.current_version + 1)`
-              ),
-            // A schedule follows its trigger's version, from the
-            // occurrence it is at.
-            db
-              .update(triggerSchedules)
-              .set({
-                version: sql`(SELECT current_version FROM trigger_resources
-                  WHERE trigger_resources.id = trigger_schedules.trigger_id)`,
-              })
-              .where(
-                sql`${triggerSchedules.triggerId} IN (SELECT value FROM json_each(${ids}))`
-              ),
-          ],
-  };
+  return [
+    ...following.map(({ id }) => {
+      const event = createAuditEvent(
+        entry(by, "trigger.updated", id, {
+          workflowVersion: version,
+          previous,
+        }),
+        "core"
+      );
+      return outboxedEventWhere(
+        db,
+        event,
+        sql`${live} AND NOT ${storedEvent(event.id)}`
+      );
+    }),
+    ...[...told].map(([owner, triggerId]) =>
+      triggerWorkflowNoticed(db, {
+        triggerId,
+        workflowId,
+        personId: owner,
+        recorded: live,
+      })
+    ),
+  ];
 };
 
 /**
@@ -977,7 +829,6 @@ interface TriggerRow {
   enabled: boolean;
   createdAt: Date;
   workflowId: string;
-  workflowVersion: number;
   principal: string;
   emailAddress: string | null;
   eventType: string | null;
@@ -1068,9 +919,7 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
   id: row.id,
   kind: row.kind,
   owner: row.owner,
-  version: row.version,
   workflowId: row.workflowId,
-  workflowVersion: row.workflowVersion,
   principal: row.principal,
   enabled: row.enabled,
   createdAt: row.createdAt.toISOString(),
@@ -1111,7 +960,7 @@ const heldStatusSql = (
     WHEN 'active' THEN 0 WHEN 'requested' THEN 1 ELSE 2 END
   LIMIT 1)`;
 
-/** Where a trigger's `start` on the workflow its current version pins stands (`heldStatusSql`). */
+/** Where a trigger's `start` on the workflow it starts stands (`heldStatusSql`). */
 export const startStatusSql = heldStatusSql(
   "workflow",
   sql`${triggerResourceVersions.workflowResourceId}`,
@@ -1149,7 +998,6 @@ const triggersWhere = async (
       enabled: triggerResources.enabled,
       createdAt: triggerResources.createdAt,
       workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
       principal: triggerResourceVersions.principalBinding,
       emailAddress: triggerResources.emailAddress,
       eventType: triggerResourceVersions.eventType,

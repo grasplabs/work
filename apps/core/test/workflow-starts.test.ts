@@ -28,11 +28,12 @@ import {
   removeProjectMember,
   unfileItem,
 } from "../src/projects.ts";
+import { rollback } from "../src/publish.ts";
 import {
   createTriggerResource,
   setTriggerEnabled,
-  updateTriggerVersion,
 } from "../src/trigger-resources.ts";
+import { workflowKind } from "../src/workflow-publish.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
@@ -42,6 +43,7 @@ import {
 import {
   admitWorkflowStart,
   decideWorkflowStart,
+  isStaleRefusal,
   startWorkflow,
 } from "../src/workflow-starts.ts";
 import type {
@@ -233,12 +235,11 @@ const appOwnedBy = async (owner: Person): Promise<string> => {
   return id;
 };
 
-/** A webhook trigger `by` creates for version 1 of workflow `id`. */
+/** A webhook trigger `by` creates for workflow `id`. */
 const webhookTrigger = async (by: Person, id: string) =>
   await createTriggerResource(env, by, {
     kind: "webhook",
     workflowId: id,
-    version: 1,
     config: await webhookConfig(),
   });
 
@@ -303,6 +304,39 @@ describe("a person starting a workflow", () => {
     await expect(
       outcome(startWorkflow(env, personOf(stranger), workflow.id, request()))
     ).resolves.toBe("workflow.resource_unavailable");
+  });
+
+  it("starts only the live version: neither the one rolled back from nor one before it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada, 3);
+    await rollback(env, workflowKind, ada, workflow.id, 2);
+    const agent = `agent-${unique()}`;
+    await granted(
+      ada,
+      admin,
+      startsOn(
+        { type: "agent", agentId: agentIdSchema.parse(agent) },
+        workflow.id
+      )
+    );
+    const tries = async (invoker: StartInvoker) =>
+      await Promise.all(
+        [1, 2, 3].map(
+          async (version) =>
+            await outcome(
+              startWorkflow(env, invoker, workflow.id, request(version))
+            )
+        )
+      );
+    expect({
+      person: await tries(personOf(ada)),
+      agent: await tries(agentOf(ada.userId, agent)),
+    }).toStrictEqual({
+      person: ["workflow.version_not_live", "ok", "workflow.version_not_live"],
+      // Code learns nothing more: any refusal is a denial.
+      agent: ["workflow.start_denied", "ok", "workflow.start_denied"],
+    });
   });
 
   it("never names latest, a range or a version never published", async () => {
@@ -743,7 +777,7 @@ describe("an App starting a workflow", () => {
 });
 
 describe("a trigger starting a workflow", () => {
-  it("starts only the exact version it pins, with a grant of its own, for whoever bound it", async () => {
+  it("starts only the live version, with a grant of its own, for whoever bound it", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const bob = await person("builder");
@@ -756,7 +790,6 @@ describe("a trigger starting a workflow", () => {
     const trigger = await createTriggerResource(env, bob, {
       kind: "schedule",
       workflowId: workflow.id,
-      version: 1,
       config: {
         schedule: { cron: "0 9 * * 1-5", timeZone: "Europe/Amsterdam" },
         input: { who: "Ada" },
@@ -765,16 +798,16 @@ describe("a trigger starting a workflow", () => {
     });
     const invoker: StartInvoker = { type: "trigger", triggerId: trigger.id };
     const ungranted = await outcome(
-      startWorkflow(env, invoker, workflow.id, request(1))
+      startWorkflow(env, invoker, workflow.id, request(2))
     );
     await granted(
       bob,
       admin,
       startsOn({ type: "trigger", triggerId: trigger.id }, workflow.id)
     );
-    const started = await startWorkflow(env, invoker, workflow.id, request(1));
-    const otherVersion = await outcome(
-      startWorkflow(env, invoker, workflow.id, request(2))
+    const started = await startWorkflow(env, invoker, workflow.id, request(2));
+    const notLive = await outcome(
+      startWorkflow(env, invoker, workflow.id, request(1))
     );
     // Bob loses his role in the workflow: his trigger acts for him no more.
     await unshareWorkflowResource(env, ada, workflow.id, {
@@ -784,27 +817,26 @@ describe("a trigger starting a workflow", () => {
     expect({
       ungranted,
       principal: started.principal,
-      otherVersion,
+      notLive,
       unshared: await outcome(
-        startWorkflow(env, invoker, workflow.id, request(1))
+        startWorkflow(env, invoker, workflow.id, request(2))
       ),
     }).toStrictEqual({
       ungranted: "workflow.start_denied",
       // Bob bound it: never the workflow's owner.
       principal: bob.userId,
-      otherVersion: "workflow.trigger_unavailable",
+      notLive: "workflow.start_denied",
       unshared: "workflow.start_denied",
     });
   });
 
-  it("moves to another version only explicitly, and stops when disabled or its person leaves", async () => {
+  it("starts the version live as it is admitted, and stops when disabled or its person leaves", async () => {
     const admin = await person("admin");
     const bob = await person("builder");
     const workflow = await workflowOf(bob, 2);
     const trigger = await createTriggerResource(env, bob, {
       kind: "webhook",
       workflowId: workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     await granted(
@@ -813,27 +845,37 @@ describe("a trigger starting a workflow", () => {
       startsOn({ type: "trigger", triggerId: trigger.id }, workflow.id)
     );
     const invoker: StartInvoker = { type: "trigger", triggerId: trigger.id };
-    // Decided for version 1, then moved to 2 before it is admitted.
-    const beforeMove = await decide(invoker, workflow.id, 1);
-    await updateTriggerVersion(env, bob, trigger.id, 2);
-    const moved = {
-      decidedBefore: await outcome(admitWorkflowStart(env, beforeMove)),
-      old: await outcome(startWorkflow(env, invoker, workflow.id, request(1))),
-      now: await outcome(startWorkflow(env, invoker, workflow.id, request(2))),
+    // Decided for version 2, then 3 published before it is admitted:
+    // stale, for the trigger to decide again on 3.
+    const beforePublish = await decide(invoker, workflow.id, 2);
+    await publishDefinition(
+      env,
+      bob,
+      workflow.id,
+      greetingOf(undefined, "Version 3")
+    );
+    const decidedBefore = await admitWorkflowStart(env, beforePublish).then(
+      () => "ok",
+      (error: unknown) => (isStaleRefusal(error) ? "stale" : String(error))
+    );
+    const published = {
+      decidedBefore,
+      old: await outcome(startWorkflow(env, invoker, workflow.id, request(2))),
+      now: await outcome(startWorkflow(env, invoker, workflow.id, request(3))),
     };
-    const decided = await decide(invoker, workflow.id, 2);
+    const decided = await decide(invoker, workflow.id, 3);
     await setTriggerEnabled(env, bob, trigger.id, false);
     const disabled = await outcome(admitWorkflowStart(env, decided));
     await setTriggerEnabled(env, bob, trigger.id, true);
     await leaves(bob);
     expect({
-      moved,
+      published,
       disabled,
-      left: await outcome(startWorkflow(env, invoker, workflow.id, request(2))),
+      left: await outcome(startWorkflow(env, invoker, workflow.id, request(3))),
     }).toStrictEqual({
-      moved: {
-        decidedBefore: "workflow.start_denied",
-        old: "workflow.trigger_unavailable",
+      published: {
+        decidedBefore: "stale",
+        old: "workflow.start_denied",
         now: "ok",
       },
       disabled: "workflow.start_denied",
@@ -841,7 +883,7 @@ describe("a trigger starting a workflow", () => {
     });
   });
 
-  it("is moved or enabled by its owner alone while they build the workflow, and stopped by its builders or admins", async () => {
+  it("is enabled by its owner alone while they build the workflow, and stopped by its builders or admins", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const bob = await person("builder");
@@ -854,16 +896,9 @@ describe("a trigger starting a workflow", () => {
     const trigger = await createTriggerResource(env, bob, {
       kind: "webhook",
       workflowId: workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     const tries = {
-      adminMoves: await outcome(
-        updateTriggerVersion(env, admin, trigger.id, 2)
-      ),
-      ownerOfWorkflowMoves: await outcome(
-        updateTriggerVersion(env, ada, trigger.id, 2)
-      ),
       adminDisables: await outcome(
         setTriggerEnabled(env, admin, trigger.id, false)
       ),
@@ -871,8 +906,8 @@ describe("a trigger starting a workflow", () => {
         setTriggerEnabled(env, ada, trigger.id, true)
       ),
     };
-    // Bob, demoted to a user of the workflow, can't undo the disable or
-    // steer his trigger; unshared, neither.
+    // Bob, demoted to a user of the workflow, can't undo the disable;
+    // unshared, neither.
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
       id: bob.userId,
@@ -880,7 +915,6 @@ describe("a trigger starting a workflow", () => {
     });
     const demoted = {
       enables: await outcome(setTriggerEnabled(env, bob, trigger.id, true)),
-      moves: await outcome(updateTriggerVersion(env, bob, trigger.id, 2)),
     };
     await unshareWorkflowResource(env, ada, workflow.id, {
       type: "person",
@@ -901,12 +935,10 @@ describe("a trigger starting a workflow", () => {
       enabled: enabled?.enabled,
     }).toStrictEqual({
       tries: {
-        adminMoves: "workflow.trigger_unavailable",
-        ownerOfWorkflowMoves: "workflow.trigger_unavailable",
         adminDisables: "ok",
         ownerOfWorkflowEnables: "workflow.trigger_unavailable",
       },
-      demoted: { enables: "role.forbidden", moves: "role.forbidden" },
+      demoted: { enables: "role.forbidden" },
       unshared: "workflow.resource_unavailable",
       enabled: 0,
     });
@@ -925,7 +957,6 @@ describe("a trigger starting a workflow", () => {
     const trigger = await createTriggerResource(env, bob, {
       kind: "webhook",
       workflowId: workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     await granted(
@@ -976,7 +1007,6 @@ describe("a trigger starting a workflow", () => {
       const trigger = await createTriggerResource(env, ada, {
         kind: "webhook",
         workflowId: workflow.id,
-        version: 1,
         config: await webhookConfig(),
       });
       await granted(
@@ -1204,7 +1234,6 @@ describe("permissions of independent resources", () => {
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     const subject = { type: "workflow", workflowId: workflow.id } as const;
@@ -1402,7 +1431,6 @@ describe("what code and triggers may learn and name", () => {
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: theirs.id,
-      version: 1,
       config: await webhookConfig(),
     });
     const ask = async (by: Person, permission: PermissionRequest) =>

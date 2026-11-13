@@ -8,7 +8,10 @@ import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { valueAtPointer } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { coreStartKeyPrefix } from "@grasp-os/shared/workflow-resources";
+import {
+  coreStartKeyPrefix,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 import { inputMappingSchema } from "@grasp-os/shared/workflow-triggers";
 import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
 import type { ConnectorEvent } from "@grasp-os/shared/workflows";
@@ -27,6 +30,7 @@ import {
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { allowingPermissionSql } from "../permissions.ts";
+import { liveWorkflow } from "../workflow-resources.ts";
 import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 import type { TriggerCause } from "../workflow-starts.ts";
 import type { StampedRun } from "./mail-stamps.ts";
@@ -60,13 +64,13 @@ import type { StartFiles } from "./start-files.ts";
 //   again in the statement that admits the start, so one revoked meanwhile
 //   starts nothing. A revoked or disconnected connection reports nothing.
 // - A trigger acting on authority it lost. Each delivery is a start as any
-//   trigger's: the trigger live, enabled and pinning that version, its
-//   person still with a role, and its own `start` grant active, read again
+//   trigger's: the trigger live and enabled, of the workflow's live
+//   version, its person still with a role, and its own `start` grant active, read again
 //   as the start is admitted.
 // - Code in a mapping. The input is built from JSON Pointers into the
 //   event (RFC 6901) and literal defaults (`inputOf`): nothing is
 //   evaluated, and a pointer that finds nothing leaves its default. The
-//   input is then checked against the workflow version's schema as any
+//   input is then checked against the live version's schema as any
 //   start's is; one it doesn't take is refused for good.
 // - A workflow starting itself without end: its own mail reaching a
 //   mailbox its trigger watches, or two workflows mailing each other. A
@@ -120,12 +124,11 @@ import type { StartFiles } from "./start-files.ts";
 // Email triggers' messages (inbound-email.ts) go through the same steps
 // (`startOnce`), each message an event of its own.
 
-/** A trigger that takes an event or a message, as its current version pins it. */
+/** A trigger that takes an event or a message, as its current version keeps it. */
 export interface Taker {
   id: string;
   version: number;
   workflowId: string;
-  workflowVersion: number;
   inputMapping: string | null;
 }
 
@@ -223,7 +226,6 @@ const takersOf = async (env: Env, event: ConnectorEvent): Promise<Taker[]> => {
       id: triggerResources.id,
       version: triggerResources.currentVersion,
       workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
       inputMapping: triggerResourceVersions.inputMapping,
     })
     .from(triggerResources)
@@ -404,18 +406,10 @@ const settle = async (
   return "gone";
 };
 
-/**
- * Where trigger `taker` stands now, read live: `moved` to another version
- * since it was read (so a refusal may be of the old version's start, and
- * the event is to be tried again, at the new one), `gone` (disabled or
- * deleted), or still `current`.
- */
-const standingOf = async (
-  env: Env,
-  taker: Taker
-): Promise<"current" | "moved" | "gone"> => {
+/** Whether trigger `taker` is disabled or deleted now, read live. */
+const isGone = async (env: Env, taker: Taker): Promise<boolean> => {
   const live = await drizzle(env.DB)
-    .select({ version: triggerResources.currentVersion })
+    .select({ id: triggerResources.id })
     .from(triggerResources)
     .where(
       and(
@@ -425,19 +419,15 @@ const standingOf = async (
       )
     )
     .get();
-  if (live === undefined) {
-    return "gone";
-  }
-  return live.version === taker.version ? "current" : "moved";
+  return live === undefined;
 };
 
 /**
  * What became of `taker`'s start of `arrival` that threw `error`: gone
  * (refused for good, audited, or held back too long, dropped, audited:
  * settled), unavailable (the trigger disabled or deleted meanwhile), or to
- * try again (core's own failure, or the trigger moved to another version
- * meanwhile, whatever it was refused with: nothing of the old version's
- * is settled for good).
+ * try again (core's own failure, or a decision gone stale, such as a
+ * version published as it was decided: tried again on the new one).
  */
 const refusalOf = async (
   env: Env,
@@ -452,11 +442,10 @@ const refusalOf = async (
     });
     return "retry";
   }
-  const standing = await standingOf(env, taker);
-  if (standing === "moved") {
-    return "retry";
-  }
-  if (error.code === "workflow.trigger_unavailable" || standing === "gone") {
+  if (
+    error.code === "workflow.trigger_unavailable" ||
+    (await isGone(env, taker))
+  ) {
     return "unavailable";
   }
   let { code } = error;
@@ -582,6 +571,13 @@ export const startOnce = async (
           : { emittingRun: arrival.stamped.runId }),
       });
     }
+    // The version live now: a publish before it is admitted refuses it as
+    // stale, and it is tried again on the new one.
+    const workflow = await liveWorkflow(env, taker.workflowId);
+    const version = workflow?.currentVersion;
+    if (version === undefined || version === null) {
+      throw workflowResourceErrors.create("workflow.start_denied");
+    }
     await startWorkflow(
       env,
       {
@@ -590,7 +586,7 @@ export const startOnce = async (
         ...(cause === undefined ? {} : { cause }),
       },
       taker.workflowId,
-      { version: taker.workflowVersion, args: arrival.input, key },
+      { version, args: arrival.input, key },
       // Read again as it is admitted: what else it needs.
       arrival.also,
       {

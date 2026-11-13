@@ -160,7 +160,7 @@ const requestItems = async (
   };
 };
 
-/** The latest page of the person's notifications: questions they were asked, schedules of theirs that stopped, sources connect stopped hearing for their triggers, what core found of their approved packages, and what Apps told them. */
+/** The latest page of the person's notifications: questions they were asked, schedules of theirs that stopped, workflows changed under their triggers, sources connect stopped hearing for their triggers, what core found of their approved packages, and what Apps told them. */
 const notificationItems = async (
   { notifications, connections }: WaitingSources,
   { forMe }: Reader
@@ -190,6 +190,15 @@ const notificationItems = async (
             ...base,
             kind: "stoppedSchedule",
             id: `stoppedSchedule:${notification.id}`,
+            verdicts: [],
+            notification,
+          };
+        }
+        case "trigger_workflow_changed": {
+          return {
+            ...base,
+            kind: "workflowChanged",
+            id: `workflowChanged:${notification.id}`,
             verdicts: [],
             notification,
           };

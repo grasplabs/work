@@ -3845,7 +3845,9 @@ export const platformVersions = sqliteTable("platform_versions", {
  * What core tells a person in the product (src/notifications.ts): that an
  * admin asked them one of the brain's open questions (`gap_asked`,
  * src/brain-gaps.ts), that a schedule trigger of theirs stopped
- * (`trigger_stopped`), that connect stopped hearing a source their
+ * (`trigger_stopped`), that someone else made another version of a
+ * workflow their triggers start live (`trigger_workflow_changed`), that
+ * connect stopped hearing a source their
  * triggers listen to (`events_stopped`), that packages of an App they
  * build were revoked as malware
  * (`package_revoked`), or what an App told them (`app_message`). A
@@ -3862,6 +3864,7 @@ export const notifications = sqliteTable(
       enum: [
         "gap_asked",
         "trigger_stopped",
+        "trigger_workflow_changed",
         "package_revoked",
         "package_advisory",
         "events_stopped",
@@ -3878,8 +3881,9 @@ export const notifications = sqliteTable(
     readAt: timestamp("read_at"),
     /**
      * The schedule trigger a `trigger_stopped` row says stopped
-     * (workflows/schedule-triggers.ts); its `workflow_id` is the workflow
-     * resource the trigger starts.
+     * (workflows/schedule-triggers.ts), or a trigger of the person's whose
+     * workflow a `trigger_workflow_changed` row says changed; its
+     * `workflow_id` is the workflow resource the trigger starts.
      */
     triggerId: text("trigger_id"),
     /**

@@ -5,6 +5,7 @@ import type {
   AppMessageNotification,
   GapAskedNotification,
   TriggerStoppedNotification,
+  TriggerWorkflowChangedNotification,
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
@@ -47,6 +48,7 @@ export type InboxKind =
   | "unknownOutcome"
   | "permissionRequest"
   | "stoppedSchedule"
+  | "workflowChanged"
   | "packageNotice"
   | "stoppedEvents"
   | "appMessage"
@@ -83,6 +85,10 @@ export type InboxSource =
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
+  | {
+      type: "workflowChanged";
+      notification: TriggerWorkflowChangedNotification;
+    }
   | { type: "packageNotice"; notification: PackageNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
   | { type: "appMessage"; notification: AppMessageNotification }
@@ -130,6 +136,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   unknownOutcome: "apps",
   permissionRequest: "apps",
   stoppedSchedule: "workflows",
+  workflowChanged: "workflows",
   packageNotice: "apps",
   stoppedEvents: "workflows",
   appMessage: "apps",
@@ -570,6 +577,39 @@ const stoppedItems = (
     ];
   });
 
+/** A workflow the person's triggers start, of which someone else made another version live: their triggers start it, acting as them. */
+const workflowChangedItems = (
+  notifications: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  notifications.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "trigger_workflow_changed") {
+      return [];
+    }
+    const { workflowName, at } = notification;
+    return [
+      {
+        id: `workflowChanged:${notification.id}`,
+        kind: "workflowChanged",
+        title: t`Your triggers start a new version of ${workflowName}`,
+        context: workflowName,
+        body: [
+          t`Someone else made another version of this workflow live. Your triggers start it from now on, acting as you. Its History shows who changed what; turn a trigger off in its Triggers if you don't want that.`,
+        ],
+        facts: [{ label: t`Changed`, value: formatDateTime(at) }],
+        about: {
+          kind: "independentWorkflow",
+          workflow: notification.workflow,
+          section: "triggers",
+        },
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "workflowChanged", notification },
+      },
+    ];
+  });
+
 /** What an App the person can open told them, opened on the App's page. */
 const appMessageItems = (
   notifications: NotificationsPage,
@@ -702,6 +742,9 @@ export const inboxItems = (
     ...skillShareItems(skillShares),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
+    ...(notifications === undefined
+      ? []
+      : workflowChangedItems(notifications, me)),
     ...(notifications === undefined
       ? []
       : packageNoticeItems(notifications, me)),

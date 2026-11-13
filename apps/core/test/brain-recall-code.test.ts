@@ -676,7 +676,6 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     await granted(ada, admin, {

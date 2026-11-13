@@ -408,8 +408,8 @@ export const mailingWorkflow = async (
 };
 
 /** A start request of Ada's, with a key of its own. */
-export const adaStart = () => ({
-  version: 1,
+export const adaStart = (version = 1) => ({
+  version,
   args: { who: "Ada" },
   key: unique(),
 });

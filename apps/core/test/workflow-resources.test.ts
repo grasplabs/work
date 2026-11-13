@@ -933,7 +933,6 @@ describe("releasing a deleted workflow's name", () => {
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     // Neither holds a grant to start it, so neither keeps it from being

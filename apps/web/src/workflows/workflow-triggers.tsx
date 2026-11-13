@@ -64,8 +64,9 @@ import {
 // or an email to an address of its own (a name they choose, as an App's
 // email trigger has, or a random one when they leave it empty, with how
 // the message becomes the run's input, shown by the part of its address
-// before the @), for an exact published version. A trigger acts for whoever made it:
-// they alone turn it on again or move it to another version; its builders
+// before the @). A trigger starts the workflow's live version, whichever
+// that is as it starts, and acts for whoever made it: they alone turn it
+// on again; its builders
 // and admins turn it off and delete it (deleting asks first). A schedule
 // whose starts kept failing stopped, and says so, with Turn on again for
 // its owner. Core decides every change again (trigger-resources.ts) and
@@ -294,18 +295,16 @@ const requestsAgain = (trigger: WorkflowTrigger): PermissionRequest[] =>
     return request === undefined ? [] : [request];
   });
 
-/** One trigger: what starts it, its version, where it stands, and what the reader may change. */
+/** One trigger: what starts it, where it stands, and what the reader may change. */
 const TriggerRow = ({
   trigger,
   connections,
-  versions,
   me,
   builder,
   onChanged,
 }: {
   trigger: WorkflowTrigger;
   connections: readonly ListedConnection[];
-  versions: readonly number[];
   me: string;
   builder: boolean;
   onChanged: () => Promise<void>;
@@ -314,7 +313,6 @@ const TriggerRow = ({
   const { busy, failure, run } = useCoreAction();
   const own = trigger.owner === me;
   const manages = own || builder;
-  const { workflowVersion } = trigger;
 
   const change = async (
     action: (
@@ -350,7 +348,6 @@ const TriggerRow = ({
             <TriggerWhat connections={connections} trigger={trigger} />
           </span>
           <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-            <Trans>Starts version {workflowVersion}</Trans>
             <TriggerState trigger={trigger} />
           </span>
           {trigger.stopped ? (
@@ -414,27 +411,6 @@ const TriggerRow = ({
             >
               <Trans context="turn a trigger off">Turn off</Trans>
             </Button>
-          ) : null}
-          {own && builder && versions.length > 1 ? (
-            <NativeSelect
-              aria-label={t`Version it starts`}
-              disabled={busy}
-              onChange={(event) => {
-                const next = Number(event.target.value);
-                void change(
-                  async (triggers) =>
-                    await triggers.setVersion(trigger.id, next)
-                );
-              }}
-              size="sm"
-              value={String(workflowVersion)}
-            >
-              {versions.map((version) => (
-                <NativeSelectOption key={version} value={String(version)}>
-                  {t`Version ${version}`}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
           ) : null}
           <AlertDialog>
             <AlertDialogTrigger
@@ -500,17 +476,15 @@ type AddedKind = (typeof addedKinds)[number];
 
 /**
  * A new trigger, for a builder: a schedule, a connection's event, an email
- * or an event from a webhook source, for one version.
+ * or an event from a webhook source.
  */
 const AddTrigger = ({
   workflow,
-  versions,
   connections,
   sources,
   onAdded,
 }: {
   workflow: string;
-  versions: readonly number[];
   connections: readonly ListedConnection[];
   sources: readonly EventSource[];
   onAdded: () => Promise<void>;
@@ -520,7 +494,6 @@ const AddTrigger = ({
   const { busy, failure, run } = useCoreAction();
   const [problem, setProblem] = useState<string>();
   const [kind, setKind] = useState<AddedKind>("schedule");
-  const [chosen, setChosen] = useState(versions.at(-1) ?? 1);
   const [cron, setCron] = useState("");
   const [timeZone, setTimeZone] = useState(ownTimeZone);
   const [input, setInput] = useState("{}");
@@ -597,7 +570,6 @@ const AddTrigger = ({
         await session.workflowResources.triggers.create({
           kind,
           workflowId: workflow,
-          version: chosen,
           config,
         })
     );
@@ -650,24 +622,6 @@ const AddTrigger = ({
             <NativeSelectOption value="webhook">
               {t`An event from a webhook source`}
             </NativeSelectOption>
-          </NativeSelect>
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor={`${ids}-version`}>
-            <Trans>Version it starts</Trans>
-          </Label>
-          <NativeSelect
-            id={`${ids}-version`}
-            onChange={(changed) => {
-              setChosen(Number(changed.target.value));
-            }}
-            value={String(chosen)}
-          >
-            {versions.map((version) => (
-              <NativeSelectOption key={version} value={String(version)}>
-                {t`Version ${version}`}
-              </NativeSelectOption>
-            ))}
           </NativeSelect>
         </div>
       </div>
@@ -909,7 +863,8 @@ const AddTrigger = ({
 /** What the tab read from core. */
 interface Read {
   triggers: WorkflowTrigger[];
-  versions: number[];
+  /** Whether a version of the workflow is live, for its triggers to start. */
+  live: boolean;
   connections: ListedConnection[];
   /** The workspace's webhook sources, for a builder to add a trigger on. */
   sources: EventSource[];
@@ -975,9 +930,7 @@ const TriggersRead = ({
           setFailure(undefined);
           setRead({
             triggers,
-            versions: versions
-              .map(({ version }) => version)
-              .toSorted((a, b) => a - b),
+            live: versions.some(({ label }) => label !== null),
             sources,
             ...accounts,
           });
@@ -1023,17 +976,15 @@ const TriggersRead = ({
               me={me}
               onChanged={changed}
               trigger={trigger}
-              versions={read.versions}
             />
           ))}
         </ul>
       )}
-      {builder && read.versions.length > 0 ? (
+      {builder && read.live ? (
         <AddTrigger
           connections={read.connections}
           onAdded={changed}
           sources={read.sources}
-          versions={read.versions}
           workflow={workflow}
         />
       ) : null}
@@ -1057,9 +1008,10 @@ export const WorkflowTriggers = ({
     <div className="flex flex-col gap-6">
       <p className="text-muted-foreground">
         <Trans>
-          A trigger starts a run on its own, as whoever made it. Adding one asks
-          an admin to allow it to start this workflow, and one on a connection
-          to read its events there: it starts nothing until they do.
+          A trigger starts a run of the live version on its own, as whoever made
+          it. Adding one asks an admin to allow it to start this workflow, and
+          one on a connection to read its events there: it starts nothing until
+          they do.
         </Trans>
       </p>
       <TriggersRead

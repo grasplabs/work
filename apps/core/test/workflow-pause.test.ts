@@ -213,7 +213,6 @@ describe("a paused workflow", { timeout: 120_000 }, () => {
     const trigger = await createTriggerResource(env, admin, {
       kind: "schedule",
       workflowId: workflow.id,
-      version: 1,
       config: {
         schedule: { cron: "* * * * *", timeZone: "UTC" },
         input: { who: "Ada" },

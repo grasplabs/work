@@ -188,6 +188,15 @@ const waiting = (ranOut = true) =>
               read: false,
             },
             {
+              id: "changed-1",
+              type: "trigger_workflow_changed",
+              trigger: "trigger-1",
+              workflow: "workflow-1",
+              workflowName: "Nightly report",
+              at: "2026-10-12T08:00:00.000Z",
+              read: false,
+            },
+            {
               id: "revoked-1",
               type: "package_revoked",
               app: "app-invoices",
@@ -285,6 +294,7 @@ describe(inboxItems, () => {
         "signIn:connection-1",
         "stopped:stopped-1",
         "stoppedEvents:deaf-1",
+        "workflowChanged:changed-1",
       ].toSorted()
     );
   });
@@ -467,6 +477,7 @@ describe(inInbox, () => {
       "packageNotice:revoked-1",
       "stopped:stopped-1",
       "stoppedEvents:deaf-1",
+      "workflowChanged:changed-1",
     ]);
   });
 });
@@ -491,6 +502,7 @@ describe(listed, () => {
       "stoppedEvents",
       "heldStart",
       "stoppedSchedule",
+      "workflowChanged",
     ]);
     expect(
       listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
@@ -515,7 +527,17 @@ describe(listed, () => {
         section: "triggers",
       },
     });
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 6);
+    const changed = items.find(({ kind }) => kind === "workflowChanged");
+    expect({ title: changed?.title, about: changed?.about }).toStrictEqual({
+      title: "Your triggers start a new version of Nightly report",
+      // Its workflow's Triggers, where they are turned off.
+      about: {
+        kind: "independentWorkflow",
+        workflow: "workflow-1",
+        section: "triggers",
+      },
+    });
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
   });
 });
 

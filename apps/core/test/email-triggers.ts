@@ -286,7 +286,6 @@ export const emailTriggerFor = async (
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "email",
     workflowId: id,
-    version: 1,
     config: { input, ...(address === undefined ? {} : { address }) },
   });
   const start = await granted(by, {

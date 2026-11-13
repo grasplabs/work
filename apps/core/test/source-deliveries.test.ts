@@ -93,7 +93,6 @@ const triggerOn = async (
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "webhook",
     workflowId: id,
-    version: 1,
     config: { source, type },
   });
   if (grant) {
@@ -590,7 +589,6 @@ describe("an event source", () => {
       builder.api.workflowResources.triggers.create({
         kind: "webhook",
         workflowId: workflow,
-        version: 1,
         config: { source: source.id, type: "invoice.paid" },
       })
     );

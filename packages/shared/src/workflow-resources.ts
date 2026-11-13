@@ -79,6 +79,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.definition_invalid":
     "The workflow definition isn't a valid grasp-workflow/2 document.",
   "workflow.version_not_found": "This workflow has no such version.",
+  "workflow.version_not_live":
+    "Only the workflow's live version starts: this one isn't live.",
   "workflow.resource_bound":
     "The current version of another workflow calls this one, or a trigger starts it, so it can't be deleted.",
   "workflow.resource_busy":

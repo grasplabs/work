@@ -20,7 +20,6 @@ import {
   deleteTriggerResource,
   listWorkflowTriggers,
   setTriggerEnabled,
-  updateTriggerVersion,
 } from "../src/trigger-resources.ts";
 import {
   createWorkflowResource,
@@ -42,8 +41,9 @@ import { publishDefinition } from "./workflow-publishing.ts";
 // often the clock runs or dies between starting it and moving on, and a
 // run cancelled since stays cancelled; occurrences missed in an outage
 // start one run; a local time the spring change skips starts nothing and
-// one the autumn change repeats starts once; disabled, deleted or moved
-// triggers start nothing they missed; a start refused for good is
+// one the autumn change repeats starts once; disabled or deleted
+// triggers start nothing they missed; each occurrence starts the
+// workflow's live version, once, however a publish falls; a start refused for good is
 // audited and moves on, and one that keeps failing stops, audited; and
 // only a schedule, input and time zone that hold are taken.
 
@@ -93,7 +93,7 @@ const definitionOf = (field: string, version = "1"): string =>
     ],
   });
 
-/** A workflow of `admin`'s taking a `report`, with a second version taking a `job`. */
+/** A workflow of `admin`'s taking a `report`. */
 const reporting = async (admin: Identity) => {
   const workflow = await createWorkflowResource(
     env,
@@ -163,7 +163,6 @@ const scheduleTrigger = async (
   const trigger = await createTriggerResource(env, owner, {
     kind: "schedule",
     workflowId: id,
-    version: 1,
     config: scheduleConfig(cron, timeZone),
   });
   const permission = granted ? await grantStart(admin, trigger.id) : undefined;
@@ -567,26 +566,18 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     });
   });
 
-  it("start nothing they missed while disabled, deleted or moved to another version", async () => {
+  it("start nothing they missed while disabled or deleted", async () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
-    await publishDefinition(
-      env,
-      admin,
-      workflow.id,
-      definitionOf("report", "2")
-    );
     const disabled = await scheduleTrigger(admin, workflow.id);
     const deleted = await scheduleTrigger(admin, workflow.id);
-    const moved = await scheduleTrigger(admin, workflow.id);
     const missed = new Date(lastMinute().getTime() - 60 * minuteMs);
     await setTriggerEnabled(env, admin, disabled.id, false);
     await deleteTriggerResource(env, admin, deleted.id);
-    for (const { id } of [disabled, deleted, moved]) {
+    for (const { id } of [disabled, deleted]) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
       await dueAt(id, missed);
     }
-    await updateTriggerVersion(env, admin, moved.id, 2);
     const whileDisabled = await runsOf(disabled.id);
     await startDueScheduleTriggers(env);
     await setTriggerEnabled(env, admin, disabled.id, true);
@@ -595,12 +586,11 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     await setTriggerEnabled(env, admin, disabled.id, true);
     await startDueScheduleTriggers(env);
     const counts = await Promise.all(
-      [disabled, deleted, moved].map(async ({ id }) => {
+      [disabled, deleted].map(async ({ id }) => {
         const runs = await runsOf(id);
         return runs.length;
       })
     );
-    const movedSchedule = await scheduleOf(moved.id);
     const twiceEnabled = await scheduleOf(disabled.id);
 
     expect({
@@ -608,16 +598,11 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       counts,
       reenabledNext: (reenabled?.nextAt ?? 0) > Date.now() - minuteMs,
       sameAfterSecondEnable: twiceEnabled?.nextAt,
-      moved: {
-        version: movedSchedule?.version,
-        future: (movedSchedule?.nextAt ?? 0) > Date.now() - minuteMs,
-      },
     }).toStrictEqual({
       whileDisabled: 0,
-      counts: [0, 0, 0],
+      counts: [0, 0],
       reenabledNext: true,
       sameAfterSecondEnable: reenabled?.nextAt,
-      moved: { version: 2, future: true },
     });
   });
 
@@ -1063,14 +1048,21 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
   // may have changed since: each pair, the next turn ends where it should.
   // Dying before the start, while sending it (before its receipt) or
   // before recording a failure leaves nothing written; dying after the
-  // receipt leaves the occurrence started, not moved on.
+  // receipt leaves the occurrence started, not moved on. A version
+  // published meanwhile never starts it twice: the occurrence's key is
+  // the same whichever version it starts.
   const crashes = [
     { crash: "before the start", started: false },
     { crash: "after the start was sent, before its receipt", started: false },
     { crash: "after the receipt, before moving on", started: true },
     { crash: "before a failure was recorded", started: false },
   ] as const;
-  const changes = ["revoked", "disabled", "moved", "run limit full"] as const;
+  const changes = [
+    "revoked",
+    "disabled",
+    "published",
+    "run limit full",
+  ] as const;
   const pairs = crashes.flatMap(({ crash, started }) =>
     changes.map((change) => ({ crash, started, change }))
   );
@@ -1094,7 +1086,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
           env,
           { type: "trigger", triggerId: trigger.id },
           workflow.id,
-          { version: 1, args: nightly, key: keyOf(trigger.id, 1, occurrence) },
+          { version: 2, args: nightly, key: keyOf(trigger.id, 1, occurrence) },
           undefined,
           { scheduledAt: occurrence.toISOString(), triggerVersion: "1" }
         );
@@ -1103,8 +1095,13 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         await revokePermission(env, admin, trigger.permission);
       } else if (change === "disabled") {
         await setTriggerEnabled(env, admin, trigger.id, false);
-      } else if (change === "moved") {
-        await updateTriggerVersion(env, admin, trigger.id, 2);
+      } else if (change === "published") {
+        await publishDefinition(
+          env,
+          admin,
+          workflow.id,
+          definitionOf("report", "3")
+        );
       }
       await startDueScheduleTriggers(
         change === "run limit full" ? runLimitFull() : env
@@ -1117,19 +1114,21 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         (schedule.nextAt ?? 0) > occurrence.getTime();
 
       // Started: moved on whatever changed, unless the trigger was
-      // disabled or moved, which works its schedule out again.
-      const expected = started
-        ? {
-            runs: 1,
-            counted: false,
-            movedOn: change === "revoked" || change === "run limit full",
-          }
-        : {
-            runs: 0,
-            counted: change === "revoked" || change === "run limit full",
-            // Refused for good moves on; a full run limit retries it.
-            movedOn: change === "revoked",
-          };
+      // disabled, which works its schedule out again. Not started: a
+      // publish starts it on the new version, once.
+      const expected =
+        started || change === "published"
+          ? {
+              runs: 1,
+              counted: false,
+              movedOn: change !== "disabled",
+            }
+          : {
+              runs: 0,
+              counted: change === "revoked" || change === "run limit full",
+              // Refused for good moves on; a full run limit retries it.
+              movedOn: change === "revoked",
+            };
       expect({ runs: runs.length, counted, movedOn }).toStrictEqual(expected);
     }
   );
@@ -1175,21 +1174,17 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     });
   });
 
-  it("take only a schedule, time zone and input that hold, for every version they move to", async () => {
+  it("take only a schedule, time zone and input that hold, for the live version", async () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
-    await publishDefinition(env, admin, workflow.id, definitionOf("job", "2"));
     const create = async (config: unknown) =>
       await outcome(
         createTriggerResource(env, admin, {
           kind: "schedule",
           workflowId: workflow.id,
-          version: 1,
           config,
         })
       );
-    const trigger = await scheduleTrigger(admin, workflow.id);
-
     expect({
       sixFields: await create(scheduleConfig("0 * * * * *")),
       nonsense: await create(scheduleConfig("every day")),
@@ -1205,9 +1200,6 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         ...scheduleConfig(),
         missedOccurrences: "all",
       }),
-      moveToOtherInput: await outcome(
-        updateTriggerVersion(env, admin, trigger.id, 2)
-      ),
     }).toStrictEqual({
       sixFields: "workflow.resource_invalid",
       nonsense: "workflow.resource_invalid",
@@ -1216,7 +1208,6 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       input: "workflow.resource_invalid",
       tooLarge: "workflow.resource_invalid",
       backlog: "workflow.resource_invalid",
-      moveToOtherInput: "workflow.resource_invalid",
     });
   });
 });

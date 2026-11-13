@@ -22,6 +22,7 @@ const settledInInbox = new Set<InboxSource["type"]>([
   "heldStart",
   "asked",
   "stopped",
+  "workflowChanged",
   "stoppedEvents",
   "appMessage",
   "bindings",

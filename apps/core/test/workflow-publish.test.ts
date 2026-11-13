@@ -36,9 +36,9 @@ import { outcome, unique } from "./sign-in.ts";
 // Publishing a workflow's draft and rolling back to one of its versions
 // (publish.ts, workflow-publish.ts), from their threat model: a draft
 // written over a stale read never lands, each write is a checkpoint to
-// restore; what goes live is the draft the builder read; enabled triggers
-// move onto the version that goes live with it, a disabled one stays;
-// a run keeps the version it started on; and a batch whose answer was
+// restore; what goes live is the draft the builder read; every trigger,
+// a disabled one too, starts the version that goes live, audited on it
+// with the batch that makes it live; a run keeps the version it started on; and a batch whose answer was
 // lost, tried again, is answered as the roll back it is. Each test makes
 // its own people and workflows.
 
@@ -63,27 +63,21 @@ const published = async (by: Identity, id: string) => {
   return await publish(env, workflowKind, by, id, revision);
 };
 
-/** The workflow version trigger `id`'s current version pins. */
-const pinnedBy = async (id: string): Promise<number | undefined> => {
-  const row = await env.DB.prepare(
-    `SELECT current.workflow_resource_version AS version
-      FROM trigger_resources
-      JOIN trigger_resource_versions AS current
-        ON current.trigger_id = trigger_resources.id
-        AND current.version = trigger_resources.current_version
-      WHERE trigger_resources.id = ?`
-  )
-    .bind(id)
-    .first<{ version: number }>();
-  return row?.version;
+/** The versions trigger `id` was audited starting from, oldest first. */
+const followedBy = async (id: string): Promise<unknown[]> => {
+  const events = await allEvents();
+  return events.flatMap(({ action, target, detail }) =>
+    action === "trigger.updated" && target?.id === id
+      ? [detail.workflowVersion]
+      : []
+  );
 };
 
-/** A schedule trigger of version 1 of workflow `id`, granted its start. */
+/** A schedule trigger of workflow `id`, granted its start. */
 const scheduled = async (admin: Identity, id: string): Promise<string> => {
   const trigger = await createTriggerResource(env, admin, {
     kind: "schedule",
     workflowId: id,
-    version: 1,
     config: {
       schedule: { cron: "0 0 1 1 *", timeZone: "UTC" },
       input: { who: "Ada" },
@@ -168,7 +162,7 @@ describe("a workflow's draft", () => {
 });
 
 describe("publishing a workflow", { timeout: 60_000 }, () => {
-  it("moves its triggers onto the version it makes live, a disabled one too, leaves a running run where it was, and labels the version", async () => {
+  it("has its triggers start the version it makes live, a disabled one too, leaves a running run where it was, and labels the version", async () => {
     const admin = await person("admin");
     const workflow = await publishedWorkflow(
       admin,
@@ -197,7 +191,7 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
         version: live.version,
         label: /^\d\d\.\d\d\.\d+$/u.test(live.label),
       },
-      triggers: [await pinnedBy(enabled), await pinnedBy(disabled)],
+      triggers: [await followedBy(enabled), await followedBy(disabled)],
       run: { version: running.version, ended: running.endedAt !== null },
       labelled: versions.map(({ version, label }) => ({
         version,
@@ -213,7 +207,7 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
         .map(({ detail }) => detail.version),
     }).toStrictEqual({
       live: { version: 2, label: true },
-      triggers: [2, 2],
+      triggers: [[2], [2]],
       run: { version: 1, ended: false },
       labelled: [
         { version: 2, labelled: true },
@@ -268,7 +262,7 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
     });
   });
 
-  it("rolls back to an earlier version, its label kept, its triggers and draft moved onto it", async () => {
+  it("rolls back to an earlier version, its label kept, its triggers starting it and its draft moved onto it", async () => {
     const admin = await person("admin");
     const workflow = await publishedWorkflow(
       admin,
@@ -297,12 +291,12 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
     expect({
       unseen,
       back: { version: back.version, label: back.label },
-      trigger: await pinnedBy(trigger),
+      trigger: await followedBy(trigger),
       draft: draft.source,
     }).toStrictEqual({
       unseen: "draft.conflict",
       back: { version: 1, label: first?.label },
-      trigger: 1,
+      trigger: [2, 1],
       draft: greetingOf(undefined, "Version 1"),
     });
   });
@@ -354,14 +348,14 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
     expect({
       lost,
       back,
-      trigger: await pinnedBy(trigger),
+      // Each audited once, though the roll back's batch ran twice.
+      trigger: await followedBy(trigger),
       draft: draft.source,
-      // Its discard is audited once, though its batch ran twice.
       discarded: discarded.length,
     }).toStrictEqual({
       lost: true,
       back: "ok",
-      trigger: 1,
+      trigger: [2, 1],
       draft: greetingOf(undefined, "Version 1"),
       discarded: 1,
     });

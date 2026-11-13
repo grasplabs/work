@@ -95,7 +95,6 @@ const listening = async () => {
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "connector",
     workflowId: workflow.id,
-    version: 1,
     config: {
       connection: { connectionId: connection },
       event: "m365.mail.received",

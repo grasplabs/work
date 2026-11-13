@@ -735,7 +735,6 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       createTriggerResource(env, admin, {
         kind: "email",
         workflowId: workflow.id,
-        version: 1,
         config: { input: {}, address: local },
       })
     ).rejects.toMatchObject({ code: "workflow.email_taken" });

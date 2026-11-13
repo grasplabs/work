@@ -225,7 +225,6 @@ const connectorTrigger = async (
   const trigger = await createTriggerResource(env, owner, {
     kind: "connector",
     workflowId: id,
-    version: 1,
     config: {
       connection: {
         connectionId,
@@ -496,7 +495,6 @@ describe("connector triggers", { timeout: 120_000 }, () => {
         createTriggerResource(env, admin, {
           kind: "connector",
           workflowId: workflow.id,
-          version: 1,
           config: {
             connection: { connectionId },
             event: "m365.mail.received",
@@ -526,7 +524,6 @@ describe("connector triggers", { timeout: 120_000 }, () => {
         createTriggerResource(env, admin, {
           kind: "connector",
           workflowId: workflow.id,
-          version: 1,
           config: {
             connection: { connectionId: shared },
             event: "m365.mail.received",
@@ -552,7 +549,6 @@ describe("connector triggers", { timeout: 120_000 }, () => {
         createTriggerResource(env, admin, {
           kind: "connector",
           workflowId: workflow.id,
-          version: 1,
           config: {
             connection: { connectionId: shared },
             event: "m365.anything",
