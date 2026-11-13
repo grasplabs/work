@@ -748,30 +748,42 @@ describe("writing and sharing skills", setUpTime, () => {
       listed: listedIn(groupProvider.requests),
     };
     /**
-     * A direct chat with the agent in `platform`: what the person's own
-     * skills steer there. The chat app keeps the message where its admins
-     * and exports reach it, so it doesn't answer them alone (GRA-1821).
+     * A chat with the agent in `platform`, at `place`: what the person's
+     * own skills steer there. Not even a direct chat is theirs alone: the
+     * chat app keeps the message where its admins and exports reach it
+     * (GRA-1821).
      */
-    const directIn = async (platform: string) => {
+    const askedIn = async (
+      platform: string,
+      place: Parameters<typeof group.askThrough>[5]
+    ) => {
       const provider = await fakeProvider(selectsForATender, says("Done."));
-      const direct = await group.askThrough(
+      const asked = await group.askThrough(
         author.userId,
         crypto.randomUUID(),
         platform,
-        "Quote a tender."
+        "Quote a tender.",
+        undefined,
+        place
       );
       return {
-        selected: await returnedIn(group, direct.chatId),
+        selected: await returnedIn(group, asked.chatId),
         listed: listedIn(provider.requests),
       };
     };
-    const teamsDirect = await directIn("teams");
-    const slackDirect = await directIn("slack");
+    const teamsDirect = await askedIn("teams", { kind: "direct" });
+    const slackDirect = await askedIn("slack", { kind: "direct" });
+    const teamsChannel = await askedIn("teams", {
+      thread: `T-${unique()}`,
+      kind: "channel",
+      audience: { members: [author.userId, other.userId], outsiders: false },
+    });
 
     expect({
       ownTurns,
       teamsDirect,
       slackDirect,
+      teamsChannel,
       othersChat: {
         selected: await returnedIn(others.stub, others.chat.id),
         listed: listedIn(others.provider.requests),
@@ -784,6 +796,7 @@ describe("writing and sharing skills", setUpTime, () => {
       },
       teamsDirect: { selected: ["Returned:\nnone"], listed: [false, false] },
       slackDirect: { selected: ["Returned:\nnone"], listed: [false, false] },
+      teamsChannel: { selected: ["Returned:\nnone"], listed: [false, false] },
       othersChat: {
         selected: ["Returned:\nnone"],
         listed: [false, false],
