@@ -1978,9 +1978,10 @@ export class Workspace extends DurableObject<Env> {
     }: { unattended?: boolean; turn?: boolean } = {}
   ): Omit<AgentScope, "runId"> {
     const { personId, agentId, via } = chat;
-    // A turn its person asked for in their own chat, not a thread others
-    // share: the only scope their own skills steer (`AgentScope.ownChat`).
-    const ownChat = turn && !unattended && chat.thread === null;
+    // A turn whose answer reaches its person alone (`answersAlone`): the
+    // only scope their own skills steer (`AgentScope.ownChat`). A chat
+    // app's direct message is not one, until GRA-1821 decides it may be.
+    const ownChat = turn && answersAlone(chat, unattended);
     const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
     return {
       workspaceId,

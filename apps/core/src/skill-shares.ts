@@ -463,7 +463,9 @@ export const approveShare = async (
   }
   // As it is now: approved by this call or one before, or not at all.
   const decided = await shareById(env, row.id);
-  if (decided.status === "approved" && decided.version !== null) {
+  // Its add landed, whatever became of it since (declined while the add
+  // was on its way, say): the store's answer is the truth.
+  if (decided.version !== null) {
     return shareOf(decided);
   }
   // Closed (declined, or its text dropped by the person asking again or
