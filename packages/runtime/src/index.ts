@@ -35,10 +35,6 @@ export type {
   BrainPackItem,
   BrainRecall,
   BrainSkill,
-  BrainSkillRead,
-  BrainSkillScope,
-  BrainSkillsSelect,
-  BrainSkillsSelected,
   BrainSkillText,
 } from "./brain-recall.ts";
 export type {

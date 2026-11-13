@@ -16,7 +16,7 @@ import { expectTypeOf } from "vite-plus/test";
 import { defineApp, permission } from "../src/index.ts";
 import type {
   BrainPack,
-  BrainSkillsSelected,
+  BrainSkill,
   BrainSkillText,
   ConnectorAction,
   ConnectorContract,
@@ -307,7 +307,7 @@ const skillsBrain = permission.brain({
 declare const skillsCtx: ActionCtx<typeof skillsBrain>;
 expectTypeOf(
   skillsCtx.brain.skills.select({ task: "pay an invoice" })
-).resolves.toEqualTypeOf<BrainSkillsSelected>();
+).resolves.toEqualTypeOf<{ readonly skills: readonly BrainSkill[] }>();
 expectTypeOf(
   skillsCtx.brain.skills.read({
     skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },

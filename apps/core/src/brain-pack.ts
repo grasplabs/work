@@ -1,8 +1,6 @@
 import type {
   BrainPack,
-  BrainSkillRead,
-  BrainSkillsSelect,
-  BrainSkillsSelected,
+  BrainSkill,
   BrainSkillText,
 } from "@grasp-os/runtime/app";
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
@@ -33,10 +31,7 @@ export const brainPackSchema: z.ZodType<BrainPack> = z.strictObject({
 });
 
 /** A task to select skills for, in the asker's words, as a question is. */
-export const skillsSelectSchema: z.ZodType<
-  BrainSkillsSelect,
-  BrainSkillsSelect
-> = z.strictObject({
+export const skillsSelectSchema: z.ZodType<{ task: string }> = z.strictObject({
   task: z.string().trim().min(1).max(brainQuestionMaxLength),
 });
 
@@ -52,26 +47,29 @@ export const skillReadSchema = z.strictObject({
       version: z.int().positive(),
     })
     .transform(({ scope, name, version }) => ({ scope, name, version })),
-}) satisfies z.ZodType<BrainSkillRead>;
+}) satisfies z.ZodType<{
+  skill: Pick<BrainSkill, "scope" | "name" | "version">;
+}>;
 
 const skillScopeSchema = z.enum(["grasp", "company"]);
 
 /**
- * What a selection answers code (`BrainSkillsSelected`), and nothing more:
+ * What a selection answers code (`{ skills }`, each a `BrainSkill`), and nothing more:
  * as the function host lets an App's hand back, and a test run's fixture
  * may answer a workflow's.
  */
-export const brainSkillsSelectedSchema: z.ZodType<BrainSkillsSelected> =
-  z.strictObject({
-    skills: z.array(
-      z.strictObject({
-        scope: skillScopeSchema,
-        name: z.string().min(1),
-        version: z.int().positive(),
-        description: z.string(),
-      })
-    ),
-  });
+export const brainSkillsSelectedSchema: z.ZodType<{
+  skills: readonly BrainSkill[];
+}> = z.strictObject({
+  skills: z.array(
+    z.strictObject({
+      scope: skillScopeSchema,
+      name: z.string().min(1),
+      version: z.int().positive(),
+      description: z.string(),
+    })
+  ),
+});
 
 /** A skill read, whole (`BrainSkillText`), and nothing more. */
 export const brainSkillTextSchema: z.ZodType<BrainSkillText> = z.strictObject({

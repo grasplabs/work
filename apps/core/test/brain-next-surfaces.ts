@@ -1258,6 +1258,35 @@ export const coreProbes = {
           version: 1,
         },
       ]),
+      // A run's pins of skills: one never written, one named by the
+      // markers, one of the markers' scope, as the company, as a run's
+      // check reads them.
+      await answer(
+        "skills no one wrote, as the company",
+        async () =>
+          await coreBrain.readableVersionsAs(
+            env,
+            personId,
+            [
+              {
+                source: { producer: "skill", id: "company:unwritten" },
+                version: 1,
+              },
+              {
+                source: {
+                  producer: "skill",
+                  id: `company:${markers.join("-")}`,
+                },
+                version: 1,
+              },
+              {
+                source: { producer: "skill", id: `${markers.join("")}:x` },
+                version: 1,
+              },
+            ],
+            { reach: "company" }
+          )
+      ),
     ];
   },
   mergeRecalled: async ({ personId, personal, markers, sharedWord }) => {
@@ -1861,50 +1890,25 @@ export const coreProbes = {
         await coreBrain.listSkillsAs(
           env,
           personId,
-          new Set(["draw-a-workflow"]),
-          "person"
-        )
-    ),
-    await answer(
-      "the reader's skills, as the company",
-      async () =>
-        await coreBrain.listSkillsAs(
-          env,
-          personId,
-          new Set(["draw-a-workflow"]),
-          "company"
+          new Set(["draw-a-workflow"])
         )
     ),
     await answer(
       "as someone who isn't a member",
       async () =>
-        await coreBrain.listSkillsAs(
-          env,
-          stranger(),
-          new Set<string>(),
-          "company"
-        )
+        await coreBrain.listSkillsAs(env, stranger(), new Set<string>())
     ),
   ],
   // A skill is read by its own key alone: no producer's source is under
   // the skills' kind, so no hidden source can be named as one.
   readSkillAs: async ({ personId, markers }) => {
-    const read = async (
-      name: string,
-      wanted: unknown,
-      reach: coreBrain.SkillReach = "person"
-    ) =>
+    const read = async (name: string, wanted: unknown) =>
       await answer(
         name,
         async () =>
-          await coreBrain.readSkillAs(env, personId, unchecked(wanted), reach)
+          await coreBrain.readSkillAs(env, personId, unchecked(wanted))
       );
     return [
-      await read(
-        "a name of the markers, as the company",
-        { scope: "company", name: markers.join("-"), version: 1 },
-        "company"
-      ),
       await read("a skill never written", {
         scope: "company",
         name: "unwritten",
@@ -1923,12 +1927,11 @@ export const coreProbes = {
       await answer(
         "as someone who isn't a member",
         async () =>
-          await coreBrain.readSkillAs(
-            env,
-            stranger(),
-            { scope: "grasp", name: "draw-a-workflow", version: 1 },
-            "person"
-          )
+          await coreBrain.readSkillAs(env, stranger(), {
+            scope: "grasp",
+            name: "draw-a-workflow",
+            version: 1,
+          })
       ),
     ];
   },
@@ -1965,6 +1968,24 @@ export const coreProbes = {
       );
       const { ownStores } = await coreBrain.brainStaffReport(env);
       return { model: host.embedders.model, totals: ownStores };
+    }),
+  ],
+  // Pure: a skill's key as a run keeps it, from what the caller names
+  // alone (a name it gives comes back as given), so no markers.
+  skillVersionRefOf: async () => [
+    await answer("a skill", async () => {
+      await Promise.resolve();
+      return coreBrain.skillVersionRefOf({
+        scope: "grasp",
+        name: "draw-a-workflow",
+        version: 1,
+      });
+    }),
+    await answer("not a skill's scope", async () => {
+      await Promise.resolve();
+      return coreBrain.skillVersionRefOf(
+        unchecked({ scope: "upload", name: "draw-a-workflow", version: 1 })
+      );
     }),
   ],
 } satisfies Record<Exclude<CoreMember, CorePersonMember>, Probe>;
@@ -2849,6 +2870,15 @@ const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
   actor: { type: "system" },
 });
 
+/** An App reading skills as `as`, under `grant`, keeping nothing. */
+const skillsCallerOf = (
+  as: Authority,
+  grant: string
+): codeRecall.SkillsCaller => {
+  const { keep: _keep, ...caller } = callerOf(as, grant);
+  return caller;
+};
+
 /** A recall as code asks for one, from what a probe asks. */
 const codeAsk = ({ question, budget, asOf }: PackAsk) => ({
   question,
@@ -2943,7 +2973,7 @@ export const recallProbes = {
         async () =>
           await codeRecall.skillsCallFor(
             env,
-            callerOf(as, grant),
+            skillsCallerOf(as, grant),
             operation,
             input
           ),

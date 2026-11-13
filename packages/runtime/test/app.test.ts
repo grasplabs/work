@@ -266,6 +266,35 @@ describe("permissions", () => {
     ]);
   });
 
+  test("a manifest read back refuses a Brain declaration with no operations or one it can't have, never reading it as all", () => {
+    const { manifest } = inspectApp(
+      notes({
+        permissions: { brain: permission.brain({ operations: ["recall"] }) },
+      })
+    );
+    const withOperations = (operations: unknown): string => {
+      // SAFETY: a plain copy of the manifest, whose permissions are objects.
+      const data = structuredClone(manifest) as {
+        permissions: Record<string, object>;
+      };
+      data.permissions.brain = { ...data.permissions.brain, operations };
+      return refusal(() => readAppManifest(JSON.stringify(data)));
+    };
+    expect([
+      withOperations([]),
+      withOperations(["skills"]),
+      withOperations(["skills.write"]),
+      withOperations(["skills.read", "skills.read"]),
+    ]).toStrictEqual([
+      expect.stringMatching(
+        /^A permission lists between 1 and \d+ operations\.$/u
+      ),
+      "A permission lists operations it can't have.",
+      "A permission lists operations it can't have.",
+      "A permission lists `skills.read` twice.",
+    ]);
+  });
+
   test("each kind sits under its own key, each alias once", () => {
     const mail = permission.connection("mail", {
       contract: "microsoft-365.mail@1",

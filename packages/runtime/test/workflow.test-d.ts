@@ -5,7 +5,7 @@ import { expectTypeOf } from "vite-plus/test";
 
 import { defineWorkflow, v } from "../src/workflow.ts";
 import type {
-  BrainSkillsSelected,
+  BrainSkill,
   ConnectionMembers,
   WorkflowCtx,
   WorkflowPermissions,
@@ -39,7 +39,7 @@ expectTypeOf(ctx.params.threshold).toEqualTypeOf<number>();
 expectTypeOf(ctx.brain.handbook.recall).toBeFunction();
 expectTypeOf(
   ctx.brain.handbook.skills.select({ task: "refunds" }, { step: "skills" })
-).resolves.toEqualTypeOf<BrainSkillsSelected>();
+).resolves.toEqualTypeOf<{ readonly skills: readonly BrainSkill[] }>();
 // @ts-expect-error -- no step reads a skill
 expectTypeOf(ctx.brain.handbook.skills.read).toBeFunction();
 

@@ -1,3 +1,4 @@
+import { brainOf } from "@grasp-os/brain-next/contract";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -8,10 +9,12 @@ import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import { addMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
 import { installShippedSkills } from "../src/brain-skills.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -44,8 +47,12 @@ import { unique } from "./sign-in.ts";
 //    skills for the same person and task, and the same text at a version.
 // 2. Code without the grant reads skills: an App no admin bound, or one
 //    whose grant was revoked, gets nothing; a run whose binding wasn't
-//    approved never calls.
-// 3. Untrusted input reaches the Brain, or a refusal or the audit log
+//    approved never calls; a person no longer a member reads nothing.
+// 3. What a run read leaves it after it may no longer read it: a skill a
+//    run selected or read is pinned with the run, as a recall's pack is,
+//    so once its grant is revoked or the skill erased, nothing leaves the
+//    run (`brain.revoked`).
+// 4. Untrusted input reaches the Brain, or a refusal or the audit log
 //    carries the task or a skill's text: each is refused in the host's
 //    fixed words, and the audit event says who, for whom and how many or
 //    which version, never what.
@@ -213,12 +220,20 @@ const skillDescriptor = {
   },
 };
 
+/** A step that waits a moment, for a test to act in. */
+const holdStep = { id: "hold", type: "wait", for: "3 seconds" };
+
 /**
  * A workflow of `by`'s that selects the skills for its args' task and
  * returns the first, read, its `brain` permission bound by `admin` to a
- * grant of its own.
+ * grant of its own; `hold` waits a moment after the read, and
+ * `bind: false` approves no binding.
  */
-const skillsWorkflow = async (by: Member, admin: Member) => {
+const skillsWorkflow = async (
+  by: Member,
+  admin: Member,
+  { hold = false, bind = true }: { hold?: boolean; bind?: boolean } = {}
+) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `skills-${unique()}`);
@@ -244,6 +259,7 @@ const skillsWorkflow = async (by: Member, admin: Member) => {
           action: "skills.read",
           args: { skill: { $expr: "chosen.skills[0]" } },
         },
+        ...(hold ? [holdStep] : []),
       ],
     }),
     basedOn: null,
@@ -253,20 +269,22 @@ const skillsWorkflow = async (by: Member, admin: Member) => {
     admin,
     brainGrant({ type: "workflow", workflowId: workflow.id })
   );
-  await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "docs",
-    target: { kind: "brain", permissionId },
-    reviewed: { version: 1 },
-  });
-  return workflow;
+  if (bind) {
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "docs",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+  }
+  return { workflow, permissionId };
 };
 
-/** How a run of `id` for `by` on `args` ended: its result, or its code. */
-const ranOf = async (
+/** A run of `id` for `by` on `args`, started: its ID. */
+const startedRun = async (
   by: Member,
   id: string,
   args: { task: string }
-): Promise<unknown> => {
+): Promise<string> => {
   const { runId } = await startWorkflow(
     env,
     { type: "person", person: by },
@@ -276,6 +294,15 @@ const ranOf = async (
   if (runId === null) {
     throw new Error("The start admitted no run");
   }
+  return runId;
+};
+
+/** How run `runId` of `id` ended: its result, or its code. */
+const endOf = async (
+  by: Member,
+  id: string,
+  runId: string
+): Promise<unknown> => {
   const run: WorkflowResourceRun = await vi.waitFor(
     async () => {
       const read = await resourceRunFor(env, by, id, runId);
@@ -285,6 +312,54 @@ const ranOf = async (
     { timeout: 30_000, interval: 100 }
   );
   return run.status === "completed" ? run.result : { failed: run.error?.code };
+};
+
+/** How a run of `id` for `by` on `args` ended: its result, or its code. */
+const ranOf = async (
+  by: Member,
+  id: string,
+  args: { task: string }
+): Promise<unknown> => {
+  let runId: string;
+  try {
+    runId = await startedRun(by, id, args);
+  } catch (error) {
+    // Refused before any run: as a run that failed, by its code.
+    return { failed: z.object({ code: z.string() }).parse(error).code };
+  }
+  return await endOf(by, id, runId);
+};
+
+/** Once run `runId` has read its skill, as its audit event says. */
+const readIn = async (runId: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const all = await allEvents();
+      expect(
+        all.some(
+          ({ action, target }) =>
+            action === "brain.skills.read" && target?.id === runId
+        )
+      ).toBeTruthy();
+    },
+    { timeout: 30_000, interval: 50 }
+  );
+};
+
+/**
+ * A skill of the company's, for a task of `word`'s settlements, sharing no
+ * word with `task`, as the Brain keeps one (no publish adds them yet): its
+ * name.
+ */
+const companySkill = async (word: string): Promise<string> => {
+  const name = `pay-${word}`;
+  await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addInstructions({
+    source: `skill:company:${name}`,
+    change: crypto.randomUUID(),
+    text: `---\nname: ${name}\ndescription: Closing ${word} settlements.\n---\n\nClose ${word} settlements on Fridays.\n`,
+    access: { kind: "audience", group: "company" },
+  });
+  return name;
 };
 
 // A chat.
@@ -298,6 +373,8 @@ const chatCode = (asked: string) =>
 /** What a chat's code returned, its last step's. */
 const returnedOf = (text: string | undefined): unknown =>
   JSON.parse((text ?? "").replace(/^Returned:\n/u, ""));
+
+const refusal = z.object({ failed: z.string() });
 
 const answerSchema = z.object({
   skills: z.array(z.object({ name: z.string(), version: z.number() })),
@@ -331,7 +408,7 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const app = await boundAppOf(ada, admin);
-    const workflow = await skillsWorkflow(ada, admin);
+    const { workflow } = await skillsWorkflow(ada, admin);
     const { stub, chat, ask } = await chatOf(
       ada.userId,
       chatCode(task),
@@ -446,5 +523,80 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
       "permission.item_not_found",
       "permission.item_not_found",
     ]);
+  });
+
+  it("never calls from a run whose binding wasn't approved, nor reads for someone no longer a member", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const uma = await person("user");
+    const { workflow } = await skillsWorkflow(ada, admin, { bind: false });
+    // An App bound, shared with Uma, who then leaves the company.
+    const app = await boundAppOf(ada, admin);
+    await addMember(env, ada, app.app, {
+      type: "person",
+      id: uma.userId,
+      role: "user",
+    });
+    const before = await calledOf(app, uma, "skills.ask", selecting({ task }));
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(uma.userId)
+      .run();
+    const after = await calledOf(app, uma, "skills.ask", selecting({ task }));
+    const events = await skillEvents(uma.userId, 1);
+    const answered = events.filter(
+      ({ detail }) => detail?.refused === undefined
+    );
+    expect({
+      run: await ranOf(ada, workflow.id, { task }),
+      before: z.object({ skills: z.array(z.unknown()) }).safeParse(before)
+        .success,
+      after: refusal.safeParse(after).success,
+      // Her one selection before she left, and none after.
+      answered: answered.length,
+    }).toStrictEqual({
+      run: { failed: "workflow.binding_unapproved" },
+      before: true,
+      after: true,
+      answered: 1,
+    });
+  });
+
+  it("withholds what a run read of a skill once its grant is revoked or the skill erased while it waits, and lets it through when nothing changed", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const word = `fx${unique().replaceAll(/\W/gu, "").toLowerCase()}`;
+    const erasedName = await companySkill(word);
+    // One workflow for the run left alone and the run whose skill is
+    // erased; another whose grant is revoked.
+    const kept = await skillsWorkflow(ada, admin, { hold: true });
+    const revoked = await skillsWorkflow(ada, admin, { hold: true });
+    const [unchanged, erased, withdrawn] = await Promise.all([
+      startedRun(ada, kept.workflow.id, { task }),
+      startedRun(ada, kept.workflow.id, { task: `${word} settlements` }),
+      startedRun(ada, revoked.workflow.id, { task }),
+    ]);
+    // Each has read its skill, and waits before its output.
+    await Promise.all([unchanged, erased, withdrawn].map(readIn));
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).eraseSource({
+      source: `skill:company:${erasedName}`,
+      reason: "deleted",
+    });
+    await revokePermission(env, admin, revoked.permissionId);
+    const [left, afterErasure, afterRevoke] = await Promise.all([
+      endOf(ada, kept.workflow.id, unchanged),
+      endOf(ada, kept.workflow.id, erased),
+      endOf(ada, revoked.workflow.id, withdrawn),
+    ]);
+    expect({
+      left: z.object({ name: z.string() }).parse(left).name,
+      afterErasure,
+      afterRevoke,
+      said: JSON.stringify([afterErasure, afterRevoke]).includes(word),
+    }).toStrictEqual({
+      left: "draw-a-workflow",
+      afterErasure: { failed: "brain.revoked" },
+      afterRevoke: { failed: "brain.revoked" },
+      said: false,
+    });
   });
 });

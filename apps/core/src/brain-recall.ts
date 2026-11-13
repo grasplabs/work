@@ -1,6 +1,6 @@
 import type {
   BrainPack,
-  BrainSkillsSelected,
+  BrainSkill,
   BrainSkillText,
 } from "@grasp-os/runtime/app";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -12,7 +12,9 @@ import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
-import { codeRecallOf, recallAs } from "./brain-next.ts";
+import { codeRecallOf, recallAs, skillVersionRefOf } from "./brain-next.ts";
+import type { SkillVersionRef } from "./brain-next.ts";
+import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
 import { authorize } from "./permissions.ts";
 
@@ -160,27 +162,39 @@ const inHostSkillWords = (error: unknown): unknown => {
   return inHostWords(error);
 };
 
+/** Who reads the Brain's skills: a recall's caller, with its own pins. */
+export interface SkillsCaller extends Omit<RecallCaller, "keep"> {
+  /**
+   * What the caller keeps of the skills it is handed, before it gets them:
+   * a run's pins, as a recall's (`recordRunVersions`). Run before the call
+   * is audited as answered, so skills that couldn't be kept are audited as
+   * refused, and nobody gets them.
+   */
+  readonly keep?: (versions: readonly SkillVersionRef[]) => Promise<void>;
+}
+
 /**
  * The Brain's skills for an App's action or a workflow's step (GRA-1830):
  * `skills.select` the skills for `input.task`, `skills.read` one at the
- * version a selection gave, the same a chat's code selects and reads
- * (brain-skills.ts), as the company alone. Checked and audited as a
- * recall is (`recallFor`, the threat model on GRA-1830): the caller's
- * grant to read the Brain, now; the person it acts for still a member;
- * refused as `permission.invalid_args` for input that isn't a task or a
- * skill, `permission.item_not_found` for a skill there isn't at that
- * version, `permission.denied` without the grant and
- * `permission.unavailable` once the person is no longer a member. Audited,
- * answered or refused, before it returns: how many skills, or which
- * version, never the task, a name or a text. Nothing is pinned with a
- * run: every skill is the whole company's and keeps its versions.
+ * version a selection gave, the same a chat's code selects and reads for
+ * the same person (brain-skills.ts). Checked, kept and audited as a recall
+ * is (`recallFor`, the threat model on GRA-1830): the input first, then
+ * the caller's grant to read the Brain, now, and the person it acts for
+ * still a member. Refused as `permission.invalid_args` for input that
+ * isn't a task or a skill, `permission.item_not_found` for a skill there
+ * isn't at that version, `permission.denied` without the grant and
+ * `permission.unavailable` once the person is no longer a member. Each
+ * skill handed over, a selection's or a read's, is kept by the caller
+ * first (`keep`), so a run checks it again before anything leaves it.
+ * Audited, answered or refused, before it returns: how many skills, or
+ * which version, never the task, a name or a text.
  */
 export const skillsCallFor = async (
   env: Env,
-  caller: Omit<RecallCaller, "keep">,
+  caller: SkillsCaller,
   operation: SkillsOperation,
   input: unknown
-): Promise<BrainSkillsSelected | BrainSkillText> => {
+): Promise<{ skills: readonly BrainSkill[] } | BrainSkillText> => {
   const audit = async (detail: Record<string, string | number | boolean>) => {
     await appendAuditEvent(env, {
       actor: caller.actor,
@@ -190,6 +204,13 @@ export const skillsCallFor = async (
     });
   };
   try {
+    // The input first, as a recall's: a caller with no grant and bad
+    // input is refused alike by both.
+    const request =
+      operation === "skills.select" ? skillsSelectSchema : skillReadSchema;
+    if (!request.safeParse(input).success) {
+      throw functionErrors.create("permission.invalid_args");
+    }
     if (caller.permissionId === null) {
       throw permissionErrors.create("permission.denied", { action: "brain" });
     }
@@ -203,10 +224,12 @@ export const skillsCallFor = async (
     );
     if (operation === "skills.select") {
       const skills = await selectSkillsFor(env, caller.authority, input);
+      await caller.keep?.(skills.map((skill) => skillVersionRefOf(skill)));
       await audit({ skills: skills.length });
       return { skills };
     }
     const read = await readSkillFor(env, caller.authority, input);
+    await caller.keep?.([skillVersionRefOf(read)]);
     await audit({ scope: read.scope, version: read.version });
     return read;
   } catch (error) {

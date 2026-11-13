@@ -62,51 +62,25 @@ export interface BrainPack {
 
 // Skills, beside recall: an App's action (`ctx.brain.skills`) and a
 // workflow's step (`ctx.brain.<alias>.skills`) select and read the same
-// skills a chat's code does (`env.skills`), from the Brain, of what
-// everyone in the company may read. A skill is guidance; it grants
-// nothing.
-
-/** Whose a skill is: Grasp's own, or the company's. */
-export type BrainSkillScope = "grasp" | "company";
+// skills a chat's code does (`env.skills`): Grasp's own and the
+// company's. A skill is guidance; it grants nothing.
 
 /**
- * A skill at one version, as a selection names it: keep it for the whole
- * task, and read that version.
+ * A skill at one version, as a selection names it, Grasp's own (`grasp`)
+ * or the company's (`company`): keep it for the whole task, and read that
+ * version.
  */
 export interface BrainSkill {
-  readonly scope: BrainSkillScope;
+  readonly scope: "grasp" | "company";
   readonly name: string;
   readonly version: number;
   /** When to use it. */
   readonly description: string;
 }
 
-/** What to select skills for: a task, in your words, at most 2,000 characters. */
-export interface BrainSkillsSelect {
-  readonly task: string;
-}
-
-/**
- * The skills that apply to a task, best first, a few at most: none when
- * none shares the task's telling words. Go without one then, never with a
- * skill that only seems close.
- */
-export interface BrainSkillsSelected {
-  readonly skills: readonly BrainSkill[];
-}
-
-/** What to read: a skill at exactly the version a selection gave. */
-export interface BrainSkillRead {
-  readonly skill: {
-    readonly scope: BrainSkillScope;
-    readonly name: string;
-    readonly version: number;
-  };
-}
-
 /** A skill at its version, whole: its `SKILL.md`. */
 export interface BrainSkillText {
-  readonly scope: BrainSkillScope;
+  readonly scope: "grasp" | "company";
   readonly name: string;
   readonly version: number;
   readonly text: string;

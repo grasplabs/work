@@ -120,8 +120,6 @@ export const callBrain = async (
   const authority = runAuthority(run);
   const permissionId = permissionIdSchema.parse(target.permissionId);
   if (call.operation !== "recall") {
-    // A skill is the whole company's and keeps its versions: nothing to
-    // pin with the run (brain-recall.ts).
     const answered = await skillsCallFor(
       env,
       {
@@ -130,6 +128,11 @@ export const callBrain = async (
         permissionId,
         actor: delegateActorOf(authority),
         target: { type: "workflow_run", id: run.runId },
+        // Pinned with the run as a recall's pack is, so the skills are
+        // checked again before anything leaves the run.
+        keep: async (versions) => {
+          await recordRunVersions(env, run.runId, permissionId, versions);
+        },
       },
       call.operation,
       call.arguments

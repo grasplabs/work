@@ -9,9 +9,7 @@ import type { HttpContract } from "@grasp-os/shared/http-contract";
 import type {
   BrainPack,
   BrainRecall,
-  BrainSkillRead,
-  BrainSkillsSelect,
-  BrainSkillsSelected,
+  BrainSkill,
   BrainSkillText,
 } from "./brain-recall.ts";
 import type { ContractAction, HttpRequestInit } from "./connector-contracts.ts";
@@ -101,15 +99,19 @@ type BrainSkillsClient<Operations extends readonly BrainOperation[]> =
          * The skills that apply to `request.task`, best first, a few at
          * most, each at its version: the same a chat's code selects.
          */
-        readonly select: (
-          request: BrainSkillsSelect
-        ) => Promise<BrainSkillsSelected>;
+        readonly select: (request: {
+          /** The task, in your words: at most 2,000 characters. */
+          readonly task: string;
+        }) => Promise<{ readonly skills: readonly BrainSkill[] }>;
       }
     : unknown) &
     ("skills.read" extends Operations[number]
       ? {
           /** A skill at exactly the version a selection gave, whole. */
-          readonly read: (request: BrainSkillRead) => Promise<BrainSkillText>;
+          readonly read: (request: {
+            /** As a selection gave it: its scope, name and version. */
+            readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+          }) => Promise<BrainSkillText>;
         }
       : unknown);
 

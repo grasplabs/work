@@ -3,9 +3,7 @@ import { z } from "zod";
 import type {
   BrainPack,
   BrainRecall,
-  BrainSkillRead,
-  BrainSkillsSelect,
-  BrainSkillsSelected,
+  BrainSkill,
   BrainSkillText,
 } from "./brain-recall.ts";
 
@@ -131,11 +129,13 @@ export interface BrainActions {
     options: CallOptions
   ) => Promise<BrainPack>;
   readonly "skills.select": (
-    request: BrainSkillsSelect,
+    request: { readonly task: string },
     options: CallOptions
-  ) => Promise<BrainSkillsSelected>;
+  ) => Promise<{ readonly skills: readonly BrainSkill[] }>;
   readonly "skills.read": (
-    request: BrainSkillRead,
+    request: {
+      readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+    },
     options: CallOptions
   ) => Promise<BrainSkillText>;
 }
