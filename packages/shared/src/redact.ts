@@ -227,6 +227,33 @@ const linkEndOf = (found: string): number => {
   return end;
 };
 
+/**
+ * Of what GFM cuts off a link's end, the characters that can be part of a
+ * token's value: the marks among RFC 3986's unreserved characters
+ * (letters, digits, `-`, `.`, `_`, `~`; §2.3) and `*`, which the
+ * `application/x-www-form-urlencoded` serializer leaves raw too. A
+ * base64url, hex or JWT signature can end in one.
+ */
+const valueMarks = new Set(["_", "~", ".", "*"]);
+
+/**
+ * Whether the last pair of `link`'s query (decoded, cut by `linkEndOf`)
+ * has a granting name: then what GFM cut after it may be the end of its
+ * value. Not when the link has a fragment, which holds what follows.
+ */
+const endsInGrant = (link: string): boolean => {
+  const query = link.indexOf("?");
+  if (query === -1 || link.includes("#")) {
+    return false;
+  }
+  const last = link.lastIndexOf("&") + 1 || query + 1;
+  const equals = link.indexOf("=", Math.max(last, query + 1));
+  return (
+    equals !== -1 &&
+    grantingName.test(decoded(link.slice(Math.max(last, query + 1), equals)))
+  );
+};
+
 /** A character no link holds as written: what ends one (`linkPattern`). */
 const outsideLink = /[\s"'<>\\^`{|}]/gu;
 
@@ -261,8 +288,22 @@ const serialized = (link: string): string => {
  */
 const redactLinks = (text: string): string =>
   text.replace(linkPattern, (found) => {
-    // What ends no link stays outside it, byte for byte (`linkEndOf`).
-    const end = linkEndOf(found);
+    // What ends no link stays outside it, byte for byte (`linkEndOf`);
+    // but when the link ends in a granting value, the marks GFM cut that
+    // can end such a value (`valueMarks`) go with it, up to the first that
+    // can't: so `sig=S_).` redacts `S_` and leaves `).`, `sig=S).` leaves
+    // `).`, and `[t](…?sig=S)` keeps its `)`. A sentence's `.` straight
+    // after a secret is redacted with it: accepted, as a secret's last `.`
+    // or `_` must never be left behind.
+    let end = linkEndOf(found);
+    if (
+      end < found.length &&
+      endsInGrant(decodeHTMLAttribute(found.slice(0, end)))
+    ) {
+      while (end < found.length && valueMarks.has(found[end] ?? "")) {
+        end += 1;
+      }
+    }
     const link = found.slice(0, end);
     const redacted = redactedQuery(decodeHTMLAttribute(link), true);
     return redacted === undefined
