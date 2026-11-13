@@ -15,6 +15,7 @@ import {
   ChevronDownIcon,
   InboxIcon,
   LibraryIcon,
+  LightbulbIcon,
   NotebookPenIcon,
   TargetIcon,
   UsersIcon,
@@ -341,6 +342,11 @@ export const BrainNav = ({
   const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
   const onMemory = Boolean(matchRoute({ to: "/brain/memory" }));
   const onSources = Boolean(matchRoute({ to: "/brain/sources" }));
+  const onMemories = Boolean(matchRoute({ to: "/brain/memories" }));
+  const memoriesLabel = t({
+    message: "Memories",
+    context: "the Brain's memories page",
+  });
   const sourcesLabel = t({
     message: "Sources",
     context: "the Brain's sources page",
@@ -433,6 +439,13 @@ export const BrainNav = ({
         >
           <LibraryIcon />
         </PageSidebarRailButton>
+        <PageSidebarRailButton
+          active={onMemories}
+          label={memoriesLabel}
+          render={<Link to="/brain/memories" />}
+        >
+          <LightbulbIcon />
+        </PageSidebarRailButton>
         {regions.map(({ region, Icon }) => (
           <PageSidebarRailButton
             active={here.has(regionKey(region.id))}
@@ -475,6 +488,9 @@ export const BrainNav = ({
         </Link>
         <Link className={topLinkClass} to="/brain/sources">
           <TopLinkContent icon={LibraryIcon} label={sourcesLabel} />
+        </Link>
+        <Link className={topLinkClass} to="/brain/memories">
+          <TopLinkContent icon={LightbulbIcon} label={memoriesLabel} />
         </Link>
         <span aria-hidden="true" className="bg-border my-2 h-px" />
 

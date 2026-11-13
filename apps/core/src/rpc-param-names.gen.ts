@@ -111,7 +111,13 @@ export const rpcParamNames: ParamNames = {
     "verify": ["after"],
   },
   "BrainMemoriesRpc": {
+    "confirm": ["memory"],
+    "contested": ["next"],
+    "correct": ["correction"],
+    "entities": ["kind","next"],
+    "entity": ["entity"],
     "forget": ["memory"],
+    "memories": ["entity","next"],
   },
   "BrainRpc": {
     "addRecords": ["records"],
