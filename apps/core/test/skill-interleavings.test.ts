@@ -384,8 +384,8 @@ const waitingWith = async (w: World, team: string): Promise<string[]> => {
 
 /**
  * Asks again to share the asker's skill with team `team`, at a new
- * version. Refused, it must have changed nothing: the share that waited
- * still does.
+ * version. Refused (nothing new waits), it must have changed nothing: the
+ * share that waited still does.
  */
 const askTeam = async (w: World, team: string, e: Env): Promise<void> => {
   const version = await saveNew(w);
@@ -396,8 +396,11 @@ const askTeam = async (w: World, team: string, e: Env): Promise<void> => {
     });
     w.lastTeamShare.set(teamKey(team), asked.id);
   } catch (error) {
-    const after = new Set(await waitingWith(w, team));
-    if (before.some((id) => !after.has(id))) {
+    // Refused when nothing new waits: then nothing may have gone either.
+    // (A new one that waits is an ask that landed and lost its reply.)
+    const after = await waitingWith(w, team);
+    const written = after.some((id) => !before.includes(id));
+    if (!written && before.some((id) => !after.includes(id))) {
       w.refusals.push("a refused ask took away the share that waited");
     }
     throw error;
