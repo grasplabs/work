@@ -121,12 +121,13 @@ const applyChange = async (
       return;
     }
     case "onboarding.new_start": {
+      const backed = await store.claimTeamsOf(command.payload.person);
       refuseUnless(
         await store.newStart(command.payload.person, by),
         "onboarding.no_link"
       );
       // What they said leaves the new Brain now, or on the clock.
-      await eraseOwedOfPersonQuietly(env, command.payload.person);
+      await eraseOwedOfPersonQuietly(env, command.payload.person, backed);
       return;
     }
     case "onboarding.gate.open": {

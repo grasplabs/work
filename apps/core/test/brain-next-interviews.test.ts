@@ -5,11 +5,14 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import {
+  brainExportFile,
+  brainExportStatus,
   erasePerson,
   listSourcesAs,
   listVersionsAs,
   readSourceVersionAs,
   recallAs,
+  startBrainExport,
   workBrain,
 } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
@@ -168,6 +171,55 @@ const holdingAdds = (holds: (source: string) => boolean) => {
       released.resolve(true);
     },
   };
+};
+
+/**
+ * Core's env with every erasure in the Brain's stores failing, as when the
+ * Brain is out of reach: what an inline erasure, or the clock's, leaves.
+ */
+/** A store's stub whose every erasure fails. */
+const failingErasuresOf = <T extends object>(stub: T): T =>
+  new Proxy(stub, {
+    get: (target, name): unknown => {
+      const member: unknown = Reflect.get(target, name);
+      if (typeof member !== "function") {
+        return member;
+      }
+      if (name === "eraseSource") {
+        return async (): Promise<never> => {
+          await Promise.resolve();
+          throw new Error("The Brain is out of reach.");
+        };
+      }
+      return (...given: unknown[]): unknown =>
+        Reflect.apply(member, target, given);
+    },
+  });
+
+const erasuresFailing = (): Env => {
+  const namespaceOf = <T extends object>(namespace: T): T =>
+    new Proxy(namespace, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        if (name !== "jurisdiction" && name !== "getByName") {
+          return (...given: unknown[]): unknown =>
+            Reflect.apply(member, target, given);
+        }
+        return (argument: unknown): unknown => {
+          const made: unknown = Reflect.apply(member, target, [argument]);
+          if (typeof made !== "object" || made === null) {
+            return made;
+          }
+          return name === "jurisdiction"
+            ? namespaceOf(made)
+            : failingErasuresOf(made);
+        };
+      },
+    });
+  return { ...env, BRAIN_STORE: namespaceOf(env.BRAIN_STORE) };
 };
 
 /** The queue's clock across this file: only forward, as core's clock goes. */
@@ -750,9 +802,12 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
    */
   const rosterWith = (
     ids: Awaited<ReturnType<typeof team>>,
-    { moved = [], lead }: { moved?: readonly Key[]; lead?: Key } = {}
+    {
+      moved = [],
+      lead,
+      keys = [...everyone, "sam"],
+    }: { moved?: readonly Key[]; lead?: Key; keys?: readonly Key[] } = {}
   ) => {
-    const keys: Key[] = [...everyone, "sam"];
     const base = rosterOf(
       ids,
       keys,
@@ -911,6 +966,157 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       group: ids.team,
       oldKey: false,
       recalled: [],
+    });
+  });
+
+  /** Ops' eight, Sam and Ada with them, but for `left`. */
+  const eightBut = (left?: Key): Key[] =>
+    [...everyone, "sam" as const, "ada" as const].filter((key) => key !== left);
+
+  it("stay unreadable while their erasure is owed, the Brain failing, in a team still of seven", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    // Pim, who backs the claim, is taken off the list: four left behind it,
+    // seven still interviewed. The Brain fails every erasure.
+    await onboardingStore(env).saveRoster(
+      rosterWith(ids, { keys: eightBut("pim") }),
+      {
+        type: "system",
+      }
+    );
+    await eraseOwedOnboardingSources(erasuresFailing());
+    const owed = await onboardingStore(env).owedErasures();
+    expect({
+      before,
+      owed: owed.some(
+        (each) => each.kind === "claim" && each.team === ids.team
+      ),
+      now: await readableBy(max),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      owed: true,
+      now: { group: null, recalled: [], listed: [] },
+    });
+  });
+
+  it("are never readable again under their old key when the team goes under seven and back while their erasure fails", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const [first] = await claimsOf(max);
+    const store = onboardingStore(env);
+    await store.saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+      type: "system",
+    });
+    await eraseOwedOnboardingSources(erasuresFailing());
+    await store.saveRoster(rosterWith(ids), { type: "system" });
+    await eraseOwedOnboardingSources(erasuresFailing());
+    const listed = await claimsOf(max);
+    expect({
+      first: first === undefined,
+      oldKey: listed.some(({ source }) => source.id === first?.source.id),
+      now: await readableBy(max),
+    }).toStrictEqual({
+      first: false,
+      oldKey: false,
+      now: { group: null, recalled: [], listed: [] },
+    });
+  });
+
+  it("no longer count one moved to another team among their backers: the move owes their erasure in the same save", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    // Pim, who backs the claim, moves to Billing: Ops still has seven
+    // interviewed, but four of its people now back the claim.
+    await onboardingStore(env).saveRoster(
+      rosterWith(ids, { keys: eightBut(), moved: ["pim"] }),
+      {
+        type: "system",
+      }
+    );
+    const owed = await onboardingStore(env).owedErasures();
+    expect({
+      owed: owed.some(
+        (each) => each.kind === "claim" && each.team === ids.team
+      ),
+      now: await readableBy(max),
+    }).toStrictEqual({
+      owed: true,
+      now: { group: null, recalled: [], listed: [] },
+    });
+  });
+
+  it("are erased by the withdrawal itself of a backer who moved to another team, before core's clock", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    // Pim moves to Billing, with the erasure his move owes failing; then
+    // he withdraws: his request erases the claims of every team he backed.
+    await onboardingStore(env).saveRoster(
+      rosterWith(ids, { keys: eightBut(), moved: ["pim"] }),
+      {
+        type: "system",
+      }
+    );
+    await eraseOwedOnboardingSources(erasuresFailing());
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    const owed = await onboardingStore(env).owedErasures();
+    expect({
+      owed: owed.some(
+        (each) => each.kind === "claim" && each.team === ids.team
+      ),
+      recalled: await recalled(max, "Zendesk", "claim"),
+      listed: await claimsOf(max),
+    }).toStrictEqual({ owed: false, recalled: [], listed: [] });
+  });
+
+  it("are in the company's export while they stand, never a person's interview, and an export holding one is never served once it is erased", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const { id } = await startBrainExport(env);
+    for (let tick = 0; tick < 20; tick += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- until the export is written
+      const status = await brainExportStatus(env, { id });
+      if (status?.state !== "writing") {
+        break;
+      }
+      clock.at = Math.max(clock.at, Date.now()) + 1;
+      // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+      await workBrain(env, new Date(clock.at), producersOf(env));
+    }
+    const written = await brainExportStatus(env, { id });
+    const files = await Promise.all(
+      (written?.files ?? []).map(
+        async (file) => (await brainExportFile(env, { id, file })) ?? ""
+      )
+    );
+    // The team goes under seven: the claim is erased.
+    await onboardingStore(env).saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+      type: "system",
+    });
+    await eraseOwedOnboardingSources(env);
+    const [firstFile = ""] = written?.files ?? [];
+    const erasedStatus = await brainExportStatus(env, { id });
+    expect({
+      state: written?.state,
+      claim: files.some((text) => text.includes(zendeskClaim.text)),
+      interview: files.some((text) =>
+        text.includes("Opens the ticket in Zendesk.")
+      ),
+      max: max.length > 0,
+      after: erasedStatus?.state,
+      file: await brainExportFile(env, { id, file: firstFile }),
+    }).toStrictEqual({
+      state: "done",
+      claim: true,
+      interview: false,
+      max: true,
+      after: "erased",
+      file: null,
     });
   });
 });

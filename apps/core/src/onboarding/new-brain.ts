@@ -109,7 +109,7 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
  */
 export const eraseOwedOnboardingSources = async (
   env: Env,
-  scope?: { person: string } | { claims: true }
+  scope?: { person: string; teams?: readonly string[] } | { claims: true }
 ): Promise<void> => {
   const store = onboardingStore(env);
   for (const owed of await store.owedErasures(scope)) {
@@ -149,13 +149,15 @@ export const eraseOnboardingInterview = async (
  */
 export const eraseOwedOfPersonQuietly = async (
   env: Env,
-  person: string | null
+  person: string | null,
+  /** The teams whose claims they backed before the request (`claimTeamsOf`). */
+  teams: readonly string[] = []
 ): Promise<void> => {
   if (person === null) {
     return;
   }
   try {
-    await eraseOwedOnboardingSources(env, { person });
+    await eraseOwedOnboardingSources(env, { person, teams });
   } catch (error) {
     log.error("onboarding.brain_erasure_failed", {
       error: error instanceof Error ? error.name : "unknown",

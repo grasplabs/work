@@ -1254,9 +1254,11 @@ export class Onboarding extends DurableObject<Env> {
     this.#lateTeams(late ? before : roster, roster, now);
     this.#askNewcomers(before, roster);
     // Someone moved out, made a lead or taken off may leave a team too
-    // small to have claims shown: its claims are owed an erasure at once
-    // (`teamMayClaim`), which core's clock does within a minute.
+    // small to have claims shown (`teamMayClaim`), or a claim under five of
+    // its team's people now (`#toPurge`, the one recount): those claims are
+    // owed an erasure at once, which core's clock does within a minute.
     this.#eraseClaimsOfSmallTeams();
+    this.#eraseClaims(this.#toPurge().records);
     return { removed: gone.length, erased };
   }
 
@@ -6261,8 +6263,9 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * The staff-list team of the person `account` is linked to
    * (`linkAccount`), while they are on the list, core didn't erase them,
-   * and the team may have claims shown (`teamMayClaim`): whose claims they
-   * read in the new Brain (brain-next.ts, `readerOf`). Null otherwise.
+   * the team may have claims shown (`teamMayClaim`), and none of its
+   * claims is owed an erasure: whose claims they read in the new Brain
+   * (brain-next.ts, `readerOf`). Null otherwise.
    */
   interviewTeamOf(account: string): string | null {
     const [link] = this.#db
@@ -6274,12 +6277,21 @@ export class Onboarding extends DurableObject<Env> {
       return null;
     }
     // A team too small to have claims shown gives its group to nobody,
-    // from the moment its count changes: a claim owed an erasure is
-    // unreadable before core's clock erases it (`teamMayClaim`).
+    // from the moment its count changes (`teamMayClaim`); and so does a
+    // team with any claim owed an erasure the Brain hasn't confirmed, so
+    // that what may be read never rests on a Brain call having succeeded:
+    // readers read less, never more, until it has.
     const team = this.#teamOfPerson(link.person);
-    return team !== null && teamMayClaim(this.#tellers(team).length)
-      ? team
-      : null;
+    if (team === null || !teamMayClaim(this.#tellers(team).length)) {
+      return null;
+    }
+    const [owed] = this.#db
+      .select({ source: brainClaims.source })
+      .from(brainClaims)
+      .where(and(eq(brainClaims.team, team), eq(brainClaims.erase, true)))
+      .limit(1)
+      .all();
+    return owed === undefined ? team : null;
   }
 
   /**
@@ -6491,23 +6503,35 @@ export class Onboarding extends DurableObject<Env> {
    * (`erasedFromBrain`). Interviews are decided first. Scoped to what a
    * request erases at once, the rest left to core's clock:
    *
-   * - `person`: that person's interviews, and the claims of their team now
-   *   owed: what their withdrawal or delete takes out (a claim they backed
-   *   that fell under five, or every claim of a team their leaving took
-   *   under seven), never another team's;
+   * - `person`: that person's interviews, and the claims now owed of
+   *   their team and of `teams` (the teams whose claims they backed before
+   *   their request, `claimTeamsOf`): what their withdrawal or delete
+   *   takes out (a claim they backed that fell under five, or every claim
+   *   of a team their leaving took under seven), never another team's;
    * - `claims`: every claim owed, after a roster save, which may take any
    *   team under seven.
    */
-  owedErasures(scope?: { person: string } | { claims: true }): OwedErasure[] {
+  owedErasures(
+    scope?: { person: string; teams?: readonly string[] } | { claims: true }
+  ): OwedErasure[] {
     this.#decideInterviews();
     if (scope !== undefined) {
-      const team = "person" in scope ? this.#teamOfPerson(scope.person) : null;
+      const ofTeams = new Set<string>();
+      if ("person" in scope) {
+        for (const team of scope.teams ?? []) {
+          ofTeams.add(team);
+        }
+        const now = this.#teamOfPerson(scope.person);
+        if (now !== null) {
+          ofTeams.add(now);
+        }
+      }
       return this.owedErasures().filter((owed) =>
         "claims" in scope
           ? owed.kind === "claim"
           : (owed.kind === "interview" &&
               this.#interviewPersonOf(owed.source) === scope.person) ||
-            (owed.kind === "claim" && owed.team === team)
+            (owed.kind === "claim" && ofTeams.has(owed.team))
       );
     }
     const owedInterviews: OwedErasure[] = this.#db
@@ -6528,6 +6552,31 @@ export class Onboarding extends DurableObject<Env> {
       .all()
       .map(({ source, team }) => ({ kind: "claim", source, team }));
     return [...owedInterviews, ...claims];
+  }
+
+  /**
+   * The teams whose standing claims `person` backs now, from the rows the
+   * intake keeps of who each claim rests on (`brain_sent`): asked before a
+   * request of theirs that may drop them (onboarding/links.ts), whose
+   * recount forgets those rows. At most the claims they back.
+   */
+  claimTeamsOf(person: string): string[] {
+    const backed = this.#db
+      .select({ record: brainSent.record })
+      .from(brainSent)
+      .where(and(eq(brainSent.person, person), eq(brainSent.type, "statement")))
+      .all()
+      .map(({ record }) => record);
+    return [
+      ...new Set(
+        this.#db
+          .select({ team: brainClaims.team })
+          .from(brainClaims)
+          .where(inList(brainClaims.record, backed))
+          .all()
+          .map(({ team }) => team)
+      ),
+    ];
   }
 
   /** The staff-list team `person` is in now; null when they aren't on the list. */
@@ -6733,14 +6782,21 @@ export class Onboarding extends DurableObject<Env> {
       held.people.push(person);
       records.set(record, held);
     }
+    // Who is in which team now: a claim counts only those of its team
+    // who are in it now, so someone moved away no longer backs it.
+    const teamNow = new Map(
+      (roster?.people ?? []).map(({ id, team }) => [id, team])
+    );
     const purged = new Set<string>();
     for (const [record, { type, team, people: on }] of records) {
       const left = on.filter((person) => agreed.has(person));
+      const backers = left.filter((person) => teamNow.get(person) === team);
       if (
         emptied.has(team) ||
         left.length === 0 ||
-        // A claim rests on five or more people, or isn't the team's.
-        (type === "statement" && left.length < minTeamShown) ||
+        // A claim rests on five or more of its team's people now, or isn't
+        // the team's.
+        (type === "statement" && backers.length < minTeamShown) ||
         (type === "workflowVersion" && left.length < on.length) ||
         (unmapped.has(team) &&
           (type === "workflow" || type === "workflowVersion"))
