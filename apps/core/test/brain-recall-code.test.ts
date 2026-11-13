@@ -24,8 +24,8 @@ import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import {
-  addSource as addCoreSource,
-  eraseSource as eraseCoreSource,
+  addSource,
+  eraseSource,
   recallAs,
   workBrain,
 } from "../src/brain-next.ts";
@@ -127,7 +127,8 @@ const versionKey = (id: string, version: number): string =>
  * The versions everyone in the company may read now, of every test in this
  * file, by their source's id: each `forEveryone` adds, until core adds
  * the source again for other readers (narrowed: no version of it is the
- * company's then) or erases it (`addSource`, `eraseSource` below). What
+ * company's then) or erases it (`addSourceNoLongerEveryones`,
+ * `eraseSourceNoLongerEveryones` below). What
  * code's recall as the company may find by meaning, whichever test added
  * it, and nothing else.
  */
@@ -138,22 +139,26 @@ const isEveryones = (key: string): boolean =>
   [...everyonesVersions.values()].includes(key);
 
 /**
- * Core's `addSource`, as every call in this file makes it: a source of
- * everyone's added again for other readers is no longer everyone's.
+ * Core's `addSource`, which every call in this file goes through: a
+ * source of everyone's added again for other readers is no longer
+ * everyone's (`everyonesVersions`).
  */
-const addSource = async (
-  ...args: Parameters<typeof addCoreSource>
+const addSourceNoLongerEveryones = async (
+  ...args: Parameters<typeof addSource>
 ): Promise<void> => {
   everyonesVersions.delete(args[1].source.id);
-  await addCoreSource(...args);
+  await addSource(...args);
 };
 
-/** Core's `eraseSource`, as every call in this file makes it: an erased source is no one's. */
-const eraseSource = async (
-  ...args: Parameters<typeof eraseCoreSource>
+/**
+ * Core's `eraseSource`, which every call in this file goes through: an
+ * erased source is no one's (`everyonesVersions`).
+ */
+const eraseSourceNoLongerEveryones = async (
+  ...args: Parameters<typeof eraseSource>
 ): Promise<void> => {
   everyonesVersions.delete(args[1].source.id);
-  await eraseCoreSource(...args);
+  await eraseSource(...args);
 };
 
 /** A source in the Brain that `readers` may read. */
@@ -162,7 +167,7 @@ const added = async (
   readers: SourceReaders
 ): Promise<SourceRef> => {
   const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
-  await addSource(env, {
+  await addSourceNoLongerEveryones(env, {
     source,
     change: crypto.randomUUID(),
     text,
@@ -787,12 +792,12 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     );
     // The first plan is erased (it was in the shared store, as any
     // source not one person's own is); the third narrowed to a team.
-    await eraseSource(env, {
+    await eraseSourceNoLongerEveryones(env, {
       source: erased,
       readers: { kind: "none" },
       reason: "deleted",
     });
-    await addSource(env, {
+    await addSourceNoLongerEveryones(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Route plan: ${narrowedWord} departs at four.`,
@@ -836,13 +841,13 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       runs.push(runId);
     }
     // Once they ended: the first plan narrowed to a team, the second erased.
-    await addSource(env, {
+    await addSourceNoLongerEveryones(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Salary band: ${narrowedWord} is 95k.`,
       readers: { kind: "team", teamId: elsewhere },
     });
-    await eraseSource(env, {
+    await eraseSourceNoLongerEveryones(env, {
       source: erased,
       readers: { kind: "none" },
       reason: "deleted",
@@ -911,13 +916,13 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     await handOver();
     const handed = await ofRuns("Workflow run completed");
     const before = [await ofRuns(narrowedWord), await ofRuns(erasedWord)];
-    await addSource(env, {
+    await addSourceNoLongerEveryones(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Salary band: ${narrowedWord} is 95k.`,
       readers: { kind: "team", teamId: elsewhere },
     });
-    await eraseSource(env, {
+    await eraseSourceNoLongerEveryones(env, {
       source: erased,
       readers: { kind: "none" },
       reason: "deleted",
@@ -969,7 +974,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
         await Promise.resolve();
       }),
       erased: await sentAfter(async (source) => {
-        await eraseSource(env, {
+        await eraseSourceNoLongerEveryones(env, {
           source,
           readers: { kind: "team", teamId: team },
           reason: "deleted",
@@ -977,7 +982,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       }),
       // Narrowed to a team she isn't in.
       narrowed: await sentAfter(async (source, word) => {
-        await addSource(env, {
+        await addSourceNoLongerEveryones(env, {
           source,
           change: crypto.randomUUID(),
           text: `Route plan: ${word} departs at one.`,
@@ -1150,7 +1155,10 @@ const joinedTexts =
  * `joined` (`joinedTexts`) as what it handed on: the versions found by
  * words or an exact part (which one depends on whether the random word
  * holds two digits), and those found by meaning that everyone may not
- * read: none, for code's recall as the company.
+ * read: none, for code's recall as the company. That anything comes back
+ * by meaning isn't asserted: a test run alone holds no other note for
+ * everyone, and its own is found by its word, so by meaning there is
+ * nothing it may get; run whole, the file's earlier notes come back.
  */
 const passedOn = (joined: unknown) => {
   const items = (typeof joined === "string" ? joined.split(" | ") : []).map(
