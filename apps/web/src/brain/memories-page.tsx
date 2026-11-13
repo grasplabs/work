@@ -1,19 +1,17 @@
 import type {
   BrainContestedFact,
-  BrainContestedPage,
   BrainEntityKind,
   BrainEntityListed,
-  BrainEntityPage,
   BrainEntityRef,
   BrainMemoryAttribute,
-  BrainMemoryPage,
+  BrainMemoryPageNext,
   BrainMemoryShown,
+  BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
 import {
   brainCorrectionMaxLength,
   brainEntityKinds,
 } from "@grasp-os/shared/brain-memories";
-import { failureText } from "@grasp-os/shared/errors";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -51,14 +49,12 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
-import type { CoreConnection } from "../core-connection.ts";
-import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { useCoreAction } from "../use-core-action.ts";
-import { useCore } from "../use-core.ts";
+import { NotLoaded } from "../load-from-core.tsx";
+import { useAsk, usePaged } from "./memories-asks.ts";
 
 // The Brain's memories, from the new Brain (GRA-1746): the facts sources
 // disagree on, each with its sides and a way to confirm one; the entities
@@ -68,50 +64,7 @@ import { useCore } from "../use-core.ts";
 // may read alone; what is theirs alone is marked so, as on the Sources
 // page. Texts are shown as text, never markup.
 
-type Memories = Session["brainMemories"];
-
-/** What a read from core came to. */
-type Read<T> =
-  | { state: "loading" }
-  | { state: "refused"; message: string }
-  | { state: "ready"; data: T };
-
-/**
- * What `read` answers on the person's session, or why not. Outside the
- * components, as the React Compiler can't compile `try`.
- */
-const readFrom = async <T,>(
-  core: CoreConnection,
-  read: (memories: Memories) => Promise<T>
-): Promise<Read<T>> => {
-  try {
-    const data = await core.withSession(
-      async (session) => await read(session.brainMemories)
-    );
-    return { state: "ready", data };
-  } catch (error) {
-    return { state: "refused", message: failureText(error) };
-  }
-};
-
-/**
- * `items` with each key once, the first kept: a change to who may read a
- * source applies at once, so a later page can repeat an item (the
- * Brain's contract asks callers to drop repeats).
- */
-const once = <T,>(items: readonly T[], keyOf: (item: T) => string): T[] => {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = keyOf(item);
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-};
-
-/** A memory's key, for React and for `once`. */
+/** A memory's key, for React and for `usePaged`. */
 const memoryKeyOf = ({ store, id }: BrainMemoryShown): string =>
   `${store}:${id}`;
 
@@ -389,8 +342,10 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
 
 /**
  * Says `memory` is wrong, with what is right: the person's own word,
- * theirs alone, confirmed. The correction's id is minted once, when the
- * dialog opens, so a retry saves it once.
+ * theirs alone, confirmed. Each opening is one correction, with its id
+ * minted then, so a retry saves it once, and the key its answer is tied
+ * to: a reply for an earlier opening lands nowhere. While it saves, the
+ * dialog can't be closed (its close button, Escape, a click outside).
  */
 const CorrectDialog = ({
   memory,
@@ -401,7 +356,6 @@ const CorrectDialog = ({
 }) => {
   const { t } = useLingui();
   const ids = useId();
-  const { busy, failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
   const { statement } = memory;
   const wrongLabel = t`Say this is wrong: ${statement}`;
@@ -410,40 +364,42 @@ const CorrectDialog = ({
   // The text of a save that failed: new words after it are a new
   // correction, with a new id, while the same words retry the same one.
   const [tried, setTried] = useState<string>();
+  const { busy, failure, ask } = useAsk(`correct#${change}`);
   const changedText = t`This memory has changed or is no longer yours to read. Look at it again first.`;
   const ready = right.trim() !== "";
   const correct = async (): Promise<void> => {
-    setTried(undefined);
-    const saved = await run(
-      async (session) =>
-        await session.brainMemories.correct({
+    const words = right.trim();
+    setTried(right);
+    await ask(
+      async (memories) =>
+        await memories.correct({
           wrong: {
             store: memory.store,
             entity: memory.about,
             memory: memory.id,
           },
-          right: right.trim(),
+          right: words,
           change,
-        })
+        }),
+      (saved) => {
+        setTried(undefined);
+        setOpen(false);
+        // Not theirs to correct now: say so, and read the page again so
+        // it shows what stands (their own earlier save of this one too).
+        if (saved === null) {
+          sayChanged(changedText);
+        }
+        onCorrected();
+      }
     );
-    if (saved === null) {
-      // Not theirs to correct now: say so, close, and read the page again,
-      // so it shows what stands (their own earlier save of this one too).
-      setOpen(false);
-      sayChanged(changedText);
-      onCorrected();
-      return;
-    }
-    if (saved === undefined) {
-      setTried(right);
-      return;
-    }
-    setOpen(false);
-    onCorrected();
   };
   return (
     <Dialog
+      disablePointerDismissal={busy}
       onOpenChange={(opening) => {
+        if (!opening && busy) {
+          return;
+        }
         if (opening) {
           setRight("");
           setTried(undefined);
@@ -458,7 +414,7 @@ const CorrectDialog = ({
       >
         <Trans>It&apos;s wrong</Trans>
       </DialogTrigger>
-      <DialogContent closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`} showCloseButton={!busy}>
         <form
           className="flex flex-col gap-5"
           onSubmit={(event) => {
@@ -533,32 +489,29 @@ const ConfirmButton = ({
   onConfirmed: () => void;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
+  const { busy, failure, ask } = useAsk(`confirm#${memoryKeyOf(memory)}`);
   const { statement } = memory;
+  const changedText = t`This memory has changed or is no longer yours to read. Look at it again first.`;
   return (
     <>
       <Button
         aria-label={t`Say this one is right: ${statement}`}
         disabled={busy}
         onClick={() => {
-          void (async () => {
-            const outcome = await run(
-              async (session) =>
-                await session.brainMemories.confirm({
-                  store: memory.store,
-                  memory: memory.id,
-                })
-            );
-            if (outcome === "nothing") {
-              sayChanged(
-                t`This memory has changed or is no longer yours to read. Look at it again first.`
-              );
-            }
-            // Read again on either answer: what stands now shows.
-            if (outcome !== undefined) {
+          void ask(
+            async (memories) =>
+              await memories.confirm({
+                store: memory.store,
+                memory: memory.id,
+              }),
+            (outcome) => {
+              if (outcome === "nothing") {
+                sayChanged(changedText);
+              }
+              // Read again on either answer: what stands now shows.
               onConfirmed();
             }
-          })();
+          );
         }}
         size="sm"
         type="button"
@@ -710,47 +663,57 @@ const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
   );
 };
 
+/** "Show more" of a listing (`usePaged`), and why the last one failed. */
+const ShowMore = ({
+  listing,
+}: {
+  listing: {
+    next: unknown;
+    busy: boolean;
+    failure: string | undefined;
+    showMore: () => void;
+  };
+}) => (
+  <>
+    <ErrorText>{listing.failure}</ErrorText>
+    {listing.next === null ? null : (
+      <Button
+        className="self-start"
+        disabled={listing.busy}
+        onClick={() => {
+          listing.showMore();
+        }}
+        type="button"
+        variant="outline"
+      >
+        <Trans>Show more</Trans>
+      </Button>
+    )}
+  </>
+);
+
+/** A contested fact's key, for React and for `usePaged`. */
+const keyOfFact = ({ about, attribute }: BrainContestedFact): string =>
+  `${keyOf(about.entity)}#${attribute}`;
+
 /** The facts sources disagree on that the person may read, a page at a time. */
 const ContestedList = ({
-  changes,
+  contested,
   onOpen,
   onChanged,
 }: {
-  /** How many changes the person made: each reads the list again. */
-  changes: number;
+  contested: ReturnType<typeof useContested>;
   onOpen: (entity: BrainEntityListed) => void;
   onChanged: () => void;
 }) => {
-  const core = useCore();
   const attributeLabel = useAttributeLabel();
-  const [listed, setListed] = useState<Read<BrainContestedPage>>({
-    state: "loading",
-  });
-  const [more, setMore] = useState<Read<BrainContestedPage>>();
-  useEffect(() => {
-    let left = false;
-    const read = async (): Promise<void> => {
-      const answer = await readFrom(
-        core,
-        async (memories) => await memories.contested()
-      );
-      if (!left) {
-        setListed(answer);
-      }
-    };
-    void read();
-    return () => {
-      left = true;
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changes` says when to read again
-  }, [core, changes]);
-  if (listed.state === "refused") {
-    return <ErrorText>{listed.message}</ErrorText>;
-  }
-  if (listed.state === "loading") {
+  const { first, items: facts, next } = contested;
+  if (first === undefined) {
     return null;
   }
-  const { facts, next } = listed.data;
+  if (first.state !== "ready") {
+    return <NotLoaded page={first} />;
+  }
   // A page can hold no fact and still have more after it.
   if (facts.length === 0 && next === null) {
     return (
@@ -759,8 +722,6 @@ const ContestedList = ({
       </p>
     );
   }
-  const keyOfFact = ({ about, attribute }: BrainContestedFact) =>
-    `${keyOf(about.entity)}#${attribute}`;
   return (
     <div className="flex flex-col gap-3">
       <ul className="flex flex-col gap-3">
@@ -802,92 +763,53 @@ const ContestedList = ({
           </li>
         ))}
       </ul>
-      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
-      {next === null ? null : (
-        <Button
-          className="self-start"
-          disabled={more?.state === "loading"}
-          onClick={() => {
-            setMore({ state: "loading" });
-            void (async () => {
-              const answer = await readFrom(
-                core,
-                async (memories) => await memories.contested(next)
-              );
-              setMore(answer.state === "refused" ? answer : undefined);
-              if (answer.state === "ready") {
-                // Only onto the list it was asked for: one read again
-                // since starts over.
-                setListed((now) =>
-                  now === listed
-                    ? {
-                        state: "ready",
-                        data: {
-                          facts: once(
-                            [...facts, ...answer.data.facts],
-                            keyOfFact
-                          ),
-                          next: answer.data.next,
-                        },
-                      }
-                    : now
-                );
-              }
-            })();
-          }}
-          type="button"
-          variant="outline"
-        >
-          <Trans>Show more</Trans>
-        </Button>
-      )}
+      <ShowMore listing={contested} />
     </div>
   );
 };
 
-/** The entities of `kind` the person may see, a page at a time: their own first. */
+/** The facts sources disagree on, as read at `changes`. */
+const useContested = (changes: number) =>
+  usePaged(
+    `contested#${changes}`,
+    "contested",
+    async (memories, next?: BrainMemoryPageNext) => {
+      const page = await memories.contested(next);
+      return { items: page.facts, next: page.next };
+    },
+    keyOfFact
+  );
+
+/** The entities of `kind`, as read at `changes`. */
+const useEntities = (kind: BrainEntityKind, changes: number) =>
+  usePaged(
+    `entities#${kind}#${changes}`,
+    `entities#${kind}`,
+    async (memories, next?: BrainMemoryPageNext) => {
+      const page = await memories.entities(kind, next);
+      return { items: page.entities, next: page.next };
+    },
+    ({ entity }: BrainEntityListed) => keyOf(entity)
+  );
+
+/** The entities of a kind the person may see, a page at a time: their own first. */
 const EntityList = ({
-  changes,
-  kind,
+  entities,
   picked,
   onPick,
 }: {
-  /** How many changes the person made: each reads the list again. */
-  changes: number;
-  kind: BrainEntityKind;
+  entities: ReturnType<typeof useEntities>;
   picked: BrainEntityRef | undefined;
   onPick: (entity: BrainEntityListed) => void;
 }) => {
-  const core = useCore();
-  const [listed, setListed] = useState<Read<BrainEntityPage>>({
-    state: "loading",
-  });
-  const [more, setMore] = useState<Read<BrainEntityPage>>();
-  useEffect(() => {
-    let left = false;
-    const read = async (): Promise<void> => {
-      const answer = await readFrom(
-        core,
-        async (memories) => await memories.entities(kind)
-      );
-      if (!left) {
-        setListed(answer);
-      }
-    };
-    void read();
-    return () => {
-      left = true;
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changes` says when to read again
-  }, [core, kind, changes]);
-  if (listed.state === "refused") {
-    return <ErrorText>{listed.message}</ErrorText>;
-  }
-  if (listed.state === "loading") {
+  const { first, items } = entities;
+  if (first === undefined) {
     return null;
   }
-  const { entities, next } = listed.data;
-  if (entities.length === 0) {
+  if (first.state !== "ready") {
+    return <NotLoaded page={first} />;
+  }
+  if (items.length === 0 && entities.next === null) {
     return (
       <Empty>
         <EmptyHeader>
@@ -907,7 +829,7 @@ const EntityList = ({
   return (
     <div className="flex flex-col gap-3">
       <ItemGroup render={<ul />} spacing="tight">
-        {entities.map((each) => (
+        {items.map((each) => (
           <li key={keyOf(each.entity)}>
             <Item
               onClick={() => {
@@ -942,44 +864,7 @@ const EntityList = ({
           </li>
         ))}
       </ItemGroup>
-      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
-      {next === null ? null : (
-        <Button
-          className="self-start"
-          disabled={more?.state === "loading"}
-          onClick={() => {
-            setMore({ state: "loading" });
-            void (async () => {
-              const answer = await readFrom(
-                core,
-                async (memories) => await memories.entities(kind, next)
-              );
-              setMore(answer.state === "refused" ? answer : undefined);
-              if (answer.state === "ready") {
-                // Only onto the list it was asked for (above).
-                setListed((now) =>
-                  now === listed
-                    ? {
-                        state: "ready",
-                        data: {
-                          entities: once(
-                            [...entities, ...answer.data.entities],
-                            ({ entity }) => keyOf(entity)
-                          ),
-                          next: answer.data.next,
-                        },
-                      }
-                    : now
-                );
-              }
-            })();
-          }}
-          type="button"
-          variant="outline"
-        >
-          <Trans>Show more</Trans>
-        </Button>
-      )}
+      <ShowMore listing={entities} />
     </div>
   );
 };
@@ -995,32 +880,21 @@ const EntityPanel = ({
   entity: BrainEntityListed;
   onChanged: () => void;
 }) => {
-  const core = useCore();
   const kindLabel = useKindLabel();
-  const [page, setPage] = useState<Read<BrainMemoryPage>>({
-    state: "loading",
-  });
-  const [more, setMore] = useState<Read<BrainMemoryPage>>();
   const ref = entity.entity;
-  useEffect(() => {
-    let left = false;
-    const read = async (): Promise<void> => {
-      const answer = await readFrom(
-        core,
-        async (memories) => await memories.memories(ref)
-      );
-      if (!left) {
-        setPage(answer);
-      }
-    };
-    void read();
-    return () => {
-      left = true;
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changes` says when to read again
-  }, [core, ref, changes]);
+  const opened = keyOf(ref);
+  const memories = usePaged(
+    `memories#${opened}#${changes}`,
+    `memories#${opened}`,
+    async (read, next?: BrainStoreCursor) => {
+      const page = await read.memories(ref, next);
+      return { items: page.memories, next: page.next };
+    },
+    memoryKeyOf
+  );
   const heading = useId();
   const kind = kindLabel(entity.kind);
+  const { first, items } = memories;
   return (
     <Card render={<section aria-labelledby={heading} />} size="sm">
       <CardContent>
@@ -1035,67 +909,26 @@ const EntityPanel = ({
             </Badge>
           ) : null}
         </div>
-        {page.state === "refused" ? (
-          <ErrorText>{page.message}</ErrorText>
+        {first !== undefined && first.state !== "ready" ? (
+          <NotLoaded page={first} />
         ) : null}
-        {page.state === "ready" && page.data.memories.length === 0 ? (
+        {first?.state === "ready" && items.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             <Trans>
               You can&apos;t read anything the Brain remembers about this.
             </Trans>
           </p>
         ) : null}
-        {page.state === "ready" && page.data.memories.length > 0 ? (
+        {items.length > 0 ? (
           <ItemGroup render={<ul />} spacing="tight">
-            {page.data.memories.map((memory) => (
+            {items.map((memory) => (
               <li key={memoryKeyOf(memory)}>
                 <MemoryLine memory={memory} onChanged={onChanged} />
               </li>
             ))}
           </ItemGroup>
         ) : null}
-        {more?.state === "refused" ? (
-          <ErrorText>{more.message}</ErrorText>
-        ) : null}
-        {page.state === "ready" && page.data.next !== null ? (
-          <Button
-            className="self-start"
-            disabled={more?.state === "loading"}
-            onClick={() => {
-              const asked = page;
-              const { memories, next } = page.data;
-              setMore({ state: "loading" });
-              void (async () => {
-                const answer = await readFrom(
-                  core,
-                  async (read) => await read.memories(ref, next)
-                );
-                setMore(answer.state === "refused" ? answer : undefined);
-                if (answer.state === "ready") {
-                  // Only onto the page it was asked for (above).
-                  setPage((now) =>
-                    now === asked
-                      ? {
-                          state: "ready",
-                          data: {
-                            memories: once(
-                              [...memories, ...answer.data.memories],
-                              memoryKeyOf
-                            ),
-                            next: answer.data.next,
-                          },
-                        }
-                      : now
-                  );
-                }
-              })();
-            }}
-            type="button"
-            variant="outline"
-          >
-            <Trans>Show more</Trans>
-          </Button>
-        ) : null}
+        <ShowMore listing={memories} />
       </CardContent>
     </Card>
   );
@@ -1105,6 +938,8 @@ const EntityPanel = ({
 export const MemoriesPage = () => {
   const kindLabel = useKindLabel();
   const [kind, setKind] = useState<BrainEntityKind>("customer");
+  // The open entity, as it was when opened: shown as the page reads it
+  // now, by its key, wherever it is listed (below).
   const [opened, setOpened] = useState<BrainEntityListed>();
   // Each change the person makes reads everything again, in place, so
   // what they confirmed or corrected shows where it now stands, and an
@@ -1114,6 +949,19 @@ export const MemoriesPage = () => {
   const changed = () => {
     setChanges((count) => count + 1);
   };
+  const contested = useContested(changes);
+  const entities = useEntities(kind, changes);
+  // One source of truth for the open entity's name: the latest read of
+  // either list that holds it; as opened only while neither does.
+  const openedKey = opened === undefined ? undefined : keyOf(opened.entity);
+  const shown =
+    openedKey === undefined
+      ? undefined
+      : (entities.items.find(({ entity }) => keyOf(entity) === openedKey) ??
+        contested.items
+          .map(({ about }) => about)
+          .find(({ entity }) => keyOf(entity) === openedKey) ??
+        opened);
   const contestedHeading = useId();
   const entitiesHeading = useId();
   const kindId = useId();
@@ -1145,7 +993,7 @@ export const MemoriesPage = () => {
             <Trans>Where sources disagree</Trans>
           </h2>
           <ContestedList
-            changes={changes}
+            contested={contested}
             onChanged={changed}
             onOpen={(entity) => {
               setKind(entity.kind);
@@ -1186,17 +1034,15 @@ export const MemoriesPage = () => {
           </div>
           <div className="grid min-h-0 gap-6 lg:grid-cols-2">
             <EntityList
-              changes={changes}
-              key={kind}
-              kind={kind}
+              entities={entities}
               onPick={setOpened}
               picked={opened?.entity}
             />
-            {opened === undefined ? null : (
+            {shown === undefined ? null : (
               <EntityPanel
                 changes={changes}
-                entity={opened}
-                key={keyOf(opened.entity)}
+                entity={shown}
+                key={keyOf(shown.entity)}
                 onChanged={changed}
               />
             )}

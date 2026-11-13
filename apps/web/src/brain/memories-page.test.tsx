@@ -122,7 +122,9 @@ const shown = async (refusal?: string, failedSaves = 0) => {
     await Promise.resolve();
     calls.push(call);
     if (refusal !== undefined) {
-      throw new Error(refusal);
+      // As core refuses: with a code (an error without one is core out
+      // of reach).
+      throw Object.assign(new Error(refusal), { code: "auth.unauthenticated" });
     }
     return value();
   };

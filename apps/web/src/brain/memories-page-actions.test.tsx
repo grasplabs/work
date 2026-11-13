@@ -401,6 +401,105 @@ describe("the Memories page's actions", () => {
     }).toStrictEqual({ nothing: false, more: 1 });
   });
 
+  it("names the open entity as the page reads it again", async () => {
+    let lost = false;
+    const own: BrainEntityListed = {
+      entity: { store: "own", id: "e-own" },
+      kind: "customer",
+      name: "Acme",
+      unreadable: false,
+    };
+    await shown({
+      contested: async () => await Promise.resolve({ facts: [], next: null }),
+      entities: async () =>
+        await Promise.resolve({
+          entities: [lost ? { ...own, name: null, unreadable: true } : own],
+          next: null,
+        }),
+      memories: async () =>
+        await Promise.resolve({
+          memories: [
+            memory("m-mine", "e-own", "Churned", {
+              store: "own",
+              statement: "Churned",
+              source: null,
+              yours: true,
+            }),
+          ],
+          next: null,
+        }),
+      confirm: async () => {
+        // Meanwhile, the shared entity it stands for went out of reach.
+        lost = true;
+        return await Promise.resolve("done");
+      },
+    });
+    await press(buttons("Acme")[0]);
+    await press(buttons("This one is right")[0]);
+    expect(document.querySelector("h3")?.textContent).toBe(
+      "Something you corrected, which you can no longer read"
+    );
+  });
+
+  it("can't be closed while a correction saves", async () => {
+    const reply = held<unknown>();
+    await shown({
+      contested: async () => await Promise.resolve(factPage()),
+      entities: async () => await Promise.resolve({ entities: [], next: null }),
+      correct: async () => await reply.promise,
+    });
+    await press(buttons("It's wrong")[0]);
+    await save("Paused");
+    const closeOffered = [
+      ...document.querySelectorAll("[role=dialog] button"),
+    ].some((each) => each.textContent === "Close");
+    await act(async () => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+      await Promise.resolve();
+    });
+    await settle();
+    const open = document.querySelector("textarea") !== null;
+    await act(async () => {
+      reply.release({ memory: "m-new", entity: "e-own" });
+      await Promise.resolve();
+    });
+    await settle();
+    expect({
+      closeOffered,
+      open,
+      closedOnceSaved: document.querySelector("textarea") === null,
+    }).toStrictEqual({
+      closeOffered: false,
+      open: true,
+      closedOnceSaved: true,
+    });
+  });
+
+  it("drops a Show more that fails after the list was read again", async () => {
+    const more = held<unknown>();
+    await shown({
+      contested: async (next?: unknown) =>
+        next === undefined || next === null
+          ? await Promise.resolve({ ...factPage(), next: { store: "shared" } })
+          : await more.promise,
+      entities: async () => await Promise.resolve({ entities: [], next: null }),
+      confirm: async () => await Promise.resolve("done"),
+    });
+    await press(buttons("Show more")[0]);
+    await press(buttons("This one is right")[0]);
+    await act(async () => {
+      more.release(Promise.reject(new Error("The connection dropped")));
+      await Promise.resolve();
+    });
+    await settle();
+    expect({
+      said: document.body.textContent.includes("The connection dropped"),
+      offered: buttons("Show more")[0]?.disabled,
+    }).toStrictEqual({ said: false, offered: false });
+  });
+
   it("offers to confirm the person's own word not yet confirmed", async () => {
     const own: BrainEntityListed = {
       entity: { store: "own", id: "e-own" },
