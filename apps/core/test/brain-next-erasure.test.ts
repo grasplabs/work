@@ -182,6 +182,22 @@ const recalledAs = async (
   return items.map(({ text }) => text);
 };
 
+/**
+ * What `personId` recalls for `question`, each chunk's text and the way
+ * it was found: by words, an exact part or meaning.
+ */
+const foundAs = async (
+  personId: string,
+  question: string
+): Promise<{ text: string; found: string }[]> => {
+  const { items } = await recallAs(env, personId, {
+    personal: true,
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return items.map(({ text, found }) => ({ text, found }));
+};
+
 /** `source`'s `version` as `personId` reads it: null if not. */
 const historyAs = async (
   personId: string,
@@ -634,14 +650,20 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       await tickPastGrace();
     }
 
+    const keptFound = await foundAs(reader, wordOf(keptMark));
     expect({
       tables: await tablesHolding([erasedMark]),
       vectors: await vectorsOf(erasedRows, []),
-      kept: await recalledAs(reader, wordOf(keptMark)),
+      // By its word (an exact part: it holds digits), the kept source
+      // alone; by meaning, other passages the reader may read, never one
+      // of the erased source.
+      byWords: keptFound.filter(({ found }) => found !== "meaning"),
+      erasedBack: keptFound.filter(({ text }) => text.includes(erasedMark)),
     }).toStrictEqual({
       tables: [],
       vectors: { codes: 0, inBlocks: 0, kept: 0 },
-      kept: [`Staying ${wordOf(keptMark)}`],
+      byWords: [{ text: `Staying ${wordOf(keptMark)}`, found: "exact" }],
+      erasedBack: [],
     });
   });
 
@@ -1053,9 +1075,15 @@ describe("an add under way as an erasure lands", { timeout: 120_000 }, () => {
     await tickUntilErased();
     await tickPastGrace();
 
+    const recalled = await foundAs(leaver, wordOf(inFlight));
     expect({
       added,
-      recalled: await recalledAs(leaver, wordOf(inFlight)),
+      // Nothing by its word, and by meaning only what they may read, never
+      // the refused add.
+      recalled: recalled.filter(
+        ({ found, text }) =>
+          found !== "meaning" || text === `In flight ${wordOf(inFlight)}`
+      ),
       history: await historyAs(leaver, source, 1),
       tables: await tablesHolding([inFlight]),
       objects: await objectsHolding([inFlight]),
@@ -2214,11 +2242,16 @@ const addAt = async (
   }
 };
 
-/** Every version `personId`'s packs cite for the questions, as of each moment. */
+/**
+ * Every version `personId`'s packs cite for the questions, as of each
+ * moment, by words, an exact part or a phrase; with `byMeaning`, those
+ * cited by meaning instead.
+ */
 const citedBy = async (
   personId: string,
   questions: readonly string[],
-  moments: readonly (Date | undefined)[]
+  moments: readonly (Date | undefined)[],
+  byMeaning = false
 ): Promise<string[]> => {
   const packs = await Promise.all(
     questions.flatMap((question) =>
@@ -2234,7 +2267,9 @@ const citedBy = async (
     )
   );
   return packs.flatMap(({ items }) =>
-    items.map(({ source, version }) => `${source.id} v${version}`)
+    items.flatMap(({ source, version, found }) =>
+      (found === "meaning") === byMeaning ? [`${source.id} v${version}`] : []
+    )
   );
 };
 
@@ -2315,15 +2350,18 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
     await eraseShared(whole, "deleted");
     await erasePersonShared({ personId: erased, reason: "withdrawn" });
     const { erasing: left } = await brainWorkOverview(env);
-    const erasing = {
+    /** What the reader's packs cite, and of it what by meaning. */
+    const cited = async () => ({
       source: await citedBy(reader, questions(sourceMark), moments),
       person: await citedBy(reader, questions(personMark), moments),
-    };
+      byMeaning: [
+        ...(await citedBy(reader, questions(sourceMark), moments, true)),
+        ...(await citedBy(reader, questions(personMark), moments, true)),
+      ],
+    });
+    const erasing = await cited();
     await tickUntilErased();
-    const deleted = {
-      source: await citedBy(reader, questions(sourceMark), moments),
-      person: await citedBy(reader, questions(personMark), moments),
-    };
+    const deleted = await cited();
 
     // Of the team's source: by its words, the version current at each
     // moment that isn't erased (v1 for the hours v1 and the erased v2
@@ -2335,10 +2373,26 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
       source: [],
       person: [team3, team1, team1, team3],
     };
-    expect({ left: left > 0, erasing, deleted }).toStrictEqual({
+    // By meaning, as of now only: any current version the reader may read
+    // (the team's v3, once embedded), never an erased one.
+    const erasedVersions = new Set([
+      `${whole.id} v1`,
+      `${whole.id} v2`,
+      `${middle.id} v2`,
+    ]);
+    const byMeaning = [...erasing.byMeaning, ...deleted.byMeaning];
+    expect({
+      left: left > 0,
+      erasing: { source: erasing.source, person: erasing.person },
+      deleted: { source: deleted.source, person: deleted.person },
+      erasedByMeaning: byMeaning.filter((each) => erasedVersions.has(each)),
+      otherByMeaning: byMeaning.filter((each) => each !== team3),
+    }).toStrictEqual({
       left: true,
       erasing: expected,
       deleted: expected,
+      erasedByMeaning: [],
+      otherByMeaning: [],
     });
   });
 
