@@ -174,7 +174,10 @@ const surfaces: [string, Probe][] = brainSurfaces.flatMap(({ name, probes }) =>
  * alone: those tests add hidden sources before or beside what each reader
  * may read, so no moment holds a reader's own content without them. The
  * test that answers "by meaning exactly as before anything the reader may
- * not read was added" holds them to non-interference.
+ * not read was added" holds them to non-interference, for each shape of
+ * reader core builds (`readerOf`): one in a team with their own note, a
+ * team-mate to whom that note is hidden, and an admin in no team with
+ * nothing of their own.
  */
 const findingsIn = (
   answers: readonly Answer[],
@@ -362,6 +365,15 @@ const foundByMeaning = (answers: Iterable<readonly Answer[]>): number =>
     .flat()
     .reduce(
       (sum, { got }) => sum + textOf(got).split('"found":"meaning"').length - 1,
+      0
+    );
+
+/** How many items of `answers` were found by any way. */
+const foundAtAll = (answers: Iterable<readonly Answer[]>): number =>
+  [...answers]
+    .flat()
+    .reduce(
+      (sum, { got }) => sum + textOf(got).split('"found":"').length - 1,
       0
     );
 
@@ -568,11 +580,22 @@ describe(
       // would take every place by meaning if they took any.
       const { embedding: atStart } = await brainWorkOverview(env);
       expect(atStart.chunks).toBe(0);
-      const [{ userId: reader }, { userId: holder }] = await Promise.all([
+      // Three shapes of reader, as core builds them (`readerOf`): the
+      // reader, in a team and with their own note; a team-mate of theirs,
+      // to whom that note is hidden; and an admin in no team, with nothing
+      // of their own.
+      const [
+        { userId: reader },
+        { userId: holder },
+        { userId: teamMate },
+        { userId: admin },
+      ] = await Promise.all([
         signedInWithRole(idp, "user"),
         signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "admin"),
       ]);
-      const readersTeam = await newTeam(reader);
+      const readersTeam = await newTeam(reader, teamMate);
       const secretTeam = await newTeam(holder);
       const sharedWord = `s${unique()}`;
       const markers = {
@@ -590,12 +613,8 @@ describe(
         "a source erased": erasedMarker,
       } = markers;
       const words = Object.values(markers);
-      // The reader's own, in their store, and their team's, current after
-      // drafts: what they may read, all of it holding the shared word.
-      await add(`Notes on ${sharedWord} for the reader`, {
-        kind: "owner",
-        personId: reader,
-      });
+      // Their team's, current after drafts, then the reader's own, in their
+      // store: what each may read, all of it holding the shared word.
       const handbookId = await add(`${sharedWord} draft 0`, {
         kind: "team",
         teamId: readersTeam,
@@ -605,18 +624,30 @@ describe(
         { kind: "team", teamId: readersTeam },
         handbookId
       );
-      const readable = await allEmbedded([reader]);
-      const probing: Probing = {
-        personId: reader,
-        reader: { person: reader, groups: [`team:${readersTeam}`] },
+      await allEmbedded([teamMate]);
+      const probingAs = (personId: string, groups: string[]): Probing => ({
+        personId,
+        reader: { person: personId, groups },
         personal: true,
         sharedWord,
         markers: words,
         hiddenVersions: [],
         hiddenInstructionFiles: [],
         instructionGroups: [],
-      };
+      });
+      const probing = probingAs(reader, [`team:${readersTeam}`]);
+      const asMate = probingAs(teamMate, [`team:${readersTeam}`]);
+      const asAdmin = probingAs(admin, []);
       const among = surfaces.filter(([name]) => meaningSurfaces.has(name));
+      // The team-mate's and the admin's before the reader's own note, which
+      // is hidden from both, and everything else hidden is added.
+      const mateBefore = await answersOf(asMate, among);
+      const adminBefore = await answersOf(asAdmin, among);
+      await add(`Notes on ${sharedWord} for the reader`, {
+        kind: "owner",
+        personId: reader,
+      });
+      const readable = await allEmbedded([reader]);
       const before = await answersOf(probing, among);
 
       // A source the reader may read now, embedded, then erased once the
@@ -675,19 +706,47 @@ describe(
         readers: { kind: "team", teamId: readersTeam },
         reason: "deleted",
       });
-      const whileErasing = await findingsOf(
-        "the reader, an erasure under way",
-        asReader,
-        markers,
-        { among, before }
-      );
+      const whileErasing = [
+        ...(await findingsOf(
+          "the reader, an erasure under way",
+          asReader,
+          markers,
+          { among, before }
+        )),
+        ...(await findingsOf(
+          "a team-mate, an erasure under way",
+          { ...asMate, hiddenVersions: asReader.hiddenVersions },
+          markers,
+          { among, before: mateBefore }
+        )),
+        ...(await findingsOf(
+          "an admin in no team, an erasure under way",
+          { ...asAdmin, hiddenVersions: asReader.hiddenVersions },
+          markers,
+          { among, before: adminBefore }
+        )),
+      ];
       const afterErasure = await allEmbedded([reader, holder]);
-      const erasedGone = await findingsOf(
-        "the reader, the erasure done",
-        asReader,
-        markers,
-        { among, before }
-      );
+      const erasedGone = [
+        ...(await findingsOf(
+          "the reader, the erasure done",
+          asReader,
+          markers,
+          { among, before }
+        )),
+        ...(await findingsOf(
+          "a team-mate, the erasure done",
+          { ...asMate, hiddenVersions: asReader.hiddenVersions },
+          markers,
+          { among, before: mateBefore }
+        )),
+        ...(await findingsOf(
+          "an admin in no team, the erasure done",
+          { ...asAdmin, hiddenVersions: asReader.hiddenVersions },
+          markers,
+          { among, before: adminBefore }
+        )),
+      ];
       // In the holder's team for one recall, then out again: the very next
       // answers are as before.
       await join(secretTeam, reader);
@@ -696,12 +755,26 @@ describe(
         `Board minutes ${sharedWord} ${teamMarker}`
       );
       await leave(secretTeam, reader);
-      const leftAgain = await findingsOf(
-        "the reader, out of the team again",
-        asReader,
-        markers,
-        { among, before }
-      );
+      const leftAgain = [
+        ...(await findingsOf(
+          "the reader, out of the team again",
+          asReader,
+          markers,
+          { among, before }
+        )),
+        ...(await findingsOf(
+          "a team-mate, out of the team again",
+          { ...asMate, hiddenVersions: asReader.hiddenVersions },
+          markers,
+          { among, before: mateBefore }
+        )),
+        ...(await findingsOf(
+          "an admin in no team, out of the team again",
+          { ...asAdmin, hiddenVersions: asReader.hiddenVersions },
+          markers,
+          { among, before: adminBefore }
+        )),
+      ];
 
       expect({
         findings: [...whileErasing, ...erasedGone, ...leftAgain],
@@ -710,6 +783,11 @@ describe(
         // was embedded when the answers were taken again.
         readable: readable.rebuilt && readable.embedded === readable.chunks,
         meaningBefore: foundByMeaning(before.values()) > 0,
+        // The team-mate read the handbook, embedded, and found it by
+        // meaning; the admin may read nothing here, so their answers found
+        // nothing by any way, and must find nothing still.
+        mateMeaningBefore: foundByMeaning(mateBefore.values()) > 0,
+        adminFoundBefore: foundAtAll(adminBefore.values()),
         hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
         hiddenChunks: hidden.chunks - readable.chunks,
         afterErasure: afterErasure.rebuilt,
@@ -721,6 +799,8 @@ describe(
         findings: [],
         readable: true,
         meaningBefore: true,
+        mateMeaningBefore: true,
+        adminFoundBefore: 0,
         hidden: true,
         hiddenChunks: (recallLimit + 1) * hiddenTexts.length + 4,
         afterErasure: true,
