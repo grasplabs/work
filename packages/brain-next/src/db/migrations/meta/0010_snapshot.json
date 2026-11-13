@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3894e969-7b47-495c-ae1c-73f33a419a0a",
+  "id": "adfd9f5f-30ce-4b90-9e9d-3347552c4108",
   "prevId": "26f4cdf9-559e-43ae-ac3c-8e7b96acdfde",
   "tables": {
     "chunks": {
@@ -268,6 +268,15 @@
             "type",
             "folded",
             "entity"
+          ],
+          "isUnique": false
+        },
+        "entity_names_entity_idx": {
+          "name": "entity_names_entity_idx",
+          "columns": [
+            "entity",
+            "type",
+            "folded"
           ],
           "isUnique": false
         },

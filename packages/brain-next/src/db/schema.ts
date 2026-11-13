@@ -814,6 +814,9 @@ export const entityNames = sqliteTable(
       columns: [table.entity, table.memory, table.type, table.folded],
     }),
     index("entity_names_folded_idx").on(table.type, table.folded, table.entity),
+    // An entity's names of one type (its earliest name, its own names for
+    // proposals): without it the planner seeks by type alone, every name.
+    index("entity_names_entity_idx").on(table.entity, table.type, table.folded),
     index("entity_names_memory_idx").on(table.memory),
   ]
 );

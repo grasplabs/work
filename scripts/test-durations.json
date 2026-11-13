@@ -25,7 +25,7 @@
   "@grasp-os/brain-next test/handover.test.ts": 0.8,
   "@grasp-os/brain-next test/meaning.test.ts": 0.2,
   "@grasp-os/brain-next test/linking.test.ts": 0.6,
-  "@grasp-os/brain-next test/memories-cost.test.ts": 20,
+  "@grasp-os/brain-next test/memories-cost.test.ts": 45,
   "@grasp-os/brain-next test/memories.test.ts": 3.6,
   "@grasp-os/brain-next test/pack.test.ts": 1.8,
   "@grasp-os/brain-next test/personal.test.ts": 2.9,

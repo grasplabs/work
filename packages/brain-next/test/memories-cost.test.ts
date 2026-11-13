@@ -500,4 +500,80 @@ describe("what reading memories costs", () => {
     expect(grown.map((read) => flat(alone, read))).toStrictEqual([true, true]);
     // Adding 20,000 names, a hundred an add, takes its time.
   }, 120_000);
+
+  // An entity named and found as a reader sees it (entities.ts `asSeen`,
+  // its earliest name, read through the entity's own names), and the card
+  // naming the entities it relates to: never every name in the store.
+  it.each([
+    ["reads an entity", "entity"],
+    ["finds an entity by name", "name"],
+    ["finds an entity by identifier", "identifier"],
+    ["names a card's entities", "card"],
+  ] as const)(
+    "%s without reading other names, readable or hidden",
+    async (_read, asked) => {
+      const { stub, rowsReadBy } = await countedStore();
+      const group = `seen-${crypto.randomUUID()}`;
+      const hidden = `hidden-${crypto.randomUUID()}`;
+      const reader = readerOf("reader", group);
+      const name = `${word()} ${word()}`;
+      const identifier = { type: "ref" as const, value: `crm:${word()}` };
+      const { entities } = await add(
+        stub,
+        group,
+        [
+          {
+            key: "c",
+            kind: "customer",
+            names: [name],
+            identifiers: [identifier],
+          },
+          { key: "o", kind: "person", names: [`${word()} ${word()}`] },
+        ],
+        [
+          fact("c", `${name} is a customer`),
+          fact("o", `The owner looks after ${name}`, {
+            attribute: "owns",
+            object: "c",
+          }),
+        ]
+      );
+      const entity = entities.c ?? "";
+      const reads = {
+        entity: async () => await stub.readEntity({ entity, reader }),
+        name: async () => await stub.findEntities({ name, reader }),
+        identifier: async () => await stub.findEntities({ identifier, reader }),
+        card: async () => await stub.readCard({ entity, reader }),
+      };
+      const rows: number[] = [];
+      let have = 0;
+      for (const size of [100, 5000, 20_000]) {
+        for (let start = have; start < size; start += 100) {
+          const keys = Array.from({ length: 100 }, (_, index) => `n${index}`);
+          // oxlint-disable-next-line no-await-in-loop -- one add at a time
+          await add(
+            stub,
+            (start / 100) % 2 === 0 ? group : hidden,
+            keys.map((key) => ({
+              key,
+              kind: "customer" as const,
+              names: [`${word()} ${word()}`, word()],
+              identifiers: [{ type: "ref" as const, value: `crm:${word()}` }],
+            })),
+            keys.map((key) => fact(key, `named ${start} ${key}`))
+          );
+        }
+        have = size;
+        // oxlint-disable-next-line no-await-in-loop -- one size at a time
+        rows.push(await rowsReadBy(reads[asked]));
+      }
+      const [alone = 0, ...grown] = rows;
+
+      expect(grown.map((read) => flat(alone, read))).toStrictEqual([
+        true,
+        true,
+      ]);
+    },
+    120_000
+  );
 });
