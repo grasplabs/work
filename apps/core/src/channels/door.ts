@@ -224,6 +224,18 @@ export interface SharedPlace {
   audience: Audience;
 }
 
+/**
+ * Where a member asked, as the door hands it on: a direct message only
+ * when the platform's own data for this message names a conversation of
+ * the person and the bot alone (Teams' `personal`, Slack's `im`), which
+ * can't gain a member; anything else is a chat others share. Taken from
+ * each message as it comes, never kept or guessed from what came before.
+ */
+export type ChannelPlace = { kind: "direct" } | SharedPlace;
+
+/** A direct message, as the platform named it. */
+const direct: ChannelPlace = { kind: "direct" };
+
 /** What Stephen says of a press on Start, in `locale`. */
 const pressSaid = (
   said: PressLine,
@@ -263,8 +275,8 @@ export interface ChannelMessage {
    * message, to be answered first: once, within the hour.
    */
   kept?: string;
-  /** Where they asked, when it was a group chat or channel. */
-  shared?: SharedPlace;
+  /** Where they asked: their direct message, or a chat others share. */
+  place: ChannelPlace;
   /**
    * Sends `send` once the platform has the reply as it stands: on Teams,
    * after a streamed answer's last words, which Microsoft's SDK sends only
@@ -455,6 +467,26 @@ const audienceIn = async (
   };
 };
 
+/**
+ * Where `activity` was written, by Teams' own word for its conversation:
+ * a direct message only for `personal`, the person and the bot alone;
+ * a group chat or channel with who is in it now.
+ */
+const placeOf = async (
+  env: Env,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity
+): Promise<ChannelPlace> => {
+  const { conversationType } = activity.conversation;
+  if (conversationType === "personal") {
+    return direct;
+  }
+  return {
+    kind: conversationType === "groupChat" ? "group" : "channel",
+    audience: await audienceIn(env, adapter, activity),
+  };
+};
+
 /** What a member asked before Grasp knew them, if it is still kept: taken once. */
 const keptQuestion = async (
   state: StateAdapter,
@@ -525,7 +557,7 @@ const gate = async (
   userId?: string;
   acts?: boolean;
   kept?: string;
-  shared?: SharedPlace;
+  place?: ChannelPlace;
 }> => {
   // A message without an id can't be told from its resends: dropped.
   if (activity.id === undefined) {
@@ -574,16 +606,11 @@ const gate = async (
         return { line: "notTurnedOn" };
       }
       const kept = await keptQuestion(state, oid);
-      if (conversationType === "personal") {
-        return { userId: writer.userId, acts: reach.acts, kept };
-      }
-      const kind = conversationType === "groupChat" ? "group" : "channel";
-      const audience = await audienceIn(env, adapter, activity);
       return {
         userId: writer.userId,
         acts: reach.acts,
         kept,
-        shared: { kind, audience },
+        place: await placeOf(env, adapter, activity),
       };
     }
     case "removed": {
@@ -609,6 +636,7 @@ const gate = async (
         userId,
         acts: reach.acts,
         kept: await keptQuestion(state, oid),
+        place: await placeOf(env, adapter, activity),
       };
     }
     default: {
@@ -804,7 +832,13 @@ const slackGate = async (
       ? { line: "tooFast" }
       : {};
   }
-  if (event.channel_type !== "im") {
+  // A direct message only as Slack names one, both ways it does: its
+  // event's type and its conversation's id. A group DM (`mpim`) or a
+  // channel is no one's alone.
+  if (
+    event.channel_type !== "im" ||
+    !directMessagePattern.test(event.channel)
+  ) {
     return { line: "privateOnly" };
   }
   const writer = await writerOf(env, "slack", event.user);
@@ -922,6 +956,7 @@ const slackResponse = async (
       thread,
       message,
       acts: reach.acts,
+      place: direct,
       afterward: (send) => {
         later.push(send);
       },
@@ -1002,7 +1037,7 @@ export const channelResponse = async (
   const activity = parsed.data;
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = await teamsAdapter(env, teamsKeys);
-  const { line, userId, acts, kept, shared } = await gate(
+  const { line, userId, acts, kept, place } = await gate(
     env,
     state,
     adapter,
@@ -1030,6 +1065,11 @@ export const channelResponse = async (
     later.push(send);
   };
   chat.onDirectMessage(async (thread, message) => {
+    // Only what the door itself took for a direct message: never one it
+    // read as a group chat or channel, whatever the SDK makes of it.
+    if (place?.kind !== "direct") {
+      return;
+    }
     await keepConversation(
       env,
       platform,
@@ -1044,6 +1084,7 @@ export const channelResponse = async (
       message,
       acts: acts ?? false,
       kept,
+      place,
       afterward,
     });
   });
@@ -1071,7 +1112,7 @@ export const channelResponse = async (
   // A group chat's or channel's: only ever one that @mentioned the bot,
   // which the door let through with who is in it.
   chat.onNewMention(async (thread, message) => {
-    if (shared === undefined || thread.isDM) {
+    if (place === undefined || place.kind === "direct" || thread.isDM) {
       return;
     }
     await takeOn({
@@ -1081,7 +1122,7 @@ export const channelResponse = async (
       message,
       acts: acts ?? false,
       kept,
-      shared,
+      place,
       afterward,
     });
   });

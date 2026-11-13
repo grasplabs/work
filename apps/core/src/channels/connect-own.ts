@@ -53,10 +53,15 @@ const offerEveryMs = 24 * 60 * 60 * 1000;
 const keptKey = (userId: string): string => `connect-own:kept:${userId}`;
 const offeredKey = (userId: string): string => `connect-own:offered:${userId}`;
 
-/** What waits for a person to connect: their question and where they asked it. */
+/**
+ * What waits for a person to connect: their question and where they asked
+ * it, which is only ever their direct message, as the record says: one
+ * that doesn't say so is dropped, and nothing carried on.
+ */
 const keptSchema = z.object({
   platform: z.string(),
   threadId: z.string(),
+  place: z.literal("direct"),
   question: z.string(),
   locale: z.enum(channelLocales),
 });
@@ -141,14 +146,15 @@ export interface Conversation {
 }
 
 /**
- * After `userId` was answered in `conversation`: if they have no working
+ * After `userId` was answered in `conversation`, their direct message
+ * (the caller checks; never a chat others read): if they have no working
  * Microsoft 365 of their own, keeps what they asked for the hour and, once
  * a day, offers the card to connect it. A failure here costs only the card.
  */
 export const offerConnectOwn = async (
   env: Env,
   conversation: Conversation,
-  ask: Omit<KeptAsk, "threadId"> & { userId: string }
+  ask: Omit<KeptAsk, "threadId" | "place"> & { userId: string }
 ): Promise<void> => {
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
@@ -163,6 +169,7 @@ export const offerConnectOwn = async (
     const kept: KeptAsk = {
       platform: ask.platform,
       threadId: conversation.id,
+      place: "direct",
       question: ask.question,
       locale: ask.locale,
     };

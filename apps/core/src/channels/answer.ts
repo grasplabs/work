@@ -352,9 +352,9 @@ const answerOne = async (
     userId,
     thread,
     afterward,
-    shared,
+    place,
     messageId,
-  }: Pick<ChannelMessage, "platform" | "userId" | "afterward" | "shared"> & {
+  }: Pick<ChannelMessage, "platform" | "userId" | "afterward" | "place"> & {
     thread: Thread | Conversation;
     /**
      * The platform's id for the message, which makes it one of Stephen's
@@ -387,7 +387,7 @@ const answerOne = async (
       platform,
       text,
       streaming?.onText,
-      shared === undefined ? undefined : { thread: thread.id, ...shared }
+      place.kind === "direct" ? place : { thread: thread.id, ...place }
     );
   } catch (error) {
     stopTyping();
@@ -477,8 +477,14 @@ const answerOne = async (
   }));
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company
-  // shared alone: once a day, he offers to connect it.
+  // shared alone: once a day, he offers to connect it, in their direct
+  // message alone. What he carries on with once they have answers there
+  // as theirs (`carryOnAfterConnecting`), so it is never kept from a chat
+  // others read.
   const offer = quietly("connect_own", async () => {
+    if (place.kind !== "direct") {
+      return;
+    }
     await offerConnectOwn(env, thread, {
       userId,
       platform,
@@ -572,6 +578,8 @@ export const carryOnAfterConnecting = async (
         platform: "teams",
         userId,
         thread: conversation,
+        // Only ever kept from their direct message (`offerConnectOwn`).
+        place: { kind: kept.place },
         afterward: (send) => {
           later.push(send);
         },
