@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { brainHandOvers, personErasures } from "./db/core/schema.ts";
-import { chunks } from "./db/d1.ts";
+import { statementsWithin } from "./db/d1.ts";
 
 // What core has still to hand over to the new Brain: a source by its
 // producer and id, never its content (brain-sources.ts reads that when the
@@ -112,9 +112,6 @@ const intentsOf = (
   return [...intents.values()];
 };
 
-/** Rows per insert: four bound parameters each, within D1's 100. */
-const rowsPerInsert = 25;
-
 /**
  * Notes the hand-overs `events` (audit events the log now has) call for,
  * each in place of one of its source noted before by another event, to be
@@ -132,7 +129,8 @@ export const noteHandOvers = async (
   }
   const db = drizzle(env.DB);
   const notedAt = new Date();
-  const [first, ...rest] = chunks(intents, rowsPerInsert).map((part) =>
+  // As many rows an insert as D1 binds, counted from the insert itself.
+  const [first, ...rest] = statementsWithin(intents, (part) =>
     db
       .insert(brainHandOvers)
       .values(part.map((intent) => ({ ...intent, notedAt })))
@@ -141,7 +139,8 @@ export const noteHandOvers = async (
         set: {
           noting: sql`excluded.noting`,
           notedAt: sql`excluded.noted_at`,
-          relayedAt: null,
+          // SQL, not a bound value: the conflict clause binds nothing.
+          relayedAt: sql`NULL`,
         },
         setWhere: sql`${brainHandOvers.noting} <> excluded.noting`,
       })

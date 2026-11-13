@@ -4,7 +4,7 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -26,7 +26,7 @@ import {
 import type { Producers, SourceRef } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { brainHandOvers, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
@@ -192,6 +192,52 @@ const brainOutOfReach = async (
       Reflect.set(envOf(instance), "BRAIN_STORE", real);
     });
   };
+};
+
+/**
+ * The Workspace object's audit log out of reach, so its outbox keeps what
+ * it notes, until the returned function puts it back.
+ */
+const auditLogOutOfReach = async (
+  stub: ReturnType<typeof workspace>
+): Promise<() => Promise<void>> => {
+  const real: unknown = await runInDurableObject(stub, (instance) => {
+    const objectEnv = envOf(instance);
+    const was: unknown = Reflect.get(objectEnv, "AUDIT_LOG");
+    Reflect.set(objectEnv, "AUDIT_LOG", {
+      getByName: outOfReach,
+      jurisdiction: () => ({ getByName: outOfReach }),
+    });
+    return was;
+  });
+  return async () => {
+    await runInDurableObject(stub, (instance) => {
+      Reflect.set(envOf(instance), "AUDIT_LOG", real);
+    });
+  };
+};
+
+/** How many audit events the Workspace object's outbox still holds. */
+const outboxLeft = async (stub: ReturnType<typeof workspace>) =>
+  await runInDurableObject(stub, (_, state) => {
+    const [row] = state.storage.sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM audit_outbox")
+      .toArray();
+    return row?.count ?? 0;
+  });
+
+/** The hand-overs still open whose source names `personId`, by their ids. */
+const openFor = async (personId: string): Promise<string[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ sourceId: brainHandOvers.sourceId })
+    .from(brainHandOvers)
+    .where(
+      and(
+        eq(brainHandOvers.producer, "chat"),
+        like(brainHandOvers.sourceId, `${personId}/%`)
+      )
+    );
+  return rows.map(({ sourceId }) => sourceId);
 };
 
 /**
@@ -790,6 +836,95 @@ describe("a deleted chat", () => {
       ended: ["brain.source.handover_refused:erased"],
       found: [],
       listed: [],
+    });
+  });
+
+  it("notes every question of a chat whose outbox the log couldn't take for a while, however many at once", async () => {
+    const marker = word();
+    const asked = 27;
+    const { person, stub, chatId, ask } = await chatter(
+      ...Array.from({ length: asked }, () => says("Noted."))
+    );
+    const putBack = await auditLogOutOfReach(stub);
+    for (let turn = 1; turn < asked; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn after the other
+      await ask(`Turn ${turn} ${marker}?`);
+    }
+    const held = await outboxLeft(stub);
+    await putBack();
+    // The next turn's drain takes them all at once.
+    await ask(`Turn ${asked} ${marker}?`);
+    await vi.waitFor(
+      async () => {
+        await expect(outboxLeft(stub)).resolves.toBe(0);
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    const noted = await notedEvents(person.userId, chatId);
+    const open = await openFor(person.userId);
+
+    expect({
+      heldAtLeast: held >= asked - 1,
+      noted: noted.length,
+      open: open.length,
+    }).toStrictEqual({ heldAtLeast: true, noted: asked, open: asked });
+  });
+
+  it("ends a question's hand-over the queue parked as erased when its person is erased, so no noting keeps their id", async () => {
+    const marker = word();
+    const { person, chatId, ask } = await chatter(says("Parked."));
+    const admin = await signedInApi(idp, "admin");
+    await ask(`Park ${marker}?`);
+    await vi.waitFor(
+      async () => {
+        await expect(notedEvents(person.userId, chatId)).resolves.toHaveLength(
+          1
+        );
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    // The Brain's queue fails it until it parks it (5 attempts, its
+    // backoff waited out each time).
+    const failing: Producers = {
+      attempt: async () => {
+        await Promise.resolve();
+        throw new Error("Core is out of reach");
+      },
+    };
+    await handOverNow(failing);
+    for (let attempt = 1; attempt < 5; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick after the other
+      await workBrain(env, later(10 * 60_000), failing);
+    }
+    const [noted] = await notedEvents(person.userId, chatId);
+    const key = `chat:${noted?.target?.id ?? ""}`;
+    const { parked } = await brainOf(
+      inJurisdiction(env, env.BRAIN_STORE)
+    ).workOverview();
+    const wasParked = parked.some(
+      (item) => item.kind === "source.handover" && item.key === key
+    );
+    const openBefore = await openFor(person.userId);
+
+    await admin.api.members.remove(person.userId);
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+    await handOverNow();
+
+    expect({
+      wasParked,
+      openBefore: openBefore.length,
+      completed: typeof erased.completedAt,
+      open: await openFor(person.userId),
+      ended: await endingsFor(noted?.target?.id ?? ""),
+    }).toStrictEqual({
+      wasParked: true,
+      openBefore: 1,
+      completed: "string",
+      open: [],
+      ended: ["brain.source.handover_refused:erased"],
     });
   });
 });

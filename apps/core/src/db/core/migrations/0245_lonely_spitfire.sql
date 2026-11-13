@@ -1,1 +1,0 @@
-ALTER TABLE `brain_hand_overs` ADD `relayed_at` integer;

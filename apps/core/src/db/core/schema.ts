@@ -6057,7 +6057,11 @@ export const brainHandOvers = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.producer, table.sourceId] }),
-    index("brain_hand_overs_noted_at_idx").on(table.notedAt),
+    // What the relay reads, oldest first: only what it has yet to relay,
+    // so it never steps over notings already on the queue.
+    index("brain_hand_overs_unrelayed_idx")
+      .on(table.notedAt)
+      .where(sql`${table.relayedAt} IS NULL`),
   ]
 );
 

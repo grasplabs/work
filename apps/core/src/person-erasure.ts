@@ -33,6 +33,7 @@ import {
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
 import { erasePerson as eraseFromBrain } from "./brain-next.ts";
+import { endHandOversOf } from "./brain-sources.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
@@ -600,6 +601,9 @@ const brainSources: ErasureStep = {
     // minutes: pending, for the clock, with nothing logged or counted as
     // failed, so a stuck erasure stands out from a normal one.
     if (outcome === "erased") {
+      // Their hand-overs still open, which name them by id (a chat's
+      // turns), end as erased: none keeps their id after this.
+      await endHandOversOf(env, userId);
       await completed(drizzle(env.DB), userId, "brain_sources");
     }
   },

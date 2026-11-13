@@ -1,7 +1,8 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedWhere } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -14,8 +15,13 @@ import {
   settleRelay,
   stillOpen,
 } from "./brain-hand-overs.ts";
-import type { HandOverProducer } from "./brain-hand-overs.ts";
-import { chatSource, chatTurnOf, runSource } from "./brain-next-origins.ts";
+import type { HandOverProducer, TakenHandOver } from "./brain-hand-overs.ts";
+import {
+  chatSource,
+  chatsOf,
+  chatTurnOf,
+  runSource,
+} from "./brain-next-origins.ts";
 import { queueHandOvers } from "./brain-next.ts";
 import type {
   Handed,
@@ -24,7 +30,7 @@ import type {
   Producers,
   SourceRef,
 } from "./brain-next.ts";
-import { workflowStartReceipts } from "./db/core/schema.ts";
+import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
@@ -192,21 +198,26 @@ const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
 
 /**
  * Every producer (brain-hand-overs.ts `handOverProducers`): its source
- * for an id it noted (brain-next-origins.ts), and how that source is read
- * as its records hold it now.
+ * for an id it noted (brain-next-origins.ts), how that source is read as
+ * its records hold it now, and what the ids of its sources that name a
+ * person start with (`ofPerson`), for that person's erasure
+ * (`endHandOversOf`): null when its ids name nobody.
  */
 const producers: Record<
   HandOverProducer,
   {
     source: (id: string) => SourceRef;
     read: (env: Env, id: string) => Promise<Handed>;
+    ofPerson: ((personId: string) => string) | null;
   }
 > = {
-  run: { source: runSource, read: runOfId },
+  // A run's id is its own: the person it acted for is its row's.
+  run: { source: runSource, read: runOfId, ofPerson: null },
   chat: {
     // The id as noted: its parts are read back when it is handed over.
     source: (id) => ({ producer: "chat", id }),
     read: chatTurnOfId,
+    ofPerson: chatsOf,
   },
 };
 
@@ -242,6 +253,21 @@ const outcomeEntry = (
       ? { producer: source.producer, version: outcome.version }
       : { producer: source.producer, reason: outcome.reason },
 });
+
+/** The ending statements of `taken`, as `outcome`, as an attempt writes them. */
+const ending = (
+  db: DrizzleD1Database,
+  taken: TakenHandOver & { producer: HandOverProducer },
+  outcome: HandOverOutcome
+) =>
+  [
+    outboxedWhere(
+      db,
+      outcomeEntry({ producer: taken.producer, id: taken.sourceId }, outcome),
+      stillOpen(taken)
+    ),
+    endedHandOver(db, taken),
+  ] as const;
 
 /** An attempt with nothing open to end: it records nothing. */
 const nothingOpen = (handed: Handed): HandOverAttempt => ({
@@ -295,14 +321,63 @@ export const producersOf = (env: Env): Producers => ({
         return stored.meta.changes > 0;
       },
       ended: async (outcome) => {
-        await auditedBatch(env, db, [
-          outboxedWhere(db, outcomeEntry(known, outcome), stillOpen(taken)),
-          endedHandOver(db, taken),
-        ]);
+        await auditedBatch(env, db, ending(db, taken, outcome));
       },
     };
   },
 });
+
+/**
+ * Ends every hand-over still open whose source's id names `personId`
+ * (each producer's `ofPerson`: their chats' turns) as refused `erased`,
+ * each with its one outcome, as an attempt would: for their erasure
+ * (person-erasure.ts), once the Brain erased what was theirs, so no noting
+ * keeps their id after it, also one whose item the queue parked for good.
+ * Such an item, if it runs later, finds nothing open and closes its key.
+ * A noting made after this one ran is ended by its own attempt, as
+ * `erased`. Safe to repeat.
+ */
+export const endHandOversOf = async (
+  env: Env,
+  personId: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  for (const producer of Object.keys(producers).filter(isProducer)) {
+    const { ofPerson } = producers[producer];
+    if (ofPerson === null) {
+      continue;
+    }
+    const start = ofPerson(personId);
+    // oxlint-disable-next-line no-await-in-loop -- one producer at a time
+    const open = await db
+      .select({
+        sourceId: brainHandOvers.sourceId,
+        noting: brainHandOvers.noting,
+      })
+      .from(brainHandOvers)
+      .where(
+        and(
+          eq(brainHandOvers.producer, producer),
+          sql`substr(${brainHandOvers.sourceId}, 1, ${start.length}) = ${start}`
+        )
+      );
+    for (const { sourceId, noting } of open) {
+      // oxlint-disable-next-line no-await-in-loop -- one hand-over at a time
+      await auditedBatch(
+        env,
+        db,
+        ending(
+          db,
+          { producer, sourceId, noting },
+          {
+            kind: "refused",
+            reason: "erased",
+          }
+        )
+      );
+    }
+  }
+};
 
 /** Intents one relay reads at a time, oldest first. */
 const relayPage = 100;

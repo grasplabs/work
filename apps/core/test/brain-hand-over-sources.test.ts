@@ -817,6 +817,42 @@ describe("how a hand-over fails closed", () => {
     });
   });
 
+  it("notes every run whose end a drain takes at once, however many, and empties the outbox", async () => {
+    // More run ends than one insert of notings binds (D1's 100 parameters),
+    // in core's outbox at once: the log out of reach a while, say.
+    const ids = Array.from({ length: 30 }, () => crypto.randomUUID());
+    const events = ids.map((id) =>
+      createAuditEvent(
+        {
+          actor: { type: "system" },
+          action: "workflow.run.completed",
+          target: { type: "workflow_run", id },
+        },
+        "core"
+      )
+    );
+    const db = drizzle(env.DB);
+    for (const event of events) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another, in order
+      await outboxedEvent(db, event);
+    }
+
+    await drainAuditOutboxes(env);
+
+    const { results } = await env.DB.prepare(
+      "SELECT count(*) AS count FROM audit_outbox WHERE id IN (SELECT value FROM json_each(?))"
+    )
+      .bind(JSON.stringify(events.map(({ id }) => id)))
+      .all<{ count: number }>();
+    expect({
+      left: results[0]?.count,
+      noted: await openAmong(ids),
+    }).toStrictEqual({
+      left: 0,
+      noted: { open: ids.toSorted(), unrelayed: ids.toSorted() },
+    });
+  });
+
   it("ends a noted hand-over in one outcome when the answer to its record was lost, and the attempt tried again records nothing more", async () => {
     const runner = await builder();
     const said = word();

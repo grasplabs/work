@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b3d250fe-21a0-4b17-a445-17d341a2d240",
+  "id": "fd0b327f-b3c9-4214-adc6-5a8117f7f43d",
   "prevId": "354eab34-7fbc-425a-8c89-db53064ef21a",
   "tables": {
     "access_revocations": {
@@ -4206,12 +4206,13 @@
         }
       },
       "indexes": {
-        "brain_hand_overs_noted_at_idx": {
-          "name": "brain_hand_overs_noted_at_idx",
+        "brain_hand_overs_unrelayed_idx": {
+          "name": "brain_hand_overs_unrelayed_idx",
           "columns": [
             "noted_at"
           ],
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"brain_hand_overs\".\"relayed_at\" IS NULL"
         }
       },
       "foreignKeys": {},

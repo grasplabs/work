@@ -89,3 +89,36 @@ export const chunks = <T>(items: readonly T[], size: number): T[][] =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
     items.slice(index * size, (index + 1) * size)
   );
+
+/** The most parameters D1 binds to one statement. */
+export const boundParametersMax = 100;
+
+/**
+ * `rows` written as statements `statementOf` makes, each with as many rows
+ * as D1 binds (`boundParametersMax`): counted from the statement itself,
+ * its parameters for one row and for two, so both what each row binds and
+ * what the statement binds once (a conflict clause, say) are counted, also
+ * after a column or a bound value is added. Throws when one row alone
+ * binds more than D1 takes.
+ */
+export const statementsWithin = <Row, Statement>(
+  rows: readonly Row[],
+  statementOf: (part: Row[]) => Statement & {
+    toSQL: () => { params: unknown[] };
+  }
+): Statement[] => {
+  const [first] = rows;
+  if (first === undefined) {
+    return [];
+  }
+  const once = statementOf([first]).toSQL().params.length;
+  const perRow = statementOf([first, first]).toSQL().params.length - once;
+  if (once > boundParametersMax) {
+    throw new Error("One row binds more parameters than D1 takes");
+  }
+  const size =
+    perRow === 0
+      ? rows.length
+      : Math.floor((boundParametersMax - (once - perRow)) / perRow);
+  return chunks(rows, size).map(statementOf);
+};
