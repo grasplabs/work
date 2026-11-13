@@ -37,6 +37,8 @@ export interface UsageRecord {
   id: string;
   /** `<provider>/<model>`. */
   model: string;
+  /** What the call was for, as its audit event says (`brain.recall_analysis`, say). */
+  purpose: string;
   credential: "organization" | "platform";
   /** Which of Grasp's own features, on Grasp's key. */
   feature?: string;
