@@ -292,7 +292,7 @@ const workerEntry = (
 
 /** A model file a release names: not in the build, but in the releases bucket. */
 export interface ModelFileInfo {
-  /** What it is, such as `bekko-embedding-v1-a8m/tokens`. */
+  /** What it is, such as `engram-1/tokens`. */
   name: string;
   sha256: string;
   size: number;

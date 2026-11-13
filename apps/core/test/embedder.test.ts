@@ -83,8 +83,10 @@ const putModel = async ({
 };
 
 describe("core's embedder", () => {
-  it("has the clock warm the question embedder, failing no task, and answers a question by the model core ships, from MODEL_FILES", async () => {
+  it("answers a question by the model core ships, from MODEL_FILES, after the clock's warm-up, which fails no task", async () => {
     const question = "Wat staat er op de factuur?";
+    // Once per isolate (`tried`): an earlier file in this runtime may have
+    // warmed already, so this proves only that it doesn't throw.
     await expect(warmQuestionEmbedder(env)).resolves.toBeUndefined();
 
     const {

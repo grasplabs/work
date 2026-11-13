@@ -34,9 +34,9 @@ if (args.dir === undefined) {
   throw new Error("--dir <dir> is required");
 }
 const dir = path.resolve(args.dir);
-const model = shippedModel;
-
-const named = new Map(modelFilesOf(model).map((file) => [file.sha256, file]));
+const named = new Map(
+  modelFilesOf(shippedModel).map((file) => [file.sha256, file])
+);
 const found = new Map<string, Buffer>();
 for (const entry of readdirSync(dir, { withFileTypes: true })) {
   if (!entry.isFile()) {
@@ -47,7 +47,7 @@ for (const entry of readdirSync(dir, { withFileTypes: true })) {
   const file = named.get(sha256);
   if (file === undefined || file.size !== bytes.byteLength) {
     throw new Error(
-      `${entry.name} isn't a file of ${model.name} (SHA-256 ${sha256}); nothing uploaded`
+      `${entry.name} isn't a file of ${shippedModel.name} (SHA-256 ${sha256}); nothing uploaded`
     );
   }
   found.set(sha256, bytes);
@@ -55,7 +55,7 @@ for (const entry of readdirSync(dir, { withFileTypes: true })) {
 const missing = [...named.values()].filter(({ sha256 }) => !found.has(sha256));
 if (missing.length > 0) {
   throw new Error(
-    `${dir} lacks ${model.name}'s ${missing.map(({ which }) => which).join(", ")}; nothing uploaded`
+    `${dir} lacks ${shippedModel.name}'s ${missing.map(({ which }) => which).join(", ")}; nothing uploaded`
   );
 }
 
