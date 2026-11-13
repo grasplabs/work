@@ -48,6 +48,8 @@ import {
   useAudienceLine,
   wakesOn,
 } from "./agent-facts.tsx";
+import { OwnAgentsCard } from "./own-agents-admin.tsx";
+import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
 
 // The Agents page: the company's agents as a grid of cards, as the Apps
 // page has its Apps (apps/apps-overview.tsx). Everyone sees the agents
@@ -262,14 +264,21 @@ const AgentCard = ({
 const filters = ["all", "on", "paused"] as const;
 type Filter = (typeof filters)[number];
 
-/** The cards of the person's own agents, each opening its page. */
-const ownShownOf = (own: readonly Agent[]): Shown[] =>
+/**
+ * The cards of the person's own agents, each opening its page, with a way
+ * into a chat only for one core lists them as asking (`usable`): none
+ * while the company has them off.
+ */
+const ownShownOf = (
+  own: readonly Agent[],
+  usable: readonly ChatAgent[]
+): Shown[] =>
   own.map(({ id, name, job, face, state }) => ({
     id,
     name,
     job,
     face,
-    usable: true,
+    usable: usable.some((each) => each.id === id),
     own: state,
     managed: undefined,
   }));
@@ -341,6 +350,7 @@ export const AgentsOverview = ({
   own,
   makes,
   makesOwn,
+  ownAdmin,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
@@ -348,8 +358,10 @@ export const AgentsOverview = ({
   own: readonly Agent[];
   /** Whether the person may make an agent for the company: its own admins. */
   makes: boolean;
-  /** Whether the person may make one of their own: anyone of the company. */
+  /** Whether the person may make one of their own: anyone of the company, while the company lets them. */
   makesOwn: boolean;
+  /** What an admin reads of people's own agents; undefined for anyone else. */
+  ownAdmin?: OwnAgentsAdmin | undefined;
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -365,7 +377,7 @@ export const AgentsOverview = ({
     (agent) =>
       matches(agent) && (filter === "all" || agent.managed?.state === filter)
   );
-  const mine = ownShownOf(own).filter(
+  const mine = ownShownOf(own, usable).filter(
     (agent) => matches(agent) && (filter === "all" || agent.own === filter)
   );
   const paused = agents.filter(
@@ -505,6 +517,9 @@ export const AgentsOverview = ({
             </section>
           )}
         </>
+      )}
+      {ownAdmin === undefined ? null : (
+        <OwnAgentsCard admin={ownAdmin} editable={makes} />
       )}
     </Page>
   );

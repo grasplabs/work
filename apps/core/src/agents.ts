@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { workspaceAgentIdSchema } from "./agent-scope.ts";
 import { organizationId } from "./auth/membership-sql.ts";
 import { agents } from "./db/core/schema.ts";
+import { ownAgentsOn } from "./own-agents-switch.ts";
 
 // The company's agents, as records. Until now there was one agent for
 // the whole organization, known only by its ID (`chatAgentId` in
@@ -119,6 +120,11 @@ export const turnAgent = async (
   }
   if (agent?.state === "paused") {
     throw agentErrors.create("agent.paused");
+  }
+  // A person's own takes no turn while the company has them off.
+  const own = agent !== undefined && agent.ownerId !== null;
+  if (own && !(await ownAgentsOn(env))) {
+    throw agentErrors.create("agent.own_off");
   }
   return agent;
 };
