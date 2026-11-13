@@ -3470,12 +3470,6 @@ export const recallProbes = {
         like
       );
     const hidden = markers.join(" ");
-    // A skill of the reader's own whose words are the markers.
-    const ownName = `own-${(markers[0] ?? "").toLowerCase()}`;
-    await coreBrain.addOwnSkill(env, personId, {
-      change: crypto.randomUUID(),
-      text: `---\nname: ${ownName}\ndescription: ${hidden}\n---\n${hidden}`,
-    });
     const [shipped] = await brainSkills.skillsFor(env, authority, {
       personal: false,
     });
@@ -3525,40 +3519,23 @@ export const recallProbes = {
       await call("a scope of the markers", "skills.read", {
         skill: { scope: hidden, name: "draw-a-workflow", version: 1 },
       }),
-      // The reader's own skill, holding the markers: code is never handed
-      // it, nor told it exists, whoever it acts for.
-      await call(
-        "the reader's own skill",
-        "skills.select",
-        { task: hidden },
-        {},
-        "hidden",
-        "own"
-      ),
-      await call(
-        "the reader's own skill",
-        "skills.select",
-        { task: markers.map(twinOf).join(" ") },
-        {},
-        "nothing",
-        "own"
-      ),
-      await call(
-        "the reader's own skill, read",
-        "skills.read",
-        { skill: { scope: "person", name: ownName, version: 1 } },
-        {},
-        "hidden",
-        "own read"
-      ),
-      await call(
-        "the reader's own skill, read",
-        "skills.read",
-        { skill: { scope: "person", name: `${ownName}-twin`, version: 1 } },
-        {},
-        "nothing",
-        "own read"
-      ),
+      // A person's own skill, named by the markers or their twins: code
+      // may name none (each pair from one call site, as the answers are
+      // compared whole). That code never reaches the reader's own store,
+      // where their skills are, the pass's store watch holds.
+      ...(await Promise.all(
+        [markers.join("-"), markers.map(twinOf).join("-")].map(
+          async (name, at) =>
+            await call(
+              "a person's own skill",
+              "skills.read",
+              { skill: { scope: "person", name, version: 1 } },
+              {},
+              at === 0 ? "hidden" : "nothing",
+              "own read"
+            )
+        )
+      )),
       await call(
         "the markers, under a grant the App doesn't hold",
         "skills.select",
