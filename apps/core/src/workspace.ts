@@ -126,6 +126,7 @@ import {
   withoutLinks,
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
+import { questionText } from "./chat-agent.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import type {
   TurnCapture,
@@ -1560,25 +1561,27 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * What the turn of `personId`'s chat `chatId` that ended with message
-   * `answerId` said, for their own Brain (brain-sources.ts), as the person
-   * reads it: their question, the last of theirs before that answer, if
-   * any; and the answer only when the turn read nothing, no step's result
-   * between the two (the recall before the question is one too). An
-   * answer can quote what a step read, and a copy of it in their store
-   * would outlive that being erased or their losing it: so a turn that
-   * read anything keeps the question alone. Read back from the answer,
-   * this turn's rows alone, never the chat's history before it.
+   * What `personId` asked in the turn of their chat `chatId` that ended
+   * with message `answerId`, for their own Brain (brain-sources.ts): the
+   * last question of theirs before that answer, their words alone (as
+   * `questionText` reads them: no note of files, no recall). Never the
+   * answer: it can quote anything the turn's prompt held (a step's result,
+   * this turn's or an earlier one's; the recall; instruction files,
+   * memories, skills), and a copy of it in their store would outlive that
+   * being erased or their losing it (GRA-1855 gives an answer a record of
+   * what it used). Read back from the answer, this turn's rows alone,
+   * never the chat's history before it.
    *
    * Null once the chat is gone, being deleted, someone else's, or no
-   * longer one whose turns go to the Brain (`handsTurnsOver`), and for any
-   * message that isn't one of its answers. Nothing a step read or ran.
+   * longer one whose turns go to the Brain (`handsTurnsOver`); for any
+   * message that isn't one of its answers; and for a turn with no words
+   * of theirs before it.
    */
   turnForBrain(
     chatId: string,
     personId: string,
     answerId: number
-  ): { question: string | null; answer: string | null } | null {
+  ): { question: string } | null {
     const id = chatIdSchema.safeParse(chatId);
     if (!id.success || this.#deleting.has(id.data)) {
       return null;
@@ -1597,27 +1600,19 @@ export class Workspace extends DurableObject<Env> {
     }
     const parsed = (row: { message: string }) =>
       storedMessageSchema.parse(JSON.parse(row.message));
-    const answerRow = this.#db
+    const answer = this.#db
       .select()
       .from(chatMessages)
       .where(
         and(eq(chatMessages.chatId, id.data), eq(chatMessages.id, answerId))
       )
       .get();
-    const answered =
-      answerRow === undefined
-        ? undefined
-        : chatMessageOf(answerRow.id, parsed(answerRow), answerRow.createdAt);
-    if (answered?.role !== "assistant" || answered.text.trim() === "") {
+    if (answer === undefined || parsed(answer).role !== "assistant") {
       return null;
     }
-    // Back from the answer, a page at a time, to the person's question:
-    // whether any step's result came between.
-    let question: string | null = null;
-    let read = false;
+    // Back from the answer, a page at a time, to the person's question.
     let before = answerId;
-    let more = true;
-    while (more) {
+    for (;;) {
       const page = this.#db
         .select()
         .from(chatMessages)
@@ -1627,20 +1622,19 @@ export class Workspace extends DurableObject<Env> {
         .orderBy(desc(chatMessages.id))
         .limit(turnRowsPerRead)
         .all();
-      more = page.length === turnRowsPerRead;
-      for (const row of page) {
-        const message = parsed(row);
-        read ||= message.role === "toolResult";
-        const shown = chatMessageOf(row.id, message, row.createdAt);
-        if (shown?.role === "user") {
-          question = shown.text.trim() === "" ? null : shown.text;
-          more = false;
-          break;
-        }
-        before = row.id;
+      const asked = page
+        .map((row) => parsed(row))
+        .find((message) => message.role === "user");
+      if (asked?.role === "user") {
+        const question = questionText(asked).trim();
+        return question === "" ? null : { question };
       }
+      const last = page.at(-1);
+      if (last === undefined || page.length < turnRowsPerRead) {
+        return null;
+      }
+      before = last.id;
     }
-    return { question, answer: read ? null : answered.text };
   }
 
   async #captureSoon(): Promise<void> {

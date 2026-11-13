@@ -42,9 +42,10 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // From the threat model on the issue, each way it can fail:
 //
 // - A turn lands where anyone but its person reads it (threats 1, 2).
-// - What the agent ran or read is kept as the turn (threat 2), or an
-//   answer quoting it outlives that being erased or the person losing it
-//   (review round 1: a turn that read anything keeps its question alone).
+// - Anything but the person's own question is kept: what the agent ran or
+//   read, or an answer, which can quote it (this turn's step, an earlier
+//   turn's, the recall, whatever the prompt held) and would outlive it
+//   being erased or the person losing it (threat 2; review rounds 1, 2).
 // - A chat platform's chat, a woken turn or a restricted chat is handed
 //   over (threats 3, 4, 5).
 // - A deleted chat's turns stay, or come back with a hand-over that lands
@@ -188,13 +189,11 @@ const chatter = async (...replies: ProviderReply[]) => {
 describe("a person's chat turn", () => {
   it("is kept in their own store alone: recalled by them in their own chat, by nobody else, and never from the shared store", async () => {
     const marker = word();
-    const { person, chatId, ask } = await chatter(
-      says(`The codename is ${marker}.`)
-    );
+    const { person, chatId, ask } = await chatter(says("It is noted."));
     const ben = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
 
-    await ask("What is the codename?");
+    await ask(`Is the codename ${marker}?`);
     const [source] = await handedTo(person.userId, marker);
 
     const turn = chatTurnOf(source?.id ?? "");
@@ -220,37 +219,117 @@ describe("a person's chat turn", () => {
     });
   });
 
-  it("holds what was asked and what was answered when the turn read nothing, and its event holds neither", async () => {
+  // An answer can quote anything its prompt held, so none is kept
+  // (GRA-1855 brings answers back); nor is the event any of the words.
+  it("holds what was asked, never what was answered, and its event holds neither", async () => {
     const marker = word();
-    const { person, chatId, ask } = await chatter(says(`Plainly ${marker}.`));
+    const answered = word();
+    const { person, chatId, ask } = await chatter(says(`Plainly ${answered}.`));
 
     await ask(`Say it for ${marker}?`);
 
     await expect(keptTextOf(person.userId, marker)).resolves.toBe(
-      `Asked:\nSay it for ${marker}?\n\nAnswered:\nPlainly ${marker}.`
+      `Say it for ${marker}?`
     );
+    await expect(recalled(person.userId, answered)).resolves.toStrictEqual([]);
     expect(JSON.stringify(await keptEvents(person.userId, chatId))).not.toMatch(
       new RegExp(marker, "u")
     );
   });
 
-  // An answer can quote what a step read: kept, it would outlive that.
-  it("holds the question alone when a step's result came before the answer", async () => {
-    const marker = word();
-    const ran = word();
+  // The reviewer's probe A1 (round 2): an earlier turn's step, quoted by
+  // a later turn that ran none.
+  it("keeps nothing of what an earlier turn's step read, when a later turn quotes it", async () => {
+    const secret = word();
+    const topic = word();
     const { person, ask } = await chatter(
       codeStep(
-        `console.log(${JSON.stringify(ran)}); return ${JSON.stringify(ran)};`
+        `console.log(${JSON.stringify(secret)}); return ${JSON.stringify(secret)};`
       ),
-      says(`Done: ${ran}.`)
+      says("Done."),
+      says(`As the step showed: ${secret}.`)
     );
 
-    await ask(`Run it for ${marker}?`);
-
-    await expect(keptTextOf(person.userId, marker)).resolves.toBe(
-      `Asked:\nRun it for ${marker}?`
+    await ask(`Run it for ${topic}?`);
+    await ask(`And ${topic} again?`);
+    await vi.waitFor(
+      async () => {
+        await handOverNow();
+        await expect(recalled(person.userId, topic)).resolves.toHaveLength(2);
+      },
+      { timeout: 15_000, interval: 200 }
     );
-    await expect(recalled(person.userId, ran)).resolves.toStrictEqual([]);
+
+    await expect(recalled(person.userId, secret)).resolves.toStrictEqual([]);
+  });
+
+  // The reviewer's probe C (round 2): two questions before one answer,
+  // a step between them.
+  it("keeps only the last question before an answer, never the answer or a step between", async () => {
+    const secret = word();
+    const { person, stub, chatId } = await chatter();
+    const usage = {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
+    const by = { api: "x", provider: "x", model: "x", usage };
+    const rows = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "First?" }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "c1", name: "executeCode", arguments: {} },
+        ],
+        ...by,
+        stopReason: "toolUse",
+        timestamp: 2,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "executeCode",
+        content: [{ type: "text", text: secret }],
+        isError: false,
+        timestamp: 3,
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "Second?" }],
+        timestamp: 4,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: `It said ${secret}.` }],
+        ...by,
+        stopReason: "stop",
+        timestamp: 5,
+      },
+    ];
+
+    const kept = await runInDurableObject(stub, (instance, state) => {
+      let last = 0;
+      for (const row of rows) {
+        ({ id: last } = state.storage.sql
+          .exec<{ id: number }>(
+            "INSERT INTO chat_messages (chat_id, message, created_at) VALUES (?, ?, ?) RETURNING id",
+            chatId,
+            JSON.stringify(row),
+            Date.now()
+          )
+          .one());
+      }
+      return instance.turnForBrain(chatId, person.userId, last);
+    });
+
+    expect(kept).toStrictEqual({ question: "Second?" });
   });
 
   // The reviewer's probe (round 1): what the recall before the question
@@ -296,7 +375,7 @@ describe("a person's chat turn", () => {
 
     await stub.ask(made.id, { text: `What about ${topic}?`, model });
     await expect(keptTextOf(person.userId, topic)).resolves.toBe(
-      `Asked:\nWhat about ${topic}?`
+      `What about ${topic}?`
     );
     await eraseSource(env, { source: upload, readers, reason: "deleted" });
     await db
@@ -314,9 +393,7 @@ describe("a person's chat turn", () => {
   // The re-check as it is handed over (threat 5): the reviewer's probe.
   it("is not handed over once its chat was restricted after it was noted", async () => {
     const marker = word();
-    const { person, stub, chatId, ask } = await chatter(
-      says(`Before ${marker}.`)
-    );
+    const { person, stub, chatId, ask } = await chatter(says("Before."));
     await ask(`Before ${marker}?`);
     await vi.waitFor(
       async () => {
@@ -372,12 +449,9 @@ describe("a person's chat turn", () => {
 describe("a deleted chat", () => {
   it("takes every turn with it from its person's store, and refuses a turn handed over again after", async () => {
     const marker = word();
-    const { person, chatId, ask } = await chatter(
-      says(`First ${marker}.`),
-      says(`Second ${marker}.`)
-    );
-    await ask("One?");
-    await ask("Two?");
+    const { person, chatId, ask } = await chatter(says("One."), says("Two."));
+    await ask(`One ${marker}?`);
+    await ask(`Two ${marker}?`);
     await vi.waitFor(
       async () => {
         await handOverNow();
@@ -412,8 +486,8 @@ describe("a deleted chat", () => {
 
   it("refuses a turn read before its chat was deleted and added after", async () => {
     const marker = word();
-    const { person, chatId, ask } = await chatter(says(`Racing ${marker}.`));
-    await ask("Race?");
+    const { person, chatId, ask } = await chatter(says("Raced."));
+    await ask(`Race ${marker}?`);
     await vi.waitFor(
       async () => {
         await expect(keptEvents(person.userId, chatId)).resolves.toHaveLength(
@@ -447,10 +521,8 @@ describe("a deleted chat", () => {
 
   it("stays when its turns can't be erased from the Brain, and goes once they can", async () => {
     const marker = word();
-    const { person, stub, chatId, ask } = await chatter(
-      says(`Kept ${marker}.`)
-    );
-    await ask("Keep?");
+    const { person, stub, chatId, ask } = await chatter(says("Kept."));
+    await ask(`Keep ${marker}?`);
     await handedTo(person.userId, marker);
     const putBack = await brainOutOfReach(stub);
 

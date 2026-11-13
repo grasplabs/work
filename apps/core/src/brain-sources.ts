@@ -40,10 +40,12 @@ import { detailsRemoved } from "./workflows/retention.ts";
 //
 // - A turn of a person's own chat (`chat:<person>/<chat>/<answer>`), in
 //   their own store alone, in its chat's group (brain-next-origins.ts):
-//   once, change `answer`: what they asked, and what was answered only
-//   when the turn read nothing (no step's result, the recall's included):
-//   an answer can quote what it read, and its copy here would outlive that
-//   being erased or the person losing it. Nothing the agent read or ran. Only while the chat is still theirs, in Grasp's
+//   once, change `answer`: what they asked, their words alone. Never what
+//   was answered: an answer can quote anything its prompt held (a step's
+//   result, an earlier turn's, the recall, instruction files, memories,
+//   skills), and its copy here would outlive that being erased or the
+//   person losing it, until GRA-1855 gives an answer a record of what it
+//   used. Only while the chat is still theirs, in Grasp's
 //   own app, shared with no one, not restricted and not being deleted, as
 //   their Workspace holds it now (workspace.ts `turnForBrain`); a turn
 //   nobody asked for there and then is never noted. Deleting the chat
@@ -116,21 +118,6 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   };
 };
 
-/**
- * How a turn says who said what: the person's words, then the answer when
- * it is kept (workspace.ts `turnForBrain`). Null when neither is.
- */
-const turnText = (
-  question: string | null,
-  answer: string | null
-): string | null => {
-  const parts = [
-    ...(question === null ? [] : [`Asked:\n${question}`]),
-    ...(answer === null ? [] : [`Answered:\n${answer}`]),
-  ];
-  return parts.length === 0 ? null : parts.join("\n\n");
-};
-
 /** Turn `id` of a person's own chat, as their Workspace holds it now. */
 const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
   const turn = chatTurnOf(id);
@@ -150,15 +137,14 @@ const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
     personId,
     answerId
   );
-  const text = said === null ? null : turnText(said.question, said.answer);
-  if (text === null) {
+  if (said === null) {
     return gone;
   }
   return {
     kind: "source",
     change: "answer",
-    text,
-    whenTooLarge: "A turn of a chat, too large to keep.",
+    text: said.question,
+    whenTooLarge: "A question asked in a chat, too large to keep.",
     readers,
     group: chatSource(personId, chatId),
   };

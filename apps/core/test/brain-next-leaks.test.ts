@@ -1066,7 +1066,8 @@ describe(
     it("gives away nothing core's producers handed over to whoever the producer would not let read it", async () => {
       // Planted through each producer, as core hands them over: a run that
       // ended for the person it acted for, and a turn of a person's own
-      // chat (GRA-1805), its question and answer both marked. Then core's
+      // chat (GRA-1805), its question and answer both marked (the question
+      // alone is kept). Then core's
       // surfaces are probed as the outsider and as an admin, neither of
       // whom reads either.
       const [otherAdmin, { userId: outsider }, runner, chatter] =
@@ -1107,7 +1108,7 @@ describe(
           await workBrain(env, new Date(), producersOf(env));
           const { items } = await recallAs(env, chatter.userId, {
             personal: true,
-            question: answerMarker,
+            question: askedMarker,
             budget: { tokens: recallBudgetMax },
           });
           const [found] = items;

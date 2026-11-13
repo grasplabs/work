@@ -289,7 +289,7 @@ describe("the Brain's sources, as a person reads them", () => {
     await addSource(env, {
       source: turn,
       change: "answer",
-      text: `Asked:\n${asked} in a chat?`,
+      text: `${asked} in a chat?`,
       readers: owner(reader.userId),
       group: chat,
     });

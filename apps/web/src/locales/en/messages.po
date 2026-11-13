@@ -7468,8 +7468,8 @@ msgid "Kept"
 msgstr "Kept"
 
 #: src/activity/audit-words.ts
-msgid "Kept a chat's question and answer for its person's own Brain"
-msgstr "Kept a chat's question and answer for its person's own Brain"
+msgid "Kept a question asked in a chat for its person's own Brain"
+msgstr "Kept a question asked in a chat for its person's own Brain"
 
 #: src/activity/audit-words.ts
 msgid "Kept access at the provider for an account connected again"
