@@ -1,15 +1,14 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatAuthority } from "../src/agent-scope.ts";
-import { heldIn } from "../src/agent-skills.ts";
+import { readSkillFor, skillsFor } from "../src/brain-skills.ts";
 import {
-  readSkillFor,
-  selectSkillsFor,
-  skillsFor,
-} from "../src/brain-skills.ts";
-import type { HeldNow, SkillsReach } from "../src/brain-skills.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+  chatOf,
+  codeResults,
+  codeStep,
+  personalChatsOf,
+  says,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
@@ -17,6 +16,7 @@ import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { holding, holdsNothing } from "./stored-skills.ts";
 import { newTeam } from "./teams.ts";
+import { connectDb } from "./test-env.ts";
 
 // What a skill needs (GRA-1844), from the threat model on the issue: a
 // skill selected where its caller can't do what it says, so the model is
@@ -37,6 +37,10 @@ const skillText = (name: string, description: string, requires = "") =>
 /** A chat's agent acting for `userId`. */
 const agentOf = (userId: string) =>
   actingFor({ type: "agent", agentId: `agent-${unique()}` }, userId);
+
+/** What the chat's code returned of a skill: whether it was selected, and read. */
+const said = (selected: boolean, read: string): string =>
+  `Returned:\n${JSON.stringify({ selected, read })}`;
 
 /** Every string in `value`, however deep: what a request to the model carried. */
 const stringsIn = (value: unknown): string[] => {
@@ -213,10 +217,11 @@ describe("what a skill needs", setUpTime, () => {
     });
   });
 
-  it("holds nothing where connect can't be reached, or where others share the conversation: a skill that needs anything is then not listed, selected or read", async () => {
-    const [author, admin] = await Promise.all([
+  it("holds nothing where connect can't be reached, or in a thread others share: a skill that needs anything is then not listed, selected or read", async () => {
+    const [author, admin, other] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
     ]);
     const name = `mail-the-board-${unique()}`;
     const saved = await author.api.skills.save(
@@ -224,70 +229,79 @@ describe("what a skill needs", setUpTime, () => {
     );
     const share = await author.api.skills.share(name, saved.version, "company");
     await admin.api.skills.approve(share.id);
-    const chat = await chatOf(author.userId);
+    // The chat's code: whether the skill is selected, and read.
+    const step = codeStep(
+      `export default async (self, env) => {
+        const { skills } = await env.skills.select({ task: "mail the board" });
+        const selected = skills.some(({ name }) => name === ${JSON.stringify(name)});
+        let read = "read";
+        try { await env.skills.read({ skill: { scope: "company", name: ${JSON.stringify(name)}, version: 1 } }); } catch { read = "refused"; }
+        return JSON.stringify({ selected, read });
+      };`
+    );
+    // One agent of the person's own workspace, granted mail everywhere,
+    // in their own web chat, a thread others share, then their own chat
+    // again with connect out of reach.
+    const chats = await personalChatsOf(
+      author.userId,
+      step,
+      says("Done."),
+      step,
+      says("Done."),
+      step,
+      says("Done.")
+    );
     const mail = await mailConnection([], mailWithSearch);
     await requestGranted(idp, admin, {
-      subject: chat.agent,
+      subject: chats.agent,
       object: { type: "connection", connectionId: mail.id },
       actions: ["mail.send", "mail.search"],
       binding: "MAIL",
     });
-    const scope = {
-      workspaceId: chat.id,
-      agentId: chat.agent.agentId,
-      chatId: chat.chat.id,
-      personId: author.userId,
+    const own = await chats.newChat();
+    await own.ask("Mail the board.");
+    const { chatId: thread } = await chats.stub.askThrough(
+      author.userId,
+      chats.agent.agentId,
+      "slack",
+      "Mail the board.",
+      undefined,
+      {
+        thread: `C-${unique()}`,
+        kind: "group",
+        audience: {
+          members: [author.userId, other.userId],
+          outsiders: false,
+        },
+      }
+    );
+    const again = await chats.newChat();
+    // Connect can't answer whose connections are active: its table is
+    // away while the turn runs.
+    const db = connectDb();
+    await db
+      .prepare("ALTER TABLE connections RENAME TO connections_away")
+      .run();
+    try {
+      await again.ask("Mail the board.");
+    } finally {
+      await db
+        .prepare("ALTER TABLE connections_away RENAME TO connections")
+        .run();
+    }
+    const returned = async (chatId: string) => {
+      const results = await codeResults(chats.stub, chatId);
+      return results.map(({ text }) => text);
     };
-    // Connect out of reach: asking whose connections are active fails.
-    const unreachable: Env = {
-      ...env,
-      CONNECT: new Proxy(env.CONNECT, {
-        get: (target, property): unknown =>
-          property === "connectionOwners"
-            ? async () => {
-                await Promise.resolve();
-                throw new Error("Out of reach, for the test");
-              }
-            : Reflect.get(target, property),
-      }),
-    };
-    const authority = chatAuthority(scope);
-    const given = async (held: HeldNow, reach: SkillsReach) => {
-      const listed = await skillsFor(env, authority, reach, held);
-      return listed.some((skill) => skill.name === name);
-    };
-    const read = async (held: HeldNow, reach: SkillsReach) =>
-      await outcome(
-        readSkillFor(env, authority, reach, held, {
-          skill: { scope: "company", name, version: 1 },
-        })
-      );
-    const selected = async (held: HeldNow) => {
-      const skills = await selectSkillsFor(env, authority, "teams", held, {
-        task: "mail the board",
-      });
-      return skills.some((skill) => skill.name === name);
-    };
-    const reachable = heldIn(env, scope, "teams");
-    const outOfReach = heldIn(unreachable, scope, "teams");
-    const shared = heldIn(env, scope, "company");
 
     expect({
-      reachable: [
-        await given(reachable, "teams"),
-        await read(reachable, "teams"),
-        await selected(reachable),
-      ],
-      outOfReach: [
-        await given(outOfReach, "teams"),
-        await read(outOfReach, "teams"),
-        await selected(outOfReach),
-      ],
-      shared: [await given(shared, "company"), await read(shared, "company")],
+      own: await returned(own.chat.id),
+      sharedThread: await returned(thread),
+      outOfReach: await returned(again.chat.id),
     }).toStrictEqual({
-      reachable: [true, "ok", true],
-      outOfReach: [false, "skills.not_found", false],
-      shared: [false, "skills.not_found"],
+      own: [said(true, "read")],
+      sharedThread: [said(false, "refused")],
+      outOfReach: [said(false, "refused")],
     });
   });
 });

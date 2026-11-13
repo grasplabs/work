@@ -338,20 +338,30 @@ const skillEntry = (
   detail,
 });
 
-/**
- * Of each audience and name whose latest decision is an approval (what is,
- * or is about to be, live): its audience as stored, its name, the version
- * it was added at (null while on its way) and, for a team's, the team's
- * name while the team exists. From core's own records, never the Brain:
- * for admins, who decide every audience's skills, in a team or not.
- */
-const decidedLive = async (env: Env) =>
+/** Where the decisions on one audience's skill of one name stand. */
+interface DecisionState {
+  /** Its audience, as stored. */
+  audience: string;
+  name: string;
+  /** Its team's name while the team exists; null for the company's. */
+  teamName: string | null;
+  /** Whether its latest decision is an approval: in use, or about to be. */
+  approved: boolean;
+  /** The version in use now: the latest that landed, if an approval's. */
+  inUse: number | null;
+  /** Whether its latest decision is an approval not added yet. */
+  onItsWay: boolean;
+}
+
+/** The latest decision, or the latest that landed (`landed`), of each audience and name. */
+const latestDecisions = async (env: Env, landed: boolean) =>
   await drizzle(env.DB)
     .select({
       audience: skillDecisions.audience,
       name: skillDecisions.name,
-      version: skillDecisions.version,
+      shareId: skillDecisions.shareId,
       outcome: skillDecisions.outcome,
+      version: skillDecisions.version,
       teamName: teams.name,
     })
     .from(skillDecisions)
@@ -359,30 +369,70 @@ const decidedLive = async (env: Env) =>
     .where(
       and(
         isNotNull(skillDecisions.audience),
-        isNotNull(skillDecisions.shareId),
+        landed ? eq(skillDecisions.outcome, "landed") : undefined,
         sql`${skillDecisions.seq} = (SELECT MAX(latest.seq) FROM ${skillDecisions} AS latest
           WHERE latest.audience = ${skillDecisions.audience}
-            AND latest.name = ${skillDecisions.name})`
+            AND latest.name = ${skillDecisions.name}
+            ${landed ? sql`AND latest.outcome = 'landed'` : sql``})`
       )
     )
     .orderBy(asc(skillDecisions.audience), asc(skillDecisions.name));
 
-/** `decided` as the teams' skills an admin may retire. */
+/**
+ * Where every audience's skill of every name stands, by `audience name`,
+ * from core's own records, never the Brain: what is in use (the version
+ * the latest landed approval made), and what an approval not added yet is
+ * bringing. For admins, who decide every audience's skills, in a team or
+ * not, and for a person's own approved shares.
+ */
+const decisionStates = async (
+  env: Env
+): Promise<Map<string, DecisionState>> => {
+  const [latest, landed] = await Promise.all([
+    latestDecisions(env, false),
+    latestDecisions(env, true),
+  ]);
+  const inUse = new Map<string, number>();
+  for (const { audience, name, shareId, version } of landed) {
+    if (shareId !== null && version !== null) {
+      inUse.set(`${audience} ${name}`, version);
+    }
+  }
+  return new Map(
+    latest.map(({ audience, name, shareId, outcome, teamName }) => {
+      const key = `${audience} ${name}`;
+      const state: DecisionState = {
+        audience: audience ?? "",
+        name,
+        teamName,
+        approved: shareId !== null,
+        inUse: inUse.get(key) ?? null,
+        onItsWay: shareId !== null && outcome === null,
+      };
+      return [key, state];
+    })
+  );
+};
+
+/** Of `states`, the teams' skills an admin may retire: those whose latest decision is an approval. */
 const teamSkillsOf = (
-  decided: Awaited<ReturnType<typeof decidedLive>>
+  states: ReadonlyMap<string, DecisionState>
 ): DecidedTeamSkill[] =>
-  decided.flatMap(({ audience, name, version, outcome, teamName }) => {
-    const of = audienceOf(audience);
-    return of?.kind === "team"
-      ? [
-          {
-            team: { id: of.team, name: teamName },
-            name,
-            version: outcome === "landed" ? version : null,
-          },
-        ]
-      : [];
-  });
+  [...states.values()].flatMap(
+    ({ audience, name, teamName, approved, inUse, onItsWay }) => {
+      const of = audienceOf(audience);
+      return of?.kind === "team" && approved
+        ? [
+            {
+              team: { id: of.team, name: teamName },
+              name,
+              version: inUse,
+              newVersionOnItsWay: onItsWay,
+            },
+          ]
+        : [];
+    }
+  );
 
 /**
  * What the skills page shows `by`: their own skills, the company's, their
@@ -422,10 +472,11 @@ export const skillsOverview = async (
         .where(decidable())
         .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
     : null;
-  const decided = await decidedLive(env);
-  const live = new Set(
-    decided.map(({ audience, name }) => `${audience} ${name}`)
-  );
+  const states = await decisionStates(env);
+  /** Whether `audience name`'s latest decision is an approval. */
+  const live = {
+    has: (key: string) => states.get(key)?.approved === true,
+  };
   /** What approving `share` replaces for its audience, if anything. */
   const replacedBy = (share: SkillShare): SkillShareRequest["replaces"] => {
     const { audience, name } = share;
@@ -448,7 +499,11 @@ export const skillsOverview = async (
     if (share === undefined) {
       return [];
     }
-    const inUse = live.has(`${row.audience} ${row.name}`);
+    // Only of a share of theirs that was approved: one declined or still
+    // waiting says nothing of what others' later skills of its name are.
+    const state = states.get(`${row.audience} ${row.name}`);
+    const inUse =
+      row.status === "approved" && state !== undefined && state.inUse !== null;
     if (row.status !== "pending" || row.text === null) {
       return [{ ...share, outdated: false, inUse }];
     }
@@ -467,7 +522,11 @@ export const skillsOverview = async (
   const asked = await Promise.all(shares.map(ownOf));
   return {
     own: listed.filter(({ scope }) => scope === "person").map(listedOf),
-    company: company.map(listedOf),
+    company: company.map((skill) => ({
+      ...listedOf(skill),
+      newVersionOnItsWay:
+        states.get(`${companyKey} ${skill.name}`)?.onItsWay === true,
+    })),
     team,
     teams: by.teams.map(({ id, name }) => ({ id, name })),
     shares: asked.flat(),
@@ -481,7 +540,7 @@ export const skillsOverview = async (
               replaces: replacedBy(share),
             }))
       ) ?? null,
-    teamSkills: requests === null ? null : teamSkillsOf(decided),
+    teamSkills: requests === null ? null : teamSkillsOf(states),
   };
 };
 

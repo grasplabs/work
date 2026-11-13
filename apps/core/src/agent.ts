@@ -319,10 +319,13 @@ const turnSkillDescriptionMax = 300;
 /** `text` on one line: any run of whitespace, line breaks included, as one space. */
 const oneLine = (text: string): string => text.replace(whitespace, " ");
 
-/** Where `skill` comes from, as the model reads it: a team's by its name and ID. */
+/**
+ * Where `skill` comes from, as the model reads it: a team's by its name,
+ * cut as a description is (a team's name is any length), and its ID.
+ */
 const scopeOf = (skill: TurnSkill): string =>
   skill.scope === "team"
-    ? `team, of ${JSON.stringify(oneLine(skill.teamName))}, team ${skill.team}`
+    ? `team, of ${JSON.stringify(oneLine(skill.teamName).slice(0, turnSkillDescriptionMax))}, team ${skill.team}`
     : skill.scope;
 
 /** The skills this chat may use, as the model reads them; `null` without any. */

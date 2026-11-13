@@ -1249,6 +1249,10 @@ msgstr "{team}, pas encore ajouté"
 msgid "{team}, version {version}"
 msgstr "{team}, version {version}"
 
+#: src/brain/skills-page.tsx
+msgid "{team}, version {version}; a new version is on its way"
+msgstr "{team}, version {version} ; une nouvelle version est en route"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{team}: “{words}”"
 msgstr "{team} : « {words} »"
@@ -15426,6 +15430,10 @@ msgstr "Version {version}, pas encore en production"
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version}, which runs now"
 msgstr "Version {version}, celle qui s'exécute maintenant"
+
+#: src/brain/skills-page.tsx
+msgid "Version {version}; a new version is on its way"
+msgstr "Version {version} ; une nouvelle version est en route"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/workflow-status.tsx

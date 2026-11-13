@@ -35,6 +35,7 @@ import { holdsNothing } from "./stored-skills.ts";
 import {
   joinTeam,
   leaveTeam,
+  namedTeam,
   newTeam,
   otherOrganizationsTeam,
 } from "./teams.ts";
@@ -279,6 +280,12 @@ const hooked = (
 /** A fresh skill name. */
 const nameOf = (what: string): string => `${what}-${unique()}`;
 
+/** A hook that fails its call, as a store out of reach does. */
+const outOfReach = async (): Promise<void> => {
+  await Promise.resolve();
+  throw new Error("Out of reach, for the test");
+};
+
 describe("writing and sharing skills", setUpTime, () => {
   it("keeps a person's own skill theirs: used in their own chat, never in a shared one, never by anyone else", async () => {
     const [author, other] = await Promise.all([
@@ -402,7 +409,12 @@ describe("writing and sharing skills", setUpTime, () => {
       authorDecides: "role.forbidden",
       approved: ["approved", 1],
       memberUses: [["company", name]],
-      company: { name, version: 1, description: "Close the month" },
+      company: {
+        name,
+        version: 1,
+        description: "Close the month",
+        newVersionOnItsWay: false,
+      },
       read: asked,
       selected: [["company", name]],
       // Decided: a second click has nothing waiting to decide.
@@ -1213,14 +1225,16 @@ describe("sharing a skill with a team", setUpTime, () => {
       signedInApi(idp, "admin"),
       signedInApi(idp, "user"),
     ]);
-    const team = await newTeam(author.userId);
+    // A team's name is any length: the prompt cuts it, as a description.
+    const longName = `Sales-${"x".repeat(1000)}`;
+    const team = await namedTeam(longName, author.userId);
     const name = nameOf("quote-a-tender");
     const saved = await author.api.skills.save(skillText(name, "Quote it"));
     const share = await author.api.skills.share(name, saved.version, { team });
     await admin.api.skills.approve(share.id);
     // Their own copy goes, so what is listed is the team's.
     await author.api.skills.remove(name);
-    const listed = `- ${name} (team, of "Team ${team}", team ${team}`;
+    const listed = `- ${name} (team, of "${longName.slice(0, 300)}", team ${team}`;
     /** The chat's code: the skills of this name `env.skills` selects for quoting a tender. */
     const selectsThis = codeStep(
       `export default async (self, env) => { const { skills } = await env.skills.select({ task: "quote a tender" }); return skills.filter(({ name }) => name === ${JSON.stringify(name)}).map(({ scope, name }) => scope + ":" + name).join(",") || "none"; };`
@@ -1360,7 +1374,14 @@ describe("sharing a skill with a team", setUpTime, () => {
     }).toStrictEqual({
       // Its team and name, from core's records: the admin is in no team.
       listed: {
-        admin: [{ team: { id: team, name: `Team ${team}` }, name, version: 1 }],
+        admin: [
+          {
+            team: { id: team, name: `Team ${team}` },
+            name,
+            version: 1,
+            newVersionOnItsWay: false,
+          },
+        ],
         author: null,
       },
       inUse: [true, false],
@@ -1488,5 +1509,110 @@ describe("sharing a skill with a team", setUpTime, () => {
       retired: "ok",
       afterRetiring: [],
     });
+  });
+
+  it("tells an admin a newer approved version is on its way beside the one in use, for a team's skill and the company's alike", async () => {
+    const [author, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const team = await newTeam(author.userId);
+    const name = nameOf("count-the-stock");
+    const first = await author.api.skills.save(skillText(name, "First way"));
+    for (const audience of ["company", { team }] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+      const share = await author.api.skills.share(
+        name,
+        first.version,
+        audience
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+      await admin.api.skills.approve(share.id);
+    }
+    const second = await author.api.skills.save(skillText(name, "Second way"));
+    // Approved, and each Brain write fails: on its way until the clock.
+    const failing = hooked({
+      before: { addInstructions: { 1: outOfReach, 2: outOfReach } },
+    });
+    const decider = await admin.api.whoami();
+    for (const audience of ["company", { team }] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+      const share = await author.api.skills.share(
+        name,
+        second.version,
+        audience
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+      await approveShare(failing, decider, share.id);
+    }
+    const { company, teamSkills } = await overviewOf(admin.api);
+    const onItsWay = {
+      company: company
+        .filter((skill) => skill.name === name)
+        .map(({ version, newVersionOnItsWay }) => ({
+          version,
+          newVersionOnItsWay,
+        })),
+      team: teamSkills
+        ?.filter((skill) => skill.name === name)
+        .map(({ version, newVersionOnItsWay }) => ({
+          version,
+          newVersionOnItsWay,
+        })),
+    };
+    await reconcileSkills(env);
+    const after = await overviewOf(admin.api);
+
+    expect({
+      onItsWay,
+      landed: after.teamSkills
+        ?.filter((skill) => skill.name === name)
+        .map(({ version, newVersionOnItsWay }) => ({
+          version,
+          newVersionOnItsWay,
+        })),
+    }).toStrictEqual({
+      // The first versions are in use while the second ones are on their way.
+      onItsWay: {
+        company: [{ version: 1, newVersionOnItsWay: true }],
+        team: [{ version: 1, newVersionOnItsWay: true }],
+      },
+      landed: [{ version: 2, newVersionOnItsWay: false }],
+    });
+  });
+
+  it("says nothing of a skill in use to someone whose share of its name was declined or still waits, however they stand in its team", async () => {
+    const [author, admin, mate] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const team = await newTeam(author.userId, mate.userId);
+    const name = nameOf("plan-the-week");
+    /** `api`'s person saves `how` as the skill and asks to share it with the team. */
+    const asked = async (api: SessionApi, how: string) => {
+      const saved = await api.skills.save(skillText(name, how));
+      return await api.skills.share(name, saved.version, { team });
+    };
+    const declined = await asked(author.api, "Mine");
+    await admin.api.skills.decline(declined.id);
+    const theirs = await asked(mate.api, "Theirs");
+    await admin.api.skills.approve(theirs.id);
+    const waiting = await asked(author.api, "Mine again");
+    await leaveTeam(team, author.userId);
+    const inUseOf = async (api: SessionApi, id: string) => {
+      const { shares } = await overviewOf(api);
+      return shares.find((share) => share.id === id)?.inUse;
+    };
+
+    expect({
+      declined: await inUseOf(author.api, declined.id),
+      // Hidden while they are out of the team; false when back.
+      waiting: await (async () => {
+        await joinTeam(team, author.userId);
+        return await inUseOf(author.api, waiting.id);
+      })(),
+      approved: await inUseOf(mate.api, theirs.id),
+    }).toStrictEqual({ declined: false, waiting: false, approved: true });
   });
 });

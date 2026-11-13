@@ -555,6 +555,33 @@ const TeamSkill = ({ skill }: { skill: ListedTeamSkill }) => {
   );
 };
 
+/**
+ * Which version of a team's skill its members' agents use, and whether a
+ * newer one is on its way, in a whole sentence.
+ */
+const DecidedVersion = ({
+  team,
+  version,
+  newVersionOnItsWay,
+}: {
+  team: string;
+  version: number | null;
+  newVersionOnItsWay: boolean;
+}) => {
+  if (version === null) {
+    return <Trans>{team}, not added yet</Trans>;
+  }
+  return newVersionOnItsWay ? (
+    <Trans>
+      {team}, version {version}; a new version is on its way
+    </Trans>
+  ) : (
+    <Trans>
+      {team}, version {version}
+    </Trans>
+  );
+};
+
 /** A team's skill in use, for an admin, in the team or not: with Retire. */
 const DecidedSkill = ({
   skill,
@@ -573,13 +600,11 @@ const DecidedSkill = ({
       <ItemContent>
         <span className="text-sm font-medium">{name}</span>
         <span className="text-muted-foreground text-xs">
-          {version === null ? (
-            <Trans>{team}, not added yet</Trans>
-          ) : (
-            <Trans>
-              {team}, version {version}
-            </Trans>
-          )}
+          <DecidedVersion
+            newVersionOnItsWay={skill.newVersionOnItsWay}
+            team={team}
+            version={version}
+          />
         </span>
       </ItemContent>
       <ItemActions>
@@ -1014,7 +1039,13 @@ export const SkillsPage = () => {
                         {skill.description}
                       </span>
                       <span className="text-muted-foreground text-xs">
-                        <Trans>Version {version}</Trans>
+                        {skill.newVersionOnItsWay ? (
+                          <Trans>
+                            Version {version}; a new version is on its way
+                          </Trans>
+                        ) : (
+                          <Trans>Version {version}</Trans>
+                        )}
                       </span>
                     </ItemContent>
                     {data.requests === null ? null : (

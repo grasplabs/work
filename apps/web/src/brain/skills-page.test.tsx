@@ -103,6 +103,7 @@ const shown = async ({
   held = {},
   approveRefusal,
   company = ["file-expenses"],
+  replacing = [],
   overviewRefusals = [],
   teams = [],
   team = [],
@@ -120,6 +121,8 @@ const shown = async ({
   approveRefusal?: string;
   /** The names of the company's live skills. */
   company?: string[];
+  /** Of the company's skills, those with a newer approved version on its way. */
+  replacing?: string[];
   /** Which reads of the page core refuses, counting from 1. */
   overviewRefusals?: number[];
   /** The teams the person is in. */
@@ -147,6 +150,7 @@ const shown = async ({
       return {
         own: [...owned],
         company: company.map((name) => ({
+          newVersionOnItsWay: replacing.includes(name),
           name,
           version: 1,
           description: "File",
@@ -697,11 +701,19 @@ describe("the skills page", () => {
           team: { id: "t-2", name: "Legal" },
           name: "check-a-contract",
           version: 2,
+          newVersionOnItsWay: false,
         },
         {
           team: { id: "t-3", name: null },
           name: "close-a-deal",
           version: null,
+          newVersionOnItsWay: true,
+        },
+        {
+          team: { id: "t-2", name: "Legal" },
+          name: "file-a-claim",
+          version: 4,
+          newVersionOnItsWay: true,
         },
       ],
     });
@@ -715,11 +727,35 @@ describe("the skills page", () => {
     expect({
       legal: text.includes("Legal, version 2"),
       gone: text.includes("t-3, not added yet"),
+      replacing: text.includes("Legal, version 4; a new version is on its way"),
       calls,
     }).toStrictEqual({
       legal: true,
       gone: true,
+      replacing: true,
       calls: ["overview", "retire check-a-contract for t-2", "overview"],
     });
+  });
+
+  it("says when a newer approved version of a company skill is on its way, beside the one in use", async () => {
+    await shown({
+      admin: false,
+      company: ["file-expenses", "book-travel"],
+      replacing: ["book-travel"],
+    });
+    const lines = [
+      ...document.querySelectorAll('[data-slot="item-content"]'),
+    ].map((item) => item.textContent);
+    expect({
+      replacing: lines.some(
+        (line) =>
+          line?.startsWith("book-travel") &&
+          line.endsWith("Version 1; a new version is on its way")
+      ),
+      settled: lines.some(
+        (line) =>
+          line?.startsWith("file-expenses") && line.endsWith("Version 1")
+      ),
+    }).toStrictEqual({ replacing: true, settled: true });
   });
 });
