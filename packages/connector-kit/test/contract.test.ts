@@ -80,6 +80,47 @@ describe("a tool", () => {
     );
   });
 
+  it("answers an item only when read-only, naming exactly that one item when it runs, as the manifest then says", async () => {
+    const itemTool = (readOnly: boolean, provenance: string[]) =>
+      defineTool({
+        name: "items.get",
+        description: "Gets an item",
+        input: z.strictObject({}),
+        output: z.strictObject({ id: z.string() }),
+        readOnly,
+        reach: "own",
+        answersItem: true,
+        routes: [route],
+        run: async () =>
+          await Promise.resolve({ output: { id: "item-1" }, provenance }),
+      });
+    const one = itemTool(true, ["item-1"]);
+
+    expect(one.action.answersItem).toBeTruthy();
+    expect(() => itemTool(false, ["item-1"])).toThrow(/answers an item/u);
+    await expect(one.call({})).resolves.toMatchObject({
+      structuredContent: { id: "item-1" },
+    });
+    // Naming none, or two, is no answer of one item.
+    await expect(
+      Promise.all(
+        [[], ["item-1", "item-2"]].map(
+          async (named) => await itemTool(true, named).call({})
+        )
+      )
+    ).resolves.toStrictEqual(
+      [0, 1].map(() => ({
+        content: [
+          {
+            type: "text",
+            text: "The connector's result isn't what it declares",
+          },
+        ],
+        isError: true,
+      }))
+    );
+  });
+
   it("takes strict input with a string resource property", () => {
     expect(() =>
       toolWith(
