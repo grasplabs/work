@@ -632,11 +632,13 @@ const gate = async (
       if (!reach.reaches) {
         return { line: "notTurnedOn" };
       }
+      // As before the place was said: their first message is taken in
+      // their direct message alone, and left unanswered anywhere else.
       return {
         userId,
         acts: reach.acts,
         kept: await keptQuestion(state, oid),
-        place: await placeOf(env, adapter, activity),
+        ...(conversationType === "personal" ? { place: direct } : {}),
       };
     }
     default: {

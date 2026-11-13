@@ -124,8 +124,8 @@ export interface TurnRequest {
   /**
    * Whether the answer reaches the person alone, so the recall before the
    * question may hold what only they may read (their own store,
-   * turn-recall.ts): their own chat in Grasp, or their direct message on
-   * a chat app, in a turn they started (workspace.ts, `answersAlone`).
+   * turn-recall.ts): their own chat in Grasp, in a turn they started
+   * (workspace.ts, `answersAlone`).
    */
   personal: boolean;
   /** Whether the chat's agent holds the brain permission. */

@@ -815,7 +815,7 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
 });
 
 describe("what the recall before a question may reach", setUpTime, () => {
-  it("holds what only the person may read where the answer reaches them alone: their own chat in Grasp or a chat app's direct message, in a turn they started", async () => {
+  it("holds what only the person may read where the answer reaches them alone: their own chat in Grasp, in a turn they started", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
     const depot = word();
@@ -911,9 +911,9 @@ describe("what the recall before a question may reach", setUpTime, () => {
       web: { own: true, team: true },
       // Not started by them: their team's, never their own.
       unattended: { own: false, team: true },
-      // A direct message, the person and the agent alone: as their own chat.
-      slack: { own: true, team: true },
-      teams: { own: true, team: true },
+      // Kept by the chat app too: their team's, never their own.
+      slack: { own: false, team: true },
+      teams: { own: false, team: true },
       // Read by others too: nothing, not even their team's.
       thread: { own: false, team: false },
     });

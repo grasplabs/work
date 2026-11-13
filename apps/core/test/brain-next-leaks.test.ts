@@ -1179,11 +1179,13 @@ describe(
       });
     });
 
-    it("puts a person's own content in their direct message with the agent alone, never in a chat-app thread anyone else can read", async () => {
+    it("puts a person's own content in no chat-app conversation, their direct message included, and answers that one to them alone", async () => {
       // Through Teams' door as Teams posts (channels/door.ts), each turn
       // answered by the fake provider behind connect, which keeps what
-      // reached it: a person's own source may reach a model only for a
-      // conversation Teams itself names the person's and the bot's alone.
+      // reached it. A person's own source reaches a model only in their
+      // own chat in Grasp: not in a thread others read, nor, while
+      // GRA-1821's decision is open, in their direct message, which the
+      // chat app keeps too (workspace.ts, `answersAlone`).
       const admin = await signedInApi(idp, "admin");
       await requestGranted(idp, admin, {
         subject: { type: "agent", agentId: chatAgentId },
@@ -1194,8 +1196,9 @@ describe(
       const depot = `d${unique()}`;
       const marker = markerWord();
       const answered = `Your note says ${marker}.`;
-      // The threads are asked first, then her direct message, whose answer
-      // alone carries the marker: found in a thread, it went astray.
+      // The threads are asked first, then her direct message, whose
+      // (scripted) answer alone carries the marker: found in a thread or
+      // another's chat, it went astray.
       const ann = await teamsMember(
         idp,
         says("Noted."),
@@ -1256,20 +1259,24 @@ describe(
       const inDirect = await reachedModel(
         async () => await post(messageFrom(ann.teams, { text: question }))
       );
+      const found = await textsFor(ann.userId, `depot ${depot}`);
       const postedIn = async (conversation: string) => {
         const { activities } = await reached(conversation);
         return JSON.stringify(activities).includes(marker);
       };
 
       expect({
+        // Her own recall finds it: what the model got is no empty Brain.
+        found: found.length,
         inThreads,
         inDirect,
         postedInThreads: await Promise.all(threads.map(postedIn)),
         postedInDirect: await postedIn(ann.teams.conversation),
         postedToBen: await postedIn(ben.teams.conversation),
       }).toStrictEqual({
+        found: 1,
         inThreads: [false, false, false],
-        inDirect: true,
+        inDirect: false,
         postedInThreads: [false, false, false],
         postedInDirect: true,
         postedToBen: false,

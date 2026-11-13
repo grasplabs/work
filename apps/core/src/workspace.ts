@@ -779,14 +779,18 @@ const outputOf = (
 
 /**
  * Whether a turn of `chat` answers its person alone, so its recall may
- * hold what only they may read (their own store): only in a chat that is
- * theirs alone, in a turn they started. That is their own chat in Grasp,
- * or their one chat on a chat platform, which only a direct message the
- * platform itself names one-to-one reaches (`askThrough`, `direct`): a
- * Teams `personal` conversation or a Slack `im`, each the person and the
- * bot, which can't gain a member. A chat for a thread others share
+ * hold what only they may read (their own store): only in their own chat
+ * in Grasp, in a turn they started. A chat for a thread others share
  * (`thread`) is read by all of them, however few the platform says it
  * holds.
+ *
+ * A chat app's direct message is the person's one chat there (`thread`
+ * null), which only a message the platform itself names one-to-one
+ * reaches (`askThrough`, place `direct`). It is left out here while the
+ * decision on it is open (GRA-1821): the chat app keeps the answer too,
+ * where its admins and compliance exports read it, so a person's own
+ * content would leave Grasp. Were it decided yes, this is the one place
+ * that changes: drop `via === "web"`.
  *
  * A turn a schedule or an event woke (`unattended`) wasn't theirs to
  * start, and acts on what woke it: an event's words, from anyone, steer
@@ -796,9 +800,9 @@ const outputOf = (
  * there because they asked for it; a woken turn adds none they didn't.
  */
 const answersAlone = (
-  { thread }: Pick<Chat, "thread">,
+  { via, thread }: Pick<Chat, "via" | "thread">,
   unattended: boolean
-): boolean => thread === null && !unattended;
+): boolean => via === "web" && thread === null && !unattended;
 
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
