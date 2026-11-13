@@ -85,24 +85,41 @@ export const keptUntilSettled = async <T>(
   }
 };
 
+/** What the wrapper answers a put once its store forgot itself. */
+const forgottenStore =
+  "The Brain refused it: this store was erased, and writes nothing more";
+
 /**
- * `bucket`, each write it is sent (a put, a delete) kept in `inFlight`
- * from the moment it is sent until R2 answers or rejects it, whether or not
- * anyone still waits for it: what a caller that stopped waiting (a call's
- * deadline, a queue handler past its time) left on its way is still
- * counted, as the wait here is the write's own. The store's one count of
- * what it may still write (store.ts `#eraseWhole`).
+ * `bucket`, each put it is sent kept in `inFlight` from the moment it is
+ * sent until R2 answers or rejects it, whether or not anyone still waits
+ * for it: what a caller that stopped waiting (a call's deadline, a queue
+ * handler past its time) left on its way is still counted, as the wait
+ * here is the put's own. The store's one count of what it may still write
+ * (store.ts `#eraseWhole`). Only puts: a delete can't leave an object
+ * behind, and counting one would take an erasure's own delete for a write
+ * that may never answer.
+ *
+ * Once `forgotten()` says the store deleted all it held (store.ts
+ * `#forget`), every put but one of `allowed` (the record of its erasure)
+ * is refused before it is sent: so nothing a handler still running does
+ * after the erasure began can write, whatever it read first.
  */
 export const countingWrites = (
   bucket: BrainBucket,
-  inFlight: Set<Promise<unknown>>
+  inFlight: Set<Promise<unknown>>,
+  forgotten: () => boolean,
+  allowed: string
 ): BrainBucket => ({
   get: async (key) => await bucket.get(key),
   head: async (key) => await bucket.head(key),
   list: async (options) => await bucket.list(options),
-  put: async (key, value, options) =>
-    await keptUntilSettled(bucket.put(key, value, options), inFlight),
+  put: async (key, value, options) => {
+    if (forgotten() && key !== allowed) {
+      throw new Error(forgottenStore);
+    }
+    return await keptUntilSettled(bucket.put(key, value, options), inFlight);
+  },
   delete: async (keys) => {
-    await keptUntilSettled(bucket.delete(keys), inFlight);
+    await bucket.delete(keys);
   },
 });

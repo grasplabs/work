@@ -127,6 +127,7 @@ import {
   isUnderErasedGroup,
   isStoreErased,
   storeErasedAt,
+  storeErasedKey,
   subjectOf,
   subjectsOver,
   keepMissingSubjects,
@@ -576,7 +577,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     return countingWrites(
       bucketUnder(this.env.BRAIN_OBJECTS, this.#prefix),
-      this.#inFlight
+      this.#inFlight,
+      () => this.#work.forgotten,
+      storeErasedKey
     );
   }
 
@@ -1128,24 +1131,29 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // store started: until it can, the erasure is never done.
     await this.#ledgerStep();
     // The one rule. Done only when no write of this instance is on its way
-    // (bucket.ts `countingWrites`: every put and delete, from the moment it
-    // is sent until R2 answers, whoever sent it and whether or not it still
-    // waits), the grace (files.ts `fileGraceMs`) has passed since the
+    // (bucket.ts `countingWrites`: every put, from the moment it is sent
+    // until R2 answers, whoever sent it and whether or not it still waits;
+    // after `#forget` none is sent but the record's), the grace
+    // (contract.ts `fileGraceMs`) has passed since the
     // record's moment, and the listing is empty, read in that order, so
     // what lands after the listing is deleted by a later call: the caller
     // calls again until one is done.
     //
-    // The premise, for writes of an instance that has ended (restarted,
-    // evicted, crashed): the runtime ends what it had still to send with
-    // it, and a write R2 had already taken completes within R2's own
-    // bounds, far inside the grace. So every write of an earlier instance
-    // lands before the grace from a moment after that instance ended. The
-    // record's moment is such a moment for every instance that ended
-    // before it was written; a write of this instance that never answers
-    // moves it (below), and ends this instance after, so it is one for
-    // that write too. It lives in the bucket, with the record, under the
-    // store's prefix: `#forget` deletes the object's storage, never it,
-    // and a restart or an eviction leaves it as it is.
+    // The assumption, for writes of an instance that has ended (restarted,
+    // evicted, crashed), which this store can't count: they land within
+    // the grace (`fileGraceMs`, 15 minutes) of a moment after it
+    // ended. What the platform says bounds them: pending I/O keeps an
+    // object alive up to 15 minutes, in-flight requests may finish (up to
+    // 30 s on a runtime update), and an abort ends the instance's own
+    // code. Nothing the platform says bounds when R2 commits a put it had
+    // already taken: that it does so well inside the grace is assumed, as
+    // the grace already is for an add's file (files.ts). The record's
+    // moment is such a moment for every instance that ended before it was
+    // written; a put of this instance that never answers moves it (below)
+    // and ends this instance after, so it is one for that put too. It
+    // lives in the bucket, with the record, under the store's prefix:
+    // `#forget` deletes the object's storage, never it, and a restart or
+    // an eviction leaves it as it is.
     let done = false;
     try {
       const at = await storeErasedAt(this.#bucket);

@@ -609,11 +609,14 @@ const brainSources: ErasureStep = {
     // failed. Past the Brain's bound for it (`stillDeletingTooLong`,
     // counted from when the erasure was asked for) it is stuck: counted as a
     // failed attempt and logged (`runErasure`), once, so it stands out from
-    // a normal one.
+    // a normal one. Once: while the area was last changed (a failed attempt
+    // counted, `runErasure`) before the erasure grew stuck, whatever failed
+    // earlier; that attempt changes it, after. A failure of another kind
+    // counted after the bound also ends it: that one was logged too.
     const [state] = await db
       .select({
         requestedAt: personErasures.requestedAt,
-        attempts: personErasureAreas.attempts,
+        changedAt: personErasureAreas.updatedAt,
       })
       .from(personErasures)
       .innerJoin(
@@ -626,8 +629,8 @@ const brainSources: ErasureStep = {
       .where(eq(personErasures.userId, userId));
     const stuck =
       state !== undefined &&
-      state.attempts === 0 &&
-      stillDeletingTooLong(state.requestedAt);
+      stillDeletingTooLong(state.requestedAt) &&
+      !stillDeletingTooLong(state.requestedAt, state.changedAt);
     if (stuck) {
       throw new Error(
         "Their own store has been still deleting for longer than its graces allow"
