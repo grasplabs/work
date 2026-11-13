@@ -1,0 +1,1 @@
+ALTER TABLE `model_usage` ADD `purpose` text;
