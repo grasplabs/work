@@ -58,7 +58,7 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
 import {
@@ -1270,8 +1270,6 @@ export class Workspace extends DurableObject<Env> {
     by?: AuditActor,
     via: ChatChannel = "web",
     thread?: string,
-    /** The App the chat is for (`appChat`), if any. */
-    appId?: AppId,
     make?: ChatMake
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
@@ -1284,12 +1282,7 @@ export class Workspace extends DurableObject<Env> {
     const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
-        this.#outboxed(
-          by,
-          "chat.created",
-          id,
-          appId === undefined ? {} : { app: appId }
-        );
+        this.#outboxed(by, "chat.created", id, {});
       }
       const now = new Date();
       const made = this.#db
@@ -1303,7 +1296,6 @@ export class Workspace extends DurableObject<Env> {
           agentId: agent.data,
           via: channel,
           thread: thread ?? null,
-          appId: appId ?? null,
           makeKind: make?.kind ?? null,
           makeProject: make?.project ?? null,
         })

@@ -1744,73 +1744,11 @@ const buildVersion = async (
 };
 
 /**
- * What identifies a binding: its alias, its kind, and the catalog contract
- * it binds by its key, so the same alias on another contract or kind is
- * another binding.
- */
-const bindingKey = (binding: PinnedBinding): string =>
-  [binding.alias, binding.kind, binding.contractId].join("\n");
-
-/**
- * Refuses Grasp staff (`role.forbidden`) a publication whose bindings
- * aren't exactly those of the current version: which workflows a client's
- * workflow runs is the client's decision, as which stores an App binds is
- * (data-stores.ts). Staff may still publish a version that binds the same.
- * Binding nothing is a change too, when the current version binds
- * something: dropping what a client chose is theirs to decide as well.
- */
-const requireStaffKeepsBindings = async (
-  env: Env,
-  by: Acting,
-  workflow: Live,
-  bindings: readonly PinnedBinding[]
-): Promise<void> => {
-  if (!by.staff) {
-    return;
-  }
-  const versions = await bindingsOf(env, workflow.id);
-  const current =
-    workflow.currentVersion === null
-      ? []
-      : (versions.get(workflow.currentVersion) ?? []);
-  const kept = new Set(current.map(bindingKey));
-  if (
-    current.length !== bindings.length ||
-    !bindings.every((binding) => kept.has(bindingKey(binding)))
-  ) {
-    throw roleErrors.create("role.forbidden");
-  }
-};
-
-/**
- * What keeps `definition` from being published as workflow `workflow`'s
- * next version by `by`, thrown: the profile's and the catalog's checks
- * (`workflow.definition_invalid` with its problems), and for Grasp staff
- * any change of what it binds (`requireStaffKeepsBindings`). Answers what
- * was checked.
- */
-export const checkPublication = async (
-  env: Env,
-  by: Acting,
-  workflow: Live,
-  definition: string
-) => {
-  const checked = await checkDefinition(
-    env,
-    by,
-    definition,
-    workflow.id,
-    parsedJson(definition)
-  );
-  await requireStaffKeepsBindings(env, by, workflow, checked.bindings);
-  return checked;
-};
-
-/**
  * Builds `definition` as workflow `workflow`'s next version for `by`:
- * checked (`checkPublication`), compiled once, here (no start or resume
- * compiles anything), and written, not live (`buildVersion`). Another
- * version built at once takes the number: `draft.conflict`.
+ * checked by the profile and the catalog (`workflow.definition_invalid`
+ * with its problems), compiled once, here (no start or resume compiles
+ * anything), and written, not live (`buildVersion`). Another version
+ * built at once takes the number: `draft.conflict`.
  */
 export const buildWorkflowVersion = async (
   env: Env,
@@ -1818,11 +1756,12 @@ export const buildWorkflowVersion = async (
   workflow: Live,
   definition: string
 ): Promise<WorkflowResourceVersion> => {
-  const { checked, bindings } = await checkPublication(
+  const { checked, bindings } = await checkDefinition(
     env,
     by,
-    workflow,
-    definition
+    definition,
+    workflow.id,
+    parsedJson(definition)
   );
   // Of its canonical JSON: whitespace and key order make no other version.
   const definitionHash = await definitionHashOf(checked.document);

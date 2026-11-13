@@ -295,7 +295,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         actorOf(person),
         "web",
         undefined,
-        undefined,
         making?.data
       );
       return summaryOfMade(chat);

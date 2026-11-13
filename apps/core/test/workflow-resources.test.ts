@@ -435,8 +435,22 @@ describe("roles in a workflow", () => {
 
   it("never lets Grasp staff decide whom it reaches or delete it", async () => {
     const ada = await person("builder");
+    const bob = await person("builder");
     const staff = await person("admin", [], true);
     const workflow = await workflowOf(ada);
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    await expect(
+      outcome(
+        unshareWorkflowResource(env, staff, workflow.id, {
+          type: "person",
+          id: bob.userId,
+        })
+      )
+    ).resolves.toBe("role.forbidden");
     await expect(
       outcome(
         shareWorkflowResource(env, staff, workflow.id, {
@@ -487,22 +501,6 @@ describe("Apps and workflows", () => {
     });
   });
 });
-
-/** A definition asking model `key` through binding `greeting`. */
-const bindingDefinition = (key: string, status = "done") =>
-  definitionOf({
-    status,
-    permissions: { ai: { contract: key } },
-    steps: [
-      {
-        id: "greet",
-        type: "generate",
-        instructions: "Greet them.",
-        input: { who: { $expr: "args.who" } },
-        returns: objectSchema({ line: { kind: "string" } }),
-      },
-    ],
-  });
 
 /** The details a refusal carried, or what was thrown instead. */
 const detailsOf = async (promise: Promise<unknown>): Promise<unknown> => {
@@ -688,63 +686,6 @@ describe("the business process a workflow serves", () => {
         },
       ],
     });
-  });
-});
-
-describe("Grasp staff", () => {
-  it("never unshare, nor publish bindings the current version doesn't have", async () => {
-    const ada = await person("builder");
-    const bob = await person("builder");
-    const staff = await person("admin", [], true);
-    const model = await modelContract();
-    const workflow = await workflowOf(ada);
-    await publish(ada, workflow.id, definitionOf());
-    await shareWorkflowResource(env, ada, workflow.id, {
-      type: "person",
-      id: bob.userId,
-      role: "user",
-    });
-    expect({
-      unshare: await outcome(
-        unshareWorkflowResource(env, staff, workflow.id, {
-          type: "person",
-          id: bob.userId,
-        })
-      ),
-      bind: await outcome(
-        publish(staff, workflow.id, bindingDefinition(model, "2.0.0"))
-      ),
-    }).toStrictEqual({ unshare: "role.forbidden", bind: "role.forbidden" });
-    // Reading, and a version that binds nothing new, as for Apps.
-    const plain = await publish(
-      staff,
-      workflow.id,
-      definitionOf({ status: "ok" })
-    );
-    expect({
-      version: plain.version,
-      definition: await workflowDefinition(env, staff, workflow.id, 2),
-    }).toStrictEqual({
-      version: 2,
-      definition: definitionOf({ status: "ok" }),
-    });
-  });
-
-  it("never publish a version that drops what the current version binds", async () => {
-    const ada = await person("builder");
-    const staff = await person("admin", [], true);
-    const model = await modelContract();
-    const workflow = await workflowOf(ada);
-    await publish(ada, workflow.id, bindingDefinition(model));
-
-    expect({
-      dropped: await outcome(
-        publish(staff, workflow.id, definitionOf({ status: "2.0.0" }))
-      ),
-      kept: await outcome(
-        publish(staff, workflow.id, bindingDefinition(model, "2.0.0"))
-      ),
-    }).toStrictEqual({ dropped: "role.forbidden", kept: "ok" });
   });
 });
 
