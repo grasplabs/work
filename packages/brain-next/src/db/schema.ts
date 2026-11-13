@@ -580,6 +580,123 @@ export const unembeddable = sqliteTable(
   (table) => [primaryKey({ columns: [table.model, table.hash] })]
 );
 
+// Exports and restores (exports.ts, restore.ts). An export writes what a
+// scope holds as files in the store's part of the bucket (`exports/<id>/`),
+// a part a run of the queue, and its manifest last; a restore reads a
+// company export's files back into an empty shared store.
+
+/**
+ * An export of the company's Brain, and how far it has come. It is stale once the erasure ledger names a
+ * version it holds (`export_sources`), and its files are deleted
+ * (exports.ts).
+ */
+export const exportsTable = sqliteTable(
+  "exports",
+  {
+    id: text().primaryKey(),
+    /** The deployment it is of, as the host names it: its manifest says so. */
+    deployment: text().notNull(),
+    /** The last version's row it takes: what was there when it started. */
+    upTo: integer("up_to").notNull(),
+    /** The last version's row written to a part. */
+    cursor: integer().notNull(),
+    state: text({
+      enum: ["writing", "restoring", "done", "failed", "erased", "expired"],
+    }).notNull(),
+    /** Parts written, and the versions in them. */
+    parts: integer().notNull(),
+    versions: integer().notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("exports_state_idx").on(table.state, table.finishedAt)]
+);
+
+/**
+ * The versions an export holds, by their source's key as the erasure
+ * ledger names it (SHA-256) and their number: recorded with each part, so
+ * the ledger naming one of them makes exactly the exports that hold it
+ * stale. Kept until the export's files are deleted, so an erasure is
+ * known unfinished while a file still holds what it took.
+ */
+export const exportSources = sqliteTable(
+  "export_sources",
+  {
+    export: text()
+      .notNull()
+      .references(() => exportsTable.id),
+    subject: text().notNull(),
+    version: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.export, table.subject, table.version] }),
+    // An erasure finds the exports holding what it names.
+    index("export_sources_subject_idx").on(table.subject, table.version),
+  ]
+);
+
+/** A part of an export, as written: its SHA-256 and how many versions it holds. */
+export const exportParts = sqliteTable(
+  "export_parts",
+  {
+    export: text()
+      .notNull()
+      .references(() => exportsTable.id),
+    part: integer().notNull(),
+    hash: text().notNull(),
+    versions: integer().notNull(),
+    /** Its size in bytes, as written. */
+    bytes: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.export, table.part] })]
+);
+
+/**
+ * A restore of a company export into the shared store: how far it has
+ * checked and written its export's parts (each part's hash, size and count
+ * are rows of `export_parts`, written as it started, so no value grows
+ * with how many parts there are), and how many versions it restored.
+ */
+export const restores = sqliteTable("restores", {
+  export: text().primaryKey(),
+  /** Parts checked so far, in a first pass before anything is written. */
+  checked: integer().notNull(),
+  /** Whether a part checked so far failed: the restore fails once all are checked. */
+  damaged: integer({ mode: "boolean" }).notNull().default(false),
+  /**
+   * When it failed: the last version's row the store held then. A restart
+   * is refused once anything was added past it.
+   */
+  heldTo: integer("held_to"),
+  /** The next part to write, once every part is checked. */
+  part: integer().notNull(),
+  restored: integer().notNull(),
+  state: text({ enum: ["running", "done", "failed", "abandoned"] }).notNull(),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+});
+
+/**
+ * The sweep of export files the store has no record of (exports.ts
+ * `sweepWork`): the last erasure (`erasures.rowid`) its pass was started
+ * for, and where its listing of `exports/` goes on (null once it is
+ * through), saved after each key; and the last erasure every export was
+ * checked against. One row at most. A store whose rows were lost, or
+ * rolled back, replays its ledger into `erasures` past both, so both are
+ * due again.
+ */
+export const exportSweep = sqliteTable(
+  "export_sweep",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+    /** The last erasure every export was checked against (`staleSql`). */
+    checked: integer().notNull().default(0),
+    cursor: text(),
+  },
+  () => [check("export_sweep_one", sql.raw("id = 1"))]
+);
+
 // Memories and entities (memories.ts, entities.ts). A memory is written
 // once and never changed but for the moment it is retired: what ends it
 // otherwise is a newer memory of its lineage, read as such per reader, so

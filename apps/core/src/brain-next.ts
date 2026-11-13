@@ -6,6 +6,8 @@ import {
   erasedSource,
   listPageMax,
   erasureReasons,
+  exportFileNameSchema,
+  exportIdSchema,
   handOversMax,
   instructionsMaxLength,
   instructionsTextSchema,
@@ -17,6 +19,8 @@ import {
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
+  refusalPrefix,
+  restoringNow,
   personalBrainOf,
   storeBytesMax,
   storeKindOf,
@@ -27,6 +31,7 @@ import type {
   Brain,
   ErasureReason,
   Embedders,
+  ExportStatus,
   KeyState,
   HandOverPriority,
   HandOverResult,
@@ -36,12 +41,14 @@ import type {
   PackItem,
   Reader,
   RecallRequest,
+  RestoreStatus,
   SourceId,
   StepFailure,
   WayCounts,
   WorkOverview,
 } from "@grasp-os/brain-next/contract";
 import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
+import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import {
   brainReportSchema,
   brainSearchWays,
@@ -106,6 +113,22 @@ import type { SkillCardText } from "./skill-cards.ts";
 // a source nobody can reach would be added without a word. Every string is
 // well-formed (the Brain's own rule, `wellFormedString`), so no two become
 // one once encoded.
+
+/**
+ * `add`, its refusal while the Brain restores an export (contract.ts
+ * `restoringNow`) answered as `brain.restoring`: a code a producer makes
+ * the add again for, later, as after any failure of an add.
+ */
+const whileNotRestoring = async <T>(add: () => Promise<T>): Promise<T> => {
+  try {
+    return await add();
+  } catch (error) {
+    if (error instanceof Error && error.message === restoringNow) {
+      throw brainExportErrors.create("brain.restoring");
+    }
+    throw error;
+  }
+};
 
 /** A team's group name starts with this; the rest is the team's ID. */
 const teamPrefix = "team:";
@@ -505,18 +528,21 @@ export const addSource = async (
   let version: number;
   let newer: true | undefined;
   try {
-    ({ version, newer } = await keptIn(
-      env,
-      key,
-      access,
-      async (store) =>
-        await store.addSource({
-          source: key,
-          change,
-          text,
+    ({ version, newer } = await whileNotRestoring(
+      async () =>
+        await keptIn(
+          env,
+          key,
           access,
-          ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
-        })
+          async (store) =>
+            await store.addSource({
+              source: key,
+              change,
+              text,
+              access,
+              ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
+            })
+        )
     ));
   } catch (error) {
     // The Brain's own refusals of what an erasure closed, by their whole
@@ -901,6 +927,116 @@ export const erasePerson = async (
   return "erased";
 };
 
+// Exports and restores (@grasp-os/brain-next exports.ts, restore.ts): the
+// company's Brain, for an admin; core's route checks who asks
+// (brain-next-exports.ts). A person's own export is for later, with the
+// store per person.
+
+const exportRefSchema = z.strictObject({ id: exportIdSchema });
+
+/** An export, by its id. */
+export type ExportRef = z.infer<typeof exportRefSchema>;
+
+const exportFileRefSchema = exportRefSchema.extend({
+  file: exportFileNameSchema,
+});
+
+/** A file of an export, by its id and name. */
+export type ExportFileRef = z.infer<typeof exportFileRefSchema>;
+
+type ExportEnv = Pick<
+  Env,
+  "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION" | "CLIENT_ID"
+>;
+
+/**
+ * The deployment an export is of, as its manifest names it: the client
+ * the admin deployed, or `local` where none is set (local development and
+ * on-prem, a deployment of its own). A restore refuses another's. On-prem
+ * every install is `local`, so there the check tells little: an export
+ * moved from one install's bucket to another's would pass it.
+ */
+const deploymentOf = (env: Pick<Env, "CLIENT_ID">): string =>
+  env.CLIENT_ID ?? "local";
+
+/**
+ * Starts an export of the company's Brain, or answers with the one being
+ * written. Refused as `brain.export_refused` while a restore runs.
+ */
+export const startBrainExport = async (
+  env: ExportEnv
+): Promise<{ id: string }> => {
+  try {
+    return await brain(env).startExport(deploymentOf(env));
+  } catch (error) {
+    // Refused for the state the Brain is in (a restore runs).
+    if (error instanceof Error && error.message.startsWith(refusalPrefix)) {
+      throw brainExportErrors.create("brain.export_refused");
+    }
+    throw error;
+  }
+};
+
+/** Where export `ref` is: null when there is none. */
+export const brainExportStatus = async (
+  env: ExportEnv,
+  ref: ExportRef
+): Promise<ExportStatus | null> =>
+  await brain(env).exportStatus(checked(exportRefSchema, ref));
+
+/**
+ * A file of done export `ref`: null for any other, alike, and for one the
+ * ledger made stale.
+ */
+export const brainExportFile = async (
+  env: ExportEnv,
+  ref: ExportFileRef
+): Promise<string | null> => {
+  // A name the Brain's one rule of an export's files doesn't take names
+  // no file: answered as such.
+  const asked = exportFileRefSchema.safeParse(ref);
+  return asked.success ? await brain(env).exportFile(asked.data) : null;
+};
+
+/**
+ * Starts restoring the company's export `exportId` into the shared store,
+ * which must hold nothing, the erasure ledger applied over all it brings
+ * back; nothing is added to the store while it runs. `prepare` runs once
+ * the Brain says the restore may start, before it does (core's route
+ * installs Grasp's own skills there), and answers whether it is done: when
+ * it isn't, the restore doesn't start, refused as
+ * `brain.restore_unprepared`, to try again. A restore the Brain won't start (the store holds something, one is under way, or no whole
+ * export of this deployment's company has that id) is refused as
+ * `brain.restore_refused`. For an admin only: core's route checks.
+ */
+export const startBrainRestore = async (
+  env: ExportEnv,
+  exportId: string,
+  prepare?: () => Promise<boolean>
+): Promise<RestoreStatus> => {
+  const id = checked(exportIdSchema, exportId);
+  try {
+    // Checked first, so `prepare` runs only for a restore that may start.
+    await brain(env).checkRestore(id, deploymentOf(env));
+    if (prepare !== undefined && !(await prepare())) {
+      throw brainExportErrors.create("brain.restore_unprepared");
+    }
+    return await brain(env).startRestore(id, deploymentOf(env));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(refusalPrefix)) {
+      throw brainExportErrors.create("brain.restore_refused");
+    }
+    throw error;
+  }
+};
+
+/** Where the restore of the company's export `exportId` is: null when none was started. */
+export const brainRestoreStatus = async (
+  env: BrainEnv,
+  exportId: string
+): Promise<RestoreStatus | null> =>
+  await brain(env).restoreStatus(checked(exportIdSchema, exportId));
+
 // Instruction files: what people write for every chat to start with (the
 // company's instructions and lasting facts, a person's own file, an App's
 // and an agent's), each a source of its own under `instructions:`, kept
@@ -1033,17 +1169,20 @@ export const addInstructionFile = async (
   const { file, change } = checked(newInstructionsSchema, added);
   const access = instructionAccessOf(file);
   const key = instructionKeyOf(file);
-  const { version } = await keptIn(
-    env,
-    key,
-    access,
-    async (store) =>
-      await store.addInstructions({
-        source: key,
-        change,
-        text: added.text,
+  const { version } = await whileNotRestoring(
+    async () =>
+      await keptIn(
+        env,
+        key,
         access,
-      })
+        async (store) =>
+          await store.addInstructions({
+            source: key,
+            change,
+            text: added.text,
+            access,
+          })
+      )
   );
   return { file, version };
 };
@@ -1236,12 +1375,15 @@ export const addShippedSkill = async (
   if (current?.text === text) {
     return { ...skill, version: current.version, changed: false };
   }
-  const { version } = await brain(env).addInstructions({
-    source,
-    change,
-    text,
-    access: skillAccess,
-  });
+  const { version } = await whileNotRestoring(
+    async () =>
+      await brain(env).addInstructions({
+        source,
+        change,
+        text,
+        access: skillAccess,
+      })
+  );
   return { ...skill, version, changed: true };
 };
 
