@@ -1096,8 +1096,28 @@ const calledOf = async (
   return result.ok ? result.value : { failed: result.error.code };
 };
 
-/** What a run's recall handed on: its items' texts, joined. */
-const joinedTexts = "recalled.items.map((item) => item.text).join(' | ')";
+/**
+ * What a run's recall handed on of the question's word: each item holding
+ * it, by any way it was found, as that way and its text, joined. Every
+ * passage of a test's company (`company`) holds its word, the ones its
+ * run may not read included; what else everyone may read, which earlier
+ * tests added, comes back by meaning too and is left out, so the joined
+ * text stays within a decision's prompt.
+ */
+const joinedTexts =
+  "recalled.items.filter((item) => item.text.includes(args.question)).map((item) => item.found + ': ' + item.text).join(' | ')";
+
+/**
+ * `joined` (`joinedTexts`) as the items it names: each way found by words
+ * or an exact part written as "by its word" (which one depends on whether
+ * the random word holds two digits), by meaning as is.
+ */
+const byWay = (joined: unknown): string[] =>
+  typeof joined === "string"
+    ? joined
+        .split(" | ")
+        .map((each) => each.replace(/^(?:words|exact): /u, "by its word: "))
+    : [String(joined)];
 
 /**
  * A workflow of `by`'s that recalls its args' question, its `brain`
@@ -1207,10 +1227,13 @@ describe("what code recalls, passed on", setUpTime, () => {
     const ran = await ranOf(uma, workflow.id, { question: word, tokens: 800 });
     expect({
       ran: z.object({ failed: z.unknown() }).safeParse(ran).success,
-      benReads: await calledOf(notes, ben, "notes.titles", {}),
+      benReads: z
+        .array(z.string())
+        .parse(await calledOf(notes, ben, "notes.titles", {}))
+        .flatMap(byWay),
     }).toStrictEqual({
       ran: false,
-      benReads: [`For everyone: ${word} is in the handbook.`],
+      benReads: [`by its word: For everyone: ${word} is in the handbook.`],
     });
   });
 
@@ -1266,6 +1289,8 @@ describe("what code recalls, passed on", setUpTime, () => {
       },
       { timeout: 20_000, interval: 100 }
     );
-    expect(asked).toBe(`For everyone: ${word} is in the handbook.`);
+    expect(byWay(asked)).toStrictEqual([
+      `by its word: For everyone: ${word} is in the handbook.`,
+    ]);
   });
 });
