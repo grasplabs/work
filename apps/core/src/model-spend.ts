@@ -1,5 +1,6 @@
 import { graspAi } from "@grasp-os/shared/ai-providers";
 import type { AuditActor } from "@grasp-os/shared/audit";
+import type { BrainModelSpend } from "@grasp-os/shared/brain-report";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import { modelSpendListed } from "@grasp-os/shared/models";
 import type { Authority } from "@grasp-os/shared/permissions";
@@ -378,6 +379,50 @@ export interface PlatformSpendByPeriod {
   model: string;
   micros: number;
 }
+
+/**
+ * What makes a call's purpose the Brain's: its first segment is `brain`
+ * (`brain.recall_analysis`, `brain.extract.check`). A purpose is
+ * lowercase segments joined by dots (models.ts `purposePattern`), so a
+ * new Brain purpose is counted without a change here, and no other
+ * purpose (`chat.turn`, `brainstorm.x`) can match.
+ */
+export const brainPurposePrefix = "brain.";
+
+const isBrainPurpose = sql`substr(${modelUsage.purpose}, 1, ${brainPurposePrefix.length}) = ${brainPurposePrefix}`;
+
+/**
+ * What the Brain's model calls used in `month`, by purpose, as the
+ * gateway recorded each answered request (model-usage.ts): calls, tokens
+ * and US dollars at list prices, on whichever key, the dearest first.
+ * Totals only: nothing of who asked or what was said. The Brain keeps no
+ * figures of its own.
+ */
+export const brainSpendByPurpose = async (
+  env: Pick<Env, "DB">,
+  month: string
+): Promise<BrainModelSpend> => {
+  const cost = sql<number>`sum(${modelUsage.cost})`;
+  const rows = await drizzle(env.DB)
+    .select({
+      purpose: modelUsage.purpose,
+      calls: count(),
+      inputTokens: sql<number>`sum(${modelUsage.inputTokens})`,
+      outputTokens: sql<number>`sum(${modelUsage.outputTokens})`,
+      cost,
+    })
+    .from(modelUsage)
+    .where(and(eq(modelUsage.period, month), isBrainPurpose))
+    .groupBy(modelUsage.purpose)
+    .orderBy(desc(cost), modelUsage.purpose);
+  return {
+    month,
+    purposes: rows.flatMap(({ purpose, ...used }) =>
+      // Never expected: the query keeps only rows with a Brain purpose.
+      purpose === null ? [] : [{ purpose, ...used }]
+    ),
+  };
+};
 
 /**
  * What Grasp's own features cost on its keys in each of `periods`, by
