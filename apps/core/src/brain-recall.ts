@@ -2,15 +2,14 @@ import type { BrainPack } from "@grasp-os/runtime/app";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
-import { teamIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
+import { storedTeamsOf } from "./brain-grant-teams.ts";
 import { codeRecallOf, recallAs } from "./brain-next.ts";
 import { permissions } from "./db/core/schema.ts";
 import { authorize } from "./permissions.ts";
@@ -81,12 +80,11 @@ export interface RecallCaller {
 export const isBrainRecall = (input: unknown): boolean =>
   codeRecallOf(input) !== undefined;
 
-const storedTeamsSchema = z.array(teamIdSchema).nullable();
-
 /**
  * The teams App grant `permissionId` reaches (`teams` on its row), none
- * when it names none; a stored value that isn't a list of team IDs is
- * refused, never read as more. Set as the grant is asked for and never
+ * when it names none. A stored value that isn't a list of team IDs is
+ * refused (`permission.denied`), never read as more nor as less (threat
+ * model on GRA-1842, item 7). Set as the grant is asked for and never
  * changed, so reading it after `authorize` reads what was authorized.
  */
 const grantTeamsOf = async (
@@ -98,7 +96,11 @@ const grantTeamsOf = async (
     .from(permissions)
     .where(eq(permissions.id, permissionId))
     .get();
-  return storedTeamsSchema.parse(row?.teams ?? null) ?? [];
+  const teams = storedTeamsOf(row?.teams ?? null);
+  if (teams === undefined) {
+    throw permissionErrors.create("permission.denied", { action: "brain" });
+  }
+  return teams;
 };
 
 /** `error` in the function host's words, which carry nothing of the call. */

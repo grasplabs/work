@@ -73,6 +73,7 @@ import {
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
+import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
 import { personOf, requireOfferedConnection } from "./connections.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
@@ -181,7 +182,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: "platform",
         resource: null,
-        teams: object.teams ?? null,
+        teams: object.teams === undefined ? null : JSON.stringify(object.teams),
       };
     }
     default: {
@@ -223,7 +224,11 @@ const objectOf = (row: Row): PermissionObject => {
     case "platform": {
       return permissionObjectSchema.parse({
         type: row.objectType,
-        ...(row.teams === null ? {} : { teams: row.teams }),
+        // A malformed value as the team nobody is in: shown and checked
+        // closed, and no one else's listing breaks on it.
+        ...(row.teams === null
+          ? {}
+          : { teams: storedTeamsOf(row.teams) ?? [unreadableTeam] }),
       });
     }
     default: {
@@ -888,7 +893,7 @@ const auditDetailSql = sql`json_patch(
       CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('function', ${permissions.resource}) END
     )
     WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
-    WHEN 'platform' THEN CASE WHEN ${permissions.teams} IS NULL THEN '{}' ELSE json_object('teams', json_array_length(${permissions.teams})) END
+    WHEN 'platform' THEN CASE WHEN ${permissions.teams} IS NULL THEN '{}' WHEN json_valid(${permissions.teams}) AND json_type(${permissions.teams}) = 'array' THEN json_object('teams', json_array_length(${permissions.teams})) ELSE json_object('teams', -1) END
     ELSE '{}'
   END
 )`;

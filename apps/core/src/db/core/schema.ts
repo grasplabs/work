@@ -616,12 +616,13 @@ export const permissions = sqliteTable(
      */
     personal: integer({ mode: "boolean" }).notNull().default(false),
     /**
-     * The teams an App's `brain` permission reaches, by ID (JSON array,
-     * `PermissionObject`'s `teams`); null for every other permission, and
-     * for a `brain` one that reaches the company alone. Set as it is
-     * asked for, never changed after.
+     * The teams an App's `brain` permission reaches, by ID: a JSON array
+     * as text (`PermissionObject`'s `teams`), read with `storedTeamsOf`
+     * (brain-grant-teams.ts) so a malformed row breaks no one else's read;
+     * null for every other permission, and for a `brain` one that reaches
+     * the company alone. Set as it is asked for, never changed after.
      */
-    teams: text({ mode: "json" }).$type<string[]>(),
+    teams: text(),
   },
   (table) => [
     index("permissions_subject_idx").on(

@@ -1,6 +1,6 @@
 import { collections } from "@grasp-os/brain/schema";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
-import { appIdSchema, teamIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
@@ -8,6 +8,7 @@ import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import {
   apps as appsTable,
@@ -110,21 +111,9 @@ export const readerOf = (
 
 const actionsSchema = z.array(z.string());
 
-/** A Brain grant's teams as stored (`teams`): IDs, or none. */
-const teamsSchema = z.array(teamIdSchema).nullable();
-
-/**
- * A team nobody is in: what a stored `teams` that isn't team IDs counts
- * as, so the App holding it is closed to everyone (fail closed), and no
- * other App's check is broken by it.
- */
-const unreadableTeam = "*";
-
 /** The teams a stored `teams` value names; `unreadableTeam` for one that doesn't read as IDs. */
-const teamsIn = (stored: unknown): string[] => {
-  const parsed = teamsSchema.safeParse(stored);
-  return parsed.success ? (parsed.data ?? []) : [unreadableTeam];
-};
+const teamsIn = (stored: string | null): string[] =>
+  storedTeamsOf(stored) ?? [unreadableTeam];
 
 /**
  * The graph of calls between Apps is walked this deep, and this wide, and
@@ -573,7 +562,7 @@ export const sourcesOfApps = async (
       id,
       actions,
       teams,
-    }: { object: string; id: string; actions: string; teams: unknown }
+    }: { object: string; id: string; actions: string; teams: string | null }
   ): void => {
     if (object === "platform") {
       for (const team of teamsIn(teams)) {

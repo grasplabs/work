@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { anyTeamGrant } from "../src/app-provenance.ts";
 import { indexApps } from "../src/knowledge/apps-collection.ts";
 import { commitApp } from "./app-definitions.ts";
 import { grantReviewed, release, requestGranted } from "./apps.ts";
@@ -526,6 +527,40 @@ describe("who finds an App", setUpTime, () => {
         entriesFound(inTeam.knowledge, word),
       ])
     ).resolves.toStrictEqual(["app.unreadable", [], [entryPath(app.id)]]);
+  });
+
+  it("closes only the App whose stored Brain teams aren't JSON, keeping every other App's search and listing for admins", async () => {
+    const admin = await personOf("admin");
+    const owner = await personOf("builder");
+    const word = term();
+    const [broken, healthy] = await Promise.all([
+      releasedApp(owner, agentsMd(word)),
+      releasedApp(owner, agentsMd(word)),
+    ]);
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'TEAM_BRAIN', 'active', 'test', 0, 'test', 0, 'not json')"
+    )
+      .bind(crypto.randomUUID(), broken.id)
+      .run();
+    const adminApps = await admin.api.apps.list();
+    await expect(
+      Promise.all([
+        entriesFound(admin.knowledge, word),
+        outcome(admin.api.apps.get(broken.id)),
+        outcome(owner.api.apps.get(broken.id)),
+        anyTeamGrant(env),
+      ])
+    ).resolves.toStrictEqual([
+      [entryPath(healthy.id)],
+      "app.unreadable",
+      "app.unreadable",
+      true,
+    ]);
+    expect(
+      [broken.id, healthy.id].map((id) =>
+        adminApps.some((app) => app.id === id)
+      )
+    ).toStrictEqual([true, true]);
   });
 
   it("doesn't name an App through a link to its entry", async () => {

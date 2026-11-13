@@ -4,6 +4,7 @@ import { readDefinition } from "@grasp-os/runtime/definition";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import {
+  appIdSchema,
   permissionIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -1758,6 +1759,35 @@ describe("an App whose grant names teams", setUpTime, () => {
       naming: refused,
       run: { failed: "permission.team_brain_workflow" },
     });
+  });
+
+  it("refuses a recall under a grant whose stored teams aren't JSON, never reading it as less or more", async () => {
+    const { word, ada } = await company();
+    const appId = appIdSchema.parse(`app-${crypto.randomUUID()}`);
+    const grant = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?, 'not json')"
+    )
+      .bind(grant, appId, ada.userId, Date.now())
+      .run();
+    const authority = authoritySchema.parse({
+      subject: { type: "app", appId },
+      onBehalfOf: ada.userId,
+      mode: "interactive",
+      appVersion: 1,
+    });
+    await expect(
+      recallFor(
+        env,
+        {
+          authority,
+          context: { type: "app", appId },
+          permissionId: permissionIdSchema.parse(grant),
+          actor: { type: "system" },
+        },
+        requestOf(word)
+      )
+    ).rejects.toMatchObject({ code: "permission.denied" });
   });
 
   it("closes only the App whose stored teams don't read as teams, never another's listing", async () => {
