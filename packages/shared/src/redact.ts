@@ -94,8 +94,9 @@ const credentials: readonly (readonly [
 // Only the values of those parameters change, found by their offsets in
 // one pass (never searched for, which a link of many pairs would make
 // quadratic): a link with none comes back byte for byte as it was, one
-// with some comes back decoded with those values replaced, and a word
-// outside a link (`R&D`, `code=42`) is never one. JSON escapes are not decoded: what is redacted (a tool's
+// with some comes back as the URL standard serializes it (percent-encoded,
+// so no character a reference stood for breaks out of what held the
+// link), and a word outside a link (`R&D`, `code=42`) is never one. JSON escapes are not decoded: what is redacted (a tool's
 // output as JSON text, a chat's text) holds `&` as itself.
 // Not caught: a credential in a URL's path, and an opaque download URL
 // that grants by its whole self. What is left is bounded: such text
@@ -135,12 +136,14 @@ const decoded = (component: string): string => {
  * link, whatever its pairs hold.
  */
 const redactedQuery = (link: string, nested: boolean): string | undefined => {
+  // The query is what lies between the first `?` and the first `#`: a `?`
+  // after the `#` is the fragment's.
+  const hash = link.indexOf("#");
+  const end = hash === -1 ? link.length : hash;
   const query = link.indexOf("?");
-  if (query === -1 || !URL.canParse(link)) {
+  if (query === -1 || query > end || !URL.canParse(link)) {
     return undefined;
   }
-  const hash = link.indexOf("#", query);
-  const end = hash === -1 ? link.length : hash;
   let out = "";
   // Written up to here; the pair being read starts at `start`, its `=` at `equals`.
   let written = 0;
@@ -172,18 +175,43 @@ const redactedQuery = (link: string, nested: boolean): string | undefined => {
   return written === 0 ? undefined : out + link.slice(written);
 };
 
+/** A character no link holds as written: what ends one (`linkPattern`). */
+const outsideLink = /[\s"'<>\\^`{|}]/gu;
+
+/**
+ * `link` (decoded, its granting values replaced) as the URL standard
+ * writes it: its query by the `application/x-www-form-urlencoded`
+ * serializer (every character but letters, digits and `*-._`
+ * percent-encoded, so `[redacted]` reads `%5Bredacted%5D`), the whole by
+ * `URL`'s `href` (its host lower-cased, an IDN as punycode, a path
+ * normalised: fine for a link whose secret was just removed). What the
+ * path's and the fragment's rules leave raw that no link holds (a `\` or
+ * a `'`) is percent-encoded too. So a character a reference stood for
+ * (`&quot;`, `&lt;`, `&#32;`, `&#92;`) never comes back raw: nothing
+ * outside the link (an HTML attribute, a JSON string, a Markdown link) is
+ * broken out of.
+ */
+const serialized = (link: string): string => {
+  const url = new URL(link);
+  url.search = url.searchParams.toString();
+  // `encodeURIComponent` leaves `'` as it is, one of its unreserved marks.
+  return url.href.replace(outsideLink, (char) =>
+    char === "'" ? "%27" : encodeURIComponent(char)
+  );
+};
+
 /**
  * `text` with the granting parameters of every link in it redacted: each
  * link's character references decoded as a browser reads an `href`, the
- * result parsed and only those values replaced. A link with nothing to
- * redact is left exactly as it was written; one with something is written
- * back as decoded (its `&amp;` as `&`), the rest of it unchanged.
+ * result parsed and only those values replaced, and written back as the
+ * URL standard serializes it (`serialized`). A link with nothing to redact
+ * is left exactly as it was written.
  */
 const redactLinks = (text: string): string =>
-  text.replace(
-    linkPattern,
-    (link) => redactedQuery(decodeHTMLAttribute(link), true) ?? link
-  );
+  text.replace(linkPattern, (link) => {
+    const redacted = redactedQuery(decodeHTMLAttribute(link), true);
+    return redacted === undefined ? link : serialized(redacted);
+  });
 
 /** `text` with every credential in it ({@link credentials}) redacted. */
 export const redact = (text: string): string => {

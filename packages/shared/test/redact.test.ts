@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { redact } from "../src/redact.ts";
 
@@ -19,13 +20,13 @@ describe("redacting credentials", () => {
         "https://acme.zoom.us/j/123456789?pwd=QWxhZGRpbjpvcGVu",
       ].map(redact)
     ).toStrictEqual([
-      "https://bucket.s3.amazonaws.com/q.pdf?X-Amz-Expires=300&X-Amz-Signature=[redacted]&x-id=GetObject",
-      "https://storage.googleapis.com/b/q.pdf?X-Goog-Date=20261112&x-goog-signature=[redacted]",
-      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024-11-04&se=2026-11-13&sig=[redacted]",
-      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=[redacted]&Key-Pair-Id=K2JCJMDEHXQW5F",
-      "https://storage.googleapis.com/b/q.pdf?GoogleAccessId=svc@acme.iam&Expires=1795000000&Signature=[redacted]",
-      "https://acme.sharepoint.com/_layouts/15/download.aspx?UniqueId=abc&tempauth=[redacted]",
-      "https://acme.zoom.us/j/123456789?pwd=[redacted]",
+      "https://bucket.s3.amazonaws.com/q.pdf?X-Amz-Expires=300&X-Amz-Signature=%5Bredacted%5D&x-id=GetObject",
+      "https://storage.googleapis.com/b/q.pdf?X-Goog-Date=20261112&x-goog-signature=%5Bredacted%5D",
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024-11-04&se=2026-11-13&sig=%5Bredacted%5D",
+      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=%5Bredacted%5D&Key-Pair-Id=K2JCJMDEHXQW5F",
+      "https://storage.googleapis.com/b/q.pdf?GoogleAccessId=svc%40acme.iam&Expires=1795000000&Signature=%5Bredacted%5D",
+      "https://acme.sharepoint.com/_layouts/15/download.aspx?UniqueId=abc&tempauth=%5Bredacted%5D",
+      "https://acme.zoom.us/j/123456789?pwd=%5Bredacted%5D",
     ]);
   });
 
@@ -36,7 +37,7 @@ describe("redacting credentials", () => {
       )
     ).toBe(
       // Written back decoded where something was redacted.
-      '<a href="https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=[redacted]&Key-Pair-Id=K2J">Quote</a> <a href="https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=[redacted]">Q</a>'
+      '<a href="https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=%5Bredacted%5D&Key-Pair-Id=K2J">Quote</a> <a href="https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=%5Bredacted%5D">Q</a>'
     );
   });
 
@@ -51,9 +52,9 @@ describe("redacting credentials", () => {
         `https://app.acme.test/out?to=${encodeURIComponent(target)}`,
       ].map(redact)
     ).toStrictEqual([
-      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=[redacted]",
-      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=[redacted]",
-      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=[redacted]",
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=%5Bredacted%5D",
+      "https://d111.cloudfront.net/q.pdf?Expires=1795000000&Signature=%5Bredacted%5D",
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=%5Bredacted%5D",
       `https://app.acme.test/out?to=${encodeURIComponent(
         "https://bucket.s3.amazonaws.com/q.pdf?x=1&X-Amz-Signature=[redacted]"
       )}`,
@@ -63,15 +64,45 @@ describe("redacting credentials", () => {
   it("redacts the parameter itself, never a look-alike inside another's value", () => {
     expect(
       redact("https://h.example/f?x=a=SECRET&#59;&sig=SECRET&y=sig=1")
-    ).toBe("https://h.example/f?x=a=SECRET;&sig=[redacted]&y=sig=1");
+    ).toBe("https://h.example/f?x=a%3DSECRET%3B&sig=%5Bredacted%5D&y=sig%3D1");
   });
 
   it("reads a megabyte link of many pairs, each holding a reference, in one pass", () => {
     const pairs = 125_000;
     const link = `https://h.example/x?${"a=&#59;&".repeat(pairs)}sig=S`;
     expect(redact(`<a href="${link}">x</a>`)).toBe(
-      `<a href="https://h.example/x?${"a=;&".repeat(pairs)}sig=[redacted]">x</a>`
+      `<a href="https://h.example/x?${"a=%3B&".repeat(pairs)}sig=%5Bredacted%5D">x</a>`
     );
+  });
+
+  it("writes a redacted link back percent-encoded, so nothing it decoded breaks out of what held it", () => {
+    const attribute =
+      '<a href="https://h/?sig=S&amp;q=&quot;&#32;onmouseover&#61;alert(1)&#32;x&#61;&quot;">t</a> after &amp; more';
+    const json = [
+      JSON.stringify({ u: "https://h/?sig=S&amp;q=&quot;&#92;", n: 1 }),
+      JSON.stringify({
+        u: "https://h/?sig=S&amp;q=&quot;,&quot;admin&quot;:true,&quot;x&quot;:&quot;",
+      }),
+    ];
+    const redactedAttribute = redact(attribute);
+    const href = /href="(?<link>[^"]*)"/u.exec(redactedAttribute)?.groups?.link;
+
+    expect({
+      // The attribute ends where it did, and the text after it is as it was.
+      attribute: redactedAttribute.endsWith('">t</a> after &amp; more'),
+      href,
+      rawInLink: /[\s"<>]/u.test(href ?? ""),
+      // Each JSON text still parses, to the same keys.
+      json: json.map((text) => {
+        const parsed: unknown = JSON.parse(redact(text));
+        return Object.keys(z.record(z.string(), z.unknown()).parse(parsed));
+      }),
+    }).toStrictEqual({
+      attribute: true,
+      href: "https://h/?sig=%5Bredacted%5D&q=%22+onmouseover%3Dalert%281%29+x%3D%22",
+      rawInLink: false,
+      json: [["u", "n"], ["u"]],
+    });
   });
 
   it("leaves a link with nothing to redact, and prose, exactly as they were", () => {
@@ -93,8 +124,8 @@ describe("redacting credentials", () => {
     expect(large.map((text) => redact(text).length)).toStrictEqual([
       large[0]?.length,
       large[1]?.length,
-      "https://acme.test/q?sig=[redacted]".length,
-      "https://acme.test/q?x=1&Signature=[redacted] ".length * 30_000,
+      "https://acme.test/q?sig=%5Bredacted%5D".length,
+      "https://acme.test/q?x=1&Signature=%5Bredacted%5D ".length * 30_000,
     ]);
   });
 
@@ -105,7 +136,7 @@ describe("redacting credentials", () => {
         '{"statusCode": 404, "zipcode": "1012 AB", "code": "INVOICE_LATE"}',
       ].map(redact)
     ).toStrictEqual([
-      "https://app.acme.test/callback?code=[redacted]&state=xyz",
+      "https://app.acme.test/callback?code=%5Bredacted%5D&state=xyz",
       '{"statusCode": 404, "zipcode": "1012 AB", "code": "INVOICE_LATE"}',
     ]);
   });
