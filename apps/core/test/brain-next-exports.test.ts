@@ -513,6 +513,48 @@ describe(
       });
     });
 
+    // A person is told their latest attempt failed: the status is their most
+    // recent export, whatever its state, never an older finished one.
+    it("shows a person their latest export when it failed, not an older one that finished", async () => {
+      const member = await signedInWithRole(idp, "user");
+      await addSource(env, {
+        source: { producer: "upload", id: crypto.randomUUID() },
+        change: "1",
+        text: "Mine alone",
+        readers: { kind: "owner", personId: member.userId },
+      });
+      const first = await ownExported(member.session, member.userId);
+      // The next one finds the file it is to read gone: it fails.
+      const started = await request(member.session, brainOwnExportPath, {
+        method: "POST",
+      });
+      const { id: second } = startedSchema.parse(await started.json());
+      const sources = await env.BRAIN_OBJECTS.list({
+        prefix: `people/${await sha256(member.userId)}/sources/`,
+      });
+      await env.BRAIN_OBJECTS.delete(sources.objects.map(({ key }) => key));
+      const store = inJurisdiction(env, env.BRAIN_STORE).getByName(
+        `person:${member.userId}`
+      );
+      for (let alarms = 0; alarms < 10; alarms += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- an alarm at a time
+        const shown = await ownStatusOf(member.session);
+        if (shown?.state !== "writing") {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- an alarm at a time
+        await runDurableObjectAlarm(store);
+      }
+      const shown = await ownStatusOf(member.session);
+      expect({
+        older: first !== second,
+        shown: [shown?.id === second, shown?.state, shown?.files],
+      }).toStrictEqual({
+        older: true,
+        shown: [true, "failed", []],
+      });
+    });
+
     // GRA-1839 threat 6 and the acceptance criterion: by listing the bucket.
     it("leaves no file of a person's own export in the bucket once they are erased", async () => {
       const member = await signedInWithRole(idp, "user");

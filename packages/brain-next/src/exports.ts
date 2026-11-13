@@ -850,17 +850,15 @@ export const exportStatus = (
 };
 
 /**
- * The export a person's own store shows its person: the one being
- * written, else the one done, else the latest started; null when none was
+ * The export a person's own store shows its person: their most recent one
+ * by its start, whatever came of it, so a latest attempt that failed is
+ * said, never hidden behind an older one that finished; null when none was
  * ever started. A stale one says it was erased (`stateOf`).
  */
 export const latestExportStatus = (sql: SqlStorage): ExportStatus | null => {
   const latest = sql
     .exec<{ id: string }>(
-      `SELECT id FROM exports
-      ORDER BY CASE state WHEN 'writing' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,
-        started_at DESC, rowid DESC
-      LIMIT 1`
+      "SELECT id FROM exports ORDER BY started_at DESC, rowid DESC LIMIT 1"
     )
     .toArray()
     .at(0);
