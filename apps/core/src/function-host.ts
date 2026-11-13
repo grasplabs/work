@@ -86,7 +86,11 @@ import { z } from "zod";
 import type { PeopleNotifications } from "./app-notifications.ts";
 import { answerPeople } from "./app-people.ts";
 import type { PeopleAccess } from "./app-people.ts";
-import { brainPackSchema } from "./brain-pack.ts";
+import {
+  brainPackSchema,
+  brainSkillsSelectedSchema,
+  brainSkillTextSchema,
+} from "./brain-pack.ts";
 import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
 import { CallTree } from "./call-tree.ts";
 import type { RunnerCall } from "./call-tree.ts";
@@ -1861,6 +1865,13 @@ const returnsDeclared = (
   return shape !== undefined && isNormalized(shape.returns, result);
 };
 
+/** What each of the Brain's operations answers code. */
+const brainResults: Readonly<Record<string, z.ZodType>> = {
+  recall: brainPackSchema,
+  "skills.select": brainSkillsSelectedSchema,
+  "skills.read": brainSkillTextSchema,
+};
+
 /**
  * What a permission answered, if its contract allows it: AI's text, or the
  * value the request asked for; the Brain's hits or document; a guest
@@ -1882,7 +1893,9 @@ const checkedResourceResult = (
         ? typeof result === "string"
         : isNormalized(output, result);
   } else if (declaration["~permission"] === "brain") {
-    valid = method === "recall" && brainPackSchema.safeParse(result).success;
+    valid =
+      Object.hasOwn(brainResults, method) &&
+      brainResults[method]?.safeParse(result).success === true;
   } else if (declaration["~permission"] === "guests") {
     valid =
       (method === "invite" ||

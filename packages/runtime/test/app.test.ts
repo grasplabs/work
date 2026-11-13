@@ -660,6 +660,41 @@ describe("the App's permissions in a function's context", () => {
     ]);
   });
 
+  test("the Brain's skill operations are members of `skills`, each sending its operation, and only the declared ones are members", async () => {
+    const reach = server.action({
+      args: {},
+      handler: async (ctx) => {
+        const brain = loose(Reflect.get(ctx, "brain"));
+        const skills = loose(Reflect.get(brain, "skills"));
+        await loose(Reflect.get(skills, "select"))({ task: "refunds" });
+        return {
+          brain: shapeOf(brain),
+          skills: shapeOf(skills),
+          read: typeof Reflect.get(skills, "read"),
+        };
+      },
+    });
+    const registered = notes(
+      {
+        permissions: {
+          brain: permission.brain({ operations: ["recall", "skills.select"] }),
+        },
+      },
+      { notes: { reach } }
+    );
+    const { calls, channel } = recordingChannel();
+    await expect(
+      runFunction(registered, "notes.reach", {}, channel)
+    ).resolves.toStrictEqual({
+      brain: { own: ["recall", "skills"], prototype: null, frozen: true },
+      skills: { own: ["select"], prototype: null, frozen: true },
+      read: "undefined",
+    });
+    expect(calls).toStrictEqual([
+      ["permission", "brain", "skills.select", [{ task: "refunds" }]],
+    ]);
+  });
+
   test("a connection can't list two actions with one member", () => {
     expect(
       refusal(() =>

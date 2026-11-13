@@ -1626,19 +1626,30 @@ const declaredCard = (source: SourceId, text: string): SkillCardText | null => {
 };
 
 /**
- * `personId` as a reader of skills: the person, and the company, which
- * every current member is in. Refused once they have no current
- * membership.
+ * How far a reader of skills reaches: the person and the company
+ * (`person`, a chat's agent), or the company alone (`company`, an App's or
+ * a workflow's code, as its recall reads).
+ */
+export type SkillReach = Extract<Reach, "person" | "company">;
+
+/**
+ * `personId` as a reader of skills: the company, which every current
+ * member is in, and the person too with the `person` reach. Refused once
+ * they have no current membership, whatever the reach.
  */
 const skillReaderOf = async (
   env: Pick<Env, "DB">,
-  personId: string
+  personId: string,
+  reach: SkillReach
 ): Promise<Reader> => {
   const member = await memberOf(env.DB, checked(idSchema, personId));
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
-  return { person: member.userId, groups: [companyGroup] };
+  return {
+    person: reach === "person" ? member.userId : null,
+    groups: [companyGroup],
+  };
 };
 
 /** The current versions of `sources`, whole, a batch at a time, in order. */
@@ -1725,15 +1736,16 @@ const companySkillsAs = async (
  * by name, so however long ago they were installed; and the company's,
  * listed on their own, newest first, at most `companySkillsMax`. A
  * company skill takes the place of Grasp's of the same name. Those that
- * declare their own name only. Refused with
+ * declare their own name only, as far as `reach` goes. Refused with
  * `permission.person_inactive` once they are no longer a member.
  */
 export const listSkillsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  shipped: ReadonlySet<string>
+  shipped: ReadonlySet<string>,
+  reach: SkillReach
 ): Promise<SkillCardAt[]> => {
-  const reader = await skillReaderOf(env, personId);
+  const reader = await skillReaderOf(env, personId, reach);
   const company = await companySkillsAs(env, reader);
   const replaced = new Set(company.map(({ name }) => name));
   const graspSources = [...shipped]
@@ -1761,12 +1773,13 @@ export const listSkillsAs = async (
  * they may read its current version (as `readSourceVersionAs`): `null`
  * when there is none, alike. Refused with `skills.invalid` for something
  * that isn't a skill at a version, and `permission.person_inactive` once
- * they are no longer a member.
+ * they are no longer a member; as far as `reach` goes.
  */
 export const readSkillAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  wanted: SkillAt
+  wanted: SkillAt,
+  reach: SkillReach
 ): Promise<SkillVersion | null> => {
   const { scope, name, version } = skillErrors.parse(
     "skills.invalid",
@@ -1776,7 +1789,7 @@ export const readSkillAs = async (
   const read = await brain(env).readVersion({
     source: skillKeyOf({ scope, name }),
     version,
-    reader: await skillReaderOf(env, personId),
+    reader: await skillReaderOf(env, personId, reach),
   });
   return read === null ? null : { scope, name, version, text: read.text };
 };

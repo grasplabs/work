@@ -1,5 +1,4 @@
 import { selectSkills } from "@grasp-os/brain-next/skills";
-import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -9,11 +8,16 @@ import {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { addShippedSkill, listSkillsAs, readSkillAs } from "./brain-next.ts";
-import type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
+import type {
+  SkillAt,
+  SkillCardAt,
+  SkillReach,
+  SkillVersion,
+} from "./brain-next.ts";
+import { skillReadSchema, skillsSelectSchema } from "./brain-pack.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import type { ShippedSkill } from "./shipped-skills.ts";
 
@@ -25,9 +29,11 @@ export type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 // them for the Brain.
 //
 // - Who reads: the person the code acts for, while a member, through the
-//   Brain's own reader check. A skill is guidance every member may read,
-//   as the company's instruction file, and grants nothing: what the agent
-//   or code does after reading it is checked against its own grants.
+//   Brain's own reader check; an App's or a workflow's code as the
+//   company alone (GRA-1830), never as the person. A skill is guidance
+//   every member may read, as the company's instruction file, and grants
+//   nothing: what the agent or code does after reading it is checked
+//   against its own grants.
 // - Which: Grasp's skills only by the names this release ships (one a
 //   release dropped stays in the Brain as history, never selected or
 //   read), and a company skill of the same name in its place in what is
@@ -127,10 +133,24 @@ export const installShippedSkills = async (
   return failed === 0;
 };
 
-/** The person `by` acts for, from an `Authority` checked whole. */
-const personOf = (by: Authority): string =>
-  permissionErrors.parse("permission.context_invalid", authoritySchema, by)
-    .onBehalfOf;
+/**
+ * The person `by` acts for, from an `Authority` checked whole, and how far
+ * its skills reach: a chat's agent as its person; an App's or a
+ * workflow's code as the company alone, as its recall reads
+ * (brain-recall.ts), since what code reads may end up anywhere a member
+ * reads it.
+ */
+const readerOf = (by: Authority): { person: string; reach: SkillReach } => {
+  const { onBehalfOf, subject } = permissionErrors.parse(
+    "permission.context_invalid",
+    authoritySchema,
+    by
+  );
+  return {
+    person: onBehalfOf,
+    reach: subject.type === "agent" ? "person" : "company",
+  };
+};
 
 /**
  * The skills the code `by` acts with may use, by name: Grasp's this
@@ -143,14 +163,10 @@ export const skillsFor = async (
   env: Env,
   by: Authority
 ): Promise<SkillCardAt[]> => {
-  const listed = await listSkillsAs(env, personOf(by), shippedNames);
+  const { person, reach } = readerOf(by);
+  const listed = await listSkillsAs(env, person, shippedNames, reach);
   return listed.toSorted((a, b) => a.name.localeCompare(b.name));
 };
-
-/** A task, in the asker's words, as a question to the Brain is. */
-const taskSchema = z.strictObject({
-  task: z.string().trim().min(1).max(brainQuestionMaxLength),
-});
 
 /**
  * The skills of `skillsFor` that apply to `input.task`, best first, a few
@@ -163,22 +179,13 @@ export const selectSkillsFor = async (
   by: Authority,
   input: unknown
 ): Promise<SkillCardAt[]> => {
-  const { task } = skillErrors.parse("skills.invalid", taskSchema, input);
+  const { task } = skillErrors.parse(
+    "skills.invalid",
+    skillsSelectSchema,
+    input
+  );
   return selectSkills(task, await skillsFor(env, by));
 };
-
-const skillAtSchema = z.strictObject({
-  // As a listing or a selection gives it: what else it carries (its
-  // description) is accepted and dropped here, by name, whatever zod's
-  // default for unknown keys.
-  skill: z
-    .looseObject({
-      scope: z.enum(["grasp", "company"]),
-      name: z.string(),
-      version: z.int().positive(),
-    })
-    .transform(({ scope, name, version }) => ({ scope, name, version })),
-});
 
 /**
  * The skill `input.skill` at exactly its version, whole, as a selection
@@ -195,11 +202,12 @@ export const readSkillFor = async (
   by: Authority,
   input: unknown
 ): Promise<SkillVersion> => {
-  const { skill } = skillErrors.parse("skills.invalid", skillAtSchema, input);
+  const { skill } = skillErrors.parse("skills.invalid", skillReadSchema, input);
   const wanted: SkillAt = skill;
   // Read first, so the person's membership is checked alike for every
   // skill named.
-  const read = await readSkillAs(env, personOf(by), wanted);
+  const { person, reach } = readerOf(by);
+  const read = await readSkillAs(env, person, wanted, reach);
   if (
     read === null ||
     (wanted.scope === "grasp" && !shippedNames.has(wanted.name))

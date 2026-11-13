@@ -5,6 +5,7 @@ import { expectTypeOf } from "vite-plus/test";
 
 import { defineWorkflow, v } from "../src/workflow.ts";
 import type {
+  BrainSkillsSelected,
   ConnectionMembers,
   WorkflowCtx,
   WorkflowPermissions,
@@ -18,6 +19,7 @@ const permissions = {
   },
   decisions: ["finance"],
   events: { stripe: ["invoice.paid", "invoice.failed"] },
+  brain: { handbook: ["recall", "skills.select"] },
 } as const satisfies WorkflowPermissions;
 
 const params = {
@@ -33,6 +35,13 @@ expectTypeOf(ctx.connections.github.issues.create).toBeFunction();
 expectTypeOf(ctx.decisions.finance.ask).toBeFunction();
 expectTypeOf(ctx.ai.generate).toBeFunction();
 expectTypeOf(ctx.params.threshold).toEqualTypeOf<number>();
+// The Brain's actions: `recall` itself, its skills under `skills`.
+expectTypeOf(ctx.brain.handbook.recall).toBeFunction();
+expectTypeOf(
+  ctx.brain.handbook.skills.select({ task: "refunds" }, { step: "skills" })
+).resolves.toEqualTypeOf<BrainSkillsSelected>();
+// @ts-expect-error -- no step reads a skill
+expectTypeOf(ctx.brain.handbook.skills.read).toBeFunction();
 
 // A name nobody declared is no member.
 // @ts-expect-error -- no such connection

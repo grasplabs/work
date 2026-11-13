@@ -18,6 +18,7 @@ import {
 import type { ParamMetadata, ParamValues, Params } from "./workflow-params.ts";
 import type {
   BrainActions,
+  BrainMembers,
   CallOptions,
   ConnectionCallOptions,
   Decision,
@@ -108,10 +109,17 @@ export type {
   BrainPack,
   BrainPackItem,
   BrainRecall,
+  BrainSkill,
+  BrainSkillRead,
+  BrainSkillScope,
+  BrainSkillsSelect,
+  BrainSkillsSelected,
+  BrainSkillText,
 } from "./brain-recall.ts";
 export type { Param, ParamMetadata } from "./workflow-params.ts";
 export type {
   BrainActions,
+  BrainMembers,
   CallOptions,
   CaughtError,
   ConnectionCallOptions,
@@ -268,9 +276,11 @@ export interface WorkflowCtx<
     >;
   };
   readonly brain: {
-    readonly [Alias in keyof NonNullable<Permissions["brain"]>]: Pick<
-      BrainActions,
-      ListedOf<NonNullable<Permissions["brain"]>[Alias]>
+    readonly [Alias in keyof NonNullable<Permissions["brain"]>]: BrainMembers<
+      Extract<
+        ListedOf<NonNullable<Permissions["brain"]>[Alias]>,
+        keyof BrainActions
+      >
     >;
   };
   readonly ai: Permissions["ai"] extends true ? AiMembers : undefined;

@@ -10670,6 +10670,10 @@ msgstr "Datensätze einer sensiblen Tabelle gelesen"
 msgid "Read restricted sources, and is held to them"
 msgstr "Eingeschränkte Quellen gelesen und ist jetzt an sie gebunden"
 
+#: src/activity/audit-words.ts
+msgid "Read skills from the Brain"
+msgstr "Skills aus dem Gehirn gelesen"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Das des Unternehmens lesen"

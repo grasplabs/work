@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-import type { BrainPack, BrainRecall } from "./brain-recall.ts";
+import type {
+  BrainPack,
+  BrainRecall,
+  BrainSkillRead,
+  BrainSkillsSelect,
+  BrainSkillsSelected,
+  BrainSkillText,
+} from "./brain-recall.ts";
 
 // What a workflow's `ctx` calls take and answer: their options and
 // results, as generated code and its types see them.
@@ -112,16 +119,47 @@ export interface FilesActions {
 }
 
 /**
- * What a brain permission's steps do: recall what everyone in the
- * company may read, whoever the run acts for, with the same request and
- * pack as an App's action (`brain-recall.ts`).
+ * What a brain permission's steps do, by action: recall what everyone in
+ * the company may read, whoever the run acts for, with the same request
+ * and pack as an App's action (`brain-recall.ts`), and select and read
+ * its skills (`skills.select`, `skills.read`), as
+ * `ctx.brain.<alias>.skills.select` and `.read`.
  */
 export interface BrainActions {
   readonly recall: (
     request: BrainRecall,
     options: CallOptions
   ) => Promise<BrainPack>;
+  readonly "skills.select": (
+    request: BrainSkillsSelect,
+    options: CallOptions
+  ) => Promise<BrainSkillsSelected>;
+  readonly "skills.read": (
+    request: BrainSkillRead,
+    options: CallOptions
+  ) => Promise<BrainSkillText>;
 }
+
+/**
+ * `ctx.brain.<alias>` for the brain actions `Listed`: `recall` as itself,
+ * `skills.select` and `skills.read` as members of `skills`.
+ */
+export type BrainMembers<Listed extends keyof BrainActions> = Pick<
+  BrainActions,
+  Exclude<Listed, `skills.${string}`>
+> &
+  (Extract<Listed, `skills.${string}`> extends never
+    ? unknown
+    : {
+        readonly skills: {
+          readonly [
+            Action in Extract<
+              Listed,
+              `skills.${string}`
+            > as Action extends `skills.${infer Name}` ? Name : never
+          ]: BrainActions[Action];
+        };
+      });
 
 /**
  * How a decision ended: answered, by whom (their user ID) and with what

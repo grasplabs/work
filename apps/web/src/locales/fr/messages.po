@@ -10670,6 +10670,10 @@ msgstr "A lu des enregistrements d’une table sensible"
 msgid "Read restricted sources, and is held to them"
 msgstr "A lu des sources restreintes et y est désormais soumis"
 
+#: src/activity/audit-words.ts
+msgid "Read skills from the Brain"
+msgstr "A lu des skills du Cerveau"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Lire ce qui est à l'entreprise"

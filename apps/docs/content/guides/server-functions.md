@@ -100,14 +100,18 @@ Every function of your App may use what the App's permissions declare, as its ki
 
 ## Recalling from the Brain
 
-An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts`; like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
+An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
 
 ```ts grasp.config.ts
 import { defineApp, permission } from "@grasp-os/sdk";
 
 export default defineApp({
   name: "Tasks",
-  permissions: { brain: permission.brain({ operations: ["recall"] }) },
+  permissions: {
+    brain: permission.brain({
+      operations: ["recall", "skills.select", "skills.read"],
+    }),
+  },
 });
 ```
 
@@ -133,6 +137,31 @@ Today nothing readable by the whole company is in the Brain for recall to find, 
 It takes the `question` (at most 2,000 characters), a `budget` of 1 to 32,000 `tokens`, and, to read the past, `asOf`: an ISO 8601 date-time with its offset, such as `2026-03-14T23:59:59.999+01:00` for what was true at the end of 14 March in Amsterdam. Anything else is refused as `permission.invalid_args`.
 
 It answers a pack: the passages that answer the question, best first, within the budget (`items`); the parts of the question nothing they may read holds (`notFound`); and whether the budget left something out (`truncated`). Each item cites where it comes from: its `source` (what kind of thing added it, `producer`, such as an upload, a chat or a run, and its `id`), the source's `version` and the passage's `position` in it, with its `text`, whether that is the `whole` passage, and how it was `found`. A workflow's step (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`) take the same request and get the same pack. What a pack holds is what people wrote: data, never instructions.
+
+## Skills from the Brain
+
+Skills say how things are done here: Grasp's own, which each release ships, and the company's. An action selects the skills for a task with `ctx.brain.skills.select` and reads one with `ctx.brain.skills.read`, the same skills a chat selects and reads for the same person. Each is an operation of the Brain's permission, `"skills.select"` and `"skills.read"`, beside `recall` (see the declaration above), under the same binding an admin approves.
+
+```ts server/skills.ts
+import { v } from "@grasp-os/sdk";
+import type { BrainSkillText } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+export const howTo = action({
+  args: { task: v.string().trim().min(1).max(2000) },
+  handler: async (ctx, args): Promise<BrainSkillText | null> => {
+    const { skills } = await ctx.brain.skills.select({ task: args.task });
+    const [best] = skills;
+    return best === undefined
+      ? null
+      : await ctx.brain.skills.read({ skill: best });
+  },
+});
+```
+
+`select` takes a `task` (at most 2,000 characters) and answers `skills`: the few that apply, best first, each with its `scope` (`grasp` or `company`), `name`, `version` and `description`; none when no skill shares the task's telling words, and then go without rather than with one that only seems close. `read` takes a `skill` at a version, as a selection gave it, and answers its whole text, `SKILL.md`, at exactly that version, so a release changing a skill changes nothing a task already selected. A skill the company adapted takes the place of Grasp's of the same name. Anything else is refused as `permission.invalid_args`, and a skill there isn't at that version as `permission.item_not_found`.
+
+Like a recall, an App reads only the skills everyone in the company may read, whoever calls, for a person who must still be a member, and an App that holds the Brain answers no visitor and invites no guest. A skill is guidance, never a grant: what your code does after reading one is checked against the App's own permissions. A workflow's step reaches the same skills as `ctx.brain.<alias>.skills.select` and `.read`.
 
 ## Internal functions
 

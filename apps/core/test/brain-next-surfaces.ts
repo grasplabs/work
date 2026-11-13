@@ -1861,25 +1861,50 @@ export const coreProbes = {
         await coreBrain.listSkillsAs(
           env,
           personId,
-          new Set(["draw-a-workflow"])
+          new Set(["draw-a-workflow"]),
+          "person"
+        )
+    ),
+    await answer(
+      "the reader's skills, as the company",
+      async () =>
+        await coreBrain.listSkillsAs(
+          env,
+          personId,
+          new Set(["draw-a-workflow"]),
+          "company"
         )
     ),
     await answer(
       "as someone who isn't a member",
       async () =>
-        await coreBrain.listSkillsAs(env, stranger(), new Set<string>())
+        await coreBrain.listSkillsAs(
+          env,
+          stranger(),
+          new Set<string>(),
+          "company"
+        )
     ),
   ],
   // A skill is read by its own key alone: no producer's source is under
   // the skills' kind, so no hidden source can be named as one.
   readSkillAs: async ({ personId, markers }) => {
-    const read = async (name: string, wanted: unknown) =>
+    const read = async (
+      name: string,
+      wanted: unknown,
+      reach: coreBrain.SkillReach = "person"
+    ) =>
       await answer(
         name,
         async () =>
-          await coreBrain.readSkillAs(env, personId, unchecked(wanted))
+          await coreBrain.readSkillAs(env, personId, unchecked(wanted), reach)
       );
     return [
+      await read(
+        "a name of the markers, as the company",
+        { scope: "company", name: markers.join("-"), version: 1 },
+        "company"
+      ),
       await read("a skill never written", {
         scope: "company",
         name: "unwritten",
@@ -1898,11 +1923,12 @@ export const coreProbes = {
       await answer(
         "as someone who isn't a member",
         async () =>
-          await coreBrain.readSkillAs(env, stranger(), {
-            scope: "grasp",
-            name: "draw-a-workflow",
-            version: 1,
-          })
+          await coreBrain.readSkillAs(
+            env,
+            stranger(),
+            { scope: "grasp", name: "draw-a-workflow", version: 1 },
+            "person"
+          )
       ),
     ];
   },
@@ -2895,6 +2921,100 @@ export const recallProbes = {
             { question: hidden, budget: whole },
             readersApp(stranger())
           )
+      ),
+    ];
+  },
+  // Code's skills, as an App or a workflow selects and reads them: under
+  // an App's grant, acting for the reader, as the company alone; tasks and
+  // skills of the markers, then every way it refuses.
+  skillsCallFor: async ({ personId, markers, sharedWord }) => {
+    const { authority, permissionId } = await appWithBrain(personId);
+    await brainSkills.installShippedSkills(env);
+    const call = async (
+      name: string,
+      operation: codeRecall.SkillsOperation,
+      input: unknown,
+      { as = authority, grant = permissionId } = {},
+      about?: Answer["about"],
+      like?: string
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await codeRecall.skillsCallFor(
+            env,
+            callerOf(as, grant),
+            operation,
+            input
+          ),
+        about,
+        like
+      );
+    const hidden = markers.join(" ");
+    const [shipped] = await brainSkills.skillsFor(env, authority);
+    return [
+      await call(
+        "the markers",
+        "skills.select",
+        { task: hidden },
+        {},
+        "hidden",
+        "the markers"
+      ),
+      await call(
+        "the markers",
+        "skills.select",
+        { task: markers.map(twinOf).join(" ") },
+        {},
+        "nothing",
+        "the markers"
+      ),
+      await call(
+        "beside the shared word",
+        "skills.select",
+        { task: `${sharedWord} ${hidden}` },
+        {},
+        "hidden",
+        "beside the shared word"
+      ),
+      await call(
+        "beside the shared word",
+        "skills.select",
+        { task: `${sharedWord} ${markers.map(twinOf).join(" ")}` },
+        {},
+        "nothing",
+        "beside the shared word"
+      ),
+      await call("a workflow, beside the markers", "skills.select", {
+        task: `draw a workflow ${hidden}`,
+      }),
+      await call("not a task", "skills.select", { task: markers }),
+      await call("a skill the release ships", "skills.read", {
+        skill: shipped,
+      }),
+      await call("a name of the markers", "skills.read", {
+        skill: { scope: "company", name: markers.join("-"), version: 1 },
+      }),
+      await call("a scope of the markers", "skills.read", {
+        skill: { scope: hidden, name: "draw-a-workflow", version: 1 },
+      }),
+      await call(
+        "the markers, under a grant the App doesn't hold",
+        "skills.select",
+        { task: hidden },
+        { grant: crypto.randomUUID() }
+      ),
+      await call(
+        "the markers, for someone who isn't a member",
+        "skills.select",
+        { task: hidden },
+        { as: readersApp(stranger()) }
+      ),
+      await call(
+        "a skill, for someone who isn't a member",
+        "skills.read",
+        { skill: shipped },
+        { as: readersApp(stranger()) }
       ),
     ];
   },

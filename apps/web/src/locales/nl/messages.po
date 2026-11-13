@@ -10670,6 +10670,10 @@ msgstr "Records van een gevoelige tabel gelezen"
 msgid "Read restricted sources, and is held to them"
 msgstr "Beperkte bronnen gelezen en is daar nu aan gebonden"
 
+#: src/activity/audit-words.ts
+msgid "Read skills from the Brain"
+msgstr "Skills uit het Brein gelezen"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Wat van het bedrijf is lezen"

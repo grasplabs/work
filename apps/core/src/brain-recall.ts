@@ -1,13 +1,19 @@
-import type { BrainPack } from "@grasp-os/runtime/app";
+import type {
+  BrainPack,
+  BrainSkillsSelected,
+  BrainSkillText,
+} from "@grasp-os/runtime/app";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
+import { skillErrors } from "@grasp-os/shared/skills";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { codeRecallOf, recallAs } from "./brain-next.ts";
+import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
 import { authorize } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -132,6 +138,79 @@ export const recallFor = async (
     return pack;
   } catch (error) {
     const refused = inHostWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+};
+
+/** What code asks of the Brain's skills: `ctx.brain.skills.<operation>`. */
+export type SkillsOperation = "skills.select" | "skills.read";
+
+/** `error` in the function host's words, a skill's refusals among them. */
+const inHostSkillWords = (error: unknown): unknown => {
+  const code = skillErrors.codeOf(error);
+  if (code === "skills.invalid") {
+    return functionErrors.create("permission.invalid_args");
+  }
+  if (code === "skills.not_found") {
+    return functionErrors.create("permission.item_not_found");
+  }
+  return inHostWords(error);
+};
+
+/**
+ * The Brain's skills for an App's action or a workflow's step (GRA-1830):
+ * `skills.select` the skills for `input.task`, `skills.read` one at the
+ * version a selection gave, the same a chat's code selects and reads
+ * (brain-skills.ts), as the company alone. Checked and audited as a
+ * recall is (`recallFor`, the threat model on GRA-1830): the caller's
+ * grant to read the Brain, now; the person it acts for still a member;
+ * refused as `permission.invalid_args` for input that isn't a task or a
+ * skill, `permission.item_not_found` for a skill there isn't at that
+ * version, `permission.denied` without the grant and
+ * `permission.unavailable` once the person is no longer a member. Audited,
+ * answered or refused, before it returns: how many skills, or which
+ * version, never the task, a name or a text. Nothing is pinned with a
+ * run: every skill is the whole company's and keeps its versions.
+ */
+export const skillsCallFor = async (
+  env: Env,
+  caller: Omit<RecallCaller, "keep">,
+  operation: SkillsOperation,
+  input: unknown
+): Promise<BrainSkillsSelected | BrainSkillText> => {
+  const audit = async (detail: Record<string, string | number | boolean>) => {
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: `brain.${operation}`,
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
+    });
+  };
+  try {
+    if (caller.permissionId === null) {
+      throw permissionErrors.create("permission.denied", { action: "brain" });
+    }
+    await authorize(
+      env,
+      caller.authority,
+      { type: "platform" },
+      "brain",
+      caller.permissionId,
+      caller.context
+    );
+    if (operation === "skills.select") {
+      const skills = await selectSkillsFor(env, caller.authority, input);
+      await audit({ skills: skills.length });
+      return { skills };
+    }
+    const read = await readSkillFor(env, caller.authority, input);
+    await audit({ scope: read.scope, version: read.version });
+    return read;
+  } catch (error) {
+    const refused = inHostSkillWords(error);
     await audit({
       refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
     });

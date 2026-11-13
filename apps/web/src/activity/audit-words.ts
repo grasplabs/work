@@ -333,6 +333,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "statistics.read", text: msg`Read an App's statistics` },
   { action: "brain.recall", text: msg`Recalled from the Brain` },
+  { action: "brain.skills", text: msg`Read skills from the Brain` },
   { action: "guest.invited", text: msg`Invited a guest` },
   { action: "guest.revoked", text: msg`Took back a guest's link` },
   { action: "guest.read", text: msg`Read what a guest wrote` },

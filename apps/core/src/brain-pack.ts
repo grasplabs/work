@@ -1,4 +1,11 @@
-import type { BrainPack } from "@grasp-os/runtime/app";
+import type {
+  BrainPack,
+  BrainSkillRead,
+  BrainSkillsSelect,
+  BrainSkillsSelected,
+  BrainSkillText,
+} from "@grasp-os/runtime/app";
+import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { z } from "zod";
 
 /**
@@ -23,4 +30,53 @@ export const brainPackSchema: z.ZodType<BrainPack> = z.strictObject({
   ),
   notFound: z.array(z.string()),
   truncated: z.boolean(),
+});
+
+/** A task to select skills for, in the asker's words, as a question is. */
+export const skillsSelectSchema: z.ZodType<
+  BrainSkillsSelect,
+  BrainSkillsSelect
+> = z.strictObject({
+  task: z.string().trim().min(1).max(brainQuestionMaxLength),
+});
+
+/**
+ * A skill at a version to read, as a selection gives it: what else it
+ * carries (its description) is accepted and dropped, by name.
+ */
+export const skillReadSchema = z.strictObject({
+  skill: z
+    .looseObject({
+      scope: z.enum(["grasp", "company"]),
+      name: z.string(),
+      version: z.int().positive(),
+    })
+    .transform(({ scope, name, version }) => ({ scope, name, version })),
+}) satisfies z.ZodType<BrainSkillRead>;
+
+const skillScopeSchema = z.enum(["grasp", "company"]);
+
+/**
+ * What a selection answers code (`BrainSkillsSelected`), and nothing more:
+ * as the function host lets an App's hand back, and a test run's fixture
+ * may answer a workflow's.
+ */
+export const brainSkillsSelectedSchema: z.ZodType<BrainSkillsSelected> =
+  z.strictObject({
+    skills: z.array(
+      z.strictObject({
+        scope: skillScopeSchema,
+        name: z.string().min(1),
+        version: z.int().positive(),
+        description: z.string(),
+      })
+    ),
+  });
+
+/** A skill read, whole (`BrainSkillText`), and nothing more. */
+export const brainSkillTextSchema: z.ZodType<BrainSkillText> = z.strictObject({
+  scope: skillScopeSchema,
+  name: z.string().min(1),
+  version: z.int().positive(),
+  text: z.string(),
 });
