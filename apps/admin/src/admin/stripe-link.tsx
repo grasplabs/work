@@ -52,7 +52,7 @@ export const StripeLink = ({
   };
   return (
     <form
-      className="flex flex-col gap-3 border-t px-5 py-4"
+      className="flex flex-col gap-3 border-t px-5 py-4 *:max-w-xl"
       onSubmit={(event) => {
         event.preventDefault();
         const value = new FormData(event.currentTarget).get("customerId");
@@ -91,7 +91,7 @@ export const StripeLink = ({
             }}
             size="sm"
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             Unlink
           </Button>
