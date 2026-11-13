@@ -32,6 +32,12 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
+/** The memories the page undid, by id, in order. */
+const forgotten: string[] = [];
+
+/** What core answers the page's undo of a memory. */
+let forgetAnswer: "done" | "nothing" = "done";
+
 const asked: ChatMessage = {
   id: 1,
   role: "user",
@@ -56,9 +62,19 @@ const thread = async (
     withSession: async <T,>(
       action: (session: {
         brain: { thinking: () => Promise<ThinkingGround> };
+        brainMemories: {
+          forget: (memory: string) => Promise<"done" | "nothing">;
+        };
       }) => Promise<T>
     ): Promise<T> =>
       await action({
+        brainMemories: {
+          forget: async (memory) => {
+            await Promise.resolve();
+            forgotten.push(memory);
+            return forgetAnswer;
+          },
+        },
         brain: {
           thinking: async () => {
             await Promise.resolve();
@@ -149,6 +165,212 @@ describe(ChatThread, () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    forgotten.length = 0;
+    forgetAnswer = "done";
+  });
+
+  it("says under a call of remember that it is an instruction, with the value it holds", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Answer in Dutch" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "instruction",
+          statement: "Always answer in Dutch",
+          value: "Dutch",
+        },
+      },
+    ]);
+    const text = document.body.textContent;
+
+    expect({
+      kind: text.includes("Instruction"),
+      saved: text.includes(
+        "Grasp will remember: Always answer in Dutch (value: Dutch)"
+      ),
+    }).toStrictEqual({ kind: true, saved: true });
+  });
+
+  it("says under a call of remember who or what it is about, when it isn't the person", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Prefers answers by mail" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "fact",
+          statement: "Prefers answers by mail",
+          about: "Bob",
+        },
+      },
+    ]);
+
+    expect(document.body.textContent).toContain(
+      "Grasp will remember about Bob: Prefers answers by mail"
+    );
+  });
+
+  it("says when an undo found nothing to undo, never that it was forgotten", async () => {
+    forgetAnswer = "nothing";
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Acme renews on 1 March" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "fact",
+          statement: "Acme renews on 1 March",
+        },
+      },
+    ]);
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((button) => button.textContent === "Undo")
+        ?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(forgotten).toHaveLength(1);
+    });
+    const text = document.body.textContent;
+
+    expect({
+      told: text.includes(
+        "There was nothing to undo: Grasp no longer uses this."
+      ),
+      claimedForgotten: text.includes("Grasp no longer remembers this."),
+    }).toStrictEqual({ told: true, claimedForgotten: false });
+  });
+
+  it("says under a call of remember what Grasp will remember, in the person's words, and undoes it there", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const memory = "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        citations: [],
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Acme renews on 1 March" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: { memory, type: "fact", statement: "Acme renews on 1 March" },
+      },
+    ]);
+    const shown = document.body.textContent;
+    const undo = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Undo"
+    );
+    await act(async () => {
+      undo?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Grasp no longer remembers this."
+      );
+    });
+
+    expect({
+      line: shown.includes("Saved to your memory"),
+      notice: shown.includes("Grasp will remember: Acme renews on 1 March"),
+      forgotten,
+      undoLeft: [...document.querySelectorAll("button")].some(
+        (button) => button.textContent === "Undo"
+      ),
+    }).toStrictEqual({
+      line: true,
+      notice: true,
+      forgotten: [memory],
+      undoLeft: false,
+    });
   });
 
   it("streams what the model thinks, open under Thinking, before it says a word", async () => {

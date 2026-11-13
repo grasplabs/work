@@ -3,6 +3,7 @@ import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 import { AiProvidersRpc } from "./ai-providers.ts";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
+import { BrainMemoriesRpc } from "./brain-memories-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
 import { BrainSourcesRpc } from "./brain-sources-rpc.ts";
 import { ChannelAccountsRpc } from "./channels/accounts.ts";
@@ -58,6 +59,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #knowledge: KnowledgeRpc;
   readonly #brain: BrainRpc;
   readonly #brainSources: BrainSourcesRpc;
+  readonly #brainMemories: BrainMemoriesRpc;
   readonly #knowledgeSignals: KnowledgeSignalsRpc;
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
@@ -104,6 +106,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#knowledge = new KnowledgeRpc(env, full);
     this.#brain = new BrainRpc(env, full);
     this.#brainSources = new BrainSourcesRpc(env, full);
+    this.#brainMemories = new BrainMemoriesRpc(env, full);
     this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
@@ -207,6 +210,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get brainSources(): BrainSourcesRpc {
     return this.#brainSources;
+  }
+
+  get brainMemories(): BrainMemoriesRpc {
+    return this.#brainMemories;
   }
 
   get knowledgeSignals(): KnowledgeSignalsRpc {

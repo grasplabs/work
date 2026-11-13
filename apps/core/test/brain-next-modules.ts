@@ -39,6 +39,13 @@ export const brainModules = {
   // Erases what an erased person alone may read with core's erasePerson,
   // and answers nothing of it.
   "apps/core/src/person-erasure.ts": "core",
+  // Remembers, forgets and corrects for a person, and reads entities for
+  // them: its own surface, each export probed as the person.
+  "apps/core/src/brain-memories.ts": "memories",
+  // The chat's tool that saves what a person says: reads core's
+  // memoryChoices, and hands on nothing it returns beyond what
+  // brain-memories.ts's probes hold.
+  "apps/core/src/agent-remember.ts": "core",
   // Core's subclass of the store: its alarm's host, from core's
   // alarmHostOf, given to the store inside its own object; it adds no
   // method, so the store's probes are its own.

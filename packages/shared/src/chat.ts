@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
@@ -868,6 +869,12 @@ export type ChatMessage =
        * for any other.
        */
       thinking?: ThinkingStep;
+      /**
+       * A memory the agent saved for the person (`remember`, see
+       * `ChatSavedMemory`), for the result of a call that saved one; none
+       * for any other.
+       */
+      saved?: ChatSavedMemory;
     };
 
 /**
