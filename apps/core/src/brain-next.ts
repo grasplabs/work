@@ -1017,7 +1017,8 @@ export const brainRestoreStatus = async (
 // company's instructions and lasting facts, a person's own file, an App's
 // and an agent's), each a source of its own under `instructions:`, kept
 // whole and versioned, never indexed, so recall never returns one. Who
-// may read each in the Brain: a person's file, that person; an App's, the
+// may read each in the Brain: a person's file, that person, in their own
+// store alone (`keptIn`; the shared store refuses it); an App's, the
 // App's group, which core puts in a reader only once they passed the
 // builder check; the company's and agents', the company. Which of them
 // reaches which chat or run, and who may write each, is

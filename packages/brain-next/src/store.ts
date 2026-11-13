@@ -273,9 +273,12 @@ const notInstructions =
   "The Brain refused it: an instruction file or a skill is added with addInstructions";
 const onlyInstructions =
   "The Brain refused it: addInstructions takes only an instruction file's or a skill's key";
-/** What the shared store answers memories only one person may read. */
+/**
+ * What the shared store answers memories or an instruction file only one
+ * person may read: they are kept only in that person's own store.
+ */
 const sharedNotOwn =
-  "The Brain refused it: memories only one person may read are kept in that person's own store";
+  "The Brain refused it: what only one person may read is kept in that person's own store";
 
 /** What a read of memories under an attribute it can't have answers. */
 const noSuchAttribute =
@@ -755,6 +758,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       throw new Error(onlyInstructions);
     }
     this.#mayKeep(adding.access);
+    // A person's own instruction file or skill lies only in their own
+    // store: never in the shared one, which the company's export carries
+    // and their erasure doesn't take whole.
+    if (this.#kind.kind === "shared" && adding.access.kind === "owner") {
+      throw new Error(sharedNotOwn);
+    }
     return await this.#changing(async () => {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(
