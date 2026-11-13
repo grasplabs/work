@@ -232,6 +232,13 @@ export const exportLineSchema = z.strictObject({
   version: z.int().positive(),
   /** When it was added, in milliseconds. */
   addedAt: z.int().nonnegative(),
+  /**
+   * When its text was last read, in milliseconds, if its producer said
+   * (the latest `read_at` of its changes, `NewSource.readAt`): restored on
+   * each of its changes, so no add of an earlier read replaces it after a
+   * restore either. Optional: a bundle made before it restores with none.
+   */
+  readAt: z.int().nonnegative().optional(),
   access: accessSchema,
   /** Whether it was its source's current version. */
   current: z.boolean(),
@@ -488,6 +495,7 @@ interface Selected extends Record<string, SqlStorageValue> {
   version: number;
   file: string;
   added_at: number;
+  read_at: number | null;
   readers: string;
   current: number;
   indexed: number;
@@ -521,7 +529,10 @@ const selectSqlOf = (scope: ExportScope["kind"]): string => `
 WITH ${unreadableSql[scope]}
 SELECT source_versions.row AS row, source_versions.source AS source,
   source_versions.version AS version, source_versions.file AS file,
-  source_versions.added_at AS added_at, reader_sets.key AS readers,
+  source_versions.added_at AS added_at,
+  (SELECT max(read_at) FROM source_changes
+    WHERE source_changes.version_row = source_versions.row) AS read_at,
+  reader_sets.key AS readers,
   coalesce(
     current_versions.version_row = source_versions.row
     OR (current_versions.version_row > ?2 AND source_versions.row = (
@@ -1431,6 +1442,7 @@ const linesOf = async (
         source: version.source,
         version: version.version,
         addedAt: version.added_at,
+        ...(version.read_at === null ? {} : { readAt: version.read_at }),
         access,
         current: version.current === 1,
         indexed: version.indexed === 1,

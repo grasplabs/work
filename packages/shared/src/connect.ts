@@ -94,6 +94,15 @@ export interface ConnectResult {
    */
   provenance: string[];
   /**
+   * Set when core may keep what `output` holds of each item `provenance`
+   * names as a source in the Brain (GRA-1730): only on a read connect
+   * carried out just now (no side effect, never held, never a stored
+   * answer), whose server named the items it read, from a connection
+   * whose provider's terms allow copies. Absent, nothing of the call is
+   * kept.
+   */
+  keep?: true;
+  /**
    * Set when connect held the call for the person it acts for to confirm
    * (a side effect from chat, from a person using an App, or from a context
    * that read restricted data): nothing was done yet, so `output` is the
