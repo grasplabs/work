@@ -302,7 +302,7 @@ interface Shown {
 }
 
 /** What is shown: one agent's page, by its name, or the new agent's. */
-type Open = { agent: string; tab?: AgentTab } | "new";
+type Open = { agent: string; tab?: AgentTab } | "new" | "new-own-off";
 
 /** The page for `open` on the agents its route read, its tab kept as its route would. */
 const Page = ({
@@ -315,10 +315,10 @@ const Page = ({
   open: Open;
 }) => {
   const [tab, setTab] = useState<AgentTab>(
-    open === "new" ? "overview" : (open.tab ?? "overview")
+    typeof open === "string" ? "overview" : (open.tab ?? "overview")
   );
-  if (open === "new") {
-    return <NewAgent company={editable} models={models} />;
+  if (typeof open === "string") {
+    return <NewAgent company={editable} models={models} own={open === "new"} />;
   }
   const agent = data.agents.find(({ name }) => name === open.agent);
   if (agent === undefined) {
@@ -585,6 +585,18 @@ describe("an agent's page", () => {
       asked: [["make own", claire]],
       at: "/agents/agent-1",
     });
+  });
+
+  it("offers an admin no agent of their own while the company has them off", async () => {
+    const { connections } = fakeConnections();
+    await shown(connections, "new");
+    // Shown with the company's setting off, as its route reads it.
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown(connections, "new-own-off");
+    expect(document.querySelectorAll("input[name='whose']")).toHaveLength(0);
   });
 
   it("lets an admin make an agent just for themselves instead of one for the company", async () => {

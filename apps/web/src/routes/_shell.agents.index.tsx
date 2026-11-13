@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { AgentsOverview } from "../agents/agents-overview.tsx";
 import type { ManagedAgents } from "../agents/agents-overview.tsx";
+import type { OwnAgentsAdmin } from "../agents/own-agents-admin.tsx";
 import type { Session } from "../core.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -79,6 +80,24 @@ const readOffered = async (session: Session) => {
   };
 };
 
+/**
+ * What an admin reads of people's own agents beside the switch: what
+ * each person's cost, and the people to name them by. Either is left out
+ * where core won't say it, and the page still shows the rest.
+ */
+const readOwnAdmin = async (
+  session: Session
+): Promise<Omit<OwnAgentsAdmin, "on">> => {
+  const [usage, people] = await Promise.allSettled([
+    session.connections.ownAgentsUsage(),
+    session.members.list(),
+  ]);
+  return {
+    usage: usage.status === "fulfilled" ? usage.value : undefined,
+    people: people.status === "fulfilled" ? people.value : undefined,
+  };
+};
+
 const AgentsPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
@@ -91,9 +110,10 @@ const AgentsPage = () => {
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
       <AgentsOverview
         makes={isMemberAdmin(identity)}
-        makesOwn={!identity.staff}
+        makesOwn={!identity.staff && page.data.ownOn}
         managed={page.data.managed}
         offered={page.data.offered}
+        ownAdmin={page.data.ownAdmin}
         own={page.data.own}
         usable={page.data.usable}
       />
@@ -107,14 +127,25 @@ export const Route = createFileRoute("/_shell/agents/")({
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
       const admin = isAdmin(identity.role);
-      const [usable, own, managed, offered] = await Promise.all([
-        session.chats.agents(),
-        // The person's own, which nobody else is ever listed.
-        session.connections.ownAgents(),
-        // Admins, Grasp's staff among them, who read and change nothing.
-        admin ? readManaged(session) : undefined,
-        admin ? readOffered(session) : undefined,
-      ]);
-      return { usable, own, managed, offered };
+      const [usable, own, setting, managed, ownAdmin, offered] =
+        await Promise.all([
+          session.chats.agents(),
+          // The person's own, which nobody else is ever listed.
+          session.connections.ownAgents(),
+          session.orgSettings.ownAgents(),
+          // Admins, Grasp's staff among them, who read and change nothing.
+          admin ? readManaged(session) : undefined,
+          admin ? readOwnAdmin(session) : undefined,
+          admin ? readOffered(session) : undefined,
+        ]);
+      return {
+        usable,
+        own,
+        ownOn: setting.on,
+        managed,
+        offered,
+        ownAdmin:
+          ownAdmin === undefined ? undefined : { ...ownAdmin, on: setting.on },
+      };
     }),
 });

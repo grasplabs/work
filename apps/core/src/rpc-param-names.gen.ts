@@ -196,6 +196,7 @@ export const rpcParamNames: ParamNames = {
     "offerOwnAgent": ["agentId","offered"],
     "offeredAgents": [],
     "ownAgents": [],
+    "ownAgentsUsage": [],
     "pointApp": ["request"],
     "pointSharedMailbox": ["mailbox","audience"],
     "removeAgentDocument": ["agentId","documentId"],
@@ -364,8 +365,10 @@ export const rpcParamNames: ParamNames = {
   },
   "OrgSettingsRpc": {
     "billing": [],
+    "ownAgents": [],
     "signIn": [],
     "updateBilling": ["input"],
+    "updateOwnAgents": ["input"],
   },
   "OrganizationRpc": {
     "get": [],
@@ -487,7 +490,6 @@ export const rpcParamNames: ParamNames = {
     "files": ["id"],
     "get": ["id"],
     "itemTest": ["id","testId"],
-    "knowledge": ["id"],
     "list": [],
     "members": ["id"],
     "params": ["id"],

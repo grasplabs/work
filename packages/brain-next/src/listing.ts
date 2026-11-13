@@ -96,7 +96,10 @@ export const listSources = (
       // One more than the page, to tell whether more follow.
       limit + 1,
       openingMaxLength,
-      readerSetKeyOf({ kind: "owner", person: reader.person })
+      // No person: nothing is theirs alone (`key = NULL` is never true).
+      reader.person === null
+        ? null
+        : readerSetKeyOf({ kind: "owner", person: reader.person })
     )
     .toArray();
   return {

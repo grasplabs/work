@@ -14,7 +14,10 @@ export { caughtError, itemsOf, own, parse } from "@grasp-os/runtime/workflow";
 export type {
   AiMembers,
   BrainActions,
-  BrainHit,
+  BrainFound,
+  BrainPack,
+  BrainPackItem,
+  BrainRecall,
   CallMember,
   CallOptions,
   CaughtError,

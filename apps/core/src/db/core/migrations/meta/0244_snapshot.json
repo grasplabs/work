@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d85b06b8-5715-4a09-a8e9-f0afcfbd3729",
+  "id": "354eab34-7fbc-425a-8c89-db53064ef21a",
   "prevId": "1a494733-0e19-44c2-8748-a1d8c3ba1758",
   "tables": {
     "access_revocations": {
@@ -955,13 +955,6 @@
         "owner_id": {
           "name": "owner_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "offered_at": {
-          "name": "offered_at",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -8940,6 +8933,69 @@
             "permission_id"
           ],
           "name": "run_brain_evidence_run_id_document_id_version_permission_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "run_brain_versions": {
+      "name": "run_brain_versions",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "producer": {
+          "name": "producer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "permission_id": {
+          "name": "permission_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "run_brain_versions_run_id_producer_source_id_version_permission_id_pk": {
+          "columns": [
+            "run_id",
+            "producer",
+            "source_id",
+            "version",
+            "permission_id"
+          ],
+          "name": "run_brain_versions_run_id_producer_source_id_version_permission_id_pk"
         }
       },
       "uniqueConstraints": {},

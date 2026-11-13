@@ -11,6 +11,7 @@ import type {
   HandOvers,
   NewEntity,
   NewMemory,
+  PersonReader,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
@@ -70,7 +71,7 @@ const called = async <T>(rpc: Promise<T>): Promise<T> => await rpc;
 
 const team = (name: string): Access => ({ kind: "audience", group: name });
 const alone = (person: string): Access => ({ kind: "owner", person });
-const readerOf = (person: string, groups: string[] = []): Reader => ({
+const readerOf = (person: string, groups: string[] = []): PersonReader => ({
   person,
   groups,
 });

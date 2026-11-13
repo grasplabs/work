@@ -24,6 +24,7 @@ import {
   quoteMaxLength,
   questionMaxLength,
   readableCheckMax,
+  recallRequestSchema,
   sourceIdMaxLength,
   statementMaxLength,
   valueMaxLength,
@@ -60,6 +61,7 @@ import type {
   ModelReply,
   Pack,
   PackItem,
+  PersonReader,
   Reader,
   RecallRequest,
   RestoreStatus,
@@ -309,6 +311,14 @@ export interface Recall {
    */
   personal: boolean;
   /**
+   * Whether it reads only what everyone in the company may read: as no
+   * person and no team, so neither the person's own content nor any
+   * team's is found (`personal` is then ignored). Apps' and workflows'
+   * recall (brain-recall.ts) does: what code is handed may end up where
+   * any member reads it, so it holds nothing a member couldn't.
+   */
+  company?: boolean;
+  /**
    * Read each source as it was at this moment, to the millisecond and
    * including it: a version added at it counts. A caller who means "on
    * that day" passes the day's last millisecond in the time zone they
@@ -325,6 +335,35 @@ export interface Recall {
    */
   asOf?: Date;
 }
+
+/**
+ * A recall as code asks for one (an App's action, a workflow's step, a
+ * chat's code: brain-recall.ts): the question and the budget, held to the
+ * Brain's own limits, and the moment as an ISO 8601 date-time with its
+ * offset, which crosses JSON where a `Date` can't. Nothing else, so code
+ * never names a reader, groups or a vector.
+ */
+const codeRecallSchema = z.strictObject({
+  question: recallRequestSchema.shape.question,
+  budget: recallRequestSchema.shape.budget,
+  asOf: z.iso.datetime({ offset: true }).optional(),
+});
+
+/** `input` as a recall code asks for (`codeRecallSchema`), or undefined. */
+export const codeRecallOf = (
+  input: unknown
+): Omit<Recall, "personal"> | undefined => {
+  const parsed = codeRecallSchema.safeParse(input);
+  if (!parsed.success) {
+    return undefined;
+  }
+  const { question, budget, asOf } = parsed.data;
+  return {
+    question,
+    budget,
+    ...(asOf === undefined ? {} : { asOf: new Date(asOf) }),
+  };
+};
 
 /** An item of a pack, citing its source as its producer named it. */
 export interface RecalledItem extends Omit<PackItem, "source"> {
@@ -369,6 +408,14 @@ const brain = (env: BrainEnv): Brain =>
 /** `person`'s own store: what only they may read (above). */
 const ownBrain = (env: BrainEnv, person: string): Brain =>
   personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), person);
+
+/**
+ * The own store of `reader`, as `readerOf` verified them, or none for a
+ * reader with no person (code's recall, as their teams alone): such a
+ * reader never addresses anyone's own store.
+ */
+const ownBrainOf = (env: BrainEnv, reader: Reader): Brain | undefined =>
+  reader.person === null ? undefined : ownBrain(env, reader.person);
 
 /**
  * What the reader's own store answers to `read`, or `missing` when it
@@ -465,21 +512,62 @@ const accessOf = (readers: SourceReaders): Access => {
 };
 
 /**
- * `personId` as the Brain's reader: the person, and the teams core counts
- * them in now. Refused once they have no current membership.
+ * Whom a reader reads as: the person, the teams core counts them in and
+ * the company (`person`); those teams and the company, as no person
+ * (`teams`); or the company alone, as no person and no team (`company`),
+ * which reads only what every member may. Every reach of a current member
+ * holds the company: what everyone may read, each of them may. A guest or
+ * a visitor is never a member, so never a reader here.
  */
-const readerOf = async (
+export type Reach = "person" | "teams" | "company";
+
+/** Every current member is in this group, and in no other way. */
+const companyGroup = "company";
+
+/**
+ * The member `personId` as the Brain's reader: the person, their teams as
+ * core counts them now, and the company. Refused once they have no
+ * current membership.
+ */
+const personReaderOf = async (
   env: Pick<Env, "DB">,
   personId: string
-): Promise<Reader> => {
+): Promise<PersonReader> => {
   const member = await memberOf(env.DB, checked(idSchema, personId));
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
     person: member.userId,
-    groups: member.teams.map(({ id }) => teamGroup(id)),
+    groups: [...member.teams.map(({ id }) => teamGroup(id)), companyGroup],
   };
+};
+
+/**
+ * The member `personId` as the Brain's reader, as far as `reach` goes
+ * (`Reach`). Refused once they have no current membership, whatever the
+ * reach.
+ */
+const readerOf = async (
+  env: Pick<Env, "DB">,
+  personId: string,
+  reach: Reach
+): Promise<Reader> => {
+  const { person, groups } = await personReaderOf(env, personId);
+  switch (reach) {
+    case "person": {
+      return { person, groups };
+    }
+    case "teams": {
+      return { person: null, groups };
+    }
+    case "company": {
+      return { person: null, groups: [companyGroup] };
+    }
+    default: {
+      throw new Error("Unknown reach");
+    }
+  }
 };
 
 /**
@@ -591,18 +679,24 @@ const meaningOf = async (
  * and whether the budget cut it short, all from what they may read alone.
  * With `personal`, from the shared store and their own together, packed
  * as one store holding both would pack them (`packAcross`); without, from
- * the shared store alone. Refused once they are no longer a member, or
- * when `personId` isn't an ID.
+ * the shared store alone, as their teams may read it (a reader with no
+ * person: no `owner` source matches), or with `company` as the company
+ * alone. Refused once they are no longer a member, or when `personId`
+ * isn't an ID.
  */
 export const recallAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
   personId: string,
-  { question: asked, budget, asOf, personal }: Recall
+  { question: asked, budget, asOf, personal, company = false }: Recall
 ): Promise<RecalledPack> => {
   // As the Brain checks it, before the embedder sees any of it.
   const question = checked(questionSchema, asked);
+  let reach: Reach = personal ? "person" : "teams";
+  if (company) {
+    reach = "company";
+  }
   const [reader, meaning] = await Promise.all([
-    readerOf(env, personId),
+    readerOf(env, personId, reach),
     // As of a moment the Brain never searches by meaning: nothing to embed.
     asOf === undefined ? meaningOf(env, question) : {},
   ]);
@@ -613,18 +707,17 @@ export const recallAs = async (
     ...(asOf === undefined ? {} : { asOf }),
     ...meaning,
   };
-  const { items, notFound, truncated } = personal
-    ? packAcross(
-        question,
-        budget.tokens,
-        // The same request of both, the shared store first, as ties go
-        // to the store given first.
-        await Promise.all([
-          brain(env).find(request),
-          ownBrain(env, reader.person).find(request),
-        ])
-      )
-    : await brain(env).recall(request);
+  const own = ownBrainOf(env, reader);
+  const { items, notFound, truncated } =
+    own === undefined
+      ? await brain(env).recall(request)
+      : packAcross(
+          question,
+          budget.tokens,
+          // The same request of both, the shared store first, as ties go
+          // to the store given first.
+          await Promise.all([brain(env).find(request), own.find(request)])
+        );
   return {
     items: items.map(({ source, version, position, text, whole, found }) => ({
       source: sourceRefOf(source),
@@ -699,11 +792,12 @@ export const readSourceVersionAs = async (
   wanted: { source: SourceRef; version: number }
 ): Promise<SourceVersion | null> => {
   const { source, version } = checked(versionRefSchema, wanted);
-  const reader = await readerOf(env, personId);
+  const reader = await personReaderOf(env, personId);
   const request = { source: sourceKeyOf(source), version, reader };
   const read =
     (await brain(env).readVersion(request)) ??
-    (await ownBrain(env, reader.person).readVersion(request));
+    (await ownBrainOf(env, reader)?.readVersion(request)) ??
+    null;
   return read === null
     ? null
     : { source, version, text: read.text, addedAt: read.addedAt };
@@ -758,7 +852,7 @@ export const listSourcesAs = async (
 ): Promise<SourcePage> => {
   const from =
     after === undefined ? undefined : checked(sourcesAfterSchema, after);
-  const reader = await readerOf(env, personId);
+  const reader = await personReaderOf(env, personId);
   const request = {
     reader,
     prefixes: producerKinds.map((kind) => `${kind}:`),
@@ -770,7 +864,11 @@ export const listSourcesAs = async (
     await Promise.all([
       brain(env).listSources(request),
       ownOr(
-        async () => await ownBrain(env, reader.person).listSources(request),
+        async () =>
+          (await ownBrainOf(env, reader)?.listSources(request)) ?? {
+            sources: [],
+            more: false,
+          },
         {
           sources: [],
           more: false,
@@ -837,7 +935,7 @@ export const listVersionsAs = async (
   wanted: { source: SourceRef; before?: number }
 ): Promise<VersionPage> => {
   const { source, before } = checked(versionsWantedSchema, wanted);
-  const reader = await readerOf(env, personId);
+  const reader = await personReaderOf(env, personId);
   const request = {
     source: sourceKeyOf(source),
     reader,
@@ -847,7 +945,7 @@ export const listVersionsAs = async (
   const { versions, more } =
     shared.versions.length > 0
       ? shared
-      : await ownBrain(env, reader.person).listVersions(request);
+      : ((await ownBrainOf(env, reader)?.listVersions(request)) ?? shared);
   const last = versions.at(-1);
   return {
     versions: versions.map(({ version, addedAt }) => ({ version, addedAt })),
@@ -890,22 +988,25 @@ const readableIn = async (
  * Of `versions`, those the member `personId` may read now, as
  * `readSourceVersionAs` decides it, in the order given and each once,
  * without reading their text: for core to check what a chat once read
- * before it sends it again (history-access.ts). Of the shared store, and
- * of their own for those the shared one doesn't answer: a source is in
- * one of them (`keptIn`). Their own store failing answers none of its own
- * (`ownOr`): what can't be checked is withheld. Refused once they are no
- * longer a member. For the server only, as `addSource`.
+ * before it sends it again (history-access.ts), or a run what it
+ * recalled (workflows/resource-reads.ts): as far as `reach` goes, as the
+ * recall that handed them read. Of the shared store, and of their own for
+ * those the shared one doesn't answer (with the `person` reach alone): a
+ * source is in one of them (`keptIn`). Their own store failing answers
+ * none of its own (`ownOr`): what can't be checked is withheld. Refused
+ * once they are no longer a member. For the server only, as `addSource`.
  */
 export const readableVersionsAs = async (
   env: BrainEnv & Pick<Env, "DB">,
   personId: string,
-  versions: readonly SourceVersionRef[]
+  versions: readonly SourceVersionRef[],
+  { reach = "person" }: { reach?: Reach } = {}
 ): Promise<SourceVersionRef[]> => {
   const asked = checked(versionRefsSchema, versions);
   if (asked.length === 0) {
     return [];
   }
-  const reader = await readerOf(env, personId);
+  const reader = await readerOf(env, personId, reach);
   const keys = [
     ...new Map(
       asked.map(({ source, version }) => {
@@ -917,15 +1018,12 @@ export const readableVersionsAs = async (
   const inShared = await readableIn(brain(env), reader, keys);
   const shared = new Set(inShared.map((key) => versionKeyOf(key)));
   const rest = keys.filter((key) => !shared.has(versionKeyOf(key)));
-  const own =
-    rest.length === 0
+  const own = ownBrainOf(env, reader);
+  const inOwn =
+    rest.length === 0 || own === undefined
       ? []
-      : await ownOr(
-          async () =>
-            await readableIn(ownBrain(env, reader.person), reader, rest),
-          []
-        );
-  const kept = new Set([...shared, ...own.map((key) => versionKeyOf(key))]);
+      : await ownOr(async () => await readableIn(own, reader, rest), []);
+  const kept = new Set([...shared, ...inOwn.map((key) => versionKeyOf(key))]);
   const seen = new Set<string>();
   return asked.filter(({ source, version }) => {
     const key = versionKeyOf({ source: sourceKeyOf(source), version });
@@ -1153,9 +1251,6 @@ export const brainRestoreStatus = async (
 // reaches which chat or run, and who may write each, is
 // instruction-files.ts's rule; the functions here only name them for the
 // Brain.
-
-/** Every current member is in this group, and in no other way. */
-const companyGroup = "company";
 
 /** An App's group: only for a reader who builds the App. */
 const appGroup = (appId: string): string => `app:${appId}`;
@@ -2412,7 +2507,7 @@ export const rememberAs = async (
     rememberedSchema,
     remembered
   );
-  const reader = await readerOf(env, personId);
+  const reader = await personReaderOf(env, personId);
   const { person } = reader;
   const store = ownBrain(env, person);
   let added: Awaited<ReturnType<Brain["addMemories"]>>;
@@ -2477,7 +2572,7 @@ export const ownEntityAs = async (
   entity: string
 ): Promise<OwnEntity | null> => {
   const id = checked(entityIdSchema, entity);
-  const reader = await readerOf(env, personId);
+  const reader = await personReaderOf(env, personId);
   const store = ownBrain(env, reader.person);
   const read = await store.readEntity({ entity: id, reader });
   if (read === null) {
@@ -2519,7 +2614,7 @@ export const forgetAs = async (
   memory: string
 ): Promise<MemoryChangeOutcome> => {
   const id = checked(memoryIdSchema, memory);
-  const reader = await readerOf(env, personId);
+  const reader = await personReaderOf(env, personId);
   try {
     return await ownBrain(env, reader.person).retireMemory({
       memory: id,

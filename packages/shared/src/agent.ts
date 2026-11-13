@@ -20,6 +20,8 @@ export const agentErrors = defineErrorFamily({
   "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,
   "agent.not_offered":
     "This agent isn't offered to the company, or its owner took the offer back.",
+  "agent.own_off":
+    "Your company has turned off agents of people's own. An admin can turn them back on.",
   "agent.first_stays":
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":
