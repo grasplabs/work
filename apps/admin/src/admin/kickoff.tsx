@@ -37,12 +37,13 @@ import {
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { useRouter } from "@tanstack/react-router";
-import { CircleCheckIcon, CircleHelpIcon } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { CircleCheckIcon, CircleHelpIcon, UploadIcon } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { kickoffFn } from "../clients/kickoff-functions.ts";
 import type { KickoffAnswer, KickoffRefusal } from "../clients/kickoff.ts";
 import { InvalidFieldError, useAction } from "../use-action.ts";
+import { formatDate } from "./words.ts";
 
 /** The ten things Stephen needs from the first conversation, by name. */
 export const visionWords: Record<VisionField, string> = {
@@ -137,6 +138,7 @@ const BringIn = ({
   const [file, setFile] = useState<File | null>(null);
   // The file input starts again, empty, each time this changes.
   const [fileInput, setFileInput] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
   const clearFile = () => {
     setFile(null);
     setFileInput((each) => each + 1);
@@ -157,7 +159,7 @@ const BringIn = ({
   };
   return (
     <form
-      className="flex flex-col gap-4 border-t px-5 py-4"
+      className="flex flex-col gap-4 border-t px-5 py-4 *:max-w-xl"
       onSubmit={(event) => {
         event.preventDefault();
         void bringIn();
@@ -179,28 +181,54 @@ const BringIn = ({
       </Field>
       <Field>
         <FieldLabel htmlFor={`${id}-file`}>Or a file</FieldLabel>
+        {/* The browser's own file control is kept for what it does and for a
+            screen reader, out of sight: a button of the kit's opens it, and
+            the file's name stands beside it. */}
         <Input
           accept={accept}
+          className="sr-only"
           disabled={busy}
           id={`${id}-file`}
           key={fileInput}
           onChange={(event) => {
             setFile(event.target.files?.[0] ?? null);
           }}
+          ref={fileRef}
+          tabIndex={-1}
           type="file"
         />
-        {file === null ? null : (
+        <div className="flex flex-wrap items-center gap-3">
           <Button
-            className="self-start"
             disabled={busy}
-            onClick={clearFile}
+            onClick={() => {
+              fileRef.current?.click();
+            }}
             size="sm"
             type="button"
-            variant="ghost"
+            variant="outline"
           >
-            Remove the file
+            <UploadIcon data-icon="inline-start" />
+            Choose a file
           </Button>
-        )}
+          <span
+            className={
+              file === null ? "text-muted-foreground" : "min-w-0 truncate"
+            }
+          >
+            {file === null ? "No file chosen" : file.name}
+          </span>
+          {file === null ? null : (
+            <Button
+              disabled={busy}
+              onClick={clearFile}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Remove the file
+            </Button>
+          )}
+        </div>
         <FieldDescription>
           A .txt, .vtt, .srt or .docx file of at most 5 MB.
         </FieldDescription>
@@ -373,7 +401,7 @@ const broughtWords = (transcript: AdminKickoffView["transcript"]): string => {
   if (transcript === null) {
     return "Not brought in yet.";
   }
-  const at = transcript.at.slice(0, 16).replace("T", " ");
+  const at = `${formatDate(transcript.at)}, ${transcript.at.slice(11, 16)}`;
   return transcript.fileName === null
     ? `Pasted on ${at} (UTC).`
     : `${transcript.fileName}, brought in on ${at} (UTC).`;

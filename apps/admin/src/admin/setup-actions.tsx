@@ -246,7 +246,7 @@ export const SignInChange = ({
   const { busy, failure, run } = useSettingsAction();
   return (
     <form
-      className="flex flex-col gap-4 border-t px-5 py-4"
+      className="flex flex-col gap-4 border-t px-5 py-4 *:max-w-xl"
       onSubmit={(event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -473,7 +473,7 @@ export const TeamsBotChange = ({
   const { busy, failure, run } = useSettingsAction();
   return (
     <form
-      className="flex flex-col gap-4 border-t px-5 py-4"
+      className="flex flex-col gap-4 border-t px-5 py-4 *:max-w-xl"
       onSubmit={(event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -565,7 +565,7 @@ export const TeamsBotChange = ({
             }}
             size="sm"
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             Remove bot
           </Button>
@@ -665,7 +665,7 @@ export const SealedSecretChange = ({
   const id = `setup-${name.toLowerCase().replaceAll("_", "-")}`;
   return (
     <form
-      className="flex flex-col gap-3 border-t px-5 py-4"
+      className="flex flex-col gap-3 border-t px-5 py-4 *:max-w-xl"
       onSubmit={(event) => {
         event.preventDefault();
         const form = event.currentTarget;

@@ -14,12 +14,12 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, PlusIcon } from "lucide-react";
+import { ArrowRightIcon, ChevronRightIcon, PlusIcon } from "lucide-react";
 
 import { WithAdmins } from "../admin/admins.tsx";
 import { PageLoading } from "../admin/failure.tsx";
 import { AdminPage } from "../admin/page.tsx";
-import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
+import { Figure, KnowledgeDots, StageBar } from "../admin/parts.tsx";
 import { ReadinessBanner } from "../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../admin/readiness.ts";
 import { Section } from "../admin/section.tsx";
@@ -59,6 +59,16 @@ const knowledgeDots = 20;
 
 /** A cell with nothing to say: a dash, never a made-up number. */
 const Nothing = () => <span className="text-muted-foreground">–</span>;
+
+/** A row's last cell: the chevron that says the whole row opens, as every list a row of which opens has it. */
+const RowChevron = () => (
+  <TableCell variant="end">
+    <ChevronRightIcon
+      aria-hidden="true"
+      className="text-muted-foreground ml-auto size-4"
+    />
+  </TableCell>
+);
 
 /** An organization's name, linking to its own page, with whatever goes under it. */
 const NameLink = ({
@@ -188,6 +198,7 @@ const AnsweredRow = ({
           <Nothing />
         )}
       </TableCell>
+      <RowChevron />
     </TableRow>
   );
 };
@@ -239,6 +250,7 @@ const UnreadRow = ({
       <TableCell className="text-right" variant="card">
         <Nothing />
       </TableCell>
+      <RowChevron />
     </TableRow>
   );
 };
@@ -296,22 +308,24 @@ const Portfolio = ({
       <div className="overflow-hidden rounded-xl border text-sm">
         {/* Two abreast on a phone too: one a row made the numbers a screen long before the list began. */}
         <div className="bg-border grid grid-cols-2 gap-px lg:grid-cols-3 xl:grid-cols-6">
-          <Tile
-            label={portfolio.orgs === 1 ? "organization" : "organizations"}
+          <Figure
+            label={portfolio.orgs === 1 ? "Organization" : "Organizations"}
             value={portfolio.orgs}
           />
-          <Tile label="ready for Grasp’s go" value={portfolio.ready} />
-          <Tile label="open, and in the platform" value={portfolio.open} />
-          <Tile
-            label={`a month under contract, before VAT${fees.from}`}
+          <Figure label="Ready for Grasp’s go" value={portfolio.ready} />
+          <Figure label="Open, in the platform" value={portfolio.open} />
+          <Figure
+            label="Under contract"
+            sub={`a month, before VAT${fees.from}`}
             value={fees.value}
           />
-          <Tile label="of AI used this month" value={euro(portfolio.spend)} />
-          <Tile
-            label={
+          <Figure label="AI this month" value={euro(portfolio.spend)} />
+          <Figure
+            label="Hours a week freed"
+            sub={
               portfolio.counted.value === 0
-                ? "hours a week freed: not known yet"
-                : `hours a week freed, worth ${euros(portfolio.value)} a month${freed.from}`
+                ? "not known yet"
+                : `worth ${euros(portfolio.value)} a month${freed.from}`
             }
             value={freed.value}
           />
@@ -405,7 +419,7 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
                   )
                 }
                 size="sm"
-                variant="ghost"
+                variant="outline"
               >
                 Open
                 <ArrowRightIcon data-icon="inline-end" />
@@ -486,44 +500,46 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
         </Tabs>
       )}
       {/* Then the organizations themselves: what needs Grasp at one is on its own page, a click away. */}
-      <section className="bg-card @container overflow-hidden rounded-xl border text-sm">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">Organization</TableHead>
-              <TableHead className="hidden @xl:table-cell" variant="card">
-                Where it stands
-              </TableHead>
-              <TableHead className="hidden @3xl:table-cell" variant="card">
-                Known
-              </TableHead>
-              <TableHead className="hidden @5xl:table-cell" variant="card">
-                Contract
-              </TableHead>
-              <TableHead
-                className="hidden text-right @6xl:table-cell"
-                variant="card"
-              >
-                AI this month
-              </TableHead>
-              <TableHead
-                className="w-24 text-right whitespace-normal"
-                variant="card"
-              >
-                Needs Grasp
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {shown.map((organization) => (
-              <OrganizationRow
-                key={organization.admin.client.id}
-                organization={organization}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      </section>
+      <div className="@container">
+        <Section title="Every organization">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead variant="card">Organization</TableHead>
+                <TableHead className="hidden @xl:table-cell" variant="card">
+                  Where it stands
+                </TableHead>
+                <TableHead className="hidden @3xl:table-cell" variant="card">
+                  Known
+                </TableHead>
+                <TableHead className="hidden @5xl:table-cell" variant="card">
+                  Contract
+                </TableHead>
+                <TableHead
+                  className="hidden text-right @6xl:table-cell"
+                  variant="card"
+                >
+                  AI this month
+                </TableHead>
+                <TableHead className="text-right" variant="card">
+                  Needs Grasp
+                </TableHead>
+                <TableHead variant="card">
+                  <span className="sr-only">Open</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {shown.map((organization) => (
+                <OrganizationRow
+                  key={organization.admin.client.id}
+                  organization={organization}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </Section>
+      </div>
     </>
   );
 };

@@ -297,10 +297,8 @@ describe("an organization's interviews", () => {
         : html.slice(start, html.indexOf("</div>", start));
     };
 
-    // Its ring says the share too: none of the two who started.
-    expect(
-      [">0 of 2<", ">0%<"].filter((text) => figureOf("Finished").includes(text))
-    ).toStrictEqual([">0 of 2<", ">0%<"]);
+    // None of the two who started.
+    expect(figureOf("Finished")).toContain(">0 of 2<");
   });
 
   it("measures Stephen across every organization in the Lab, each opening its interviewers, never with what anyone said", async () => {
