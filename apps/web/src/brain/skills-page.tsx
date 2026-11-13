@@ -89,43 +89,45 @@ The steps.
 `;
 
 /**
- * Where the person's share stands, as its row says: waiting; approved and
- * added (a later add may replace it since: the last to land is live);
- * approved but not added yet; or declined.
+ * Where the person's share stands, as its row says: added, whenever an
+ * add landed (one on its way when the share was closed included; a later
+ * add may replace it since: the last to land is live); otherwise waiting;
+ * approved but not added yet; closed before it was added (the person asked
+ * again or deleted the skill); or declined.
  */
 const ShareStatus = ({ share }: { share: SkillShare }) => {
-  switch (share.status) {
-    case "pending": {
-      return (
-        <Badge variant="attention">
-          <Trans>Waiting for an admin</Trans>
-        </Badge>
-      );
-    }
-    case "declined": {
-      return (
-        <Badge variant="outline">
-          <Trans>Declined</Trans>
-        </Badge>
-      );
-    }
-    case "approved": {
-      return share.version === null ? (
-        <Badge variant="attention">
-          <Trans>
-            Approved, but not added to the company&apos;s skills yet.
-          </Trans>
-        </Badge>
-      ) : (
-        <Badge variant="passed">
-          <Trans>Added to the company&apos;s skills.</Trans>
-        </Badge>
-      );
-    }
-    default: {
-      return null;
-    }
+  if (share.version !== null) {
+    return (
+      <Badge variant="passed">
+        <Trans>Added to the company&apos;s skills.</Trans>
+      </Badge>
+    );
   }
+  if (share.status === "pending") {
+    return (
+      <Badge variant="attention">
+        <Trans>Waiting for an admin</Trans>
+      </Badge>
+    );
+  }
+  if (share.status === "declined") {
+    return (
+      <Badge variant="outline">
+        <Trans>Declined</Trans>
+      </Badge>
+    );
+  }
+  return share.open ? (
+    <Badge variant="attention">
+      <Trans>Approved, but not added to the company&apos;s skills yet.</Trans>
+    </Badge>
+  ) : (
+    <Badge variant="outline">
+      <Trans>
+        Closed before it was added: you asked again or deleted the skill.
+      </Trans>
+    </Badge>
+  );
 };
 
 /** Asks before something that can't be undone. */
@@ -285,17 +287,17 @@ const ShareRequest = ({
           <Button disabled={busy} onClick={onApprove} size="sm" type="button">
             <Trans>Approve</Trans>
           </Button>
-          {request.status === "pending" ? (
-            <Button
-              disabled={busy}
-              onClick={onDecline}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Trans>Decline</Trans>
-            </Button>
-          ) : null}
+          {/* Every card is an open share: waiting, or approved and not
+              added yet. Either is closed by declining it. */}
+          <Button
+            disabled={busy}
+            onClick={onDecline}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <Trans>Decline</Trans>
+          </Button>
         </div>
       </CardContent>
     </Card>

@@ -3978,6 +3978,10 @@ msgstr "Deze vraag zonder antwoord sluiten?"
 msgid "Close without an answer"
 msgstr "Sluiten zonder antwoord"
 
+#: src/brain/skills-page.tsx
+msgid "Closed before it was added: you asked again or deleted the skill."
+msgstr "Gesloten voordat hij werd toegevoegd: je hebt opnieuw gevraagd of de skill verwijderd."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
 msgstr "Sluit op {closes}"

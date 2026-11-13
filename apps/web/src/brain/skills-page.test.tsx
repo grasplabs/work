@@ -57,6 +57,7 @@ const request: SkillShareRequest = {
   requestedBy: { userId: "u-2", name: "Anna" },
   decidedAt: null,
   version: null,
+  open: true,
   text: asked,
   replaces: "grasp",
 };
@@ -69,6 +70,7 @@ const shareOf = (name: string): SkillShare => ({
   requestedBy: { userId: "u-1", name: "Me" },
   decidedAt: null,
   version: null,
+  open: true,
 });
 
 /** Shows the page on a faked core, as an admin or not, refusing saves with `refusal`. */
@@ -76,15 +78,18 @@ const shown = async ({
   admin,
   refusal,
   existing = [],
+  waiting = request,
 }: {
   admin: boolean;
   refusal?: string;
   /** The person's shares already there. */
   existing?: SkillShare[];
+  /** The share that waits for an admin. */
+  waiting?: SkillShareRequest;
 }) => {
   const calls: string[] = [];
   const shares: SkillShare[] = [...existing];
-  let requests = [request];
+  let requests = [waiting];
   const skills = {
     overview: async (): Promise<SkillsOverview> => {
       await Promise.resolve();
@@ -116,6 +121,12 @@ const shown = async ({
       calls.push(`approve ${id}`);
       requests = [];
       return { ...request, status: "approved" as const, version: 1 };
+    },
+    decline: async (id: string) => {
+      await Promise.resolve();
+      calls.push(`decline ${id}`);
+      requests = [];
+      return { ...request, status: "declined" as const, open: false };
     },
   };
   const core = {
@@ -248,20 +259,25 @@ describe("the skills page", () => {
     const at = (
       name: string,
       status: SkillShare["status"],
-      version: number | null
+      version: number | null,
+      open: boolean
     ) => ({
       ...shareOf(name),
       id: `share-${name}`,
       status,
       version,
+      open,
     });
     await shown({
       admin: false,
       existing: [
-        at("waiting", "pending", null),
-        at("added", "approved", 3),
-        at("stuck", "approved", null),
-        at("refused", "declined", null),
+        at("waiting", "pending", null, true),
+        at("added", "approved", 3, false),
+        at("stuck", "approved", null, true),
+        at("closed", "approved", null, false),
+        at("refused", "declined", null, false),
+        // Declined while its add was on its way, which then landed.
+        at("landed", "declined", 2, false),
       ],
     });
 
@@ -269,12 +285,39 @@ describe("the skills page", () => {
       waiting: stateOf("waiting"),
       added: stateOf("added"),
       stuck: stateOf("stuck"),
+      closed: stateOf("closed"),
       refused: stateOf("refused"),
+      landed: stateOf("landed"),
     }).toStrictEqual({
       waiting: "Waiting for an admin",
       added: "Added to the company's skills.",
       stuck: "Approved, but not added to the company's skills yet.",
+      closed:
+        "Closed before it was added: you asked again or deleted the skill.",
       refused: "Declined",
+      landed: "Added to the company's skills.",
+    });
+  });
+
+  it("lets an admin decline a share approved but not added yet", async () => {
+    const { calls } = await shown({
+      admin: true,
+      waiting: {
+        ...request,
+        status: "approved",
+        decidedAt: request.requestedAt,
+      },
+    });
+    await click("Decline");
+
+    expect({
+      calls,
+      after: document.body.textContent?.includes(
+        "Nobody is waiting for you to decide a share."
+      ),
+    }).toStrictEqual({
+      calls: ["overview", "decline share-1", "overview"],
+      after: true,
     });
   });
 });

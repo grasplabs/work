@@ -3978,6 +3978,10 @@ msgstr "¿Cerrar esta pregunta sin respuesta?"
 msgid "Close without an answer"
 msgstr "Cerrar sin respuesta"
 
+#: src/brain/skills-page.tsx
+msgid "Closed before it was added: you asked again or deleted the skill."
+msgstr "Cerrada antes de añadirse: volviste a pedirlo o eliminaste la skill."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
 msgstr "Cierra el {closes}"

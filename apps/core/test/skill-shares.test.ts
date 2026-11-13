@@ -1806,4 +1806,199 @@ describe("writing and sharing skills", setUpTime, () => {
       ],
     });
   });
+
+  it("closes an approved share not added yet when its person asks again, so its old text is never added after the new one", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("asked-again");
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+    const first = await asker.api.skills.save(skillText(name, "Old"));
+    const old = await asker.api.skills.share(name, first.version);
+    const oldFailed = await outcome(
+      approveShare(sharedStoreFailing("addInstructions"), deciding, old.id)
+    );
+    const second = await asker.api.skills.save(skillText(name, "New"));
+    const newer = await asker.api.skills.share(name, second.version);
+    const page = await overviewOf(admin.api);
+    await admin.api.skills.approve(newer.id);
+    const oldAgain = await outcome(admin.api.skills.approve(old.id));
+    const asked = await overviewOf(asker.api);
+
+    expect({
+      oldFailed,
+      cards: page.requests
+        ?.filter(({ name: named }) => named === name)
+        .map(({ id }) => (id === old.id ? "old" : "new")),
+      oldAgain,
+      live: await liveOf(member.api, name),
+      rows: asked.shares
+        .filter(({ name: named }) => named === name)
+        .map(({ id, status, version, open }) => [
+          id === old.id ? "old" : "new",
+          status,
+          version,
+          open,
+        ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      oldFailed: "Error: Out of reach, for the test",
+      // Only the new ask is there to decide.
+      cards: ["new"],
+      oldAgain: "skills.not_found",
+      live: [["New", 1]],
+      rows: [
+        ["new", "approved", 1, false],
+        ["old", "approved", null, false],
+      ],
+      events: [
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("closes an approved share not added yet when its person deletes the skill for good, so the deleted text is never added", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("deleted-meanwhile");
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+    const saved = await asker.api.skills.save(skillText(name, "Deleted"));
+    const share = await asker.api.skills.share(name, saved.version);
+    const failed = await outcome(
+      approveShare(sharedStoreFailing("addInstructions"), deciding, share.id)
+    );
+    await asker.api.skills.remove(name);
+    const page = await overviewOf(admin.api);
+    const again = await outcome(admin.api.skills.approve(share.id));
+
+    expect({
+      failed,
+      cards: page.requests?.filter(({ id }) => id === share.id).length,
+      again,
+      live: await liveOf(member.api, name),
+      kept: await keptText(share.id),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      failed: "Error: Out of reach, for the test",
+      cards: 0,
+      again: "skills.not_found",
+      live: [],
+      kept: [null],
+      events: [
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.approve_failed",
+      ],
+    });
+  });
+
+  it("lets an admin decline a share approved but not added yet, which is then never added", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("decline-approved");
+    const deciding = await admin.api.whoami();
+    const saved = await asker.api.skills.save(skillText(name, "Stuck"));
+    const share = await asker.api.skills.share(name, saved.version);
+    const head = await logHead();
+    const failed = await outcome(
+      approveShare(sharedStoreFailing("addInstructions"), deciding, share.id)
+    );
+    const declined = await outcome(admin.api.skills.decline(share.id));
+    const page = await overviewOf(admin.api);
+    const again = await outcome(admin.api.skills.approve(share.id));
+
+    expect({
+      failed,
+      declined,
+      cards: page.requests?.filter(({ id }) => id === share.id).length,
+      again,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([{ api: asker.api, id: share.id }]),
+      kept: await keptText(share.id),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      failed: "Error: Out of reach, for the test",
+      declined: "ok",
+      cards: 0,
+      again: "skills.not_found",
+      live: [],
+      rows: [["declined", null]],
+      kept: [null],
+      events: [
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.declined",
+      ],
+    });
+  });
+
+  it("records an add already on its way when its share was declined, and the admin can retire it as usual", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("declined-in-flight");
+    const deciding = await admin.api.whoami();
+    const saved = await asker.api.skills.save(skillText(name, "Landed"));
+    const share = await asker.api.skills.share(name, saved.version);
+    const head = await logHead();
+    // The first attempt fails, leaving the share approved and not added.
+    // The second is declined while its add is on its way; the add lands.
+    await outcome(
+      approveShare(sharedStoreFailing("addInstructions"), deciding, share.id)
+    );
+    const landed = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () => await admin.api.skills.decline(share.id),
+        }),
+        deciding,
+        share.id
+      )
+    );
+    const halfway = {
+      landed,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([{ api: asker.api, id: share.id }]),
+    };
+    const retired = await outcome(admin.api.skills.retire(name));
+
+    expect({
+      ...halfway,
+      retired,
+      liveAfter: await liveOf(member.api, name),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      landed: "ok",
+      live: [["Landed", 1]],
+      // The store's answer is the truth: declined, and added at 1.
+      rows: [["declined", 1]],
+      retired: "ok",
+      liveAfter: [],
+      events: [
+        "skill.share.approved",
+        "skill.share.approve_failed",
+        "skill.share.declined",
+        "skill.share.added",
+        "skill.retired",
+        "skill.retire_done",
+      ],
+    });
+  });
 });

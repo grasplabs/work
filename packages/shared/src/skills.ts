@@ -47,10 +47,17 @@ export interface SkillShare {
   /** ISO 8601; null while it waits. */
   decidedAt: string | null;
   /**
-   * Approved, the company skill's version it made; null while that isn't
-   * in yet (approving it again finishes it), and for any other status.
+   * The company skill's version its add landed at; null while none did.
+   * Set whatever its status: an add on its way when the share was closed
+   * may still land, and the store's answer is what is live.
    */
   version: number | null;
+  /**
+   * Whether it can still be decided: waiting, or approved with no add
+   * landed yet. A decline, the person asking again for that skill, or the
+   * person deleting it for good closes it, and drops its text.
+   */
+  open: boolean;
 }
 
 /** A share waiting for an admin, with the exact text an approval adds. */

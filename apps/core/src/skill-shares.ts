@@ -13,7 +13,7 @@ import type {
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -51,8 +51,10 @@ import { shippedSkills } from "./shipped-skills.ts";
 //   person's own stored skill at the version they name, never from what
 //   they send, and keeps that text: the admin approves exactly the text
 //   they were shown, so an edit after asking needs a new share. Asking
-//   again replaces a waiting share under a new ID, so an approval of the
-//   one shown is refused, never applied to text nobody reviewed.
+//   again replaces every open share of that skill (waiting, or approved
+//   with no add landed) under a new ID, and deleting the skill for good
+//   closes them too: a closed share's text is dropped, so an approval of
+//   it is refused, never applied to text nobody reviewed or that is gone.
 // - A decision that reads as done when it isn't, or one done unaudited:
 //   approving records the decision and its one `skill.share.approved`
 //   event in one batch (one conditional update from `pending`), before
@@ -128,6 +130,59 @@ interface ShareRow {
   version: number | null;
 }
 
+/**
+ * That a share is open, as SQL: waiting, or approved with no add landed
+ * and its text kept. The one rule the decline, asking again, deleting
+ * the skill, the admin's list and approving go by.
+ */
+const isOpen = or(
+  eq(skillShares.status, "pending"),
+  and(
+    eq(skillShares.status, "approved"),
+    isNull(skillShares.version),
+    isNotNull(skillShares.text)
+  )
+);
+
+/** That `row` is open, as `isOpen` says it. */
+const openOf = (row: Pick<ShareRow, "status" | "version" | "text">): boolean =>
+  row.status === "pending" ||
+  (row.status === "approved" && row.version === null && row.text !== null);
+
+/**
+ * The statements that close `requestedBy`'s open shares of `name`: a
+ * waiting one goes, as it always did; an approved one with no add landed
+ * keeps its record (an add on its way may still land: the record step
+ * writes its version on it) and drops its text, so no approval can add it
+ * from then on.
+ */
+const closingOpenShares = (
+  db: ReturnType<typeof drizzle>,
+  requestedBy: string,
+  name: string
+) =>
+  [
+    db
+      .delete(skillShares)
+      .where(
+        and(
+          eq(skillShares.requestedBy, requestedBy),
+          eq(skillShares.name, name),
+          eq(skillShares.status, "pending")
+        )
+      ),
+    db
+      .update(skillShares)
+      .set({ text: null })
+      .where(
+        and(
+          eq(skillShares.requestedBy, requestedBy),
+          eq(skillShares.name, name),
+          isOpen
+        )
+      ),
+  ] as const;
+
 const shareOf = (row: ShareRow): SkillShare => ({
   id: row.id,
   name: row.name,
@@ -136,6 +191,7 @@ const shareOf = (row: ShareRow): SkillShare => ({
   requestedBy: { userId: row.userId, name: row.userName },
   decidedAt: row.decidedAt?.toISOString() ?? null,
   version: row.version,
+  open: openOf(row),
 });
 
 /** The share `id`, or `skills.not_found`. */
@@ -170,8 +226,8 @@ const shareEntry = (
 
 /**
  * What the skills page shows `by`: their own skills, the company's, their
- * own shares, and, for admins, every share that waits and every approved
- * one still to finish, each with its text.
+ * own shares, and, for admins, every open share (waiting, or approved with
+ * no add landed), each with its text.
  */
 export const skillsOverview = async (
   env: Env,
@@ -201,12 +257,7 @@ export const skillsOverview = async (
         .select(shareColumns)
         .from(skillShares)
         .leftJoin(users, eq(users.id, skillShares.requestedBy))
-        .where(
-          or(
-            eq(skillShares.status, "pending"),
-            and(eq(skillShares.status, "approved"), isNull(skillShares.version))
-          )
-        )
+        .where(isOpen)
         .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
     : null;
   return {
@@ -276,8 +327,9 @@ export const saveOwnSkill = async (
 };
 
 /**
- * Erases `by`'s own skill `name` for good, then drops their share of it
- * that waits, if any (its text is theirs). Safe to repeat.
+ * Erases `by`'s own skill `name` for good, then closes their open shares
+ * of it (`closingOpenShares`: their text is theirs, and goes). Safe to
+ * repeat.
  */
 export const removeOwnSkill = async (
   env: Env,
@@ -286,21 +338,14 @@ export const removeOwnSkill = async (
 ): Promise<void> => {
   const named = skillErrors.parse("skills.invalid", nameSchema, name);
   await eraseOwnSkill(env, by.userId, named);
-  await drizzle(env.DB)
-    .delete(skillShares)
-    .where(
-      and(
-        eq(skillShares.requestedBy, by.userId),
-        eq(skillShares.name, named),
-        eq(skillShares.status, "pending")
-      )
-    );
+  const db = drizzle(env.DB);
+  await db.batch(closingOpenShares(db, by.userId, named));
 };
 
 /**
  * Asks to share `by`'s own skill `name`, exactly as it is at `version`,
- * with the company: it waits for an admin, in place of a share of it
- * that waits already, which is dropped.
+ * with the company: it waits for an admin, in place of every open share
+ * of it (`closingOpenShares`), which is closed.
  */
 export const shareOwnSkill = async (
   env: Env,
@@ -323,15 +368,8 @@ export const shareOwnSkill = async (
   const id = crypto.randomUUID();
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
-    db
-      .delete(skillShares)
-      .where(
-        and(
-          eq(skillShares.requestedBy, by.userId),
-          eq(skillShares.name, read.name),
-          eq(skillShares.status, "pending")
-        )
-      ),
+    // The new ask replaces every open share of that skill of theirs.
+    ...closingOpenShares(db, by.userId, read.name),
     db.insert(skillShares).values({
       id,
       name: read.name,
@@ -391,10 +429,12 @@ const sayOutcome = async (
  * the share stays approved with its text, and approving it again reads
  * the current version afresh and lands it, without a second decision. A
  * decision with no outcome is one whose attempt stopped half-way.
- * `skills.not_found` for a share there isn't or that was declined or
- * replaced. A decline acts only on a waiting share, and an add only
- * follows a decision that moved it on from waiting, so a declined share
- * never has an add on its way.
+ * `skills.not_found` for a share there isn't or that is closed (declined,
+ * or its text dropped by its person asking again or deleting the skill):
+ * an approve that starts after the close never adds it. An add already on
+ * its way when the share is closed may still land: the store's answer is
+ * what is live, so the record step writes its version and
+ * `skill.share.added` on the row whatever its status.
  */
 export const approveShare = async (
   env: Env,
@@ -423,10 +463,12 @@ export const approveShare = async (
   }
   // As it is now: approved by this call or one before, or not at all.
   const decided = await shareById(env, row.id);
+  if (decided.status === "approved" && decided.version !== null) {
+    return shareOf(decided);
+  }
+  // Closed (declined, or its text dropped by the person asking again or
+  // deleting the skill): never added from then on.
   if (decided.status !== "approved" || decided.text === null) {
-    if (decided.status === "approved") {
-      return shareOf(decided);
-    }
     throw skillErrors.create("skills.not_found");
   }
   let version: number;
@@ -452,21 +494,18 @@ export const approveShare = async (
     db
       .update(skillShares)
       .set({ version, text: null })
-      .where(
-        and(
-          eq(skillShares.id, decided.id),
-          eq(skillShares.status, "approved"),
-          isNull(skillShares.version)
-        )
-      ),
+      // Whatever its status: closed while its add was on its way, the add
+      // still landed, and the row and the log say what is live.
+      .where(and(eq(skillShares.id, decided.id), isNull(skillShares.version))),
     outboxedIfChanged(db, shareEntry(by, "added", decided.id, { version })),
   ]);
   return shareOf(await shareById(env, decided.id));
 };
 
 /**
- * Declines the share `id` as the admin `by`, dropping its text.
- * `skills.not_found` for a share there isn't or that no longer waits.
+ * Declines the open share `id` as the admin `by` (waiting, or approved
+ * with no add landed), dropping its text. `skills.not_found` for a share
+ * there isn't or that is closed.
  */
 export const declineShare = async (
   env: Env,
@@ -485,9 +524,7 @@ export const declineShare = async (
         decidedAt: new Date(),
         text: null,
       })
-      .where(
-        and(eq(skillShares.id, row.id), eq(skillShares.status, "pending"))
-      ),
+      .where(and(eq(skillShares.id, row.id), isOpen)),
     outboxedIfChanged(db, shareEntry(by, "declined", row.id)),
   ]);
   const decided = await shareById(env, row.id);
@@ -566,7 +603,7 @@ export const waitingShares = async (
     .select(shareColumns)
     .from(skillShares)
     .leftJoin(users, eq(users.id, skillShares.requestedBy))
-    .where(eq(skillShares.status, "pending"))
+    .where(isOpen)
     .orderBy(asc(skillShares.requestedAt), asc(skillShares.id));
   return rows.map(shareOf);
 };
