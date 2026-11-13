@@ -183,19 +183,23 @@ const recalledAs = async (
 };
 
 /**
- * What `personId` recalls for `question`, each chunk's text and the way
- * it was found: by words, an exact part or meaning.
+ * What `personId` recalls for `question`, each chunk's text, its source's
+ * id and the way it was found: by words, an exact part or meaning.
  */
 const foundAs = async (
   personId: string,
   question: string
-): Promise<{ text: string; found: string }[]> => {
+): Promise<{ text: string; source: string; found: string }[]> => {
   const { items } = await recallAs(env, personId, {
     personal: true,
     question,
     budget: { tokens: recallBudgetMax },
   });
-  return items.map(({ text, found }) => ({ text, found }));
+  return items.map(({ text, source, found }) => ({
+    text,
+    source: source.id,
+    found,
+  }));
 };
 
 /** `source`'s `version` as `personId` reads it: null if not. */
@@ -658,11 +662,17 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       // alone; by meaning, other passages the reader may read, never one
       // of the erased source.
       byWords: keptFound.filter(({ found }) => found !== "meaning"),
-      erasedBack: keptFound.filter(({ text }) => text.includes(erasedMark)),
+      erasedBack: keptFound.filter(({ source }) => source === erased.id),
     }).toStrictEqual({
       tables: [],
       vectors: { codes: 0, inBlocks: 0, kept: 0 },
-      byWords: [{ text: `Staying ${wordOf(keptMark)}`, found: "exact" }],
+      byWords: [
+        {
+          text: `Staying ${wordOf(keptMark)}`,
+          source: kept.id,
+          found: "exact",
+        },
+      ],
       erasedBack: [],
     });
   });
@@ -1078,11 +1088,10 @@ describe("an add under way as an erasure lands", { timeout: 120_000 }, () => {
     const recalled = await foundAs(leaver, wordOf(inFlight));
     expect({
       added,
-      // Nothing by its word, and by meaning only what they may read, never
-      // the refused add.
+      // Nothing by its word, and by meaning never the refused add's
+      // source: what else meaning brings is theirs to read.
       recalled: recalled.filter(
-        ({ found, text }) =>
-          found !== "meaning" || text === `In flight ${wordOf(inFlight)}`
+        ({ found, source: from }) => found !== "meaning" || from === source.id
       ),
       history: await historyAs(leaver, source, 1),
       tables: await tablesHolding([inFlight]),

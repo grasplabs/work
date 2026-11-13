@@ -168,7 +168,13 @@ const surfaces: [string, Probe][] = brainSurfaces.flatMap(({ name, probes }) =>
  * errors, covers nothing). An answer by meaning (`Answer.byMeaning`) is
  * held to `before` alone, where a pass has one: a question of the markers
  * and one of their twins mean different things, so their packs differ by
- * meaning whatever is hidden.
+ * meaning whatever is hidden. A pass without one (the marker test's
+ * readers, and the restore, producers and export tests) holds `core
+ * recallAs`, `core mergeRecalled` and `sources search` to their markers
+ * alone: those tests add hidden sources before or beside what each reader
+ * may read, so no moment holds a reader's own content without them. The
+ * test that answers "by meaning exactly as before anything the reader may
+ * not read was added" holds them to non-interference.
  */
 const findingsIn = (
   answers: readonly Answer[],
