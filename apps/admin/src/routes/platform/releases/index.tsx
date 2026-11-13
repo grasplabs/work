@@ -81,7 +81,7 @@ const EveryRelease = ({
                 <TableCell className="whitespace-normal" variant="card">
                   <div className="flex flex-col gap-0.5">
                     <Link
-                      className="font-mono text-xs underline-offset-4 hover:underline"
+                      className="underline-offset-4 hover:underline"
                       params={{ releaseId: release.id }}
                       to="/platform/releases/$releaseId"
                     >

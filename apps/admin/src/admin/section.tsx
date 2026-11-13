@@ -42,7 +42,8 @@ export const Section = ({
         <h2>{title}</h2>
       </CardTitle>
       {description === undefined ? null : (
-        <CardDescription>{description}</CardDescription>
+        // A measure a line can be read at: a description as wide as the card ran past 130 characters.
+        <CardDescription className="max-w-3xl">{description}</CardDescription>
       )}
       {action === undefined ? null : <CardAction>{action}</CardAction>}
     </CardHeader>

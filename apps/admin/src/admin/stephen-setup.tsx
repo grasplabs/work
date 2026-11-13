@@ -38,6 +38,7 @@ import { PencilIcon, RotateCcwIcon } from "lucide-react";
 import { useId, useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
+import { Attention } from "./parts.tsx";
 
 /** Stephen's setup as the snapshot has it. */
 export type SetupRead = AdminSnapshot["setup"];
@@ -184,7 +185,9 @@ const SetupDialog = ({
             </FieldDescription>
           </Field>
           {problem === null ? null : (
-            <p className="text-status-attention">{problem}</p>
+            <p>
+              <Attention>{problem}</Attention>
+            </p>
           )}
           <CommandFailure failure={failure} />
           <DialogFooter>
@@ -221,7 +224,7 @@ export const SetupActions = ({
               });
             }}
             size="sm"
-            variant="ghost"
+            variant="outline"
           >
             <RotateCcwIcon data-icon="inline-start" />
             As the first conversation suggests

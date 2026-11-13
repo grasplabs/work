@@ -12,6 +12,7 @@ import {
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { cn } from "@grasp-os/ui/lib/utils";
 import type { ReactNode } from "react";
 
 import { Section } from "../admin/section.tsx";
@@ -58,32 +59,40 @@ const StateMark = ({ state }: { state: LineState }) => {
   return <Badge variant={badgeVariants[state]}>{stateWords[state]}</Badge>;
 };
 
+/** One step on one line: where it stands, what it is, and at its end the way to its details, which open under it. */
 const Line = ({ line }: { line: ProgressLine }) => (
-  <li className="flex flex-col gap-1 border-t py-3 first:border-t-0">
-    <div className="flex flex-wrap items-center gap-3 text-sm">
-      <StateMark state={line.state} />
-      <span className={line.state === "waiting" ? "text-muted-foreground" : ""}>
-        {line.label}
-      </span>
-      {/* A spinner says nothing: its state in words for screen readers. */}
-      {line.state === "doing" || line.state === "retrying" ? (
-        <span className="sr-only">{stateWords[line.state]}</span>
-      ) : null}
-    </div>
-    {line.details.length === 0 ? null : (
-      <Collapsible>
-        <CollapsibleTrigger render={<Button size="sm" variant="link" />}>
-          Details
-        </CollapsibleTrigger>
+  <li className="border-t py-2 first:border-t-0">
+    <Collapsible>
+      <div className="flex min-h-7 items-center gap-3 text-sm">
+        <StateMark state={line.state} />
+        <span
+          className={cn(
+            "min-w-0 flex-1",
+            line.state === "waiting" && "text-muted-foreground"
+          )}
+        >
+          {line.label}
+        </span>
+        {/* A spinner says nothing: its state in words for screen readers. */}
+        {line.state === "doing" || line.state === "retrying" ? (
+          <span className="sr-only">{stateWords[line.state]}</span>
+        ) : null}
+        {line.details.length === 0 ? null : (
+          <CollapsibleTrigger render={<Button size="xs" variant="outline" />}>
+            Details
+          </CollapsibleTrigger>
+        )}
+      </div>
+      {line.details.length === 0 ? null : (
         <CollapsibleContent>
-          <ul className="text-muted-foreground list-disc pl-5 text-sm">
+          <ul className="text-muted-foreground list-disc pt-1 pl-5 text-sm">
             {line.details.map((detail) => (
               <li key={detail}>{detail}</li>
             ))}
           </ul>
         </CollapsibleContent>
-      </Collapsible>
-    )}
+      )}
+    </Collapsible>
   </li>
 );
 
@@ -113,7 +122,7 @@ const Ready = ({ progress }: { progress: ProvisioningProgress }) => (
   <Collapsible>
     <Section
       action={
-        <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
+        <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
           Show its steps
         </CollapsibleTrigger>
       }
@@ -157,7 +166,7 @@ export const ProvisioningProgressView = ({
         <Steps progress={progress} />
         {progress.code === null ? null : (
           <Collapsible>
-            <CollapsibleTrigger render={<Button size="sm" variant="link" />}>
+            <CollapsibleTrigger render={<Button size="xs" variant="outline" />}>
               Details
             </CollapsibleTrigger>
             <CollapsibleContent>
