@@ -18,7 +18,7 @@ import { refusal, signedInApi } from "./sign-in.ts";
 // its version declares: each resource in its manifest, bound and approved
 // by an admin for that declaration, and each independent workflow it binds
 // under an alias, whose every call is a binding of its validated
-// definition, approved for that exact version. No code is read to say what
+// definition, approved for that declaration. No code is read to say what
 // a version calls, so nothing may run that the review doesn't list.
 //
 // The attacks, each refused:
