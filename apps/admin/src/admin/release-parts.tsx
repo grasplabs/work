@@ -31,7 +31,7 @@ export const Facts = ({ rows }: { rows: readonly Fact[] }) => (
         <dd
           className={cn(
             "min-w-0 text-right break-all",
-            row.mono === true && "font-mono text-xs",
+            row.mono === true && "tabular-nums",
             row.attention === true && "text-status-attention"
           )}
         >
