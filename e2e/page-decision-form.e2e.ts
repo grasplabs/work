@@ -272,7 +272,6 @@ const boundApp = async (
     await builds.api.workflowResources.bindToApp(workflow.id, {
       app,
       alias: "followUp",
-      version: 1,
     });
     const { version } = await commitApp(
       builds.api.apps.files,

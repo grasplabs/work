@@ -397,8 +397,7 @@ const seedWorkflow = async (
   });
   await owner.api.drafts.publish(
     { kind: "workflow", id: created.id },
-    drafted.revision,
-    "Seeded."
+    drafted.revision
   );
   if (decision !== undefined) {
     const teamId = teams.get(decision.team);
@@ -420,7 +419,7 @@ const seedWorkflow = async (
     const id = teams.get(team);
     if (id !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one change at a time
-      await resources.share(created.id, { type: "team", id, role });
+      await resources.members.add(created.id, { type: "team", id, role });
     }
   }
   return created.id;
@@ -526,7 +525,6 @@ const seedApp = async (
         await owner.api.workflowResources.bindToApp(id, {
           app: app.id,
           alias,
-          version: 1,
         });
       }
     }
