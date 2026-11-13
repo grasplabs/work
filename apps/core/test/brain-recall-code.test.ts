@@ -1320,13 +1320,13 @@ export const save = mutation({
 
 export const keep = action({
   args: { question: v.string() },
-  returns: v.number(),
+  returns: v.array(v.string()),
   handler: async (ctx, args) => {
     const pack = await ctx.brain.recall({ question: args.question, budget: { tokens: 800 } });
     for (const item of pack.items) {
       await ctx.runMutation(save, { title: item.text });
     }
-    return pack.items.length;
+    return pack.items.map((item) => item.text);
   },
 });
 
@@ -1442,6 +1442,22 @@ const ranOfCalls = async (by: Member, id: string): Promise<unknown> => {
   return await endOf(by, id, runId);
 };
 
+/**
+ * Of `answer`, a list of texts, those that carry this test's own `word`,
+ * sorted; anything else (a refusal) as it is. Recall also finds what other
+ * tests added by meaning, which the reader may read: never this test's to
+ * count.
+ */
+const carrying = (word: string, answer: unknown): unknown =>
+  Array.isArray(answer)
+    ? answer
+        .filter(
+          (text): text is string =>
+            typeof text === "string" && text.includes(word)
+        )
+        .toSorted()
+    : answer;
+
 /** `member` as a request of theirs is signed in now: their teams now. */
 const now = async (member: Member): Promise<Member> => ({
   ...member,
@@ -1465,7 +1481,7 @@ describe("an App whose grant names teams", setUpTime, () => {
     await boundToTeams(app, ada, admin, [teams.adas]);
     const asks = { question: word, tokens: 800 };
     expect({
-      ada: textsOf(await askedOf(app, await now(ada), asks)).toSorted(),
+      ada: carrying(word, textsOf(await askedOf(app, await now(ada), asks))),
       admin: await askedOf(app, await now(admin), asks),
     }).toStrictEqual({
       ada: [
@@ -1481,6 +1497,9 @@ describe("an App whose grant names teams", setUpTime, () => {
     const ben = await person("user");
     await joined(teams.adas, ben);
     const app = await keepOf(ada);
+    // What carries this test's word: what else recall finds isn't its to count.
+    const own = async (...args: Parameters<typeof calledOf>) =>
+      carrying(word, await calledOf(...args));
     await boundToTeams(app, ada, admin, [teams.adas]);
     const share = async (member: Member) =>
       await addMember(env, await now(ada), app.app, {
@@ -1505,11 +1524,11 @@ describe("an App whose grant names teams", setUpTime, () => {
       `For everyone: ${word} is in the handbook.`,
     ].toSorted();
     expect({
-      saved: await calledOf(app, await now(ben), "keep.keep", {
+      saved: await own(app, await now(ben), "keep.keep", {
         question: word,
       }),
-      benReads: await calledOf(app, await now(ben), "keep.titles", {}),
-    }).toStrictEqual({ saved: 2, benReads: kept });
+      benReads: await own(app, await now(ben), "keep.titles", {}),
+    }).toStrictEqual({ saved: kept, benReads: kept });
     // Uma shared with anyway (a share that raced the grant): every call
     // refused, so she never reads the team's note Ben saved.
     await env.DB.prepare(
@@ -1524,12 +1543,12 @@ describe("an App whose grant names teams", setUpTime, () => {
       .bind(teams.adas, ben.userId)
       .run();
     expect({
-      umaReads: await calledOf(app, await now(uma), "keep.titles", {}),
-      umaKeeps: await calledOf(app, await now(uma), "keep.keep", {
+      umaReads: await own(app, await now(uma), "keep.titles", {}),
+      umaKeeps: await own(app, await now(uma), "keep.keep", {
         question: word,
       }),
-      benReads: await calledOf(app, await now(ben), "keep.titles", {}),
-      adaReads: await calledOf(app, await now(ada), "keep.titles", {}),
+      benReads: await own(app, await now(ben), "keep.titles", {}),
+      adaReads: await own(app, await now(ada), "keep.titles", {}),
     }).toStrictEqual({
       umaReads: { failed: "app.unreadable" },
       umaKeeps: { failed: "app.unreadable" },
@@ -1543,7 +1562,7 @@ describe("an App whose grant names teams", setUpTime, () => {
       .bind(teams.adas, ada.userId)
       .run();
     await expect(
-      calledOf(app, await now(ada), "keep.titles", {})
+      own(app, await now(ada), "keep.titles", {})
     ).resolves.toStrictEqual({ failed: "app.unreadable" });
   });
 
@@ -1555,6 +1574,9 @@ describe("an App whose grant names teams", setUpTime, () => {
     await joined(teams.payroll, carl);
     const outsideAdmin = await person("admin");
     const app = await keepOf(ada);
+    // What carries this test's word: what else recall finds isn't its to count.
+    const own = async (...args: Parameters<typeof calledOf>) =>
+      carrying(word, await calledOf(...args));
     await addMember(env, await now(ada), app.app, {
       type: "person",
       id: carl.userId,
@@ -1567,13 +1589,13 @@ describe("an App whose grant names teams", setUpTime, () => {
       `For everyone: ${word} is in the handbook.`,
     ].toSorted();
     expect({
-      saved: await calledOf(app, await now(carl), "keep.keep", {
+      saved: await own(app, await now(carl), "keep.keep", {
         question: word,
       }),
-      carlReads: await calledOf(app, await now(carl), "keep.titles", {}),
-      adminReads: await calledOf(app, await now(admin), "keep.titles", {}),
-      adaReads: await calledOf(app, await now(ada), "keep.titles", {}),
-      adaKeeps: await calledOf(app, await now(ada), "keep.keep", {
+      carlReads: await own(app, await now(carl), "keep.titles", {}),
+      adminReads: await own(app, await now(admin), "keep.titles", {}),
+      adaReads: await own(app, await now(ada), "keep.titles", {}),
+      adaKeeps: await own(app, await now(ada), "keep.keep", {
         question: word,
       }),
       outsideAdminReads: await calledOf(
@@ -1586,7 +1608,7 @@ describe("an App whose grant names teams", setUpTime, () => {
         async () => await appFor(env, await now(ada), app.app, "user")
       ),
     }).toStrictEqual({
-      saved: 2,
+      saved: kept,
       carlReads: kept,
       adminReads: kept,
       adaReads: { failed: "app.unreadable" },
@@ -1615,7 +1637,7 @@ describe("an App whose grant names teams", setUpTime, () => {
           id: carl.userId,
         });
       }),
-      carlAfter: await calledOf(app, await now(carl), "keep.titles", {}),
+      carlAfter: await own(app, await now(carl), "keep.titles", {}),
     }).toStrictEqual({
       sharedWith: [carl.userId],
       adminSees: [carl.userId],
