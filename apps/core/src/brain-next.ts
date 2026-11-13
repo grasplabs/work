@@ -95,7 +95,6 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { z } from "zod";
 
@@ -1533,9 +1532,8 @@ const skillAccess: Access = { kind: "audience", group: companyGroup };
  * The group a retired company skill's last version is readable by: core
  * counts no reader in it (`skillReaderOf`, `readerOf`), so nobody lists,
  * selects or reads a retired skill, and its versions stay in the store as
- * history. Two reads alone hold it, each answering a version, never its
- * text: `companySkillVersionOf`, the current version for an approval's
- * add, and `companyChangeVersionOf`, the version a share's change made.
+ * history. Only core's reconciler reads with it (`decisionsReader`),
+ * answering versions, never text.
  */
 const retiredGroup = "retired-skills";
 
@@ -1546,8 +1544,7 @@ const ownSkillPrefix = `${skillsKind}:person:`;
  * The release's own reader of skills, to compare what is stored with what
  * it ships: the company's group, which every skill is readable by, and a
  * person no member is (core's person principals are user IDs, which never
- * hold ":"), so it reads nothing but what the company may. Core's own
- * reader for a step no person runs, too (`companyChangeVersionAsCore`).
+ * hold ":"), so it reads nothing but what the company may.
  */
 const releaseReader: PersonReader = {
   person: "grasp:release",
@@ -1894,245 +1891,99 @@ const skillTextOf = (name: string, text: unknown): string => {
   return checkedText;
 };
 
-/**
- * `personId` as a reader of skills, once they are one of the
- * organization's own admins now: `role.forbidden` for any other member,
- * `permission.person_inactive` for someone who isn't one.
- */
-const skillAdminOf = async (
-  env: Pick<Env, "DB">,
-  personId: string
-): Promise<Reader> => {
-  const member = await memberOf(env.DB, checked(idSchema, personId));
-  if (member === undefined) {
-    throw permissionErrors.create("permission.person_inactive");
-  }
-  if (!isMemberAdmin(member)) {
-    throw roleErrors.create("role.forbidden");
-  }
-  return { person: member.userId, groups: [companyGroup] };
-};
+/** The company's skill `name` as its source in the shared store. */
+const companySkillKey = (name: string): SourceId =>
+  skillKeyOf(
+    skillErrors.parse("skills.invalid", skillSchema, {
+      scope: "company",
+      name,
+    })
+  );
 
-/** `write`, its stale refusal (`staleVersion`) said as `skills.changed`. */
-const changedOr = async <T>(write: () => Promise<T>): Promise<T> => {
-  try {
-    return await write();
-  } catch (error) {
-    if (error instanceof Error && error.message === staleVersion) {
-      throw skillErrors.create("skills.changed");
-    }
-    throw error;
-  }
+/**
+ * Core's own reader of the company's skills, live and retired, for the
+ * reconciler (skill-shares.ts): the release's person, which no member is,
+ * so it acts for nobody; it reads versions alone, never answering text.
+ */
+const decisionsReader: Reader = {
+  person: releaseReader.person,
+  groups: [companyGroup, retiredGroup],
 };
 
 /**
- * Adds `text` as the next version of the company's skill `name`, readable
- * by every member; the one before stays as history. `approverId` is the
- * admin whose approval of a share this is: checked here to be one of the
- * organization's own admins now. `change` is the share's, so a retry adds
- * nothing twice (the store answers a change it has with the version it
- * made). `after` is the current version the caller saw
- * (`companySkillVersionOf`, null for none): the store writes only while
- * it still is, in the same transaction, so this text never lands over a
- * version the caller didn't see (another add, a retirement); otherwise
- * refused with `skills.changed`, nothing written. Refused (`skills.invalid`) for text
- * that isn't a skill of that name.
- *
- * For skill-shares.ts only, once the approval is recorded and audited:
- * the one way a company skill is written.
+ * The current version of the company's skill `name`, live or retired;
+ * null while it has none. What the reconciler writes over (`after`).
  */
-export const addCompanySkill = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  approverId: string,
-  added: { name: string; change: string; text: string; after: number | null }
-): Promise<SkillAt> => {
-  await skillAdminOf(env, approverId);
-  const skill = skillErrors.parse("skills.invalid", skillSchema, {
-    scope: "company",
-    name: added.name,
-  });
-  const change = skillErrors.parse(
-    "skills.invalid",
-    changeSchema,
-    added.change
-  );
-  const text = skillTextOf(skill.name, added.text);
-  const after = skillErrors.parse(
-    "skills.invalid",
-    z.int().positive().nullable(),
-    added.after
-  );
-  const { version } = await changedOr(
-    async () =>
-      await brain(env).addInstructions({
-        source: skillKeyOf(skill),
-        change,
-        text,
-        access: skillAccess,
-        after,
-      })
-  );
-  return { ...skill, version };
-};
-
-/** As `companyChangeVersionOf`, read as `person`, whoever checked them. */
-const changeVersionAs = async (
+export const companySkillVersion = async (
   env: BrainEnv,
-  person: string,
-  asked: { name: string; change: string }
-): Promise<number | null> => {
-  const skill = skillErrors.parse("skills.invalid", skillSchema, {
-    scope: "company",
-    name: asked.name,
-  });
-  const change = skillErrors.parse(
-    "skills.invalid",
-    changeSchema,
-    asked.change
-  );
-  return await brain(env).changeVersion({
-    source: skillKeyOf(skill),
-    change,
-    reader: { person, groups: [companyGroup, retiredGroup] },
-  });
-};
-
-/**
- * The version of the company's skill `name` its change `change` made, if
- * it made one, as the member `personId` asks: a number alone, never text,
- * live or retired. For a share whose add may have landed though its reply
- * or its record didn't (skill-shares.ts): the store's answer is the truth,
- * learned without sending the text again. Refused once `personId` is no
- * longer a member.
- *
- * Any member may ask, on purpose, unlike the add's admin check: a person
- * asking again or deleting their skill records what their own share's add
- * made, as themselves. What it can tell is a version number, of a change
- * key made of a share's random ID, which only that share's person and the
- * admins are ever shown: nothing a member couldn't list already.
- */
-export const companyChangeVersionOf = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  personId: string,
-  asked: { name: string; change: string }
-): Promise<number | null> => {
-  const { person } = await skillReaderOf(env, personId);
-  return await changeVersionAs(env, person, asked);
-};
-
-/**
- * As `companyChangeVersionOf`, asked by core itself for a step no person
- * runs: a person's erasure, which the clock retries, and which nobody's
- * membership may hold up (the admin who asked for it may have left). Read
- * as the release's own reader (`releaseReader`), a person no member is,
- * answering a version number alone.
- */
-export const companyChangeVersionAsCore = async (
-  env: BrainEnv,
-  asked: { name: string; change: string }
-): Promise<number | null> =>
-  await changeVersionAs(env, releaseReader.person, asked);
-
-/**
- * The current version of the company's skill `name`, live or retired, as
- * the admin `adminId` acting for an approval reads it: what an add over
- * it expects (`addCompanySkill`'s `after`); null when there is none. Its
- * text is never answered: a retired one is read by no one.
- */
-export const companySkillVersionOf = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  adminId: string,
   name: string
 ): Promise<number | null> => {
-  const { person } = await skillAdminOf(env, adminId);
-  const skill = skillErrors.parse("skills.invalid", skillSchema, {
-    scope: "company",
-    name,
-  });
   const [current] = await brain(env).readCurrent({
-    sources: [skillKeyOf(skill)],
-    reader: { person, groups: [companyGroup, retiredGroup] },
+    sources: [companySkillKey(name)],
+    reader: decisionsReader,
   });
   return current?.version ?? null;
 };
 
 /**
- * Retires the company's skill `name` as the admin `adminId`: its current
- * text becomes a new version nobody reads (`retiredGroup`), so no member
- * lists, selects or reads it from then on, and every version stays in the
- * store as history. Answers the version it retired; null when the
- * company has no such skill live, nor one this retired. An approved share
- * of the name makes it live again.
- *
- * Its change is the version it retires (`retire:<version>`), and it is
- * written only over that version (`skills.changed` when an approval
- * landed in between, nothing written). So asking again once it is
- * retired is answered by the store with the retirement it made: a retry
- * after a lost reply, or after its outcome wasn't recorded, answers the
- * same version, and writes nothing.
+ * The version of the company's skill `name` its change `change` made, live
+ * or retired, if it made one: a number alone, never text. How the
+ * reconciler learns what a decision did in the Brain, whether or not a
+ * reply ever came back.
  */
-export const retireCompanySkill = async (
-  env: BrainEnv & Pick<Env, "DB">,
-  adminId: string,
-  retired: { name: string }
-): Promise<number | null> => {
-  const reader = await skillAdminOf(env, adminId);
-  const skill = skillErrors.parse("skills.invalid", skillSchema, {
-    scope: "company",
-    name: retired.name,
+export const companyChangeVersion = async (
+  env: BrainEnv,
+  asked: { name: string; change: string }
+): Promise<number | null> =>
+  await brain(env).changeVersion({
+    source: companySkillKey(asked.name),
+    change: skillErrors.parse("skills.invalid", changeSchema, asked.change),
+    reader: decisionsReader,
   });
-  const source = skillKeyOf(skill);
-  const retiredAccess: Access = { kind: "audience", group: retiredGroup };
-  const [live] = await brain(env).readCurrent({ sources: [source], reader });
-  if (live !== undefined) {
-    await changedOr(
-      async () =>
-        await brain(env).addInstructions({
-          source,
-          change: `retire:${live.version}`,
-          text: live.text,
-          access: retiredAccess,
-          after: live.version,
-        })
-    );
-    return live.version;
+
+/**
+ * Writes the company's skill `name` as a decision says (skill-shares.ts):
+ * `text` as its next version, readable by every member, or `retired`,
+ * readable by no one (its versions stay as history). Under `change`, the
+ * decision's own, so a retry writes nothing twice (the store answers a
+ * change it has with the version it made, first); and only while the
+ * current version is still `after` (`companySkillVersion`, null for
+ * none), checked in the store's own transaction: otherwise `stale`, and
+ * nothing written. Answers the version it made.
+ *
+ * Who may decide is checked where the decision is written, in core's
+ * database; this only writes what a recorded decision says. The one way
+ * a company skill is written.
+ */
+export const writeCompanySkill = async (
+  env: BrainEnv,
+  written: {
+    name: string;
+    change: string;
+    text: string;
+    retired: boolean;
+    after: number | null;
   }
-  // Not live: retired already, or never there. A retirement this made is
-  // the current version, made over the one before it under that one's
-  // change: asked again, the store answers it, writing nothing.
-  const withRetired: Reader = {
-    person: reader.person,
-    groups: [companyGroup, retiredGroup],
-  };
-  const [current] = await brain(env).readCurrent({
-    sources: [source],
-    reader: withRetired,
-  });
-  const { versions } = await brain(env).listVersions({
-    source,
-    reader: withRetired,
-    limit: 2,
-  });
-  const [, before] = versions;
-  if (current === undefined || before === undefined) {
-    return null;
-  }
+): Promise<number | "stale"> => {
+  const source = companySkillKey(written.name);
   try {
-    await brain(env).addInstructions({
+    const { version } = await brain(env).addInstructions({
       source,
-      change: `retire:${before.version}`,
-      text: current.text,
-      access: retiredAccess,
-      after: before.version,
+      change: skillErrors.parse("skills.invalid", changeSchema, written.change),
+      text: skillTextOf(written.name, written.text),
+      access: {
+        kind: "audience",
+        group: written.retired ? retiredGroup : companyGroup,
+      },
+      after: written.after,
     });
+    return version;
   } catch (error) {
-    // No retirement of that version under this change: none this made.
     if (error instanceof Error && error.message === staleVersion) {
-      return null;
+      return "stale";
     }
     throw error;
   }
-  return before.version;
 };
 
 /**

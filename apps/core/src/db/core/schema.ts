@@ -3461,15 +3461,12 @@ export const appRequests = sqliteTable(
 );
 
 /**
- * A person's ask to share one of their own skills with the company, and
- * an admin's decision on it (skill-shares.ts, GRA-1754). `text` is the
- * exact `SKILL.md` they asked to share, kept only while it waits: the
- * admin approves that text and nothing else, and the decision clears it
- * (approved, it is the company's skill in the Brain; declined, it is
- * gone). At most one waits per person and name: asking again replaces it
- * under a new ID, so an approval of the old one is refused. `version` is
- * the company skill's version an approval made, set once the Brain took
- * it: an approved row without one is finished by approving it again.
+ * A person's ask to share one of their own skills with the company
+ * (skill-shares.ts, GRA-1754). `text` is the exact `SKILL.md` they asked
+ * to share, kept only while it waits: an admin decides that text and no
+ * other (`skillDecisions` takes it on). At most one waits per person and
+ * name; asking again, deleting the skill or being removed takes the waiting
+ * one away, so a decision on it is refused.
  */
 export const skillShares = sqliteTable(
   "skill_shares",
@@ -3482,7 +3479,6 @@ export const skillShares = sqliteTable(
     status: text({ enum: ["pending", "approved", "declined"] }).notNull(),
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at"),
-    version: integer(),
   },
   (table) => [
     uniqueIndex("skill_shares_pending_idx")
@@ -3490,6 +3486,53 @@ export const skillShares = sqliteTable(
       .where(sql`status = 'pending'`),
     index("skill_shares_status_idx").on(table.status, table.requestedAt),
   ]
+);
+
+/**
+ * The admins' decisions on the company's skills, the one record of what
+ * should be live (skill-shares.ts): numbered per name (`seq`), the latest
+ * is what the Brain follows, an approved share's text (`share_id`) or a
+ * retirement (none). `text` is what the decision writes, kept with it so
+ * an erasure of the asker never takes a decision's text away. `outcome` is
+ * what became of it in the Brain, recorded once by the reconciler:
+ * `landed` at `version`, or `superseded` by a later decision before it
+ * did; null while it is on its way.
+ */
+export const skillDecisions = sqliteTable(
+  "skill_decisions",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    seq: integer().notNull(),
+    shareId: text("share_id"),
+    text: text().notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at").notNull(),
+    outcome: text({ enum: ["landed", "superseded"] }),
+    version: integer(),
+  },
+  (table) => [
+    uniqueIndex("skill_decisions_seq_idx").on(table.name, table.seq),
+    index("skill_decisions_share_idx").on(table.shareId),
+    index("skill_decisions_open_idx")
+      .on(table.name)
+      .where(sql`outcome IS NULL`),
+  ]
+);
+
+/**
+ * The names of their own skills people deleted for good: no ask of one is
+ * written from then on (skill-shares.ts). The name can't be used again
+ * (the Brain closes its key), so the row is never taken back; it goes with
+ * its person's erasure.
+ */
+export const skillDeletions = sqliteTable(
+  "skill_deletions",
+  {
+    personId: text("person_id").notNull(),
+    name: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.personId, table.name] })]
 );
 
 /**

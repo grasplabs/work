@@ -2750,12 +2750,12 @@ msgid "Approved packages"
 msgstr "Approved packages"
 
 #: src/brain/skills-page.tsx
-msgid "Approved, but not added to the company's skills yet."
-msgstr "Approved, but not added to the company's skills yet."
+msgid "Approved, but a later decision on this skill came before it was added."
+msgstr "Approved, but a later decision on this skill came before it was added."
 
 #: src/brain/skills-page.tsx
-msgid "Approved, not added yet: approve it again"
-msgstr "Approved, not added yet: approve it again"
+msgid "Approved, but not added to the company's skills yet."
+msgstr "Approved, but not added to the company's skills yet."
 
 #: src/inbox/item-detail.tsx
 msgid "Approved: {alias} of {name}."
@@ -3999,10 +3999,6 @@ msgstr "Close this question without an answer?"
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
 msgstr "Close without an answer"
-
-#: src/brain/skills-page.tsx
-msgid "Closed before it was added: you asked again or deleted the skill."
-msgstr "Closed before it was added: you asked again or deleted the skill."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"

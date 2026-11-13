@@ -55,6 +55,8 @@ import {
   sessions,
   stephenRequestCards,
   stephenRequests,
+  skillDecisions,
+  skillDeletions,
   skillShares,
   stephenSummaries,
   stephenSummaryReaders,
@@ -77,7 +79,6 @@ import { dropHeldStarts } from "./held-starts.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { coreErasure } from "./knowledge/rpc.ts";
 import { onboardingStore } from "./onboarding/store.ts";
-import { closingShares } from "./skill-shares.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
@@ -271,23 +272,22 @@ const brain: ErasureStep = {
       userId,
       reason: "erasure_request" as const,
     };
-    // Their asks to share a skill, with the text a waiting one holds; a
-    // company skill an approval made stays the company's, and an add of
-    // theirs that landed unrecorded is recorded first, by the share's ID,
-    // by core itself (`closingShares` as `system`): the admin who asked may
-    // have left since, and nobody's membership holds an erasure up. Who
-    // decided another's ask goes too, if it was them: the decision stays,
-    // unnamed.
-    const closing = await closingShares(env, "system", {
-      why: "erased",
-      requestedBy: userId,
-    });
+    // Their asks to share a skill, with the text a waiting one holds, and
+    // the names of the skills they deleted. A decision on an ask of theirs
+    // is the company's, and keeps its text: the Brain follows it all the
+    // same (skill-shares.ts). Who decided anything goes too, if it was
+    // them: the decision stays, unnamed.
     await db.batch([
-      ...closing,
+      db.delete(skillShares).where(eq(skillShares.requestedBy, userId)),
+      db.delete(skillDeletions).where(eq(skillDeletions.personId, userId)),
       db
         .update(skillShares)
         .set({ decidedBy: null })
         .where(eq(skillShares.decidedBy, userId)),
+      db
+        .update(skillDecisions)
+        .set({ decidedBy: null })
+        .where(eq(skillDecisions.decidedBy, userId)),
     ]);
     const onErase = coreErasure(env);
     const plan = await preparePurge(brainOf(env), by, input, onErase);

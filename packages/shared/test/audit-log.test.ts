@@ -238,10 +238,10 @@ describe("audit event types", () => {
         "skill.share.approved",
         "skill.share.declined",
         "skill.share.added",
-        "skill.share.approve_failed",
+        "skill.share.superseded",
         "skill.retired",
         "skill.retire_done",
-        "skill.retire_failed",
+        "skill.retire_superseded",
       ].map((action) => typeOf(action))
     ).toStrictEqual([
       "action",

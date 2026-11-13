@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b2801b85-c926-4497-affc-3cec5791a3a0",
+  "id": "272431fb-10fd-4a32-8224-b379267f215e",
   "prevId": "354eab34-7fbc-425a-8c89-db53064ef21a",
   "tables": {
     "access_revocations": {
@@ -10451,6 +10451,135 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "skill_decisions": {
+      "name": "skill_decisions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "share_id": {
+          "name": "share_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "skill_decisions_seq_idx": {
+          "name": "skill_decisions_seq_idx",
+          "columns": [
+            "name",
+            "seq"
+          ],
+          "isUnique": true
+        },
+        "skill_decisions_share_idx": {
+          "name": "skill_decisions_share_idx",
+          "columns": [
+            "share_id"
+          ],
+          "isUnique": false
+        },
+        "skill_decisions_open_idx": {
+          "name": "skill_decisions_open_idx",
+          "columns": [
+            "name"
+          ],
+          "isUnique": false,
+          "where": "outcome IS NULL"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "skill_deletions": {
+      "name": "skill_deletions",
+      "columns": {
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "skill_deletions_person_id_name_pk": {
+          "columns": [
+            "person_id",
+            "name"
+          ],
+          "name": "skill_deletions_person_id_name_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "skill_shares": {
       "name": "skill_shares",
       "columns": {
@@ -10505,13 +10634,6 @@
         },
         "decided_at": {
           "name": "decided_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

@@ -9,8 +9,6 @@ import { defineErrorFamily } from "./errors.ts";
 export const skillErrors = defineErrorFamily({
   "skills.invalid": "That isn't a task or a skill.",
   "skills.not_found": "There's no such skill, or not at that version.",
-  "skills.changed":
-    "The skill changed while this was on its way: nothing was written. Try again.",
   "skills.name_erased":
     "You deleted a skill of that name for good: give this one another name.",
 });
@@ -30,9 +28,8 @@ export interface SkillText {
 }
 
 /**
- * Where a share of a skill stands: waiting for an admin; approved (added
- * once its `version` is set; until then, approving it again adds it); or
- * declined.
+ * Where a share of a skill stands: waiting for an admin; approved (the
+ * company's from then on: added once its `version` is set); or declined.
  */
 export type SkillShareStatus = "pending" | "approved" | "declined";
 
@@ -46,18 +43,13 @@ export interface SkillShare {
   requestedBy: { userId: string; name: string | null };
   /** ISO 8601; null while it waits. */
   decidedAt: string | null;
-  /**
-   * The company skill's version its add landed at; null while none did.
-   * Set whatever its status: an add on its way when the share was closed
-   * may still land, and the store's answer is what is live.
-   */
+  /** The company skill's version its approval made; null until it did. */
   version: number | null;
   /**
-   * Whether it can still be decided: waiting, or approved with no add
-   * landed yet. A decline, the person asking again for that skill, or the
-   * person deleting it for good closes it, and drops its text.
+   * Approved, but a later decision on the skill's name (another approval,
+   * a retirement) came before it was added: it never will be.
    */
-  open: boolean;
+  superseded: boolean;
 }
 
 /** One of the person's own shares, as their own page lists it. */

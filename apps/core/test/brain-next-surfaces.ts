@@ -706,18 +706,6 @@ const refusedWith = async (call: () => Promise<unknown>): Promise<unknown> => {
   }
 };
 
-/**
- * How many statements closing `closing` answers: `closingShares` answers
- * them for a batch, never run here.
- */
-const closes = async (
-  by: skillShares.Closer,
-  closing: skillShares.Closing
-): Promise<number> => {
-  const statements = await skillShares.closingShares(env, by, closing);
-  return statements.length;
-};
-
 /** `personId`'s session, as the RPC layer builds an `Identity`. */
 const sessionOf = (personId: string): Identity => ({
   userId: personId,
@@ -2012,57 +2000,22 @@ export const coreProbes = {
         })
     )),
   ],
-  // A version, never text: which version a change of a company skill
-  // made. Someone else's own skill's name, or the markers, name none.
-  companyChangeVersionOf: async ({ personId, markers, hiddenSkills }) => [
+  // Core's own reads for its reconciler: a version number alone, of what
+  // the company may read, whatever change or skill is named. Someone
+  // else's own skill's name, or the markers, name none.
+  companyChangeVersion: async ({ markers, hiddenSkills }) => [
     await answer(
       "a change never made",
       async () =>
-        await coreBrain.companyChangeVersionOf(env, personId, {
+        await coreBrain.companyChangeVersion(env, {
           name: "unwritten",
-          change: "share:unmade",
+          change: "decision:unmade",
         })
     ),
     await answer(
       "a change of the markers",
       async () =>
-        await coreBrain.companyChangeVersionOf(env, personId, {
-          name: "unwritten",
-          change: markers.join(""),
-        })
-    ),
-    await answer(
-      "as someone who isn't a member",
-      async () =>
-        await coreBrain.companyChangeVersionOf(env, stranger(), {
-          name: "unwritten",
-          change: "share:unmade",
-        })
-    ),
-    ...(await pairedOverSkills(
-      hiddenSkills,
-      async (name) =>
-        await coreBrain.companyChangeVersionOf(env, personId, {
-          name,
-          change: "share:unmade",
-        })
-    )),
-  ],
-  // Core's own read, for an erasure: a version number alone, of what the
-  // company may read, whatever change or skill is named.
-  companyChangeVersionAsCore: async ({ markers, hiddenSkills }) => [
-    await answer(
-      "a change never made",
-      async () =>
-        await coreBrain.companyChangeVersionAsCore(env, {
-          name: "unwritten",
-          change: "share:unmade",
-        })
-    ),
-    await answer(
-      "a change of the markers",
-      async () =>
-        await coreBrain.companyChangeVersionAsCore(env, {
+        await coreBrain.companyChangeVersion(env, {
           name: "unwritten",
           change: markers.join(""),
         })
@@ -2070,68 +2023,52 @@ export const coreProbes = {
     ...(await pairedOverSkills(
       hiddenSkills,
       async (name) =>
-        await coreBrain.companyChangeVersionAsCore(env, {
+        await coreBrain.companyChangeVersion(env, {
           name,
-          change: "share:unmade",
+          change: "decision:unmade",
         })
     )),
   ],
-  // A version, never text, and only for one of the organization's admins:
-  // the readers here aren't, so each is refused alike, whatever is named.
-  companySkillVersionOf: async ({ personId, markers, hiddenSkills }) => [
+  companySkillVersion: async ({ markers, hiddenSkills }) => [
     await answer(
       "a skill never written",
-      async () =>
-        await coreBrain.companySkillVersionOf(env, personId, "unwritten")
+      async () => await coreBrain.companySkillVersion(env, "unwritten")
     ),
     await answer(
       "a name of the markers",
-      async () =>
-        await coreBrain.companySkillVersionOf(env, personId, markers.join("-"))
-    ),
-    await answer(
-      "as someone who isn't a member",
-      async () =>
-        await coreBrain.companySkillVersionOf(env, stranger(), "unwritten")
-    ),
-    await answer(
-      "the reader's skills",
-      async () =>
-        await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
-          personal: true,
-        })
+      async () => await coreBrain.companySkillVersion(env, markers.join("-"))
     ),
     ...(await pairedOverSkills(
       hiddenSkills,
-      async (name) => await coreBrain.companySkillVersionOf(env, personId, name)
+      async (name) => await coreBrain.companySkillVersion(env, name)
     )),
   ],
-  // Writes a company skill only for one of the organization's admins:
-  // the readers here aren't, so each is refused, a marked one included,
-  // and nothing of it is listed after.
-  addCompanySkill: async ({ personId, markers }) => {
+  // Writes only what a recorded decision says (skill-shares.ts): text that
+  // isn't a skill of the name is refused, so a marked one is never written
+  // where anyone reads it; nothing of it is listed after.
+  writeCompanySkill: async ({ personId, markers }) => {
     const text = markedText(markers);
     const name = `probe-${crypto.randomUUID()}`;
     return [
       await answer(
         "a marked skill of another name",
         async () =>
-          await coreBrain.addCompanySkill(env, personId, {
+          await coreBrain.writeCompanySkill(env, {
             name,
             change: crypto.randomUUID(),
-            // A card of another name: refused, for an admin too, so the
-            // markers are never written where anyone reads them.
             text: `---\nname: ${name}-other\ndescription: ${text}\n---\n${text}`,
+            retired: false,
             after: null,
           })
       ),
       await answer(
-        "as someone who isn't a member",
+        "a name of the markers",
         async () =>
-          await coreBrain.addCompanySkill(env, stranger(), {
-            name,
+          await coreBrain.writeCompanySkill(env, {
+            name: markers.join(" "),
             change: crypto.randomUUID(),
             text,
+            retired: true,
             after: null,
           })
       ),
@@ -2203,46 +2140,6 @@ export const coreProbes = {
         personal: true,
       });
     })),
-  ],
-  // Retires only as an admin, and only a company skill: a name of the
-  // markers, or someone's own skill's name, is none. The readers here
-  // aren't admins: they are refused, and their skills are as they were.
-  retireCompanySkill: async ({ personId, markers, hiddenSkills }) => [
-    await answer(
-      "the reader's skills",
-      async () =>
-        await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
-          personal: true,
-        })
-    ),
-    await answer(
-      "a skill never written",
-      async () =>
-        await coreBrain.retireCompanySkill(env, personId, {
-          name: "unwritten",
-        })
-    ),
-    await answer(
-      "a name of the markers",
-      async () =>
-        await coreBrain.retireCompanySkill(env, personId, {
-          name: markers.join("-"),
-        })
-    ),
-    await answer(
-      "as someone who isn't a member",
-      async () =>
-        await coreBrain.retireCompanySkill(env, stranger(), {
-          name: "unwritten",
-        })
-    ),
-    ...(await pairedOverSkills(
-      hiddenSkills,
-      async (name) =>
-        await coreBrain.retireCompanySkill(env, personId, {
-          name,
-        })
-    )),
   ],
   // A number, the longest question recall takes: the same for everyone.
   recallQuestionMaxLength: async () => [
@@ -5634,7 +5531,14 @@ export const shareProbes = {
         )
     ),
   ],
+  // Only one of the organization's admins decides, checked in the
+  // decision's own statement: the readers here aren't, so each decline is
+  // refused, and their page after says so.
   declineShare: async ({ personId, markers }) => [
+    await answer(
+      "the reader's page after",
+      async () => await skillShares.skillsOverview(env, sessionOf(personId))
+    ),
     await answer(
       "a share of the markers",
       async () =>
@@ -5685,33 +5589,30 @@ export const shareProbes = {
   ],
   // It answers statements for a batch, never run here: what it answers
   // is how many, and what it records first is the store's version alone.
-  closingShares: async ({ personId, markers }) => [
-    await answer(
-      "the reader's shares of a name of the markers",
-      async () =>
-        await closes(sessionOf(personId), {
-          why: "replaced",
-          requestedBy: personId,
-          name: markers.join("-"),
-        })
-    ),
-    await answer(
-      "the reader's share, declined",
-      async () =>
-        await closes(adminSessionOf(personId), {
-          why: "declined",
-          id: await plainShare(personId),
-          decidedBy: personId,
-        })
-    ),
-    await answer(
-      "every share of the reader, erased",
-      async () =>
-        await closes("system", {
-          why: "erased",
-          requestedBy: personId,
-        })
-    ),
+  // The reconciler writes only what a recorded decision says: a name with
+  // none, the markers' or someone's own skill's, is left as it is, and
+  // answers nothing.
+  reconcileSkill: async ({ personId, markers, hiddenSkills }) => [
+    await answer("a name with no decision", async () => {
+      await skillShares.reconcileSkill(env, "undecided");
+    }),
+    await answer("a name of the markers", async () => {
+      await skillShares.reconcileSkill(env, markers.join("-"));
+    }),
+    ...(await pairedOverSkills(hiddenSkills, async (name) => {
+      await skillShares.reconcileSkill(env, name);
+      return await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
+        personal: true,
+      });
+    })),
+  ],
+  reconcileSkills: async ({ personId }) => [
+    await answer("every name with a decision on its way", async () => {
+      await skillShares.reconcileSkills(env);
+      return await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
+        personal: true,
+      });
+    }),
   ],
   waitingShares: async ({ personId }) => [
     await answer(

@@ -166,17 +166,18 @@ const typeRules: readonly {
   { action: "knowledge.search", type: "read" },
   // Sharing a skill with the company (GRA-1754), by the share's ID or the
   // skill's name, never its text. A person asking; an admin's decision
-  // (approving or declining) and, after approving, its outcome: added
-  // (with the version) or failed. An admin's retirement of a company
-  // skill, and its outcome: done (with the version retired) or failed. A
-  // decision without an outcome is one whose attempt stopped half-way.
+  // (approving or declining a share, retiring a company skill); and each
+  // decision's one outcome, as core's reconciler recorded it from the
+  // Brain: added or retired (with the version), or superseded by a later
+  // decision before it could be. A decision without an outcome yet is on
+  // its way: the clock reconciles it.
   { action: "skill.share.requested", type: "action" },
   { action: "skill.share.added", type: "action" },
-  { action: "skill.share.approve_failed", type: "action" },
+  { action: "skill.share.superseded", type: "action" },
   { action: "skill.share", type: "decision" },
   { action: "skill.retired", type: "config" },
   { action: "skill.retire_done", type: "config" },
-  { action: "skill.retire_failed", type: "action" },
+  { action: "skill.retire_superseded", type: "action" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
   { action: "knowledge.read", type: "read" },

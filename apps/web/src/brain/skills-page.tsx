@@ -90,13 +90,11 @@ The steps.
 `;
 
 /**
- * Where the person's share stands, as its row says: added, whenever an
- * add landed (one on its way when the share was closed included; a later
- * add may replace it since: the last to land is live), or added and since
- * taken out of use when the company has no such skill now (retired);
- * otherwise waiting;
- * approved but not added yet; closed before it was added (the person asked
- * again or deleted the skill); or declined.
+ * Where the person's share stands: added (a later decision may replace it
+ * since), or added and since taken out of use when the company has no
+ * such skill now (retired); otherwise waiting; declined; approved and on
+ * its way to the company's skills; or approved but overtaken by a later
+ * decision before it was added.
  */
 const ShareStatus = ({
   share,
@@ -133,15 +131,15 @@ const ShareStatus = ({
       </Badge>
     );
   }
-  return share.open ? (
-    <Badge variant="attention">
-      <Trans>Approved, but not added to the company&apos;s skills yet.</Trans>
-    </Badge>
-  ) : (
+  return share.superseded ? (
     <Badge variant="outline">
       <Trans>
-        Closed before it was added: you asked again or deleted the skill.
+        Approved, but a later decision on this skill came before it was added.
       </Trans>
+    </Badge>
+  ) : (
+    <Badge variant="attention">
+      <Trans>Approved, but not added to the company&apos;s skills yet.</Trans>
     </Badge>
   );
 };
@@ -189,9 +187,8 @@ const Confirmed = ({
 
 /**
  * The person's share button for a skill: share it; or, while a share of
- * it is open, nothing to do unless asking again replaces something: a
- * waiting share of an older text, or one approved and not added yet
- * (asking again closes it, and the admin's approval with it).
+ * it waits, nothing to do unless they saved a newer version since, which
+ * asking again shares instead (the waiting one goes).
  */
 const ShareLabel = ({ waiting }: { waiting: Waiting | undefined }) => {
   if (waiting === "replaceable") {
@@ -204,20 +201,17 @@ const ShareLabel = ({ waiting }: { waiting: Waiting | undefined }) => {
   );
 };
 
-/**
- * An open share of a skill: one waiting with its current text, or one a
- * new ask replaces (waiting with an older text, or approved and not added).
- */
+/** A share of a skill that waits: of its current text, or of an older one a new ask replaces. */
 type Waiting = "current" | "replaceable";
 
-/** Of each of the person's skills with an open share: which kind. */
+/** Of each of the person's skills with a share that waits: which kind. */
 const waitingOf = (shares: OwnSkillShare[] = []): Map<string, Waiting> =>
   new Map(
     shares
-      .filter(({ open }) => open)
-      .map(({ name, status, outdated }): [string, Waiting] => [
+      .filter(({ status }) => status === "pending")
+      .map(({ name, outdated }): [string, Waiting] => [
         name,
-        status === "pending" && !outdated ? "current" : "replaceable",
+        outdated ? "replaceable" : "current",
       ])
   );
 
@@ -236,7 +230,7 @@ const OwnSkill = ({
   onRemove,
 }: {
   skill: ListedSkill;
-  /** Undefined while no share of it is open. */
+  /** Undefined while no share of it waits. */
   waiting: Waiting | undefined;
   busy: boolean;
   /** A skill is being read into the editor: nothing is deleted meanwhile. */
@@ -308,14 +302,7 @@ const ShareRequest = ({
   return (
     <Card render={<li />} size="sm">
       <CardContent>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium">{name}</span>
-          {request.status === "approved" ? (
-            <Badge variant="attention">
-              <Trans>Approved, not added yet: approve it again</Trans>
-            </Badge>
-          ) : null}
-        </div>
+        <span className="text-sm font-medium">{name}</span>
         {request.replaces === "company" ? (
           <p className="text-sm">
             <Trans>
@@ -341,8 +328,6 @@ const ShareRequest = ({
           <Button disabled={busy} onClick={onApprove} size="sm" type="button">
             <Trans>Approve</Trans>
           </Button>
-          {/* Every card is an open share: waiting, or approved and not
-              added yet. Either is closed by declining it. */}
           <Button
             disabled={busy}
             onClick={onDecline}
