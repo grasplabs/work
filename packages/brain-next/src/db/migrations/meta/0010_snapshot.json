@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a097a37d-5415-4272-919c-127d93a9ddb4",
+  "id": "17459488-a159-4e64-982c-55d05693a0a9",
   "prevId": "26f4cdf9-559e-43ae-ac3c-8e7b96acdfde",
   "tables": {
     "chunks": {
@@ -565,6 +565,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "memories": {
+          "name": "memories",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "bytes": {
           "name": "bytes",
           "type": "integer",
@@ -623,6 +630,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "written": {
+          "name": "written",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
@@ -739,6 +753,27 @@
           "notNull": true,
           "autoincrement": false
         },
+        "phase": {
+          "name": "phase",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stamp": {
+          "name": "stamp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "changes_up_to": {
+          "name": "changes_up_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "state": {
           "name": "state",
           "type": "text",
@@ -841,23 +876,6 @@
           "value": "\"files\".\"refs\" >= 0"
         }
       }
-    },
-    "known_groups": {
-      "name": "known_groups",
-      "columns": {
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
     },
     "memories": {
       "name": "memories",
@@ -1538,6 +1556,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "held_stamp": {
+          "name": "held_stamp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "part": {
           "name": "part",
           "type": "integer",
@@ -1649,13 +1674,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "group_subject": {
-          "name": "group_subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -1663,13 +1681,6 @@
           "name": "source_subjects_subject_idx",
           "columns": [
             "subject"
-          ],
-          "isUnique": false
-        },
-        "source_subjects_group_idx": {
-          "name": "source_subjects_group_idx",
-          "columns": [
-            "group_subject"
           ],
           "isUnique": false
         }
