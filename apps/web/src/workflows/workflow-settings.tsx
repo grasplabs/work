@@ -16,6 +16,7 @@ import { Link, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { DraftHistory } from "../drafts/draft-history.tsx";
+import { Sharing } from "../drafts/sharing.tsx";
 import { formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -33,7 +34,6 @@ import { FilesAndApps } from "./files-and-apps.tsx";
 import { KeptState } from "./kept-state.tsx";
 import { ResourceParams } from "./resource-params.tsx";
 import { SavedAgo } from "./saved-ago.tsx";
-import { ShareWorkflow } from "./share-workflow.tsx";
 import { VersionSource } from "./version-source.tsx";
 import { WorkflowTriggers } from "./workflow-triggers.tsx";
 
@@ -248,7 +248,14 @@ const SectionBody = ({
   const builder = resource.role === "builder";
   const { currentVersion } = resource;
   if (section === "sharing") {
-    return <ShareWorkflow resource={resource} />;
+    return (
+      <Sharing
+        editable={builder && !identity.staff}
+        identity={{ userId: names.me }}
+        owner={resource.owner}
+        subject={{ kind: "workflow", id: resource.id }}
+      />
+    );
   }
   if (section === "triggers") {
     return (

@@ -41,7 +41,6 @@ const refusals: Readonly<Record<string, MessageDescriptor>> = {
   "draft.empty": msg`There are no changes to share.`,
   "app.draft_failed": msg`It doesn't pass its checks. Fix the problems, then share.`,
   "workflow.definition_invalid": msg`It doesn't pass its checks. Fix the problems, then share.`,
-  "app.publish_busy": msg`Someone else is sharing this App right now. Try again in a moment.`,
   "app.archived": msg`This App is archived. Restore it to share it.`,
   "page.build_failed": msg`The App's pages don't build. Fix the problems, then share.`,
   "version.tests_failed": msg`The App's tests fail, so nothing was shared. Fix them, then share.`,

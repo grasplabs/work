@@ -45,7 +45,7 @@ const followDraft = (
 ): (() => void) => {
   let closed = false;
   let release: (() => void) | undefined;
-  const watch = async (): Promise<void> => {
+  const watch = async (again = false): Promise<void> => {
     try {
       const subscription = await core.withSession(
         async (session) =>
@@ -61,11 +61,16 @@ const followDraft = (
         release();
         return;
       }
+      // Followed again after the connection dropped: whatever was written
+      // while it was down is read now.
+      if (again) {
+        onWritten();
+      }
       const stub: unknown = subscription;
       if (stub instanceof RpcStub) {
         stub.onRpcBroken(() => {
           if (!closed) {
-            void watch();
+            void watch(true);
           }
         });
       }

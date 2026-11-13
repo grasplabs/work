@@ -252,7 +252,8 @@ const VersionFiles = ({
 }: OpenFile & { app: string; version: number }) => {
   const files = useCoreRead(
     `${app}/${version}`,
-    async (session) => await session.apps.files.read(app, version)
+    async (session) =>
+      await session.versions.files({ kind: "app", id: app }, version)
   );
   return files?.state === "ready" ? (
     // A version's own tree, the file asked for open while it has it.

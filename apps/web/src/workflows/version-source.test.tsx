@@ -55,12 +55,14 @@ const published = (version: number): WorkflowResourceVersion => ({
 /** The section for a builder when `builder`: what core was asked. */
 const shown = async (builder: boolean): Promise<unknown[]> => {
   const asked: unknown[] = [];
-  const workflowResources = {
-    definition: async (id: string, version: number) => {
+  const versions = {
+    files: async ({ id }: { id: string }, version: number) => {
       await Promise.resolve();
-      asked.push({ definition: id, version });
-      return `{"document":{"version":"1.${version}.0"}}`;
+      asked.push({ files: id, version });
+      return { "workflow.json": `{"document":{"version":"1.${version}.0"}}` };
     },
+  };
+  const workflowResources = {
     source: async (id: string, version: number) => {
       await Promise.resolve();
       asked.push({ source: id, version });
@@ -75,9 +77,10 @@ const shown = async (builder: boolean): Promise<unknown[]> => {
   const core = {
     withSession: async <T,>(
       action: (session: {
+        versions: typeof versions;
         workflowResources: typeof workflowResources;
       }) => Promise<T>
-    ): Promise<T> => await action({ workflowResources }),
+    ): Promise<T> => await action({ versions, workflowResources }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
@@ -130,7 +133,7 @@ describe("a version's definition and source", () => {
     document.body.replaceChildren();
   });
 
-  it("shows the definition of exactly the version picked, and lists its source files to download", async () => {
+  it("names each version by its label, shows the definition of exactly the version picked, and lists its source files to download", async () => {
     const asked = await shown(true);
     const select = document.querySelector("select");
     const latest = select?.value;
@@ -146,6 +149,8 @@ describe("a version's definition and source", () => {
 
     expect({
       latest,
+      // Each version by its label.
+      options: [...(select?.options ?? [])].map(({ text }) => text),
       asked,
       definition: document.querySelector("pre")?.textContent,
       downloads: [...document.querySelectorAll("button")]
@@ -154,8 +159,9 @@ describe("a version's definition and source", () => {
     }).toStrictEqual({
       // The latest, until another is picked.
       latest: "2",
+      options: ["26.11.1", "26.11.2"],
       asked: [
-        { definition: "workflow-1", version: 1 },
+        { files: "workflow-1", version: 1 },
         { source: "workflow-1", version: 1 },
       ],
       definition: '{"document":{"version":"1.1.0"}}',

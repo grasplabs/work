@@ -1,7 +1,7 @@
 import type { Draft } from "@grasp-os/shared/drafts";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
+import type { WorkflowPause } from "@grasp-os/shared/workflow-pause";
 import type {
   WorkflowActivity,
   WorkflowDraft,
@@ -24,15 +24,16 @@ import { useEffect, useState } from "react";
 import { useCoreRead } from "../apps/use-core-read.ts";
 import { setActiveChat } from "../chat/active-chat.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
-import { slotOf } from "../chat/chat-subject.ts";
+import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
+import { useChatAbout } from "../chat/global-chat.tsx";
 import { readPeople } from "../directory.ts";
-import { memberNames, readMembers } from "../drafts/members.ts";
-import type { Member } from "../drafts/members.ts";
 import {
   ShareWithTeam,
   showsUnpublishedChanges,
   UnpublishedChanges,
 } from "../drafts/share-with-team.tsx";
+import { memberNames, readMembers } from "../drafts/sharing.tsx";
+import type { Member } from "../drafts/sharing.tsx";
 import { useDraft } from "../drafts/use-draft.ts";
 import {
   backCrumb,
@@ -55,16 +56,13 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
 import type { Names } from "../workflows/activity-bar.tsx";
-import {
-  useFollowedDraft,
-  useWorkflowChat,
-} from "../workflows/draw-in-chat.ts";
 import { ListedCount } from "../workflows/listed-count.tsx";
 import { workflowVersions } from "../workflows/reads.ts";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
+import { useWorkflowDraft } from "../workflows/use-workflow-draft.ts";
 import { WorkflowFlow } from "../workflows/workflow-flow.tsx";
 import {
   workflowSettingsSectionOf,
@@ -85,7 +83,7 @@ import { PauseControl, WorkflowStatus } from "../workflows/workflow-status.tsx";
 // - Flow, for its builders, who read its draft: the definition drawn
 //   (`workflow-flow.tsx`), filling the page, with Grasp's chat about it
 //   docked beside (chat/chat-subject.ts), which draws it: the Flow follows
-//   the draft as anyone writes it (`workflows/draw-in-chat.ts`). Once it
+//   the draft as anyone writes it (`workflows/use-workflow-draft.ts`). Once it
 //   is shared, a line under the bar says it has changes only its builders
 //   see, with Undo, as an App's does.
 // - Runs: its runs as core lists them for the reader (GRA-674), each
@@ -110,36 +108,21 @@ const viewOf = (value: unknown): WorkflowView | undefined =>
  * Whether it is paused, as core answered the last change made on the
  * page until the page reads it again; `onChange` takes a change.
  */
-const usePaused = (lifecycle: Loaded<WorkflowLifecycle>) => {
+const usePaused = (pause: Loaded<WorkflowPause>) => {
   const router = useRouter();
-  const loaded = lifecycle.state === "ready" ? lifecycle.data : undefined;
+  const loaded = pause.state === "ready" ? pause.data : undefined;
   // As core answered the last change made here, until the next read.
-  const [changed, setChanged] = useState<WorkflowLifecycle>();
+  const [changed, setChanged] = useState<WorkflowPause>();
   const [seen, setSeen] = useState(loaded);
   if (loaded !== seen) {
     setSeen(loaded);
     setChanged(undefined);
   }
-  const onChange = (next: WorkflowLifecycle): void => {
+  const onChange = (next: WorkflowPause): void => {
     setChanged(next);
     void router.invalidate();
   };
   return { status: changed ?? loaded, onChange };
-};
-
-/**
- * The draft the page goes by: its editor's last save or read (`edited`),
- * or the page's own read when that is at a later revision.
- */
-const latestDraftOf = (
-  loaded: Loaded<WorkflowDraft> | undefined,
-  edited: WorkflowDraft | undefined
-): WorkflowDraft | undefined => {
-  const read = loaded?.state === "ready" ? loaded.data : undefined;
-  if (edited === undefined) {
-    return read;
-  }
-  return read !== undefined && read.revision > edited.revision ? read : edited;
 };
 
 /**
@@ -335,7 +318,7 @@ interface WorkflowPageRead {
   state: Loaded<WorkflowState> | undefined;
   runs: Loaded<WorkflowResourceRun[]>;
   askable: Loaded<boolean>;
-  lifecycle: Loaded<WorkflowLifecycle>;
+  pause: Loaded<WorkflowPause>;
   activity: Loaded<WorkflowActivity[]>;
   names: Names;
   /** Who reads it: what its History offers them. */
@@ -374,7 +357,7 @@ const WorkflowBar = ({
   /** How many runs it has, once read. */
   runs: number | undefined;
   /** Whether it is paused, once read. */
-  status: WorkflowLifecycle | undefined;
+  status: WorkflowPause | undefined;
   builder: boolean;
   /** Its draft, for its builders, as read last. */
   draft: Draft | undefined;
@@ -384,7 +367,7 @@ const WorkflowBar = ({
   running: boolean;
   /** Whether it is shared and has changes only its builders see. */
   pending: boolean;
-  onChange: (lifecycle: WorkflowLifecycle) => void;
+  onChange: (pause: WorkflowPause) => void;
   /** Shows what it may reach, in its Settings' Files and apps. */
   onFiles: () => void;
   onShared: () => void;
@@ -409,7 +392,7 @@ const WorkflowBar = ({
           />
           {status === undefined ? null : (
             <PauseControl
-              lifecycle={status}
+              pause={status}
               live={live}
               name={resource.name}
               onChange={onChange}
@@ -438,7 +421,7 @@ const WorkflowBar = ({
       state={
         builder && members === undefined ? undefined : (
           <WorkflowStatus
-            lifecycle={status}
+            pause={status}
             live={live}
             who={members === undefined ? undefined : memberNames(members)}
           />
@@ -483,19 +466,21 @@ const WorkflowResourceView = ({
   const builder = resource.role === "builder";
   const subject = { kind: "workflow", id: resource.id } as const;
   const view = shownView(asked, draft !== undefined);
-  const chat = useWorkflowChat(resource, builder);
+  // Grasp's chat about it, docked beside it for its builders, draws it.
+  useChatSubject(builder ? subject : undefined, resource.name);
+  const chat = useChatAbout(builder ? subject : undefined);
   const { draft: shared, reread } = useDraft(
     builder ? subject : undefined,
     chat.worked
   );
-  // The draft as its editor last saved or read it, beside the page's read:
-  // whichever is at the later revision is the draft the page goes by.
-  const [edited, setEdited] = useState<WorkflowDraft>();
-  const latest = latestDraftOf(draft, edited);
-  useFollowedDraft(resource.id, shared?.revision, latest?.revision, setEdited);
+  const { draft: latest, onDraft } = useWorkflowDraft(
+    resource.id,
+    draft,
+    shared?.revision
+  );
   const [shares, setShares] = useState(0);
   const members = useMembers(resource.id, builder, shares);
-  const { status, onChange } = usePaused(read.lifecycle);
+  const { status, onChange } = usePaused(read.pause);
   useEffect(() => {
     if (handedOver === undefined) {
       return;
@@ -583,7 +568,7 @@ const WorkflowResourceView = ({
               onDefinition={() => {
                 settingsAt("definition");
               }}
-              onDraft={setEdited}
+              onDraft={onDraft}
               onTriggers={() => {
                 settingsAt("triggers");
               }}
@@ -617,7 +602,7 @@ const WorkflowResourceView = ({
           read={{
             ...read,
             latest,
-            onDraft: setEdited,
+            onDraft,
             savedAt: shared?.updatedAt ?? null,
           }}
           section={section}
@@ -769,7 +754,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       state,
       runs,
       askable,
-      lifecycle,
+      pause,
       activity,
       inProject,
     ] = await Promise.all([
@@ -794,8 +779,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       ),
       loadFromCore(
         core,
-        async (session) =>
-          await session.workflowResources.lifecycle.get(workflow)
+        async (session) => await session.workflowResources.pause.get(workflow)
       ),
       loadFromCore(
         core,
@@ -815,7 +799,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       state,
       runs,
       askable,
-      lifecycle,
+      pause,
       activity,
       people,
       project: inProject.state === "ready" ? inProject.data : undefined,

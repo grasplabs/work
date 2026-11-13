@@ -41,6 +41,7 @@ import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
 import { DraftHistory } from "../drafts/draft-history.tsx";
+import { Sharing } from "../drafts/sharing.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -60,8 +61,7 @@ import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
 import { RemoveApp } from "./app-remove.tsx";
 import { ResetAppData } from "./app-reset.tsx";
-import { buildsApp } from "./app-role.ts";
-import { AppMembers, readMembers } from "./app-sharing.tsx";
+import { buildsApp, sharesApp } from "./app-role.ts";
 import {
   ArchiveDialog,
   StatusBadge,
@@ -676,16 +676,20 @@ const General = ({
 
 // --- Sharing -------------------------------------------------------------
 
-const Sharing = ({ app, identity }: { app: ViewedApp; identity: Identity }) => {
-  const read = useAppRead(app.id, readMembers);
-  return (
-    <Read read={read}>
-      {(members) => (
-        <AppMembers app={app} identity={identity} members={members} />
-      )}
-    </Read>
-  );
-};
+const AppSharing = ({
+  app,
+  identity,
+}: {
+  app: ViewedApp;
+  identity: Identity;
+}) => (
+  <Sharing
+    editable={sharesApp(app, identity)}
+    identity={identity}
+    owner={app.owner}
+    subject={{ kind: "app", id: app.id }}
+  />
+);
 
 // --- Connections ---------------------------------------------------------
 
@@ -961,7 +965,7 @@ const SectionBody = ({
     return <General app={app} builds={builds} identity={identity} />;
   }
   if (section === "sharing") {
-    return <Sharing app={app} identity={identity} />;
+    return <AppSharing app={app} identity={identity} />;
   }
   if (section === "history") {
     return (

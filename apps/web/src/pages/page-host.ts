@@ -1519,7 +1519,7 @@ export interface DraftRevisions {
 
 /**
  * Runs the pages of the draft of `app` in `frame`, as a preview
- * (`runFrame`), at `location`: of the draft's undo point `point`, or of
+ * (`runFrame`), at `location`: of the draft's checkpoint `point`, or of
  * the App's version `version`, read-only. The draft as it is now takes each newer revision `revisions` names in the frame it has
  * open (preview-updates.ts); one that can't come in that way starts the
  * frame afresh, as a new version of an App does (`updated`).

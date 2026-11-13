@@ -12,7 +12,7 @@ import type { ReadOnlyShown } from "./app-workspace.tsx";
 /**
  * The preview of App `app` as its `draft` has it: its pages, as one single
  * page app the person moves through as they would the App; of the draft's
- * undo point or the App's version `shown` when History opened one,
+ * checkpoint or the App's version `shown` when History opened one,
  * read-only. With no draft, or one that changes nothing, core previews
  * the App's latest version, so the App always shows. Each of the draft's
  * writes comes into the frame it has open, keeping what the pages hold

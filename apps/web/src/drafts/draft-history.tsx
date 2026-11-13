@@ -844,7 +844,7 @@ interface VersionsOf {
  * back for a builder, and an App's releases, revoked or held, for an
  * admin.
  */
-export const VersionsView = ({
+const VersionsView = ({
   subject,
   live,
   builds,

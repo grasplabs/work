@@ -21,6 +21,7 @@ import {
 } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import { pendingAsk } from "./asked-questions.tsx";
+import { answeredAfterBuild } from "./build-answered.ts";
 import { useChatBuilds } from "./builds.tsx";
 import { readChatNames, useChatSummary } from "./chat-details.ts";
 import { closeChat, exitFullscreen, useChatLayout } from "./chat-layout.ts";
@@ -33,7 +34,12 @@ import {
 } from "./chat-presence.ts";
 import type { ChatPresence } from "./chat-presence.ts";
 import { stageOf, useChatStage } from "./chat-stage.ts";
-import { subjectOf, subjectWords, useSubjectChat } from "./chat-subject.ts";
+import {
+  slotOf,
+  subjectOf,
+  subjectWords,
+  useSubjectChat,
+} from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
@@ -304,6 +310,29 @@ export const useGlobalChat = (): GlobalChat => {
     throw new Error("useGlobalChat must be used within a GlobalChatProvider.");
   }
   return chat;
+};
+
+/**
+ * Grasp's chat about `subject` on its page, once its slot holds it
+ * (chat-subject.ts), and nothing of the chat it showed before (none for no
+ * subject: a page about something the person doesn't build): its ID,
+ * whether its agent works on it (`running`), or checks it too (`busy`),
+ * whether Grasp answered after the Build it that made it (`built`), how
+ * often its agent wrote drafts (`worked`), which reads the page again,
+ * and what the person calls it, its chat's title, which the plan named.
+ */
+export const useChatAbout = (subject: Subject | undefined) => {
+  const chat = useGlobalChat();
+  const ours = subject !== undefined && chat.slot === slotOf(subject);
+  const running = ours && chat.view.running;
+  return {
+    chatId: ours ? chat.chatId : undefined,
+    running,
+    busy: running || (ours && chat.view.checking),
+    built: ours && answeredAfterBuild(chat.view.messages, subject),
+    worked: chat.view.worked,
+    title: ours ? chat.summary?.title : undefined,
+  };
 };
 
 /** The key that opens the chat, or closes it: ⌘J, or Ctrl J off a Mac. */

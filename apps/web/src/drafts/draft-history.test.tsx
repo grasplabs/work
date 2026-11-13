@@ -389,7 +389,7 @@ describe("An App's History", () => {
     });
   });
 
-  it("keeps the undo points of changes undone, each to see and restore, as Undo changes promised", async () => {
+  it("keeps the checkpoints of changes undone, each to see and restore, as Undo changes promised", async () => {
     // Undone: the draft changes nothing, its points since version 2 stay.
     const { session, asked } = fakeApps({ role: "builder" });
     await shown(session, person("user-owner", "builder"));

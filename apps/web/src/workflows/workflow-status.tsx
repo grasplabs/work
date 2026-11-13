@@ -1,4 +1,4 @@
-import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
+import type { WorkflowPause } from "@grasp-os/shared/workflow-pause";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,7 +25,7 @@ import { useGrace } from "../use-grace.ts";
 // bar has (apps/app-status.tsx): "Only you see this" until a version is
 // live and shared, then who uses it; "Paused" while it is paused. Beside
 // Run, for whoever core lets change it (`canChange`), Pause while a
-// version is live, or Resume while paused (`workflowResources.lifecycle`).
+// version is live, or Resume while paused (`workflowResources.pause`).
 //
 // Pausing stops real work, so it asks first and says what it stops: core
 // refuses new starts while it is paused, and runs already going carry on.
@@ -39,16 +39,16 @@ const graceSeconds = 5;
 /** Where the workflow stands, as its bar says it. */
 export const WorkflowStatus = ({
   live,
-  lifecycle,
+  pause,
   who,
 }: {
   /** Its live version; null before the first. */
   live: number | null;
-  lifecycle: WorkflowLifecycle | undefined;
+  pause: WorkflowPause | undefined;
   /** Whom it is shared with, by name; none while they are read. */
   who: readonly string[] | undefined;
 }) =>
-  lifecycle?.paused === null || lifecycle === undefined ? (
+  pause?.paused === null || pause === undefined ? (
     <StatusBadge app={{ archived: false, currentVersion: live }} who={who} />
   ) : (
     <Badge variant="attention">
@@ -124,15 +124,15 @@ export const PauseControl = ({
   workflow,
   name,
   live,
-  lifecycle,
+  pause,
   onChange,
 }: {
   workflow: string;
   name: string;
   /** Its live version; null before the first. */
   live: number | null;
-  lifecycle: WorkflowLifecycle;
-  onChange: (lifecycle: WorkflowLifecycle) => void;
+  pause: WorkflowPause;
+  onChange: (pause: WorkflowPause) => void;
 }) => {
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
@@ -140,8 +140,7 @@ export const PauseControl = ({
 
   const change = async (write: "pause" | "resume"): Promise<void> => {
     const changed = await run(
-      async (session) =>
-        await session.workflowResources.lifecycle[write](workflow)
+      async (session) => await session.workflowResources.pause[write](workflow)
     );
     if (changed !== undefined) {
       onChange(changed);
@@ -161,7 +160,7 @@ export const PauseControl = ({
         try {
           await core.withSession(
             async (session) =>
-              await session.workflowResources.lifecycle.pause(workflow)
+              await session.workflowResources.pause.pause(workflow)
           );
         } catch {
           // Nobody is left on the page to tell.
@@ -173,8 +172,8 @@ export const PauseControl = ({
   if (held !== null) {
     return <PauseCountdown left={held.left} onUndo={undo} />;
   }
-  const paused = lifecycle.paused !== null;
-  if (!lifecycle.canChange || (live === null && !paused)) {
+  const paused = pause.paused !== null;
+  if (!pause.canChange || (live === null && !paused)) {
     return null;
   }
   return (

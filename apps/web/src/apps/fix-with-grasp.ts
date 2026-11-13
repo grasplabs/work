@@ -1,4 +1,4 @@
-import type { AppDraftProblem } from "@grasp-os/shared/app-drafts";
+import type { DraftProblem } from "@grasp-os/shared/app-review";
 
 // Fix with Grasp, wherever the App's workspace offers it (the Publish
 // panel, a preview that didn't start): what was found goes to the App's
@@ -10,7 +10,7 @@ import type { AppDraftProblem } from "@grasp-os/shared/app-drafts";
  */
 export const fixQuestion = (
   intro: string,
-  problems: readonly AppDraftProblem[]
+  problems: readonly DraftProblem[]
 ): string =>
   [
     intro,

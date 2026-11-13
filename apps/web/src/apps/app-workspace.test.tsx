@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
+import type { AppReview } from "@grasp-os/shared/app-review";
 import type {
   App,
   AppMember,
@@ -307,26 +307,23 @@ const opened = async (
   draft: () => Promise<Draft> = async () =>
     await Promise.resolve(draftOf("invoice-desk")),
   /** How core answers the person publishing the App's draft; by default not yet. */
-  publish: (
-    app: string,
-    revision: number,
-    message?: string
-  ) => Promise<App> = async () => await Promise.withResolvers<never>().promise,
+  publish: (app: string, revision: number) => Promise<App> = async () =>
+    await Promise.withResolvers<never>().promise,
   /** What publishing the draft changes, as core reads it; by default not yet. */
-  changes: () => Promise<AppDraftChanges> = async () =>
+  changes: () => Promise<AppReview> = async () =>
     await Promise.withResolvers<never>().promise,
   /** Draft or Live, as the address says. */
   env: WorkspaceEnv = "draft",
-  /** An undo point or a version History opened read-only, if any. */
+  /** A checkpoint or a version History opened read-only, if any. */
   shown?: ReadOnlyShown
 ) => {
-  // The App's chat: core never answers `forApp` here. A chat that is
+  // The App's chat: core never answers `forSubject` here. A chat that is
   // followed sends nothing yet and worked on nothing.
   const askedForApp: string[] = [];
   const sent: { chatId: string; question: ChatQuestion }[] = [];
   const chats = {
-    forApp: async (app: string) => {
-      askedForApp.push(app);
+    forSubject: async ({ id }: { kind: string; id: string }) => {
+      askedForApp.push(id);
       return await forApp();
     },
     watch,
@@ -344,8 +341,8 @@ const opened = async (
   const withReview = { ...apps, review: changes };
   const drafts = {
     get: draft,
-    publish: async ({ id }: Subject, revision: number, message?: string) =>
-      liveOf(await publish(id, revision, message)),
+    publish: async ({ id }: Subject, revision: number) =>
+      liveOf(await publish(id, revision)),
     checkpoints: apps.draftPoints,
     restore: async ({ id }: Subject, point: number, revision: number) => {
       await apps.restoreDraftPoint(id, point, revision);
@@ -498,9 +495,7 @@ const press = async (element: HTMLElement): Promise<void> => {
  * revision 1: its page changed, checks passing, unless `overrides` says
  * otherwise.
  */
-const changesOf = (
-  overrides: Partial<AppDraftChanges> = {}
-): AppDraftChanges => ({
+const changesOf = (overrides: Partial<AppReview> = {}): AppReview => ({
   revision: 1,
   live: null,
   liveLabel: null,
@@ -1465,8 +1460,8 @@ describe(AppWorkspace, () => {
         await Promise.resolve(
           drafted ? draftOf("invoice-desk") : draftOf("invoice-desk", [])
         ),
-      async (app, revision, message) => {
-        published.push([app, revision, message]);
+      async (app, revision) => {
+        published.push([app, revision]);
         await Promise.resolve();
         // Core makes it version 1: its changes are the team's now.
         drafted = false;
@@ -1509,7 +1504,7 @@ describe(AppWorkspace, () => {
         sees: true,
         off: true,
       },
-      published: [["invoice-desk", 1, "Shared from the App's workspace"]],
+      published: [["invoice-desk", 1]],
       calls: ["share team:t-fin as user"],
       after: {
         status: "Finance team uses it",
@@ -1782,9 +1777,7 @@ describe(AppWorkspace, () => {
    * What the open sheet says of the draft's access, once its changes are
    * shown, as core reads the draft's changes as `changes` says.
    */
-  const accessShown = async (
-    changes: Partial<AppDraftChanges>
-  ): Promise<string> => {
+  const accessShown = async (changes: Partial<AppReview>): Promise<string> => {
     await opened(
       fakeApps().apps,
       identityOf(false),

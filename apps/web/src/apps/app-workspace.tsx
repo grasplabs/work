@@ -46,17 +46,17 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
-import { answeredAfterBuild } from "../chat/build-answered.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
-import { useGlobalChat } from "../chat/global-chat.tsx";
+import { useChatAbout, useGlobalChat } from "../chat/global-chat.tsx";
+import type { Session } from "../core.ts";
 import { ConfirmChange, useDraftChange } from "../drafts/draft-history.tsx";
 import type { Asked } from "../drafts/draft-history.tsx";
-import { memberNames } from "../drafts/members.ts";
 import {
   ShareWithTeam,
   showsUnpublishedChanges,
   UnpublishedChanges,
 } from "../drafts/share-with-team.tsx";
+import { memberNames, readMembers } from "../drafts/sharing.tsx";
 import { hasChanges, useDraft } from "../drafts/use-draft.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
@@ -75,9 +75,9 @@ import { useVersionPushes } from "../pages/use-version-pushes.ts";
 import { AppDataModel } from "./app-data-model.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog } from "./app-own-link.tsx";
+import { sharesApp } from "./app-role.ts";
 import { AppSettings, Read } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
-import { readMembers, sharesApp } from "./app-sharing.tsx";
 import { AppStart } from "./app-start.tsx";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
@@ -121,7 +121,7 @@ const AppCode = lazy(async () => {
 // a line under the bar says how many changes only its builders see, with
 // Share changes and Undo (drafts/share-with-team.tsx). The chat's agent never shares.
 // History, in Settings, steps the changes back and goes back to an
-// earlier version (drafts/draft-history.tsx); its Preview opens an undo point or a
+// earlier version (drafts/draft-history.tsx); its Preview opens a checkpoint or a
 // version here, read-only (`?point=`, `?version=`).
 
 /** What the main area shows. */
@@ -130,7 +130,7 @@ export type WorkspaceView = "preview" | "code" | "data" | "settings";
 /** What Preview, Code and Data show: the builders' version, or what the team sees. */
 export type WorkspaceEnv = "draft" | "live";
 
-/** An undo point of the draft, or a version, the preview shows read-only. */
+/** A checkpoint of the draft, or a version, the preview shows read-only. */
 export type ReadOnlyShown = { point: number } | { version: number };
 
 /** What the preview shows, as a key: another starts it afresh. */
@@ -453,8 +453,8 @@ const ShownBadge = ({
 };
 
 /**
- * Over the preview of an undo point or a version, read-only (`shown`):
- * what it is, the way back to the draft, and, for an undo point,
+ * Over the preview of a checkpoint or a version, read-only (`shown`):
+ * what it is, the way back to the draft, and, for a checkpoint,
  * restoring it, once the person confirms.
  */
 const ReadOnlyBar = ({
@@ -599,7 +599,7 @@ const MadeTip = ({ app }: { app: string }) => {
 /**
  * The main area's preview of the builders' working version: the App as
  * its draft has it, never the live App itself, while it has changes or
- * no version yet; an undo point or a version read-only when History
+ * no version yet; a checkpoint or a version read-only when History
  * asked for one (`shown`). One frame throughout, so the chat's first
  * write, and each after it, comes into the App it shows in place. An App
  * with nothing written and no version asks what it should do instead.
@@ -968,44 +968,28 @@ const useSetUp = ({
   return { setUp: failed ? "failed" : "ready", onFrame };
 };
 
-/**
- * Grasp's chat on App `app`, once it is (chat-subject.ts), and nothing of
- * the chat it showed before: its ID, whether its agent works on the App
- * (`running`), or checks it too (`busy`), and how often it wrote drafts,
- * which reads the App again as its build moves on (its name may change).
- */
-const useAppChat = (app: string) => {
-  const chat = useGlobalChat();
-  const ours = chat.slot === slotOf({ kind: "app", id: app });
-  const running = ours && chat.view.running;
-  return {
-    chatId: ours ? chat.chatId : undefined,
-    running,
-    busy: running || (ours && chat.view.checking),
-    built:
-      ours && answeredAfterBuild(chat.view.messages, { kind: "app", id: app }),
-    draftChanges: chat.view.worked,
-  };
-};
+/** Whom App `app` is shared with. */
+const readAppMembers = async (session: Session, app: string) =>
+  await readMembers(session, { kind: "app", id: app });
 
 /**
  * Reads the page again once the chat's agent stops, or its drafts change
- * after (`draftChanges`): during a turn they change at every write, and
- * its end reads anyway.
+ * after (`worked`): during a turn they change at every write, and its end
+ * reads anyway.
  */
-const useReadAgainOnceBuilt = (running: boolean, draftChanges: number) => {
+const useReadAgainOnceBuilt = (running: boolean, worked: number) => {
   const router = useRouter();
-  const seen = useRef({ running, draftChanges });
+  const seen = useRef({ running, worked });
   useEffect(() => {
     // Read again once the agent stops, or its drafts change after.
     const before = seen.current;
-    seen.current = { running, draftChanges };
+    seen.current = { running, worked };
     // During a turn the drafts change at every write; its end reads anyway.
-    const draftsMoved = !running && before.draftChanges !== draftChanges;
+    const draftsMoved = !running && before.worked !== worked;
     if ((before.running && !running) || draftsMoved) {
       void router.invalidate();
     }
-  }, [router, running, draftChanges]);
+  }, [router, running, worked]);
 };
 
 /**
@@ -1044,16 +1028,19 @@ const Building = ({
   section: AppSettingsSection | undefined;
   identity: Identity;
 }) => {
-  const { chatId, running, busy, built, draftChanges } = useAppChat(app.id);
-  const { draft, reread } = useDraft({ kind: "app", id: app.id }, draftChanges);
+  const { chatId, running, busy, built, worked } = useChatAbout({
+    kind: "app",
+    id: app.id,
+  });
+  const { draft, reread } = useDraft({ kind: "app", id: app.id }, worked);
   const changing = hasChanges(draft);
   // Each reset of the test data in Data starts the preview afresh on it,
   // without the alert that it didn't fit.
   const [resets, setResets] = useState(0);
-  useReadAgainOnceBuilt(running, draftChanges);
+  useReadAgainOnceBuilt(running, worked);
   useReadAgainOnNewBase(app, draft?.base);
   // Whom it is shared with: who uses it, and whom Share adds to.
-  const membersRead = useAppRead(app.id, readMembers);
+  const membersRead = useAppRead(app.id, readAppMembers);
   const members = membersRead?.state === "ready" ? membersRead.data : undefined;
   const { setUp, onFrame } = useSetUp({
     app,
@@ -1200,7 +1187,7 @@ interface WorkspaceAt {
   view: WorkspaceView;
   /** Draft or Live (`?env=live`): what Preview, Code and Data show. */
   env: WorkspaceEnv;
-  /** An undo point or a version the preview shows read-only, if asked. */
+  /** A checkpoint or a version the preview shows read-only, if asked. */
   shown: ReadOnlyShown | undefined;
   section: AppSettingsSection | undefined;
   identity: Identity;

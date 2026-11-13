@@ -21,13 +21,14 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AppMembers } from "./app-sharing.tsx";
+import { sharesApp } from "../apps/app-role.ts";
+import { Sharing } from "./sharing.tsx";
 
-// Sharing an App's App on its Members tab, against core's App members
+// Sharing, in an App's or a workflow's settings, against core's members
 // API as the page reaches it over RPC (the boundary from the web app),
-// faked: it keeps whom the App is shared with and in which role, answers
-// the tab's next read with it, and offers the organization's people and
-// teams to share with.
+// faked alike for both kinds: it keeps whom it is shared with and in
+// which role, answers the next read with it, and offers the
+// organization's people and teams to share with.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -115,7 +116,10 @@ const fakeMembers = (
       );
     },
   };
-  return { session: { apps: { members } }, asked };
+  return {
+    session: { apps: { members }, workflowResources: { members } },
+    asked,
+  };
 };
 
 let root: Root | undefined;
@@ -130,10 +134,11 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The Members tab on what `session` holds, for `viewed`. */
+/** Sharing on what `session` holds, for `viewed`, as an App or a workflow. */
 const shown = async (
   session: ReturnType<typeof fakeMembers>["session"],
-  viewed: ViewedApp
+  viewed: ViewedApp,
+  kind: "app" | "workflow" = "app"
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -141,12 +146,12 @@ const shown = async (
     ): Promise<T> => await run(session),
   };
   const rootRoute = createRootRoute({
-    loader: async () => await session.apps.members.list(),
     component: () => (
-      <AppMembers
-        app={viewed}
+      <Sharing
+        editable={sharesApp(viewed, viewer)}
         identity={viewer}
-        members={rootRoute.useLoaderData()}
+        owner={viewed.owner}
+        subject={{ kind, id: viewed.id }}
       />
     ),
   });
@@ -214,7 +219,7 @@ const listed = (): string[] =>
     (cell) => cell.textContent?.trim() ?? ""
   );
 
-describe("Sharing an App's App", () => {
+describe("Sharing an App or a workflow", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -252,6 +257,23 @@ describe("Sharing an App's App", () => {
         ["add", "team", "team-sales", "user"],
       ],
       listed: ["Ann", "Sales (team)"],
+    });
+  });
+
+  it("shares a workflow alike, through its own members", async () => {
+    const { session, asked } = fakeMembers();
+    await shown(session, app("builder"), "workflow");
+
+    await press(button("Share"));
+    await press(
+      [...document.querySelectorAll("[cmdk-item]")].find((each) =>
+        each.textContent?.includes("Bo")
+      )
+    );
+
+    expect({ asked, listed: listed() }).toStrictEqual({
+      asked: [["add", "person", "user-bo", "user"]],
+      listed: ["Bo"],
     });
   });
 

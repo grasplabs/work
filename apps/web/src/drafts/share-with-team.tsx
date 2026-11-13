@@ -1,8 +1,5 @@
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type {
-  AppDraftChanges,
-  AppDraftProblem,
-} from "@grasp-os/shared/app-drafts";
+import type { AppReview, DraftProblem } from "@grasp-os/shared/app-review";
 import type { AppMemberRef, ShareCandidates } from "@grasp-os/shared/apps";
 import type { Draft } from "@grasp-os/shared/drafts";
 import type { Subject } from "@grasp-os/shared/subject";
@@ -60,14 +57,9 @@ import { usePeopleApart } from "../people/people-apart.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmChange, useDraftChange } from "./draft-history.tsx";
 import type { Asked } from "./draft-history.tsx";
-import {
-  addMember,
-  readCandidates,
-  readMembers,
-  removeMember,
-} from "./members.ts";
-import type { Member } from "./members.ts";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
+import { membersOf, readMembers } from "./sharing.tsx";
+import type { Member } from "./sharing.tsx";
 import { hasChanges } from "./use-draft.ts";
 
 // Share with your team, in the bar of an App's workspace and of a
@@ -94,7 +86,7 @@ import { hasChanges } from "./use-draft.ts";
 // which discards them once the person confirms (draft-history.tsx).
 
 /** A problem that stops the draft from being shared: where, and what. */
-type Problem = AppDraftProblem;
+type Problem = DraftProblem;
 
 /**
  * What the sheet read of the draft's changes, at the draft's `revision`:
@@ -106,7 +98,7 @@ interface Review {
   passed: boolean;
   problems: readonly Problem[];
   /** An App's changes, for its notes; none for a workflow. */
-  app: AppDraftChanges | null;
+  app: AppReview | null;
 }
 
 /**
@@ -200,7 +192,7 @@ const useReview = (
 };
 
 /** Whether publishing changes the App's records, as the sheet says once. */
-const changesData = (changes: AppDraftChanges, i18n: I18n): boolean =>
+const changesData = (changes: AppReview, i18n: I18n): boolean =>
   (changes.plan === null ? 0 : planLines(changes.plan, i18n).length) > 0 ||
   (changes.migrations?.length ?? 0) > 0;
 
@@ -228,7 +220,7 @@ const groupCount = (group: FileGroup, count: number): string => {
 };
 
 /** What an App's changes are, in a few words each: how many of what. */
-export const changeSummaries = (changes: AppDraftChanges): string[] =>
+const changeSummaries = (changes: AppReview): string[] =>
   groupOrder.flatMap((group) => {
     const count = changes.files.filter(
       ({ path }) => groupOf(path) === group
@@ -296,7 +288,7 @@ const Line = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
 );
 
 /** Everything an App's changes hold, folded away. */
-const Summary = ({ changes }: { changes: AppDraftChanges }) => (
+const Summary = ({ changes }: { changes: AppReview }) => (
   <Collapsible>
     <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
       <ChevronRightIcon data-icon="inline-start" />
@@ -317,7 +309,7 @@ const Summary = ({ changes }: { changes: AppDraftChanges }) => (
 );
 
 /** What applies to an App's changes being shared: their data, an admin's approval. */
-const AppNotes = ({ changes }: { changes: AppDraftChanges }) => {
+const AppNotes = ({ changes }: { changes: AppReview }) => {
   const { i18n } = useLingui();
   const asksAgain = [...changes.grants, ...changes.callers].some(
     ({ askedAgain }) => askedAgain
@@ -449,7 +441,10 @@ const undoShare = async (
   const removed = await settled(core, async (session) => {
     for (const member of added) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-      await removeMember(session, subject, member);
+      await membersOf(session, subject.kind).remove(subject.id, {
+        type: member.type,
+        id: member.id,
+      });
     }
   });
   if (!removed.ok) {
@@ -554,14 +549,6 @@ const useSharing = (
   ): Promise<boolean> => {
     setBusy(true);
     setFailure(undefined);
-    // An App's version keeps a note of where it was shared from.
-    const message =
-      subject.kind === "app"
-        ? t({
-            message: "Shared from the App's workspace",
-            context: "a version's message",
-          })
-        : undefined;
     const before = live;
     const shared = await settled(core, async (session) => {
       let made = before;
@@ -582,14 +569,17 @@ const useSharing = (
       } else if (review !== undefined) {
         const published = await session.drafts.publish(
           subject,
-          review.revision,
-          message
+          review.revision
         );
         made = published.version;
       }
       for (const recipient of added) {
         // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-        await addMember(session, subject, recipient);
+        await membersOf(session, subject.kind).add(subject.id, {
+          type: recipient.type,
+          id: recipient.id,
+          role: "user",
+        });
       }
       return { made, added };
     });
@@ -872,7 +862,8 @@ export const ShareWithTeam = ({
     }
     const listed = await settled(
       core,
-      async (session) => await readCandidates(session, subject)
+      async (session) =>
+        await membersOf(session, subject.kind).candidates(subject.id)
     );
     setCandidates(
       listed.ok ? listed.value : { people: [], teams: [], projects: [] }

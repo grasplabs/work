@@ -1,12 +1,11 @@
 import type {
-  App,
   AppMember,
   AppMemberRef,
   AppRole,
   ShareCandidates,
-  ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,32 +30,56 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { useCoreRead } from "../apps/use-core-read.ts";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
+import { NotLoaded } from "../load-from-core.tsx";
 import { usePeopleApart } from "../people/people-apart.ts";
 import type { PeopleApart } from "../people/people-apart.ts";
 import { RoleSelect, SharePicker } from "../people/share-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { buildsApp } from "./app-role.ts";
 
-// Sharing an App (an App's): whom it is open to besides its owner and
-// the admins, as a user (its pages) or a builder (its code, settings and
-// whom it is shared with), on its Members tab and from Share on its bar.
-// Its builders share it, change a role and unshare it; everyone with a role
-// in it sees whom it is shared with. Whom to share with comes from
-// `apps.members.candidates`: the organization's people and teams by name,
-// for whoever may share the App, since a builder isn't an admin and can't
-// list the organization's members. Core checks every change (a builder of
-// the App, not archived, and that everyone it would
-// reach may read what the App has read) and records it in the audit log.
+// Whom an App or a workflow is shared with besides its owner and the
+// admins, as a user or a builder: its Sharing settings, and Share with
+// your team (share-with-team.tsx), which adds users alone. Both kinds
+// give their members alike (`apps.members`, `workflowResources.members`),
+// named by core; whom to share with comes from their `candidates`, the
+// organization's people and teams by name, for whoever may share it, as
+// a builder isn't an admin and can't list the organization's members.
+// Core checks every change and records it in the audit log.
 
-/** Whether `identity` may share `app`: a builder of it, while it isn't archived. */
-export const sharesApp = (
-  app: Pick<App, "archived"> & { role: AppRole },
-  identity: Pick<Identity, "staff">
-): boolean => buildsApp(app, identity) && !app.archived;
+/** Someone it is shared with: a person, a team, or everyone in a project, by name. */
+export type Member = AppMember;
+
+/** Whom a subject is shared with, as both kinds give it. */
+interface MembersApi {
+  list: (id: string) => Promise<Member[]>;
+  add: (
+    id: string,
+    member: AppMemberRef & { role: AppRole }
+  ) => Promise<unknown>;
+  remove: (id: string, member: AppMemberRef) => Promise<unknown>;
+  candidates: (id: string) => Promise<ShareCandidates>;
+}
+
+/** The members of `kind`'s subjects, over `session`. */
+export const membersOf = (session: Session, kind: SubjectKind): MembersApi =>
+  kind === "app" ? session.apps.members : session.workflowResources.members;
+
+/** Whom `subject` is shared with. */
+export const readMembers = async (
+  session: Session,
+  { kind, id }: Subject
+): Promise<Member[]> => await membersOf(session, kind).list(id);
+
+/**
+ * Who uses it by name, as its status says it: the teams, people and
+ * projects it is shared with, those with a name the person may read.
+ */
+export const memberNames = (members: readonly Member[]): string[] =>
+  members.flatMap(({ name }) => (name === null ? [] : [name]));
 
 /** How a member is named: a team, and everyone in a project, say so. */
 interface MemberWords {
@@ -67,11 +90,7 @@ interface MemberWords {
 }
 
 /** Who `member` is, in words: a person told apart from a namesake. */
-const memberName = (
-  member: AppMember,
-  words: MemberWords,
-  apart: PeopleApart
-) => {
+const memberName = (member: Member, words: MemberWords, apart: PeopleApart) => {
   if (member.type === "project") {
     return member.name === null
       ? words.unnamedProject
@@ -83,26 +102,23 @@ const memberName = (
     : apart.named({ id: member.id, name });
 };
 
-/** The people and teams App `app` is shared with. */
-export const readMembers = async (
-  session: Session,
-  app: string
-): Promise<AppMember[]> => await session.apps.members.list(app);
-
 /**
- * Share: the organization's people and teams the App isn't shared with
- * yet, read when it opens, and the role to give whoever is picked.
+ * Share: the organization's people and teams it isn't shared with yet,
+ * read when it opens, and the role to give whoever is picked.
  */
-export const ShareApp = ({
-  app,
+const ShareMembers = ({
+  subject,
+  owner,
   members,
+  onChanged,
 }: {
-  app: App;
-  /** Whom it is shared with now, left out of the list; none while unknown. */
+  subject: Subject;
+  owner: string;
+  /** Whom it is shared with now, left out of the list. */
   members: readonly AppMemberRef[];
+  onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [candidates, setCandidates] = useState<ShareCandidates>();
   // Everyone in the organization, so someone is told apart from a
@@ -110,13 +126,14 @@ export const ShareApp = ({
   const apart = usePeopleApart(candidates?.people ?? []);
   const shared = new Set(members.map(({ type, id }) => `${type}:${id}`));
   const isOffered = (type: AppMemberRef["type"], id: string): boolean =>
-    !shared.has(`${type}:${id}`) && !(type === "person" && id === app.owner);
+    !shared.has(`${type}:${id}`) && !(type === "person" && id === owner);
   const read = async (): Promise<void> => {
     if (candidates !== undefined) {
       return;
     }
     const listed = await run(
-      async (session) => await session.apps.members.candidates(app.id)
+      async (session) =>
+        await membersOf(session, subject.kind).candidates(subject.id)
     );
     if (listed !== undefined) {
       setCandidates(listed);
@@ -124,14 +141,12 @@ export const ShareApp = ({
   };
   const share = async (member: AppMemberRef, role: AppRole): Promise<void> => {
     await run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          await session.apps.members.add(app.id, { ...member, role });
-        },
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
+      await changeThenRefresh(async () => {
+        await membersOf(session, subject.kind).add(subject.id, {
+          ...member,
+          role,
+        });
+      }, onChanged);
     });
   };
   const offered =
@@ -173,21 +188,22 @@ export const ShareApp = ({
   );
 };
 
-/** Someone the App is shared with: their role, and unsharing, for its builders. */
+/** Someone it is shared with: their role, and unsharing, for its builders. */
 const MemberRow = ({
-  app,
+  subject,
   member,
   editable,
   apart,
+  onChanged,
 }: {
-  app: App;
-  member: AppMember;
+  subject: Subject;
+  member: Member;
   editable: boolean;
   /** Telling apart the people it is shared with of the same name. */
   apart: PeopleApart;
+  onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const name = memberName(
     member,
@@ -200,19 +216,12 @@ const MemberRow = ({
   );
   const ref: AppMemberRef = { type: member.type, id: member.id };
   const change = async (
-    action: (
-      session: Parameters<Parameters<typeof run>[0]>[0]
-    ) => Promise<unknown>
+    action: (members: MembersApi) => Promise<unknown>
   ): Promise<void> => {
     await run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          await action(session);
-        },
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
+      await changeThenRefresh(async () => {
+        await action(membersOf(session, subject.kind));
+      }, onChanged);
     });
   };
   return (
@@ -230,8 +239,8 @@ const MemberRow = ({
             label={t`Role of ${name}`}
             onChange={(role) => {
               void change(
-                async (session) =>
-                  await session.apps.members.add(app.id, { ...ref, role })
+                async (members) =>
+                  await members.add(subject.id, { ...ref, role })
               );
             }}
             role={member.role}
@@ -273,8 +282,8 @@ const MemberRow = ({
                 </AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
-                    void change(async (session) => {
-                      await session.apps.members.remove(app.id, ref);
+                    void change(async (members) => {
+                      await members.remove(subject.id, ref);
                     });
                   }}
                   variant="destructive"
@@ -291,34 +300,62 @@ const MemberRow = ({
 };
 
 /**
- * Who opens the App: its owner and the admins, who build it, and the
- * people and teams it is shared with, each as a user or a builder.
+ * Sharing, in an App's or a workflow's settings: who opens it, its owner
+ * and the admins, who build it, and the people, teams and projects it is
+ * shared with, each as a user or a builder, read again after each change
+ * made here. Whoever may change it (`editable`) shares it, changes a role
+ * and unshares it.
  */
-export const AppMembers = ({
-  app,
-  members,
+export const Sharing = ({
+  subject,
+  owner,
+  editable,
   identity,
 }: {
-  app: ViewedApp;
-  members: AppMember[];
-  identity: Identity;
+  subject: Subject;
+  owner: string;
+  editable: boolean;
+  identity: Pick<Identity, "userId">;
 }) => {
   const { t } = useLingui();
-  const editable = sharesApp(app, identity);
+  const router = useRouter();
+  // Each change made here, which reads whom it is shared with again.
+  const [changes, setChanges] = useState(0);
+  const read = useCoreRead(
+    `${subject.kind}:${subject.id}/${changes}`,
+    async (session) => await readMembers(session, subject),
+    subject.id
+  );
+  const members = read?.state === "ready" ? read.data : [];
   const apart = usePeopleApart(
     members.flatMap(({ type, id, name }) =>
       type === "person" && name !== null ? [{ id, name }] : []
     )
   );
+  const onChanged = async (): Promise<void> => {
+    setChanges((before) => before + 1);
+    // Whoever sees it now, as the page reads it.
+    await router.invalidate({ sync: true });
+  };
+  if (read?.state !== "ready") {
+    return read === undefined ? null : <NotLoaded page={read} />;
+  }
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-muted-foreground">
-          {app.owner === identity.userId
+          {owner === identity.userId
             ? t`Created by you. It opens for you, the admins, and whoever it is shared with.`
             : t`It opens for the member who created it, the admins, and whoever it is shared with.`}
         </p>
-        {editable ? <ShareApp app={app} members={members} /> : null}
+        {editable ? (
+          <ShareMembers
+            members={members}
+            onChanged={onChanged}
+            owner={owner}
+            subject={subject}
+          />
+        ) : null}
       </div>
       {members.length === 0 ? (
         <p className="text-muted-foreground">
@@ -348,10 +385,11 @@ export const AppMembers = ({
               {members.map((member) => (
                 <MemberRow
                   apart={apart}
-                  app={app}
                   editable={editable}
                   key={`${member.type}:${member.id}`}
                   member={member}
+                  onChanged={onChanged}
+                  subject={subject}
                 />
               ))}
             </TableBody>

@@ -725,10 +725,6 @@ msgstr "{mapped, plural, one {Eine Aufgabe ist erfasst und für Sie bereit.} oth
 msgid "{match} of {matches}"
 msgstr "{match} von {matches}"
 
-#: src/workflows/share-workflow.tsx
-msgid "{memberName} (team)"
-msgstr "{memberName} (Team)"
-
 #: src/knowledge/purge.tsx
 msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
 msgstr "{memories, plural, one {# Erinnerung geschwärzt oder gelöscht} other {# Erinnerungen geschwärzt oder gelöscht}}"
@@ -1225,7 +1221,7 @@ msgstr "{team} · noch nicht verfügbar"
 msgid "{team} · our email didn’t reach them"
 msgstr "{team} · unsere E-Mail hat sie nicht erreicht"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "{team} (team)"
 msgstr "{team} (Team)"
 
@@ -1925,9 +1921,9 @@ msgstr "Kundenverantwortliche Person"
 msgid "Action"
 msgstr "Aktion"
 
-#: src/apps/app-sharing.tsx
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
+#: src/drafts/sharing.tsx
 msgid "Actions"
 msgstr "Aktionen"
 
@@ -3519,7 +3515,6 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/apps/app-data-model.tsx
 #: src/apps/app-remove.tsx
 #: src/apps/app-reset.tsx
-#: src/apps/app-sharing.tsx
 #: src/apps/app-status.tsx
 #: src/apps/app-workflows.tsx
 #: src/apps/blueprints.tsx
@@ -3541,6 +3536,7 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/drafts/draft-history.tsx
+#: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/knowledge/new-collection.tsx
@@ -3606,6 +3602,7 @@ msgstr "Machen Sie dort weiter. Haben Sie das Gerät nicht mehr? Bitten Sie die 
 msgid "Chain check"
 msgstr "Kettenprüfung"
 
+#: src/apps/app-workflows.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Change"
@@ -3669,10 +3666,6 @@ msgstr "Begriffe ändern"
 #: src/settings/stephen-settings.tsx
 msgid "Change their own"
 msgstr "Das Eigene ändern"
-
-#: src/apps/app-workflows.tsx
-msgid "Change version"
-msgstr "Version ändern"
 
 #: src/apps/app-workflows.tsx
 msgid "Change what {alias} starts"
@@ -3949,10 +3942,6 @@ msgid "Choose a source."
 msgstr "Wählen Sie eine Quelle."
 
 #: src/apps/app-workflows.tsx
-msgid "Choose a version"
-msgstr "Version wählen"
-
-#: src/apps/app-workflows.tsx
 msgid "Choose a workflow"
 msgstr "Workflow wählen"
 
@@ -3989,7 +3978,6 @@ msgid "Choose your staff list"
 msgstr "Mitarbeiterliste auswählen"
 
 #: src/projects/file-item-dialog.tsx
-#: src/workflows/share-workflow.tsx
 #: src/workflows/start-run.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Choose…"
@@ -4659,7 +4647,7 @@ msgstr "Ein Team angelegt"
 msgid "Created a webhook source"
 msgstr "Hat eine Webhook-Quelle erstellt"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "Created by you. It opens for you, the admins, and whoever it is shared with."
 msgstr "Von Ihnen erstellt. Es öffnet sich für Sie, die Admins und alle, mit denen es geteilt ist."
 
@@ -5639,14 +5627,12 @@ msgstr "Alle von Grasp werden sofort abgemeldet, und niemand von Grasp kann sich
 msgid "Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked."
 msgstr "Jede Person hat einen eigenen Link: Wer ihn hat, gilt als diese Person, senden Sie ihn also nur an sie. Links, die noch nicht verfügbar sind, öffnen sich an ihrem Tag oder sobald die Teamleitung gesprochen hat."
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 #: src/people/share-picker.tsx
-#: src/workflows/share-workflow.tsx
 msgid "Everyone in {project}"
 msgstr "Alle in {project}"
 
-#: src/apps/app-sharing.tsx
-#: src/workflows/share-workflow.tsx
+#: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
 msgstr "Alle in einem Projekt, in dem Sie nicht sind"
 
@@ -7471,12 +7457,7 @@ msgstr "Es wird Ihrer Organisation nicht angeboten: Bieten Sie es in der Übersi
 msgid "It isn't offered to your organization."
 msgstr "Es wird Ihrer Organisation nicht angeboten."
 
-#: src/workflows/share-workflow.tsx
-msgctxt "a workflow"
-msgid "It isn't shared with anyone."
-msgstr "Er ist mit niemandem geteilt."
-
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "It isn’t shared with anyone."
 msgstr "Es ist mit niemandem geteilt."
 
@@ -7500,7 +7481,7 @@ msgstr "Es wurde vielleicht umbenannt oder entfernt."
 msgid "It may read the name, email and teams of everyone in the organization."
 msgstr "Sie kann Name, E-Mail-Adresse und Teams aller Personen in der Organisation lesen."
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "It opens for the member who created it, the admins, and whoever it is shared with."
 msgstr "Es öffnet sich für das Mitglied, das es erstellt hat, die Admins und alle, mit denen es geteilt ist."
 
@@ -7705,10 +7686,6 @@ msgstr "Der nächste Start wird abgelehnt, bis ein Admin {alias} erneut freigibt
 #: src/apps/app-settings.tsx
 msgid "Its own address, for whoever may use it while it is live."
 msgstr "Ihre eigene Adresse, für alle, die sie nutzen dürfen, solange sie live ist."
-
-#: src/workflows/share-workflow.tsx
-msgid "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
-msgstr "Sein Besitzer und die Admins haben ihn immer. Ein Nutzer verfolgt und startet ihn; ein Builder ändert, teilt und löscht ihn außerdem."
 
 #: src/apps/draft-changes.tsx
 msgid "Its pages and server code may hand files people can read to the workflows it binds."
@@ -9301,8 +9278,8 @@ msgstr "Niemand ändert die Datensätze in {table}, auch Sam nicht."
 msgid "Nobody else to add."
 msgstr "Niemand sonst zum Hinzufügen."
 
-#: src/apps/app-sharing.tsx
 #: src/drafts/share-with-team.tsx
+#: src/drafts/sharing.tsx
 msgid "Nobody else to share with."
 msgstr "Niemand sonst zum Teilen."
 
@@ -10671,7 +10648,6 @@ msgstr "Ausstehend"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
-#: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "Personen"
 
@@ -10929,7 +10905,6 @@ msgstr "Projekt"
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/routes/_shell.projects.index.tsx
-#: src/workflows/share-workflow.tsx
 msgid "Projects"
 msgstr "Projekte"
 
@@ -11990,7 +11965,7 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Rakete"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
@@ -12005,20 +11980,15 @@ msgstr "Rolle"
 msgid "Role in the project"
 msgstr "Rolle im Projekt"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "Role of {name}"
 msgstr "Rolle von {name}"
-
-#: src/workflows/share-workflow.tsx
-msgid "Role of {shown}"
-msgstr "Rolle von {shown}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Rolle von {who}"
 
-#: src/apps/app-sharing.tsx
-#: src/workflows/share-workflow.tsx
+#: src/drafts/sharing.tsx
 msgid "Role to share with"
 msgstr "Rolle beim Teilen"
 
@@ -12753,13 +12723,8 @@ msgstr "Geklärt: {choice}"
 msgid "Several for one question"
 msgstr "Mehrere für eine Frage"
 
-#: src/apps/app-sharing.tsx
 #: src/drafts/share-with-team.tsx
-msgid "Share"
-msgstr "Teilen"
-
-#: src/workflows/share-workflow.tsx
-msgctxt "share a workflow with someone"
+#: src/drafts/sharing.tsx
 msgid "Share"
 msgstr "Teilen"
 
@@ -12775,7 +12740,7 @@ msgstr "{name} mit {team} teilen?"
 msgid "Share {name} with the company?"
 msgstr "{name} mit dem Unternehmen teilen?"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "Share as"
 msgstr "Teilen als"
 
@@ -12804,7 +12769,6 @@ msgid "Share this version instead"
 msgstr "Stattdessen diese Version teilen"
 
 #: src/brain/share-record.tsx
-#: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Teilen mit"
 
@@ -12825,11 +12789,6 @@ msgstr "Mit Ihrem Team teilen"
 msgid "Share your staff list"
 msgstr "Mitarbeiterliste teilen"
 
-#: src/drafts/share-with-team.tsx
-msgctxt "a version's message"
-msgid "Shared from the App's workspace"
-msgstr "Aus dem Arbeitsbereich der App geteilt"
-
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
 msgstr "Geteilte Postfächer, Kalender von Kolleginnen und Kollegen und die Dateien des Unternehmens."
@@ -12842,8 +12801,7 @@ msgstr "Geteilte Postfächer, Register und Datensätze des Unternehmens, nachdem
 msgid "Shared uploads"
 msgstr "Geteilte Uploads"
 
-#: src/apps/app-sharing.tsx
-#: src/workflows/share-workflow.tsx
+#: src/drafts/sharing.tsx
 msgid "Shared with"
 msgstr "Geteilt mit"
 
@@ -13192,10 +13150,6 @@ msgstr "Jemand hat diesen Entwurf geändert, seit Sie ihn gelesen haben. Ihr Tex
 #: src/workflows/traces.tsx
 msgid "Someone else"
 msgstr "Jemand anderes"
-
-#: src/drafts/publish-errors.ts
-msgid "Someone else is sharing this App right now. Try again in a moment."
-msgstr "Gerade teilt jemand anderes diese App. Versuchen Sie es gleich noch einmal."
 
 #: src/pages/frame-failure.tsx
 msgid "Someone else signed in"
@@ -13589,21 +13543,17 @@ msgstr "Stoppen und fragen"
 msgid "Stop for now"
 msgstr "Vorerst aufhören"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "Stop sharing"
 msgstr "Nicht mehr teilen"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "Stop sharing with {name}"
 msgstr "Nicht mehr mit {name} teilen"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "Stop sharing with {name}?"
 msgstr "Nicht mehr mit {name} teilen?"
-
-#: src/workflows/share-workflow.tsx
-msgid "Stop sharing with {shown}"
-msgstr "Nicht mehr mit {shown} teilen"
 
 #: src/workflows/stop-run.tsx
 msgid "Stop the run"
@@ -13867,7 +13817,6 @@ msgstr "Teamgröße unbekannt."
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
 #: src/settings/teams.tsx
-#: src/workflows/share-workflow.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -14131,8 +14080,8 @@ msgid "The App starts no workflow of its own."
 msgstr "Die App startet keinen eigenen Workflow."
 
 #: src/apps/app-workflows.tsx
-msgid "The App starts this exact version by its name, until a builder binds another. Starting it still takes the App's own permission on the workflow, which an admin grants."
-msgstr "Die App startet genau diese Version unter ihrem Namen, bis ein Builder eine andere bindet. Zum Starten braucht die App weiterhin ihre eigene Berechtigung für den Workflow, die ein Admin erteilt."
+msgid "The App starts the workflow's live version by its name, until a builder binds another. Starting it still takes the App's own permission on the workflow, which an admin grants."
+msgstr "Die App startet die Live-Version des Workflows unter diesem Namen, bis ein Builder einen anderen bindet. Zum Starten braucht die App weiterhin ihre eigene Berechtigung für den Workflow, die ein Admin erteilt."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App's actions can't use it until an admin binds it."
@@ -14767,7 +14716,7 @@ msgstr "Dann endet ihr Zugriff von selbst."
 msgid "Their name, on what they did, so it stays traceable"
 msgstr "Ihr Name bei dem, was sie getan haben, damit es nachvollziehbar bleibt"
 
-#: src/apps/app-sharing.tsx
+#: src/drafts/sharing.tsx
 msgid "Their open pages of it stop within seconds, and they can no longer open it. You can share it with them again."
 msgstr "Ihre geöffneten Seiten davon stoppen innerhalb von Sekunden, und sie können es nicht mehr öffnen. Sie können es erneut mit ihnen teilen."
 
@@ -15663,8 +15612,7 @@ msgstr "Unlesbares Ereignis"
 msgid "Unsaved changes"
 msgstr "Nicht gespeicherte Änderungen"
 
-#: src/apps/app-sharing.tsx
-#: src/workflows/share-workflow.tsx
+#: src/drafts/sharing.tsx
 msgid "Unshare"
 msgstr "Nicht mehr teilen"
 
@@ -15870,7 +15818,6 @@ msgstr "Jetzt prüfen"
 msgid "Verify the chain"
 msgstr "Kette prüfen"
 
-#: src/apps/app-workflows.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
 #: src/workflows/resource-runs.tsx
@@ -15899,7 +15846,6 @@ msgstr "Version {number}"
 msgid "Version {number}, current"
 msgstr "Version {number}, aktuell"
 
-#: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx

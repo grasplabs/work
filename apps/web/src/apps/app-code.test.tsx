@@ -116,13 +116,12 @@ const drafts = {
   },
 };
 
-/** Core's Apps API, as far as the Code tab reads it, on `filesOf`. */
-const appsOn = (filesOf: Versions) => ({
-  files: {
-    read: async (_app: string, at?: number): Promise<AppFiles> => {
-      await Promise.resolve();
-      return filesOf[at ?? 2] ?? {};
-    },
+/** Core's versions, as far as the Code tab reads them, on `filesOf`. */
+const versionsOn = (filesOf: Versions) => ({
+  files: async (_subject: { kind: string; id: string }, at: number) => {
+    await Promise.resolve();
+    const files: AppFiles = filesOf[at] ?? {};
+    return files;
   },
 });
 
@@ -167,14 +166,14 @@ const shown = async (
   versions: Versions = smallVersions,
   building = false
 ): Promise<void> => {
-  const apps = appsOn(versions);
+  const read = versionsOn(versions);
   const core = {
     withSession: async <T,>(
       action: (session: {
-        apps: typeof apps;
+        versions: typeof read;
         drafts: typeof drafts;
       }) => Promise<T>
-    ): Promise<T> => await action({ apps, drafts }),
+    ): Promise<T> => await action({ versions: read, drafts }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({

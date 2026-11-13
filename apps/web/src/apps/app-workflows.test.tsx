@@ -91,7 +91,7 @@ const fakeWorkflows = () => {
     },
     bindToApp: async (
       id: string,
-      input: { app: string; alias: string; version: number }
+      input: { app: string; alias: string }
     ): Promise<AppWorkflowBinding> => {
       await Promise.resolve();
       asked.push(["bindToApp", id, input]);
@@ -100,7 +100,8 @@ const fakeWorkflows = () => {
         app: input.app,
         alias: input.alias,
         workflowId: id,
-        version: input.version,
+        // Its live version, as core binds it.
+        version: id === "flow-invoice" ? 3 : 2,
         boundBy: "user-owner",
         boundAt: "2026-10-30T09:00:00.000Z",
       };
@@ -116,18 +117,7 @@ const fakeWorkflows = () => {
       bindings = bindings.filter((each) => each.id !== binding);
     },
   };
-  // A workflow's versions, as `versions` lists them: newest first.
-  const versions = {
-    list: async ({ id }: { kind: string; id: string }) => {
-      await Promise.resolve();
-      const count = id === "flow-invoice" ? 3 : 2;
-      return Array.from({ length: count }, (_, index) => ({
-        resourceId: id,
-        version: count - index,
-      }));
-    },
-  };
-  return { session: { workflowResources, versions }, asked };
+  return { session: { workflowResources }, asked };
 };
 
 let root: Root | undefined;
@@ -233,11 +223,11 @@ const type = async (label: string, text: string): Promise<void> => {
   });
 };
 
-/** Each binding listed: its alias, workflow and version. */
+/** Each binding listed: its alias and workflow. */
 const listed = (): string[][] =>
   [...document.querySelectorAll("tbody tr")].map((row) =>
     [...row.querySelectorAll("td")]
-      .slice(0, 3)
+      .slice(0, 2)
       .map((cell) => cell.textContent?.trim() ?? "")
   );
 
@@ -246,40 +236,35 @@ describe("The workflows an App starts, for its builders", () => {
     unmount();
   });
 
-  it("binds a new name to a published workflow's exact version", async () => {
+  it("binds a new name to a published workflow, whose live version it starts", async () => {
     const { session, asked } = fakeWorkflows();
     await shown(session);
-    expect(listed()).toStrictEqual([["summary", "Summarise the week", "1"]]);
+    expect(listed()).toStrictEqual([["summary", "Summarise the week"]]);
 
     await press(button("Bind a workflow"));
     await type("Name in the App's code", "invoice");
     await choose("Workflow", "Send an invoice");
-    await choose("Version", "Version 3");
     await press(button("Bind"));
 
     expect({ asked, listed: listed() }).toStrictEqual({
       asked: [
         ["appBindings", "app-1"],
-        [
-          "bindToApp",
-          "flow-invoice",
-          { app: "app-1", alias: "invoice", version: 3 },
-        ],
+        ["bindToApp", "flow-invoice", { app: "app-1", alias: "invoice" }],
         ["appBindings", "app-1"],
       ],
       listed: [
-        ["invoice", "Send an invoice", "3"],
-        ["summary", "Summarise the week", "1"],
+        ["invoice", "Send an invoice"],
+        ["summary", "Summarise the week"],
       ],
     });
   });
 
-  it("moves a name to another version, and unbinds one only once confirmed", async () => {
+  it("moves a name to another workflow, and unbinds one only once confirmed", async () => {
     const { session, asked } = fakeWorkflows();
     await shown(session);
 
-    await press(button("Change version"));
-    await choose("Version", "Version 2");
+    await press(button("Change"));
+    await choose("Workflow", "Send an invoice");
     await press(button("Bind"));
     const moved = listed();
     await press(button("Unbind"));
@@ -289,7 +274,7 @@ describe("The workflows an App starts, for its builders", () => {
     await press(button("Unbind"));
 
     expect({ moved, afterCancel, listed: listed() }).toStrictEqual({
-      moved: [["summary", "Summarise the week", "2"]],
+      moved: [["summary", "Send an invoice"]],
       afterCancel: [],
       listed: [],
     });
@@ -302,7 +287,6 @@ describe("The workflows an App starts, for its builders", () => {
     await press(button("Bind a workflow"));
     await type("Name in the App's code", "2nd-flow");
     await choose("Workflow", "Send an invoice");
-    await choose("Version", "Version 1");
 
     expect({
       told: document.body.textContent?.includes("Start with a letter"),
@@ -327,7 +311,7 @@ describe("The workflows an App starts, for its builders", () => {
 
     expect({ kept, userAsked, staffAsked: staff.asked }).toStrictEqual({
       kept: {
-        listed: [["summary", "Summarise the week", "1"]],
+        listed: [["summary", "Summarise the week"]],
         changes: false,
       },
       userAsked: [],

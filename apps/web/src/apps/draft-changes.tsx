@@ -1,4 +1,4 @@
-import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
+import type { AppReview } from "@grasp-os/shared/app-review";
 import type {
   FileDiff,
   ReviewedRowRule,
@@ -29,12 +29,13 @@ import type { ReactNode } from "react";
 import { formatList } from "../format.ts";
 import { PlanList, planLines } from "./data-model-changes.tsx";
 
-// What publishing an App's draft changes, as Publish (publish.tsx) shows
-// it before the person publishes, and History (app-history.tsx) of a
+// What publishing an App's draft changes, as Share with your team (drafts/share-with-team.tsx)
+// shows it before the person publishes, and History
+// (drafts/draft-history.tsx) of a
 // version against the one before it: its files, grouped by what they
 // are, each with its diff on demand; what it does to the App's data; and
 // the access the App waits for or is asked for again. All as core worked
-// it out (`apps.drafts.changes`), never as whoever wrote the draft says.
+// it out (`apps.review`), never as whoever wrote the draft says.
 
 // The diff, with its renderer and highlighter, loads once one opens.
 const CodeDiff = lazy(async () => {
@@ -160,7 +161,7 @@ export const FileChanges = ({ files }: { files: readonly FileDiff[] }) => {
 export const DataChanges = ({
   changes,
 }: {
-  changes: Pick<AppDraftChanges, "plan" | "migrations">;
+  changes: Pick<AppReview, "plan" | "migrations">;
 }) => {
   const { i18n } = useLingui();
   const lines = changes.plan === null ? [] : planLines(changes.plan, i18n);
@@ -317,7 +318,7 @@ export const AccessChanges = ({
   changes,
 }: {
   changes: Pick<
-    AppDraftChanges,
+    AppReview,
     | "permissions"
     | "grants"
     | "callers"

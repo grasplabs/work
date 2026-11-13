@@ -4,7 +4,6 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useEffect, useState } from "react";
 
-import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -32,25 +31,11 @@ import type { ChatSlot } from "./active-chat.ts";
  * App and a workflow, whose draft its builders share until they share
  * it with their team.
  */
-const words = {
+export const subjectWords = {
   title: msg`Ask for a change`,
   placeholder: msg`Say what should change`,
   empty: msg`Say what to change. Your team sees the changes once you share them.`,
 } satisfies Record<string, MessageDescriptor>;
-
-/**
- * The person's chat for a subject of each kind, as core keeps it: an
- * App's made the first time; a workflow's only once its agent drafted it
- * with them (null before), as the next question in a slot holding none
- * starts one.
- */
-const chatOf: Record<
-  SubjectKind,
-  (session: Session, id: string) => Promise<{ id: string } | null>
-> = {
-  app: async (session, id) => await session.chats.forApp(id),
-  workflow: async (session, id) => await session.chats.forWorkflow(id),
-};
 
 /** The tab's slot for `subject`'s chat. */
 export const slotOf = ({ kind, id }: Subject): ChatSlot => `${kind}:${id}`;
@@ -67,9 +52,6 @@ export const subjectOf = (slot: ChatSlot): Subject | undefined => {
   const kind = slot.slice(0, at);
   return isKind(kind) ? { kind, id: slot.slice(at + 1) } : undefined;
 };
-
-/** What the chat says about a subject, of either kind. */
-export const subjectWords = words;
 
 /**
  * Has Grasp's chat be about `subject`, called `name`, while the calling
@@ -99,8 +81,7 @@ export const useChatSubject = (
  * (`chatId`), and keeps it there: whether it is looking, why not when core
  * couldn't say, and a way to ask again. Nothing for the person's own
  * slot, one left to start afresh, or a subject core has no chat for yet
- * (a workflow nobody's agent drafted with them): its next question starts
- * one.
+ * (none worked on it with them): its next question starts one.
  */
 export const useSubjectChat = (
   slot: ChatSlot,
@@ -132,7 +113,7 @@ export const useSubjectChat = (
     const find = async (): Promise<void> => {
       const found = await loadFromCore(
         core,
-        async (session) => await chatOf[subject.kind](session, subject.id)
+        async (session) => await session.chats.forSubject(subject)
       );
       if (!live) {
         return;
