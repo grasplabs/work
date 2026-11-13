@@ -113,7 +113,9 @@ const keptTextOf = async (
   personId: string,
   question: string
 ): Promise<string | undefined> => {
-  const [source] = await handedTo(personId, question);
+  // The turn, whatever else holds its words or comes back by meaning.
+  const found = await handedTo(personId, question);
+  const source = found.find(({ producer }) => producer === "chat");
   if (source === undefined) {
     throw new Error("Nothing was handed over");
   }
