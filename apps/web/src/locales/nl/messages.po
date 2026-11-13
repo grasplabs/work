@@ -1500,8 +1500,8 @@ msgid "A connection refused to say what changed"
 msgstr "Een verbinding weigerde te zeggen wat er veranderd is"
 
 #: src/brain/own-export.tsx
-msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when you are erased."
-msgstr "Een kopie van alles wat het Brain alleen voor jou bewaart: je eigen bronnen en wat het daaruit onthoudt. Alleen jij kunt hem maken en downloaden, en hij wordt verwijderd als jij wordt gewist."
+msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
+msgstr "Een kopie van alles wat het Brain alleen voor jou bewaart: je eigen bronnen en wat het daaruit onthoudt. Alleen jij kunt hem maken en downloaden, en hij wordt verwijderd als je gegevens worden gewist."
 
 #: src/apps/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
@@ -3789,6 +3789,10 @@ msgstr "Wordt gecontroleerd tegen je cijfers…"
 #: src/apps/publish.tsx
 msgid "Checking it…"
 msgstr "Bezig met controleren…"
+
+#: src/brain/own-export.tsx
+msgid "Checking on your export…"
+msgstr "Je export wordt nagekeken…"
 
 #. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
 #: src/chat/thread.tsx
@@ -6226,10 +6230,6 @@ msgstr "Grasp kon deze vraag niet aan het model stellen. Probeer het opnieuw."
 #: src/connections/revocations-by-hand.tsx
 msgid "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
 msgstr "Grasp kon zijn eigen toegang bij deze apps niet verwijderen. Tot iemand die daar verwijdert, werkt die misschien nog."
-
-#: src/brain/own-export.tsx
-msgid "Grasp couldn’t start your export just now."
-msgstr "Grasp kon je export nu niet starten."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -10801,10 +10801,6 @@ msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Je antwoord wordt gelezen"
-
-#: src/brain/own-export.tsx
-msgid "Reading where your export is"
-msgstr "Lezen hoe ver je export is"
 
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"

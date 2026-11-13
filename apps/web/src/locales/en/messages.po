@@ -1500,8 +1500,8 @@ msgid "A connection refused to say what changed"
 msgstr "A connection refused to say what changed"
 
 #: src/brain/own-export.tsx
-msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when you are erased."
-msgstr "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when you are erased."
+msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
+msgstr "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 
 #: src/apps/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
@@ -3789,6 +3789,10 @@ msgstr "Checking it against your numbers…"
 #: src/apps/publish.tsx
 msgid "Checking it…"
 msgstr "Checking it…"
+
+#: src/brain/own-export.tsx
+msgid "Checking on your export…"
+msgstr "Checking on your export…"
 
 #. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
 #: src/chat/thread.tsx
@@ -6226,10 +6230,6 @@ msgstr "Grasp couldn't put this question to the model. Try again."
 #: src/connections/revocations-by-hand.tsx
 msgid "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
 msgstr "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
-
-#: src/brain/own-export.tsx
-msgid "Grasp couldn’t start your export just now."
-msgstr "Grasp couldn’t start your export just now."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -10801,10 +10801,6 @@ msgstr "Reading what changed at a connection failed"
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Reading what you wrote"
-
-#: src/brain/own-export.tsx
-msgid "Reading where your export is"
-msgstr "Reading where your export is"
 
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"

@@ -1500,8 +1500,8 @@ msgid "A connection refused to say what changed"
 msgstr "Una conexión se negó a decir qué cambió"
 
 #: src/brain/own-export.tsx
-msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when you are erased."
-msgstr "Una copia de todo lo que el Brain guarda solo para ti: tus propias fuentes y lo que recuerda de ellas. Solo tú puedes crearla y descargarla, y se elimina cuando se te borra."
+msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
+msgstr "Una copia de todo lo que el Brain guarda solo para ti: tus propias fuentes y lo que recuerda de ellas. Solo tú puedes crearla y descargarla, y se elimina cuando se borran tus datos."
 
 #: src/apps/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
@@ -3789,6 +3789,10 @@ msgstr "Comprobándolo con tus números…"
 #: src/apps/publish.tsx
 msgid "Checking it…"
 msgstr "Comprobando…"
+
+#: src/brain/own-export.tsx
+msgid "Checking on your export…"
+msgstr "Comprobando tu exportación…"
 
 #. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
 #: src/chat/thread.tsx
@@ -6226,10 +6230,6 @@ msgstr "Grasp no pudo hacerle esta pregunta al modelo. Vuelve a intentarlo."
 #: src/connections/revocations-by-hand.tsx
 msgid "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
 msgstr "Grasp no pudo quitar su propio acceso en estas aplicaciones. Hasta que alguien lo quite allí, puede que siga funcionando."
-
-#: src/brain/own-export.tsx
-msgid "Grasp couldn’t start your export just now."
-msgstr "Grasp no ha podido iniciar tu exportación en este momento."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -10801,10 +10801,6 @@ msgstr "Falló la lectura de lo que cambió en una conexión"
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Leyendo lo que has escrito"
-
-#: src/brain/own-export.tsx
-msgid "Reading where your export is"
-msgstr "Leyendo cómo va tu exportación"
 
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"

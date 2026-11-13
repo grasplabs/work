@@ -18,11 +18,12 @@ import type { OwnExport } from "./own-export-route.ts";
 import { followEveryMs, OwnExportSection } from "./own-export.tsx";
 
 // The person's own export on Brain › Sources (GRA-1839), against core's
-// route faked as `fetch` answers it: each state as core shows it, a start
-// followed by a read, while it is written read again until it is done, and
-// the page's own rules: one start at a time, the button off while it runs,
-// a failed start or read said and read again, and a reply that lands after
-// the section left dropped.
+// route faked as `fetch` answers it: each state as core shows it; a start
+// followed by a read, its button off until that read is back; while the
+// export is written, the next read only once the last landed, never while
+// the page is hidden, and once when it is seen again; a start's failure
+// said only while the read that followed it is on screen; and the person's
+// focus kept when the button they pressed goes.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -35,6 +36,10 @@ const exported = (
   files: string[] = []
 ): OwnExport => ({ id, state, versions: 3, files });
 
+const twoFiles = ["manifest.json", "part-0000.jsonl"];
+
+const ready = "Your export is ready. Download each of its files:";
+
 /** What the faked route holds and answers. */
 interface Route {
   /** The export it shows; null for none. */
@@ -43,36 +48,53 @@ interface Route {
   started?: OwnExport;
   /** Refuses each start with this core error. */
   refuseStart?: { status: number; code: string; message: string };
+  /** Whether a refused start was made all the same (its answer lost). */
+  startedAnyway?: boolean;
   /** Holds each start until it settles. */
   holdStart?: Promise<unknown>;
+  /** Holds each read until it settles. */
+  holdRead?: Promise<unknown>;
   /** Fails each read, as a body core never sends. */
   failRead?: boolean;
   /** Every call, in order. */
   calls: string[];
+  /** Whether each read was sent with a signal to end it. */
+  signals: boolean[];
 }
 
-/** Answers `fetch` as core's route would, from `route`. */
-const serve = (route: Route) =>
+const route = (shown: OwnExport | null, more: Partial<Route> = {}): Route => ({
+  shown,
+  calls: [],
+  signals: [],
+  ...more,
+});
+
+/** Answers `fetch` as core's route would, from `faked`. */
+const serve = (faked: Route) =>
   vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
     async (_input, init) => {
       if (init?.method === "POST") {
-        route.calls.push("start");
-        await route.holdStart;
-        if (route.refuseStart !== undefined) {
-          const { status, code, message } = route.refuseStart;
+        faked.calls.push("start");
+        await faked.holdStart;
+        if (faked.refuseStart === undefined || faked.startedAnyway === true) {
+          faked.shown = faked.started ?? exported("writing");
+        }
+        if (faked.refuseStart !== undefined) {
+          const { status, code, message } = faked.refuseStart;
           return Response.json(
             { code, message, details: { requestId: "req-1" } },
             { status }
           );
         }
-        route.shown = route.started ?? exported("writing");
         return Response.json({ id });
       }
-      route.calls.push("read");
-      if (route.failRead === true) {
+      faked.calls.push("read");
+      faked.signals.push(init?.signal instanceof AbortSignal);
+      await faked.holdRead;
+      if (faked.failRead === true) {
         return new Response("<html>proxy</html>", { status: 502 });
       }
-      return Response.json({ export: route.shown });
+      return Response.json({ export: faked.shown });
     }
   );
 
@@ -86,9 +108,18 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Shows the section on a faked core, its route answering from `route`. */
-const shown = async (route: Route): Promise<void> => {
-  vi.stubGlobal("fetch", serve(route));
+/** Moves the faked timers on by `ms`, and lets what they started settle. */
+const later = async (ms: number): Promise<void> => {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Shows the section on a faked core, its route answering from `faked`. */
+const shown = async (faked: Route): Promise<void> => {
+  vi.stubGlobal("fetch", serve(faked));
   const core = {
     withSession: async <T,>(action: (session: object) => Promise<T>) =>
       await action({}),
@@ -120,6 +151,8 @@ const shown = async (route: Route): Promise<void> => {
 
 const text = (): string => document.body.textContent;
 
+const said = (): string => document.querySelector("output")?.textContent ?? "";
+
 const buttonOf = (label: string): HTMLButtonElement => {
   const button = [...document.querySelectorAll("button")].find(
     (each) => each.textContent === label
@@ -132,6 +165,7 @@ const buttonOf = (label: string): HTMLButtonElement => {
 
 const press = async (label: string): Promise<void> => {
   await act(async () => {
+    buttonOf(label).focus();
     buttonOf(label).click();
     await Promise.resolve();
   });
@@ -150,6 +184,19 @@ const links = (): [string, string | null, boolean][] =>
     link.hasAttribute("download"),
   ]);
 
+/** The page hidden, or seen again, as the browser says it. */
+const visibility = async (state: "hidden" | "visible"): Promise<void> => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: state,
+  });
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    await Promise.resolve();
+  });
+  await settle();
+};
+
 describe("the person's own export", () => {
   afterEach(() => {
     act(() => {
@@ -157,31 +204,32 @@ describe("the person's own export", () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    Reflect.deleteProperty(document, "visibilityState");
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  it("starts one, says it is being written, reads it again until it is done, and offers its files to download", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    const route: Route = { shown: null, calls: [] };
-    await shown(route);
+  it("starts one, says it is being written, reads it again until it is done, says so, and offers its files to download", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const faked = route(null);
+    await shown(faked);
     await press("Export");
-    const writing = text();
-    route.shown = exported("done", ["manifest.json", "part-0000.jsonl"]);
-    await act(async () => {
-      vi.advanceTimersByTime(followEveryMs);
-      await Promise.resolve();
-    });
-    await settle();
+    const writing = said();
+    const focused = document.activeElement?.tagName;
+    faked.shown = exported("done", twoFiles);
+    await later(followEveryMs);
     expect({
       writing: writing.includes("Grasp is writing your export."),
-      ready: text().includes("Your export is ready."),
+      focused,
+      done: said(),
       links: links(),
-      calls: route.calls,
+      calls: faked.calls,
+      signals: faked.signals.every(Boolean),
       again: buttonOf("Export again").disabled,
     }).toStrictEqual({
       writing: true,
-      ready: true,
+      focused: "OUTPUT",
+      done: ready,
       links: [
         [
           "manifest.json",
@@ -195,52 +243,55 @@ describe("the person's own export", () => {
         ],
       ],
       calls: ["read", "start", "read", "read"],
+      signals: true,
       again: false,
     });
   });
 
   it("says an export of a store that holds nothing holds nothing", async () => {
-    await shown({
-      shown: exported("done", ["manifest.json"]),
-      calls: [],
+    await shown(route(exported("done", ["manifest.json"])));
+    expect({
+      said: said(),
+      links: links().map(([name]) => name),
+    }).toStrictEqual({
+      said: "The Brain keeps nothing that only you may read yet, so your export holds nothing.",
+      links: ["manifest.json"],
     });
-    expect(text()).toContain(
-      "The Brain keeps nothing that only you may read yet, so your export holds nothing."
-    );
   });
 
   it("says an export something was erased from since is gone, and offers a new one", async () => {
-    await shown({ shown: exported("erased"), calls: [] });
+    await shown(route(exported("erased")));
     expect({
-      said: text().includes("Something your export held was erased since"),
+      said: said().includes("Something your export held was erased since"),
       links: links(),
       again: buttonOf("Export again").disabled,
     }).toStrictEqual({ said: true, links: [], again: false });
   });
 
   it("says an export that couldn't be finished failed, and offers to try again", async () => {
-    await shown({ shown: exported("failed"), calls: [] });
+    await shown(route(exported("failed")));
     expect({
-      said: text().includes("Your export couldn’t be finished."),
+      said: said(),
       again: buttonOf("Export again").disabled,
-    }).toStrictEqual({ said: true, again: false });
+    }).toStrictEqual({
+      said: "Your export couldn’t be finished. Try making it again.",
+      again: false,
+    });
   });
 
   it("says why a start was refused, reads the export again, and lets the person try again", async () => {
-    const route: Route = {
-      shown: null,
+    const faked = route(null, {
       refuseStart: {
         status: 500,
         code: "internal.unexpected",
         message: "Something went wrong.",
       },
-      calls: [],
-    };
-    await shown(route);
+    });
+    await shown(faked);
     await press("Export");
     expect({
       alerts: alerts(),
-      calls: route.calls,
+      calls: faked.calls,
       off: buttonOf("Export").disabled,
     }).toStrictEqual({
       alerts: ["Something went wrong. Reference: req-1"],
@@ -250,37 +301,151 @@ describe("the person's own export", () => {
   });
 
   // A start whose answer was lost after core started it: the read since
-  // shows it being written, so no failure is said.
-  it("says no failure for a start the read since shows under way", async () => {
-    const route: Route = {
-      shown: null,
+  // shows it being written, and its failure never comes back, also once
+  // the export is done.
+  it("never says a failure for a start the read since shows under way, through to its end", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const faked = route(null, {
       refuseStart: {
         status: 503,
         code: "internal.unexpected",
         message: "Lost.",
       },
-      calls: [],
-    };
-    await shown(route);
-    route.shown = exported("writing");
+      startedAnyway: true,
+    });
+    await shown(faked);
     await press("Export");
+    const whileWriting = alerts();
+    faked.shown = exported("done", twoFiles);
+    await later(followEveryMs);
     expect({
+      whileWriting,
+      done: said(),
       alerts: alerts(),
-      writing: text().includes("Grasp is writing your export."),
-    }).toStrictEqual({ alerts: [], writing: true });
+    }).toStrictEqual({ whileWriting: [], done: ready, alerts: [] });
+  });
+
+  it("keeps the button off until the read after its start is back, and sends one start for two clicks in one tick", async () => {
+    const started = Promise.withResolvers<boolean>();
+    const read = Promise.withResolvers<boolean>();
+    const faked = route(exported("done", twoFiles), {
+      holdStart: started.promise,
+      started: exported("done", [...twoFiles, "part-0001.jsonl"]),
+    });
+    await shown(faked);
+    await act(async () => {
+      buttonOf("Export again").click();
+      buttonOf("Export again").click();
+      await Promise.resolve();
+    });
+    await settle();
+    const whileStarting = buttonOf("Export again").disabled;
+    faked.holdRead = read.promise;
+    await act(async () => {
+      started.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+    const whileReading = buttonOf("Export again").disabled;
+    await act(async () => {
+      read.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect({
+      whileStarting,
+      whileReading,
+      after: buttonOf("Export again").disabled,
+      calls: faked.calls,
+    }).toStrictEqual({
+      whileStarting: true,
+      whileReading: true,
+      after: false,
+      calls: ["read", "start", "read"],
+    });
+  });
+
+  // A read slower than the follow-up's pace: none starts over it, and it
+  // lands.
+  it("reads again only once the last read landed, however long it takes within its deadline", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const faked = route(exported("writing"));
+    await shown(faked);
+    const slow = Promise.withResolvers<boolean>();
+    faked.holdRead = slow.promise;
+    await later(followEveryMs);
+    const asked = faked.calls.length;
+    await later(followEveryMs - 1);
+    const meanwhile = faked.calls.length;
+    faked.shown = exported("done", twoFiles);
+    faked.holdRead = undefined;
+    await act(async () => {
+      slow.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect({ asked, meanwhile, done: said() }).toStrictEqual({
+      asked: 2,
+      meanwhile: 2,
+      done: ready,
+    });
+  });
+
+  // One that never answers fails at its deadline, as every read does: the
+  // page says core can't be reached, and goes on following, one read at a
+  // time.
+  it("goes on following, one read at a time, after a read that never answered", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const faked = route(exported("writing"));
+    await shown(faked);
+    faked.holdRead = Promise.withResolvers<boolean>().promise;
+    await later(followEveryMs);
+    await later(followEveryMs);
+    const failed = alerts();
+    const askedThen = faked.calls.length;
+    faked.holdRead = undefined;
+    faked.shown = exported("done", twoFiles);
+    await later(followEveryMs);
+    expect({
+      failed,
+      askedThen,
+      asked: faked.calls.length,
+      done: said(),
+    }).toStrictEqual({
+      failed: ["Grasp can’t be reached just now."],
+      askedThen: 2,
+      asked: 3,
+      done: ready,
+    });
+  });
+
+  it("reads nothing while the page is hidden, and once when it is seen again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const faked = route(exported("writing"));
+    await shown(faked);
+    await visibility("hidden");
+    await later(followEveryMs * 4);
+    const whileHidden = faked.calls.length;
+    faked.shown = exported("done", twoFiles);
+    await visibility("visible");
+    expect({
+      whileHidden,
+      after: faked.calls.length,
+      done: said(),
+    }).toStrictEqual({ whileHidden: 1, after: 2, done: ready });
   });
 
   it("says a read that failed, and reads again when asked", async () => {
-    const route: Route = { shown: null, failRead: true, calls: [] };
-    await shown(route);
+    const faked = route(null, { failRead: true });
+    await shown(faked);
     const failed = alerts();
-    route.failRead = false;
+    faked.failRead = false;
     await press("Try again");
     expect({
       failed,
       after: alerts(),
       start: buttonOf("Export").disabled,
-      calls: route.calls,
+      calls: faked.calls,
     }).toStrictEqual({
       failed: ["Grasp can’t be reached just now."],
       after: [],
@@ -289,33 +454,25 @@ describe("the person's own export", () => {
     });
   });
 
-  it("sends one start for two clicks in one tick, its button off while it runs", async () => {
-    const held = Promise.withResolvers<boolean>();
-    const route: Route = { shown: null, holdStart: held.promise, calls: [] };
-    await shown(route);
-    await act(async () => {
-      buttonOf("Export").click();
-      buttonOf("Export").click();
-      await Promise.resolve();
-    });
-    await settle();
-    const whileRunning = buttonOf("Export").disabled;
-    await act(async () => {
-      held.resolve(true);
-      await Promise.resolve();
-    });
-    await settle();
-    expect({
-      whileRunning,
-      starts: route.calls.filter((call) => call === "start").length,
-      writing: text().includes("Grasp is writing your export."),
-    }).toStrictEqual({ whileRunning: true, starts: 1, writing: true });
+  it("says core can't be reached, in our own words, when the network fails a start", async () => {
+    await shown(route(null));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<() => Promise<Response>>(async () => {
+        await Promise.resolve();
+        throw new TypeError("Failed to fetch");
+      })
+    );
+    await press("Export");
+    expect(alerts()).toContain(
+      "Grasp can't be reached right now. Try again in a moment."
+    );
   });
 
   it("drops a start's reply that lands after the person left the section", async () => {
     const held = Promise.withResolvers<boolean>();
-    const route: Route = { shown: null, holdStart: held.promise, calls: [] };
-    await shown(route);
+    const faked = route(null, { holdStart: held.promise });
+    await shown(faked);
     await act(async () => {
       buttonOf("Export").click();
       await Promise.resolve();
@@ -331,7 +488,7 @@ describe("the person's own export", () => {
       await Promise.resolve();
     });
     await settle();
-    expect({ calls: route.calls, shown: text() }).toStrictEqual({
+    expect({ calls: faked.calls, shown: text() }).toStrictEqual({
       calls: ["read", "start"],
       shown: "",
     });

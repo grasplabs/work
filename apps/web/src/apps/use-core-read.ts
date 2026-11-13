@@ -13,7 +13,7 @@ import { useCore } from "../use-core.ts";
  */
 export const useCoreRead = <T>(
   key: string,
-  read: (session: Session) => Promise<T>,
+  read: (session: Session, signal: AbortSignal) => Promise<T>,
   scope?: string
 ): Loaded<T> | undefined => {
   const core = useCore();

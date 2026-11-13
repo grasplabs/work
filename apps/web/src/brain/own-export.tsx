@@ -1,12 +1,14 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
+import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
-import { useKeyedAction } from "./own-export-action.ts";
+import type { Loaded } from "../load-from-core.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 import {
   ownExportFileHref,
   readOwnExport,
@@ -16,107 +18,214 @@ import type { OwnExport } from "./own-export-route.ts";
 
 // Brain › Sources: the person's own export of what only they may read
 // (GRA-1839). Their own store writes it on its own alarm, a part a minute
-// or so, so while it is written the page reads it again every few seconds,
-// as the erasures page follows an erasure (settings/erasures.tsx), until
-// it is done. What is shown is always the latest read: a start is followed
-// by a read, never by what the start answered. Each file is a plain link
-// the browser downloads on the person's session (core's route checks it).
+// or so. While it is written the page reads it again a few seconds after
+// each read has landed, never over one still under way, and not while the
+// page is hidden: once when it is seen again. What is shown is always the
+// latest read: a start is followed by a read (`changeThenRefresh`), its
+// button off until that read is back, and a start's failure is said only
+// while the read on screen is the one that followed it. Each file is a
+// plain link the browser downloads on the person's session (core's route
+// checks it).
 
-/** How often the page reads the export again while it is written. */
+/** How long after a read has landed the page reads again, while it is written. */
 export const followEveryMs = 5000;
 
-/** What the person can do with their export: none, or one that ended without files. */
-const StartButton = ({
-  busy,
-  again,
-  onStart,
-}: {
-  busy: boolean;
-  again: boolean;
-  onStart: () => void;
-}) => (
-  <div>
-    <Button disabled={busy} onClick={onStart} variant="outline">
-      {again ? <Trans>Export again</Trans> : <Trans>Export</Trans>}
-    </Button>
-  </div>
-);
+/** How often the page was seen again after it was hidden: each is one more read. */
+const useSeenAgain = (): number => {
+  const [seen, setSeen] = useState(0);
+  useEffect(() => {
+    const back = (): void => {
+      if (document.visibilityState === "visible") {
+        setSeen((before) => before + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+    };
+  }, []);
+  return seen;
+};
 
-/** A done export: its files, each a download, or that it holds nothing. */
+/** A done export's files, each a download. */
 const Files = ({ shown }: { shown: OwnExport }) => {
   const { t } = useLingui();
-  // The manifest alone: no part, so nothing only they may read was kept.
-  const empty = shown.files.length <= 1;
   return (
-    <>
-      <p className="text-sm">
-        {empty ? (
-          <Trans>
-            The Brain keeps nothing that only you may read yet, so your export
-            holds nothing.
-          </Trans>
-        ) : (
-          <Trans>Your export is ready. Download each of its files:</Trans>
-        )}
-      </p>
-      <ul aria-label={t`Your export's files`} className="flex flex-col gap-1">
-        {shown.files.map((file) => (
-          <li key={file}>
-            <Button
-              nativeButton={false}
-              render={
-                <a download href={ownExportFileHref(shown.id, file)}>
-                  {file}
-                </a>
-              }
-              size="inline"
-              variant="link"
-            />
-          </li>
-        ))}
-      </ul>
-    </>
+    <ul aria-label={t`Your export's files`} className="flex flex-col gap-1">
+      {shown.files.map((file) => (
+        <li key={file}>
+          <Button
+            nativeButton={false}
+            render={
+              <a download href={ownExportFileHref(shown.id, file)}>
+                {file}
+              </a>
+            }
+            size="inline"
+            variant="link"
+          />
+        </li>
+      ))}
+    </ul>
   );
+};
+
+/** What the section says of the latest read: announced as it changes. */
+const Said = ({
+  read,
+  shown,
+}: {
+  read: Loaded<OwnExport | null> | undefined;
+  shown: OwnExport | null | undefined;
+}) => {
+  if (read === undefined) {
+    return <Trans>Checking on your export…</Trans>;
+  }
+  if (shown?.state === "writing") {
+    return (
+      <span className="flex items-center gap-2">
+        <Spinner aria-hidden />
+        <Trans>
+          Grasp is writing your export. It takes a minute or two; it shows here
+          as soon as it is ready, and you can leave this page meanwhile.
+        </Trans>
+      </span>
+    );
+  }
+  if (shown?.state === "done") {
+    return shown.files.length <= 1 ? (
+      <Trans>
+        The Brain keeps nothing that only you may read yet, so your export holds
+        nothing.
+      </Trans>
+    ) : (
+      <Trans>Your export is ready. Download each of its files:</Trans>
+    );
+  }
+  if (shown?.state === "erased") {
+    return (
+      <Trans>
+        Something your export held was erased since, so the export was deleted
+        with it. Make a new one.
+      </Trans>
+    );
+  }
+  if (shown?.state === "failed") {
+    return (
+      <Trans>Your export couldn’t be finished. Try making it again.</Trans>
+    );
+  }
+  return null;
 };
 
 /** Where the person's own export is, and what they can do about it. */
 export const OwnExportSection = () => {
   const { t } = useLingui();
   const heading = useId();
+  const status = useRef<HTMLOutputElement>(null);
   const [reads, setReads] = useState(0);
+  const seenAgain = useSeenAgain();
   const read = useCoreRead(
-    `own-export/${reads}`,
-    async () => await readOwnExport(),
+    `own-export/${reads}/${seenAgain}`,
+    async (_session, signal) => await readOwnExport(signal),
     "own-export"
   );
   const shown = read?.state === "ready" ? read.data : undefined;
   const writing = shown?.state === "writing";
-  const readAgain = (): void => {
-    setReads((before) => before + 1);
-  };
-  // While it is written, read again until it isn't.
+
+  // Each read that lands (a new one: `useCoreRead` keeps the last while
+  // the next is under way) lets a start's follow-up read go on, and, while
+  // the export is written and the page seen, sets the next read a few
+  // seconds on. One read at a time: none starts over one under way. A read
+  // that failed (core out of reach, or slower than a read's deadline, as
+  // every read of the app) is followed too, while the last that landed
+  // showed the export being written.
+  const landed = useRef<(() => void) | null>(null);
+  const lastWriting = useRef(false);
   useEffect(() => {
-    const timer = writing
-      ? setInterval(() => {
-          setReads((before) => before + 1);
+    if (read !== undefined) {
+      landed.current?.();
+      landed.current = null;
+    }
+    if (read?.state === "ready") {
+      lastWriting.current = writing;
+    }
+    const following =
+      read !== undefined &&
+      (writing || (read.state !== "ready" && lastWriting.current));
+    const timer = following
+      ? setTimeout(() => {
+          if (document.visibilityState === "visible") {
+            setReads((before) => before + 1);
+          }
         }, followEveryMs)
       : undefined;
     return () => {
-      clearInterval(timer);
+      clearTimeout(timer);
     };
-  }, [writing]);
-  const { busy, failure, run } = useKeyedAction("own-export");
-  const start = (): void => {
-    void run(async () => {
-      await startOwnExport(t`Grasp couldn’t start your export just now.`);
-    }, readAgain);
+  }, [read, writing]);
+  // A follow-up read the page left before it landed holds up nothing.
+  useEffect(
+    () => () => {
+      landed.current?.();
+    },
+    []
+  );
+  const readAgain = async (): Promise<void> => {
+    const { promise, resolve } = Promise.withResolvers<true>();
+    landed.current = () => {
+      resolve(true);
+    };
+    setReads((before) => before + 1);
+    await promise;
   };
 
-  let body: ReactNode;
-  if (read === undefined) {
-    body = <Spinner aria-label={t`Reading where your export is`} />;
-  } else if (read.state !== "ready") {
-    body = (
+  const { busy, run } = useCoreAction();
+  /** Two clicks in one tick, before `busy` turns the button off: one start. */
+  const starting = useRef(false);
+  /** A start's failure, with the read on screen when it was said. */
+  const [failed, setFailed] = useState<{
+    reason: string;
+    after: Loaded<OwnExport | null> | undefined;
+  }>();
+  /** The read on screen now, for a failure said after an await. */
+  const onScreen = useRef(read);
+  useEffect(() => {
+    onScreen.current = read;
+  }, [read]);
+  const start = async (): Promise<void> => {
+    if (starting.current) {
+      return;
+    }
+    starting.current = true;
+    setFailed(undefined);
+    await run(
+      async () => {
+        await changeThenRefresh(startOwnExport, readAgain);
+      },
+      (reason) => {
+        setFailed({ reason, after: onScreen.current });
+      }
+    );
+    starting.current = false;
+    // The button the person pressed is gone or replaced: their focus goes
+    // to what the section now says, not to the top of the page.
+    const section = status.current?.closest("section");
+    if (section?.contains(document.activeElement) !== true) {
+      status.current?.focus();
+    }
+  };
+  // Said only while the read on screen is the one that followed it: a
+  // start whose answer was lost shows as being written, and any later read
+  // drops it.
+  const failure =
+    failed !== undefined && failed.after === read && !writing
+      ? failed.reason
+      : undefined;
+
+  let controls: ReactNode = null;
+  if (read !== undefined && read.state !== "ready") {
+    controls = (
       <>
         <ErrorText>
           {read.state === "refused"
@@ -124,55 +233,36 @@ export const OwnExportSection = () => {
             : t`Grasp can’t be reached just now.`}
         </ErrorText>
         <div>
-          <Button onClick={readAgain} variant="outline">
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setReads((before) => before + 1);
+            }}
+            variant="outline"
+          >
             <Trans>Try again</Trans>
           </Button>
         </div>
       </>
     );
-  } else if (shown?.state === "writing") {
-    body = (
-      <output className="flex items-center gap-2">
-        <Spinner aria-hidden />
-        <p className="text-sm">
-          <Trans>
-            Grasp is writing your export. It takes a minute or two; it shows
-            here as soon as it is ready, and you can leave this page meanwhile.
-          </Trans>
-        </p>
-      </output>
-    );
-  } else if (shown?.state === "done") {
-    body = (
+  } else if (read !== undefined && !writing) {
+    const again = shown !== null && shown !== undefined;
+    controls = (
       <>
-        <Files shown={shown} />
-        <StartButton again busy={busy} onStart={start} />
+        {shown?.state === "done" ? <Files shown={shown} /> : null}
+        <div>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void start();
+            }}
+            variant="outline"
+          >
+            {again ? <Trans>Export again</Trans> : <Trans>Export</Trans>}
+          </Button>
+        </div>
       </>
     );
-  } else if (shown?.state === "erased") {
-    body = (
-      <>
-        <p className="text-sm">
-          <Trans>
-            Something your export held was erased since, so the export was
-            deleted with it. Make a new one.
-          </Trans>
-        </p>
-        <StartButton again busy={busy} onStart={start} />
-      </>
-    );
-  } else if (shown?.state === "failed") {
-    body = (
-      <>
-        <p className="text-sm">
-          <Trans>Your export couldn’t be finished. Try making it again.</Trans>
-        </p>
-        <StartButton again busy={busy} onStart={start} />
-      </>
-    );
-  } else {
-    // None yet (or one replaced since, which a person's store never shows).
-    body = <StartButton again={false} busy={busy} onStart={start} />;
   }
 
   return (
@@ -184,12 +274,14 @@ export const OwnExportSection = () => {
         <Trans>
           A copy of everything the Brain keeps for you alone: your own sources
           and what it remembers from them. Only you can make it and download it,
-          and it is deleted when you are erased.
+          and it is deleted when your data is erased.
         </Trans>
       </p>
-      {body}
-      {/* A start that failed, unless the read since shows it started after all. */}
-      {writing ? null : <ErrorText>{failure}</ErrorText>}
+      <output className="text-sm" ref={status} tabIndex={-1}>
+        <Said read={read} shown={shown} />
+      </output>
+      {controls}
+      <ErrorText>{failure}</ErrorText>
     </section>
   );
 };
