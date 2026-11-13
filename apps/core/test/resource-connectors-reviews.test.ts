@@ -359,7 +359,6 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
             account: connection?.accountName ?? null,
             provider: "microsoft",
           },
-          collections: {},
         },
         choices: null,
       },

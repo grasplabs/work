@@ -54,7 +54,7 @@ const CompanyRow = ({
           <StandingMark standing={standing} />
         </span>
         {needs.map((need) => (
-          <span className="text-status-attention text-xs" key={need.kind}>
+          <span className="text-muted-foreground text-xs" key={need.kind}>
             {needWords(need)}
           </span>
         ))}
@@ -68,7 +68,7 @@ const CompanyRow = ({
     </TableCell>
     <TableCell className="hidden @2xl:table-cell" variant="card">
       <span className="flex flex-col">
-        <span className="font-mono text-xs">{row.release ?? "–"}</span>
+        <span className="tabular-nums">{row.release ?? "–"}</span>
         {row.pinnedReleaseId === null ? null : (
           <span className="text-muted-foreground text-xs">Pinned</span>
         )}

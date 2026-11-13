@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { questionDataOf } from "../src/chat-harness.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { personOf } from "../src/connections.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
@@ -105,9 +106,10 @@ const sessionOf = (
     },
     question: { text, model: asked, files: [] },
     shared: false,
+    personal: true,
     readsBrain: false,
     context: { skills: [] },
-    capture: { model: asked, audience: null },
+    capture: { model: asked, audience: null, attended: true },
   }),
 });
 
@@ -575,6 +577,43 @@ describe("a chat's ChatSession", () => {
     expect({ before, after }).toStrictEqual({
       before: [true, true],
       after: [[], []],
+    });
+  });
+});
+
+describe("what a question's entry keeps", () => {
+  it("shows its files and what it built though its recall's call is of a shape this code doesn't write", () => {
+    const built = { plan: "call_plan", app: { id: "app-1", name: "Depot" } };
+
+    expect({
+      unknownRecall: questionDataOf({
+        files: ["file-1", "file-2"],
+        built,
+        recall: { code: "await env.brain.recall({ query })" },
+      }),
+      unknownBuilt: questionDataOf({
+        files: ["file-1"],
+        built: { plan: 7 },
+        recall: {
+          runId: "run-1",
+          callId: "call-1",
+          query: "q",
+          status: "completed",
+        },
+      }),
+      none: questionDataOf("not an object"),
+    }).toStrictEqual({
+      unknownRecall: { files: ["file-1", "file-2"], built },
+      unknownBuilt: {
+        files: ["file-1"],
+        recall: {
+          runId: "run-1",
+          callId: "call-1",
+          query: "q",
+          status: "completed",
+        },
+      },
+      none: { files: [] },
     });
   });
 });

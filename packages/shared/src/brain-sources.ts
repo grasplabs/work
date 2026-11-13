@@ -179,10 +179,14 @@ export interface BrainSourcesApi {
   deleteUpload: (uploadId: string) => Promise<void>;
 }
 
-/** What core's Brain answers a producer whose add it refuses: final, never retried. */
+/**
+ * Why core's Brain refused a call: a producer's add it refuses (final,
+ * never retried), or an argument that isn't of the kind the call takes.
+ */
 export const brainSourceErrors = defineErrorFamily({
   "brain.source_erased":
     "What this adds was erased: it stays erased, and isn't added.",
+  "brain.request_invalid": "That isn't a valid request to the Brain.",
   "brain.source_change_taken":
     "This change was added before with other text or readers; nothing changed.",
   "brain.source_no_text": "There's no text in this to keep.",

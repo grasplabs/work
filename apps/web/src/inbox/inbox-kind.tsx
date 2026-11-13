@@ -16,6 +16,7 @@ import {
   PlayIcon,
   RocketIcon,
   ScaleIcon,
+  BookOpenIcon,
   ShieldAlertIcon,
   SparklesIcon,
   SplitIcon,
@@ -80,6 +81,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     context:
       "inbox item kind: what a workflow reaches, for an admin to approve",
   }),
+  skillShare: msg({
+    message: "Skill",
+    context: "inbox item kind: a skill someone asked to share with the company",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -103,6 +108,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   stoppedEvents: MailWarningIcon,
   appMessage: BellIcon,
   bindingApproval: LockKeyholeIcon,
+  skillShare: BookOpenIcon,
   decision: ScaleIcon,
 };
 

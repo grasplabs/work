@@ -70,6 +70,7 @@ import type { DriftCheck } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
 import { aiStatusLine, graspAiLine } from "./ai-status-words.ts";
+import { Attention } from "./parts.tsx";
 import { attentionWords } from "./platform-parts.tsx";
 import { Section } from "./section.tsx";
 import {
@@ -146,7 +147,7 @@ const TabLink = ({
       />
     }
     size="sm"
-    variant="ghost"
+    variant="outline"
   >
     {children}
   </Button>
@@ -165,7 +166,7 @@ const OutLink = ({ href, label }: { href: string; label: string }) => (
       />
     }
     size="sm"
-    variant="ghost"
+    variant="outline"
   >
     {label}
     <ExternalLinkIcon data-icon="inline-end" />
@@ -391,7 +392,7 @@ const Header = ({
           {runs === null ? null : (
             <>
               <span aria-hidden>·</span>
-              <span className="font-mono text-xs">{runs}</span>
+              <span className="tabular-nums">{runs}</span>
             </>
           )}
           {client === null ? null : (
@@ -633,34 +634,35 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
  * Settings.
  */
 const AiStatus = ({ status }: { status: Promise<AiStatusReport | null> }) => (
+  // One card with its lines under its title: a bordered row of its own for
+  // one sentence made the page a stack of boxes.
   <Section
-    description="Its admins connect a provider in their own Settings."
+    description={
+      <span className="flex flex-col gap-0.5">
+        <Await fallback={<span>AI: reading its core…</span>} promise={status}>
+          {(report) => {
+            const grasp = graspAiLine(report);
+            return (
+              <>
+                <span className="text-foreground">{aiStatusLine(report)}</span>
+                {grasp === null ? null : (
+                  <span className="text-foreground">
+                    {report?.graspAi?.reached === true ? (
+                      <Attention>{grasp}</Attention>
+                    ) : (
+                      grasp
+                    )}
+                  </span>
+                )}
+              </>
+            );
+          }}
+        </Await>
+        <span>Its admins connect a provider in their own Settings.</span>
+      </span>
+    }
     title="AI"
-  >
-    <CardContent>
-      <Await fallback={<p>AI: reading its core…</p>} promise={status}>
-        {(report) => {
-          const grasp = graspAiLine(report);
-          return (
-            <>
-              <p>{aiStatusLine(report)}</p>
-              {grasp === null ? null : (
-                <p
-                  className={
-                    report?.graspAi?.reached === true
-                      ? "text-status-attention"
-                      : undefined
-                  }
-                >
-                  {grasp}
-                </p>
-              )}
-            </>
-          );
-        }}
-      </Await>
-    </CardContent>
-  </Section>
+  />
 );
 
 /** Whether it runs the shared secrets in Secrets Store now, in words. */
@@ -738,19 +740,17 @@ const WhatRuns = ({ clientId }: { clientId: string }) => {
                 {drift.workers.map((worker) => (
                   <TableRow key={worker.worker}>
                     <TableCell variant="card">
-                      <span className="font-mono text-xs">
-                        {worker.scriptName}
-                      </span>
+                      <span className="tabular-nums">{worker.scriptName}</span>
                     </TableCell>
                     <TableCell variant="card">
-                      <span className="font-mono text-xs">
+                      <span className="tabular-nums">
                         {worker.recorded === null
                           ? "–"
                           : shortVersion(worker.recorded)}
                       </span>
                     </TableCell>
                     <TableCell className="whitespace-normal" variant="card">
-                      <span className="font-mono text-xs">
+                      <span className="tabular-nums">
                         {worker.live === null
                           ? "not known"
                           : worker.live
@@ -825,18 +825,18 @@ const Workers = ({
                 <TableCell variant="card">
                   <span className="flex flex-col">
                     <span className="capitalize">{worker.worker}</span>
-                    <span className="text-muted-foreground font-mono text-xs">
+                    <span className="text-muted-foreground text-xs">
                       {worker.scriptName}
                     </span>
                   </span>
                 </TableCell>
                 <TableCell className="hidden @lg:table-cell" variant="card">
-                  <span className="font-mono text-xs">
+                  <span className="tabular-nums">
                     {worker.releaseId ?? "–"}
                   </span>
                 </TableCell>
                 <TableCell className="hidden @2xl:table-cell" variant="card">
-                  <span className="font-mono text-xs">
+                  <span className="tabular-nums">
                     {worker.versionId === null
                       ? "–"
                       : shortVersion(worker.versionId)}
@@ -858,7 +858,7 @@ const Workers = ({
       {kept.length === 0 ? null : (
         <Collapsible>
           <div className="border-t px-5 py-3">
-            <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
+            <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
               What it keeps
               <ChevronDownIcon data-icon="inline-end" />
             </CollapsibleTrigger>
@@ -872,9 +872,7 @@ const Workers = ({
                   key={`${kind}-${name}`}
                 >
                   <span>{kind}</span>
-                  <span className="text-muted-foreground font-mono text-xs">
-                    {name}
-                  </span>
+                  <span className="text-muted-foreground text-xs">{name}</span>
                 </li>
               ))}
             </ul>
@@ -1095,7 +1093,7 @@ const HistoryRow = ({ entry }: { entry: HistoryEntry }) => {
         {said ? (
           <span>{words}</span>
         ) : (
-          <span className="font-mono text-xs break-all">
+          <span className="break-all">
             {entry.target === null
               ? entry.action
               : `${entry.action} ${entry.target}`}
@@ -1182,7 +1180,7 @@ const Releases = ({
                 runs === null ? (
                   "–"
                 ) : (
-                  <span className="font-mono text-xs">{runs}</span>
+                  <span className="tabular-nums">{runs}</span>
                 ),
             },
             {
@@ -1191,7 +1189,7 @@ const Releases = ({
                 target === null ? (
                   "No release on its channel yet"
                 ) : (
-                  <span className="font-mono text-xs">{target}</span>
+                  <span className="tabular-nums">{target}</span>
                 ),
               attention: target === null,
             },
@@ -1227,7 +1225,7 @@ const Releases = ({
             nativeButton={false}
             render={<Link to="/platform/releases" />}
             size="sm"
-            variant="ghost"
+            variant="outline"
           >
             All releases
           </Button>
@@ -1250,7 +1248,7 @@ const Releases = ({
               >
                 <span className="flex flex-wrap items-center gap-2">
                   <Link
-                    className="hover:text-foreground font-mono text-xs underline underline-offset-4"
+                    className="hover:text-foreground underline underline-offset-4"
                     params={{ releaseId: release.id }}
                     to="/platform/releases/$releaseId"
                   >

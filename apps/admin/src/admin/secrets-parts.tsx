@@ -5,7 +5,6 @@
  * deploys it, as it deploys a release.
  */
 import { Button } from "@grasp-os/ui/components/button";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useState } from "react";
 
 import { checkRevocationFn } from "../rollout/functions.ts";
@@ -13,6 +12,7 @@ import type {
   RevocationCheck,
   RevocationRefusal,
 } from "../rollout/shared-secrets.ts";
+import { Attention } from "./parts.tsx";
 import { Section } from "./section.tsx";
 
 /** What a revocation check says, secret by secret, in words. */
@@ -99,14 +99,13 @@ export const SharedSecrets = () => {
     >
       {verdict === null ? null : (
         <div
-          className={cn(
-            "flex flex-col gap-1 border-t px-5 py-3",
-            !verdict.safe && "text-status-attention"
-          )}
+          className="flex flex-col gap-1 border-t px-5 py-3"
           role={verdict.safe ? undefined : "alert"}
         >
           {verdict.lines.map((line) => (
-            <p key={line}>{line}</p>
+            <p key={line}>
+              {verdict.safe ? line : <Attention>{line}</Attention>}
+            </p>
           ))}
         </div>
       )}

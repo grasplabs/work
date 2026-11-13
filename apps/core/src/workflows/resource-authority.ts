@@ -141,7 +141,9 @@ export interface CandidateBinding {
 }
 
 /** Who a run's calls act as: the workflow, for its principal, as a run. */
-export const runAuthority = (run: CallingRun): Authority => ({
+export const runAuthority = (
+  run: Pick<CallingRun, "workflowId" | "principal">
+): Authority => ({
   subject: {
     type: "workflow",
     workflowId: workflowResourceIdSchema.parse(run.workflowId),
@@ -155,7 +157,7 @@ export const runAuthority = (run: CallingRun): Authority => ({
  * files, with the files use they come from (`filesFrom`, GRA-887).
  */
 export const runContext = (
-  run: CallingRun,
+  run: Pick<CallingRun, "workflowId" | "runId">,
   filesFrom?: string
 ): WorkContext => ({
   type: "workflowRun",

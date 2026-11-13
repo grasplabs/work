@@ -73,6 +73,7 @@ const agent = (id: string, name: string): ChatAgent => ({
   face: "",
   job: "",
   model: null,
+  own: false,
 });
 
 /**

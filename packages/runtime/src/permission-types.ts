@@ -56,26 +56,12 @@ export interface ConnectionConfig<
   readonly actions: Actions;
 }
 
-/**
- * The Brain's operations an action may ask for. `recall`, `skillsSelect`
- * and `skillsRead` answer only once an admin also grants the App the
- * Brain's permission (`brain.ts`).
- */
-export type BrainOperation =
-  | "search"
-  | "read"
-  | "recall"
-  | "skillsSelect"
-  | "skillsRead";
+/** What an action may ask the Brain: `recall` (`brain-recall.ts`). */
+export type BrainOperation = "recall";
 
 /** What a `brain` permission may say. */
 export interface BrainConfig<Operations extends readonly BrainOperation[]> {
   readonly operations: Operations;
-  /**
-   * The collections the App needs, by the names its builders gave them:
-   * requirements the host resolves, never a way to list others.
-   */
-  readonly collections: readonly string[];
 }
 
 /** What a `guests` permission may do with the App's guest chats. */
@@ -109,12 +95,16 @@ export interface ConnectionPermission<
   readonly actions: Actions;
 }
 
-/** A `brain` permission: some operations on some collections. */
+/**
+ * A `brain` permission: recall from the Brain of only what everyone in
+ * the company may read, whoever a call acts for: never a team's content,
+ * nor anyone's own. An admin binds it to the App's own permission to read
+ * the Brain.
+ */
 export interface BrainPermission<
   Operations extends readonly BrainOperation[] = readonly BrainOperation[],
 > extends DeclarationBase<"brain", "brain"> {
   readonly operations: Operations;
-  readonly collections: readonly string[];
 }
 
 /** A `guests` permission. */

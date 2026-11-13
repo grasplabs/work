@@ -546,7 +546,7 @@ export const noteLinksOf = (
  * plan (`proposePlan`) only there too: one a chat app's
  * model calls anyway was never offered, so it shows as the failed call it
  * is, never as questions. The person's Build it shows what it built
- * (`built`).
+ * (`built`). An answer names the agent that gave it (`agentId`).
  */
 export const chatMessageOf = (
   id: number,
@@ -555,7 +555,8 @@ export const chatMessageOf = (
   given: (documentId: string) => boolean = givenNothing,
   thinkingMs: number | null = null,
   asking = false,
-  built?: ShownBuilt
+  built?: ShownBuilt,
+  agentId?: string
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -576,6 +577,7 @@ export const chatMessageOf = (
     return {
       id,
       role: "assistant",
+      ...(agentId === undefined ? {} : { agentId }),
       text,
       citations,
       code: codeOf(message),

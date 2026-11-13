@@ -424,9 +424,31 @@ const ownCapture = (
 };
 
 /**
+ * The new Brain's hand-over notes of the trial's own turns
+ * (src/brain-hand-overs.ts), as a condition on core's table that leaves
+ * them out: each question a person asks in their own chat is noted, by
+ * ids alone (`chat:<person>/<chat>/<answer>`), to be kept in their own
+ * store (GRA-1805). Host-written like the capture above, and like it
+ * nothing a reader or a model receives, so not a change a task made.
+ * Left out as narrowly, by the chats the trial asks in: a note for any
+ * other chat, or of any other producer (a run, an upload), still counts.
+ */
+const ownHandOvers = (
+  asked: readonly OwnTrial[]
+): Record<string, { where: string; bindings: string[] }> => ({
+  brain_hand_overs: {
+    where: `NOT (producer = 'chat' AND (${asked
+      .map(() => "source_id LIKE ?")
+      .join(" OR ")}))`,
+    // A chat's id is a UUID: no `%` or `_` in it to match more.
+    bindings: asked.map(({ chatId }) => `%/${chatId}/%`),
+  },
+});
+
+/**
  * Each table's digest, in core's and Knowledge's databases, but the
- * bookkeeping ones and, for a trial, its own turns' capture (`ownCapture`):
- * what stored state holds.
+ * bookkeeping ones and, for a trial, its own turns' capture (`ownCapture`)
+ * and hand-over notes (`ownHandOvers`): what stored state holds.
  */
 const stateOf = async (
   knowledge: KnowledgeStateCheck,
@@ -446,8 +468,8 @@ const stateOf = async (
       return [];
     }
     const counts = name === "knowledge" && knowledge === "counts";
-    const leftOut =
-      name === "knowledge" && asked.length > 0 ? ownCapture(asked) : {};
+    const ownRows = name === "knowledge" ? ownCapture : ownHandOvers;
+    const leftOut = asked.length === 0 ? {} : ownRows(asked);
     const results = await db.batch(
       tables.map((table) => {
         const what = counts ? "count(*) AS count" : "*";

@@ -66,13 +66,7 @@ export const isBrowserPermission = (
   typeof value === "object" && value !== null && browserDeclarations.has(value);
 
 /** Every Brain operation, as a declaration names it. */
-export const brainOperations: readonly BrainOperation[] = [
-  "search",
-  "read",
-  "recall",
-  "skillsSelect",
-  "skillsRead",
-];
+export const brainOperations: readonly BrainOperation[] = ["recall"];
 
 /** The operations a guests permission may declare. */
 export const guestsOperations: readonly GuestsOperation[] = [

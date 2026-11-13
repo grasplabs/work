@@ -15,6 +15,8 @@ import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
+import { readableVersionsAs } from "./brain-next.ts";
+import type { SourceVersionRef } from "./brain-next.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
 import { collectionsAllowed } from "./knowledge/access.ts";
@@ -81,6 +83,119 @@ const brainDocumentOf = (source: string): PinnedVersion | undefined => {
   }
   const [collectionId, documentId, version, text] = pin.data;
   return { collectionId, documentId, version, text };
+};
+
+// What a chat's recall before a question read of the new Brain
+// (turn-recall.ts) is pinned too: each version it handed over, by its
+// source as its producer names it and its number. A version never changes
+// and an erased source's key is never added again, so a pin means the same
+// text for as long as it is kept; it is withheld once the person may no
+// longer read that version (`readableVersionsAs`), and with the agent's
+// `brain` grant (`brainGrantRead`).
+
+const brainVersionPrefix = "brain-version:";
+
+/** The source a version the new Brain handed a run is recorded as. */
+export const brainVersionRead = ({
+  source,
+  version,
+}: SourceVersionRef): string =>
+  `${brainVersionPrefix}${JSON.stringify([source.producer, source.id, version])}`;
+
+const brainVersionSchema = z.tuple([
+  z.string().min(1),
+  z.string().min(1),
+  z.int().min(1),
+]);
+
+/** The version a `brainVersionRead` source names, if it is one. */
+const brainVersionOf = (source: string): SourceVersionRef | undefined => {
+  if (!source.startsWith(brainVersionPrefix)) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source.slice(brainVersionPrefix.length));
+  } catch {
+    return undefined;
+  }
+  const pin = brainVersionSchema.safeParse(parsed);
+  if (!pin.success) {
+    return undefined;
+  }
+  const [producer, id, version] = pin.data;
+  // SAFETY: checked again, strictly, by `readableVersionsAs`, which
+  // refuses a producer it doesn't know: the check then withholds all.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return { source: { producer, id } as SourceVersionRef["source"], version };
+};
+
+/**
+ * Of the new Brain's versions in `sources`, those the person may still
+ * read, in one read of the Brain per 500 (`readableVersionsAs`).
+ */
+const readableBrainVersions = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  const pins = sources.flatMap((source) => {
+    const pin = brainVersionOf(source);
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  if (pins.length === 0) {
+    return [];
+  }
+  const versions = await readableVersionsAs(
+    env,
+    scope.personId,
+    pins.map(({ pin }) => pin)
+  );
+  const readable = new Set(versions.map((ref) => brainVersionRead(ref)));
+  return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
+};
+
+// What a chat's code recalled (`env.brain.recall`, agent-brain.ts) is
+// pinned the same way under a prefix of its own: code reads as the
+// person's teams and the company, never what only they may read
+// (brain-recall.ts), so it is checked as they read it, and withheld once
+// those may no longer read it, even if the person alone still may.
+
+const brainTeamVersionPrefix = "brain-team-version:";
+
+/** The source a version code's recall handed a run is recorded as. */
+export const brainTeamVersionRead = (ref: SourceVersionRef): string =>
+  `${brainTeamVersionPrefix}${brainVersionRead(ref).slice(brainVersionPrefix.length)}`;
+
+/**
+ * Of the versions code's recall handed over in `sources`, those the
+ * person's teams and the company may still read (`readableVersionsAs`,
+ * as `teams`), in one read of the Brain per 500.
+ */
+const readableBrainTeamVersions = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  const pins = sources.flatMap((source) => {
+    const pin = source.startsWith(brainTeamVersionPrefix)
+      ? brainVersionOf(
+          `${brainVersionPrefix}${source.slice(brainTeamVersionPrefix.length)}`
+        )
+      : undefined;
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  if (pins.length === 0) {
+    return [];
+  }
+  const versions = await readableVersionsAs(
+    env,
+    scope.personId,
+    pins.map(({ pin }) => pin),
+    { reach: "teams" }
+  );
+  const readable = new Set(versions.map((ref) => brainTeamVersionRead(ref)));
+  return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));
 };
 
 /** Whether `error` refuses the Brain's read, rather than failing it. */
@@ -330,7 +445,9 @@ const readableApps = async (
  * disconnected that the person may use themselves; an App read the
  * agent's grants and the person's role in the App allow now; a Brain
  * read, while the Brain's recall admits the agent and each document it
- * was handed is still in its collection for it to read, unpurged. Anything
+ * was handed is still in its collection for it to read, unpurged; a
+ * version of the new Brain, while the person may read it (their teams and
+ * the company, for what code's recall handed over). Anything
  * else, an unknown source or a bare connection included, is not. Throws
  * what the reads throw (a person who left, a database away): the caller
  * withholds everything then.
@@ -356,15 +473,20 @@ export const readableSources = async (
     })
     .from(collections)
     .where(inList(collections.id, sourceIds));
-  const [apps, connections, brain] = await Promise.all([
+  // `readableBrain` reads today's Brain, and goes with it (GRA-1735).
+  const [apps, connections, brain, versions, teamVersions] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
     readableBrain(env, scope, sourceIds),
+    readableBrainVersions(env, scope, sourceIds),
+    readableBrainTeamVersions(env, scope, sourceIds),
   ]);
   return new Set([
     ...known.flatMap(({ id, readable }) => (readable === 1 ? [id] : [])),
     ...apps,
     ...connections,
     ...brain,
+    ...versions,
+    ...teamVersions,
   ]);
 };

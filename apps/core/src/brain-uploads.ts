@@ -312,6 +312,12 @@ const refusals: Readonly<
         ? brainUploadErrors.create("brain.upload_retry_refused")
         : brainUploadErrors.create("brain.upload_deleted"),
   },
+  // An argument core's own check refused, before the Brain was asked.
+  "brain.request_invalid": {
+    reason: "invalid",
+    frees: false,
+    error: () => uploadErrors.create("upload.invalid"),
+  },
   "brain.source_no_text": {
     reason: "invalid",
     frees: false,

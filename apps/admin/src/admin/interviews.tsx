@@ -70,32 +70,38 @@ const funnelWords: Record<FunnelStep, string> = {
 
 /** How far everyone has come, as five bars: each as long as its share of everyone who is asked. */
 const FunnelBars = ({ funnel }: { funnel: Funnel }) => (
-  <ul
-    aria-label="How far everyone has come"
-    className="bg-card flex flex-col justify-center gap-2.5 px-5 py-5"
-  >
-    {funnelSteps.map((step) => (
-      <li
-        className="grid grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-center gap-3"
-        key={step}
-      >
-        <span
-          className={cn(
-            "truncate",
-            step === "talked" ? undefined : "text-muted-foreground"
-          )}
+  // Under a title of its own and from the top of its cell, as the days
+  // beside it are: centred, five bars floated in the middle of a cell as
+  // tall as that list.
+  <div className="bg-card flex flex-col gap-3 px-5 py-4">
+    <span className="font-medium">How far everyone has come</span>
+    <ul
+      aria-label="How far everyone has come"
+      className="flex flex-col gap-2.5"
+    >
+      {funnelSteps.map((step) => (
+        <li
+          className="grid grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-center gap-3"
+          key={step}
         >
-          {funnelWords[step]}
-        </span>
-        <Progress
-          aria-label={funnelWords[step]}
-          max={Math.max(funnel.asked, 1)}
-          value={funnel[step]}
-        />
-        <span className="text-right tabular-nums">{funnel[step]}</span>
-      </li>
-    ))}
-  </ul>
+          <span
+            className={cn(
+              "truncate",
+              step === "talked" ? undefined : "text-muted-foreground"
+            )}
+          >
+            {funnelWords[step]}
+          </span>
+          <Progress
+            aria-label={funnelWords[step]}
+            max={Math.max(funnel.asked, 1)}
+            value={funnel[step]}
+          />
+          <span className="text-right tabular-nums">{funnel[step]}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
 );
 
 /**
@@ -105,7 +111,7 @@ const FunnelBars = ({ funnel }: { funnel: Funnel }) => (
 const TalkedDays = ({ view, asked }: { view: OrgView; asked: number }) => {
   if (!view.told) {
     return (
-      <div className="bg-card flex flex-col justify-center gap-1 px-5 py-5">
+      <div className="bg-card flex flex-col gap-1 px-5 py-4">
         <span className="font-medium">Talked, day by day</span>
         <span className="text-muted-foreground">
           Starts the day the company tells its team.
@@ -244,7 +250,7 @@ const PersonActions = ({
           clientId={clientId}
           command={{ type: "onboarding.remind", payload: { people: [id] } }}
           label={`Mark ${name} reminded`}
-          variant="ghost"
+          variant="outline"
         >
           Mark reminded
         </CommandButton>

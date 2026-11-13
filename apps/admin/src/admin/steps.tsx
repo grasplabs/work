@@ -38,6 +38,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowRightIcon,
+  ArrowUpRightIcon,
   BriefcaseIcon,
   Building2Icon,
   CheckIcon,
@@ -57,7 +58,7 @@ import { GateControls } from "./commands.tsx";
 import type { GateState } from "./commands.tsx";
 import { opensElsewhere, stageShown, stagesIn } from "./flow-stages.ts";
 import { Kickoff, visionWords } from "./kickoff.tsx";
-import { Done, KnowledgeDots } from "./parts.tsx";
+import { Attention, Done, KnowledgeDots } from "./parts.tsx";
 import { Section, SectionRow } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, stageWords } from "./words.ts";
@@ -138,16 +139,17 @@ const StageName = ({
 }) => (
   <>
     <StageMark status={status} />
-    <span className="flex min-w-0 items-center gap-1.5 font-medium">
+    <span className="min-w-0 flex-1 font-medium lg:flex-none">
       {stageWords[stage]}
       <span className="sr-only">: {statusWords[status]}</span>
-      {leaves ? (
-        <ArrowRightIcon
-          aria-hidden
-          className="text-muted-foreground size-3.5 flex-none"
-        />
-      ) : null}
     </span>
+    {/* In the same corner of every step that leads elsewhere, so the names line up whether or not one does. */}
+    {leaves ? (
+      <ArrowUpRightIcon
+        aria-hidden
+        className="text-muted-foreground size-3.5 flex-none lg:absolute lg:top-4 lg:right-4"
+      />
+    ) : null}
   </>
 );
 
@@ -391,11 +393,11 @@ const Research = ({ view }: { view: OrgView }) => {
               </span>
               {done && finding !== undefined ? <Done>Looked up</Done> : notYet}
               {done && disagrees ? (
-                <span className="text-status-attention">
+                <Attention>
                   {state.passed.includes(source)
                     ? "It disagrees with the company’s own account: passed on to its admin."
                     : "It disagrees with the company’s own account. Its admin says which is right."}
-                </span>
+                </Attention>
               ) : null}
             </li>
           );
@@ -529,18 +531,18 @@ const goLine = (view: OrgView): ReactNode => {
   }
   if (knowledge.ready) {
     return (
-      <span className="text-status-attention">
+      <Attention>
         Enough is known: it is past {threshold}%. {org.name} comes in the moment
         Grasp gives its go.
-      </span>
+      </Attention>
     );
   }
   if (view.closed) {
     return (
-      <span className="text-status-attention">
+      <Attention>
         The interviews are over and it stayed below {threshold}%. Grasp can open
         it anyway, with what is not known shown as still open.
-      </span>
+      </Attention>
     );
   }
   return (
@@ -590,9 +592,7 @@ const Opens = ({
           <GateControls clientId={clientId} gate={gate} paused={paused} />
         </div>
         <div aria-live="polite">{goLine(view)}</div>
-        {paused ? (
-          <span className="text-status-attention">{pausedLine}</span>
-        ) : null}
+        {paused ? <Attention>{pausedLine}</Attention> : null}
       </div>
 
       {knowledge.sources.length > 0 ? (
@@ -624,7 +624,7 @@ const Opens = ({
             nativeButton={false}
             render={<Link params={{ clientId }} to={sectionTo.workflows} />}
             size="sm"
-            variant="ghost"
+            variant="outline"
           >
             All workflows
             <ArrowRightIcon data-icon="inline-end" />
