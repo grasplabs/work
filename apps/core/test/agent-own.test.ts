@@ -2,7 +2,7 @@ import { ownAgentsMax } from "@grasp-os/shared/agents";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { dropOwnAgentsOf } from "../src/agent-builder.ts";
+import { dropOwnAgentsOf, makeOwnAgent } from "../src/agent-builder.ts";
 import { agentFor } from "../src/agent-reach.ts";
 import { saveInstructionFile } from "../src/instruction-files.ts";
 import { model, says } from "./agent-chat.ts";
@@ -251,6 +251,34 @@ describe("a person's own agents", slow, () => {
       made: ownAgentsMax - 1,
       refused: ["agent.too_many_own"],
       kept: ownAgentsMax,
+    });
+  });
+
+  it("are never made for someone who is no longer one of the company, though their call was under way", async () => {
+    const ann = await signedInApi(idp, "user");
+    // As a call that passed its session check before she was removed.
+    const identity = {
+      userId: ann.userId,
+      email: "ann@acme.test",
+      name: "Ann",
+      role: "user" as const,
+      teams: [],
+      staff: false,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(ann.userId)
+      .run();
+
+    const made = await outcome(makeOwnAgent(env, identity, said("Scribe")));
+    const rows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM agents WHERE owner_id = ?"
+    )
+      .bind(ann.userId)
+      .first<{ n: number }>();
+    expect({ made, rows }).toStrictEqual({
+      made: "role.forbidden",
+      rows: { n: 0 },
     });
   });
 

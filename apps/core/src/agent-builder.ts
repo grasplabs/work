@@ -22,6 +22,7 @@ import {
   readAgent,
 } from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { activeMember } from "./auth/membership-sql.ts";
 import {
   agentDocuments,
   agentPlaces,
@@ -311,8 +312,9 @@ const requireOwnNameFree = async (
  * for that person, so it does at most what the company's first agent may
  * do for them. Anyone of the company makes one, never Grasp's staff.
  * Throws `agent.record_invalid`, `agent.name_taken` for a name another of
- * their own has, `agent.model_unknown`, and `agent.too_many_own` past
- * {@link ownAgentsMax}, which the insert itself holds.
+ * their own has, `agent.model_unknown`, `agent.too_many_own` past
+ * {@link ownAgentsMax}, and `role.forbidden` for someone no longer one of
+ * the company; the insert itself holds the last two.
  */
 export const makeOwnAgent = async (
   env: Env,
@@ -336,12 +338,16 @@ export const makeOwnAgent = async (
   const now = new Date();
   const db = drizzle(env.DB);
   const room = sql`(SELECT count(*) FROM ${agents} WHERE ${agents.ownerId} = ${ownerId} AND ${agents.state} IS NOT 'deleted') < ${ownAgentsMax}`;
+  // Still one of the company as the row lands: a person is removed before
+  // they are erased, so a making that was under way when they were is
+  // never kept past the erasure that dropped their agents.
+  const member = activeMember(ownerId);
   await auditedBatch(env, db, [
     db.insert(agents).select(
       sql`SELECT ${id}, ${made.name}, NULL, ${made.face}, ${made.job},
           ${made.instructions}, ${made.modelRole}, ${made.model}, 'on',
           ${ownerId}, ${ownerId}, ${now.getTime()}, ${ownerId},
-          ${now.getTime()} WHERE ${room}`
+          ${now.getTime()} WHERE ${room} AND ${member}`
     ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
@@ -352,8 +358,12 @@ export const makeOwnAgent = async (
   ]);
   const kept = await readAgent(env, id);
   if (kept === undefined) {
-    // The insert's condition failed: full since the check.
-    throw agentErrors.create("agent.too_many_own");
+    // The insert's condition failed: full since the check, or its owner
+    // is no longer one of the company.
+    const still = await listOwnAgents(env, ownerId);
+    throw still.length >= ownAgentsMax
+      ? agentErrors.create("agent.too_many_own")
+      : roleErrors.create("role.forbidden");
   }
   return kept;
 };
