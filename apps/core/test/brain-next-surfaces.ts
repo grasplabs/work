@@ -37,6 +37,7 @@ import {
   modelNameMaxLength,
   personalBrainOf,
   questionMaxLength,
+  readableCheckMax,
   readerGroupsMax,
   recallBudgetMax,
   sourceTextMaxBytes,
@@ -1190,6 +1191,76 @@ export const coreProbes = {
     );
     return asked;
   },
+  readableVersionsAs: async ({ personId, hiddenVersions, markers }) => {
+    const check = async (
+      name: string,
+      versions: readonly { source: SourceRef; version: number }[],
+      as = personId,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.readableVersionsAs(env, as, versions),
+        about
+      );
+    const hidden = hiddenVersions[0]?.source ?? missingSource();
+    return [
+      await check(
+        "sources no one added",
+        hiddenVersions.map(({ version }) => ({
+          source: missingSource(),
+          version,
+        })),
+        personId,
+        "nothing"
+      ),
+      await check("the hidden versions", hiddenVersions, personId, "hidden"),
+      await check(
+        "as someone who isn't a member",
+        [{ source: hidden, version: 1 }],
+        stranger()
+      ),
+      await check("version 0", [{ source: hidden, version: 0 }]),
+      await check("an unknown producer named by the markers", [
+        unchecked({
+          source: { producer: markers.join(""), id: hidden.id },
+          version: 1,
+        }),
+      ]),
+      await check("an id of the markers and control characters", [
+        {
+          source: { producer: "upload", id: `${markers.join("\n")}\u0000` },
+          version: 1,
+        },
+      ]),
+    ];
+  },
+  mergeRecalled: async ({ personId, personal, markers, sharedWord }) => {
+    const whole = { tokens: recallBudgetMax };
+    // The markers' pack joined by a pack of what the reader may read must
+    // be their twins' pack joined by the same.
+    const merged = async (words: readonly string[]) => {
+      const asked = await coreBrain.recallAs(env, personId, {
+        question: words.join(" "),
+        budget: whole,
+        personal,
+      });
+      const shared = await coreBrain.recallAs(env, personId, {
+        question: sharedWord,
+        budget: whole,
+        personal,
+      });
+      return coreBrain.mergeRecalled(asked, shared, whole);
+    };
+    return [
+      await answer("the markers", async () => await merged(markers), "hidden"),
+      await answer(
+        "their twins",
+        async () => await merged(markers.map((marker) => twinOf(marker))),
+        "nothing"
+      ),
+    ];
+  },
   recallAs: async (probing) => {
     const recall = async (asking: PackAsk) =>
       await coreBrain.recallAs(env, probing.personId, {
@@ -1782,6 +1853,13 @@ export const coreProbes = {
       ),
     ];
   },
+  // A number, the longest question recall takes: the same for everyone.
+  recallQuestionMaxLength: async () => [
+    await answer(
+      "the longest question",
+      async () => await Promise.resolve(coreBrain.recallQuestionMaxLength)
+    ),
+  ],
   // The host of a store's own alarm: refused for any name but a person's
   // own store's; for the reader's own, its report kept and summed into
   // staff's totals, which hold numbers alone.
@@ -3506,6 +3584,62 @@ export const storeProbes = {
       )
     );
     return asked;
+  },
+  readableVersions: async ({ reader, hiddenVersions, markers }) => {
+    const check = async (
+      name: string,
+      versions: readonly { source: string; version: number }[],
+      as: Reader = reader,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().readableVersions({
+            versions: [...versions],
+            reader: as,
+          }),
+        about
+      );
+    const hidden = keyOf(hiddenVersions[0]?.source ?? missingSource());
+    return [
+      await check(
+        "sources no one added",
+        hiddenVersions.map(({ version }) => ({
+          source: keyOf(missingSource()),
+          version,
+        })),
+        reader,
+        "nothing"
+      ),
+      await check(
+        "the hidden versions",
+        hiddenVersions.map(({ source, version }) => ({
+          source: keyOf(source),
+          version,
+        })),
+        reader,
+        "hidden"
+      ),
+      await check("version 0", [{ source: hidden, version: 0 }]),
+      await check(
+        "too many versions",
+        Array.from({ length: readableCheckMax + 1 }, () => ({
+          source: hidden,
+          version: 1,
+        }))
+      ),
+      await check("a source named by the markers, too long", [
+        { source: hidden.repeat(300), version: 1 },
+      ]),
+      await answer(
+        "a request with an unknown field",
+        async () =>
+          await store().readableVersions(
+            unchecked({ versions: [], reader, extra: markers.join(" ") })
+          )
+      ),
+    ];
   },
   // What recall finds before it is packed: the same questions, answered
   // as lists with their order keys, must hold no marker either.

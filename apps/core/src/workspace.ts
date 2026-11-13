@@ -765,6 +765,25 @@ const outputOf = (
 ): ChatOutput | null =>
   output === undefined ? null : { callId: output.callId, text: output.text };
 
+/**
+ * Whether a turn of `chat` answers its person alone, so its recall may
+ * hold what only they may read (their own store): only in their own chat
+ * in Grasp, in a turn they started. A chat app's message (Teams, Slack) is
+ * kept by that app too, where its admins and exports reach it; a thread
+ * others share is read by all of them.
+ *
+ * A turn a schedule or an event woke (`unattended`) wasn't theirs to
+ * start, and acts on what woke it: an event's words, from anyone, steer
+ * it, and what it hands on goes where they lead, held changes included.
+ * So it recalls nothing of their own store, though its chat may already
+ * hold their own text an earlier turn of theirs recalled: that text is
+ * there because they asked for it; a woken turn adds none they didn't.
+ */
+const answersAlone = (
+  { via, thread }: Pick<Chat, "via" | "thread">,
+  unattended: boolean
+): boolean => via === "web" && thread === null && !unattended;
+
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -1684,7 +1703,7 @@ export class Workspace extends DurableObject<Env> {
     const calls: ToolCall[] = [];
     return {
       chatId: chat.id,
-      answer: await this.#turn(chat, { text, model }, undefined, onText, calls),
+      answer: await this.#turn(chat, { text, model }, false, { onText, calls }),
       calls,
     };
   }
@@ -1698,7 +1717,7 @@ export class Workspace extends DurableObject<Env> {
    * through `send`, which checks the chat is theirs.
    */
   async ask(chatId: unknown, question: Question): Promise<Answer> {
-    return await this.#turn(this.#chat(chatId), question);
+    return await this.#turn(this.#chat(chatId), question, false);
   }
 
   /**
@@ -1712,14 +1731,7 @@ export class Workspace extends DurableObject<Env> {
    * reaches it.
    */
   async askUnattended(chatId: unknown, question: Question): Promise<Answer> {
-    return await this.#turn(
-      this.#chat(chatId),
-      question,
-      undefined,
-      undefined,
-      undefined,
-      true
-    );
+    return await this.#turn(this.#chat(chatId), question, true);
   }
 
   /**
@@ -1739,17 +1751,25 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * One turn of `chat`'s agent (`ask`). `started` is called once the turn
+   * One turn of `chat`'s agent (`ask`), `unattended` when nobody asked for
+   * it there and then: every entry point says which, as what the turn may
+   * read depends on it (`answersAlone`). `started` is called once the turn
    * is under way: the model admitted, and nothing kept yet. `calls` gets
    * each call its code makes, as it ends.
    */
   async #turn(
     chat: Chat,
     question: Question,
-    started?: () => void,
-    onText?: (text: string) => unknown,
-    calls?: ToolCall[],
-    unattended?: boolean
+    unattended: boolean,
+    {
+      started,
+      onText,
+      calls,
+    }: {
+      started?: () => void;
+      onText?: (text: string) => unknown;
+      calls?: ToolCall[];
+    } = {}
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
@@ -1854,6 +1874,7 @@ export class Workspace extends DurableObject<Env> {
           makeOf(chat)
         ),
         shared,
+        personal: answersAlone(chat, unattended),
         readsBrain: await hasBrainGrant(this.env, authority),
         context,
         capture: {
@@ -1973,7 +1994,7 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const started = Promise.withResolvers<boolean>();
-    const ended = this.#sentTurn(chat, question, started);
+    const ended = this.#sentTurn(chat, question, started, false);
     this.#sent.add(ended);
     void this.#forget(ended);
     await started.promise;
@@ -2005,21 +2026,16 @@ export class Workspace extends DurableObject<Env> {
     chat: Chat,
     question: Question,
     started: PromiseWithResolvers<boolean>,
-    unattended?: boolean
+    unattended: boolean
   ): Promise<void> {
     let underWay = false;
     try {
-      await this.#turn(
-        chat,
-        question,
-        () => {
+      await this.#turn(chat, question, unattended, {
+        started: () => {
           underWay = true;
           started.resolve(true);
         },
-        undefined,
-        undefined,
-        unattended
-      );
+      });
     } catch (error) {
       if (!underWay) {
         started.reject(error);
