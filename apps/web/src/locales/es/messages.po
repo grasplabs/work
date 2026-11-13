@@ -12085,6 +12085,10 @@ msgstr "Se busca arriba. Pasado ese tiempo, los eventos pasan al archivo."
 msgid "Searched knowledge"
 msgstr "Buscó en el conocimiento"
 
+#: src/brain/sources-page.tsx
+msgid "Searched live, nothing kept."
+msgstr "Se busca en directo, no se guarda nada."
+
 #: src/chat/thread.tsx
 msgid "Searched the App's files for {text}"
 msgstr "Se buscó {text} en los archivos de la App"
@@ -13756,6 +13760,14 @@ msgstr "El Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "El Brain aún no tiene equipos que agrupar."
+
+#: src/brain/sources-page.tsx
+msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "El cerebro guarda un mensaje o un adjunto de Gmail, o una página de OneNote, cuando un agente lo lee para ti a través de una cuenta que conectaste tú mismo, y lo guarda solo para ti. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el cerebro no guarda nada de ello."
+
+#: src/brain/sources-page.tsx
+msgid "The Brain keeps the messages and pages an agent reads for you from this."
+msgstr "El cerebro guarda los mensajes y las páginas que un agente lee para ti desde aquí."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -16092,10 +16104,6 @@ msgstr "Cuando {account} informa de un evento"
 #: src/brain/lessons-view.tsx
 msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
 msgstr "Cuando una tarea falla una y otra vez de la misma forma, el Brain lo anota aquí como una lección que puedes revisar."
-
-#: src/brain/sources-page.tsx
-msgid "When an agent reads one message or page for you through a connection of your own, the Brain keeps what it read, in your own Brain, for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "Cuando un agente lee para ti un mensaje o una página a través de una conexión tuya, el Brain guarda lo que leyó, en tu propio Brain, solo para ti. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el Brain no guarda nada de ello."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"

@@ -273,15 +273,28 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
         <>
           <p className="text-muted-foreground text-sm">
             <Trans>
-              When an agent reads one message or page for you through a
-              connection of your own, the Brain keeps what it read, in your own
-              Brain, for you alone. Everything else agents search live when you
-              ask, and the Brain keeps nothing of it.
+              The Brain keeps one Gmail message or attachment, or one OneNote
+              page, when an agent reads it for you through an account you
+              connected yourself, and keeps it for you alone. Everything else
+              agents search live when you ask, and the Brain keeps nothing of
+              it.
             </Trans>
           </p>
-          <ul className="flex flex-col gap-1.5 text-sm">
-            {connections.map(({ name }) => (
-              <li key={name}>{name}</li>
+          <ul className="flex flex-col gap-2 text-sm">
+            {connections.map(({ name, keepsReads }) => (
+              <li className="flex flex-col" key={name}>
+                <span>{name}</span>
+                <span className="text-muted-foreground">
+                  {keepsReads === true ? (
+                    <Trans>
+                      The Brain keeps the messages and pages an agent reads for
+                      you from this.
+                    </Trans>
+                  ) : (
+                    <Trans>Searched live, nothing kept.</Trans>
+                  )}
+                </span>
+              </li>
             ))}
           </ul>
         </>

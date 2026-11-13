@@ -12085,6 +12085,10 @@ msgstr "Hierboven doorzocht. Daarna gaan gebeurtenissen naar het archief."
 msgid "Searched knowledge"
 msgstr "In kennis gezocht"
 
+#: src/brain/sources-page.tsx
+msgid "Searched live, nothing kept."
+msgstr "Live doorzocht, niets bewaard."
+
 #: src/chat/thread.tsx
 msgid "Searched the App's files for {text}"
 msgstr "In de bestanden van de App gezocht naar {text}"
@@ -13756,6 +13760,14 @@ msgstr "Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Het Brain heeft nog geen teams om te groeperen."
+
+#: src/brain/sources-page.tsx
+msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "Het brein bewaart één Gmail-bericht of -bijlage, of één OneNote-pagina, als een agent die voor jou leest via een account dat je zelf hebt gekoppeld, en bewaart die alleen voor jou. Al het andere doorzoeken agents live als je het vraagt, en het brein bewaart er niets van."
+
+#: src/brain/sources-page.tsx
+msgid "The Brain keeps the messages and pages an agent reads for you from this."
+msgstr "Het brein bewaart de berichten en pagina's die een agent hierlangs voor jou leest."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -16092,10 +16104,6 @@ msgstr "Wanneer {account} een gebeurtenis meldt"
 #: src/brain/lessons-view.tsx
 msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
 msgstr "Als een taak steeds op dezelfde manier mislukt, noteert het Brein dat hier als een les die je kunt nakijken."
-
-#: src/brain/sources-page.tsx
-msgid "When an agent reads one message or page for you through a connection of your own, the Brain keeps what it read, in your own Brain, for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "Als een agent voor jou één bericht of pagina leest via een verbinding van jezelf, bewaart het Brain wat hij las, in je eigen Brain, alleen voor jou. Al het andere doorzoeken agents live als je het vraagt, en het Brain bewaart er niets van."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
