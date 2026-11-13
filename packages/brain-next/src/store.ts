@@ -1118,12 +1118,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     try {
       const at = await storeErasedAt(this.#bucket);
       const settled = at !== null && Date.now() - at >= fileGraceMs;
-      // Past the grace, a handler still running is one the queue stopped
-      // waiting for long ago (the grace is longer than an item's time and
-      // its own grace), and nothing else ends it while the caller's
+      // Past the grace, a handler the queue stopped waiting for (any still
+      // running by then is one: the grace is longer than an item's time
+      // and its own grace) ends with nothing else while the caller's
       // retries keep the store awake: the store restarts, which ends it,
-      // and the next instance finishes the erasure (`upLongEnough`).
-      if (settled && this.#work.handlers.size > 0) {
+      // and the next instance finishes the erasure (`upLongEnough`). The
+      // call that restarts it may answer with the restart's error rather
+      // than `stillDeleting`: either way the caller calls again.
+      if (settled && this.#work.zombies.size > 0) {
         restartStore(this.#work);
       }
       const emptied = await deleteStoreObjects(this.#bucket, [
