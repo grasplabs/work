@@ -8,7 +8,7 @@ import m0005 from './0005_stems.sql';
 import m0006 from './0006_erasure.sql';
 import m0007 from './0007_embedding.sql';
 import m0008 from './0008_memories.sql';
-import m0009 from './0009_entity_object.sql';
+import m0009 from './0009_exports.sql';
 
   export default {
     journal,
