@@ -1232,7 +1232,8 @@ describe("what a start freezes", () => {
         pending: [{ version: 3, alias: "ai" }],
         start: "workflow.binding_unapproved",
       },
-      earlier: "ok",
+      // Approved, but no longer live: only the live version starts.
+      earlier: "workflow.version_not_live",
     });
   });
 

@@ -45,7 +45,8 @@ import type { ChannelLocale, LineName } from "./words.ts";
 //   key is the offer's, so a second start of it is the same start.
 // - Values changed between card and press: the press names only the
 //   offer; what starts is the version and input kept with it, as the card
-//   showed them whole.
+//   showed them whole, and only while that version is still the live one
+//   (workflow-starts.ts): one published or rolled back since refuses it.
 // - Data from a restricted chat carried into a run: a restricted chat
 //   offers nothing (`permission.restricted`), and a chat others share has
 //   no workflows API at all (workspace.ts).
