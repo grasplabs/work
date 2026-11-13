@@ -3328,6 +3328,31 @@ const appWithBrain = async (
   return { authority, permissionId };
 };
 
+/**
+ * An agent acting for `personId` in a chat, holding an active grant to
+ * read the Brain, as a chat's code needs one: its authority, and the
+ * grant's ID. A chat's code reads as its person's teams, no person.
+ */
+const agentWithBrain = async (
+  personId: string
+): Promise<{ authority: Authority; permissionId: string }> => {
+  const agentId = `agent-${crypto.randomUUID()}`;
+  const permissionId = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'agent', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
+  )
+    .bind(permissionId, agentId, personId, Date.now())
+    .run();
+  return {
+    authority: authoritySchema.parse({
+      subject: { type: "agent", agentId },
+      onBehalfOf: personId,
+      mode: "interactive",
+    }),
+    permissionId,
+  };
+};
+
 /** An App recalling as `as`, in its own context, under `grant`. */
 const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
   authority: as,
@@ -3350,13 +3375,21 @@ const codeAsk = ({ question, budget, asOf }: PackAsk) => ({
   ...(asOf === undefined ? {} : { asOf: asOf.toISOString() }),
 });
 
-/** One probe per export of core's brain-recall.ts. */
-export const recallProbes = {
-  // Code's recall, as an App or a workflow makes it: under an App's
-  // grant, acting for the reader, asked every way the store is, as code
-  // sends it, then every way it refuses, the markers in what is refused.
-  recallFor: async (probing) => {
-    const { authority, permissionId } = await appWithBrain(probing.personId);
+/**
+ * Code's recall (brain-recall.ts `recallFor`) as `caller` makes it: an
+ * App's or a workflow's (`app`), which reads as the company alone, or a
+ * chat's code (`agent`), which reads as its person's teams, no person.
+ * Under a grant to read the Brain, acting for the reader, asked every way
+ * the store is, as code sends it, then every way it refuses, the markers
+ * in what is refused.
+ */
+const codeRecallProbe =
+  (caller: "app" | "agent"): Probe =>
+  async (probing) => {
+    const { authority, permissionId } =
+      caller === "app"
+        ? await appWithBrain(probing.personId)
+        : await agentWithBrain(probing.personId);
     const recall = async (
       input: unknown,
       as = authority,
@@ -3421,7 +3454,14 @@ export const recallProbes = {
           )
       ),
     ];
-  },
+  };
+
+/** Code's recall as a chat's code makes it (`codeRecallProbe`). */
+export const chatCodeRecallProbe = codeRecallProbe("agent");
+
+/** One probe per export of core's brain-recall.ts. */
+export const recallProbes = {
+  recallFor: codeRecallProbe("app"),
   // Pure: what a request is, never what it holds.
   isBrainRecall: async ({ markers, sharedWord }) => {
     const is = async (name: string, input: unknown) =>
