@@ -581,7 +581,8 @@ const MemoryLine = ({
         </span>
         {current ? (
           <span className="flex flex-wrap items-center gap-2">
-            {memory.contested ? (
+            {/* Offered until the person has said this side is right. */}
+            {memory.contested && confirmed?.byYou !== true ? (
               <ConfirmButton memory={memory} onConfirmed={onChanged} />
             ) : null}
             <CorrectDialog memory={memory} onCorrected={onChanged} />

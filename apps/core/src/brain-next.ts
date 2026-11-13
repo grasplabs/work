@@ -2823,19 +2823,22 @@ export const contestedAs = async (
     const facts = await Promise.all(
       page.facts.map(async ({ about, attribute, memories, more }) => {
         const entity = await store.readEntity({ entity: about, reader });
-        if (entity === null) {
-          // A fact's entity is one its memories, which they may read, name.
-          throw new Error("The Brain listed a fact about no entity");
-        }
-        return {
-          about: { store: name, ...entity },
-          attribute,
-          sides: await storedMemories(store, name, reader, memories),
-          more,
-        };
+        // Read after the listing: who may read a source can change in
+        // between, and a fact they may no longer read is left out, as the
+        // store leaves out what that change hides (contract v11).
+        return entity === null
+          ? []
+          : [
+              {
+                about: { store: name, ...entity },
+                attribute,
+                sides: await storedMemories(store, name, reader, memories),
+                more,
+              },
+            ];
       })
     );
-    return { items: facts, more: page.more, next: page.next };
+    return { items: facts.flat(), more: page.more, next: page.next };
   });
 };
 

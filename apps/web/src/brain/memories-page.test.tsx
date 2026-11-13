@@ -276,11 +276,14 @@ describe(MemoriesPage, () => {
       ].map((text) => before.includes(text)),
       confirmedBefore: before.includes("Confirmed by you"),
       confirmedAfter: after.includes("Confirmed by you"),
+      // Offered no longer on the side they confirmed; still on the other.
+      offeredAfter: after.split("This one is right").length - 1,
       calls,
     }).toStrictEqual({
       before: [true, true, true, true, true, true, true],
       confirmedBefore: false,
       confirmedAfter: true,
+      offeredAfter: 1,
       calls: [
         "contested",
         "entities customer",
