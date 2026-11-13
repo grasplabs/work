@@ -227,6 +227,7 @@ const brainReport = (bytes: number): BrainReport => ({
     withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
   },
   ownStores: noOwnStores,
+  modelSpend: { month: "2026-11", purposes: [] },
 });
 
 /** A read of a client's Brain from its core, as the section's server function makes it. */
@@ -242,7 +243,11 @@ const textOf = (html: string): string =>
 
 /** The Recall section of a page's HTML: from its title to the next section's. */
 const recallPartOf = (html: string): string =>
-  html.slice(html.indexOf(">Recall<"), html.indexOf(">Erasures<"));
+  html.slice(html.indexOf(">Recall<"), html.indexOf(">Model spend<"));
+
+/** The Model spend section of a page's HTML. */
+const spendPartOf = (html: string): string =>
+  html.slice(html.indexOf(">Model spend<"), html.indexOf(">Erasures<"));
 
 /** The part of `html` that shows people's own stores. */
 const ownStoresPartOf = (html: string): string =>
@@ -646,6 +651,65 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
+  it("shows what the Brain's model calls spent this month by purpose, and a month without any as such", async () => {
+    const report = brainReport(1_000_000);
+    const spent = await liveClient();
+    spent.core.admin = heardSnapshot("Spent");
+    spent.core.brain = {
+      ...report,
+      modelSpend: {
+        month: "2026-11",
+        purposes: [
+          {
+            purpose: "brain.extract",
+            calls: 120,
+            inputTokens: 2_400_000,
+            outputTokens: 36_000,
+            cost: 4.218,
+          },
+          {
+            purpose: "brain.recall_analysis",
+            calls: 900,
+            inputTokens: 312_000,
+            outputTokens: 9000,
+            cost: 0.004,
+          },
+        ],
+      },
+    };
+    const none = await liveClient();
+    none.core.admin = heardSnapshot("None");
+    none.core.brain = report;
+
+    const { html: spentHtml } = await page(
+      `/organizations/${spent.clientId}/brain`
+    );
+    const { html: noneHtml } = await page(
+      `/organizations/${none.clientId}/brain`
+    );
+    const text = textOf(spendPartOf(spentHtml));
+
+    expect({
+      month: text.includes("Nov 2026, as the model gateway recorded"),
+      purposes: [
+        text.includes("brain.extract 120 2.4 million 36 thousand $4.22"),
+        text.includes(
+          "brain.recall_analysis 900 312 thousand 9 thousand under $0.01"
+        ),
+      ],
+      dearestFirst:
+        text.indexOf("brain.extract ") < text.indexOf("brain.recall_analysis"),
+      none: textOf(spendPartOf(noneHtml)).includes(
+        "No model calls in Nov 2026 $0.00"
+      ),
+    }).toStrictEqual({
+      month: true,
+      purposes: [true, true],
+      dearestFirst: true,
+      none: true,
+    });
+  });
+
   it("shows people's own stores as totals across them, a failing one in amber", async () => {
     const acme = await liveClient();
     acme.core.admin = heardSnapshot("Acme");
@@ -700,16 +764,21 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
-  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, and says they aren't available yet", async () => {
+  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores nor model spend, and says they aren't available yet", async () => {
     const older = await liveClient();
     older.core.admin = heardSnapshot("Older");
-    const { ownStores: _left, ...report } = brainReport(1_000_000);
+    const {
+      ownStores: _left,
+      modelSpend: _spend,
+      ...report
+    } = brainReport(1_000_000);
     older.core.brain = report;
 
     const { status, html } = await page(
       `/organizations/${older.clientId}/brain`
     );
     const own = textOf(ownStoresPartOf(html));
+    const spend = textOf(spendPartOf(html));
 
     expect({
       status,
@@ -718,6 +787,15 @@ describe("how an organization's Brain is doing", () => {
         "This client’s release doesn’t report people’s own stores yet."
       ),
       totals: own.includes("Waiting"),
-    }).toStrictEqual({ status: 200, rest: true, notYet: true, totals: false });
+      spendNotYet: spend.includes(
+        "This client’s release doesn’t report model spend yet."
+      ),
+    }).toStrictEqual({
+      status: 200,
+      rest: true,
+      notYet: true,
+      totals: false,
+      spendNotYet: true,
+    });
   });
 });
