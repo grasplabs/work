@@ -1242,6 +1242,10 @@ msgid "{team} says the same"
 msgstr "{team} dice lo mismo"
 
 #: src/brain/skills-page.tsx
+msgid "{team}, not added yet"
+msgstr "{team}, aún no añadida"
+
+#: src/brain/skills-page.tsx
 msgid "{team}, version {version}"
 msgstr "{team}, versión {version}"
 
@@ -2804,7 +2808,7 @@ msgstr "Al aprobarla, sustituye la skill propia de Grasp {name} para todos."
 
 #: src/brain/skills-page.tsx
 msgid "Approving it replaces Grasp's own skill {name} for the members of {team}."
-msgstr "Al aprobarla, sustituye la skill propia de Grasp {name} para los miembros de {team}."
+msgstr "Al aprobarla, sustituye la skill {name} de Grasp para los miembros de {team}."
 
 #: src/brain/skills-page.tsx
 msgid "Approving it replaces the company's own skill {name} for everyone."
@@ -2812,11 +2816,11 @@ msgstr "Al aprobarla, sustituye la skill propia de la empresa {name} para todos.
 
 #: src/brain/skills-page.tsx
 msgid "Approving it replaces the company's own skill {name} for the members of {team}."
-msgstr "Al aprobarla, sustituye la skill propia de la empresa {name} para los miembros de {team}."
+msgstr "Al aprobarla, sustituye la skill {name} de la empresa para los miembros de {team}."
 
 #: src/brain/skills-page.tsx
 msgid "Approving it replaces the team {team}'s own skill {name} for its members."
-msgstr "Al aprobarla, sustituye la skill propia del equipo {team} {name} para sus miembros."
+msgstr "Al aprobarla, sustituye la skill {name} del equipo {team} para sus miembros."
 
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
@@ -5427,6 +5431,10 @@ msgstr "Primero se comprueba cada fila. Si una es incorrecta, no se añade nada.
 #: src/brain/brain-sections.ts
 msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
 msgstr "Cada equipo con el que habló Grasp: quiénes son, cómo trabajan y qué los frena."
+
+#: src/brain/skills-page.tsx
+msgid "Every team's skills"
+msgstr "Skills de todos los equipos"
 
 #: src/apps/reset-test-data.tsx
 msgid "Every test record goes, for everyone who builds this App. The App's live data isn't touched."
@@ -8903,6 +8911,10 @@ msgstr "Sin tablas"
 #: src/apps/app-data-model.tsx
 msgid "No tables yet"
 msgstr "Aún no hay tablas"
+
+#: src/brain/skills-page.tsx
+msgid "No team has a skill of its own yet."
+msgstr "Ningún equipo tiene aún skills propias."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"

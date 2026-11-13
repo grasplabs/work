@@ -13,7 +13,7 @@ import {
 } from "./brain-skills.ts";
 import type {
   HeldNow,
-  SkillCardAt,
+  SkillCard,
   SkillsReach,
   SkillVersion,
 } from "./brain-skills.ts";
@@ -98,7 +98,7 @@ type SkillsScope = AgentScope & { reach: SkillsReach };
 /** Skills, as a chat's code reads them. */
 export class SkillsApi extends WorkerEntrypoint<Env, SkillsScope> {
   /** The skills that apply to a task, best first, each at its version. */
-  async select(input: unknown): Promise<{ skills: SkillCardAt[] }> {
+  async select(input: unknown): Promise<{ skills: SkillCard[] }> {
     return await this.#call(
       "skills.select",
       async (authority) => ({
@@ -169,7 +169,7 @@ const scopesDoc = (personal: boolean): string =>
 /** A skill's team, as its declaration types it: a team's skill names it. */
 const teamOf = (personal: boolean): string =>
   personal
-    ? "\n  /** A team's skill only: the team's ID. */\n  team?: string;"
+    ? "\n  /** A team's skill only: the team's ID, which a read names. */\n  team?: string;\n  /** A team's skill only: the team's name. */\n  teamName?: string;"
     : "";
 
 /** The types `env.skills` names. */

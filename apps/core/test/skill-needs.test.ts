@@ -1,7 +1,14 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { readSkillFor, skillsFor } from "../src/brain-skills.ts";
+import { chatAuthority } from "../src/agent-scope.ts";
+import { heldIn } from "../src/agent-skills.ts";
+import {
+  readSkillFor,
+  selectSkillsFor,
+  skillsFor,
+} from "../src/brain-skills.ts";
+import type { HeldNow, SkillsReach } from "../src/brain-skills.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { actingFor } from "./contexts.ts";
@@ -203,6 +210,84 @@ describe("what a skill needs", setUpTime, () => {
       holding: ["team"],
       readLacking: "skills.not_found",
       readHolding: "ok",
+    });
+  });
+
+  it("holds nothing where connect can't be reached, or where others share the conversation: a skill that needs anything is then not listed, selected or read", async () => {
+    const [author, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const name = `mail-the-board-${unique()}`;
+    const saved = await author.api.skills.save(
+      skillText(name, "Mail the board", "requires:\n  tools: [mail.send]\n")
+    );
+    const share = await author.api.skills.share(name, saved.version, "company");
+    await admin.api.skills.approve(share.id);
+    const chat = await chatOf(author.userId);
+    const mail = await mailConnection([], mailWithSearch);
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send", "mail.search"],
+      binding: "MAIL",
+    });
+    const scope = {
+      workspaceId: chat.id,
+      agentId: chat.agent.agentId,
+      chatId: chat.chat.id,
+      personId: author.userId,
+    };
+    // Connect out of reach: asking whose connections are active fails.
+    const unreachable: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, property): unknown =>
+          property === "connectionOwners"
+            ? async () => {
+                await Promise.resolve();
+                throw new Error("Out of reach, for the test");
+              }
+            : Reflect.get(target, property),
+      }),
+    };
+    const authority = chatAuthority(scope);
+    const given = async (held: HeldNow, reach: SkillsReach) => {
+      const listed = await skillsFor(env, authority, reach, held);
+      return listed.some((skill) => skill.name === name);
+    };
+    const read = async (held: HeldNow, reach: SkillsReach) =>
+      await outcome(
+        readSkillFor(env, authority, reach, held, {
+          skill: { scope: "company", name, version: 1 },
+        })
+      );
+    const selected = async (held: HeldNow) => {
+      const skills = await selectSkillsFor(env, authority, "teams", held, {
+        task: "mail the board",
+      });
+      return skills.some((skill) => skill.name === name);
+    };
+    const reachable = heldIn(env, scope, "teams");
+    const outOfReach = heldIn(unreachable, scope, "teams");
+    const shared = heldIn(env, scope, "company");
+
+    expect({
+      reachable: [
+        await given(reachable, "teams"),
+        await read(reachable, "teams"),
+        await selected(reachable),
+      ],
+      outOfReach: [
+        await given(outOfReach, "teams"),
+        await read(outOfReach, "teams"),
+        await selected(outOfReach),
+      ],
+      shared: [await given(shared, "company"), await read(shared, "company")],
+    }).toStrictEqual({
+      reachable: [true, "ok", true],
+      outOfReach: [false, "skills.not_found", false],
+      shared: [false, "skills.not_found"],
     });
   });
 });

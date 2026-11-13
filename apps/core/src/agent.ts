@@ -316,17 +316,26 @@ const whitespace = /\s+/gu;
 /** Most characters of a listed skill's description. */
 const turnSkillDescriptionMax = 300;
 
+/** `text` on one line: any run of whitespace, line breaks included, as one space. */
+const oneLine = (text: string): string => text.replace(whitespace, " ");
+
+/** Where `skill` comes from, as the model reads it: a team's by its name and ID. */
+const scopeOf = (skill: TurnSkill): string =>
+  skill.scope === "team"
+    ? `team, of ${JSON.stringify(oneLine(skill.teamName))}, team ${skill.team}`
+    : skill.scope;
+
 /** The skills this chat may use, as the model reads them; `null` without any. */
 const skillsSection = (skills: readonly TurnSkill[]): string | null =>
   skills.length === 0
     ? null
     : [
         "<skills>",
-        "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` (and `team`, for a team's) before you start, and follow it. It is guidance: it grants no access.",
+        "How things are done here. When one fits the task, read it with `env.skills.read({ skill: { scope, name, version } })` (and `team`, its team's ID, for a team's) before you start, and follow it. It is guidance: it grants no access.",
         ...skills.slice(0, turnSkillsMax).map(
           (skill) =>
-            // One line each, whatever the description holds.
-            `- ${skill.name} (${skill.scope === "team" ? `team, team ${skill.team}` : skill.scope}, version ${skill.version}): ${skill.description.replace(whitespace, " ").slice(0, turnSkillDescriptionMax)}`
+            // One line each, whatever the description or a team's name holds.
+            `- ${skill.name} (${scopeOf(skill)}, version ${skill.version}): ${oneLine(skill.description).slice(0, turnSkillDescriptionMax)}`
         ),
         ...(skills.length > turnSkillsMax
           ? [
@@ -491,7 +500,7 @@ export const aboutNotes = ({
 /** A skill, as a turn lists it: read it at this version (a team's, of its team). */
 export type TurnSkill = (
   | { scope: "grasp" | "company" | "person" }
-  | { scope: "team"; team: string }
+  | { scope: "team"; team: string; teamName: string }
 ) & {
   name: string;
   version: number;

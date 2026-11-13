@@ -99,6 +99,17 @@ export interface ListedTeamSkill extends ListedSkill {
   team: SkillTeam;
 }
 
+/**
+ * A team's skill as core's decisions have it, for admins: its team (its
+ * name null once the team is gone), its name, and the version it was
+ * added at (null while that is on its way).
+ */
+export interface DecidedTeamSkill {
+  team: { id: string; name: string | null };
+  name: string;
+  version: number | null;
+}
+
 /** What the skills page shows the signed-in person. */
 export interface SkillsOverview {
   /** Their own skills, for them alone. */
@@ -117,6 +128,12 @@ export interface SkillsOverview {
    * anyone else.
    */
   requests: SkillShareRequest[] | null;
+  /**
+   * For the organization's own admins: every team's skill in use, by its
+   * team and name, whether or not they are in the team, to retire one.
+   * Null for anyone else.
+   */
+  teamSkills: DecidedTeamSkill[] | null;
 }
 
 /**

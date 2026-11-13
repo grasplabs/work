@@ -6,6 +6,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { erasePerson } from "../src/brain-next.ts";
 import {
@@ -37,6 +38,7 @@ import {
   newTeam,
   otherOrganizationsTeam,
 } from "./teams.ts";
+import { testBinding } from "./test-env.ts";
 
 // Writing skills and sharing one with the company (GRA-1754), from the
 // threat model on the issue: someone else reads, lists or is given a
@@ -1218,7 +1220,7 @@ describe("sharing a skill with a team", setUpTime, () => {
     await admin.api.skills.approve(share.id);
     // Their own copy goes, so what is listed is the team's.
     await author.api.skills.remove(name);
-    const listed = `- ${name} (team, team ${team}`;
+    const listed = `- ${name} (team, of "Team ${team}", team ${team}`;
     /** The chat's code: the skills of this name `env.skills` selects for quoting a tender. */
     const selectsThis = codeStep(
       `export default async (self, env) => { const { skills } = await env.skills.select({ task: "quote a tender" }); return skills.filter(({ name }) => name === ${JSON.stringify(name)}).map(({ scope, name }) => scope + ":" + name).join(",") || "none"; };`
@@ -1307,7 +1309,7 @@ describe("sharing a skill with a team", setUpTime, () => {
     });
   });
 
-  it("retires a team's skill for its members alone, by an admin outside the team, audited by its team and name", async () => {
+  it("lists every team's skill in use to an admin outside the team, from core's decisions, and lets them retire it for its members alone, audited by its team and name", async () => {
     const [author, admin] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
@@ -1325,16 +1327,33 @@ describe("sharing a skill with a team", setUpTime, () => {
       team,
     });
     await admin.api.skills.approve(forTeam.id);
+    /** The team's skills of this name each page lists, for admins alone. */
+    const listedFor = async (api: SessionApi) => {
+      const { teamSkills } = await overviewOf(api);
+      return teamSkills?.filter((skill) => skill.name === name) ?? null;
+    };
+    const listed = {
+      admin: await listedFor(admin.api),
+      author: await listedFor(author.api),
+    };
     const head = await logHead();
     await admin.api.skills.retire(name, { team });
     const { events } = await eventsAfterWithHead(head);
 
     expect({
+      listed,
+      afterRetiring: await listedFor(admin.api),
       given: await usable(author.userId, false, [name]),
       events: events
         .filter(({ action }) => action.startsWith("skill."))
         .map(({ action, target }) => [action, target?.type, target?.id]),
     }).toStrictEqual({
+      // Its team and name, from core's records: the admin is in no team.
+      listed: {
+        admin: [{ team: { id: team, name: `Team ${team}` }, name, version: 1 }],
+        author: null,
+      },
+      afterRetiring: [],
       // Theirs again is the company's: the team's is retired.
       given: [["company", name]],
       events: [
@@ -1387,6 +1406,76 @@ describe("sharing a skill with a team", setUpTime, () => {
       asked: false,
       approved: "skills.not_found",
       given: [],
+    });
+  });
+
+  it("treats what was written before audiences as the company's once migrated: listed, decided, retired and on its asker's page", async () => {
+    const [author, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("old-company-way");
+    const first = await author.api.skills.save(skillText(name, "Old way"));
+    const landed = await author.api.skills.share(
+      name,
+      first.version,
+      "company"
+    );
+    await admin.api.skills.approve(landed.id);
+    const second = await author.api.skills.save(skillText(name, "New way"));
+    const waiting = await author.api.skills.share(
+      name,
+      second.version,
+      "company"
+    );
+    // As the release before wrote them: no audience. Then migrated, by the
+    // migration's own statements.
+    const db = drizzle(env.DB);
+    await db
+      .update(skillShares)
+      .set({ audience: null })
+      .where(eq(skillShares.name, name));
+    await db
+      .update(skillDecisions)
+      .set({ audience: null })
+      .where(eq(skillDecisions.name, name));
+    const carried = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"))
+      .flatMap(({ queries }) =>
+        queries.filter((query) => query.includes("SET `audience` = 'company'"))
+      );
+    if (carried.length !== 2) {
+      throw new Error("No migration carries the shares and decisions over");
+    }
+    await env.DB.batch(carried.map((query) => env.DB.prepare(query)));
+    const { requests } = await overviewOf(admin.api);
+    const card = requests?.find(({ id }) => id === waiting.id);
+    const asked = await askedIds(author.api);
+    await admin.api.skills.approve(waiting.id);
+    const approved = await usable(member.userId, false, [name]);
+    const read = await readIn(member.userId, false, {
+      scope: "company",
+      name,
+      version: 2,
+    });
+    const retired = await outcome(admin.api.skills.retire(name, "company"));
+
+    expect({
+      card: card === undefined ? null : [card.audience, card.replaces],
+      asked: [landed.id, waiting.id].map((id) => asked.includes(id)),
+      approved,
+      read,
+      retired,
+      afterRetiring: await usable(member.userId, false, [name]),
+    }).toStrictEqual({
+      card: [{ kind: "company" }, "company"],
+      asked: [true, true],
+      approved: [["company", name]],
+      read: skillText(name, "New way"),
+      retired: "ok",
+      afterRetiring: [],
     });
   });
 });

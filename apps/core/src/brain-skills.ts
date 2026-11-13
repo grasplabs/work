@@ -199,12 +199,18 @@ const rankOf: Record<SkillScope, number> = {
   person: 3,
 };
 
+/** A skill as code and the prompt read it: a team's, with its team's name. */
+export type SkillCard =
+  | Exclude<SkillCardAt, { scope: "team" }>
+  | (Extract<SkillCardAt, { scope: "team" }> & { teamName: string });
+
 /** `skill` as code and the prompt read it: without what it needs. */
-const cardOf = (skill: SkillListed): SkillCardAt =>
+const cardOf = (skill: SkillListed): SkillCard =>
   skill.scope === "team"
     ? {
         scope: skill.scope,
         team: skill.team,
+        teamName: skill.teamName ?? skill.team,
         name: skill.name,
         version: skill.version,
         description: skill.description,
@@ -232,7 +238,7 @@ export const skillsFor = async (
   by: Authority,
   reach: SkillsReach,
   held: HeldNow
-): Promise<SkillCardAt[]> => {
+): Promise<SkillCard[]> => {
   const listed = await listSkillsAs(env, personOf(by), shippedNames, {
     reach,
   });
@@ -273,7 +279,7 @@ export const selectSkillsFor = async (
   reach: SkillsReach,
   held: HeldNow,
   input: unknown
-): Promise<SkillCardAt[]> => {
+): Promise<SkillCard[]> => {
   const { task } = skillErrors.parse("skills.invalid", taskSchema, input);
   return selectSkills(task, await skillsFor(env, by, reach, held));
 };

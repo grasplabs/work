@@ -8,6 +8,7 @@ import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { skillErrors } from "@grasp-os/shared/skills";
 import type {
+  DecidedTeamSkill,
   ListedSkill,
   ListedTeamSkill,
   OwnSkillShare,
@@ -337,11 +338,24 @@ const skillEntry = (
   detail,
 });
 
-/** Of each audience and name, whether its latest decision is an approval: what is (or is about to be) live. */
-const decidedLive = async (env: Env): Promise<Set<string>> => {
-  const rows = await drizzle(env.DB)
-    .select({ audience: skillDecisions.audience, name: skillDecisions.name })
+/**
+ * Of each audience and name whose latest decision is an approval (what is,
+ * or is about to be, live): its audience as stored, its name, the version
+ * it was added at (null while on its way) and, for a team's, the team's
+ * name while the team exists. From core's own records, never the Brain:
+ * for admins, who decide every audience's skills, in a team or not.
+ */
+const decidedLive = async (env: Env) =>
+  await drizzle(env.DB)
+    .select({
+      audience: skillDecisions.audience,
+      name: skillDecisions.name,
+      version: skillDecisions.version,
+      outcome: skillDecisions.outcome,
+      teamName: teams.name,
+    })
     .from(skillDecisions)
+    .leftJoin(teams, sql`'team:' || ${teams.id} = ${skillDecisions.audience}`)
     .where(
       and(
         isNotNull(skillDecisions.audience),
@@ -350,15 +364,32 @@ const decidedLive = async (env: Env): Promise<Set<string>> => {
           WHERE latest.audience = ${skillDecisions.audience}
             AND latest.name = ${skillDecisions.name})`
       )
-    );
-  return new Set(rows.map(({ audience, name }) => `${audience} ${name}`));
-};
+    )
+    .orderBy(asc(skillDecisions.audience), asc(skillDecisions.name));
+
+/** `decided` as the teams' skills an admin may retire. */
+const teamSkillsOf = (
+  decided: Awaited<ReturnType<typeof decidedLive>>
+): DecidedTeamSkill[] =>
+  decided.flatMap(({ audience, name, version, outcome, teamName }) => {
+    const of = audienceOf(audience);
+    return of?.kind === "team"
+      ? [
+          {
+            team: { id: of.team, name: teamName },
+            name,
+            version: outcome === "landed" ? version : null,
+          },
+        ]
+      : [];
+  });
 
 /**
  * What the skills page shows `by`: their own skills, the company's, their
  * teams' (as the Brain gives them, by the teams core counts them in now),
  * the teams they may share with, their own shares, and, for admins,
- * every share that waits and may be decided, with its text and its team.
+ * every share that waits and may be decided, with its text and its team,
+ * and every team's skill in use, to retire.
  */
 export const skillsOverview = async (
   env: Env,
@@ -391,7 +422,10 @@ export const skillsOverview = async (
         .where(decidable())
         .orderBy(asc(skillShares.requestedAt), asc(skillShares.id))
     : null;
-  const live = requests === null ? new Set<string>() : await decidedLive(env);
+  const decided = requests === null ? [] : await decidedLive(env);
+  const live = new Set(
+    decided.map(({ audience, name }) => `${audience} ${name}`)
+  );
   /** What approving `share` replaces for its audience, if anything. */
   const replacedBy = (share: SkillShare): SkillShareRequest["replaces"] => {
     const { audience, name } = share;
@@ -442,6 +476,7 @@ export const skillsOverview = async (
               replaces: replacedBy(share),
             }))
       ) ?? null,
+    teamSkills: requests === null ? null : teamSkillsOf(decided),
   };
 };
 

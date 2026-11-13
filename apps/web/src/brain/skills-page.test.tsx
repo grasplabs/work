@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type {
+  DecidedTeamSkill,
   ListedSkill,
   ListedTeamSkill,
   OwnSkillShare,
@@ -104,6 +105,7 @@ const shown = async ({
   overviewRefusals = [],
   teams = [],
   team = [],
+  teamSkills = [],
 }: {
   admin: boolean;
   refusal?: string;
@@ -123,6 +125,8 @@ const shown = async ({
   teams?: SkillTeam[];
   /** Their teams' skills. */
   team?: ListedTeamSkill[];
+  /** Every team's skill in use, as an admin is shown them. */
+  teamSkills?: DecidedTeamSkill[];
 }) => {
   const calls: string[] = [];
   const owned = [own, other];
@@ -150,6 +154,7 @@ const shown = async ({
         teams,
         shares: [...shares],
         requests: admin ? requests : null,
+        teamSkills: admin ? teamSkills : null,
       };
     },
     save: async (text: string) => {
@@ -655,18 +660,50 @@ describe("the skills page", () => {
     });
   });
 
-  it("lists the person's teams' skills with their team, and lets an admin retire one for its team alone", async () => {
-    const teamSkill: ListedTeamSkill = {
-      name: "pitch-a-client",
-      version: 3,
-      description: "Pitch",
-      team: { id: "t-1", name: "Sales" },
-    };
+  it("lists the person's teams' skills with their team, to be read, not retired", async () => {
+    await shown({
+      admin: false,
+      company: [],
+      teams: [{ id: "t-1", name: "Sales" }],
+      team: [
+        {
+          name: "pitch-a-client",
+          version: 3,
+          description: "Pitch",
+          team: { id: "t-1", name: "Sales" },
+        },
+      ],
+    });
+    const text = document.body.textContent ?? "";
+    expect({
+      listed: text.includes("pitch-a-client"),
+      withTeam: text.includes("Sales, version 3"),
+      retire: buttons("Retire").length,
+      everyTeam: text.includes("Every team's skills"),
+    }).toStrictEqual({
+      listed: true,
+      withTeam: true,
+      retire: 0,
+      everyTeam: false,
+    });
+  });
+
+  it("lists an admin every team's skill in use, a team they aren't in too, and retires one for its team alone", async () => {
     const { calls } = await shown({
       admin: true,
       company: [],
-      teams: [{ id: "t-1", name: "Sales" }],
-      team: [teamSkill],
+      teamSkills: [
+        {
+          team: { id: "t-2", name: "Legal" },
+          name: "check-a-contract",
+          version: 2,
+        },
+        {
+          team: { id: "t-3", name: null },
+          name: "close-a-deal",
+          version: null,
+        },
+      ],
     });
     const text = document.body.textContent ?? "";
     await click("Retire");
@@ -676,13 +713,13 @@ describe("the skills page", () => {
       )
     );
     expect({
-      listed: text.includes("pitch-a-client"),
-      withTeam: text.includes("Sales, version 3"),
+      legal: text.includes("Legal, version 2"),
+      gone: text.includes("t-3, not added yet"),
       calls,
     }).toStrictEqual({
-      listed: true,
-      withTeam: true,
-      calls: ["overview", "retire pitch-a-client for t-1", "overview"],
+      legal: true,
+      gone: true,
+      calls: ["overview", "retire check-a-contract for t-2", "overview"],
     });
   });
 });

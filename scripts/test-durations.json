@@ -424,7 +424,7 @@
   "@grasp-os/core test/shared-mailboxes.test.ts": 3.3,
   "@grasp-os/core test/sign-in.test.ts": 1.9,
   "@grasp-os/core test/signals.test.ts": 0.8,
-  "@grasp-os/core test/skill-interleavings.test.ts": 181.2,
+  "@grasp-os/core test/skill-interleavings.test.ts": 52.3,
   "@grasp-os/core test/skill-needs.test.ts": 1.7,
   "@grasp-os/core test/skill-shares.test.ts": 9,
   "@grasp-os/core test/skills.test.ts": 2.2,

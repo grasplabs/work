@@ -1642,8 +1642,14 @@ export type SkillAt = z.infer<typeof skillAtSchema>;
 /** A skill at its current version, and when to use it. */
 export type SkillCardAt = SkillAt & { description: string };
 
-/** A skill at its current version, when to use it, and what it needs to be of use. */
-export type SkillListed = SkillCardAt & { needs: SkillNeeds };
+/**
+ * A skill at its current version, when to use it, and what it needs to be
+ * of use; a team's, with its team's name too.
+ */
+export type SkillListed = SkillCardAt & {
+  needs: SkillNeeds;
+  teamName?: string;
+};
 
 /** A skill at one version, whole. */
 export type SkillVersion = SkillAt & { text: string };
@@ -1838,6 +1844,33 @@ const listedOf = (
 };
 
 /**
+ * `personId` as a reader of skills (`skillReaderOf`), and the names of the
+ * teams it reads as, by their IDs: what a listing names each team's skill
+ * by.
+ */
+const skillReaderWithTeamsOf = async (
+  env: Pick<Env, "DB">,
+  personId: string,
+  reach: Reach
+): Promise<{
+  reader: PersonReader;
+  teamNames: ReadonlyMap<string, string>;
+}> => {
+  const member = await memberOf(env.DB, checked(idSchema, personId));
+  if (member === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
+  const teams = reach === "company" ? [] : member.teams;
+  return {
+    reader: {
+      person: member.userId,
+      groups: [...teams.map(({ id }) => teamGroup(id)), companyGroup],
+    },
+    teamNames: new Map(teams.map(({ id, name }) => [id, name])),
+  };
+};
+
+/**
  * `personId` as a reader of skills, as far as `reach` goes (`Reach`): the
  * person, with their teams as core counts them now and the company; or,
  * at the company's reach, the person and the company alone, so no team's
@@ -1850,10 +1883,8 @@ const skillReaderOf = async (
   personId: string,
   reach: Reach
 ): Promise<PersonReader> => {
-  const reader = await personReaderOf(env, personId);
-  return reach === "company"
-    ? { person: reader.person, groups: [companyGroup] }
-    : reader;
+  const { reader } = await skillReaderWithTeamsOf(env, personId, reach);
+  return reader;
 };
 
 /** The current versions of `sources`, whole, a batch at a time, in order. */
@@ -1986,12 +2017,22 @@ export const listSkillsAs = async (
   shipped: ReadonlySet<string>,
   { reach }: { reach: Reach }
 ): Promise<SkillListed[]> => {
-  const reader = await skillReaderOf(env, personId, reach);
+  const { reader, teamNames } = await skillReaderWithTeamsOf(
+    env,
+    personId,
+    reach
+  );
   const company = await sharedSkillsAs(env, reader, `${skillsKind}:company:`);
-  const teams =
+  const listedTeams =
     reach === "company"
       ? []
       : await sharedSkillsAs(env, reader, teamSkillPrefix);
+  // Each named as the reader's team: only theirs are listed.
+  const teams = listedTeams.map((skill) =>
+    skill.scope === "team"
+      ? { ...skill, teamName: teamNames.get(skill.team) ?? skill.team }
+      : skill
+  );
   const graspSources = [...shipped].flatMap((name) => {
     const skill = skillSchema.safeParse({ scope: "grasp", name });
     return skill.success ? [skillKeyOf(skill.data)] : [];

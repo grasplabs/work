@@ -1242,6 +1242,10 @@ msgid "{team} says the same"
 msgstr "{team} dit la même chose"
 
 #: src/brain/skills-page.tsx
+msgid "{team}, not added yet"
+msgstr "{team}, pas encore ajouté"
+
+#: src/brain/skills-page.tsx
 msgid "{team}, version {version}"
 msgstr "{team}, version {version}"
 
@@ -5428,6 +5432,10 @@ msgstr "Chaque ligne est d'abord vérifiée. Si l'une est incorrecte, rien n'est
 msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
 msgstr "Chaque équipe à qui Grasp a parlé : qui elle est, comment elle travaille et ce qui la freine."
 
+#: src/brain/skills-page.tsx
+msgid "Every team's skills"
+msgstr "Skills de toutes les équipes"
+
 #: src/apps/reset-test-data.tsx
 msgid "Every test record goes, for everyone who builds this App. The App's live data isn't touched."
 msgstr "Tous les enregistrements de test disparaissent, pour toutes les personnes qui construisent cette App. Les données réelles de l’App ne sont pas touchées."
@@ -8903,6 +8911,10 @@ msgstr "Aucune table"
 #: src/apps/app-data-model.tsx
 msgid "No tables yet"
 msgstr "Pas encore de tables"
+
+#: src/brain/skills-page.tsx
+msgid "No team has a skill of its own yet."
+msgstr "Aucune équipe n'a encore de skills à elle."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"

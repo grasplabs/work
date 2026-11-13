@@ -1,5 +1,6 @@
 import { failureText } from "@grasp-os/shared/errors";
 import type {
+  DecidedTeamSkill,
   ListedSkill,
   ListedTeamSkill,
   OwnSkillShare,
@@ -543,19 +544,8 @@ const isLive = (data: SkillsOverview, share: SkillShare): boolean => {
       );
 };
 
-/** One of the person's teams' skills; for admins, with Retire. */
-const TeamSkill = ({
-  skill,
-  admin,
-  busy,
-  onRetire,
-}: {
-  skill: ListedTeamSkill;
-  admin: boolean;
-  busy: boolean;
-  onRetire: () => void;
-}) => {
-  const { t } = useLingui();
+/** One of the person's teams' skills, as their agents use it. */
+const TeamSkill = ({ skill }: { skill: ListedTeamSkill }) => {
   const { name, version } = skill;
   const team = skill.team.name;
   return (
@@ -571,19 +561,92 @@ const TeamSkill = ({
           </Trans>
         </span>
       </ItemContent>
-      {admin ? (
-        <ItemActions>
-          <Confirmed
-            confirm={t`Retire`}
-            description={t`The agents of ${team}'s members no longer use ${name}. Its versions stay as history, and a new approved share of its name with the team brings it back.`}
-            disabled={busy}
-            label={t`Retire`}
-            onConfirm={onRetire}
-            title={t`Retire ${name} for ${team}?`}
-          />
-        </ItemActions>
-      ) : null}
     </Item>
+  );
+};
+
+/** A team's skill in use, for an admin, in the team or not: with Retire. */
+const DecidedSkill = ({
+  skill,
+  busy,
+  onRetire,
+}: {
+  skill: DecidedTeamSkill;
+  busy: boolean;
+  onRetire: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name, version } = skill;
+  const team = teamName(skill.team);
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <span className="text-sm font-medium">{name}</span>
+        <span className="text-muted-foreground text-xs">
+          {version === null ? (
+            <Trans>{team}, not added yet</Trans>
+          ) : (
+            <Trans>
+              {team}, version {version}
+            </Trans>
+          )}
+        </span>
+      </ItemContent>
+      <ItemActions>
+        <Confirmed
+          confirm={t`Retire`}
+          description={t`The agents of ${team}'s members no longer use ${name}. Its versions stay as history, and a new approved share of its name with the team brings it back.`}
+          disabled={busy}
+          label={t`Retire`}
+          onConfirm={onRetire}
+          title={t`Retire ${name} for ${team}?`}
+        />
+      </ItemActions>
+    </Item>
+  );
+};
+
+/**
+ * For the organization's admins: every team's skill in use, as core's
+ * decisions have it, whether or not they are in the team, to retire one.
+ */
+const EveryTeamsSkills = ({
+  data,
+  busy,
+  onRetire,
+}: {
+  data: SkillsOverview | undefined;
+  busy: boolean;
+  onRetire: (skill: DecidedTeamSkill) => void;
+}) => {
+  const heading = useId();
+  if (data?.teamSkills === null || data?.teamSkills === undefined) {
+    return null;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Every team&apos;s skills</Trans>
+      </h2>
+      {data.teamSkills.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>No team has a skill of its own yet.</Trans>
+        </p>
+      ) : null}
+      <ItemGroup render={<ul />} spacing="tight">
+        {data.teamSkills.map((skill) => (
+          <li key={`${skill.team.id} ${skill.name}`}>
+            <DecidedSkill
+              busy={busy}
+              onRetire={() => {
+                onRetire(skill);
+              }}
+              skill={skill}
+            />
+          </li>
+        ))}
+      </ItemGroup>
+    </section>
   );
 };
 
@@ -622,16 +685,8 @@ const AskedShares = ({ data }: { data: SkillsOverview | undefined }) => {
   );
 };
 
-/** The person's teams' skills, while they are in a team: for admins, with Retire. */
-const TeamSkills = ({
-  data,
-  busy,
-  onRetire,
-}: {
-  data: SkillsOverview | undefined;
-  busy: boolean;
-  onRetire: (skill: ListedTeamSkill) => void;
-}) => {
+/** The person's teams' skills, while they are in a team. */
+const TeamSkills = ({ data }: { data: SkillsOverview | undefined }) => {
   const heading = useId();
   if (data === undefined || data.teams.length === 0) {
     return null;
@@ -649,14 +704,7 @@ const TeamSkills = ({
       <ItemGroup render={<ul />} spacing="tight">
         {data.team.map((skill) => (
           <li key={`${skill.team.id} ${skill.name}`}>
-            <TeamSkill
-              admin={data.requests !== null}
-              busy={busy}
-              onRetire={() => {
-                onRetire(skill);
-              }}
-              skill={skill}
-            />
+            <TeamSkill skill={skill} />
           </li>
         ))}
       </ItemGroup>
@@ -1002,7 +1050,8 @@ export const SkillsPage = () => {
           </ItemGroup>
         </section>
 
-        <TeamSkills
+        <TeamSkills data={data} />
+        <EveryTeamsSkills
           busy={busy}
           data={data}
           onRetire={(skill) => {
