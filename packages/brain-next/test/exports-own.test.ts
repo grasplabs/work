@@ -8,7 +8,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { fileGraceMs } from "../src/files.ts";
+import { fileGraceMs } from "../src/contract.ts";
 import { workItemTimeMs } from "../src/work.ts";
 import { tick } from "./export-reads.ts";
 import type { Store } from "./export-reads.ts";

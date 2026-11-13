@@ -21,11 +21,11 @@ import { z } from "zod";
 import { packAcross } from "../src/across.ts";
 import {
   brainOf,
+  fileGraceMs,
   personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
 } from "../src/contract.ts";
-import { fileGraceMs } from "../src/files.ts";
 import { BrainStore } from "../src/store.ts";
 
 /** A store, as its namespace gives it. */

@@ -11,7 +11,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { fileGraceMs } from "../src/files.ts";
+import { fileGraceMs } from "../src/contract.ts";
 import { ledgerRetryMs } from "../src/store.ts";
 import type { Store } from "./export-reads.ts";
 import { kill } from "./store-copy.ts";
