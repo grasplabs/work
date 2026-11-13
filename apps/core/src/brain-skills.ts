@@ -74,8 +74,11 @@ const shippedNames: ReadonlySet<string> = new Set(
  *
  * Audited once, as the system: which release (its version, when the
  * Worker knows it), how many it shipped, wrote, found invalid and failed
- * to write, and the invalid ones' names; never a text. Resolves whether
- * nothing failed but what can't succeed in this release. The release's
+ * to write, and the invalid ones' names; never a text. Resolves `false`
+ * when a skill's write failed (the Brain out of reach, or refusing it while
+ * it restores an export): that one is tried again by the next install. A
+ * skill the Brain refuses as invalid doesn't make it `false`: it can't
+ * succeed in this release, and is logged and audited instead. The release's
  * install on the first request runs it (builtins.ts).
  */
 export const installShippedSkills = async (

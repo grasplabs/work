@@ -4,7 +4,7 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
-import { erasedSource, staleVersion } from "./contract.ts";
+import { erasedSource, restoringNow, staleVersion } from "./contract.ts";
 import type {
   CurrentRequest,
   NewSource,
@@ -38,6 +38,7 @@ import {
   noteWrite,
 } from "./files.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -185,6 +186,10 @@ const record = (
   // person alone, whose erasure came after it began and before this: it
   // may have missed it, so it is refused, writing nothing (its file is
   // left to the sweep). An add that begins after it is new, and kept.
+  // A restore is under way (restoring.ts): nothing is added meanwhile.
+  if (isRestoring(storage.sql)) {
+    throw new Error(restoringNow);
+  }
   const { onlyFor } = adding;
   if (
     isErased(storage.sql, adding.subject) ||
@@ -320,6 +325,9 @@ export const addVersion = async (
   };
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
+  }
+  if (isRestoring(storage.sql)) {
+    throw new Error(restoringNow);
   }
   const before = madeBefore(db, adding);
   if (before !== undefined) {
