@@ -1,18 +1,10 @@
-import {
-  brainOf,
-  packItemTokens,
-  packMemoryTokens,
-} from "@grasp-os/brain-next/contract";
-import type {
-  NewEntity,
-  NewMemory,
-  Reader,
-} from "@grasp-os/brain-next/contract";
+import { brainOf, packItemTokens } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
@@ -20,12 +12,12 @@ import {
   addSource,
   eraseSource,
   mergeRecalled,
-  recallAs,
+  recallPassagesAs,
+  rememberAs,
 } from "../src/brain-next.ts";
 import type {
   RecalledItem,
-  RecalledMemory,
-  RecalledPack,
+  RecalledPassages,
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
@@ -1126,8 +1118,10 @@ describe("what the recall before a question may reach", setUpTime, () => {
 /** The shared store, where a team's memories are kept. */
 const shared = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
 
-/** A new team of `personId`'s, as the Brain's group. */
-const teamOf = async (personId: string): Promise<string> => {
+/** A new team of `personId`'s: its readers, and its group as the Brain names it. */
+const teamOf = async (
+  personId: string
+): Promise<{ readers: SourceReaders; group: string }> => {
   const teamId = crypto.randomUUID();
   const db = drizzle(env.DB);
   await db.insert(teams).values({
@@ -1142,65 +1136,25 @@ const teamOf = async (personId: string): Promise<string> => {
     userId: personId,
     createdAt: new Date(),
   });
-  return `team:${teamId}`;
+  return { readers: { kind: "team", teamId }, group: `team:${teamId}` };
 };
 
-/** Adds `memories` about `entities` that `group` may read. */
-const remembered = async (
-  group: string,
-  entities: NewEntity[],
-  memories: NewMemory[],
-  reader?: Reader
-) =>
+/** Adds a memory that `group` may read, `statement`, about a customer of its own. */
+const remembered = async (group: string, statement: string) =>
   await shared().addMemories({
     change: crypto.randomUUID(),
     access: { kind: "audience", group },
-    entities,
-    memories,
-    ...(reader === undefined ? {} : { reader }),
+    entities: [{ key: "c", kind: "customer", names: [`Depot ${word()}`] }],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement,
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "crm" },
+      },
+    ],
   });
-
-/** A system fact about `about`, written by `writer`. */
-const fact = (
-  about: string,
-  statement: string,
-  extra: Partial<NewMemory> = {},
-  writer = "crm"
-): NewMemory => ({
-  about,
-  type: "fact",
-  statement,
-  speaker: { kind: "system" },
-  basis: { kind: "writer", writer },
-  ...extra,
-});
-
-/** A customer named `name`, as an add's entity `c`. */
-const customer = (name: string): NewEntity => ({
-  key: "c",
-  kind: "customer",
-  names: [name],
-});
-
-/** The tokens `pack`'s memories take, as the Brain counts them (none cites a source). */
-const memoryTokensOf = (pack: RecalledPack): number =>
-  pack.memories.reduce(
-    (sum, memory) => sum + packMemoryTokens({ ...memory, source: null }),
-    0
-  );
-
-/** The ids of `pack`'s memories, in its order. */
-const idsOf = (pack: RecalledPack): string[] =>
-  pack.memories.map(({ memory }) => memory);
-
-/** The person's recall of `question`, within `tokens`. */
-const recalledBy =
-  (personId: string, tokens: number) => async (question: string) =>
-    await recallAs(env, personId, {
-      question,
-      budget: { tokens },
-      personal: false,
-    });
 
 /** The tokens of `item`, as the Brain counts them. */
 const itemTokensOf = (item: RecalledItem): number =>
@@ -1209,10 +1163,26 @@ const itemTokensOf = (item: RecalledItem): number =>
     source: `${item.source.producer}:${item.source.id}`,
   });
 
-/** The tokens of all of `pack`, items and memories. */
-const tokensOf = (pack: RecalledPack): number =>
-  pack.items.reduce((sum, item) => sum + itemTokensOf(item), 0) +
-  memoryTokensOf(pack);
+/** The tokens of all of `pack`'s passages. */
+const tokensOf = (pack: RecalledPassages): number =>
+  pack.items.reduce((sum, item) => sum + itemTokensOf(item), 0);
+
+/** The person's recall of passages for `question`, within `tokens`. */
+const recalledBy =
+  (personId: string, tokens: number) => async (question: string) =>
+    await recallPassagesAs(env, personId, {
+      question,
+      budget: { tokens },
+      personal: false,
+    });
+
+/** Where an item of a pack is: its source, version and place. */
+const placeOf = (item: RecalledItem): string =>
+  JSON.stringify([item.source, item.version, item.position]);
+
+/** Where each of `pack`'s passages is, in its order. */
+const placesOf = (pack: RecalledPassages): string[] =>
+  pack.items.map((item) => placeOf(item));
 
 /** A passage of an upload `id`, as recall gives it. */
 const randomItem = (id: string, text: string): RecalledItem => ({
@@ -1224,200 +1194,167 @@ const randomItem = (id: string, text: string): RecalledItem => ({
   found: "words",
 });
 
-/** A memory citing no source, as recall gives it. */
-const randomMemory = (statement: string): RecalledMemory => ({
-  memory: crypto.randomUUID(),
-  about: crypto.randomUUID(),
-  attribute: null,
-  object: null,
-  type: "fact",
-  statement,
-  quote: null,
-  context: null,
-  source: null,
-  writer: "crm",
-  speaker: { kind: "system" },
-  validFrom: null,
-  validUntil: null,
-  learnedAt: new Date(0),
-  contested: false,
-  confirmed: false,
-  found: "words",
-});
-
-/** Where an item of a pack is: its source, version and place. */
-const placeOf = (item: RecalledItem): string =>
-  JSON.stringify([item.source, item.version, item.position]);
-
-/** The tokens of a memory citing no source, as the Brain counts them. */
-const sourcelessTokens = (memory: RecalledMemory): number =>
-  packMemoryTokens({ ...memory, source: null });
-
 /**
- * One pass over `first`, then `second`'s items and memories that `first`
- * doesn't hold, keeping each while it fits in `tokens`: what a merge of
- * the two packs gives, written out plainly.
+ * One pass over `first`'s passages, then `second`'s that `first` doesn't
+ * hold, keeping each while it fits in `tokens`: what a merge of the two
+ * packs gives, written out plainly.
  */
 const onePass = (
-  first: RecalledPack,
-  second: RecalledPack,
+  first: RecalledPassages,
+  second: RecalledPassages,
   tokens: number
-): RecalledPack => {
+): RecalledPassages => {
   let used = 0;
   let truncated = first.truncated || second.truncated;
-  const fitted = <T>(
-    list: readonly T[],
-    keyOf: (one: T) => string,
-    size: (one: T) => number,
-    held: Set<string>
-  ): T[] =>
-    list.filter((one) => {
-      if (held.has(keyOf(one))) {
-        return false;
-      }
-      if (used + size(one) > tokens) {
-        truncated = true;
-        return false;
-      }
-      used += size(one);
-      held.add(keyOf(one));
-      return true;
-    });
-  const places = new Set<string>();
-  const ids = new Set<string>();
-  const firstItems = fitted(first.items, placeOf, itemTokensOf, places);
-  const firstMemories = fitted(
-    first.memories,
-    ({ memory }) => memory,
-    sourcelessTokens,
-    ids
-  );
-  const secondItems = fitted(second.items, placeOf, itemTokensOf, places);
-  const secondMemories = fitted(
-    second.memories,
-    ({ memory }) => memory,
-    sourcelessTokens,
-    ids
-  );
-  return {
-    items: [...firstItems, ...secondItems],
-    memories: [...firstMemories, ...secondMemories],
-    contested: [],
-    notFound: second.notFound,
-    truncated,
-  };
+  const held = new Set<string>();
+  const items = [...first.items, ...second.items].filter((item) => {
+    if (held.has(placeOf(item))) {
+      return false;
+    }
+    if (used + itemTokensOf(item) > tokens) {
+      truncated = true;
+      return false;
+    }
+    used += itemTokensOf(item);
+    held.add(placeOf(item));
+    return true;
+  });
+  return { items, notFound: second.notFound, truncated };
 };
+
+/** What the model is handed of a recall, as far as these tests read it. */
+const handedSchema = z.object({
+  evidence: z.array(z.unknown()),
+  notFound: z.array(z.string()),
+});
 
 /** The budget both passes of the merge tests recall within. */
 const mergeBudget = { tokens: 3000 };
 
-// The second pass's pack merged into the first's (`mergeRecalled`), from
-// the ways it can fail: a memory both passes found is handed over twice;
-// the second pass's memories overrun the budget the first left; a fact
-// whose sides the two passes found apart is not shown as contested; what
-// the person may not read reaches the merged pack, or changes it at all.
-describe("two recalls merged into one pack", setUpTime, () => {
-  it("holds a memory both passes found once, then the second's own", async () => {
-    const person = await signedInWithRole(idp, "user");
-    const group = await teamOf(person.userId);
-    const [first, second] = [word(), word()];
-    const both = await remembered(
-      group,
-      [customer(`Depot ${word()}`)],
-      [fact("c", `Depot ${first} ships ${second}`)]
-    );
-    const own = await remembered(
-      group,
-      [customer(`Depot ${word()}`)],
-      [fact("c", `Depot ${second} closes`)]
-    );
-    const recall = recalledBy(person.userId, mergeBudget.tokens);
-    const merged = mergeRecalled(
-      await recall(first),
-      await recall(second),
-      mergeBudget
-    );
+// Passages alone before a question, as on main (GRA-1742): memories reach
+// the chat in their own pull request, re-checked when history is read
+// again. From the ways it can fail: a memory reaches the model, or takes
+// room or a word from what it is handed.
+describe(
+  "the recall before a question hands over passages alone",
+  setUpTime,
+  () => {
+    it("hands the model no memory: what only a memory answers is no evidence, and its words are not found", async () => {
+      const depot = word();
+      const chat = await recallingChat(says("I don't know."));
+      const statement = `Depot ${depot} opens at seven`;
+      await rememberAs(env, chat.personId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        type: "fact",
+        statement,
+        quote: statement,
+      });
+      await chat.ask(`When does depot ${depot} open?`);
+      const handed = recallIn(chat.provider.requests.at(-1)?.body) ?? "";
+      const { evidence, notFound } = handedSchema.parse(
+        JSON.parse(handed.slice(handed.indexOf("{")))
+      );
 
-    expect(idsOf(merged)).toStrictEqual([both.memories[0], own.memories[0]]);
-    expect(merged.truncated).toBeFalsy();
+      expect({
+        evidence,
+        depotNotFound: notFound.includes(depot),
+        memory: handed.includes(statement),
+      }).toStrictEqual({ evidence: [], depotNotFound: true, memory: false });
+    });
+
+    it("gives passages the whole budget, whatever memories the question also finds", async () => {
+      const person = await signedInWithRole(idp, "user");
+      const { readers, group } = await teamOf(person.userId);
+      const asked = word();
+      await added(`Depot ${asked} opens on Monday at the north gate`, readers);
+      const roomy = await recalledBy(person.userId, mergeBudget.tokens)(asked);
+      // Memories the same word finds, after: they take no room and hold no
+      // word for the pack of passages.
+      await remembered(group, `Depot ${asked} opens on Monday`);
+      await remembered(group, `Depot ${asked} keeps its keys at the gate`);
+      const exact = { tokens: tokensOf(roomy) };
+      const after = await recalledBy(person.userId, exact.tokens)(asked);
+      const afterRoomy = await recalledBy(
+        person.userId,
+        mergeBudget.tokens
+      )(asked);
+
+      expect(roomy.items).toHaveLength(1);
+      expect({ after, afterRoomy }).toStrictEqual({
+        after: roomy,
+        afterRoomy: roomy,
+      });
+    });
+  }
+);
+
+// The second pass's pack merged into the first's (`mergeRecalled`), from
+// the ways it can fail: a passage both passes found is handed over twice;
+// the second pass's passages overrun the budget the first left; what the
+// person may not read reaches the merged pack, or changes it at all.
+describe("two recalls merged into one pack", setUpTime, () => {
+  it("holds a passage both passes found once, then the second's own", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const { readers } = await teamOf(person.userId);
+    const [first, second] = [word(), word()];
+    await added(`Depot ${first} ships ${second}`, readers);
+    await added(`Depot ${second} closes`, readers);
+    const recall = recalledBy(person.userId, mergeBudget.tokens);
+    const firstPack = await recall(first);
+    const secondPack = await recall(second);
+    const merged = mergeRecalled(firstPack, secondPack, mergeBudget);
+
+    expect({
+      first: firstPack.items.length,
+      second: secondPack.items.length,
+      merged: placesOf(merged),
+      truncated: merged.truncated,
+    }).toStrictEqual({
+      first: 1,
+      second: 2,
+      merged: [
+        ...placesOf(firstPack),
+        ...placesOf(secondPack).filter(
+          (place) => !placesOf(firstPack).includes(place)
+        ),
+      ],
+      truncated: false,
+    });
   });
 
   it("keeps both passes within one budget, and says the second's was cut", async () => {
     const person = await signedInWithRole(idp, "user");
-    const group = await teamOf(person.userId);
-    const team: SourceReaders = {
-      kind: "team",
-      teamId: group.slice("team:".length),
-    };
+    const { readers } = await teamOf(person.userId);
     const [first, second] = [word(), word()];
-    await added(`Depot ${first} opens on Monday at the north gate`, team);
-    await remembered(
-      group,
-      [customer(`Depot ${word()}`)],
-      [fact("c", `Depot ${first} opens on Monday`)]
-    );
-    await added(
-      `Depot ${second} opens on Tuesday at noon, at the south gate, by the long road past the harbour and the old mill`,
-      team
-    );
-    const later = await remembered(
-      group,
-      [customer(`Depot ${word()}`)],
-      [fact("c", `Depot ${second} opens on Tuesday`)]
-    );
+    await added(`Depot ${first} opens on Monday at the north gate`, readers);
+    await added(`Depot ${second} opens on Tuesday at noon`, readers);
     const recall = recalledBy(person.userId, mergeBudget.tokens);
     const firstPack = await recall(first);
     const secondPack = await recall(second);
-    const held = tokensOf(firstPack);
-    const [laterItem] = secondPack.items;
-    const itemTokens = laterItem === undefined ? 0 : itemTokensOf(laterItem);
-    const memoryTokens = memoryTokensOf(secondPack);
-    // Room for the second's memory, not its passage: the passage is left
-    // out, the memory joins, and the pack says it was cut.
-    const tight = { tokens: held + memoryTokens };
-    const merged = mergeRecalled(firstPack, secondPack, tight);
-    const roomy = mergeRecalled(firstPack, secondPack, {
-      tokens: held + itemTokens + memoryTokens,
-    });
+    const room = tokensOf(firstPack) + tokensOf(secondPack);
+    const tight = mergeRecalled(firstPack, secondPack, { tokens: room - 1 });
+    const roomy = mergeRecalled(firstPack, secondPack, { tokens: room });
 
     expect({
-      shape: [
-        firstPack.items.length,
-        firstPack.memories.length,
-        secondPack.items.length,
-        itemTokens > memoryTokens,
-      ],
-      tight: {
-        items: merged.items,
-        memories: idsOf(merged),
-        truncated: merged.truncated,
-        within: tokensOf(merged) <= tight.tokens,
-      },
-      roomy: {
-        items: roomy.items,
-        memories: idsOf(roomy),
-        truncated: roomy.truncated,
-      },
+      tight: placesOf(tight),
+      tightCut: tight.truncated,
+      within: tokensOf(tight) <= room - 1,
+      roomy: placesOf(roomy),
+      roomyCut: roomy.truncated,
     }).toStrictEqual({
-      shape: [1, 1, 1, true],
-      tight: {
-        items: firstPack.items,
-        memories: [...idsOf(firstPack), later.memories[0]],
-        truncated: true,
-        within: true,
-      },
-      roomy: {
-        items: [...firstPack.items, ...secondPack.items],
-        memories: [...idsOf(firstPack), later.memories[0]],
-        truncated: false,
-      },
+      tight: placesOf(firstPack),
+      tightCut: true,
+      within: true,
+      roomy: [...placesOf(firstPack), ...placesOf(secondPack)],
+      roomyCut: false,
     });
   });
 
-  // Packs of every shape, the second sharing items and memories with the
-  // first: the merged pack never goes over the budget, and it is what one
-  // pass over the first pass, then the second's new items, then its new
-  // memories, keeping each while it fits, would give.
+  // Packs of every shape, the second sharing passages with the first: the
+  // merged pack never goes over the budget, and it is what one pass over
+  // the first's passages, then the second's new ones, keeping each while
+  // it fits, would give.
   it("never goes over the budget, and fits as one pass over both would", () => {
     let seed = 7;
     const random = (): number => {
@@ -1425,25 +1362,19 @@ describe("two recalls merged into one pack", setUpTime, () => {
       return seed / 2_147_483_648;
     };
     const count = (most: number): number => Math.floor(random() * (most + 1));
-    const text = (): string => "word ".repeat(1 + count(120));
-    const items = Array.from({ length: 8 }, (_, index) =>
-      randomItem(`s${index}`, text())
+    const items = Array.from({ length: 12 }, (_, index) =>
+      randomItem(`s${index}`, "word ".repeat(1 + count(120)))
     );
-    const memories = Array.from({ length: 8 }, () => randomMemory(text()));
     const some = <T>(list: readonly T[]): T[] =>
       list.filter(() => random() < 0.4);
     for (let round = 0; round < 300; round += 1) {
-      const first: RecalledPack = {
+      const first: RecalledPassages = {
         items: some(items),
-        memories: some(memories),
-        contested: [],
         notFound: [],
         truncated: random() < 0.2,
       };
-      const second: RecalledPack = {
+      const second: RecalledPassages = {
         items: some(items),
-        memories: some(memories),
-        contested: [],
         notFound: [],
         truncated: random() < 0.2,
       };
@@ -1455,75 +1386,16 @@ describe("two recalls merged into one pack", setUpTime, () => {
     }
   });
 
-  it("shows a fact as contested when each pass held one side of it", async () => {
-    const person = await signedInWithRole(idp, "user");
-    const group = await teamOf(person.userId);
-    const name = `${word()} ${word()}`;
-    const march = await remembered(
-      group,
-      [customer(name)],
-      [
-        fact("c", `${name} renews in March`, {
-          attribute: "renewal_date",
-          value: "March",
-        }),
-      ]
-    );
-    const june = await remembered(
-      group,
-      [customer(name)],
-      [
-        fact(
-          "c",
-          "The renewal is due in June",
-          { attribute: "renewal_date", value: "June" },
-          "ledger"
-        ),
-      ]
-    );
-    const pack = await recalledBy(person.userId, mergeBudget.tokens)(name);
-    const sideOf = (id: string | undefined): RecalledPack => ({
-      ...pack,
-      memories: pack.memories.filter(({ memory }) => memory === id),
-      contested: [],
-    });
-    const merged = mergeRecalled(
-      sideOf(march.memories[0]),
-      sideOf(june.memories[0]),
-      mergeBudget
-    );
-
-    expect(pack.contested).toHaveLength(1);
-    expect(merged.contested).toStrictEqual([
-      {
-        about: march.entities.c,
-        attribute: "renewal_date",
-        memories: [march.memories[0], june.memories[0]],
-      },
-    ]);
-  });
-
   it("is the same pack when the second pass's words reach what the person may not read", async () => {
     const person = await signedInWithRole(idp, "user");
-    const group = await teamOf(person.userId);
-    const hiddenGroup = `team:${crypto.randomUUID()}`;
+    const { readers } = await teamOf(person.userId);
+    const other = await signedInWithRole(idp, "user");
+    const { readers: theirTeam, group: theirGroup } = await teamOf(
+      other.userId
+    );
     const [first, second, theirs] = [word(), word(), word()];
-    const name = `Depot ${word()}`;
-    await remembered(
-      group,
-      [customer(`Depot ${word()}`)],
-      [fact("c", `Depot ${first} ships ${second}`)]
-    );
-    const renewing = await remembered(
-      group,
-      [customer(name)],
-      [
-        fact("c", `Depot ${second} renews in March`, {
-          attribute: "renewal_date",
-          value: "March",
-        }),
-      ]
-    );
+    await added(`Depot ${first} ships ${second}`, readers);
+    await added(`Depot ${second} renews in March`, readers);
     const recall = recalledBy(person.userId, mergeBudget.tokens);
     const asked = async () =>
       mergeRecalled(
@@ -1532,25 +1404,15 @@ describe("two recalls merged into one pack", setUpTime, () => {
         mergeBudget
       );
     const before = await asked();
-    // What only another team may read: a memory holding both of the second
-    // pass's words, and a rival side of the person's own fact.
-    await remembered(
-      hiddenGroup,
-      [customer(`Depot ${word()}`)],
-      [fact("c", `Depot ${second} ${theirs} keeps the other team's note`)]
+    // What only another team may read, holding both of the second pass's
+    // words: a passage, and a memory.
+    await added(
+      `Depot ${second} ${theirs} keeps the other team's note`,
+      theirTeam
     );
     await remembered(
-      hiddenGroup,
-      [{ ...customer(name), id: renewing.entities.c ?? "" }],
-      [
-        fact(
-          "c",
-          `Depot ${second} renews in June`,
-          { attribute: "renewal_date", value: "June" },
-          "ledger"
-        ),
-      ],
-      { person: crypto.randomUUID(), groups: [group, hiddenGroup] }
+      theirGroup,
+      `Depot ${second} ${theirs} keeps another note`
     );
 
     expect(before.notFound).toContain(theirs);

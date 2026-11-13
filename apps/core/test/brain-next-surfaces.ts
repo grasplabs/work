@@ -1228,6 +1228,68 @@ const erasedBefore = async (personId: string): Promise<string> => {
   return personId;
 };
 
+/**
+ * The probe of a recall of core's (`recallAs`, `recallPassagesAs`): the
+ * markers, their twins and every way it can refuse, as the reader asks.
+ */
+const recallProbe =
+  (recall: typeof coreBrain.recallAs | typeof coreBrain.recallPassagesAs) =>
+  async (probing: Probing): Promise<Answer[]> => {
+    await recallFixture(probing);
+    const asked = async (asking: PackAsk) =>
+      await recall(env, probing.personId, {
+        ...asking,
+        personal: probing.personal,
+      });
+    const hidden = probing.markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
+    return [
+      ...(await askedOfMarkers(probing, momentsOf(probing), asked)),
+      await answer(
+        "the shared word",
+        async () => await asked({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await asked({ question: "Plain", budget: whole })
+      ),
+      await answer(
+        "nothing",
+        async () => await asked({ question: "", budget: whole })
+      ),
+      await answer(
+        "too long a question",
+        async () =>
+          await asked({
+            question: `${hidden} `
+              .repeat(questionMaxLength)
+              .slice(0, questionMaxLength + 1),
+            budget: whole,
+          })
+      ),
+      await answer(
+        "no tokens",
+        async () => await asked({ question: hidden, budget: { tokens: 0 } })
+      ),
+      await answer(
+        "a moment named by the markers",
+        async () =>
+          await asked(
+            unchecked({ question: hidden, budget: whole, asOf: hidden })
+          )
+      ),
+      await answer(
+        "the markers, as someone who isn't a member",
+        async () =>
+          await recall(env, stranger(), {
+            personal: true,
+            question: hidden,
+            budget: whole,
+          })
+      ),
+    ];
+  };
+
 /** One probe per export of core's brain-next.ts. */
 export const coreProbes = {
   addSource: async ({ markers, hiddenVersions }) => {
@@ -1506,12 +1568,12 @@ export const coreProbes = {
     // The markers' pack joined by a pack of what the reader may read must
     // be their twins' pack joined by the same.
     const merged = async (words: readonly string[]) => {
-      const asked = await coreBrain.recallAs(env, personId, {
+      const asked = await coreBrain.recallPassagesAs(env, personId, {
         question: words.join(" "),
         budget: whole,
         personal,
       });
-      const shared = await coreBrain.recallAs(env, personId, {
+      const shared = await coreBrain.recallPassagesAs(env, personId, {
         question: sharedWord,
         budget: whole,
         personal,
@@ -1527,62 +1589,8 @@ export const coreProbes = {
       ),
     ];
   },
-  recallAs: async (probing) => {
-    await recallFixture(probing);
-    const recall = async (asking: PackAsk) =>
-      await coreBrain.recallAs(env, probing.personId, {
-        ...asking,
-        personal: probing.personal,
-      });
-    const hidden = probing.markers.join(" ");
-    const whole = { tokens: recallBudgetMax };
-    return [
-      ...(await askedOfMarkers(probing, momentsOf(probing), recall)),
-      await answer(
-        "the shared word",
-        async () =>
-          await recall({ question: probing.sharedWord, budget: whole })
-      ),
-      await answer(
-        "the reader's own entity, which hidden relations name",
-        async () => await recall({ question: "Plain", budget: whole })
-      ),
-      await answer(
-        "nothing",
-        async () => await recall({ question: "", budget: whole })
-      ),
-      await answer(
-        "too long a question",
-        async () =>
-          await recall({
-            question: `${hidden} `
-              .repeat(questionMaxLength)
-              .slice(0, questionMaxLength + 1),
-            budget: whole,
-          })
-      ),
-      await answer(
-        "no tokens",
-        async () => await recall({ question: hidden, budget: { tokens: 0 } })
-      ),
-      await answer(
-        "a moment named by the markers",
-        async () =>
-          await recall(
-            unchecked({ question: hidden, budget: whole, asOf: hidden })
-          )
-      ),
-      await answer(
-        "the markers, as someone who isn't a member",
-        async () =>
-          await coreBrain.recallAs(env, stranger(), {
-            personal: true,
-            question: hidden,
-            budget: whole,
-          })
-      ),
-    ];
-  },
+  recallAs: recallProbe(coreBrain.recallAs),
+  recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
   addInstructionFile: async ({ markers }) => {
