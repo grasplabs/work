@@ -396,16 +396,20 @@ describe("the built-in blueprints", () => {
     });
   });
 
-  it("each create an App that builds", async () => {
-    await expect(ensureInstalled()).resolves.toBeTruthy();
-    const builder = await signedInApi(idp, "builder");
-    for (const blueprint of release.blueprints) {
-      // oxlint-disable-next-line no-await-in-loop -- one at a time, as the install does
+  // One test per built-in, each within its own time limit: on a slow
+  // runner only a built-in that is slow fails, and a new one is covered as
+  // it ships. Each signs in a builder of its own, so a retry never finds
+  // an App an attempt before it created.
+  it.each(release.blueprints.map((blueprint) => [blueprint.id, blueprint]))(
+    "each create an App that builds: %s",
+    async (_id, blueprint) => {
+      await expect(ensureInstalled()).resolves.toBeTruthy();
+      const builder = await signedInApi(idp, "builder");
       const created = await builder.api.apps.blueprints.create(blueprint.id, {
         name: blueprint.name,
       });
-      // It becomes current, as its creator makes it.
-      // oxlint-disable-next-line no-await-in-loop -- as above
+      // It becomes current, as its creator makes it: publishing builds,
+      // type-checks and tests it.
       await builder.api.apps.versions.publish(created.app.id, 1);
       // Its pages pass the compiler's checks, with the references they
       // import (`@server/_generated/api`), as they do when saved and opened.
@@ -414,11 +418,9 @@ describe("the built-in blueprints", () => {
           path.startsWith("src/routes/")
         )
       ) {
-        // oxlint-disable-next-line no-await-in-loop -- as above
         const { files } = await withDraftReferences(env, created.app.id, {
           ...blueprint.files,
         });
-        // oxlint-disable-next-line no-await-in-loop -- as above
         const pages = await buildPages(env, files, created.app.id);
         if (!pages.ok || pages.diagnostics.length > 0) {
           throw new Error(
@@ -427,7 +429,7 @@ describe("the built-in blueprints", () => {
         }
       }
     }
-  });
+  );
 
   it("take a changed release once, and leave Apps created from them alone", async () => {
     await reinstall();
