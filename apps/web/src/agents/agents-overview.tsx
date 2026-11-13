@@ -5,6 +5,7 @@ import type {
   AgentWake,
 } from "@grasp-os/shared/agents";
 import type { ChatAgent } from "@grasp-os/shared/chat";
+import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -48,6 +49,7 @@ import {
   useAudienceLine,
   wakesOn,
 } from "./agent-facts.tsx";
+import { OfferedAgents } from "./agent-share.tsx";
 
 // The Agents page: the company's agents as a grid of cards, as the Apps
 // page has its Apps (apps/apps-overview.tsx). Everyone sees the agents
@@ -341,6 +343,7 @@ export const AgentsOverview = ({
   own,
   makes,
   makesOwn,
+  offered,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
@@ -350,6 +353,8 @@ export const AgentsOverview = ({
   makes: boolean;
   /** Whether the person may make one of their own: anyone of the company. */
   makesOwn: boolean;
+  /** For admins: the agents people offered the company, and who they are. */
+  offered?: { agents: readonly Agent[]; people: readonly Member[] } | undefined;
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -505,6 +510,13 @@ export const AgentsOverview = ({
             </section>
           )}
         </>
+      )}
+      {offered === undefined ? null : (
+        <OfferedAgents
+          editable={makes}
+          offered={offered.agents}
+          people={offered.people}
+        />
       )}
     </Page>
   );

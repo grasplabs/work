@@ -7,10 +7,20 @@ import {
   companyToolClassSchema,
   toolClassAudienceSchema,
 } from "@grasp-os/shared/connect";
-import { roleErrors } from "@grasp-os/shared/roles";
+import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { appClassAudienceSchema } from "@grasp-os/shared/stephen-reach";
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -266,6 +276,7 @@ export const makeAgent = async (
     ...made,
     state: "on",
     ownerId: null,
+    offeredAt: null,
     changedBy: identity.userId,
     changedAt: now.toISOString(),
   };
@@ -346,7 +357,7 @@ export const makeOwnAgent = async (
     db.insert(agents).select(
       sql`SELECT ${id}, ${made.name}, NULL, ${made.face}, ${made.job},
           ${made.instructions}, ${made.modelRole}, ${made.model}, 'on',
-          ${ownerId}, ${ownerId}, ${now.getTime()}, ${ownerId},
+          ${ownerId}, NULL, ${ownerId}, ${now.getTime()}, ${ownerId},
           ${now.getTime()} WHERE ${room} AND ${member}`
     ),
     outboxedIfChanged(db, {
@@ -743,5 +754,194 @@ export const dropOwnAgentsOf = async (
   await db.batch([
     db.delete(agentDocuments).where(inArray(agentDocuments.agentId, own)),
     db.delete(agents).where(eq(agents.ownerId, personId)),
+  ]);
+};
+
+/**
+ * Offers `identity`'s own agent `agentId` to the company, or takes the
+ * offer back: its admins then read what it is and is told, and may take
+ * it on (`adoptAgent`). Its owner's alone to offer, while it is theirs.
+ * Throws as `changeableAgent` does, `agent.unknown` for one of the
+ * company's, and `agent.record_invalid` for what isn't a yes or no.
+ * Audited when it changed, with whether it is offered: never its name,
+ * which its owner hasn't shown anyone before.
+ */
+export const offerOwnAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown,
+  offered: unknown
+): Promise<void> => {
+  const agent = await changeableAgent(env, identity, agentId);
+  if (agent.ownerId === null) {
+    throw agentErrors.create("agent.unknown");
+  }
+  if (typeof offered !== "boolean") {
+    throw agentErrors.create("agent.record_invalid");
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(agents)
+      .set({ offeredAt: offered ? now : null })
+      .where(
+        and(
+          eq(agents.id, agent.id),
+          notDeleted,
+          ownedBy(agent.ownerId),
+          offered ? isNull(agents.offeredAt) : isNotNull(agents.offeredAt)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(identity),
+      action: "agent.offered",
+      target: { type: "agent", id: agent.id },
+      detail: { offered: String(offered) },
+    }),
+  ]);
+};
+
+/**
+ * The agents people offered the company, the oldest offer first: for its
+ * admins, Grasp's staff among them, who read and change nothing.
+ */
+export const listOfferedAgents = async (
+  env: Env,
+  identity: Identity
+): Promise<Agent[]> => {
+  requireAdmin(identity);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(agents)
+    .where(and(isNotNull(agents.ownerId), isNotNull(agents.offeredAt)))
+    .orderBy(asc(agents.offeredAt), asc(agents.id));
+  return rows.flatMap((row) => agentOfRow(row) ?? []);
+};
+
+/** The agent `agentId`, while it is offered to the company; else `agent.not_offered`. */
+const requireOffered = async (env: Env, agentId: unknown): Promise<Agent> => {
+  const agent =
+    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
+  if (
+    agent === undefined ||
+    agent.ownerId === null ||
+    agent.offeredAt === null
+  ) {
+    throw agentErrors.create("agent.not_offered");
+  }
+  return agent;
+};
+
+/**
+ * Takes on the agent `agentId` its owner offered the company: it becomes
+ * one of the company's, under its name, which must be free among the
+ * company's (`agent.name_taken`), on, reaching nobody and with every class
+ * for nobody, as one an admin makes, with its instructions and documents
+ * as its owner left them. Throws `agent.not_offered` for one that isn't
+ * offered now. The company's own admins only, never Grasp's staff.
+ *
+ * The batch holds what was read: the agent is taken on only while it is
+ * still offered by the same owner, and its reach and classes are written
+ * only once it is the company's, so an offer taken back meanwhile leaves
+ * it as it was, and records nothing.
+ */
+export const adoptAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown
+): Promise<void> => {
+  requireCompanyAdmin(identity);
+  const agent = await requireOffered(env, agentId);
+  await requireNameFree(env, agent.name, agent.id);
+  const now = new Date();
+  const by = { changedBy: identity.userId, changedAt: now };
+  const db = drizzle(env.DB);
+  const isCompanys = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agent.id} AND ${agents.ownerId} IS NULL AND ${agents.state} IS NOT 'deleted')`;
+  await namedOnce(
+    async () =>
+      await auditedBatch(env, db, [
+        db
+          .update(agents)
+          .set({
+            ownerId: null,
+            offeredAt: null,
+            nameKey: agentNameKey(agent.name),
+            ...by,
+          })
+          .where(
+            and(
+              eq(agents.id, agent.id),
+              notDeleted,
+              ownedBy(agent.ownerId),
+              isNotNull(agents.offeredAt)
+            )
+          ),
+        outboxedIfChanged(db, {
+          actor: actorOf(identity),
+          action: "agent.adopted",
+          target: { type: "agent", id: agent.id },
+          detail: detailOf({ ...agent, model: agent.model }),
+        }),
+        // Reaching nobody, every class for nobody: as a new agent starts.
+        db
+          .insert(agentReach)
+          .select(
+            sql`SELECT ${agent.id}, 1, 'nobody', '[]', ${identity.userId}, ${now.getTime()} WHERE ${isCompanys}`
+          )
+          // Nobody, whatever a row under its ID said before.
+          .onConflictDoUpdate({
+            target: agentReach.agentId,
+            set: { on: true, who: "nobody", teams: "[]", ...by },
+          }),
+        ...companyToolClasses.map((toolClass) =>
+          db
+            .insert(agentToolClasses)
+            .select(
+              sql`SELECT ${agent.id}, ${toolClass}, 'nobody', '[]', ${identity.userId}, ${now.getTime()} WHERE ${isCompanys}`
+            )
+            .onConflictDoUpdate({
+              target: [agentToolClasses.agentId, agentToolClasses.toolClass],
+              set: { who: "nobody", teams: "[]", ...by },
+            })
+        ),
+      ])
+  );
+  const after = await readAgent(env, agent.id);
+  if (after?.ownerId !== null) {
+    throw agentErrors.create("agent.not_offered");
+  }
+};
+
+/**
+ * Declines the agent `agentId` offered to the company: it stays its
+ * owner's, and no longer offered. Throws `agent.not_offered`. The
+ * company's own admins only.
+ */
+export const declineAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown
+): Promise<void> => {
+  requireCompanyAdmin(identity);
+  const agent = await requireOffered(env, agentId);
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(agents)
+      .set({ offeredAt: null })
+      .where(
+        and(
+          eq(agents.id, agent.id),
+          ownedBy(agent.ownerId),
+          isNotNull(agents.offeredAt)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(identity),
+      action: "agent.declined",
+      target: { type: "agent", id: agent.id },
+      detail: { offered: "false" },
+    }),
   ]);
 };

@@ -42,6 +42,7 @@ const firstAgent: Agent = {
   model: null,
   state: "on",
   ownerId: null,
+  offeredAt: null,
   changedBy: null,
   changedAt: null,
 };
@@ -62,6 +63,7 @@ export const agentOfRow = (
         model: row.model,
         state: row.state,
         ownerId: row.ownerId,
+        offeredAt: row.offeredAt?.toISOString() ?? null,
         changedBy: row.changedBy,
         changedAt: row.changedAt.toISOString(),
       };

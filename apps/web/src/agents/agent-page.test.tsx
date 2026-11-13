@@ -57,6 +57,7 @@ const stephen: Agent = {
   model: null,
   state: "on",
   ownerId: null,
+  offeredAt: null,
   changedBy: null,
   changedAt: null,
 };
@@ -129,6 +130,7 @@ const fakeConnections = () => {
         model: input.model ?? null,
         state: "on",
         ownerId: null,
+        offeredAt: null,
         changedBy: "admin",
         changedAt: "2026-11-12T09:00:00.000Z",
       };
@@ -153,12 +155,18 @@ const fakeConnections = () => {
         model: input.model ?? null,
         state: "on",
         ownerId: "user-me",
+        offeredAt: null,
         changedBy: "user-me",
         changedAt: "2026-11-12T09:00:00.000Z",
       };
       // As core makes it: theirs alone, with no settings of its own.
       agents = [...agents, made];
       return made;
+    },
+    offerOwnAgent: async (id: string, offered: boolean) => {
+      await Promise.resolve();
+      asked.push(["offer", id, offered]);
+      changed(id, { offeredAt: offered ? "2026-11-13T09:00:00.000Z" : null });
     },
     changeAgent: async (id: string, input: AgentInput) => {
       await Promise.resolve();
@@ -616,6 +624,31 @@ describe("an agent's page", () => {
       who: true,
       asked: [["change", "agent-1", { ...claire, name: "Clara" }]],
     });
+  });
+
+  it("offers a person's own agent to the company from its page, and takes the offer back", async () => {
+    const { connections, asked } = fakeConnections();
+    await connections.makeOwnAgent(claire);
+    asked.length = 0;
+    await shown(connections, { agent: "Claire" });
+    await press(button("Offer to the company"));
+    const offered = document.body.textContent.includes(
+      "Your company's admins can now read what Claire is told"
+    );
+    await press(button("Take the offer back"));
+    expect({ offered, asked }).toStrictEqual({
+      offered: true,
+      asked: [
+        ["offer", "agent-1", true],
+        ["offer", "agent-1", false],
+      ],
+    });
+  });
+
+  it("offers no company agent to the company", async () => {
+    const { connections } = await withClaire();
+    await shown(connections, { agent: "Claire" });
+    expect(document.body.textContent).not.toContain("Offer to the company");
   });
 
   it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {

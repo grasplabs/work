@@ -65,6 +65,7 @@ import {
   wakesOn,
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
+import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes } from "./agent-wakes.tsx";
 
 // One agent's page, for the company's admins: what it is, what it is
@@ -586,6 +587,7 @@ export const AgentPage = ({
               wakes={wakes}
             />
             {usage === undefined ? null : <Usage usage={usage} />}
+            <ShareAgent agent={agent} can={can} change={change} />
             <SettingsSection
               description={t`What people call it, one line on what it is for, and its picture. All three show where people pick an agent.`}
               title={t`Name, job and picture`}

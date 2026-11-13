@@ -1709,6 +1709,13 @@
       "when": 1794567894289,
       "tag": "0243_agent_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "6",
+      "when": 1794572285389,
+      "tag": "0244_agent_offered",
+      "breakpoints": true
     }
   ]
 }

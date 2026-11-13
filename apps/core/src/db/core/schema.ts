@@ -3212,6 +3212,11 @@ export const agents = sqliteTable(
      * theirs the same.
      */
     ownerId: text("owner_id"),
+    /**
+     * When its owner offered a person's own agent to the company, for its
+     * admins to take on (agent-builder.ts, `adoptAgent`); null for none.
+     */
+    offeredAt: timestamp("offered_at"),
     madeBy: text("made_by").notNull(),
     madeAt: timestamp("made_at").notNull(),
     changedBy: text("changed_by").notNull(),

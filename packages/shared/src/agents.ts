@@ -46,6 +46,12 @@ export interface Agent {
    * Null for one of the company's, which its admins make.
    */
   ownerId: string | null;
+  /**
+   * When its owner offered a person's own agent to the company, for its
+   * admins to take on as one of the company's (ISO 8601); null for none
+   * offered, and for every company agent.
+   */
+  offeredAt: string | null;
   /** Who last changed it, and when; null: as Grasp ships it. */
   changedBy: string | null;
   changedAt: string | null;
@@ -196,6 +202,23 @@ export interface AgentsApi {
    * agent do for them. Up to {@link ownAgentsMax} a person.
    */
   makeOwnAgent: (input: AgentInput) => Promise<Agent>;
+  /**
+   * Offers one of the person's own agents to the company, for its admins
+   * to take on (`adoptAgent`), or takes the offer back. Its admins then
+   * read what it is and is told, which nobody but its owner did before.
+   */
+  offerOwnAgent: (agentId: string, offered: boolean) => Promise<void>;
+  /** For admins: the agents people offered the company, the oldest offer first. */
+  offeredAgents: () => Promise<Agent[]>;
+  /**
+   * Takes on an agent offered to the company: it becomes one of the
+   * company's, on, reaching nobody and with every class for nobody until
+   * an admin says otherwise, as one an admin makes. Its owner no longer
+   * changes it. The company's own admins only.
+   */
+  adoptAgent: (agentId: string) => Promise<void>;
+  /** Declines an agent offered to the company: it stays its owner's. */
+  declineAgent: (agentId: string) => Promise<void>;
   /** Changes an agent's name, face, job, instructions or model role. */
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */

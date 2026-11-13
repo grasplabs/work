@@ -64,6 +64,21 @@ export const readManaged = async (session: Session): Promise<ManagedAgents> => {
   };
 };
 
+/**
+ * The agents people offered the company, and the people to name them by:
+ * none where core won't say them, and the page still shows the rest.
+ */
+const readOffered = async (session: Session) => {
+  const [agents, people] = await Promise.allSettled([
+    session.connections.offeredAgents(),
+    session.members.list(),
+  ]);
+  return {
+    agents: agents.status === "fulfilled" ? agents.value : [],
+    people: people.status === "fulfilled" ? people.value : [],
+  };
+};
+
 const AgentsPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
@@ -78,6 +93,7 @@ const AgentsPage = () => {
         makes={isMemberAdmin(identity)}
         makesOwn={!identity.staff}
         managed={page.data.managed}
+        offered={page.data.offered}
         own={page.data.own}
         usable={page.data.usable}
       />
@@ -90,13 +106,15 @@ export const Route = createFileRoute("/_shell/agents/")({
   component: AgentsPage,
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
-      const [usable, own, managed] = await Promise.all([
+      const admin = isAdmin(identity.role);
+      const [usable, own, managed, offered] = await Promise.all([
         session.chats.agents(),
         // The person's own, which nobody else is ever listed.
         session.connections.ownAgents(),
         // Admins, Grasp's staff among them, who read and change nothing.
-        isAdmin(identity.role) ? readManaged(session) : undefined,
+        admin ? readManaged(session) : undefined,
+        admin ? readOffered(session) : undefined,
       ]);
-      return { usable, own, managed };
+      return { usable, own, managed, offered };
     }),
 });

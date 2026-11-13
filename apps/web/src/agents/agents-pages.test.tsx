@@ -47,6 +47,7 @@ const agentOf = (id: string, name: string, change: Partial<Agent>): Agent => ({
   job: `${name}'s job.`,
   instructions: `${name}'s instructions.`,
   ownerId: null,
+  offeredAt: null,
   modelRole: null,
   model: null,
   state: "on",
@@ -159,6 +160,14 @@ const mounted = async (shown: ReactNode): Promise<Asked> => {
     deleteAgent: async (id: string) => {
       await Promise.resolve();
       asked.push(["deleted", id]);
+    },
+    adoptAgent: async (id: string) => {
+      await Promise.resolve();
+      asked.push(["adopted", id]);
+    },
+    declineAgent: async (id: string) => {
+      await Promise.resolve();
+      asked.push(["declined", id]);
     },
   };
   const core = {
@@ -335,6 +344,88 @@ describe("the company's agents, on pages of their own", () => {
         newAgent: true,
         alone: true,
       });
+    });
+
+    it("shows an admin the agents people offered the company, who from and what they are told, and takes one on or declines it", async () => {
+      const offered = [
+        agentOf("agent-scribe", "Scribe", {
+          ownerId: "user-anna",
+          offeredAt: "2026-11-13T09:00:00.000Z",
+          instructions: "Short sentences.",
+        }),
+        agentOf("agent-idle", "Idle", {
+          ownerId: "user-gone",
+          offeredAt: "2026-11-13T10:00:00.000Z",
+        }),
+      ];
+      const people = [
+        {
+          userId: "user-anna",
+          name: "Anna de Vries",
+          email: "anna@acme.test",
+          role: "user" as const,
+          joinedAt: "2026-01-05T09:00:00.000Z",
+        },
+      ];
+      const asked = await mounted(
+        <AgentsOverview
+          makes
+          makesOwn
+          managed={managed}
+          offered={{ agents: offered, people }}
+          own={[]}
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      const text = document.body.textContent ?? "";
+      await press(
+        document.querySelector("[aria-label='Take Scribe on for the company']")
+      );
+      const [, declineIdle] = [...document.querySelectorAll("button")].filter(
+        (each) => each.textContent?.trim() === "Decline"
+      );
+      await press(declineIdle);
+      expect({
+        from: text.includes("From Anna de Vries"),
+        gone: text.includes("From Someone no longer in the company"),
+        told: text.includes("Short sentences."),
+        asked,
+      }).toStrictEqual({
+        from: true,
+        gone: true,
+        told: true,
+        asked: [
+          ["adopted", "agent-scribe"],
+          ["declined", "agent-idle"],
+        ],
+      });
+    });
+
+    it("gives an admin among Grasp's staff no way to take an offered agent on", async () => {
+      await mounted(
+        <AgentsOverview
+          makes={false}
+          makesOwn={false}
+          managed={managed}
+          offered={{
+            agents: [
+              agentOf("agent-scribe", "Scribe", {
+                ownerId: "user-anna",
+                offeredAt: "2026-11-13T09:00:00.000Z",
+              }),
+            ],
+            people: [],
+          }}
+          own={[]}
+          usable={[]}
+        />
+      );
+      expect({
+        listed: document.body.textContent?.includes("Scribe"),
+        takeOn: document.querySelector(
+          "[aria-label='Take Scribe on for the company']"
+        ),
+      }).toStrictEqual({ listed: true, takeOn: null });
     });
 
     it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {

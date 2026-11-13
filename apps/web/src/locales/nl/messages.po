@@ -2199,6 +2199,10 @@ msgstr "Agent niet gevonden"
 msgid "Agents"
 msgstr "Agents"
 
+#: src/agents/agent-share.tsx
+msgid "Agents people made for themselves and offered to the company. Taking one on makes it the company's: it starts reaching nobody, with nothing it may do, until you say so."
+msgstr "Agents die mensen voor zichzelf maakten en aan het bedrijf aanboden. Neem je er een over, dan is hij van het bedrijf: hij bereikt eerst niemand en mag niets doen, tot jij het zegt."
+
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
 msgstr "Agents lezen dit voordat ze erin kijken."
@@ -4609,6 +4613,7 @@ msgstr "Beslissing niet gevonden"
 msgid "Decisions"
 msgstr "Beslissingen"
 
+#: src/agents/agent-share.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
 msgstr "Weigeren"
@@ -5959,6 +5964,14 @@ msgstr "Uit"
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "Van"
+
+#: src/agents/agent-share.tsx
+msgid "From {from}"
+msgstr "Van {from}"
+
+#: src/agents/agent-share.tsx
+msgid "From {from} · {job}"
+msgstr "Van {from} · {job}"
 
 #: src/onboarding/about-story.tsx
 msgid "From all of that, I work out where AI saves your team the most time."
@@ -9197,6 +9210,10 @@ msgstr "Genoteerd: {name}. We koppelen het samen met jou. Controleer intussen wi
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Genoteerd. We nemen contact op om het samen met je op de laptops te zetten."
 
+#: src/agents/agent-share.tsx
+msgid "Nothing beyond Grasp's own rules."
+msgstr "Niets buiten de eigen regels van Grasp."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Nog niets gekoppeld."
@@ -9427,6 +9444,22 @@ msgstr "Uit: niemand kan het koppelen, beheerders ook niet. Bestaande koppelinge
 #: src/connections/offer-switch.tsx
 msgid "Offer {name}"
 msgstr "{name} aanbieden"
+
+#: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Bied {name} aan de beheerders van je bedrijf aan. Nemen zij hem over, dan wordt hij een agent van het bedrijf: zij kiezen wie hem iets mag vragen en wat hij mag doen, en jij wijzigt hem niet meer."
+
+#: src/agents/agent-share.tsx
+msgid "Offer to the company"
+msgstr "Aan het bedrijf aanbieden"
+
+#: src/agents/agent-share.tsx
+msgid "Offered on {since}. Your company's admins can now read what {name} is told and the documents it has, and may take it on."
+msgstr "Aangeboden op {since}. De beheerders van je bedrijf kunnen nu lezen wat {name} wordt verteld en welke documenten hij heeft, en hem overnemen."
+
+#: src/agents/agent-share.tsx
+msgid "Offered to the company"
+msgstr "Aan het bedrijf aangeboden"
 
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
@@ -12305,6 +12338,10 @@ msgstr "Deze herinnering delen"
 msgid "Share with"
 msgstr "Delen met"
 
+#: src/agents/agent-share.tsx
+msgid "Share with the company"
+msgstr "Delen met het bedrijf"
+
 #: src/apps/publish.tsx
 #: src/frame/setting-up.tsx
 msgid "Share with your team"
@@ -12686,6 +12723,7 @@ msgstr "Iemand heeft de organisatie verlaten"
 msgid "Someone no longer here"
 msgstr "Iemand die er niet meer is"
 
+#: src/agents/agent-share.tsx
 #: src/agents/agent-wakes.tsx
 msgid "Someone no longer in the company"
 msgstr "Iemand die niet meer in het bedrijf zit"
@@ -13141,6 +13179,10 @@ msgstr "{itemName} uit {projectName} halen?"
 msgid "Take {itemName} out of the project"
 msgstr "{itemName} uit het project halen"
 
+#: src/agents/agent-share.tsx
+msgid "Take {name} on for the company"
+msgstr "{name} overnemen voor het bedrijf"
+
 #: src/projects/project-people.tsx
 msgid "Take {name} out of {projectName}?"
 msgstr "{name} uit {projectName} halen?"
@@ -13157,6 +13199,10 @@ msgstr "{who} uit {name} halen"
 msgid "Take off the dashboard"
 msgstr "Van het dashboard halen"
 
+#: src/agents/agent-share.tsx
+msgid "Take on"
+msgstr "Overnemen"
+
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -13169,6 +13215,10 @@ msgstr "Weghalen: {text}"
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Teamleiders uit {name} halen"
+
+#: src/agents/agent-share.tsx
+msgid "Take the offer back"
+msgstr "Aanbod intrekken"
 
 #: src/frame/person-menu.tsx
 msgid "Take the tour"
@@ -15697,6 +15747,10 @@ msgstr "Waar hij voor is"
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "Waarvoor hij is"
+
+#: src/agents/agent-share.tsx
+msgid "What it is told"
+msgstr "Wat hem wordt verteld"
 
 #: src/agents/agent-page.tsx
 msgid "What it may do"
