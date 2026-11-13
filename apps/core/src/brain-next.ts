@@ -108,7 +108,6 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { connectionOfCapture } from "./connection-capture-key.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
@@ -391,28 +390,7 @@ export interface RecalledItem extends Omit<PackItem, "source"> {
 /** A pack, as recall answers (`recallAs`). */
 export interface RecalledPack extends Omit<Pack, "items"> {
   items: RecalledItem[];
-  /**
-   * The connections likely to hold more ("look elsewhere"): those the
-   * pack's own captured items came from (`capture` sources), in the order
-   * of their first item, each once. Only from items the reader may read,
-   * so a source they may not read never names its connection. An agent
-   * looks there with its own tools, if it may use them.
-   */
-  elsewhere: string[];
 }
-
-/** The connections `items` were captured from, by first item, each once. */
-const elsewhereOf = (items: readonly RecalledItem[]): string[] => [
-  ...new Set(
-    items.flatMap(({ source }) => {
-      const connection =
-        source.producer === "capture"
-          ? connectionOfCapture(source.id)
-          : undefined;
-      return connection === undefined ? [] : [connection];
-    })
-  ),
-];
 
 /** A version of a source, whole. */
 export interface SourceVersion extends SourceVersionRef {
@@ -667,6 +645,12 @@ export const addSource = async (
       "Refused: only a source for one person alone is in a group, of its own producer"
     );
   }
+  // What an agent read through a person's own connection is theirs alone
+  // (connection-capture.ts): never in the shared store, so never in a
+  // recall that doesn't read their own store, such as code's.
+  if (source.producer === "capture" && readers.kind !== "owner") {
+    throw new Error("Refused: a capture is for one person alone");
+  }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);
   let version: number;
@@ -789,21 +773,17 @@ export const recallAs = async (
           // to the store given first.
           await Promise.all([brain(env).find(request), own.find(request)])
         );
-  const recalled = items.map(
-    ({ source, version, position, text, whole, found }) => ({
+  return {
+    items: items.map(({ source, version, position, text, whole, found }) => ({
       source: sourceRefOf(source),
       version,
       position,
       text,
       whole,
       found,
-    })
-  );
-  return {
-    items: recalled,
+    })),
     notFound,
     truncated,
-    elsewhere: elsewhereOf(recalled),
   };
 };
 
@@ -845,13 +825,7 @@ export const mergeRecalled = (
     items.push(item);
     used += tokens;
   }
-  // Where else to look, from the merged items alone, as any pack's.
-  return {
-    items,
-    notFound: second.notFound,
-    truncated,
-    elsewhere: elsewhereOf(items),
-  };
+  return { items, notFound: second.notFound, truncated };
 };
 
 /**

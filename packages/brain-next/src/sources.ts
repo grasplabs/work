@@ -141,6 +141,10 @@ const versionFields = {
   readers: readerSets.key,
 };
 
+/** When `added`'s text was read, as a change row keeps it, if it said. */
+const readAtOf = (added: NewSource): { readAt?: Date } =>
+  added.readAt === undefined ? {} : { readAt: new Date(added.readAt) };
+
 /**
  * The version `adding` already made or matches, by the order above,
  * keeping a new change's key for the current version it matches; or
@@ -205,15 +209,18 @@ const madeBefore = (
       source: added.source,
       change: added.change,
       versionRow: current.row,
+      ...readAtOf(added),
     })
     .run();
   return { source: added.source, version: current.version };
 };
 
 /**
- * The source's current version when it was read later than `added`'s
- * text (both say when they were read), marked `newer`: then `added` is
- * written nowhere.
+ * The source's current version when its text was last read later than
+ * `added`'s (each says when it was read: the latest `read_at` among the
+ * current version's changes, `readAtOf`), marked `newer`: then `added` is
+ * written nowhere. A later read of the current text is a change of the
+ * current version (`madeBefore`), so it counts too.
  */
 const newerThan = (
   db: DrizzleSqliteDODatabase,
@@ -223,18 +230,26 @@ const newerThan = (
     return undefined;
   }
   const current = db
-    .select({ version: sourceVersions.version, readAt: sourceVersions.readAt })
+    .select({
+      version: sourceVersions.version,
+      readAt: max(sourceChanges.readAt),
+    })
     .from(currentVersions)
     .innerJoin(
       sourceVersions,
       eq(sourceVersions.row, currentVersions.versionRow)
     )
+    .innerJoin(
+      sourceChanges,
+      eq(sourceChanges.versionRow, currentVersions.versionRow)
+    )
     .where(eq(currentVersions.source, added.source))
+    .groupBy(sourceVersions.version)
     .get();
-  const currentReadAt = current?.readAt ?? undefined;
+  const lastRead = current?.readAt ?? undefined;
   return current !== undefined &&
-    currentReadAt !== undefined &&
-    currentReadAt.getTime() > added.readAt
+    lastRead !== undefined &&
+    lastRead.getTime() > added.readAt
     ? { source: added.source, version: current.version, newer: true }
     : undefined;
 };
@@ -313,7 +328,6 @@ const record = (
       file: hash,
       readerSet: readerSetOf(db, added.access),
       addedAt: new Date(),
-      ...(added.readAt === undefined ? {} : { readAt: new Date(added.readAt) }),
     })
     .returning({ row: sourceVersions.row })
     .get();
@@ -333,7 +347,12 @@ const record = (
     enqueueEmbedding(storage, added.source, version);
   }
   db.insert(sourceChanges)
-    .values({ source: added.source, change: added.change, versionRow: row })
+    .values({
+      source: added.source,
+      change: added.change,
+      versionRow: row,
+      ...readAtOf(added),
+    })
     .run();
   keepSubject(storage.sql, added.source, adding.subject, adding.group);
   if (adding.group !== null) {

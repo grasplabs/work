@@ -11,7 +11,7 @@ export const brainPackSchema: z.ZodType<BrainPack> = z.strictObject({
   items: z.array(
     z.strictObject({
       source: z.strictObject({
-        producer: z.enum(["upload", "chat", "run"]),
+        producer: z.enum(["upload", "chat", "run", "capture"]),
         id: z.string().min(1),
       }),
       version: z.int().positive(),

@@ -1,4 +1,4 @@
-import type { BrainPack, BrainPackItem } from "@grasp-os/runtime/app";
+import type { BrainPack } from "@grasp-os/runtime/app";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
@@ -8,7 +8,6 @@ import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { codeRecallOf, recallAs } from "./brain-next.ts";
-import type { RecalledItem } from "./brain-next.ts";
 import { authorize } from "./permissions.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -70,19 +69,6 @@ export interface RecallCaller {
 }
 
 /** Whether `input` is a recall as code asks for one (`BrainRecall`). */
-/**
- * `item` as the SDK cites it. A captured read (`capture`) is a person's
- * own and this recall never reads a person's own store (`personal:
- * false`), so one here would be a bug: refused, never handed on.
- */
-const sdkItemOf = (item: RecalledItem): BrainPackItem => {
-  const { producer } = item.source;
-  if (producer === "capture") {
-    throw new Error("A person's own captured read reached a code recall");
-  }
-  return { ...item, source: { producer, id: item.source.id } };
-};
-
 export const isBrainRecall = (input: unknown): boolean =>
   codeRecallOf(input) !== undefined;
 
@@ -136,22 +122,11 @@ export const recallFor = async (
     // An App's or a workflow's as the company alone; a chat's code as
     // its person's teams alone; never what only a person may read.
     // Nothing code sends can change it.
-    const { items, notFound, truncated } = await recallAs(
-      env,
-      caller.authority.onBehalfOf,
-      {
-        ...recall,
-        personal: false,
-        company: caller.authority.subject.type !== "agent",
-      }
-    );
-    // Not where else to look (`elsewhere`): it names only the connections
-    // of captured reads, which are a person's own and never in this pack.
-    const pack: BrainPack = {
-      items: items.map((item) => sdkItemOf(item)),
-      notFound,
-      truncated,
-    };
+    const pack: BrainPack = await recallAs(env, caller.authority.onBehalfOf, {
+      ...recall,
+      personal: false,
+      company: caller.authority.subject.type !== "agent",
+    });
     await caller.keep?.(pack);
     await audit({ items: pack.items.length, truncated: pack.truncated });
     return pack;

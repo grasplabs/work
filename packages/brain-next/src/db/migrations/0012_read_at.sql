@@ -1,1 +1,1 @@
-ALTER TABLE `source_versions` ADD `read_at` integer;
+ALTER TABLE `source_changes` ADD `read_at` integer;

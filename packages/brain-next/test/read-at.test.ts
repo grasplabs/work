@@ -108,4 +108,43 @@ describe("an add that says when its text was read", () => {
       current: "read before",
     });
   });
+
+  it("holds an earlier read against the latest read of the current text, however the reads arrive", async () => {
+    const at = Date.now();
+    /** Adds `texts` in order, each a change of its own read at its time; the last answer and the current text. */
+    const reads = async (...texts: [string, number][]) => {
+      const source = `test:${crypto.randomUUID()}`;
+      let last:
+        | Awaited<ReturnType<ReturnType<typeof store>["addSource"]>>
+        | undefined;
+      for (const [index, [text, readAt]] of texts.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        last = await store().addSource(
+          adding(source, String(index), text, readAt)
+        );
+      }
+      return {
+        version: last?.version,
+        newer: last?.newer,
+        current: await currentText(source),
+      };
+    };
+    await expect(
+      Promise.all([
+        // A at 1, A again at 3 (the same version), B read at 2 lands last.
+        reads(["A", at + 1], ["A", at + 3], ["B", at + 2]),
+        // A at 1, B at 3, A again read at 2 lands last.
+        reads(["A", at + 1], ["B", at + 3], ["A", at + 2]),
+        // A at 1, B read at the same moment: made.
+        reads(["A", at + 1], ["B", at + 1]),
+        // A at 1, A again read at the same moment, B at 1: made.
+        reads(["A", at + 1], ["A", at + 1], ["B", at + 1]),
+      ])
+    ).resolves.toStrictEqual([
+      { version: 1, newer: true, current: "A" },
+      { version: 2, newer: true, current: "B" },
+      { version: 2, newer: undefined, current: "B" },
+      { version: 2, newer: undefined, current: "B" },
+    ]);
+  });
 });

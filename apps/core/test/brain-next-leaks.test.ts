@@ -39,6 +39,7 @@ import { selectSkillsFor } from "../src/brain-skills.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { captureIdOf } from "../src/connection-capture-key.ts";
+import { captureRead } from "../src/connection-capture.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
@@ -68,6 +69,7 @@ import {
   reached,
   watched as teamsWatched,
 } from "./teams-door.ts";
+import { connectDb } from "./test-env.ts";
 import {
   builder,
   definitionOf,
@@ -588,23 +590,54 @@ describe(
           personId: holder,
         }),
       ];
-      // Fetched in the holder's chat: theirs alone, its connection's ID
-      // holding a marker too, so a pack that names where else to look
-      // (`elsewhere`) for anyone else would show it.
+      // Read in the holder's chat through their own Gmail and captured
+      // as capture keeps it (connection-capture.ts): theirs alone, its
+      // connection's ID holding a marker too, so a pack or a citation that
+      // named it for anyone else would show it.
       const captureConnection = `connection-${captureMarker}`;
-      const captureId = await add(
-        `Supplier quote ${sharedWord} ${captureMarker}`,
-        { kind: "owner", personId: holder },
+      const readAtNow = Date.now();
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'google', 'personal', ?, 'active', 'native', 'google-workspace', ?, ?)"
+        )
+        .bind(captureConnection, holder, readAtNow, readAtNow)
+        .run();
+      const capturedItem = `quote-${captureMarker}`;
+      await captureRead(
+        env,
         {
-          producer: "capture",
-          id: await captureIdOf(
-            captureConnection,
-            holder,
-            "mail.get",
-            `quote-${captureMarker}`
-          ),
+          workspaceId: personalWorkspaceId(holder),
+          agentId: chatAgentId,
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+          personId: holder,
+          runId: crypto.randomUUID(),
+        },
+        captureConnection,
+        "mail.get",
+        { mailbox: `${holder}@acme.test`, message: capturedItem },
+        {
+          result: {
+            output: JSON.stringify({
+              message: {
+                id: capturedItem,
+                subject: `Supplier quote ${sharedWord} ${captureMarker}`,
+              },
+            }),
+            provenance: [capturedItem],
+            keep: true,
+          },
+          readAt: new Date(readAtNow),
         }
       );
+      const captureId: SourceRef = {
+        producer: "capture",
+        id: await captureIdOf(
+          captureConnection,
+          holder,
+          "mail.get",
+          capturedItem
+        ),
+      };
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -716,12 +749,11 @@ describe(
       // What the outsider finds by the shared word: their own source, past
       // the marked ones.
       const outsiderFinds = await textsFor(outsider, sharedWord);
-      // The holder's own recall of it names its connection.
-      const { elsewhere: holderElsewhere } = await recallAs(env, holder, {
-        personal: true,
-        question: `supplier ${captureMarker}`,
-        budget: { tokens: recallBudgetMax },
-      });
+      // The holder's own recall finds what was captured for them.
+      const holderTexts = await textsFor(holder, `supplier ${captureMarker}`);
+      const holderFindsCapture = holderTexts.some((text) =>
+        text.includes(captureMarker)
+      );
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
         personal: true,
@@ -1020,7 +1052,7 @@ describe(
           addressed.includes(`person:${outsider}`),
         ],
         outsiderFinds,
-        holderElsewhere,
+        holderFindsCapture,
         cappedFinds,
         joinedFinds,
         leftFinds,
@@ -1032,7 +1064,7 @@ describe(
         holdersStoreAddressed: false,
         othersAddressed: [true, true],
         outsiderFinds: [handbook],
-        holderElsewhere: [captureConnection],
+        holderFindsCapture: true,
         cappedFinds: [{ text: capped, found: "exact" }],
         joinedFinds: [teamSource],
         leftFinds: [],

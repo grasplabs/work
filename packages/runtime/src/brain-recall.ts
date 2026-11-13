@@ -36,7 +36,7 @@ export type BrainFound = "exact" | "words" | "stop words" | "meaning";
  */
 export interface BrainPackItem {
   readonly source: {
-    readonly producer: "upload" | "chat" | "run";
+    readonly producer: "upload" | "chat" | "run" | "capture";
     readonly id: string;
   };
   readonly version: number;

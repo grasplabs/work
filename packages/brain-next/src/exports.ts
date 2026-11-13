@@ -233,10 +233,10 @@ export const exportLineSchema = z.strictObject({
   /** When it was added, in milliseconds. */
   addedAt: z.int().nonnegative(),
   /**
-   * When its producer read its text, in milliseconds, if it said
-   * (`NewSource.readAt`): restored with it, so no add of an earlier read
-   * replaces it after a restore either. Optional: a bundle made before it
-   * restores with none.
+   * When its text was last read, in milliseconds, if its producer said
+   * (the latest `read_at` of its changes, `NewSource.readAt`): restored on
+   * each of its changes, so no add of an earlier read replaces it after a
+   * restore either. Optional: a bundle made before it restores with none.
    */
   readAt: z.int().nonnegative().optional(),
   access: accessSchema,
@@ -529,7 +529,9 @@ const selectSqlOf = (scope: ExportScope["kind"]): string => `
 WITH ${unreadableSql[scope]}
 SELECT source_versions.row AS row, source_versions.source AS source,
   source_versions.version AS version, source_versions.file AS file,
-  source_versions.added_at AS added_at, source_versions.read_at AS read_at,
+  source_versions.added_at AS added_at,
+  (SELECT max(read_at) FROM source_changes
+    WHERE source_changes.version_row = source_versions.row) AS read_at,
   reader_sets.key AS readers,
   coalesce(
     current_versions.version_row = source_versions.row

@@ -1,16 +1,7 @@
 // The key of a source captured from a connection (GRA-1730,
 // connection-capture.ts): its connection, then a hash that names one item
 // for its person. The Brain knows no connector: to it, this is one
-// producer's id like any other. Core reads the connection back from it to
-// say where else to look (`elsewhere` in brain-next.ts `recallAs`).
-
-/** A SHA-256 digest as 64 lowercase hex characters. */
-const hexDigestLength = 64;
-
-/** What follows the connection: "/" and the hash. */
-const itemPartLength = hexDigestLength + 1;
-
-const itemPart = /^\/[0-9a-f]{64}$/u;
+// producer's id like any other.
 
 const encoder = new TextEncoder();
 
@@ -42,9 +33,3 @@ export const captureIdOf = async (
   itemId: string
 ): Promise<string> =>
   `${connectionId}/${await sha256Hex(JSON.stringify([personId, action, itemId]))}`;
-
-/** The connection a captured source's id names (`captureIdOf`), if it is one. */
-export const connectionOfCapture = (id: string): string | undefined => {
-  const at = id.length - itemPartLength;
-  return at > 0 && itemPart.test(id.slice(at)) ? id.slice(0, at) : undefined;
-};

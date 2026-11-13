@@ -4,10 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { erasePerson, eraseSource, recallAs } from "../src/brain-next.ts";
-import {
-  captureIdOf,
-  connectionOfCapture,
-} from "../src/connection-capture-key.ts";
+import { captureIdOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
@@ -215,35 +212,30 @@ const messagesRead = (messages: { id: string; subject: string }[]) => ({
 
 /**
  * What `personId` recalls for `question` by its words and exact parts,
- * each item's text and version, and where else to look by those items:
- * with their own store, as their own web chat does, unless `personal` is
- * false, as an App, a workflow or the SDK asks. A passage found by meaning
- * alone is left out, so what a test asserts never depends on which
- * readable passages lie nearest the question.
+ * each item's text and version: with their own store, as their own web
+ * chat does, unless `personal` is false, as an App, a workflow or the SDK
+ * asks. A passage found by meaning alone is left out, so what a test
+ * asserts never depends on which readable passages lie nearest the
+ * question.
  */
 const recalled = async (
   personId: string,
   question: string,
   personal = true
 ) => {
-  const { items, elsewhere } = await recallAs(env, personId, {
+  const { items } = await recallAs(env, personId, {
     personal,
     question,
     budget,
   });
-  const byWords = items.filter(({ found }) => found !== "meaning");
-  const named = new Set(
-    byWords.map(({ source }) =>
-      source.producer === "capture" ? connectionOfCapture(source.id) : undefined
-    )
-  );
   return {
-    texts: byWords.map(({ source, version, text }) => ({
-      producer: source.producer,
-      version,
-      text,
-    })),
-    elsewhere: elsewhere.filter((connection) => named.has(connection)),
+    texts: items
+      .filter(({ found }) => found !== "meaning")
+      .map(({ source, version, text }) => ({
+        producer: source.producer,
+        version,
+        text,
+      })),
   };
 };
 
@@ -279,7 +271,7 @@ const shown = ({ action, actor, detail }: AuditEvent) => ({
 });
 
 describe("what a chat's agent reads through a connection", setUpTime, () => {
-  it("keeps a message the person read from their own mail, for them alone, and their recall names the connection; a list, never, even of one", async () => {
+  it("keeps a message the person read from their own mail, for them alone, and their recall finds it; a list, never, even of one", async () => {
     const [person, stranger] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -320,7 +312,6 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         quote: text.includes(`Quote ${marker}`),
         order: text.includes(`Order ${marker}`),
       })),
-      elsewhere: found.elsewhere,
       stranger: await recalled(stranger.userId, marker),
     }).toStrictEqual({
       events: [
@@ -336,8 +327,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         },
       ],
       items: [{ producer: "capture", quote: true, order: false }],
-      elsewhere: [connectionId],
-      stranger: { texts: [], elsewhere: [] },
+      stranger: { texts: [] },
     });
     expect(JSON.stringify(events)).not.toContain(marker);
   });
@@ -417,7 +407,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           detail: { reason: "reach", items: 2, kept: 0, failed: 0, skipped: 2 },
         },
       ],
-      recalled: { texts: [], elsewhere: [] },
+      recalled: { texts: [] },
     });
   });
 
@@ -459,10 +449,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           detail: { reason: "list", items: 1, kept: 0, failed: 0, skipped: 1 },
         },
       ],
-      recalled: [
-        { texts: [], elsewhere: [] },
-        { texts: [], elsewhere: [] },
-      ],
+      recalled: [{ texts: [] }, { texts: [] }],
     });
   });
 
@@ -555,11 +542,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           },
         },
       ],
-      recalled: [
-        { texts: [], elsewhere: [] },
-        { texts: [], elsewhere: [] },
-        { texts: [], elsewhere: [] },
-      ],
+      recalled: [{ texts: [] }, { texts: [] }, { texts: [] }],
       witnessed: [
         {
           action: "brain.capture.skipped",
@@ -611,8 +594,8 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       erased,
     }).toStrictEqual({
       own: [{ redacted: true, secret: false }],
-      asApp: { texts: [], elsewhere: [] },
-      erased: { texts: [], elsewhere: [] },
+      asApp: { texts: [] },
+      erased: { texts: [] },
     });
   });
 

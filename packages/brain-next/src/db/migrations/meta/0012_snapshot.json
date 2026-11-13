@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0f036a48-933f-46d7-b75d-a7fa17ade0f5",
+  "id": "f0f77e91-7af0-477e-80e2-421956d0c2d9",
   "prevId": "870ddfb8-9fb5-4fb6-927f-a54ed4ada5f2",
   "tables": {
     "chunks": {
@@ -1645,6 +1645,13 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -1764,13 +1771,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },

@@ -526,14 +526,13 @@ const restoreVersion = async (
     const readerSet = readerSetOf(db, line.access);
     const { row } = sql
       .exec<{ row: number }>(
-        `INSERT INTO source_versions (source, version, file, reader_set, added_at, read_at)
-        VALUES (?, ?, ?, ?, ?, ?) RETURNING row`,
+        `INSERT INTO source_versions (source, version, file, reader_set, added_at)
+        VALUES (?, ?, ?, ?, ?) RETURNING row`,
         line.source,
         line.version,
         hash,
         readerSet,
-        line.addedAt,
-        line.readAt ?? null
+        line.addedAt
       )
       .one();
     const memo: WordMemo = new Map();
@@ -552,11 +551,14 @@ const restoreVersion = async (
     }
     for (const change of line.changes) {
       sql.exec(
-        `INSERT OR IGNORE INTO source_changes (source, change, version_row)
-        VALUES (?, ?, ?)`,
+        `INSERT OR IGNORE INTO source_changes (source, change, version_row, read_at)
+        VALUES (?, ?, ?, ?)`,
         line.source,
         change,
-        row
+        row,
+        // When the version's text was last read, on each of its changes:
+        // the latest is what an add of an earlier read is held against.
+        line.readAt ?? null
       );
     }
     keepSubject(sql, line.source, subject);

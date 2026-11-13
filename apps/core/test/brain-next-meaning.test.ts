@@ -150,8 +150,6 @@ describe("recall by meaning, through core", () => {
     });
     return {
       ...pack,
-      // Uploads alone: no connection to look in.
-      elsewhere: [],
       items: pack.items.map((item) => ({
         ...item,
         source: sources.get(item.source) ?? { producer: "upload", id: "" },
