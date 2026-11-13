@@ -18,14 +18,6 @@ import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
 
-/** One number and what it counts. */
-export const Tile = ({ value, label }: { value: ReactNode; label: string }) => (
-  <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
-    <Stat>{value}</Stat>
-    <span className="text-muted-foreground">{label}</span>
-  </div>
-);
-
 const segment: Record<StageStatus, string> = {
   done: "bg-foreground",
   now: "bg-foreground/45",
@@ -99,6 +91,33 @@ export const KnowledgeDots = ({
   );
 };
 
+/**
+ * The mark of what needs someone: a small amber dot before the words,
+ * which stay in the text's own colour. Amber marks a thing; a sentence
+ * set in it is hard to read.
+ */
+export const AttentionDot = () => (
+  <span
+    aria-hidden
+    className="bg-status-attention size-1.5 flex-none -translate-y-px rounded-full"
+  />
+);
+
+/** What needs someone, in words: the amber dot, then the words in the text's colour. */
+export const Attention = ({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  /** Where it stands in its layout. */
+  className?: string;
+}) => (
+  <span className={cn("flex items-baseline gap-1.5", className)}>
+    <AttentionDot />
+    <span className="min-w-0">{children}</span>
+  </span>
+);
+
 /** Something that is in place: a check and a word, in the colour of agreed. */
 export const Done = ({ children }: { children: ReactNode }) => (
   <span className="text-muted-foreground flex items-center gap-1.5">
@@ -108,100 +127,50 @@ export const Done = ({ children }: { children: ReactNode }) => (
 );
 
 /**
- * So much of a whole as a small ring, dark on grey: for a number that is
- * a share of something. The circle is 100 around, so the dark part is the
- * percentage itself.
- */
-export const Ring = ({
-  value,
-  of,
-  label,
-}: {
-  value: number;
-  of: number;
-  label: string;
-}) => {
-  const share = of > 0 ? Math.min(Math.max(value / of, 0), 1) : 0;
-  return (
-    <span className="flex-none">
-      <span className="sr-only">{label}</span>
-      <svg aria-hidden className="size-5 -rotate-90" viewBox="0 0 36 36">
-        <circle
-          className="stroke-border"
-          cx="18"
-          cy="18"
-          fill="none"
-          r="15.9155"
-          strokeWidth="4"
-        />
-        {share > 0 ? (
-          <circle
-            className="stroke-foreground"
-            cx="18"
-            cy="18"
-            fill="none"
-            r="15.9155"
-            strokeDasharray={`${share * 100} 100`}
-            strokeLinecap="round"
-            strokeWidth="4"
-          />
-        ) : null}
-      </svg>
-    </span>
-  );
-};
-
-/**
- * One number with what it counts, a line under it, and a ring where the
- * number is a share of something. The ring stands beside the label, so
- * the number has the whole tile, however narrow. Tiles in one row start
- * at the same height, so their labels and numbers line up.
+ * One number: what it counts over it, and a line under it. The one tile
+ * every page shows a figure in. Its three lines stand on the rows of the
+ * grid it is in (a subgrid), so across a row of tiles the labels, the
+ * numbers and the lines under them line up, however a label wraps.
  */
 export const Figure = ({
   label,
   value,
   sub,
-  ring,
   attention = false,
   className,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
-  ring?: { value: number; of: number };
   attention?: boolean;
   /** Where it stands in its grid. */
   className?: string;
 }) => (
   <div
     className={cn(
-      "bg-card grid grid-cols-[minmax(0,1fr)_auto] content-start gap-x-2 gap-y-0.5 px-4 py-4 sm:px-5",
+      "bg-card row-span-3 grid grid-rows-subgrid gap-y-1 px-4 py-4 sm:px-5",
       className
     )}
   >
-    <span className="text-muted-foreground flex min-h-5 items-center text-xs">
-      {label}
-    </span>
-    {ring && ring.of > 0 ? (
-      <Ring
-        label={`${Math.round(Math.min(Math.max(ring.value / ring.of, 0), 1) * 100)}%`}
-        of={ring.of}
-        value={ring.value}
-      />
-    ) : null}
-    <span className="col-span-2 row-start-2 wrap-break-word hyphens-auto">
+    <span className="text-muted-foreground self-end text-xs">{label}</span>
+    <span className="wrap-break-word hyphens-auto">
       <Stat>{value}</Stat>
     </span>
-    {sub === undefined ? null : (
-      <span
-        className={cn(
-          "col-span-2 row-start-3 text-xs",
-          attention ? "text-status-attention" : "text-muted-foreground"
-        )}
-      >
-        {sub}
-      </span>
-    )}
+    <span
+      className={cn(
+        "text-xs",
+        attention ? "text-foreground" : "text-muted-foreground"
+      )}
+    >
+      {attention && sub !== undefined ? (
+        <span className="flex items-baseline gap-1.5">
+          <AttentionDot />
+          <span>{sub}</span>
+        </span>
+      ) : (
+        sub
+      )}
+    </span>
   </div>
 );
 

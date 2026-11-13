@@ -332,7 +332,15 @@ const ColumnLayout = ({
   const waiting = new Set(view?.needs.map(needSection));
 
   return (
-    <PageSidebar folded={folded} label={name} landmark="navigation">
+    <PageSidebar
+      // Beside the admin's own sidebar there is room for it only from a
+      // desktop's width on: below that the sections are the select at the
+      // top of the page, so the page never shrinks to a few words a line.
+      className="md:hidden lg:flex"
+      folded={folded}
+      label={name}
+      landmark="navigation"
+    >
       {folded ? (
         <>
           <PageSidebarRailExpand
@@ -461,7 +469,7 @@ const SectionSelect = ({
     label: sectionWords[each].title,
   }));
   return (
-    <div className="md:hidden">
+    <div className="lg:hidden">
       <Select
         items={items}
         onValueChange={(value: OrgSection | null) => {
@@ -509,7 +517,7 @@ const laterLine = ({ source, what = "This" }: Origin): string =>
 const SourceNote = ({ origins }: { origins: readonly Origin[] }) => {
   const lines = origins.filter((origin) => !origin.read).map(laterLine);
   return lines.length === 0 ? null : (
-    <p className="text-muted-foreground text-xs" data-slot="source-note">
+    <p className="text-muted-foreground text-sm" data-slot="source-note">
       {lines.join(" ")}
     </p>
   );

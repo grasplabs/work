@@ -6,7 +6,8 @@ import { identifierMaxLength } from "./identifier.ts";
 // client's core (core's brain-report.ts), for Grasp's staff alone: its
 // work queue, its store's size against its limit, its embedding's
 // progress, its erasure ledger, the steps of its tick that failed, and
-// how its recall does by each way (counts);
+// how its recall does by each way (counts), and what its model calls
+// spent this month by purpose, as the model gateway recorded them;
 // and the three things staff may do to it: put a parked item back in the
 // queue, rebuild the word indexes, and re-embed. The admin asks as it asks for the snapshot: through the
 // router's route with the router secret, signed with a key both derive
@@ -140,6 +141,31 @@ const stepFailureSchema = z
 /** How many erasures of one kind are in the ledger, and how many not yet. */
 const erasureCountSchema = z.object({ written: count, unwritten: count });
 
+/**
+ * What the Brain's model calls used in a UTC month, by purpose, as core's
+ * model gateway recorded each answered request: the Brain keeps no spend
+ * figures of its own. Totals only, never who asked or what was said. An
+ * overview: nothing limits it, and on the client's own keys the provider's
+ * invoice is the bill.
+ */
+export const brainModelSpendSchema = z.object({
+  /** The UTC month, such as `2026-11`. */
+  month: z.string().regex(/^\d{4}-(?:0[1-9]|1[0-2])$/u),
+  /** Each purpose that was used, the dearest first; empty when none was. */
+  purposes: z.array(
+    z.object({
+      /** What the calls were for, a name in code (`brain.recall_analysis`), at most the gateway's 64. */
+      purpose: z.string().min(1).max(64),
+      calls: count,
+      inputTokens: count,
+      outputTokens: count,
+      /** US dollars at the provider's list prices, as the gateway priced them. */
+      cost: z.number().min(0),
+    })
+  ),
+});
+export type BrainModelSpend = z.infer<typeof brainModelSpendSchema>;
+
 /** A client's Brain, as staff see it. */
 export const brainReportSchema = z.object({
   /** When core read it. */
@@ -261,6 +287,12 @@ export const brainReportSchema = z.object({
       nearLimit: count,
     })
     .optional(),
+  /**
+   * What the Brain's model calls spent this month, by purpose. Core
+   * always sends it; optional only so the admin reads a core of an older
+   * release and shows the rest of its report.
+   */
+  modelSpend: brainModelSpendSchema.optional(),
 });
 export type BrainReport = z.infer<typeof brainReportSchema>;
 

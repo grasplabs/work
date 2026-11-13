@@ -106,6 +106,7 @@ import {
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { embedInBulk, embedderModel, questionVectorOf } from "./embedder.ts";
+import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
@@ -2201,14 +2202,19 @@ const recallOf = (recall: WorkOverview["recall"]): BrainReport["recall"] =>
  * The Brain as Grasp's staff see it (brain-report.ts): its overview, field
  * by field, operational state only. What names anything is left out: a
  * work item's key and an overdue item's key (a source's key, say).
- * Erasures are counts alone: never which, when, or by what hash.
+ * Erasures are counts alone: never which, when, or by what hash. What
+ * its model calls spent this month comes from the gateway's records, by
+ * purpose alone.
  */
 export const brainStaffReport = async (
-  env: BrainEnv & Pick<Env, "DB">
-): Promise<BrainReport & Required<Pick<BrainReport, "ownStores">>> => {
-  const [overview, own] = await Promise.all([
+  env: BrainEnv & Pick<Env, "DB" | "SPEND_MONTH">
+): Promise<
+  BrainReport & Required<Pick<BrainReport, "ownStores" | "modelSpend">>
+> => {
+  const [overview, own, modelSpend] = await Promise.all([
     brain(env).workOverview(),
     ownStoresTotals(env),
+    brainSpendByPurpose(env, spendMonth(env)),
   ]);
   return {
     now: new Date().toISOString(),
@@ -2264,6 +2270,7 @@ export const brainStaffReport = async (
       ...own,
       oldestWaitingAt: own.oldestWaitingAt?.toISOString() ?? null,
     },
+    modelSpend,
   };
 };
 

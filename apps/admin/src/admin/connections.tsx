@@ -18,7 +18,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
 
 import { appKey } from "./integrations-asked.ts";
-import { Done } from "./parts.tsx";
+import { Attention, Done } from "./parts.tsx";
 import { sourceNames } from "./sections.ts";
 import { formatDate, formatList, plural } from "./words.ts";
 
@@ -315,9 +315,9 @@ export const WaitingOnConnectionsRows = ({
           key={workflow.id}
         >
           <span className="min-w-0">{workflow.name}</span>
-          <span className="text-status-attention flex flex-col text-xs lg:items-end">
+          <span className="flex flex-col text-xs lg:items-end">
             {workflow.needs.map((need) => (
-              <span key={need.alias}>{needLine(need)}</span>
+              <Attention key={need.alias}>{needLine(need)}</Attention>
             ))}
           </span>
         </li>
@@ -352,7 +352,7 @@ export const AskedOfGraspRows = ({
             <Link search={{ app: appKey(app.name) }} to="/integrations" />
           }
           size="sm"
-          variant="ghost"
+          variant="outline"
         >
           Asked of Grasp
           <ArrowRightIcon data-icon="inline-end" />
