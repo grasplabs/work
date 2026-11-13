@@ -268,6 +268,10 @@ msgstr "{count, plural, one {{label}: # Eintrag} other {{label}: # Einträge}}"
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} arbeiten hier, an # Arbeit, die in dem, was Menschen erzählt haben, vorkam.} other {{names} arbeiten hier, an # Arbeiten, die in dem, was Menschen erzählt haben, vorkamen.}}"
 
+#: src/agents/own-agents-admin.tsx
+msgid "{count, plural, one {# agent} other {# agents}}"
+msgstr "{count, plural, one {# Agent} other {# Agenten}}"
+
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
 msgstr "{count, plural, one {# Bindung} other {# Bindungen}}"
@@ -1136,6 +1140,7 @@ msgid "{sources, plural, one {Time-consuming work that could be automated, raise
 msgstr "{sources, plural, one {Zeitraubende Arbeit, die sich automatisieren ließe, angesprochen in # Quelle, noch von keinem Team.} other {Zeitraubende Arbeit, die sich automatisieren ließe, angesprochen in # Quellen, noch von keinem Team.}}"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/own-agents-admin.tsx
 msgid "{spent} this month"
 msgstr "{spent} in diesem Monat"
 
@@ -2204,12 +2209,17 @@ msgid "Agent not found"
 msgstr "Agent nicht gefunden"
 
 #: src/agents/agents-overview.tsx
+#: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
 #: src/routes/_shell.agents.index.tsx
 #: src/routes/_shell.agents.new.tsx
 msgid "Agents"
 msgstr "Agenten"
+
+#: src/agents/own-agents-admin.tsx
+msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
+msgstr "Agenten, die Personen für sich selbst erstellen. Nur ihr Eigentümer sieht und fragt sie, und sie tun höchstens, was Grasp für diese Person tun darf. Du siehst, wie viele jede Person hat und was sie kosten, nie, was ihnen gesagt wird."
 
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
@@ -2397,6 +2407,10 @@ msgstr "Ein Agent für das Unternehmen oder einer, den nur du nutzt."
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "Ein eigener Agent für eine Aufgabe, die du oft erledigst. Nur du siehst ihn und fragst ihn, im Chat von Grasp."
 
+#: src/chat/thread.tsx
+msgid "An agent you can no longer ask"
+msgstr "Ein Agent, den du nicht mehr fragen kannst"
+
 #: src/apps/field-kinds.tsx
 msgid "An amount in a currency"
 msgstr "Ein Betrag in einer Währung"
@@ -2583,6 +2597,10 @@ msgstr "Jedes Ereignis, das seine Webhook-Quelle sendet, von den Typen, die sein
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Jeder Typ"
+
+#: src/agents/own-agents-admin.tsx
+msgid "Anyone in the company can make agents of their own."
+msgstr "Jede Person im Unternehmen kann eigene Agenten erstellen."
 
 #: src/apps/blueprints.tsx
 msgid "Anyone who builds and has a role in {name} can now start a new app from it. {name} itself stays as it is."
@@ -7737,6 +7755,10 @@ msgstr "Ich setze jetzt alles für Sie zusammen."
 msgid "Let people ask Stephen to start it"
 msgstr "Leute Stephen bitten lassen, ihn zu starten"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Let people make agents of their own"
+msgstr "Eigene Agenten erlauben"
+
 #: src/activity/audit-words.ts
 msgid "Let someone visit an App"
 msgstr "Jemandem erlaubt, eine App zu besuchen"
@@ -8368,6 +8390,10 @@ msgstr "Nennen Sie unten ein Modell, das dieser Endpunkt bereitstellt, wählen S
 msgid "Name in the App's code"
 msgstr "Name im Code der App"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Name not shown"
+msgstr "Name nicht angezeigt"
+
 #: src/apps/release-controls.tsx
 msgid "Name of the hold, such as a case reference"
 msgstr "Name der Aufbewahrung, etwa ein Aktenzeichen"
@@ -8908,6 +8934,10 @@ msgstr "Noch hat ihn niemand etwas gefragt."
 msgid "Nobody by that name"
 msgstr "Niemand mit diesem Namen"
 
+#: src/agents/own-agents-admin.tsx
+msgid "Nobody can make one, and those people have don't answer until you turn this back on."
+msgstr "Niemand kann einen erstellen, und vorhandene antworten nicht, bis du dies wieder einschaltest."
+
 #: src/workflows/delete-workflow.tsx
 msgid "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
 msgstr "Niemand kann ihn wieder öffnen oder starten. Seine Versionen bleiben erhalten, werden aber nie mehr ausgeliefert. Das lässt sich nicht rückgängig machen."
@@ -8929,6 +8959,10 @@ msgstr "Niemand sonst zum Teilen."
 #: src/settings/staff-access.tsx
 msgid "Nobody from Grasp can sign in to this workspace now."
 msgstr "Niemand von Grasp kann sich jetzt bei diesem Workspace anmelden."
+
+#: src/agents/own-agents-admin.tsx
+msgid "Nobody has an agent of their own yet."
+msgstr "Noch niemand hat einen eigenen Agenten."
 
 #: src/workflows/definition-editor.tsx
 msgid "Nobody has edited it since its current version."
@@ -10314,6 +10348,10 @@ msgstr "Personen, die gefragt haben"
 #: src/settings/erasures.tsx
 msgid "People you removed can’t sign in. Erasing someone also takes their personal data, for good, keeping their name on what they did."
 msgstr "Entfernte Personen können sich nicht anmelden. Wer gelöscht wird, verliert auch seine persönlichen Daten, endgültig; sein Name bleibt bei dem, was er getan hat."
+
+#: src/agents/own-agents-admin.tsx
+msgid "People's own agents"
+msgstr "Eigene Agenten der Personen"
 
 #: src/activity/type-labels.ts
 msgid "Permission"
@@ -12765,6 +12803,7 @@ msgid "Someone no longer here"
 msgstr "Jemand, der nicht mehr da ist"
 
 #: src/agents/agent-wakes.tsx
+#: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Jemand, der nicht mehr im Unternehmen ist"
 
@@ -15941,6 +15980,10 @@ msgstr "Was der Workspace für Grasp bezahlt."
 #: src/workflows/requests/request-detail.tsx
 msgid "What they ask"
 msgstr "Was sie fragen"
+
+#: src/agents/own-agents-admin.tsx
+msgid "What they cost couldn't be loaded."
+msgstr "Die Kosten konnten nicht geladen werden."
 
 #: src/settings/erasures.tsx
 msgid "What they sent through App forms, and usage signals of their collections"

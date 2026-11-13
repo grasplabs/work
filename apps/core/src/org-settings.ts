@@ -5,11 +5,14 @@ import {
   billingSettingsSchema,
   noBilling,
   orgSettingsErrors,
+  ownAgentsDefault,
+  ownAgentsSettingsSchema,
 } from "@grasp-os/shared/org-settings";
 import type {
   BillingSettings,
   BillingSettingsInput,
   OrgSettingsApi,
+  OwnAgentsSettings,
   SignInSettings,
 } from "@grasp-os/shared/org-settings";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -22,12 +25,15 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { orgSettings } from "./db/core/schema.ts";
+import { ownAgentsKind } from "./own-agents-switch.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // The organization's settings an admin keeps beside its name and time
-// zone (@grasp-os/shared/org-settings): billing, a row in `org_settings`; and, read only, how people sign in, from the
+// zone (@grasp-os/shared/org-settings): billing, and whether people may
+// have agents of their own (own-agents-switch.ts), each a row in
+// `org_settings`; and, read only, how people sign in, from the
 // deployment's config. Its admins read them, Grasp staff included (whose every
 // view is audited, staff-audit.ts); only its own admins change them, as
 // for the organization's name: what the client is billed as is the
@@ -38,10 +44,10 @@ import type { SessionCheck } from "./session-check.ts";
 
 /** A kind of setting: its row, how it is checked, and what it is until set. */
 interface Kind<T> {
-  key: "billing";
+  key: "billing" | typeof ownAgentsKind;
   schema: z.ZodType<T>;
   fallback: T;
-  invalid: "org_settings.billing_invalid";
+  invalid: "org_settings.billing_invalid" | "org_settings.own_agents_invalid";
 }
 
 const billing: Kind<BillingSettings> = {
@@ -49,6 +55,13 @@ const billing: Kind<BillingSettings> = {
   schema: billingSettingsSchema,
   fallback: noBilling,
   invalid: "org_settings.billing_invalid",
+};
+
+const ownAgents: Kind<OwnAgentsSettings> = {
+  key: ownAgentsKind,
+  schema: ownAgentsSettingsSchema,
+  fallback: ownAgentsDefault,
+  invalid: "org_settings.own_agents_invalid",
 };
 
 /**
@@ -225,6 +238,21 @@ export class OrgSettingsRpc extends CoreRpcTarget implements OrgSettingsApi {
     return await withPerson(
       this.#check,
       async (by) => await saveSetting(this.#env, by, billing, input)
+    );
+  }
+
+  async ownAgents(): Promise<OwnAgentsSettings> {
+    // Anyone of the company: it says whether they may make one.
+    return await withPerson(
+      this.#check,
+      async () => await readSetting(this.#env, ownAgents)
+    );
+  }
+
+  async updateOwnAgents(input: unknown): Promise<OwnAgentsSettings> {
+    return await withPerson(
+      this.#check,
+      async (by) => await saveSetting(this.#env, by, ownAgents, input)
     );
   }
 

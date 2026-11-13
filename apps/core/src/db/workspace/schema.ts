@@ -118,6 +118,12 @@ export const chatMessages = sqliteTable(
      * message.
      */
     built: text(),
+    /**
+     * The agent that gave an answer, or asked a step of it (`ChatMessage`'s
+     * `agentId`): the chat's agent of its turn. Null for a question, and
+     * for what was kept before a chat could have several agents.
+     */
+    agentId: text("agent_id"),
   },
   (table) => [index("chat_messages_chat").on(table.chatId, table.id)]
 );
