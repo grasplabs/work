@@ -1438,8 +1438,9 @@ const skillAccess: Access = { kind: "audience", group: companyGroup };
  * The group a retired company skill's last version is readable by: core
  * counts no reader in it (`skillReaderOf`, `readerOf`), so nobody lists,
  * selects or reads a retired skill, and its versions stay in the store as
- * history. One read alone holds it: `companySkillVersionOf`, which answers
- * the current version for an approval's add, never its text.
+ * history. Two reads alone hold it, each answering a version, never its
+ * text: `companySkillVersionOf`, the current version for an approval's
+ * add, and `companyChangeVersionOf`, the version a share's change made.
  */
 const retiredGroup = "retired-skills";
 
@@ -1876,6 +1877,36 @@ export const addCompanySkill = async (
       })
   );
   return { ...skill, version };
+};
+
+/**
+ * The version of the company's skill `name` its change `change` made, if
+ * it made one, as the member `personId` asks: a number alone, never text,
+ * live or retired. For a share whose add may have landed though its reply
+ * or its record didn't (skill-shares.ts): the store's answer is the truth,
+ * learned without sending the text again. Refused once `personId` is no
+ * longer a member.
+ */
+export const companyChangeVersionOf = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  personId: string,
+  asked: { name: string; change: string }
+): Promise<number | null> => {
+  const { person } = await skillReaderOf(env, personId);
+  const skill = skillErrors.parse("skills.invalid", skillSchema, {
+    scope: "company",
+    name: asked.name,
+  });
+  const change = skillErrors.parse(
+    "skills.invalid",
+    changeSchema,
+    asked.change
+  );
+  return await brain(env).changeVersion({
+    source: skillKeyOf(skill),
+    change,
+    reader: { person, groups: [companyGroup, retiredGroup] },
+  });
 };
 
 /**

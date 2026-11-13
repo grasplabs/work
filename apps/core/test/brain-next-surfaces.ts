@@ -1947,6 +1947,42 @@ export const coreProbes = {
         })
     )),
   ],
+  // A version, never text: which version a change of a company skill
+  // made. Someone else's own skill's name, or the markers, name none.
+  companyChangeVersionOf: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "a change never made",
+      async () =>
+        await coreBrain.companyChangeVersionOf(env, personId, {
+          name: "unwritten",
+          change: "share:unmade",
+        })
+    ),
+    await answer(
+      "a change of the markers",
+      async () =>
+        await coreBrain.companyChangeVersionOf(env, personId, {
+          name: "unwritten",
+          change: markers.join(""),
+        })
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await coreBrain.companyChangeVersionOf(env, stranger(), {
+          name: "unwritten",
+          change: "share:unmade",
+        })
+    ),
+    ...(await pairedOverSkills(
+      hiddenSkills,
+      async (name) =>
+        await coreBrain.companyChangeVersionOf(env, personId, {
+          name,
+          change: "share:unmade",
+        })
+    )),
+  ],
   // A version, never text, and only for one of the organization's admins:
   // the readers here aren't, so each is refused alike, whatever is named.
   companySkillVersionOf: async ({ personId, markers, hiddenSkills }) => [
@@ -3839,6 +3875,53 @@ export const storeProbes = {
         ""
       ),
     ];
+  },
+  // A number, never text: a change the reader may not read answers as
+  // one no one made.
+  changeVersion: async ({ reader, hiddenVersions, markers }) => {
+    const look = async (
+      name: string,
+      source: string,
+      change: string,
+      as: Reader = reader,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => await store().changeVersion({ source, change, reader: as }),
+        about
+      );
+    const asked: Answer[] = [
+      await look(
+        "a source no one added",
+        keyOf(missingSource()),
+        "unmade",
+        reader,
+        "nothing"
+      ),
+    ];
+    for (const [index, { source }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      const answered = await look(
+        `hidden source ${index}`,
+        keyOf(source),
+        "unmade",
+        reader,
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    const hidden = keyOf(hiddenVersions[0]?.source ?? missingSource());
+    asked.push(
+      await look("a change of the markers", hidden, markers.join("")),
+      await look("too many groups", hidden, "unmade", {
+        ...reader,
+        groups: Array.from({ length: readerGroupsMax + 1 }, () =>
+          markers.join("")
+        ),
+      })
+    );
+    return asked;
   },
   readVersion: async ({ reader, hiddenVersions, markers }) => {
     const read = async (

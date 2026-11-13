@@ -516,6 +516,14 @@ export const versionRequestSchema = z.strictObject({
 });
 export type VersionRequest = z.infer<typeof versionRequestSchema>;
 
+/** A change of a source to look up, and who asks. */
+export const changeRequestSchema = z.strictObject({
+  source: sourceIdSchema,
+  change: changeKeySchema,
+  reader: readerSchema,
+});
+export type ChangeRequest = z.infer<typeof changeRequestSchema>;
+
 /** Sources whose current versions to read whole, and who reads them. */
 export const currentRequestSchema = z.strictObject({
   sources: z.array(sourceIdSchema).max(currentReadMax),
@@ -2079,6 +2087,14 @@ export interface Brain {
    * hides its history from those taken off.
    */
   readVersion: (request: VersionRequest) => Promise<SourceVersion | null>;
+  /**
+   * The version the change `change` of `source` made, by the rule
+   * `readVersion` reads by: `null` when it made none, or the reader may
+   * not read it, alike. Answers a number alone, never text: for a caller
+   * whose reply to an add was lost, to learn whether the change landed
+   * without sending it again.
+   */
+  changeVersion: (request: ChangeRequest) => Promise<number | null>;
   /**
    * The current version of each source asked for, whole, in the order
    * asked, leaving out alike each that doesn't exist and each whose

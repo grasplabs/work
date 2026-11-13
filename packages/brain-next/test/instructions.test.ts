@@ -114,4 +114,19 @@ describe("an add over an expected current version", () => {
       current: await currentOf(source),
     }).toStrictEqual({ unchecked: 2, current: [2, "Second"] });
   });
+
+  it("answers which version a change made, a number alone, and nothing to a reader who may not read it", async () => {
+    const source = newSource();
+    await add(source, "a", "First", null);
+    await add(source, "b", "Second", 1);
+    const look = async (change: string, as: Reader = reader) =>
+      await shared().changeVersion({ source, change, reader: as });
+    expect({
+      first: await look("a"),
+      second: await look("b"),
+      unmade: await look("c"),
+      // Not among its readers: as if it made none.
+      outsider: await look("a", { person: "outsider", groups: [] }),
+    }).toStrictEqual({ first: 1, second: 2, unmade: null, outsider: null });
+  });
 });

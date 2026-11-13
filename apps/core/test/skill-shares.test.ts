@@ -2063,4 +2063,176 @@ describe("writing and sharing skills", setUpTime, () => {
       events: [],
     });
   });
+
+  it("records a landed add whose reply was lost before a decline, a new ask or a delete closes its share", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const deciding = await admin.api.whoami();
+    const lose = () =>
+      hooked({
+        after: {
+          addInstructions: { 1: async () => await Promise.resolve("lose") },
+        },
+      });
+    /** A share of a new skill of `asker`'s whose add landed, its reply lost. */
+    const landedUnrecorded = async (what: string) => {
+      const name = nameOf(what);
+      const saved = await asker.api.skills.save(skillText(name, what));
+      const share = await asker.api.skills.share(name, saved.version);
+      await outcome(approveShare(lose(), deciding, share.id));
+      return { name, share };
+    };
+    const declined = await landedUnrecorded("declined");
+    const askedAgain = await landedUnrecorded("asked-again");
+    const deleted = await landedUnrecorded("deleted");
+    const head = await logHead();
+
+    const declining = await outcome(
+      admin.api.skills.decline(declined.share.id)
+    );
+    const again = await asker.api.skills.save(
+      skillText(askedAgain.name, "asked-again", "Other steps.")
+    );
+    await asker.api.skills.share(askedAgain.name, again.version);
+    await asker.api.skills.remove(deleted.name);
+
+    expect({
+      declining,
+      rows: await rowsOf([
+        { api: asker.api, id: declined.share.id },
+        { api: asker.api, id: askedAgain.share.id },
+        { api: asker.api, id: deleted.share.id },
+      ]),
+      live: [
+        ...(await liveOf(member.api, declined.name)),
+        ...(await liveOf(member.api, askedAgain.name)),
+        ...(await liveOf(member.api, deleted.name)),
+      ],
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      // Added, as the store has it: the decline finds nothing open.
+      declining: "skills.not_found",
+      rows: [
+        ["approved", 1],
+        ["approved", 1],
+        ["approved", 1],
+      ],
+      live: [
+        ["declined", 1],
+        ["asked-again", 1],
+        ["deleted", 1],
+      ],
+      events: [
+        "skill.share.added",
+        "skill.share.added",
+        "skill.share.requested",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("recovers the version a closed share's add landed at when it is approved again, never adding", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("closed-landed");
+    const deciding = await admin.api.whoami();
+    const saved = await asker.api.skills.save(skillText(name, "Landed"));
+    const share = await asker.api.skills.share(name, saved.version);
+    await outcome(
+      approveShare(sharedStoreFailing("addInstructions"), deciding, share.id)
+    );
+    // Declined while the second attempt's add is on its way; the add
+    // lands, but its version's write fails.
+    const landed = await outcome(
+      approveShare(
+        {
+          ...sharedStoreHooks({
+            1: async () => await admin.api.skills.decline(share.id),
+          }),
+          DB: databaseRefusing({
+            sql: /update "skill_shares" set .*"version"/iu,
+          }).DB,
+        },
+        deciding,
+        share.id
+      )
+    );
+    const halfway = await rowsOf([{ api: asker.api, id: share.id }]);
+    const head = await logHead();
+
+    const again = await admin.api.skills.approve(share.id);
+
+    expect({
+      landed,
+      halfway,
+      again: [again.status, again.version],
+      live: await liveOf(member.api, name),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      landed: "Error: Out of reach, for the test",
+      halfway: [["declined", null]],
+      again: ["declined", 1],
+      live: [["Landed", 1]],
+      events: ["skill.share.added"],
+    });
+  });
+
+  it("logs a landed add whose share was erased with its person while the add was on its way, without naming the person", async () => {
+    const [asker, admin, member] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("erased-asker");
+    const deciding = await admin.api.whoami();
+    const saved = await asker.api.skills.save(skillText(name, "Erased"));
+    const share = await asker.api.skills.share(name, saved.version);
+    const head = await logHead();
+
+    const landed = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () => {
+            await admin.api.members.remove(asker.userId);
+            await admin.api.members.erase(
+              asker.userId,
+              String(asker.person.name)
+            );
+          },
+        }),
+        deciding,
+        share.id
+      )
+    );
+    const { events } = await eventsAfterWithHead(head);
+    const skillEvents = events.filter(({ action }) =>
+      action.startsWith("skill.")
+    );
+
+    expect({
+      landed,
+      live: await liveOf(member.api, name),
+      kept: await keptText(share.id),
+      events: skillEvents.map(({ action, detail }) => [action, detail]),
+      namesThem: skillEvents.some((event) =>
+        JSON.stringify(event).includes(asker.userId)
+      ),
+    }).toStrictEqual({
+      landed: "ok",
+      live: [["Erased", 1]],
+      // The row went with them.
+      kept: [],
+      events: [
+        ["skill.share.approved", {}],
+        ["skill.share.added", { version: 1 }],
+      ],
+      namesThem: false,
+    });
+  });
 });

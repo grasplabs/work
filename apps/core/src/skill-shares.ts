@@ -13,7 +13,7 @@ import type {
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -22,10 +22,12 @@ import {
   auditedBatch,
   outboxed,
   outboxedIfChanged,
+  outboxedWhere,
 } from "./audit-outbox.ts";
 import {
   addCompanySkill,
   addOwnSkill,
+  companyChangeVersionOf,
   companySkillVersionOf,
   eraseOwnSkill,
   listSkillsAs,
@@ -280,6 +282,72 @@ export const skillsOverview = async (
 };
 
 /**
+ * Records the version `share`'s add landed at, if it landed and isn't
+ * recorded yet: the store's answer, asked by its change without sending
+ * the text, then the version on the row with `skill.share.added`, once.
+ * For a share about to be closed (a lost reply, a failed record), so its
+ * record says what is live; and for a closed one approved again, which is
+ * never added. Answers the version, or null when the change made none.
+ */
+const recordLanded = async (
+  env: Env,
+  by: Identity,
+  share: Pick<ShareRow, "id" | "name" | "version">
+): Promise<number | null> => {
+  if (share.version !== null) {
+    return share.version;
+  }
+  const version = await companyChangeVersionOf(env, by.userId, {
+    name: share.name,
+    change: `share:${share.id}`,
+  });
+  if (version === null) {
+    return null;
+  }
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(skillShares)
+      .set({ version, text: null })
+      .where(and(eq(skillShares.id, share.id), isNull(skillShares.version))),
+    outboxedIfChanged(db, shareEntry(by, "added", share.id, { version })),
+  ]);
+  return version;
+};
+
+/**
+ * Records, for each of `requestedBy`'s approved shares of `name` not
+ * recorded yet, the version its add landed at if it did (`recordLanded`):
+ * what a close is about to drop the text of.
+ */
+const recordLandedOf = async (
+  env: Env,
+  by: Identity,
+  requestedBy: string,
+  name: string
+): Promise<void> => {
+  const approved = await drizzle(env.DB)
+    .select({
+      id: skillShares.id,
+      name: skillShares.name,
+      version: skillShares.version,
+    })
+    .from(skillShares)
+    .where(
+      and(
+        eq(skillShares.requestedBy, requestedBy),
+        eq(skillShares.name, name),
+        eq(skillShares.status, "approved"),
+        isNull(skillShares.version)
+      )
+    );
+  for (const share of approved) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    await recordLanded(env, by, share);
+  }
+};
+
+/**
  * Their own skill (`own`) or the company's `name`, at its current
  * version; `skills.not_found` alike for one there isn't and one they may
  * not read.
@@ -338,6 +406,8 @@ export const removeOwnSkill = async (
 ): Promise<void> => {
   const named = skillErrors.parse("skills.invalid", nameSchema, name);
   await eraseOwnSkill(env, by.userId, named);
+  // What landed is recorded before its text is dropped.
+  await recordLandedOf(env, by, by.userId, named);
   const db = drizzle(env.DB);
   await db.batch(closingOpenShares(db, by.userId, named));
 };
@@ -365,6 +435,8 @@ export const shareOwnSkill = async (
   if (read === null) {
     throw skillErrors.create("skills.not_found");
   }
+  // What landed of an earlier share is recorded before its text is dropped.
+  await recordLandedOf(env, by, by.userId, read.name);
   const id = crypto.randomUUID();
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
@@ -471,6 +543,11 @@ export const approveShare = async (
   // Closed (declined, or its text dropped by the person asking again or
   // deleting the skill): never added from then on.
   if (decided.status !== "approved" || decided.text === null) {
+    // Its add may have landed though nothing recorded it: recovered from
+    // the store, never added.
+    if ((await recordLanded(env, by, decided)) !== null) {
+      return shareOf(await shareById(env, decided.id));
+    }
     throw skillErrors.create("skills.not_found");
   }
   let version: number;
@@ -499,9 +576,22 @@ export const approveShare = async (
       // Whatever its status: closed while its add was on its way, the add
       // still landed, and the row and the log say what is live.
       .where(and(eq(skillShares.id, decided.id), isNull(skillShares.version))),
-    outboxedIfChanged(db, shareEntry(by, "added", decided.id, { version })),
+    // Logged when this recorded it, and when the row went meanwhile with
+    // its person's erasure: the skill is live either way. By the share's
+    // ID and the version alone, so nothing of the erased person is kept.
+    outboxedWhere(
+      db,
+      shareEntry(by, "added", decided.id, { version }),
+      sql`changes() > 0 OR NOT EXISTS (SELECT 1 FROM ${skillShares} WHERE ${skillShares.id} = ${decided.id})`
+    ),
   ]);
-  return shareOf(await shareById(env, decided.id));
+  const [recorded] = await drizzle(env.DB)
+    .select(shareColumns)
+    .from(skillShares)
+    .leftJoin(users, eq(users.id, skillShares.requestedBy))
+    .where(eq(skillShares.id, decided.id));
+  // Gone with its person's erasure: answered as it landed.
+  return shareOf(recorded ?? { ...decided, version, text: null });
 };
 
 /**
@@ -516,6 +606,10 @@ export const declineShare = async (
 ): Promise<SkillShare> => {
   requireAdmin(by);
   const row = await shareById(env, id);
+  // What landed is recorded first: then it is no longer open to decline.
+  if (row.status === "approved") {
+    await recordLanded(env, by, row);
+  }
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db

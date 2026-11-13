@@ -9,6 +9,7 @@ import { bucketUnder } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
 import {
   attributeRuleOf,
+  changeRequestSchema,
   entityKinds,
   confirmRequestSchema,
   contestedRequestSchema,
@@ -61,6 +62,7 @@ import type {
   NewMemories,
   RetireRequest,
   AskModel,
+  ChangeRequest,
   CurrentRequest,
   ReadableRequest,
   Embedders,
@@ -164,6 +166,7 @@ import { addMemories } from "./remember.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import {
   addVersion,
+  changeVersion,
   readCurrent,
   readVersion,
   readableVersions,
@@ -911,6 +914,18 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     this.#mayRead(asked.reader);
     return (await this.#readable())
       ? await readVersion(this.#sources, asked)
+      : null;
+  }
+
+  /**
+   * The version a change of a source made, if the reader may read it: a
+   * number alone, never text (contract.ts `changeVersion`).
+   */
+  async changeVersion(request: ChangeRequest): Promise<number | null> {
+    const asked = checked(changeRequestSchema, request);
+    this.#mayRead(asked.reader);
+    return (await this.#readable())
+      ? changeVersion(this.#sources, asked)
       : null;
   }
 

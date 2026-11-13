@@ -6,6 +6,7 @@ import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
 import { erasedSource, restoringNow, staleVersion } from "./contract.ts";
 import type {
+  ChangeRequest,
   CurrentRequest,
   NewSource,
   ReadableRequest,
@@ -398,6 +399,40 @@ WHERE source = ?1 AND version = ?4
     WHERE current_versions.source = ?1
       AND current.reader_set IN (SELECT reader_set FROM readable)
   )`;
+
+/** `?1` the source, `?4` the change: the version it made, by `versionSql`'s rule. */
+const changeVersionSql = `
+WITH ${readableSql}
+SELECT version.version AS version FROM source_changes AS change
+JOIN source_versions AS version ON version.row = change.version_row
+WHERE change.source = ?1 AND change.change = ?4
+  AND version.row NOT IN (SELECT version_row FROM erasing_versions)
+  AND version.reader_set IN (SELECT reader_set FROM readable)
+  AND EXISTS (
+    SELECT 1 FROM current_versions
+    JOIN source_versions AS current ON current.row = current_versions.version_row
+    WHERE current_versions.source = ?1
+      AND current.reader_set IN (SELECT reader_set FROM readable)
+  )`;
+
+/**
+ * The version the change `change` of `source` made: `null` when it made
+ * none or `reader` may not read it (as `readVersion`), alike.
+ */
+export const changeVersion = (
+  { storage }: Pick<SourcesStore, "storage">,
+  { source, change, reader }: ChangeRequest
+): number | null =>
+  storage.sql
+    .exec<{ version: number }>(
+      changeVersionSql,
+      source,
+      reader.person,
+      JSON.stringify(reader.groups),
+      change
+    )
+    .toArray()
+    .at(0)?.version ?? null;
 
 /**
  * A version of a source, current or history, whole from its file:
