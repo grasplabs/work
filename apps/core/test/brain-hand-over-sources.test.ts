@@ -139,26 +139,56 @@ const endingsFor = async (id: string): Promise<string[]> => {
 };
 
 /**
- * Core's producers, each attempt's outcome written and then answered as a
- * failure, once: an answer lost on its way back to the Brain's queue,
- * which tries the item again.
+ * Core's producers, each source's outcome written and then answered as a
+ * failure, once for each source: an answer lost on its way back to the
+ * Brain's queue, which tries that item again. `lost` names the sources
+ * whose answer was lost, by id.
  */
-const answerLostOnce = (into: Env): Producers => {
+const answerLostOnce = (
+  into: Env
+): { producers: Producers; lost: ReadonlySet<string> } => {
   const core = producersOf(into);
-  let lost = false;
+  const lost = new Set<string>();
+  return {
+    lost,
+    producers: {
+      attempt: async (source) => {
+        const attempt = await core.attempt(source);
+        return {
+          ...attempt,
+          ended: async (outcome) => {
+            await attempt.ended(outcome);
+            if (!lost.has(source.id)) {
+              lost.add(source.id);
+              throw new Error("The answer was lost");
+            }
+          },
+        };
+      },
+    },
+  };
+};
+
+/**
+ * Core's producers, running `between` once, when the attempt at source
+ * `id` has read its noted hand-over and its source and before it goes on:
+ * another writer that gets there between the attempt's read and its write.
+ */
+const betweenReadAndWrite = (
+  into: Env,
+  id: string,
+  between: () => Promise<void>
+): Producers => {
+  const core = producersOf(into);
+  let ran = false;
   return {
     attempt: async (source) => {
       const attempt = await core.attempt(source);
-      return {
-        ...attempt,
-        ended: async (outcome) => {
-          await attempt.ended(outcome);
-          if (!lost) {
-            lost = true;
-            throw new Error("The answer was lost");
-          }
-        },
-      };
+      if (source.id === id && !ran) {
+        ran = true;
+        await between();
+      }
+      return attempt;
     },
   };
 };
@@ -887,25 +917,86 @@ describe("how a hand-over fails closed", () => {
     const missing = crypto.randomUUID();
     await noteRun(missing);
     await relayNow();
-    // Each outcome is written, then its answer lost once: the queue tries
-    // that item again past its backoff.
-    const producers = answerLostOnce(env);
+    // Each source's outcome is written, then its answer lost once: the
+    // queue tries each item again past its backoff.
+    const { producers, lost } = answerLostOnce(env);
     await workBrain(env, later(), producers);
     await workBrain(env, later(2 * 60_000), producers);
     await workBrain(env, later(20 * 60_000), producers);
 
     expect({
+      lost: [id, missing].map((each) => lost.has(each)),
       handed: await outcomesFor(id),
       missing: await endingsFor(missing),
       recalled: await recalled(runner.userId, said),
       open: await openAmong([id, missing]),
       queued: await queuedFor({ producer: "run", id }),
     }).toStrictEqual({
+      // Both lost their answer once: the handed-over path and the skipped.
+      lost: [true, true],
       handed: ["brain.source.handover_started", "brain.source.handed_over"],
       missing: ["brain.source.handover_skipped:deleted"],
       recalled: [{ source: { producer: "run", id }, version: 1 }],
       open: { open: [], unrelayed: [] },
       queued: { waiting: false, parked: false },
+    });
+  });
+
+  it("records nothing for an attempt whose noted hand-over another attempt ended after it read it", async () => {
+    const missing = crypto.randomUUID();
+    await noteRun(missing);
+    await relayNow();
+    const source: SourceRef = { producer: "run", id: missing };
+    // Another attempt at the same source, run whole between this one's
+    // read and its write: it ends the hand-over first.
+    await workBrain(
+      env,
+      later(),
+      betweenReadAndWrite(env, missing, async () => {
+        const other = await producersOf(env).attempt(source);
+        if (other.handed.kind === "gone") {
+          await other.ended({ kind: "skipped", reason: other.handed.skipped });
+        }
+      })
+    );
+
+    expect({
+      ended: await endingsFor(missing),
+      open: await openAmong([missing]),
+    }).toStrictEqual({
+      ended: ["brain.source.handover_skipped:deleted"],
+      open: { open: [], unrelayed: [] },
+    });
+  });
+
+  it("leaves a run noted anew between an attempt's read and its write to the newer noting, which ends it once", async () => {
+    const runner = await builder();
+    const said = word();
+    const id = await endedRun(runner, said);
+    await relayNow();
+    // The run noted again by another event once the attempt read it: the
+    // attempt adds and records nothing, and the newer noting's item ends it.
+    await workBrain(
+      env,
+      later(),
+      betweenReadAndWrite(env, id, async () => {
+        await noteRun(id);
+      })
+    );
+    const afterRace = await outcomesFor(id);
+    await relayHandOvers(env);
+    await tick(env, later());
+
+    expect({
+      afterRace,
+      after: await outcomesFor(id),
+      recalled: await recalled(runner.userId, said),
+      open: await openAmong([id]),
+    }).toStrictEqual({
+      afterRace: [],
+      after: ["brain.source.handover_started", "brain.source.handed_over"],
+      recalled: [{ source: { producer: "run", id }, version: 1 }],
+      open: { open: [], unrelayed: [] },
     });
   });
 
