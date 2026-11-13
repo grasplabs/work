@@ -1,4 +1,3 @@
-import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
 import { and, eq, sql } from "drizzle-orm";
@@ -9,7 +8,6 @@ import { auditedBatch, outboxedWhere } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
   endedHandOver,
-  endedHandOvers,
   erasureBegun,
   handOverProducers,
   openNoting,
@@ -17,11 +15,7 @@ import {
   settleRelay,
   stillOpen,
 } from "./brain-hand-overs.ts";
-import type {
-  EndedHandOver,
-  HandOverProducer,
-  TakenHandOver,
-} from "./brain-hand-overs.ts";
+import type { HandOverProducer, TakenHandOver } from "./brain-hand-overs.ts";
 import {
   chatSource,
   chatsOf,
@@ -37,7 +31,6 @@ import type {
   SourceRef,
 } from "./brain-next.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
-import { partsBoundAsOne } from "./db/d1.ts";
 import { workspace } from "./durable-objects.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
@@ -338,20 +331,20 @@ export const producersOf = (env: Env): Producers => ({
  * Ends every hand-over still open whose source's id names `personId`
  * (each producer's `ofPerson`: their chats' turns) as refused `erased`,
  * each with its one outcome and only while it is still open as read here,
- * as an attempt would: for their erasure (person-erasure.ts), once the
- * Brain erased what was theirs, so no noting keeps their id after it, also
- * one whose item the queue parked for good. Two statements in one batch,
- * however many there are (`endedHandOvers`), and one drain after. Such an
- * item, if it runs later, finds nothing open and closes its key. A noting
- * made after this read is ended by its own attempt, as `erased`. Safe to
- * repeat.
+ * by the pair of statements an attempt ends with (`ending`): for their
+ * erasure (person-erasure.ts), once the Brain erased what was theirs, so
+ * no noting keeps their id after it, also one whose item the queue parked
+ * for good. All in one batch, which D1 counts as one query, and one drain
+ * after. Such an item, if it runs later, finds nothing open and closes its
+ * key. A noting made after this read is ended by its own attempt, as
+ * `erased`. Safe to repeat: one already ended is ended no more.
  */
 export const endHandOversOf = async (
   env: Env,
   personId: string
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const ended: EndedHandOver[] = [];
+  const open: (TakenHandOver & { producer: HandOverProducer })[] = [];
   for (const producer of Object.keys(producers).filter(isProducer)) {
     const { ofPerson } = producers[producer];
     if (ofPerson === null) {
@@ -359,7 +352,7 @@ export const endHandOversOf = async (
     }
     const start = ofPerson(personId);
     // oxlint-disable-next-line no-await-in-loop -- one producer at a time
-    const open = await db
+    const rows = await db
       .select({
         sourceId: brainHandOvers.sourceId,
         noting: brainHandOvers.noting,
@@ -371,24 +364,13 @@ export const endHandOversOf = async (
           sql`substr(${brainHandOvers.sourceId}, 1, ${start.length}) = ${start}`
         )
       );
-    for (const { sourceId, noting } of open) {
-      ended.push({
-        producer,
-        sourceId,
-        noting,
-        event: createAuditEvent(
-          outcomeEntry(
-            { producer, id: sourceId },
-            { kind: "refused", reason: "erased" }
-          ),
-          "core"
-        ),
-      });
-    }
+    open.push(...rows.map((row) => ({ ...row, producer })));
   }
-  for (const part of partsBoundAsOne(ended)) {
-    // oxlint-disable-next-line no-await-in-loop -- one part after the other
-    await auditedBatch(env, db, endedHandOvers(db, part));
+  const [first, ...rest] = open.flatMap((taken) =>
+    ending(db, taken, { kind: "refused", reason: "erased" })
+  );
+  if (first !== undefined) {
+    await auditedBatch(env, db, [first, ...rest]);
   }
 };
 

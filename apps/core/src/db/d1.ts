@@ -93,9 +93,6 @@ export const chunks = <T>(items: readonly T[], size: number): T[][] =>
 /** The most parameters D1 binds to one statement. */
 export const boundParametersMax = 100;
 
-/** The most bytes of one string D1 binds or stores. */
-export const boundValueBytesMax = 2_000_000;
-
 /**
  * `rows` written as statements `statementOf` makes, each as many rows as
  * D1 binds (`boundParametersMax`): each statement's own parameters are
@@ -112,8 +109,11 @@ export const statementsWithin = <Row, Statement>(
 ): Statement[] => {
   const statements: Statement[] = [];
   let at = 0;
+  // Each chunk starts at the size the last one was taken at: rows of one
+  // shape are built about once each.
+  let size = rows.length;
   while (at < rows.length) {
-    let size = rows.length - at;
+    size = Math.min(size, rows.length - at);
     let statement = statementOf(rows.slice(at, at + size));
     let bound = statement.toSQL().params.length;
     while (bound > boundParametersMax) {
@@ -129,35 +129,4 @@ export const statementsWithin = <Row, Statement>(
     at += size;
   }
   return statements;
-};
-
-/**
- * `items` in parts whose JSON each fits in one value D1 binds
- * (`boundValueBytesMax`): for a statement that reads a part as one value
- * (`json_each`), however many items. Throws when one item alone doesn't.
- */
-export const partsBoundAsOne = <T>(items: readonly T[]): T[][] => {
-  const encoder = new TextEncoder();
-  const parts: T[][] = [];
-  let part: T[] = [];
-  // The brackets of the array.
-  let bytes = 2;
-  for (const item of items) {
-    // The item and the comma before it.
-    const size = encoder.encode(JSON.stringify(item)).byteLength + 1;
-    if (size + 2 > boundValueBytesMax) {
-      throw new Error("One item is larger than D1 binds as one value");
-    }
-    if (part.length > 0 && bytes + size > boundValueBytesMax) {
-      parts.push(part);
-      part = [];
-      bytes = 2;
-    }
-    part.push(item);
-    bytes += size;
-  }
-  if (part.length > 0) {
-    parts.push(part);
-  }
-  return parts;
 };

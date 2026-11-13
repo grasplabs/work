@@ -24,7 +24,11 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { Producers, SourceRef } from "../src/brain-next.ts";
-import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
+import {
+  endHandOversOf,
+  producersOf,
+  relayHandOvers,
+} from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { brainHandOvers, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
@@ -238,6 +242,76 @@ const openFor = async (personId: string): Promise<string[]> => {
       )
     );
   return rows.map(({ sourceId }) => sourceId);
+};
+
+/**
+ * `count` questions of `personId`'s chat `chatId` noted, as their outbox's
+ * drain notes them, none handed over yet: their sources' ids.
+ */
+const notedFor = async (
+  personId: string,
+  chatId: string,
+  count: number
+): Promise<string[]> => {
+  const ids = Array.from(
+    { length: count },
+    (_, index) => `${personId}/${chatId}/${index + 1}`
+  );
+  await noteHandOvers(
+    env,
+    ids.map((id) => ({
+      id: crypto.randomUUID(),
+      at: new Date().toISOString(),
+      source: "core",
+      actor: { type: "system" },
+      action: "chat.turn_noted",
+      target: { type: "chat_turn", id },
+      provenance: [],
+      detail: {},
+    }))
+  );
+  return ids;
+};
+
+/** Each distinct list of hand-over events with reasons the sources `ids` have, as JSON. */
+const endingsOfAll = async (ids: readonly string[]): Promise<string[]> => {
+  const logged = await allEvents();
+  const endings = new Set(
+    ids.map((id) =>
+      JSON.stringify(
+        logged
+          .filter(
+            ({ action, target }) =>
+              action.startsWith("brain.source.") && target?.id === id
+          )
+          .map(({ action, detail }) => `${action}:${String(detail?.reason)}`)
+      )
+    )
+  );
+  return [...endings];
+};
+
+/**
+ * `real`, whose next batch writes its first `statements` and then fails,
+ * as a database failing part-way through: each later batch as `real`.
+ */
+const failsAfter = (real: D1Database, statements: number): D1Database => {
+  let failed = false;
+  return {
+    prepare: (query) => real.prepare(query),
+    batch: async <T>(list: D1PreparedStatement[]) => {
+      if (failed) {
+        return await real.batch<T>(list);
+      }
+      failed = true;
+      await real.batch(list.slice(0, statements));
+      throw new Error("D1 failed part-way");
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
 };
 
 /**
@@ -931,25 +1005,7 @@ describe("a deleted chat", () => {
   it("ends every hand-over still open of a person with hundreds of them in one erasure step, each in exactly one outcome", async () => {
     const { person, chatId } = await chatter();
     const admin = await signedInApi(idp, "admin");
-    // Three hundred of their questions noted, as their outbox's drain notes
-    // them, none handed over yet.
-    const ids = Array.from(
-      { length: 300 },
-      (_, index) => `${person.userId}/${chatId}/${index + 1}`
-    );
-    await noteHandOvers(
-      env,
-      ids.map((id) => ({
-        id: crypto.randomUUID(),
-        at: new Date().toISOString(),
-        source: "core",
-        actor: { type: "system" },
-        action: "chat.turn_noted",
-        target: { type: "chat_turn", id },
-        provenance: [],
-        detail: {},
-      }))
-    );
+    const ids = await notedFor(person.userId, chatId, 300);
     const openBefore = await openFor(person.userId);
 
     await admin.api.members.remove(person.userId);
@@ -957,27 +1013,45 @@ describe("a deleted chat", () => {
       person.userId,
       String(person.person.name)
     );
-    const logged = await allEvents();
-    const endings = new Set(
-      ids.map((id) =>
-        JSON.stringify(
-          logged
-            .filter(
-              ({ action, target }) =>
-                action.startsWith("brain.source.") && target?.id === id
-            )
-            .map(({ action, detail }) => `${action}:${String(detail?.reason)}`)
-        )
-      )
-    );
 
     expect({
       openBefore: openBefore.length,
       completed: typeof erased.completedAt,
       open: await openFor(person.userId),
-      endings: [...endings],
+      endings: await endingsOfAll(ids),
     }).toStrictEqual({
       openBefore: ids.length,
+      completed: "string",
+      open: [],
+      endings: [JSON.stringify(["brain.source.handover_refused:erased"])],
+    });
+  });
+
+  it("ends each of a person's hand-overs once when ending them failed part-way and is tried again", async () => {
+    const { person, chatId } = await chatter();
+    const admin = await signedInApi(idp, "admin");
+    const ids = await notedFor(person.userId, chatId, 300);
+    // The first 100 ended (their outcome and end, pair by pair), then the
+    // database fails the rest.
+    await expect(
+      endHandOversOf({ ...env, DB: failsAfter(env.DB, 2 * 100) }, person.userId)
+    ).rejects.toThrow("D1 failed part-way");
+    const left = await openFor(person.userId);
+
+    // The erasure's own step, tried again, ends what is left.
+    await admin.api.members.remove(person.userId);
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    expect({
+      left: left.length,
+      completed: typeof erased.completedAt,
+      open: await openFor(person.userId),
+      endings: await endingsOfAll(ids),
+    }).toStrictEqual({
+      left: 200,
       completed: "string",
       open: [],
       endings: [JSON.stringify(["brain.source.handover_refused:erased"])],
