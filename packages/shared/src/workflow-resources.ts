@@ -106,7 +106,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.start_invalid":
-    "That isn't a valid start: name an exact published version, and input the workflow accepts.",
+    "That isn't a valid start: give it input the workflow accepts.",
   "workflow.start_held_gone":
     "That start no longer waits for you: it was confirmed, declined or let lapse, or isn't yours.",
   "workflow.start_held_changed":
