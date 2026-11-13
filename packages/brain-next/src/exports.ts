@@ -443,6 +443,22 @@ export const isStale = (sql: SqlStorage, id: string): boolean =>
     .exec(`SELECT 1 FROM exports WHERE exports.id = ? AND ${staleSql}`, id)
     .toArray().length > 0;
 
+/**
+ * Whether export `id` is still being written and holds nothing erased:
+ * asked right before each of its puts, with no await between, so none
+ * starts once the ledger names what it holds, nor once its store was
+ * erased whole (its rows gone with it, so asking throws, which says no).
+ * The erasure, in turn, isn't done while a put already started is in
+ * flight (store.ts `#eraseWhole`).
+ */
+const stillWriting = (sql: SqlStorage, id: string): boolean => {
+  try {
+    return rowOf(sql, id)?.state === "writing" && !isStale(sql, id);
+  } catch {
+    return false;
+  }
+};
+
 /** `id`'s items of the queue are under this key. */
 const keyOf = (id: string): string => `export:${id}`;
 
@@ -1575,6 +1591,9 @@ const finish = async (
     parts,
   };
   await dropPartsBeyond(bucket, row.id, parts.length);
+  if (!stillWriting(storage.sql, row.id)) {
+    return;
+  }
   await bucket.put(
     exportKeyOf(row.id, manifestFile),
     JSON.stringify(manifest),
@@ -1836,11 +1855,17 @@ const writePart = async (
   }
   const body = joined(lines);
   const hash = await hashOf(body);
+  if (!stillWriting(sql, id)) {
+    return;
+  }
   await bucket.put(
     exportKeyOf(id, partHoldsFileOf(row.parts)),
     JSON.stringify(held),
     { httpMetadata: { contentType: "application/json" } }
   );
+  if (!stillWriting(sql, id)) {
+    return;
+  }
   await bucket.put(exportKeyOf(id, partFileOf(row.parts)), body, {
     sha256: hash,
     httpMetadata: { contentType: "application/x-ndjson" },

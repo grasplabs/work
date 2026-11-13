@@ -1083,14 +1083,20 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     // An add, a source's erasure or a tick that started before this may
     // still write a file, a vector or a ledger entry under the store's
     // prefix after this deletes what it lists. While one is under way in
-    // this instance, the erasure isn't finished. Nor is it while one that
+    // this instance, the erasure isn't finished: a call (`#writes`), or a
+    // handler of the queue, also one the queue stopped waiting for past its
+    // time, which may still be writing (work.ts `WorkState.handlers`). R2
+    // orders nothing between a put in flight and a listing, so none may be
+    // in flight; and none starts once the store was erased (`#forget`
+    // deleted every row a writer asks before it puts: exports.ts
+    // `stillWriting`). Nor is it while one that
     // an earlier instance started (reset meanwhile, so no longer seen
     // here) may still land: until the grace an add has to write its file
     // (files.ts `fileGraceMs`) has passed since the record, unless the
     // store was never written. Both are read before the listing, so what
     // lands after it is deleted by a later call: the caller calls again
     // until one is done.
-    const quiet = this.#writes.size === 0;
+    const quiet = this.#writes.size === 0 && this.#work.handlers.size === 0;
     let done = false;
     try {
       const at = await storeErasedAt(this.#bucket);

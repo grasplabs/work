@@ -428,6 +428,13 @@ export interface WorkState {
   /** The signals of the attempts under way, by their items' keys. */
   underWay: Map<string, Set<AbortController>>;
   /**
+   * Every handler still running, until it really ends: whether the queue
+   * waits for it or stopped waiting (past its time and grace, `runItem`).
+   * Either may still write to the bucket, so a person's store erased
+   * whole isn't done while one runs (store.ts `#eraseWhole`).
+   */
+  handlers: Set<Promise<unknown>>;
+  /**
    * Restarts the store once what it wrote is on disk: what ends handlers
    * no signal stops. Called through `restartStore` only.
    */
@@ -441,6 +448,7 @@ export const newWorkState = (restart: () => void): WorkState => ({
   turns: Promise.resolve(),
   zombies: new Map(),
   underWay: new Map(),
+  handlers: new Set(),
   restart,
   restarting: false,
 });
@@ -1191,6 +1199,12 @@ const runItem = async (
       // Nothing of it asks the model once it ended: not an `ask` it left behind.
       controller.abort(new WorkError("timed_out"));
     }
+  })();
+  // Counted until it ends, which no grace hastens (`WorkState.handlers`).
+  state.handlers.add(handled);
+  void (async () => {
+    await handled;
+    state.handlers.delete(handled);
   })();
   const { promise: graceOver, resolve: graceEnds } =
     Promise.withResolvers<"grace">();

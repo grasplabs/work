@@ -5,13 +5,14 @@
 import type { Access, Reader } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { fileGraceMs } from "../src/files.ts";
+import { workItemTimeMs } from "../src/work.ts";
 import { tick } from "./export-reads.ts";
 import type { Store } from "./export-reads.ts";
-import { copyOf, restore } from "./store-copy.ts";
+import { copyOf, kill, restore } from "./store-copy.ts";
 
 const unique = (): string => crypto.randomUUID();
 const own = (person: string): Store =>
@@ -146,6 +147,82 @@ const eraseWhole = async (person: string): Promise<void> => {
   ]);
   await ageErasure(person);
   await own(person).erasePerson({ person, reason: "person_erased" });
+};
+
+/** How often `until` looks, and how many times before it gives up: 10 s. */
+const untilEveryMs = 20;
+const untilLooks = 500;
+
+/**
+ * Waits until `open` says so, failing with `what` after 10 s, by the
+ * runtime's `scheduler.wait`, which faked timers leave real.
+ */
+const until = async (open: () => boolean, what: string): Promise<void> => {
+  for (let look = 0; !open(); look += 1) {
+    if (look === untilLooks) {
+      throw new Error(`Waited 10 s for ${what}`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- until released
+    await scheduler.wait(untilEveryMs);
+  }
+};
+
+/**
+ * How long the queue waits for an export's run before it stops waiting:
+ * its time and the grace after it (work.ts `runItem`), and a second more.
+ */
+const pastTheQueuesWaitMs = workItemTimeMs + 30_000 + 1000;
+
+/**
+ * Has `person`'s store reach the bucket through one that holds the first
+ * write of an export's file: it moves the faked timers (the store's too,
+ * in this isolate) on past the queue's wait, so the queue stops waiting
+ * for the run that asked it, and lands only once released. Answers how to
+ * release it, and whether it landed.
+ */
+const holdExportWrite = async (person: string) => {
+  /** Every export file put, by its name, in order. */
+  const puts: string[] = [];
+  const state = { held: false, released: false, landed: false, puts };
+  const real = env.BRAIN_OBJECTS;
+  const bucket = {
+    get: async (key: string) => await real.get(key),
+    head: async (key: string) => await real.head(key),
+    list: async (options?: R2ListOptions) => await real.list(options),
+    delete: async (keys: string | string[]) => {
+      await real.delete(keys);
+    },
+    put: async (
+      key: string,
+      value: ArrayBuffer | string,
+      options?: R2PutOptions
+    ) => {
+      if (key.includes("/exports/")) {
+        state.puts.push(key.slice(key.lastIndexOf("/") + 1));
+      }
+      if (state.held || !key.includes("/exports/")) {
+        return await real.put(key, value, options);
+      }
+      state.held = true;
+      await vi.advanceTimersByTimeAsync(pastTheQueuesWaitMs);
+      await until(() => state.released, "the test to release an export write");
+      const written = await real.put(key, value, options);
+      state.landed = true;
+      return written;
+    },
+  };
+  await runInDurableObject(own(person), (instance) => {
+    Reflect.set(instance, "env", { ...env, BRAIN_OBJECTS: bucket });
+  });
+  return state;
+};
+
+/** Each of `person`'s erasures' outcome, called once. */
+const erasureOf = async (person: string): Promise<string> => {
+  const [outcome] = await Promise.allSettled([
+    called(own(person).erasePerson({ person, reason: "person_erased" })),
+  ]);
+  return outcome?.status ?? "none";
 };
 
 describe("a person's own export", () => {
@@ -497,5 +574,90 @@ describe("a person's own export", () => {
       once: "fulfilled",
       files: [],
     });
+  });
+
+  // GRA-1839 review: a run the queue stopped waiting for (past its time
+  // and grace) still runs, and may still write; the erasure isn't done
+  // until it has stopped.
+  it("isn't erased as done while a run the queue stopped waiting for still writes a file of it", async () => {
+    const person = unique();
+    await add(person, "Mine alone");
+    await start(person);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const write = await holdExportWrite(person);
+      // The tick ends once the queue stops waiting for the held run.
+      await tick(own(person));
+      const before = write.puts.length;
+      const recorded = await erasureOf(person);
+      await ageErasure(person);
+      const whileWriting = await erasureOf(person);
+      write.released = true;
+      await until(() => write.landed, "the held write to land");
+      // Once its write landed, before the erasure is asked again: what an
+      // erasure that answered done would have left in the bucket.
+      const leftAfterDone =
+        whileWriting === "fulfilled" ? await exportKeysOf(person) : [];
+      let after = await erasureOf(person);
+      for (let tries = 0; tries < 50 && after !== "fulfilled"; tries += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- until the run stopped
+        await scheduler.wait(untilEveryMs);
+        // oxlint-disable-next-line no-await-in-loop -- until the run stopped
+        after = await erasureOf(person);
+      }
+      expect({
+        held: write.held,
+        recorded,
+        whileWriting,
+        leftAfterDone,
+        after,
+        // Once its store was erased, the run starts no other put.
+        putSince: write.puts.slice(before),
+        files: await exportKeysOf(person),
+      }).toStrictEqual({
+        held: true,
+        recorded: "rejected",
+        whileWriting: "rejected",
+        leftAfterDone: [],
+        after: "fulfilled",
+        putSince: [],
+        files: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // What bounds such a run: the object's life. A run that never returns
+  // ends with its instance; the next erases whole.
+  it("is erased whole once the store restarts, though a run of it never returned", async () => {
+    const person = unique();
+    await add(person, "Mine alone");
+    await start(person);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const write = await holdExportWrite(person);
+      await tick(own(person));
+      const recorded = await erasureOf(person);
+      await ageErasure(person);
+      const whileHung = await erasureOf(person);
+      await kill(own(person));
+      const restarted = await erasureOf(person);
+      expect({
+        held: write.held,
+        recorded,
+        whileHung,
+        restarted,
+        files: await exportKeysOf(person),
+      }).toStrictEqual({
+        held: true,
+        recorded: "rejected",
+        whileHung: "rejected",
+        restarted: "fulfilled",
+        files: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
