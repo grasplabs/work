@@ -116,7 +116,7 @@ const probingCode = (
       }
       return { hits, reads };
     });
-    await attempt(async () => (await env.knowledge.recall({ query })).items);
+    await attempt(async () => (await env.brain.recall({ question: query, budget: { tokens: 4000 } })).items);
   }
   for (const id of ${JSON.stringify(ids)}) {
     await attempt(() => env.knowledge.read(id));

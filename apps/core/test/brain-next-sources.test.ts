@@ -274,6 +274,9 @@ const crashed = /Crashed by the test/u;
 /** What the Brain or core says when it refuses an input. */
 const refused = /^(?:The Brain refused it|Refused)/u;
 
+/** What core answers an argument that isn't of the kind its call takes. */
+const invalid = { code: "brain.request_invalid" };
+
 describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -814,11 +817,11 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     ];
     for (const refusal of refusals) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
-      await expect(refusal()).rejects.toThrow(refused);
+      await expect(refusal()).rejects.toMatchObject(invalid);
     }
     // Nothing was kept of the refused text: its change is a first add.
     const first = await add(replaced);
-    await expect(add(lone)).rejects.toThrow(refused);
+    await expect(add(lone)).rejects.toMatchObject(invalid);
     const astralSource = newSource();
     await add(astral, astralSource, newChange());
 
@@ -858,23 +861,21 @@ describe("sources kept whole and versioned", { timeout: 60_000 }, () => {
     );
     for (const add of adds) {
       // oxlint-disable-next-line no-await-in-loop -- one add at a time
-      await expect(add()).rejects.toThrow(refused);
+      await expect(add()).rejects.toMatchObject(invalid);
     }
-    for (const [change, text] of [
-      [newChange(), " \n\t "],
-      [`change\u0007${newChange()}`, secret],
-    ] as const) {
-      // oxlint-disable-next-line no-await-in-loop -- one add at a time
-      await expect(
-        addSource(env, {
-          source: newSource(),
-          change,
-          text,
-          // oxlint-disable-next-line no-await-in-loop -- the same team each time
-          readers: await owner(reader),
-        })
-      ).rejects.toThrow(refused);
-    }
+    const addWith = async (change: string, text: string) =>
+      await addSource(env, {
+        source: newSource(),
+        change,
+        text,
+        readers: await owner(reader),
+      });
+    // Text with nothing in it is the store's to refuse; a change that
+    // isn't one, core's.
+    await expect(addWith(newChange(), " \n\t ")).rejects.toThrow(refused);
+    await expect(
+      addWith(`change\u0007${newChange()}`, secret)
+    ).rejects.toMatchObject(invalid);
     await expect(recalledAs(reader, secret)).resolves.toStrictEqual([]);
   });
 });

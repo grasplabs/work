@@ -19,28 +19,34 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { packAcross } from "../src/across.ts";
+import { chunkTarget } from "../src/chunks.ts";
 import {
   brainOf,
+  erasedSource,
+  fileGraceMs,
   personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
 } from "../src/contract.ts";
-import { fileGraceMs } from "../src/files.ts";
+import { eraseChunksPerBatch } from "../src/erasure.ts";
 import { BrainStore } from "../src/store.ts";
 
 /** A store, as its namespace gives it. */
 type Store = DurableObjectStub<BrainStore>;
 
-/** This test's person, and their own store, named as `personalBrainOf` names it. */
+/**
+ * This test's person, and their own store, named as `personalBrainOf`
+ * names it; or `who`'s, for a test that names a person of its own.
+ */
 let person = "";
-const own = (): Store => env.BRAIN_STORE.getByName(`person:${person}`);
+const own = (who = person): Store => env.BRAIN_STORE.getByName(`person:${who}`);
 
 /** The shared store, as the host names it. */
 const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 
 const whole = { tokens: recallBudgetMax };
 const readerOf = (who: string): Reader => ({ person: who, groups: [] });
-const theirs = (): Access => ({ kind: "owner", person });
+const theirs = (who = person): Access => ({ kind: "owner", person: who });
 
 /** Adds `text` to `store` as a source of its own. */
 const add = async (
@@ -326,8 +332,8 @@ const eraseWhole = async (): Promise<void> => {
   await own().erasePerson({ person, reason: "person_erased" });
 };
 
-/** The reader that is this test's person. */
-const me = (): Reader => readerOf(person);
+/** The reader that is this test's person, or `who`. */
+const me = (who = person): Reader => readerOf(who);
 
 /** What a store holding nothing finds: nothing, by every way. */
 const nothingFound = {
@@ -503,7 +509,8 @@ describe("a person's own store", () => {
 
   it("refuses to read a version, current versions or vectors for anyone else, or to erase anyone else", async () => {
     const kept = await add(own(), "Marker of their own", theirs());
-    const other = readerOf(`other-${crypto.randomUUID()}`);
+    const someoneElse = `other-${crypto.randomUUID()}`;
+    const other = readerOf(someoneElse);
     const refused = /answers only the person whose it is/u;
 
     await expect(
@@ -524,12 +531,39 @@ describe("a person's own store", () => {
     ).rejects.toThrow(refused);
     await expect(
       called(
-        own().erasePerson({ person: other.person, reason: "person_erased" })
+        own().erasePerson({ person: someoneElse, reason: "person_erased" })
       )
     ).rejects.toThrow(refused);
     await expect(
       own().readVersion({ ...kept, reader: readerOf(person) })
     ).resolves.toMatchObject({ text: "Marker of their own" });
+  });
+
+  it("tells which versions are readable to its person alone: refused for anyone else, and for a reader that names no person", async () => {
+    const kept = await add(own(), "Marker of their own", theirs());
+    const refused = /answers only the person whose it is/u;
+
+    await expect(
+      called(
+        own().readableVersions({
+          versions: [kept],
+          reader: readerOf(`other-${crypto.randomUUID()}`),
+        })
+      )
+    ).rejects.toThrow(refused);
+    // Code's recall reads as groups alone (no person): never anyone's own
+    // store.
+    await expect(
+      called(
+        own().readableVersions({
+          versions: [kept],
+          reader: { person: null, groups: [] },
+        })
+      )
+    ).rejects.toThrow(refused);
+    await expect(
+      own().readableVersions({ versions: [kept], reader: readerOf(person) })
+    ).resolves.toStrictEqual([kept]);
   });
 
   // Threat 1: content anyone else may read never goes in.
@@ -1229,9 +1263,9 @@ const noHandOvers: HandOvers = {
   },
 };
 
-/** A tick of this test's person's store, as its alarm runs one with no model. */
-const tick = async (): Promise<void> => {
-  await own().work({
+/** A tick of this test's person's store, or `who`'s, as its alarm runs one with no model. */
+const tick = async (who = person): Promise<void> => {
+  await own(who).work({
     ask: quietAsk,
     at: new Date(),
     embedders: noModel,
@@ -1239,16 +1273,19 @@ const tick = async (): Promise<void> => {
   });
 };
 
-/** Runs `change` in this test's person's store, in its own storage. */
-const inStore = async (change: (sql: SqlStorage) => void): Promise<void> => {
-  await runInDurableObject(own(), (_instance, state) => {
+/** Runs `change` in this test's person's store, or `who`'s, in its own storage. */
+const inStore = async (
+  change: (sql: SqlStorage) => void,
+  who = person
+): Promise<void> => {
+  await runInDurableObject(own(who), (_instance, state) => {
     change(state.storage.sql);
   });
 };
 
 /** The store's alarm taken away, as once it has fired. */
-const noAlarm = async (): Promise<void> => {
-  await runInDurableObject(own(), async (_instance, state) => {
+const noAlarm = async (who = person): Promise<void> => {
+  await runInDurableObject(own(who), async (_instance, state) => {
     await state.storage.deleteAlarm();
   });
 };
@@ -1257,15 +1294,17 @@ const noAlarm = async (): Promise<void> => {
  * A person's store with a source kept and all its work done, as a host
  * with no model leaves it, and no alarm: the source's ref.
  */
-const settled = async (): Promise<{ source: string; version: number }> => {
-  const kept = await add(own(), "Settled and done", theirs());
-  await tick();
-  await noAlarm();
+const settled = async (
+  who = person
+): Promise<{ source: string; version: number }> => {
+  const kept = await add(own(who), "Settled and done", theirs(who));
+  await tick(who);
+  await noAlarm(who);
   return kept;
 };
 
 /** The model the store last saw is `name`, its walk over, as a tick with it leaves it. */
-const sawModel = async (name: string): Promise<void> => {
+const sawModel = async (name: string, who = person): Promise<void> => {
   await inStore((sql) => {
     sql.exec(
       `INSERT INTO embedding_state (id, model, walked_to, walked, rebuilt)
@@ -1273,7 +1312,7 @@ const sawModel = async (name: string): Promise<void> => {
       ON CONFLICT (id) DO UPDATE SET model = ?1, walked = 1, rebuilt = 1`,
       name
     );
-  });
+  }, who);
 };
 
 /** Each public method of the store, its own and any it inherits, but the runtime's handlers. */
@@ -1295,9 +1334,9 @@ const storeMethods = (): string[] => {
   return [...names].toSorted();
 };
 
-/** A recall of this test's person by meaning, the question's vector by `model`. */
-const byMeaningOf = (model: { name: string; build: string }) => ({
-  reader: me(),
+/** A recall of this test's person, or `who`, by meaning, the question's vector by `model`. */
+const byMeaningOf = (model: { name: string; build: string }, who = person) => ({
+  reader: me(who),
   question: "settled",
   budget: whole,
   meaning: {
@@ -1310,46 +1349,51 @@ const byMeaningOf = (model: { name: string; build: string }) => ({
 
 /**
  * For each method that can leave a person's store work for a tick: a
- * settled store with no alarm made to have work by it.
+ * settled store with no alarm made to have work by it: `who`'s, the
+ * person its test names.
  */
-const leavingWork: Record<string, () => Promise<void>> = {
-  addSource: async () => {
-    await add(own(), "A source to embed", theirs());
+const leavingWork: Record<string, (who: string) => Promise<void>> = {
+  addSource: async (who) => {
+    await add(own(who), "A source to embed", theirs(who));
+  },
+  // Their own export: written by the queue, a part a run.
+  startOwnExport: async (who) => {
+    await own(who).startOwnExport({ person: who, deployment: "test" });
   },
   // Failed: its file is noted before it is written, and nothing holds it.
-  addInstructions: async () => {
-    const { heal } = await breakBucket(own(), ["put"]);
+  addInstructions: async (who) => {
+    const { heal } = await breakBucket(own(who), ["put"]);
     await Promise.allSettled([
       called(
-        own().addInstructions({
+        own(who).addInstructions({
           source: "instructions:failed",
           change: "1",
           text: "Never written",
-          access: theirs(),
+          access: theirs(who),
         })
       ),
     ]);
     await heal();
   },
-  eraseSource: async () => {
-    const kept = await add(own(), "To erase", theirs());
-    await tick();
-    await noAlarm();
-    await own().eraseSource({ source: kept.source, reason: "deleted" });
+  eraseSource: async (who) => {
+    const kept = await add(own(who), "To erase", theirs(who));
+    await tick(who);
+    await noAlarm(who);
+    await own(who).eraseSource({ source: kept.source, reason: "deleted" });
   },
   // A tick that deletes an erased version lets its file go to the sweep.
-  work: async () => {
-    const kept = await add(own(), "Erased, then swept", theirs());
-    await own().eraseSource({ source: kept.source, reason: "deleted" });
-    await noAlarm();
-    await tick();
+  work: async (who) => {
+    const kept = await add(own(who), "Erased, then swept", theirs(who));
+    await own(who).eraseSource({ source: kept.source, reason: "deleted" });
+    await noAlarm(who);
+    await tick(who);
   },
-  reembed: async () => {
-    await sawModel("m@1");
-    await own().reembed();
+  reembed: async (who) => {
+    await sawModel("m@1", who);
+    await own(who).reembed();
   },
-  requeueWork: async () => {
-    await add(own(), "Parked for good", theirs());
+  requeueWork: async (who) => {
+    await add(own(who), "Parked for good", theirs(who));
     let parked = 0;
     await inStore((sql) => {
       parked = sql
@@ -1359,28 +1403,28 @@ const leavingWork: Record<string, () => Promise<void>> = {
           Date.now()
         )
         .one().id;
-    });
-    await noAlarm();
-    await own().requeueWork(parked);
+    }, who);
+    await noAlarm(who);
+    await own(who).requeueWork(parked);
   },
-  rebuildWords: async () => {
-    await own().rebuildWords();
+  rebuildWords: async (who) => {
+    await own(who).rebuildWords();
   },
   // A recall by meaning naming a model the store's tick never embedded
   // for: the host's model changed, and nothing else would tell it.
-  find: async () => {
-    await own().find(byMeaningOf(splitModel));
+  find: async (who) => {
+    await own(who).find(byMeaningOf(splitModel, who));
   },
-  recall: async () => {
-    await own().recall(byMeaningOf(splitModel));
+  recall: async (who) => {
+    await own(who).recall(byMeaningOf(splitModel, who));
   },
   // Vectors of a build other than the one the store saw: to remove.
-  putVectors: async () => {
-    const kept = await add(own(), "With a vector", theirs());
-    await tick();
-    await sawModel("m@1");
-    await noAlarm();
-    await own().putVectors({
+  putVectors: async (who) => {
+    const kept = await add(own(who), "With a vector", theirs(who));
+    await tick(who);
+    await sawModel("m@1", who);
+    await noAlarm(who);
+    await own(who).putVectors({
       model: { name: "other@1", centre: [0, 0] },
       vectors: [{ chunk: { ...kept, position: 0 }, vector: [1, 0] }],
     });
@@ -1396,6 +1440,8 @@ const leavingNone = [
   // Memories and entities are written and read whole in their call, and
   // erased with what they rest on: none of their methods leaves work.
   "addMemories",
+  // One statement of which version a change made, if the reader may read it.
+  "changeVersion",
   "confirmMemory",
   "erasePerson",
   "exportFile",
@@ -1406,6 +1452,8 @@ const leavingNone = [
   "listContested",
   "listSources",
   "listVersions",
+  "ownExport",
+  "ownExportFile",
   "readCurrent",
   "readEntity",
   "readEntityNames",
@@ -1418,7 +1466,7 @@ const leavingNone = [
   "retireMemory",
   "searchVectors",
   "startExport",
-  // A person's own store refuses every export and restore.
+  // A person's own store refuses the company's export and every restore.
   "checkRestore",
   "startRestore",
   "workOverview",
@@ -1435,21 +1483,18 @@ describe("a person's own store's alarm", () => {
     );
   });
 
-  it("is armed after every method that leaves work, though the store had none", async () => {
-    const armed: Record<string, boolean> = {};
-    for (const [method, leave] of Object.entries(leavingWork)) {
-      person = `person-${crypto.randomUUID()}`;
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await settled();
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await leave();
-      // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      armed[method] = (await alarmOf(own())) !== null;
+  // One test per method, each within its own time limit, and each naming
+  // its own person rather than this file's: a retry's store is never one
+  // that an attempt still running before it uses.
+  it.each(Object.entries(leavingWork))(
+    "is armed after %s, though the store had none",
+    async (_method, leave) => {
+      const who = `person-${crypto.randomUUID()}`;
+      await settled(who);
+      await leave(who);
+      await expect(alarmOf(own(who))).resolves.not.toBeNull();
     }
-    expect(armed).toStrictEqual(
-      Object.fromEntries(Object.keys(leavingWork).map((name) => [name, true]))
-    );
-  });
+  );
 
   it("is not armed while the store has nothing to do: no model shipped, a model seen and done, or a paused queue with nothing in it", async () => {
     const asleep: Record<string, number | null> = {};
@@ -1781,4 +1826,455 @@ describe("recall by meaning across stores", () => {
       ofOne.toSorted().slice(0, single.items.length)
     );
   });
+});
+
+/**
+ * The text of turn `index`, cut into `chunks` chunks: paragraphs each
+ * near a chunk's target size (chunks.ts).
+ */
+const turnOfChunks = (index: number, chunks: number): string =>
+  Array.from(
+    { length: chunks },
+    (_, part) =>
+      `Echidna turn ${index} part ${part} ${"burrow ".repeat(Math.floor(chunkTarget / 8))}`
+  ).join("\n\n");
+
+/** A group of this test's own, named as a host names a chat's. */
+const newGroup = (): string => `chat:${crypto.randomUUID()}`;
+
+/** Adds `text` to this test's person's store as `key` in `group`. */
+const addIn = async (
+  group: string,
+  key: string,
+  text: string
+): Promise<{ source: string; version: number }> =>
+  await own().addSource({
+    source: `${group}/${key}`,
+    change: "1",
+    group,
+    text,
+    access: theirs(),
+  });
+
+/** The sources a recall of `question` finds for this test's person. */
+const foundFor = async (question: string): Promise<string[]> => {
+  const { items } = await own().recall({
+    question,
+    reader: me(),
+    budget: whole,
+  });
+  return items.map(({ source }) => source);
+};
+
+/** The ledger's entries in this test's person's store. */
+const groupEntries = async (): Promise<string[]> =>
+  await keysUnder(`${await ownPrefix()}erasures/`);
+
+/** How many versions this test's person's store still holds, hidden ones included. */
+const versionsHeld = async (): Promise<number> => {
+  let held = 0;
+  await inStore((sql) => {
+    ({ held } = sql
+      .exec<{ held: number }>("SELECT count(*) AS held FROM source_versions")
+      .one());
+  });
+  return held;
+};
+
+// Groups (GRA-1805): a chat's turns are sources of their own, each in the
+// chat's group, and deleting the chat erases the group in one call. The
+// threat model is on GRA-1805; each test names the threat it holds.
+describe("a group in a person's own store", () => {
+  beforeEach(() => {
+    person = `person-${crypto.randomUUID()}`;
+  });
+
+  // Threats 6 and 8: one call erases every turn, and closes the chat.
+  it("is erased whole in one call, with one ledger entry, and refuses every add after", async () => {
+    const group = newGroup();
+    const first = await addIn(group, "1", "Quokka turn one");
+    await addIn(group, "2", "Quokka turn two");
+    const outside = await add(own(), "Quokka elsewhere", theirs());
+
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    await expect(foundFor("Quokka")).resolves.toStrictEqual([outside.source]);
+    await expect(
+      own().readVersion({ ...first, reader: me() })
+    ).resolves.toBeNull();
+    await expect(groupEntries()).resolves.toHaveLength(1);
+    await expect(
+      called(addIn(group, "3", "Quokka after the delete"))
+    ).rejects.toThrow(erasedSource);
+    await expect(called(addIn(group, "1", "Quokka turn one"))).rejects.toThrow(
+      erasedSource
+    );
+  });
+
+  // Review round 3 (P2): the store holds an erased group's keys closed
+  // itself, whatever a later add names: not each producer.
+  it("refuses a key under an erased group, and answers it erased, though an add names no group", async () => {
+    const group = newGroup();
+    await addIn(group, "1", "Dingo turn");
+    await own().eraseSource({ source: group, reason: "deleted" });
+    await tick();
+    await tick();
+
+    const states = await Promise.all(
+      [`${group}/1`, `${group}/2`].map(async (key) => await own().keyState(key))
+    );
+    const added = await Promise.all(
+      [`${group}/1`, `${group}/2`].map(
+        async (source) =>
+          await called(
+            own().addSource({
+              source,
+              change: "2",
+              text: "Dingo back without its group",
+              access: theirs(),
+            })
+          ).then(
+            () => "added",
+            (error: unknown) =>
+              error instanceof Error ? error.message : String(error)
+          )
+      )
+    );
+
+    expect({ states, added, found: await foundFor("Dingo") }).toStrictEqual({
+      states: ["erased", "erased"],
+      added: [erasedSource, erasedSource],
+      found: [],
+    });
+  });
+
+  // Greptile, first paid review (P8): an erasure survives a restore whole.
+  // The copy restored predates the group's first add, so it knows no
+  // group: the ledger entry's mark tells the replay.
+  it("refuses every key under an erased group after a restore of a copy older than the group", async () => {
+    await add(own(), "Before the group", theirs());
+    const copy = await copyOf(own());
+    const group = newGroup();
+    await addIn(group, "1", "Quoll turn");
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    await restore(own(), copy);
+
+    const outcomes = await Promise.all(
+      [
+        { source: `${group}/1` },
+        { source: `${group}/2` },
+        { source: `${group}/3`, group },
+      ].map(
+        async (added) =>
+          await called(
+            own().addSource({
+              ...added,
+              change: "2",
+              text: "Quoll back",
+              access: theirs(),
+            })
+          ).then(
+            () => "added",
+            (error: unknown) =>
+              error instanceof Error ? error.message : String(error)
+          )
+      )
+    );
+    expect({
+      states: await Promise.all(
+        [`${group}/1`, `${group}/2`].map(
+          async (key) => await own().keyState(key)
+        )
+      ),
+      outcomes,
+      found: await foundFor("Quoll"),
+    }).toStrictEqual({
+      states: ["erased", "erased"],
+      outcomes: [erasedSource, erasedSource, erasedSource],
+      found: [],
+    });
+  });
+
+  // A group erased before any add named it, as the caller says it is one:
+  // the same, and across a restore.
+  it("erases a key said to be a group's as one, though no add named it", async () => {
+    await add(own(), "Before the group", theirs());
+    const group = newGroup();
+    const copy = await copyOf(own());
+    await own().eraseSource({
+      source: group,
+      reason: "deleted",
+      asGroup: true,
+    });
+
+    await restore(own(), copy);
+
+    await expect(own().keyState(`${group}/1`)).resolves.toBe("erased");
+    await expect(
+      called(
+        own().addSource({
+          source: `${group}/1`,
+          change: "1",
+          text: "Wallaby",
+          access: theirs(),
+        })
+      )
+    ).rejects.toThrow(erasedSource);
+  });
+
+  // Greptile, second paid review: a key erased as its own first, then
+  // said to be a group's, becomes one, and stays one across a restore.
+  it("makes a key erased alone a group's when erased again as one, across a restore too", async () => {
+    await add(own(), "Before the group", theirs());
+    const group = newGroup();
+    const copy = await copyOf(own());
+    await own().eraseSource({ source: group, reason: "deleted" });
+    await own().eraseSource({
+      source: group,
+      reason: "deleted",
+      asGroup: true,
+    });
+
+    const refusedOf = async () =>
+      await called(
+        own().addSource({
+          source: `${group}/1`,
+          change: "1",
+          text: "Pademelon",
+          access: theirs(),
+        })
+      ).then(
+        () => "added",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error)
+      );
+    const live = {
+      state: await own().keyState(`${group}/1`),
+      add: await refusedOf(),
+    };
+    await restore(own(), copy);
+    const restored = {
+      state: await own().keyState(`${group}/1`),
+      add: await refusedOf(),
+    };
+
+    expect({ live, restored }).toStrictEqual({
+      live: { state: "erased", add: erasedSource },
+      restored: { state: "erased", add: erasedSource },
+    });
+  });
+
+  // An entry an older release wrote has no mark: it replays as its key's
+  // alone, as it always did.
+  it("replays a group's entry without the mark as its key's alone", async () => {
+    await add(own(), "Before the group", theirs());
+    const group = newGroup();
+    const copy = await copyOf(own());
+    await addIn(group, "1", "Bandicoot turn");
+    await own().eraseSource({ source: group, reason: "deleted" });
+    const [entry] = await groupEntries();
+    if (entry === undefined) {
+      throw new Error("No ledger entry");
+    }
+    await env.BRAIN_OBJECTS.put(entry, "");
+
+    await restore(own(), copy);
+
+    await expect(own().keyState(group)).resolves.toBe("erased");
+    await expect(own().keyState(`${group}/2`)).resolves.toBe("free");
+  });
+
+  // ...and only a key an add named as a group: an erased key alone closes
+  // nothing under it.
+  it("leaves a key under a plainly erased key free", async () => {
+    const plain = `upload:${crypto.randomUUID()}`;
+    await own().addSource({
+      source: plain,
+      change: "1",
+      text: "Kiwi itself",
+      access: theirs(),
+    });
+    await own().eraseSource({ source: plain, reason: "deleted" });
+
+    await own().addSource({
+      source: `${plain}/x`,
+      change: "1",
+      text: "Kiwi under it",
+      access: theirs(),
+    });
+
+    await expect(foundFor("Kiwi")).resolves.toStrictEqual([`${plain}/x`]);
+  });
+
+  // Threat 6: a group erased before anything was added to it is closed too.
+  it("closes a group nothing was added to yet", async () => {
+    const group = newGroup();
+
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    await expect(called(addIn(group, "1", "Late turn"))).rejects.toThrow(
+      erasedSource
+    );
+  });
+
+  // Threat 6: a turn's add under way as its chat is deleted: the store
+  // takes one write at a time, so it lands first and goes with the group.
+  it("erases an add that was writing its file as its group was erased", async () => {
+    const group = newGroup();
+    await addIn(group, "1", "Wombat earlier");
+    const { reached, release } = await holdFileWrites(own());
+    const adding = called(addIn(group, "2", "Wombat in flight"));
+    await reached;
+
+    const erasing = called(
+      own().eraseSource({ source: group, reason: "deleted" })
+    );
+    release();
+
+    await expect(adding).resolves.toMatchObject({ version: 1 });
+    await expect(erasing).resolves.toBeUndefined();
+    await expect(foundFor("Wombat")).resolves.toStrictEqual([]);
+  });
+
+  // Threat 5: a turn can't join another chat's group, or leave its own.
+  it("refuses a source whose key is not under its group, or that names another group than its first", async () => {
+    const group = newGroup();
+    const kept = await addIn(group, "a/1", "First of its group");
+
+    await expect(
+      called(
+        own().addSource({
+          source: `${newGroup()}/1`,
+          change: "1",
+          group,
+          text: "Under another key",
+          access: theirs(),
+        })
+      )
+    ).rejects.toThrow(/must start with its group's/u);
+    await expect(
+      called(
+        own().addSource({
+          source: kept.source,
+          change: "2",
+          group: `${group}/a`,
+          text: "Moved to another group",
+          access: theirs(),
+        })
+      )
+    ).rejects.toThrow(/keeps the group it was first added in/u);
+    await expect(
+      called(
+        own().addSource({
+          source: kept.source,
+          change: "2",
+          text: "Out of its group",
+          access: theirs(),
+        })
+      )
+    ).rejects.toThrow(/keeps the group it was first added in/u);
+  });
+
+  // Threat 1: groups never reach the shared store.
+  it("is refused by the shared store", async () => {
+    const group = newGroup();
+
+    await expect(
+      called(
+        shared().addSource({
+          source: `${group}/1`,
+          change: "1",
+          group,
+          text: "Shared turn",
+          access: { kind: "audience", group: "team:a" },
+        })
+      )
+    ).rejects.toThrow(/only a person's own store keeps groups/u);
+  });
+
+  // Threat 7: the ledger can't be written; the repeat is the same erasure.
+  it("hides the group when its ledger entry can't be written, says so, and a repeat writes the one entry", async () => {
+    const group = newGroup();
+    await addIn(group, "1", "Numbat turn");
+    const { heal } = await breakBucket(own(), ["put"]);
+
+    await expect(
+      called(own().eraseSource({ source: group, reason: "deleted" }))
+    ).rejects.toThrow(/could not record the erasure/u);
+    await heal();
+    await expect(foundFor("Numbat")).resolves.toStrictEqual([]);
+
+    await own().eraseSource({ source: group, reason: "deleted" });
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    await expect(groupEntries()).resolves.toHaveLength(1);
+  });
+
+  // Threat 10: an older copy of the store comes back.
+  it("brings no turn of an erased group back after a restore of an older copy", async () => {
+    const group = newGroup();
+    await addIn(group, "1", "Platypus turn");
+    await tick();
+    const copy = await copyOf(own());
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    await restore(own(), copy);
+
+    await expect(foundFor("Platypus")).resolves.toStrictEqual([]);
+    await expect(called(addIn(group, "2", "Platypus again"))).rejects.toThrow(
+      erasedSource
+    );
+  });
+
+  // Threat 8: a long chat, deleted in bounded batches that go on where
+  // they stopped, through a restart. A batch is `eraseChunksPerBatch`
+  // chunks: turns of `chunksPerTurn` chunks each, so the call's own batch,
+  // a tick's and a tick after a restart each take part of them.
+  it(
+    "erases a group of many sources in one call, and deletes them a bounded batch a tick, going on after a restart",
+    { timeout: 60_000 },
+    async () => {
+      const group = newGroup();
+      const chunksPerTurn = 10;
+      const turns = (2 * eraseChunksPerBatch) / chunksPerTurn + 1;
+      const atOnce = 50;
+      for (let at = 0; at < turns; at += atOnce) {
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await Promise.all(
+          Array.from(
+            { length: Math.min(atOnce, turns - at) },
+            async (_, index) =>
+              await addIn(
+                group,
+                String(at + index),
+                turnOfChunks(at + index, chunksPerTurn)
+              )
+          )
+        );
+      }
+
+      await own().eraseSource({ source: group, reason: "deleted" });
+
+      await expect(foundFor("Echidna")).resolves.toStrictEqual([]);
+      // Each step deletes a bounded part, and the next goes on from there.
+      const held = [await versionsHeld()];
+      await tick();
+      held.push(await versionsHeld());
+      await kill(own());
+      await tick();
+      held.push(await versionsHeld());
+      const [afterCall = 0, afterTick = 0, afterRestart = 0] = held;
+      expect({
+        boundedCall: afterCall > 0 && afterCall < turns,
+        boundedTick: afterTick > 0 && afterTick < afterCall,
+        afterRestart,
+      }).toStrictEqual({
+        boundedCall: true,
+        boundedTick: true,
+        afterRestart: 0,
+      });
+      await expect(groupEntries()).resolves.toHaveLength(1);
+    }
+  );
 });

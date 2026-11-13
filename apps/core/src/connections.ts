@@ -4,6 +4,7 @@ import type {
   AgentSettings,
   AgentUsage,
   AgentWake,
+  OwnAgentsUsage,
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
@@ -53,8 +54,10 @@ import { z } from "zod";
 import {
   changeAgent,
   listAgents,
+  listOwnAgents,
   deleteAgent,
   makeAgent,
+  makeOwnAgent,
   readAgentSettings,
   setAgentPaused,
   setAgentReach,
@@ -65,7 +68,7 @@ import {
   listAgentDocuments,
   removeAgentDocument,
 } from "./agent-documents.ts";
-import { agentsUsage } from "./agent-usage.ts";
+import { agentsUsage, ownAgentsUsage } from "./agent-usage.ts";
 import {
   deleteAgentWake,
   listAgentWakes,
@@ -760,6 +763,27 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     return await withPerson(this.#check, async (identity) => {
       requireAdmin(identity);
       return await agentsUsage(this.#env, spendMonth(this.#env));
+    });
+  }
+
+  async ownAgents(): Promise<Agent[]> {
+    return await withPerson(this.#check, async (identity) =>
+      // Grasp's staff are no one of the company: they have none.
+      identity.staff ? [] : await listOwnAgents(this.#env, identity.userId)
+    );
+  }
+
+  async makeOwnAgent(input: unknown): Promise<Agent> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await makeOwnAgent(this.#env, identity, input)
+    );
+  }
+
+  async ownAgentsUsage(): Promise<OwnAgentsUsage[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await ownAgentsUsage(this.#env, spendMonth(this.#env));
     });
   }
 

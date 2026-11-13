@@ -1,4 +1,3 @@
-import { collections } from "@grasp-os/brain/schema";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -74,11 +73,7 @@ const pendingWorkflowsMax = 50;
 type Offered = PendingWorkflowBindings["bindings"][number]["offered"][number];
 
 /** Workflow `id`'s own active permissions on objects of `type`, oldest first. */
-const heldOf = async (
-  env: Env,
-  id: string,
-  type: "collection" | "connection"
-) =>
+const heldOf = async (env: Env, id: string, type: "platform" | "connection") =>
   await drizzle(env.DB)
     .select({
       id: permissions.id,
@@ -100,9 +95,9 @@ const heldOf = async (
 /**
  * What `target` names, as an offer of it and an approval of it are
  * listed: a connector's by `grant`, the name of the
- * workflow's own grant it goes through (its binding name), a Brain
- * collection by `grant`, the collection's name, a model by its ID; empty
- * where it names nothing, or its grant is gone.
+ * workflow's own grant it goes through (its binding name), the Brain by
+ * the binding name of its grant, a model by its ID; empty where it names
+ * nothing, or its grant is gone.
  */
 const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
   switch (target.kind) {
@@ -112,7 +107,7 @@ const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
     case "connector": {
       return grant === undefined ? "" : `${grant}: ${target.contract}`;
     }
-    case "knowledge": {
+    case "brain": {
       return grant ?? "";
     }
     case "decision":
@@ -151,32 +146,23 @@ const sourceTargets = async (env: Env): Promise<Offered[]> => {
   }));
 };
 
-/** The names of the Brain collections `ids`, by ID. */
-const collectionNames = async (
-  env: Env,
-  ids: readonly string[]
-): Promise<Map<string, string>> => {
-  const named =
-    ids.length === 0
-      ? []
-      : await drizzle(env.KNOWLEDGE)
-          .select({ id: collections.id, name: collections.name })
-          .from(collections)
-          .where(inArray(collections.id, [...ids]));
-  return new Map(named.map(({ id, name }) => [id, name]));
+/** The actions a permission row allows, as it keeps them (JSON). */
+const actionsOf = (actions: string): string[] => {
+  const parsed: unknown = JSON.parse(actions);
+  return Array.isArray(parsed)
+    ? parsed.filter((action): action is string => typeof action === "string")
+    : [];
 };
 
-/** The workflow's own active permissions to read a collection, as targets, by the collection's name. */
-const knowledgeTargets = async (env: Env, id: string): Promise<Offered[]> => {
-  const rows = await heldOf(env, id, "collection");
-  const names = await collectionNames(
-    env,
-    rows.map(({ objectId }) => objectId)
-  );
-  return rows.map(({ id: permissionId, objectId }) => {
-    const target = { kind: "knowledge", permissionId } as const;
-    return { target, label: labelOf(target, names.get(objectId)) };
-  });
+/** The workflow's own active permissions to read the Brain, as targets. */
+const brainTargets = async (env: Env, id: string): Promise<Offered[]> => {
+  const rows = await heldOf(env, id, "platform");
+  return rows
+    .filter(({ actions }) => actionsOf(actions).includes("brain"))
+    .map(({ id: permissionId, binding }) => {
+      const target = { kind: "brain", permissionId } as const;
+      return { target, label: labelOf(target, binding) };
+    });
 };
 
 /**
@@ -252,8 +238,8 @@ const candidatesOf = async (
     case "files": {
       return [{ target: { kind: "files" }, label: "" }];
     }
-    case "knowledge": {
-      return await knowledgeTargets(env, id);
+    case "brain": {
+      return await brainTargets(env, id);
     }
     case "connector": {
       return await connectorTargets(env, id);
@@ -469,32 +455,22 @@ export const workflowPendingBindings = async (
 
 /**
  * What the workflow's own active grants of the kinds a target goes
- * through are called, by permission ID: a Brain collection's by the
- * collection's name, a connection's by its binding name.
+ * through are called, by permission ID: each by its binding name.
  */
 const grantNamesOf = async (
   env: Env,
   id: string
 ): Promise<Map<string, string>> => {
-  const [read, connections] = await Promise.all([
-    heldOf(env, id, "collection"),
+  const [platform, connections] = await Promise.all([
+    heldOf(env, id, "platform"),
     heldOf(env, id, "connection"),
   ]);
-  const names = await collectionNames(
-    env,
-    read.map(({ objectId }) => objectId)
+  return new Map(
+    [...platform, ...connections].map(({ id: permissionId, binding }) => [
+      permissionId,
+      binding,
+    ])
   );
-  const grants = new Map<string, string>();
-  for (const { id: permissionId, objectId } of read) {
-    const name = names.get(objectId);
-    if (name !== undefined) {
-      grants.set(permissionId, name);
-    }
-  }
-  for (const { id: permissionId, binding } of connections) {
-    grants.set(permissionId, binding);
-  }
-  return grants;
 };
 
 /**

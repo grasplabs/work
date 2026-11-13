@@ -139,10 +139,21 @@ interface Said {
 const useAccessGlances = (
   first: boolean,
   settings: AgentSettings | undefined,
-  teams: StephenReach["teams"]
+  teams: StephenReach["teams"],
+  own: boolean
 ): { who: Said; may: Said } => {
   const { t } = useLingui();
   const audienceLine = useAudienceLine(teams);
+  if (own) {
+    // A person's own agent has no settings of either: core holds both.
+    return {
+      who: { value: t`Only you`, line: t`In Grasp's chat` },
+      may: {
+        value: t`What Grasp may do for you`,
+        line: t`As your company has set it, never more`,
+      },
+    };
+  }
   if (first) {
     return {
       who: {
@@ -185,7 +196,12 @@ const Glances = ({
 }) => {
   const { t } = useLingui();
   const moment = useMoment();
-  const { who, may } = useAccessGlances(first, settings, teams);
+  const { who, may } = useAccessGlances(
+    first,
+    settings,
+    teams,
+    agent.ownerId !== null
+  );
   const scheduled = wakesOn(wakes).length;
   const next = nextWakeAt(wakes);
   return (
@@ -468,6 +484,11 @@ export const AgentPage = ({
     }
   };
   const scheduled = wakesOn(wakes).length;
+  // A person's own agent: theirs alone, with no audience, class or
+  // schedule to set, so no tab for either.
+  const own = agent.ownerId !== null;
+  const shownTab =
+    own && (tab === "access" || tab === "schedule") ? "overview" : tab;
   return (
     <Page>
       <PageHeading
@@ -511,6 +532,11 @@ export const AgentPage = ({
                 {t`The company's first agent`}
               </span>
             ) : null}
+            {own ? (
+              <span className="text-muted-foreground text-xs">
+                {t`Yours alone: nobody else sees or asks it`}
+              </span>
+            ) : null}
           </>
         }
         title={
@@ -525,7 +551,7 @@ export const AgentPage = ({
         onValueChange={(next: unknown) => {
           onTab(agentTabOf(next));
         }}
-        value={tab}
+        value={shownTab}
       >
         <TabsList>
           <TabsTrigger value="overview">
@@ -534,17 +560,21 @@ export const AgentPage = ({
           <TabsTrigger value="instructions">
             <Trans>Instructions</Trans>
           </TabsTrigger>
-          <TabsTrigger value="access">
-            <Trans>Access</Trans>
-          </TabsTrigger>
-          <TabsTrigger value="schedule">
-            <Trans>Schedule</Trans>
-            {scheduled === 0 ? null : (
-              <TabsCount label={t`${scheduled} on a schedule`}>
-                {scheduled}
-              </TabsCount>
-            )}
-          </TabsTrigger>
+          {own ? null : (
+            <TabsTrigger value="access">
+              <Trans>Access</Trans>
+            </TabsTrigger>
+          )}
+          {own ? null : (
+            <TabsTrigger value="schedule">
+              <Trans>Schedule</Trans>
+              {scheduled === 0 ? null : (
+                <TabsCount label={t`${scheduled} on a schedule`}>
+                  {scheduled}
+                </TabsCount>
+              )}
+            </TabsTrigger>
+          )}
         </TabsList>
         <TabsContent keepMounted value="overview">
           <div className="flex flex-col gap-6">
@@ -664,47 +694,51 @@ export const AgentPage = ({
             </Card>
           </div>
         </TabsContent>
-        <TabsContent keepMounted value="access">
-          <div className="flex flex-col gap-6">
-            {firstAccess === undefined ? (
-              <Access
-                agent={agent}
-                can={can}
-                change={change}
-                first={first}
-                settings={settings}
-                teams={teams}
-              />
-            ) : (
-              // The first agent's reach is the company's own, with a place
-              // for each chat app and a row for each app: its settings
-              // whole, as Settings › Stephen had them.
-              <StephenSettings
-                classes={firstAccess.classes}
-                editable={editable}
-                reach={firstAccess.reach}
-                week={firstAccess.week}
-                workflows={firstAccess.workflows}
-              />
-            )}
-          </div>
-        </TabsContent>
-        <TabsContent keepMounted value="schedule">
-          <div className="flex flex-col gap-6">
-            <Card variant="panel">
-              <ul className="[&>li:first-child]:border-t-0">
-                <AgentWakes
-                  agent={agent}
-                  can={can}
-                  change={change}
-                  editable={editable}
-                  people={people}
-                  wakes={wakes}
-                />
-              </ul>
-            </Card>
-          </div>
-        </TabsContent>
+        {own ? null : (
+          <>
+            <TabsContent keepMounted value="access">
+              <div className="flex flex-col gap-6">
+                {firstAccess === undefined ? (
+                  <Access
+                    agent={agent}
+                    can={can}
+                    change={change}
+                    first={first}
+                    settings={settings}
+                    teams={teams}
+                  />
+                ) : (
+                  // The first agent's reach is the company's own, with a place
+                  // for each chat app and a row for each app: its settings
+                  // whole, as Settings › Stephen had them.
+                  <StephenSettings
+                    classes={firstAccess.classes}
+                    editable={editable}
+                    reach={firstAccess.reach}
+                    week={firstAccess.week}
+                    workflows={firstAccess.workflows}
+                  />
+                )}
+              </div>
+            </TabsContent>
+            <TabsContent keepMounted value="schedule">
+              <div className="flex flex-col gap-6">
+                <Card variant="panel">
+                  <ul className="[&>li:first-child]:border-t-0">
+                    <AgentWakes
+                      agent={agent}
+                      can={can}
+                      change={change}
+                      editable={editable}
+                      people={people}
+                      wakes={wakes}
+                    />
+                  </ul>
+                </Card>
+              </div>
+            </TabsContent>
+          </>
+        )}
       </Tabs>
     </Page>
   );

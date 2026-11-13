@@ -76,8 +76,12 @@ export const turnRecallDeadlineMs = 3000;
  */
 export const analysisWaitMs = 1500;
 
-/** What the analysis is recorded as, in the audit log and its spend. */
-export const analysisPurpose = "chat.recall_analysis";
+/**
+ * What the analysis is recorded as, in the audit log and its spend: a
+ * Brain purpose (model-spend.ts `brainPurposePrefix`), so staff see what
+ * it spent in the Brain's report.
+ */
+export const analysisPurpose = "brain.recall_analysis";
 
 /**
  * The messages before the question the analysis reads, at most: the
@@ -162,9 +166,11 @@ interface Recalling {
   turn: Pick<CodeTurn, "scope" | "runs">;
   /**
    * Who reads the answer: the person asking alone (`own`: their own chat
-   * in Grasp), or others too (`shared`: a chat app's thread, which core
-   * counts as shared whoever is in it). A recall where others read the
-   * answer must never hand over what only the asker may read.
+   * in Grasp, or their direct message on a chat app, whose recall is not
+   * `personal`), or others too
+   * (`shared`: a group chat's or channel's thread, which core counts as
+   * shared whoever is in it). A recall where others read the answer must
+   * never hand over what only the asker may read.
    */
   conversation: "own" | "shared";
   /**

@@ -23,6 +23,7 @@ const stephen: ChatAgent = {
   face: "stephen",
   job: "Answers from what the company told Grasp.",
   model: null,
+  own: false,
 };
 const claire: ChatAgent = {
   id: "agent-claire",
@@ -30,6 +31,7 @@ const claire: ChatAgent = {
   face: "claire",
   job: "Chases unpaid invoices.",
   model: null,
+  own: false,
 };
 
 let root: Root | undefined;

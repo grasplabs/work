@@ -4,9 +4,10 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
-import { restoringNow, erasedSource } from "./contract.ts";
+import { erasedSource, restoringNow, staleVersion } from "./contract.ts";
 import type {
   AddedVersion,
+  ChangeRequest,
   CurrentRequest,
   NewSource,
   ReadableRequest,
@@ -24,11 +25,15 @@ import {
 import { enqueueEmbedding } from "./embedding.ts";
 import {
   erasuresSoFar,
+  groupOfSource,
   isErased,
+  isUnderErasedGroup,
+  keepGroup,
   lastErasedVersion,
   isPersonErasedSince,
   keepSubject,
   subjectOf,
+  subjectsOver,
 } from "./erasure.ts";
 import {
   fileKeyOf,
@@ -71,6 +76,8 @@ export interface SourcesStore {
   readonly storage: DurableObjectStorage;
   readonly db: DrizzleSqliteDODatabase;
   readonly bucket: BrainBucket;
+  /** Whether it may hold groups: a person's own store; the shared one never. */
+  readonly groups: boolean;
 }
 
 const encoder = new TextEncoder();
@@ -81,7 +88,8 @@ const encoder = new TextEncoder();
  * instruction file's never is (contract.ts `addInstructions`).
  */
 interface Adding {
-  readonly added: NewSource;
+  /** The add, and the current version it expects when it names one. */
+  readonly added: NewSource & { readonly after?: number | null };
   /** The source's key as the erasure ledger names it (erasure.ts). */
   readonly subject: string;
   /**
@@ -91,11 +99,39 @@ interface Adding {
    * it (`record`).
    */
   readonly onlyFor?: { subject: string; soFar: number };
+  /** Its group's key as the erasure ledger names it: null for none. */
+  readonly group: string | null;
+  /** The keys its key lies under, as the ledger names them (`subjectsOver`). */
+  readonly over: readonly string[];
   readonly hash: string;
   readonly readers: string;
   /** Its chunks when it is indexed, each with its text's SHA-256: none when not. */
   readonly chunks: readonly { text: string; hash: string }[];
 }
+
+/** What an add answers that names another group than its source's first. */
+const otherGroup =
+  "The Brain refused it: a source keeps the group it was first added in";
+
+/**
+ * Refuses `adding` when its group's key was erased, or a group its key
+ * lies under was (`isUnderErasedGroup`, named or not: as an erased key's
+ * add, `erasedSource`), or when its source was first added in another group,
+ * or in none: a source keeps its group for good, so a group's erasure
+ * finds every version of it.
+ */
+const refuseByGroup = (sql: SqlStorage, adding: Adding): void => {
+  if (
+    (adding.group !== null && isErased(sql, adding.group)) ||
+    isUnderErasedGroup(sql, adding.over)
+  ) {
+    throw new Error(erasedSource);
+  }
+  const held = groupOfSource(sql, adding.added.source);
+  if (held !== undefined && held !== adding.group) {
+    throw new Error(otherGroup);
+  }
+};
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
 const versionFields = {
@@ -110,6 +146,12 @@ const versionFields = {
  * keeping a new change's key for the current version it matches; or
  * `undefined` when it is a new version. Throws when its change was added
  * before with other text or readers.
+ *
+ * An add over an expected version (`after`) never matches the current
+ * one: it always makes a new version, so landing moves the version, and a
+ * writer that read the version before it is refused as stale. Matching
+ * would let a decision "land" without moving it, and an older writer's
+ * `after` still pass over it.
  */
 const madeBefore = (
   db: DrizzleSqliteDODatabase,
@@ -145,8 +187,14 @@ const madeBefore = (
     .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
     .where(eq(currentVersions.source, added.source))
     .get();
+  // Expected to be over another version than the current one: refused,
+  // nothing written, before anything else is compared.
+  if (added.after !== undefined && (current?.version ?? null) !== added.after) {
+    throw new Error(staleVersion);
+  }
   if (
     current === undefined ||
+    added.after !== undefined ||
     current.file !== hash ||
     current.readers !== readers
   ) {
@@ -223,6 +271,7 @@ const record = (
   ) {
     throw new Error(erasedSource);
   }
+  refuseByGroup(storage.sql, adding);
   // The same change, or the same text and readers, added meanwhile.
   const before = madeBefore(db, adding);
   if (before !== undefined) {
@@ -286,7 +335,10 @@ const record = (
   db.insert(sourceChanges)
     .values({ source: added.source, change: added.change, versionRow: row })
     .run();
-  keepSubject(storage.sql, added.source, adding.subject);
+  keepSubject(storage.sql, added.source, adding.subject, adding.group);
+  if (adding.group !== null) {
+    keepGroup(storage.sql, adding.group);
+  }
   // The version before stops being found by meaning as it stops being
   // current: its chunks' vector codes go with the pointer.
   const replaced = db
@@ -331,10 +383,12 @@ const addAgain = "The Brain lost the file while adding it: add it again";
  * can be repeated after a lost reply, or after a crash between the file
  * and the version, which it then finishes. Its text is cut into chunks
  * and indexed for recall when `indexed`; otherwise it is only kept whole.
+ * With `after`, only over that current version (`staleVersion` otherwise),
+ * asked again in the transaction that writes.
  */
 export const addVersion = async (
-  { storage, db, bucket }: SourcesStore,
-  added: NewSource,
+  { storage, db, bucket, groups }: SourcesStore,
+  added: Adding["added"],
   { indexed }: { indexed: boolean }
 ): Promise<AddedVersion> => {
   const soFar = erasuresSoFar(storage.sql);
@@ -345,6 +399,9 @@ export const addVersion = async (
     ...(added.access.kind === "owner"
       ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
       : {}),
+    group: added.group === undefined ? null : await subjectOf(added.group),
+    // The shared store holds no group: nothing under one to look up.
+    over: groups ? await subjectsOver(added.source) : [],
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     chunks: await Promise.all(
@@ -357,6 +414,7 @@ export const addVersion = async (
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
+  refuseByGroup(storage.sql, adding);
   if (isRestoring(storage.sql)) {
     throw new Error(restoringNow);
   }
@@ -428,6 +486,40 @@ WHERE source = ?1 AND version = ?4
     WHERE current_versions.source = ?1
       AND current.reader_set IN (SELECT reader_set FROM readable)
   )`;
+
+/** `?1` the source, `?4` the change: the version it made, by `versionSql`'s rule. */
+const changeVersionSql = `
+WITH ${readableSql}
+SELECT version.version AS version FROM source_changes AS change
+JOIN source_versions AS version ON version.row = change.version_row
+WHERE change.source = ?1 AND change.change = ?4
+  AND version.row NOT IN (SELECT version_row FROM erasing_versions)
+  AND version.reader_set IN (SELECT reader_set FROM readable)
+  AND EXISTS (
+    SELECT 1 FROM current_versions
+    JOIN source_versions AS current ON current.row = current_versions.version_row
+    WHERE current_versions.source = ?1
+      AND current.reader_set IN (SELECT reader_set FROM readable)
+  )`;
+
+/**
+ * The version the change `change` of `source` made: `null` when it made
+ * none or `reader` may not read it (as `readVersion`), alike.
+ */
+export const changeVersion = (
+  { storage }: Pick<SourcesStore, "storage">,
+  { source, change, reader }: ChangeRequest
+): number | null =>
+  storage.sql
+    .exec<{ version: number }>(
+      changeVersionSql,
+      source,
+      reader.person,
+      JSON.stringify(reader.groups),
+      change
+    )
+    .toArray()
+    .at(0)?.version ?? null;
 
 /**
  * A version of a source, current or history, whole from its file:

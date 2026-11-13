@@ -3,7 +3,9 @@
  * queue, its store's size against its limit, its erasure ledger and the
  * steps of its tick that failed, as its core reported it as the section
  * opened (src/clients/brain.ts), with its embedding's progress and how
- * its recall does by each way since its store started; and the
+ * its recall does by each way since its store started, and what its
+ * model calls spent this month by purpose, as the model gateway recorded
+ * them; and the
  * three things staff may do: put a parked item back in the queue, rebuild
  * the word indexes, and re-embed. Every
  * read and action is in the company's audit log, by the staff member.
@@ -53,7 +55,15 @@ import { agoWords } from "./ai-status-words.ts";
 import type { BrainRead } from "./brain-loads.ts";
 import { Figure } from "./parts.tsx";
 import { EmptySection, Section, SectionRow } from "./section.tsx";
-import { formatList, formatPercent, plural, whole } from "./words.ts";
+import {
+  dollars,
+  formatList,
+  formatMonth,
+  formatPercent,
+  plural,
+  tokens,
+  whole,
+} from "./words.ts";
 
 /** What an action did, as staff read it: its kind's line when done. */
 const doneWords: Readonly<Record<BrainAction["type"], string>> = {
@@ -589,6 +599,85 @@ const Recall = ({ report }: { report: BrainReport }) => {
 };
 
 /**
+ * What the Brain's model calls spent this month, by purpose, as the
+ * model gateway recorded each answered request. An overview: nothing
+ * limits it.
+ */
+const ModelSpend = ({ report }: { report: BrainReport }) => {
+  const spend = report.modelSpend;
+  if (spend === undefined) {
+    // A core of an older release, on a slower channel, doesn't send it.
+    return (
+      <Section title="Model spend">
+        <SectionRow label="Not available yet">
+          <span>This client’s release doesn’t report model spend yet.</span>
+        </SectionRow>
+      </Section>
+    );
+  }
+  const month = formatMonth(spend.month);
+  return (
+    <Section
+      description={`${month}, as the model gateway recorded each answered call, at the providers’ list prices: on the client’s own keys, their provider’s invoice is the bill.`}
+      title="Model spend"
+    >
+      {spend.purposes.length === 0 ? (
+        <SectionRow label={`No model calls in ${month}`}>
+          <span className="tabular-nums">{dollars(0)}</span>
+        </SectionRow>
+      ) : (
+        <div className="border-t">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead variant="card">Purpose</TableHead>
+                <TableHead className="text-right" variant="card">
+                  Calls
+                </TableHead>
+                <TableHead className="text-right" variant="card">
+                  Tokens in
+                </TableHead>
+                <TableHead className="text-right" variant="card">
+                  Tokens out
+                </TableHead>
+                <TableHead className="text-right" variant="card">
+                  Cost
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {spend.purposes.map((used) => (
+                <TableRow key={used.purpose}>
+                  <TableCell variant="card">
+                    <code>{used.purpose}</code>
+                  </TableCell>
+                  <TableCell className="text-right" variant="card">
+                    <span className="tabular-nums">{whole(used.calls)}</span>
+                  </TableCell>
+                  <TableCell className="text-right" variant="card">
+                    <span className="tabular-nums">
+                      {tokens(used.inputTokens)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right" variant="card">
+                    <span className="tabular-nums">
+                      {tokens(used.outputTokens)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right" variant="card">
+                    <span className="tabular-nums">{dollars(used.cost)}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </Section>
+  );
+};
+
+/**
  * The erasure ledger in one line, its counters under it: by kind, by
  * reason, and not yet written. Open by itself while an entry is still
  * to write.
@@ -799,6 +888,7 @@ const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
       <Parked acting={acting} report={report} />
       <Waiting report={report} />
       <Recall report={report} />
+      <ModelSpend report={report} />
       <Ledger report={report} />
       <Steps report={report} />
       <OwnStores report={report} />
