@@ -26,6 +26,9 @@ export const brainModules = {
   // The Brain's Sources page, for people: its own surface, each method
   // probed as the signed-in person.
   "apps/core/src/brain-sources-rpc.ts": "sources",
+  // Answers an admin's request with core's export and restore functions,
+  // whose probes hold what they return, as they return it.
+  "apps/core/src/brain-next-exports.ts": "core",
   // Erases the sources of runs past their retention with core's
   // eraseSource, and answers nothing of it.
   "apps/core/src/brain-next-origins.ts": "core",
