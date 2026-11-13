@@ -15,13 +15,13 @@ import { requireWorkflowRole, versionContract } from "./workflow-resources.ts";
 // input must match, as that version's contract says. Anyone with a role
 // in the workflow may start it (workflow-starts.ts decides, again, on the
 // start), so anyone with a role may read this; nobody else learns the
-// workflow exists. The version is the one approved to go live, and before
-// any is, the one published last, as a builder's run takes it. The schema
+// workflow exists. The version is the live one, the only one a start
+// runs (workflow-starts.ts). The schema
 // is the exact form a start is checked against: a field with a default
 // must be given, as nothing fills it in. A field that takes a person is
 // marked so (`startSchemaOf`), and the form then carries whom it may
 // name: the organization's people and teams, by name and ID alone, as a
-// workflow's share offers them (workflow-share-candidates.ts). Whoever may
+// workflow's share offers them (sharing.ts, `organizationPeopleAndTeams`). Whoever may
 // start it may name anyone in such a field (the start checks only that it
 // is a person, team or role, and the run's decision that its binding
 // covers them), so they learn names they need to pick, and no more: no

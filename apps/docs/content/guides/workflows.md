@@ -11,7 +11,7 @@ An App doesn't contain workflows. It starts them, and follows their runs. This g
 
 ## Declaring the workflows an App starts
 
-An App declares each workflow it starts as a permission in its definition, with `addPermission`: an alias, the `args` a run starts with and what it `returns`, in `v`'s words, as a function declares them. Like every permission, it grants nothing yet. The App's builders bind the alias to a version of a workflow, and an admin grants the App permission to start it. Until both, every start fails.
+An App declares each workflow it starts as a permission in its definition, with `addPermission`: an alias, the `args` a run starts with and what it `returns`, in `v`'s words, as a function declares them. Like every permission, it grants nothing yet. The App's builders bind the alias to a workflow, and an admin grants the App permission to start it. Until both, every start fails. A start always runs the workflow's live version, the one its builders last published or rolled back to, and a run keeps the version it started on.
 
 Grasp generates the permission into `grasp.config.ts`, which exports it as `permissions.<alias>`:
 
@@ -44,9 +44,9 @@ export default defineApp({
 });
 ```
 
-A workflow that waits for events from the App, or asks people to decide, declares them too: the `events` its Pages and mutations send (each event's `type` and `data`), the `listens` tasks waiting on them, and the `decisions` people answer (each one's `value` and the `context` they review). They are the contract the App relies on, and what `workflows.<alias>` in `@server/_generated/api` names and types. Binding the workflow in the draft writes them in from the version you bind, with the `bindWorkflow` definition tool, as `review` above declares them.
+A workflow that waits for events from the App, or asks people to decide, declares them too: the `events` its Pages and mutations send (each event's `type` and `data`), the `listens` tasks waiting on them, and the `decisions` people answer (each one's `value` and the `context` they review). They are the contract the App relies on, and what `workflows.<alias>` in `@server/_generated/api` names and types. Binding the workflow in the draft writes them in from its live version, with the `bindWorkflow` definition tool, as `review` above declares them.
 
-A version whose events, decisions or listen tasks differ from what the App's current version declares can't be bound directly. Bind it in the App's draft, which declares the new contract, and publish the App: the version is bound as that App version becomes current, and bound again to whatever an older App version bound if you roll back to it.
+A workflow whose live version's events, decisions or listen tasks differ from what the App's current version declares can't be bound directly. Bind it in the App's draft, which declares the new contract, and publish the App: the workflow is bound as that App version becomes current, and an older App version's workflows are bound again if you roll back to it. Once bound, a version of the workflow whose events, decisions or listen tasks differ from what a bound App declares can't go live: change the App's declaration first.
 
 Then any of the App's actions and mutations can start it:
 

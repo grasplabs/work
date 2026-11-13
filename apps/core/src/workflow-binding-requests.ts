@@ -34,8 +34,8 @@ import { ingressOf } from "./workflows/run-inboxes.ts";
 
 // The bindings that wait on an admin (`workflowResources.pendingBindings`,
 // the waiting feed's `bindings`): every catalog binding of a workflow's
-// live version, or of the version asked to go live, that no approval
-// serves, so its starts are refused (workflow-starts.ts). What could go
+// live version that no approval serves, so its starts are refused
+// (workflow-starts.ts). What could go
 // wrong, and what stops it:
 //
 // - Someone else learning which workflows reach what: the organization's

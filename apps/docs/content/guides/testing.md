@@ -72,7 +72,7 @@ What `t.run` inserts belongs to the test itself, nobody in the App; `ada.run(...
 
 ## Workflow runs
 
-An identity starts the workflows the App binds as a Page does, with `start`: a real run of the bound version, on Grasp's workflow engine, with nothing of your organization's around it. What it would ask outside, the test answers in the start's options:
+An identity starts the workflows the App binds as a Page does, with `start`: a real run of the bound workflow's live version, on Grasp's workflow engine, with nothing of your organization's around it. What it would ask outside, the test answers in the start's options:
 
 - `models`: what each of its model bindings answers, by alias. No model is ever asked, and a model call the test gives no answer fails the run (`workflow.test_unfixtured`).
 - `params`: its parameter values. Any other takes its declared default, never the value your organization set.

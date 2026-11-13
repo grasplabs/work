@@ -29,9 +29,9 @@ import { draftWatch } from "./durable-objects.ts";
 // calls these, having checked the writer may write the subject's draft
 // (its kind's `editable`) and, for an agent, that its code run is still
 // open. What differs by kind (who may write, which version a draft is
-// over, a version's files, how it is published) is its `DraftKind`
-// (app-publish.ts, workflow-publish.ts); publishing a draft is
-// publish.ts's.
+// over, a version's files) is its `DraftKind` (apps.ts,
+// workflow-resources.ts); publishing a draft is publish.ts's, with each
+// kind's `PublishSteps`.
 //
 // Threat model, and how each is closed:
 //

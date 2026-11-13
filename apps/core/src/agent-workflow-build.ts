@@ -76,7 +76,8 @@ import {
 //   grants, approves or starts: a published version runs nothing until
 //   something with a grant starts it; each catalog binding it declares
 //   (a connector, model or decision) waits for an
-//   admin's approval of that exact version (workflow-bindings.ts); an App
+//   admin's approval of that binding, whichever version declares it
+//   (workflow-bindings.ts); an App
 //   starts it only through its own `start` permission, which an admin
 //   grants; and a request asks for a permission for the workflow it
 //   names, never for the agent (`subject` is set here, whatever the code
@@ -421,7 +422,7 @@ const workflowBuildDeclaration = `/**
  * which an App binds under the alias its app.ts declares
  * (\`permissions: { workflows: [permission.workflow("alias", { args, returns })] }\`). Nothing here grants or approves
  * anything: each permission a workflow declares outside itself waits for an admin to approve
- * it for that exact version, and an App starts it only once an admin grants
+ * it (once, for every version that declares it the same), and an App starts it only once an admin grants
  * the App \`start\` on it (ask with \`env.build.requestPermission\`,
  * \`{ type: "workflow", workflowId }\`). Say so.
  *

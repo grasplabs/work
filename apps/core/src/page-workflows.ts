@@ -106,7 +106,7 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   workflow that release declares under the alias it names
 //   (`function.not_found` otherwise), its arguments checked by the
 //   descriptors generated from that declaration. Only an alias the seal
-//   pinned to a workflow version has anything to start or read. As with
+//   pinned to a workflow has anything to start or read. As with
 //   the App's own functions, a page of an older release open across a
 //   publish is answered by the current one's contract: it never names its
 //   own, so nothing is refused as stale, and
@@ -229,7 +229,7 @@ interface Asking {
 export interface Resolved {
   readonly alias: string;
   readonly declared: BoundWorkflow;
-  /** The workflow version the seal pinned the alias to, if any. */
+  /** The workflow the seal pinned the alias to, if any. */
   readonly pinned: WorkflowPin | undefined;
   readonly fingerprint: string;
 }
@@ -957,7 +957,7 @@ const started = async (
     resolved.alias,
     { args, key: coreStartKey("page", key) },
     undefined,
-    // The binding still names the version the release's seal pinned.
+    // The binding still names the workflow the release's seal pinned.
     bindingPinnedSql(asking.app, resolved.alias, pin),
     undefined,
     null,
@@ -1772,7 +1772,7 @@ export const readRun = async (
 /**
  * Whether `caller` may start a run of `alias` through the App's binding
  * now, for the reference's `canStart` query: an App's start's own rule,
- * and the binding in force naming the version the seal pinned.
+ * and the binding in force naming the workflow the seal pinned.
  */
 export const mayStartNow = async (
   env: Env,
