@@ -375,13 +375,14 @@ const restoreVersion = async (
     const readerSet = readerSetOf(db, line.access);
     const { row } = sql
       .exec<{ row: number }>(
-        `INSERT INTO source_versions (source, version, file, reader_set, added_at)
-        VALUES (?, ?, ?, ?, ?) RETURNING row`,
+        `INSERT INTO source_versions (source, version, file, reader_set, added_at, read_at)
+        VALUES (?, ?, ?, ?, ?, ?) RETURNING row`,
         line.source,
         line.version,
         hash,
         readerSet,
-        line.addedAt
+        line.addedAt,
+        line.readAt ?? null
       )
       .one();
     const memo: WordMemo = new Map();

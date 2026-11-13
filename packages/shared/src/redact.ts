@@ -101,8 +101,14 @@ const credentials: readonly (readonly [
 // reads for their reader alone), and connectors select the fields they
 // return.
 
-/** A link: a scheme, `://`, and what may follow in a URL, up to a space or a character no URL holds. */
-const linkPattern = /\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>\\^`{|}]+/giu;
+/**
+ * A link: a scheme, `://`, and what may follow in a URL, up to a space or
+ * a character no URL holds. A scheme is short (`https`, `ms-excel`): held
+ * to 32 characters, so a flood of word characters and dashes (`sk-sk-…`),
+ * tried from every word in it, never scans to its end each time, which
+ * would be quadratic.
+ */
+const linkPattern = /\b[a-z][a-z\d+.-]{0,31}:\/\/[^\s"'<>\\^`{|}]+/giu;
 
 /** The query parameters that sign or grant a link, by name. */
 const grantingName = /^(?:[\w-]*signature|sig|code|tempauth|pwd)$/iu;

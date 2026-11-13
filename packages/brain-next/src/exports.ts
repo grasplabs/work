@@ -173,6 +173,13 @@ export const exportLineSchema = z.strictObject({
   version: z.int().positive(),
   /** When it was added, in milliseconds. */
   addedAt: z.int().nonnegative(),
+  /**
+   * When its producer read its text, in milliseconds, if it said
+   * (`NewSource.readAt`): restored with it, so no add of an earlier read
+   * replaces it after a restore either. Optional: a bundle made before it
+   * restores with none.
+   */
+  readAt: z.int().nonnegative().optional(),
   access: accessSchema,
   /** Whether it was its source's current version. */
   current: z.boolean(),
@@ -291,6 +298,7 @@ interface Selected extends Record<string, SqlStorageValue> {
   version: number;
   file: string;
   added_at: number;
+  read_at: number | null;
   readers: string;
   current: number;
   indexed: number;
@@ -313,7 +321,8 @@ WITH unreadable AS (
 )
 SELECT source_versions.row AS row, source_versions.source AS source,
   source_versions.version AS version, source_versions.file AS file,
-  source_versions.added_at AS added_at, reader_sets.key AS readers,
+  source_versions.added_at AS added_at, source_versions.read_at AS read_at,
+  reader_sets.key AS readers,
   coalesce(
     current_versions.version_row = source_versions.row
     OR (current_versions.version_row > ?2 AND source_versions.row = (
@@ -939,6 +948,7 @@ const linesOf = async (
         source: version.source,
         version: version.version,
         addedAt: version.added_at,
+        ...(version.read_at === null ? {} : { readAt: version.read_at }),
         access,
         current: version.current === 1,
         indexed: version.indexed === 1,

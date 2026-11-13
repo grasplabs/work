@@ -1192,6 +1192,48 @@ describe("exports and restores", () => {
       });
     });
 
+    it("restores when each version's text was read, so no earlier read replaces it after a restore; a version that never said restores with none", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const [said, unsaid] = [`test:${unique()}`, `test:${unique()}`];
+      await shared().addSource({
+        source: said,
+        change: "1",
+        text: "read at two",
+        access: team(group),
+        readAt: 2000,
+      });
+      await add(shared(), unsaid, "read whenever", team(group));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const done = await restoreSettled(id);
+
+      const earlierRead = async (source: string) =>
+        await shared().addSource({
+          source,
+          change: "2",
+          text: "read at one",
+          access: team(group),
+          readAt: 1000,
+        });
+      const earlier = await earlierRead(said);
+      const unsaidEarlier = await earlierRead(unsaid);
+      expect({
+        done: done?.state,
+        earlier: { version: earlier.version, newer: earlier.newer },
+        unsaidEarlier: {
+          version: unsaidEarlier.version,
+          newer: unsaidEarlier.newer,
+        },
+      }).toStrictEqual({
+        done: "done",
+        earlier: { version: 1, newer: true },
+        unsaidEarlier: { version: 2, newer: undefined },
+      });
+    });
+
     it("starts a failed restore again from the same export, whatever erasure landed meanwhile, and counts the whole restore", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
