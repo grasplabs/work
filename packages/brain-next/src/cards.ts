@@ -9,16 +9,17 @@ import type {
   Memory,
   Reader,
 } from "./contract.ts";
-import { asSeen, mentionedSql } from "./entities.ts";
+import { mentionedSql } from "./entities.ts";
 import { entityRowOf, readMemories } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
+import { seenAs } from "./seen.ts";
 
 // An entity's card (contract.ts `Card`): a view, built when a reader asks
 // for it from the memories they may read, never stored. Its memories are
 // read by statements that filter by the reader before anything is
 // ordered or capped (memories.ts `readMemories`); the entities it relates
 // to are named only by the names memories the reader may read gave them
-// (entities.ts `asSeen`). So two readers with different access see
+// (seen.ts `seenAs`). So two readers with different access see
 // different cards, and a reader sees the card a store without what is
 // hidden from them would show.
 
@@ -80,7 +81,7 @@ export const readCard = (
   if (found === undefined) {
     return null;
   }
-  const [card] = asSeen(sql, seenOf(sql, reader, [found.row]), reader, at);
+  const [card] = seenAs(sql, seenOf(sql, reader, [found.row]), reader, at);
   if (card === undefined) {
     return null;
   }
@@ -126,7 +127,7 @@ export const readCard = (
   // Each related entity as the reader sees it: a memory they may read,
   // the relation, mentions it, so only its names are checked.
   const others = new Map(
-    asSeen(
+    seenAs(
       sql,
       sql
         .exec<{ row: number; id: string; kind: string }>(

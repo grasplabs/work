@@ -965,6 +965,40 @@ const namesPlainly = (question: string, folded: string): boolean => {
 };
 
 describe("recall through memories, the names a question holds", () => {
+  // Punctuation between the two first words of a name: "Jan, de Vries"
+  // holds "Jan de Vries" without its comma, and "Jan" and "de Vries" as
+  // written; never "Jan Vries".
+  it("finds a name whose first two words a comma parts in the question", async () => {
+    const group = unique("team");
+    const reader = readerOf(unique("ann"), group);
+    const names = ["Jan", "Jan de", "Jan de Vries", "de Vries", "Jan Vries"];
+    await remember(
+      audience(group),
+      names.map((name, index) => ({
+        key: `n${index}`,
+        kind: "person" as const,
+        names: [name],
+      })),
+      names.map((name, index) => fact(`n${index}`, `named ${name}`))
+    );
+    const finding = await shared().find({
+      question: "Jan, de Vries",
+      reader,
+      budget: { tokens: 20_000 },
+    });
+
+    expect(
+      finding.memories.entities.map(({ statement }) => statement).toSorted()
+    ).toStrictEqual(
+      [
+        "named Jan",
+        "named Jan de",
+        "named Jan de Vries",
+        "named de Vries",
+      ].toSorted()
+    );
+  });
+
   // The entities way finds the entities a question names by a seek on
   // their names' first words; it must find exactly those the plain test
   // above finds, over generated names and questions: accents, marks that
@@ -994,6 +1028,11 @@ describe("recall through memories, the names a question holds", () => {
     "&",
     "C++",
     "'s",
+    "Jan",
+    "Jan,",
+    "de",
+    "Vries",
+    "de.",
   ];
 
   it.each([1, 2, 3, 4, 5])(
@@ -1010,10 +1049,24 @@ describe("recall through memories, the names a question holds", () => {
         const group = unique("team");
         const reader = readerOf(unique("ann"), group);
         const question = phrase(8);
+        // Names of one, two and three words sharing the question's first
+        // words, as written and without their punctuation, and two more.
+        const asked = question.split(/\s+/u).filter((one) => one.length > 0);
+        const start = draw(Math.max(1, asked.length));
+        const runs = [1, 2, 3].map((length) =>
+          asked.slice(start, start + length)
+        );
         const names = [
-          ...Array.from({ length: 4 }, () => phrase(3)),
-          question.split(/\s+/u).slice(0, 2).join(" "),
-        ];
+          ...runs.map((run) => run.join(" ")),
+          ...runs.map((run) =>
+            run
+              .map((one) =>
+                one.replaceAll(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "")
+              )
+              .join(" ")
+          ),
+          ...Array.from({ length: 2 }, () => phrase(3)),
+        ].filter((name) => /\S/u.test(name));
         // oxlint-disable-next-line no-await-in-loop -- one scenario at a time
         await remember(
           audience(group),

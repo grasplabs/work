@@ -251,7 +251,7 @@ SELECT asked.value AS entity, (
 FROM json_each(?1) AS asked`;
 
 /** Entities found, as the reader sees them: with the earliest name they may see. */
-export const asSeen = (
+const asSeen = (
   sql: SqlStorage,
   found: readonly { row: number; id: string; kind: string }[],
   reader: Reader,

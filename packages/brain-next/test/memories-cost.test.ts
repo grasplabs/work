@@ -76,6 +76,22 @@ type Store = Awaited<ReturnType<typeof countedStore>>["stub"];
  */
 const seekMargin = 8;
 
+/**
+ * How many names alike the named-entity tests add. Small: an add links a
+ * name of two words or more by its exact name (linking.ts `linkedByName`),
+ * whose read grows with the add's readers' memories (reported on #2209),
+ * so adding 20,000 such names takes minutes. The 5,000 and 20,000 figures
+ * are in the PR body.
+ */
+const namedSizes = [100, 1000, 2000];
+
+/**
+ * Rows read for each name that begins with two words next to each other
+ * in the question: its index entry, the memory that gave it, and its
+ * reader check (measured: 2 rows a name).
+ */
+const rowsPerPairName = 3;
+
 /** Whether `rows` is within `seekMargin` of `alone`, and never fewer. */
 const flat = (alone: number, rows: number): boolean =>
   rows >= alone && rows - alone <= seekMargin;
@@ -320,6 +336,66 @@ describe("what reading memories costs", () => {
 
       expect(flat(few, many)).toBeTruthy();
     }
+  );
+
+  // What finding the entities a question names reads: a seek a word of
+  // the question and a seek a pair of its words. Names that begin with
+  // one of its words cost nothing; names that begin with two of its words
+  // next to each other are read (at most `rowsPerPairName` each): the
+  // remaining cost, as a common first and last name shared by many.
+  it.each([
+    ["the question's first word", 1, true],
+    ["the question's first two words", 2, false],
+  ] as const)(
+    "finds the named entities among names beginning with %s",
+    async (_shape, shared, flatExpected) => {
+      const { stub, rowsReadBy } = await countedStore();
+      const group = `seen-${crypto.randomUUID()}`;
+      const hidden = `hidden-${crypto.randomUUID()}`;
+      const reader = readerOf("reader", group);
+      const [first, second, own] = [word(), word(), word()];
+      const name = `${first} ${second} ${own}`;
+      await add(
+        stub,
+        group,
+        [{ key: "a", kind: "person", names: [name] }],
+        [fact("a", `${name} keeps a note`)]
+      );
+      const alike = () =>
+        shared === 1 ? `${first} ${word()}` : `${first} ${second} ${word()}`;
+      const ask = async () => await finding(stub, reader, name);
+      const rows = [await rowsReadBy(ask)];
+      let have = 0;
+      for (const size of namedSizes) {
+        for (let start = have; start < size; start += 100) {
+          const keys = Array.from({ length: 100 }, (_, index) => `n${index}`);
+          // oxlint-disable-next-line no-await-in-loop -- one add at a time
+          await add(
+            stub,
+            (start / 100) % 2 === 0 ? group : hidden,
+            keys.map((key) => ({
+              key,
+              kind: "person" as const,
+              names: [alike()],
+            })),
+            keys.map((key) => fact(key, `alike ${start} ${key}`))
+          );
+        }
+        have = size;
+        // oxlint-disable-next-line no-await-in-loop -- one size at a time
+        rows.push(await rowsReadBy(ask));
+      }
+      const [alone = 0, ...grown] = rows;
+
+      expect(
+        grown.map((read, index) =>
+          flatExpected
+            ? flat(alone, read)
+            : read - alone <= rowsPerPairName * (namedSizes[index] ?? 0)
+        )
+      ).toStrictEqual([true, true, true]);
+    },
+    300_000
   );
 
   it("reads no entity two steps out once the nearer steps fill the list", async () => {

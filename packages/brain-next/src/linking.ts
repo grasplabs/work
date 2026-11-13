@@ -1,7 +1,8 @@
 import type { EntityKind, Proposal, ProposalPage, Reader } from "./contract.ts";
-import { asSeen, coveredSql, foldName } from "./entities.ts";
+import { coveredSql, foldName } from "./entities.ts";
 import { readMoment, visibleSql } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
+import { seenAs } from "./seen.ts";
 
 // Linking entities (contract.ts "Cards and proposals").
 //
@@ -187,7 +188,7 @@ export const listProposals = (
           .toArray();
   // The asked entity and each candidate, with the names the reader may see.
   const seen = new Map(
-    asSeen(
+    seenAs(
       sql,
       [...(asked === undefined ? [] : [asked]), ...page],
       reader,

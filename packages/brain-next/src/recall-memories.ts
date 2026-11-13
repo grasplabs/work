@@ -66,8 +66,12 @@ const spaces = /\s+/u;
 
 /** What the question may name an entity by (`namedBy`). */
 interface Named {
-  /** Each word of the question as names are folded, as written and bare. */
-  words: string[];
+  /**
+   * The question's words as names are folded, as written and bare: what a
+   * name of one word must equal; and each two words next to each other in
+   * one of those forms: what a name of more words must begin with.
+   */
+  sought: { words: string[]; pairs: string[] };
   /** The question's words as written, folded, between spaces. */
   written: string;
   /** The same without the punctuation at either end of each word. */
@@ -80,8 +84,10 @@ interface Named {
  * What the question may name an entity by, as names and identifiers are
  * compared (entities.ts): its words folded as names are, as written and
  * without the punctuation at either end of each word, each between spaces
- * so a name is found only as whole words; the words of those two, which
- * a name must begin with; and each word as an email and as a reference.
+ * so a name is found only as whole words; the words of those two forms,
+ * which a name of one word must equal, and the two words next to each
+ * other in one form, which a name of more must begin with; and each word
+ * as an email and as a reference.
  * No recogniser of names: an entity is found only by a name or identifier
  * a memory gave it, exactly. Its size is the question's, which the
  * contract bounds (`questionMaxLength`).
@@ -101,16 +107,20 @@ const namedBy = (question: string): Named => {
       identifiers.set(`ref ${word}`, ["ref", word]);
     }
   }
+  // A folded name's words are its spaces' pieces: a name the question
+  // holds whole, in one form, is one of its words or begins with two of
+  // them next to each other in that same form.
+  const forms = [written, bare].map((form) =>
+    form.split(" ").filter((word) => word.length > 0)
+  );
+  const pairs = forms.flatMap((form) =>
+    form.slice(1).map((word, index) => `${form[index]} ${word}`)
+  );
   return {
-    // A folded name's words are its spaces' pieces: every name the
-    // question holds begins with one of these.
-    words: [
-      ...new Set(
-        [...written.split(" "), ...bare.split(" ")].filter(
-          (word) => word.length > 0
-        )
-      ),
-    ],
+    sought: {
+      words: [...new Set(forms.flat())],
+      pairs: [...new Set(pairs)],
+    },
     written: ` ${written} `,
     bare: ` ${bare} `,
     identifiers: [...identifiers.values()],
@@ -118,31 +128,37 @@ const namedBy = (question: string): Named => {
 };
 
 /**
- * `?1` the question's words (JSON), `?4` the moment, `?5` its words as
- * written, folded, between spaces, `?6` the same bare, `?7` its
- * identifiers (JSON, each `[type, folded]`): the entities a memory the
- * reader may read, learned by then, gives a name the question holds as
- * whole words, or one of its identifiers. A name is sought in the index of
- * names (`entity_names_folded_idx`) by its first word: the names equal to
- * a word of the question, and those beginning with one and a space; each
- * found is kept only if the question holds it whole, then checked against
- * the reader. Never a scan of the names: what it reads is a seek a word,
- * and the names beginning with a word the question holds.
+ * `?1` what to seek (JSON: the question's `words` and `pairs`, `Named`),
+ * `?4` the moment, `?5` its words as written, folded, between spaces,
+ * `?6` the same bare, `?7` its identifiers (JSON, each `[type, folded]`):
+ * the entities a memory the reader may read, learned by then, gives a
+ * name the question holds as whole words, or one of its identifiers. A
+ * name is sought in the index of names (`entity_names_folded_idx`): one
+ * of one word equal to a word of the question, one of more beginning with
+ * two words next to each other in it; each found is kept only if the
+ * question holds it whole, then checked against the reader. What it reads
+ * is a seek a word and a pair, and the names beginning with a pair the
+ * question holds.
  */
 const namedSql = `
 WITH ${readableSql},
-asked AS MATERIALIZED (SELECT DISTINCT value AS word FROM json_each(?1)),
+words AS MATERIALIZED (SELECT DISTINCT value AS word FROM json_each(?1, '$.words')),
+pairs AS MATERIALIZED (SELECT DISTINCT value AS pair FROM json_each(?1, '$.pairs')),
 named AS MATERIALIZED (
   SELECT entity_names.entity AS entity, entity_names.memory AS memory,
     entity_names.folded AS folded
-  FROM asked CROSS JOIN entity_names
-    ON entity_names.type = 'name' AND entity_names.folded = asked.word
+  FROM words CROSS JOIN entity_names
+    ON entity_names.type = 'name' AND entity_names.folded = words.word
   UNION ALL
   SELECT entity_names.entity, entity_names.memory, entity_names.folded
-  FROM asked CROSS JOIN entity_names
+  FROM pairs CROSS JOIN entity_names
+    ON entity_names.type = 'name' AND entity_names.folded = pairs.pair
+  UNION ALL
+  SELECT entity_names.entity, entity_names.memory, entity_names.folded
+  FROM pairs CROSS JOIN entity_names
     ON entity_names.type = 'name'
-    AND entity_names.folded > asked.word || ' '
-    AND entity_names.folded < asked.word || ' ' || char(1114111)
+    AND entity_names.folded > pairs.pair || ' '
+    AND entity_names.folded < pairs.pair || ' ' || char(1114111)
 ),
 held AS MATERIALIZED (
   SELECT entity, memory FROM named
@@ -337,7 +353,7 @@ const byEntities = (
   const named = sql
     .exec<{ entity: number }>(
       namedSql,
-      JSON.stringify(asked.words),
+      JSON.stringify(asked.sought),
       reader.person,
       JSON.stringify(reader.groups),
       at,
