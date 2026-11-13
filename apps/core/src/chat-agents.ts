@@ -6,6 +6,7 @@ import { agentFor } from "./agent-reach.ts";
 import { workspaceAgentIdSchema } from "./agent-scope.ts";
 import { firstAgentId, turnAgent } from "./agents.ts";
 import { modelSettings } from "./models.ts";
+import { ownAgentsOn } from "./own-agents-switch.ts";
 
 // The agents a person may talk to in Grasp's own chat: the company's that
 // are on and whose audience takes them in (agent-reach.ts), and their
@@ -27,9 +28,10 @@ export const chatAgentsFor = async (
   env: Env,
   userId: string
 ): Promise<ChatAgent[]> => {
-  const [all, own, { models: chosen }] = await Promise.all([
+  const [all, own, ownOn, { models: chosen }] = await Promise.all([
     listAgents(env),
     listOwnAgents(env, userId),
+    ownAgentsOn(env),
     modelSettings(env),
   ]);
   const on = all.filter(({ state }) => state === "on");
@@ -42,7 +44,8 @@ export const chatAgentsFor = async (
   return [
     ...on.filter((_, index) => reached[index] === true),
     // Their own, after the company's: on, and theirs by their record.
-    ...own.filter(({ state }) => state === "on"),
+    // None while the company has them off.
+    ...(ownOn ? own.filter(({ state }) => state === "on") : []),
   ].map(({ id, name, face, job, model, ownerId }) => ({
     id,
     name,
