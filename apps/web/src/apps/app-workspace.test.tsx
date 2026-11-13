@@ -103,6 +103,7 @@ const fakeApps = ({
   currentVersion = 1,
   sharedWith = [],
   points = [],
+  restoreConflicts = 0,
 }: {
   role?: ViewedApp["role"];
   archived?: boolean;
@@ -111,8 +112,11 @@ const fakeApps = ({
   sharedWith?: SubjectMember[];
   /** The draft's checkpoints, newest first. */
   points?: DraftCheckpoint[];
+  /** How many restores someone else's write refuses first (`draft.conflict`). */
+  restoreConflicts?: number;
 } = {}) => {
   const calls: string[] = [];
+  let conflicts = restoreConflicts;
   let members = sharedWith;
   let app: ViewedApp = {
     id: appIdSchema.parse("invoice-desk"),
@@ -219,6 +223,15 @@ const fakeApps = ({
       ): Promise<void> => {
         calls.push(`restore point ${point} over ${revision}`);
         await Promise.resolve();
+        if (conflicts > 0) {
+          conflicts -= 1;
+          throw Object.assign(
+            new Error(
+              "Someone else changed the draft at the same time. Read it again and retry."
+            ),
+            { code: "draft.conflict" }
+          );
+        }
       },
       /** Discards the draft's changes, over the revision the person saw. */
       discardDraft: async (_app: string, revision: number): Promise<void> => {
@@ -1670,6 +1683,78 @@ describe(AppWorkspace, () => {
       "restore point 3 over 0",
     ]);
   });
+
+  it.each([
+    {
+      conflicts: 1,
+      restores: 2,
+      said: "Sharing undone",
+    },
+    {
+      conflicts: 2,
+      restores: 2,
+      said: "Your team has the version they had beforeThe changes you shared couldn't be put back as the draft. They're in its History, to restore from there.",
+    },
+  ])(
+    "puts the shared changes back after Undo, tried again once over someone's write, or says they're in History ($conflicts refused)",
+    async ({ conflicts, restores, said }) => {
+      const sharedPoint: DraftCheckpoint = {
+        number: 3,
+        revision: 1,
+        base: 1,
+        contentHash: "shared",
+        personId: "user-1",
+        chatId: null,
+        callId: null,
+        restoredFrom: null,
+        createdAt: "2026-10-20T08:00:00.000Z",
+        touched: ["src/routes/index.tsx"],
+        changes: 1,
+      };
+      const fake = fakeApps({
+        currentVersion: 1,
+        points: [sharedPoint],
+        restoreConflicts: conflicts,
+      });
+      let drafted = true;
+      await opened(
+        fake.apps,
+        identityOf(false),
+        "chat-undo-retries",
+        async () => await Promise.resolve(watching()),
+        undefined,
+        async () =>
+          await Promise.resolve(
+            drafted ? draftOf("invoice-desk") : draftOf("invoice-desk", [])
+          ),
+        async () => {
+          await Promise.resolve();
+          drafted = false;
+          return fake.published(2);
+        },
+        async () =>
+          await Promise.resolve(
+            changesOf({ live: 1, liveLabel: "26.11.1", next: "26.11.2" })
+          )
+      );
+      await settled();
+      await press(shareButton());
+      await tick("Finance team");
+      await press(sheetButton("Share"));
+      await press(button("Undo"));
+      await settled();
+
+      expect({
+        // The team has the version before either way.
+        rolledBack: fake.calls.includes(
+          "rollback invoice-desk 1 over 0 from 2"
+        ),
+        restores: fake.calls.filter((call) => call.startsWith("restore"))
+          .length,
+        said: toasts().includes(said),
+      }).toStrictEqual({ rolledBack: true, restores, said: true });
+    }
+  );
 
   it("asks before Undo drops changes taken since the share, even once the workspace was left", async () => {
     const fake = fakeApps({ currentVersion: 1 });

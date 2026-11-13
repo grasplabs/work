@@ -390,11 +390,36 @@ const undoFailed = (error: unknown): void => {
 };
 
 /**
+ * The draft as it was shared (its checkpoint at `revision`) made the draft
+ * again, over the draft as it is now: nothing, should no checkpoint be at
+ * that revision.
+ */
+const restoreShared = async (
+  session: Session,
+  subject: Subject,
+  revision: number
+): Promise<void> => {
+  const [checkpoints, now] = await Promise.all([
+    session.drafts.checkpoints(subject),
+    session.drafts.get(subject),
+  ]);
+  const shared = checkpoints.find(
+    (checkpoint) => checkpoint.revision === revision
+  );
+  if (shared !== undefined) {
+    await session.drafts.restore(subject, shared.number, now.revision);
+  }
+};
+
+/**
  * The version the team had before, live again over the draft at
  * `revision`, while the one the share made still is: a colleague's share
  * since stays. Then the draft as it was shared is the draft again, over
- * that version (its checkpoint at the revision shared), so nothing of the
- * builders' work is left only in History.
+ * that version, so nothing of the builders' work is left only in History:
+ * read again and tried once more should someone write the draft in
+ * between (`draft.conflict`). Should that fail too, the team has the
+ * version back all the same, and the person is told the changes are in
+ * History, to restore from there.
  */
 const takeBack = async (
   { core, router, onDone }: UndoTools,
@@ -402,23 +427,31 @@ const takeBack = async (
   back: NonNullable<Undoable["back"]>,
   revision: number
 ): Promise<void> => {
-  const done = await settled(core, async (session) => {
+  const rolled = await settled(core, async (session) => {
     await session.versions.rollback(subject, back.before, revision, back.made);
-    const [checkpoints, now] = await Promise.all([
-      session.drafts.checkpoints(subject),
-      session.drafts.get(subject),
-    ]);
-    const shared = checkpoints.find(
-      (checkpoint) => checkpoint.revision === back.revision
-    );
-    if (shared !== undefined) {
-      await session.drafts.restore(subject, shared.number, now.revision);
-    }
   });
+  const restore = async () =>
+    await settled(core, async (session) => {
+      await restoreShared(session, subject, back.revision);
+    });
+  let restored = rolled.ok ? await restore() : rolled;
+  if (rolled.ok && !restored.ok && isConflict(restored.error)) {
+    restored = await restore();
+  }
   onDone();
   await router.invalidate();
-  if (!done.ok) {
-    undoFailed(done.error);
+  if (!rolled.ok) {
+    undoFailed(rolled.error);
+    return;
+  }
+  if (!restored.ok) {
+    toast.add({
+      type: "warning",
+      title: pageI18n._(msg`Your team has the version they had before`),
+      description: pageI18n._(
+        msg`The changes you shared couldn't be put back as the draft. They're in its History, to restore from there.`
+      ),
+    });
     return;
   }
   toast.add({ type: "success", title: pageI18n._(msg`Sharing undone`) });
