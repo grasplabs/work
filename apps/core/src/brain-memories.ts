@@ -155,9 +155,10 @@ export const confirmFor = async (
 
 /**
  * `caller`'s person says a memory is wrong, with what is right
- * (`correctAs`): saved as their own word, theirs alone, and confirmed; null
- * alike for a memory they may not read or that isn't current. Audited as
- * `brain.memory.corrected`, with the memory saved.
+ * (`correctAs`): saved as their own word, theirs alone, and confirmed; the
+ * same again for a retry of it. Null alike for a memory they may not read
+ * and for a relation. Audited as `brain.memory.corrected`, with the memory
+ * saved: one outcome per attempt.
  */
 export const correctFor = async (
   env: Env,

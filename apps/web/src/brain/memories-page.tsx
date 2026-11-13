@@ -648,13 +648,26 @@ const MemoryLine = ({
   );
 };
 
-/** The person's choice of `name`, or a word for an entity without one. */
-const EntityName = ({ name }: { name: string | null }) =>
-  name ?? (
-    <span className="text-muted-foreground">
-      <Trans>Without a name</Trans>
-    </span>
+/**
+ * An entity's name, or a word for one without: one a correction of theirs
+ * stands for that they may no longer read, or one with no name.
+ */
+const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
+  if (entity.unreadable) {
+    return (
+      <span className="text-muted-foreground">
+        <Trans>Something you corrected, which you can no longer read</Trans>
+      </span>
+    );
+  }
+  return (
+    entity.name ?? (
+      <span className="text-muted-foreground">
+        <Trans>Without a name</Trans>
+      </span>
+    )
   );
+};
 
 /** The facts sources disagree on that the person may read, a page at a time. */
 const ContestedList = ({
@@ -718,7 +731,7 @@ const ContestedList = ({
                     type="button"
                     variant="link"
                   >
-                    <EntityName name={fact.about.name} />
+                    <EntityName entity={fact.about} />
                   </Button>
                   <span className="font-medium">
                     {attributeLabel(fact.attribute)}
@@ -854,7 +867,7 @@ const EntityList = ({
             >
               <ItemContent>
                 <span className="text-sm">
-                  <EntityName name={each.name} />
+                  <EntityName entity={each} />
                 </span>
                 {each.entity.store === "own" ? (
                   <span className="flex">
@@ -945,7 +958,7 @@ const EntityPanel = ({
       <CardContent>
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-medium" id={heading}>
-            <EntityName name={entity.name} />
+            <EntityName entity={entity} />
           </h3>
           <Badge variant="secondary">{kind}</Badge>
           {ref.store === "own" ? (

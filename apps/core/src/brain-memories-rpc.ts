@@ -111,10 +111,12 @@ const entityOut = ({
   id,
   kind,
   name,
+  unreadable,
 }: StoredEntity): BrainEntityListed => ({
   entity: { store, id },
   kind,
   name,
+  unreadable,
 });
 
 const memoryOut = (person: string, memory: StoredMemory): BrainMemoryShown => ({

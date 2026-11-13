@@ -41,16 +41,26 @@ const acme: BrainEntityListed = {
   entity: { store: "shared", id: "e-acme" },
   kind: "customer",
   name: "Acme",
+  unreadable: false,
 };
 const mine: BrainEntityListed = {
   entity: { store: "own", id: "e-mine" },
   kind: "customer",
   name: "Globex",
+  unreadable: false,
 };
 const later: BrainEntityListed = {
   entity: { store: "shared", id: "e-later" },
   kind: "customer",
   name: null,
+  unreadable: false,
+};
+/** One a correction made, whose shared entity they may no longer read. */
+const lost: BrainEntityListed = {
+  entity: { store: "own", id: "e-lost" },
+  kind: "customer",
+  name: null,
+  unreadable: true,
 };
 
 /** A memory about Acme, as core shows it. */
@@ -135,7 +145,7 @@ const shown = async (refusal?: string, failedSaves = 0) => {
     ) =>
       await answer(`entities ${kind}${next ? ` ${next.store}` : ""}`, () =>
         next
-          ? { entities: [later], next: null }
+          ? { entities: [later, lost], next: null }
           : {
               entities: [mine, acme],
               next: { store: "shared" as const, after: { entity: "e-acme" } },
@@ -311,9 +321,13 @@ describe(MemoriesPage, () => {
     const opened = section("What the Brain remembers");
 
     expect({
-      listed: ["Globex", "Only you", "Acme", "Without a name"].map((text) =>
-        listed.includes(text)
-      ),
+      listed: [
+        "Globex",
+        "Only you",
+        "Acme",
+        "Without a name",
+        "Something you corrected, which you can no longer read",
+      ].map((text) => listed.includes(text)),
       opened: [
         "Status: Paying",
         "Your own word",
@@ -322,7 +336,7 @@ describe(MemoriesPage, () => {
       ].map((text) => opened.includes(text)),
       calls: calls.slice(1),
     }).toStrictEqual({
-      listed: [true, true, true, true],
+      listed: [true, true, true, true, true],
       opened: [true, true, true, true],
       calls: [
         "entities customer",

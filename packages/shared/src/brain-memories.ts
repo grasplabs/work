@@ -128,11 +128,17 @@ export interface BrainEntityRef {
   id: string;
 }
 
-/** An entity as the person may see it: its kind and the earliest name they may see, if any. */
+/**
+ * An entity as the person may see it: its kind and the earliest name they
+ * may see, if any. One of their own that a correction made is named live
+ * by the shared entity it stands for; `unreadable` when they may no
+ * longer read that one (no name is kept for it).
+ */
 export interface BrainEntityListed {
   entity: BrainEntityRef;
   kind: BrainEntityKind;
   name: string | null;
+  unreadable: boolean;
 }
 
 /**

@@ -12968,6 +12968,10 @@ msgstr "Etwas ist schiefgelaufen."
 msgid "something without a name"
 msgstr "etwas ohne Namen"
 
+#: src/brain/memories-page.tsx
+msgid "Something you corrected, which you can no longer read"
+msgstr "Etwas, das Sie korrigiert haben und nicht mehr lesen dürfen"
+
 #: src/chat/composer-menu.tsx
 msgctxt "a feature still to come"
 msgid "Soon"

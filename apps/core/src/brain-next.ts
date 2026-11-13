@@ -47,6 +47,7 @@ import type {
   AttributeRule,
   Brain,
   ContestedCursor,
+  Entity,
   EntitiesCursor,
   ErasureReason,
   Embedders,
@@ -2671,7 +2672,52 @@ export interface StoredEntity {
   id: EntityId;
   kind: EntityKind;
   name: string | null;
+  /**
+   * The person's own entity stands for a shared one (a correction made
+   * it) that they may no longer read: shown with no name at all, as for
+   * one there isn't.
+   */
+  unreadable: boolean;
 }
+
+/**
+ * `entity` as the page names it, as `reader` may see it now. One of the
+ * person's own that a correction made stands for a shared entity
+ * (`sharedEntityRefOf`) and holds no name of its own: its name is that
+ * shared entity's earliest name the reader may see, read live from the
+ * shared store, as the page reads a shared entity, never kept; when they
+ * may no longer read it, or it is gone, alike, `unreadable`. Any other
+ * entity as the store gives it. Per entity: the store has no read of
+ * several entities at once, so a page of own entities takes at most a
+ * page of these, each two reads (its identifiers, the shared entity).
+ */
+const liveNamed = async (
+  env: BrainEnv,
+  reader: Reader,
+  store: MemoryStoreName,
+  entity: Entity
+): Promise<StoredEntity> => {
+  const plain = { store, ...entity, unreadable: false };
+  if (store !== "own" || entity.name !== null) {
+    return plain;
+  }
+  const { identifiers } = await entityNamesOf(
+    ownBrain(env, reader.person),
+    reader,
+    entity.id
+  );
+  const standsFor = identifiers.find(isSharedEntityRef);
+  if (standsFor === undefined) {
+    return plain;
+  }
+  const shared = await brain(env).readEntity({
+    entity: standsFor.value.slice(sharedEntityRefPrefix.length),
+    reader,
+  });
+  return shared === null
+    ? { ...plain, unreadable: true }
+    : { ...plain, name: shared.name };
+};
 
 const entitiesWantedSchema = z.strictObject({
   kind: z.enum(entityKinds),
@@ -2704,7 +2750,11 @@ export const entitiesAs = async (
       ...(after === undefined ? {} : { after }),
     });
     return {
-      items: found.entities.map((each) => ({ store, ...each })),
+      items: await Promise.all(
+        found.entities.map(
+          async (each) => await liveNamed(env, reader, store, each)
+        )
+      ),
       more: found.more,
       next: found.next,
     };
@@ -2734,7 +2784,7 @@ export const entityAs = async (
     entity: id,
     reader,
   });
-  return read === null ? null : { store, ...read };
+  return read === null ? null : await liveNamed(env, reader, store, read);
 };
 
 /**
@@ -2867,7 +2917,7 @@ export const contestedAs = async (
           ? []
           : [
               {
-                about: { store: name, ...entity },
+                about: await liveNamed(env, reader, name, entity),
                 attribute,
                 sides: await storedMemories(store, name, reader, memories),
                 more,
@@ -2928,8 +2978,8 @@ export type Correction = z.input<typeof correctionSchema>;
  * store (`rememberAs`), and confirmed there over what they may read that
  * says otherwise. About the same entity: in their own store by its id;
  * from the shared one, the entity of theirs that stands for it, found by
- * its exact identifier (`sharedEntityRefOf`) and named by its earliest
- * name they may see, made at the first correction. Under the same
+ * its exact identifier (`sharedEntityRefOf`) alone, made at the first
+ * correction with no name of its own (`liveNamed` names it). Under the same
  * attribute when it holds a value, so a newer correction of a one-value
  * attribute ends the one before. A wrong memory that is their own word is
  * retired too, as `forgetAs` retires it: on a many-value attribute the
@@ -2937,13 +2987,14 @@ export type Correction = z.input<typeof correctionSchema>;
  *
  * The shared store is left as it is: a correction others may read would
  * widen what the person read, theirs to publish, not this. What is saved
- * is built from what never changes for one correction (the entity's id,
- * kind and earliest name, the memory's attribute and type, the text), so
+ * is built from what never changes for one correction (the entity's id
+ * and kind, the memory's attribute and type, the text), so
  * the same `change` again answers what it saved, whatever has happened
  * to the wrong memory since (ended by it, or retired), and confirms and
  * retires again, each a repeat that records nothing new. The same
  * `change` with other text is refused (`brain.correction_reused`). Null
- * alike when the memory isn't one they may read. Refused once they are
+ * alike when the memory isn't one they may read and when it is a relation.
+ * Refused once they are
  * no longer a member.
  */
 export const correctAs = async (
@@ -2958,23 +3009,19 @@ export const correctAs = async (
     keptMemory(store, reader, wrong.entity, wrong.memory),
     store.readEntity({ entity: wrong.entity, reader }),
   ]);
-  if (read === undefined || entity === null) {
+  // A relation names another entity, which the person's own word can't:
+  // it is not one a correction takes, alike for one there isn't.
+  if (read === undefined || entity === null || read.object !== null) {
     return null;
   }
+  // No name of the shared entity is copied: a copy would outlive a
+  // narrowing or an erasure of the source that gave it. The page names
+  // it live (`liveNamed`).
   const about =
     wrong.store === "own"
       ? { id: entity.id, kind: entity.kind }
-      : {
-          kind: entity.kind,
-          names: entity.name === null ? [] : [entity.name],
-          identifiers: [sharedEntityRefOf(entity.id)],
-        };
-  // Filed under the attribute only where it holds a value: a relation
-  // names another entity, which the person's word here doesn't.
-  const attribute =
-    read.attribute !== null && attributeNames.includes(read.attribute)
-      ? read.attribute
-      : undefined;
+      : { kind: entity.kind, identifiers: [sharedEntityRefOf(entity.id)] };
+  const attribute = read.attribute ?? undefined;
   let saved: RememberedMemory;
   try {
     saved = await rememberAs(env, personId, {
