@@ -43,4 +43,8 @@ export const brainModules = {
   // memoryChoices, and hands on nothing it returns beyond what
   // brain-memories.ts's probes hold.
   "apps/core/src/agent-remember.ts": "core",
+  // Core's subclass of the store: its alarm's host, from core's
+  // alarmHostOf, given to the store inside its own object; it adds no
+  // method, so the store's probes are its own.
+  "apps/core/src/brain-store.ts": "store",
 } as const satisfies Readonly<Record<string, string>>;
