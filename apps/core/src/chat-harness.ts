@@ -69,11 +69,11 @@ import {
   rebase,
   recallTextOf,
 } from "./chat-agent.ts";
+import type { Audience } from "./chat-audiences.ts";
 import { coreMessageProvider, shownBuiltSchema } from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
 import { callObject, workspace } from "./durable-objects.ts";
-import type { Audience } from "./knowledge/access.ts";
 import { models } from "./models.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
