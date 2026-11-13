@@ -24,8 +24,8 @@ import type { Release } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import {
-  addSource,
-  eraseSource,
+  addSource as addCoreSource,
+  eraseSource as eraseCoreSource,
   recallAs,
   workBrain,
 } from "../src/brain-next.ts";
@@ -119,6 +119,43 @@ const brainGrant = (
   binding: `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
 });
 
+/** A version as `passedOn` names it: its source's id, shortened, and its number. */
+const versionKey = (id: string, version: number): string =>
+  `${id.slice(0, 8)} v${version}`;
+
+/**
+ * The versions everyone in the company may read now, of every test in this
+ * file, by their source's id: each `forEveryone` adds, until core adds
+ * the source again for other readers (narrowed: no version of it is the
+ * company's then) or erases it (`addSource`, `eraseSource` below). What
+ * code's recall as the company may find by meaning, whichever test added
+ * it, and nothing else.
+ */
+const everyonesVersions = new Map<string, string>();
+
+/** Whether `key` (`versionKey`) is a version everyone may read now. */
+const isEveryones = (key: string): boolean =>
+  [...everyonesVersions.values()].includes(key);
+
+/**
+ * Core's `addSource`, as every call in this file makes it: a source of
+ * everyone's added again for other readers is no longer everyone's.
+ */
+const addSource = async (
+  ...args: Parameters<typeof addCoreSource>
+): Promise<void> => {
+  everyonesVersions.delete(args[1].source.id);
+  await addCoreSource(...args);
+};
+
+/** Core's `eraseSource`, as every call in this file makes it: an erased source is no one's. */
+const eraseSource = async (
+  ...args: Parameters<typeof eraseCoreSource>
+): Promise<void> => {
+  everyonesVersions.delete(args[1].source.id);
+  await eraseCoreSource(...args);
+};
+
 /** A source in the Brain that `readers` may read. */
 const added = async (
   text: string,
@@ -134,18 +171,6 @@ const added = async (
   return source;
 };
 
-/** A version as `passedOn` names it: its source's id, shortened, and its number. */
-const versionKey = (id: string, version: number): string =>
-  `${id.slice(0, 8)} v${version}`;
-
-/**
- * The versions everyone in the company may read, of every test in this
- * file (`forEveryone`): what code's recall as the company may find by
- * meaning, whichever test added it. A version added otherwise, or later
- * (a source narrowed since), is not among them.
- */
-const everyonesVersions = new Set<string>();
-
 /**
  * A source everyone in the company may read, added to the shared store
  * as its producer would: core's producers add none yet. Code's recall
@@ -154,7 +179,7 @@ const everyonesVersions = new Set<string>();
  */
 const forEveryone = async (text: string): Promise<SourceRef> => {
   const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
-  everyonesVersions.add(versionKey(source.id, 1));
+  everyonesVersions.set(source.id, versionKey(source.id, 1));
   await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
     source: `upload:${source.id}`,
     change: crypto.randomUUID(),
@@ -1141,7 +1166,7 @@ const passedOn = (joined: unknown) => {
     hiddenByMeaning: items
       .filter(
         ({ way, version }) =>
-          way !== "words" && way !== "exact" && !everyonesVersions.has(version)
+          way !== "words" && way !== "exact" && !isEveryones(version)
       )
       .map(({ way, version }) => `${way} ${version}`),
   };
