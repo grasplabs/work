@@ -9,7 +9,7 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource, eraseSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { memberRemovals, teamMembers, teams } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   analysisPurpose,
@@ -914,8 +914,9 @@ describe("what the recall before a question may reach", setUpTime, () => {
       // Kept by the chat app too: their team's, never their own.
       slack: { own: false, team: true },
       teams: { own: false, team: true },
-      // Read by others too: nothing, not even their team's.
-      thread: { own: false, team: false },
+      // Read by everyone in it (here the person alone on its roster): what
+      // all of them may read, their team's, never their own.
+      thread: { own: false, team: true },
     });
   });
 
@@ -960,6 +961,92 @@ describe("what the recall before a question may reach", setUpTime, () => {
       answered: provider.requests.length,
       marker: sent.includes(marker),
     }).toStrictEqual({ answered: 1, marker: false });
+  });
+
+  it("recalls in a chat others share nothing once anyone in it is no longer a member, nor in a turn nobody started there", async () => {
+    const depot = word();
+    const marker = word();
+    const admin = await signedInApi(idp, "admin");
+    const [ann, ben] = await Promise.all([
+      signedInWithRole(idp, "user"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const teamId = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await db.insert(teams).values({
+      id: teamId,
+      name: `Team ${unique()}`,
+      organizationId,
+      createdAt: new Date(),
+    });
+    await db.insert(teamMembers).values(
+      [ann, ben].map(({ userId }) => ({
+        id: crypto.randomUUID(),
+        teamId,
+        userId,
+        createdAt: new Date(),
+      }))
+    );
+    await added(`Depot ${depot} opens at ${marker}`, { kind: "team", teamId });
+    const agentId = crypto.randomUUID();
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const provider = await fakeProvider(
+      says("Noted."),
+      says("Noted."),
+      says("Noted.")
+    );
+    const stub = workspace(env, personalWorkspaceId(ann.userId));
+    const question = `What about depot ${depot}?`;
+    /**
+     * For what `ask` asked: how many recalls its chat holds, as its last
+     * request carried them, and whether the marker reached the model.
+     */
+    const sentFor = async (ask: () => Promise<unknown>) => {
+      const before = provider.requests.length;
+      await ask();
+      const sent = provider.requests.slice(before).map(({ body }) => body);
+      return {
+        recalls: stringsIn(sent.at(-1)).filter((text) =>
+          recallHeader.test(text)
+        ).length,
+        marker: JSON.stringify(sent).includes(marker),
+      };
+    };
+    /** Ann asks in a group she and Ben are in, as its door does. */
+    const inGroup = async () =>
+      await stub.askThrough(ann.userId, agentId, "teams", question, undefined, {
+        thread: `19:${unique()}@thread.v2`,
+        kind: "group",
+        audience: { members: [ann.userId, ben.userId], outsiders: false },
+      });
+
+    // Both may read it: recalled.
+    let chatId = "";
+    const bothMembers = await sentFor(async () => {
+      ({ chatId } = await inGroup());
+    });
+    // The same chat, woken by a schedule or an event: no roster read for it.
+    const unattended = await sentFor(
+      async () => await stub.askUnattended(chatId, { text: question, model })
+    );
+    await db.insert(memberRemovals).values({
+      organizationId,
+      userId: ben.userId,
+      removedAt: new Date(),
+    });
+    const benRemoved = await sentFor(inGroup);
+
+    expect({ bothMembers, unattended, benRemoved }).toStrictEqual({
+      bothMembers: { recalls: 1, marker: true },
+      // Only the first question's recall, as the chat's history holds it.
+      unattended: { recalls: 1, marker: true },
+      benRemoved: { recalls: 1, marker: false },
+    });
   });
 
   it("never hands one person's sources to another's chat, however the analysis is steered", async () => {

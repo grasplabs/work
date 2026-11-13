@@ -19,7 +19,7 @@ import { readableVersionsAs } from "./brain-next.ts";
 import type { SourceVersionRef } from "./brain-next.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
-import { collectionsAllowed } from "./knowledge/access.ts";
+import { audienceOf, collectionsAllowed } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -131,8 +131,13 @@ const brainVersionOf = (source: string): SourceVersionRef | undefined => {
 };
 
 /**
- * Of the new Brain's versions in `sources`, those the person may still
- * read, in one read of the Brain per 500 (`readableVersionsAs`).
+ * Of the new Brain's versions in `sources`, those the chat's readers may
+ * still read, in one read of the Brain per 500 (`readableVersionsAs`):
+ * its person in a chat of their own; in one others share, everyone in it
+ * as last kept from the platform's roster (`chat_audiences`), as its
+ * recall read (turn-recall.ts). So once someone joins who may read less,
+ * or anyone Grasp can't name as a member (then none), what earlier turns
+ * recalled is withheld from the next request on (GRA-1820).
  */
 const readableBrainVersions = async (
   env: Env,
@@ -146,10 +151,15 @@ const readableBrainVersions = async (
   if (pins.length === 0) {
     return [];
   }
+  const audience = await audienceOf(env, chatContext(scope));
+  if (audience?.outsiders === true) {
+    return [];
+  }
   const versions = await readableVersionsAs(
     env,
     scope.personId,
-    pins.map(({ pin }) => pin)
+    pins.map(({ pin }) => pin),
+    audience === undefined ? {} : { reach: { everyone: audience.members } }
   );
   const readable = new Set(versions.map((ref) => brainVersionRead(ref)));
   return pins.flatMap(({ source }) => (readable.has(source) ? [source] : []));

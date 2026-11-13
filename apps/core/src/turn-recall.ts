@@ -23,7 +23,7 @@ import {
   recallAs,
   recallQuestionMaxLength,
 } from "./brain-next.ts";
-import type { RecalledPack } from "./brain-next.ts";
+import type { Recall, RecalledPack } from "./brain-next.ts";
 import { questionText } from "./chat-agent.ts";
 import { describeRun, sourceHash } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -167,12 +167,14 @@ interface Recalling {
   /**
    * Who reads the answer: the person asking alone (`own`: their own chat
    * in Grasp, or their direct message on a chat app, whose recall is not
-   * `personal`), or others too
-   * (`shared`: a group chat's or channel's thread, which core counts as
-   * shared whoever is in it). A recall where others read the answer must
-   * never hand over what only the asker may read.
+   * `personal`), or everyone in a group chat's or channel's thread, as the
+   * turn was admitted for (`TurnRequest`), or none known (`null`). A
+   * recall where others read the answer hands over only what all of them
+   * may read (`readsAs`).
    */
-  conversation: "own" | "shared";
+  conversation:
+    | "own"
+    | { everyone: { members: readonly string[]; outsiders: boolean } | null };
   /**
    * Whether the recall may hold what only the asker may read, from their
    * own store: only where the answer reaches them alone (`TurnRequest`).
@@ -253,16 +255,17 @@ const leftOf = (started: number, ms: number): number =>
  */
 const recalled = async (
   recalling: Recalling,
+  reads: Pick<Recall, "personal" | "everyone">,
   question: string,
   analysed: Promise<string | null | undefined>
 ): Promise<RecalledPack> => {
-  const { env, turn, personal } = recalling;
+  const { env, turn } = recalling;
   const started = Date.now();
   const recall = async (query: string) =>
     await recallAs(env, turn.scope.personId, {
       question: query,
       budget: turnRecallBudget,
-      personal,
+      ...reads,
     });
   const first = await withinTime(
     async () => await recall(question),
@@ -326,6 +329,39 @@ const isTimeout = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "TimeoutError";
 
 /**
+ * Whom a turn's recall reads as, or none when it may not recall at all.
+ * In a chat of one's own, its person (their own store only when
+ * `personal`). In a
+ * conversation others share (GRA-1820), only what every one of them may
+ * read is recalled (`everyone`, brain-next.ts), and only when who they are
+ * is known for this turn from the platform's own roster: not while anyone
+ * Grasp can't name as a member is in it (a guest, another company's
+ * people, an unread roster), whom nothing of the company's is for; not
+ * without an audience kept for the turn; and not in a turn nobody started
+ * there, a schedule's or an event's, for which no roster was read. Then
+ * nothing is recalled, as before shared conversations recalled at all.
+ */
+const readsAs = ({
+  conversation,
+  personal,
+  turn,
+}: Recalling): Pick<Recall, "personal" | "everyone"> | undefined => {
+  if (conversation === "own") {
+    return { personal };
+  }
+  const { everyone } = conversation;
+  if (
+    everyone === null ||
+    everyone.outsiders ||
+    turn.scope.unattended === true
+  ) {
+    return undefined;
+  }
+  // Never the asker's own: others read the answer.
+  return { personal: false, everyone: everyone.members };
+};
+
+/**
  * Recalls evidence for `question` before the turn's first model request,
  * with the analysis alongside, as a run of the chat whose reads are
  * pinned with it before anything is handed over. What it found, or what
@@ -337,11 +373,8 @@ export const recallForTurn = async (
   question: string
 ): Promise<TurnRecall | undefined> => {
   const query = asQuestion(question);
-  // A shared conversation recalls nothing, not even without the asker's
-  // own store (`personal: false`): that still reads what the asker's teams
-  // may read, and the others in the conversation may not be in those
-  // teams. Only a recall as every reader at once could hand them anything.
-  if (query === "" || recalling.conversation === "shared") {
+  const reads = readsAs(recalling);
+  if (query === "" || reads === undefined) {
     return undefined;
   }
   const { env, turn } = recalling;
@@ -373,7 +406,7 @@ export const recallForTurn = async (
   let result: string | undefined;
   let failure = "The recall failed.";
   try {
-    const pack = await recalled(recalling, query, analysed);
+    const pack = await recalled(recalling, reads, query, analysed);
     // Its answer can no longer be used: let go of now, not after the writes.
     analysis.abort();
     const versions = [

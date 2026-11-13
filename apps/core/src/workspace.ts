@@ -1901,6 +1901,7 @@ export class Workspace extends DurableObject<Env> {
           makeOf(chat)
         ),
         shared,
+        everyone: audience,
         personal: answersAlone(chat, unattended),
         readsBrain: await hasBrainGrant(this.env, authority),
         context,
