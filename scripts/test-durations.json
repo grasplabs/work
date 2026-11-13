@@ -793,6 +793,7 @@
   "@grasp-os/web src/brain/goal-records.test.ts": 0,
   "@grasp-os/web src/brain/lessons-view.test.tsx": 0.2,
   "@grasp-os/web src/brain/memory-page.test.tsx": 0.3,
+  "@grasp-os/web src/brain/own-export.test.tsx": 0.2,
   "@grasp-os/web src/brain/questions.test.ts": 0,
   "@grasp-os/web src/brain/reveal-motion.test.ts": 0,
   "@grasp-os/web src/brain/sources-page.test.tsx": 0.2,
