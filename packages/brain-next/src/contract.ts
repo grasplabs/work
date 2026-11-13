@@ -100,7 +100,9 @@ export const wellFormedString = () =>
     abort: true,
   });
 
-const principalSchema = wellFormedString().min(1).max(principalMaxLength);
+export const principalSchema = wellFormedString()
+  .min(1)
+  .max(principalMaxLength);
 
 const encoder = new TextEncoder();
 

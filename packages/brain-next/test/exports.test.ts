@@ -9,6 +9,8 @@ import type {
   AskModel,
   Embedders,
   HandOvers,
+  NewEntity,
+  NewMemory,
   Reader,
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
@@ -467,6 +469,51 @@ const servedOf = async (id: string, files: readonly string[]) => {
     }
   }
   return served;
+};
+
+/** A customer entity of an add, under key `c`. */
+const customer = (extra: Partial<NewEntity> = {}): NewEntity => ({
+  key: "c",
+  kind: "customer",
+  names: ["Acme"],
+  ...extra,
+});
+
+/** A memory about `c`, its renewal, resting on `basis`. */
+const renewal = (
+  value: string,
+  basis: NewMemory["basis"],
+  extra: Partial<NewMemory> = {}
+): NewMemory => ({
+  about: "c",
+  attribute: "renewal_date",
+  value,
+  type: "fact",
+  statement: `Acme renews in ${value}`,
+  speaker: { kind: "system" },
+  basis,
+  ...extra,
+});
+
+/** A writer's own word, as `person`. */
+const said = (person: string): Pick<NewMemory, "basis" | "speaker"> => ({
+  basis: { kind: "writer", writer: person },
+  speaker: { kind: "internal", person },
+});
+
+/** A memory about `c`, a system's fact, drawn from version 1 of `source`. */
+const drawn = (source: string, statement: string): NewMemory => ({
+  about: "c",
+  type: "fact",
+  statement,
+  speaker: { kind: "system" },
+  basis: { kind: "source", source, version: 1, quote: "words" },
+});
+
+/** The text of the object at `key` in the bucket: empty when there is none. */
+const textAt = async (key: string): Promise<string> => {
+  const object = await env.BRAIN_OBJECTS.get(key);
+  return (await object?.text()) ?? "";
 };
 
 describe("exports and restores", () => {
@@ -1802,6 +1849,484 @@ describe("exports and restores", () => {
         failed: "failed",
         files: [],
       });
+    });
+  });
+
+  // GRA-1840: memories, entities, names, confirmations, extraction marks,
+  // change keys and the write stamp in an export, and back. The threat
+  // model is on GRA-1840; each test names the threats it holds.
+  describe("memories in a company's export", { timeout: 60_000 }, () => {
+    /** Exports the shared store, loses its storage, and restores the export: done. */
+    const exportedAndRestored = async (
+      between: () => Promise<void> = async () => {
+        await Promise.resolve();
+      }
+    ): Promise<string> => {
+      const { id } = await shared().startExport("test");
+      await expect(settled(shared(), id)).resolves.toMatchObject({
+        state: "done",
+      });
+      await putBack(shared(), emptyShared);
+      await between();
+      await shared().startRestore(id, "test");
+      await expect(restoreSettled(id)).resolves.toMatchObject({
+        state: "done",
+      });
+      return id;
+    };
+
+    /** A value of the store's own, read in it. */
+    const inStore = async <T>(read: (sql: SqlStorage) => T): Promise<T> =>
+      await runInDurableObject(shared(), (_instance, state) =>
+        read(state.storage.sql)
+      );
+
+    const latestStamp = async (): Promise<number> =>
+      await inStore(
+        (sql) =>
+          sql
+            .exec<{ latest: number }>(
+              "SELECT coalesce(max(latest), 0) AS latest FROM memory_stamps"
+            )
+            .one().latest
+      );
+
+    it("brings back what each reader read of memories, contested facts, confirmations, entities and their names, and recall, and never lowers the write stamp (threats 1, 4, 7)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const other = `team:${unique()}`;
+      const person = `person:${unique()}`;
+      const source = `test:${unique()}`;
+      const word = `w${unique().replaceAll("-", "")}`;
+      await add(shared(), source, `Acme renews in March ${word}`, team(group));
+      await add(
+        shared(),
+        source,
+        `Acme renews in April ${word}`,
+        team(group),
+        "2"
+      );
+      const first = await shared().addMemories({
+        change: "extracted 1",
+        access: team(group),
+        entities: [
+          customer({
+            identifiers: [{ type: "email", value: "buy@acme.test" }],
+          }),
+        ],
+        memories: [
+          renewal("March", {
+            kind: "source",
+            source,
+            version: 1,
+            quote: "renews in March",
+          }),
+        ],
+      });
+      const acme = first.entities.c ?? "";
+      const reader = readerOf(person, [group]);
+      const known = customer({ id: acme, names: ["Acme Corp"] });
+      // The second version, fully extracted: the first's memory ends.
+      await shared().addMemories({
+        change: "extracted 2",
+        access: team(group),
+        reader,
+        entities: [known],
+        memories: [
+          renewal("April", {
+            kind: "source",
+            source,
+            version: 2,
+            quote: "renews in April",
+          }),
+        ],
+        extracted: { source, version: 2 },
+      });
+      // A person's word against the source's: contested, and confirmed.
+      const word1 = await shared().addMemories({
+        change: "said May",
+        access: team(group),
+        reader,
+        entities: [known],
+        memories: [
+          renewal("May", { kind: "writer", writer: person }, said(person)),
+        ],
+      });
+      await expect(
+        shared().confirmMemory({ memory: word1.memories[0] ?? "", reader })
+      ).resolves.toBe("done");
+      // A writer's two words on one attribute, the later retired: the
+      // earlier is current again.
+      const status = (value: string): NewMemory => ({
+        about: "c",
+        attribute: "status",
+        value,
+        type: "fact",
+        statement: `Acme is ${value}`,
+        ...said(person),
+      });
+      await shared().addMemories({
+        change: "active",
+        access: team(group),
+        reader,
+        entities: [known],
+        memories: [status("active")],
+      });
+      const churned = await shared().addMemories({
+        change: "churned",
+        access: team(group),
+        reader,
+        entities: [known],
+        memories: [status("churned")],
+      });
+      await expect(
+        shared().retireMemory({ memory: churned.memories[0] ?? "", reader })
+      ).resolves.toBe("done");
+      // Another team's customer, hidden from the first.
+      const globex = await shared().addMemories({
+        change: "globex",
+        access: team(other),
+        entities: [customer({ names: ["Globex"] })],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: `Globex is new ${word}`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: `person:${unique()}` },
+          },
+        ],
+      });
+      const readers = [
+        reader,
+        readerOf(`person:${unique()}`, [other]),
+        readerOf(`person:${unique()}`),
+      ];
+      const entities = [acme, globex.entities.c ?? ""];
+      /** All `as` reads, but the moments reads are given at. */
+      const readsAs = async (as: Reader) => {
+        const memories = await Promise.all(
+          entities.map(async (entity) => {
+            const page = await shared().readMemories({
+              entity,
+              reader: as,
+              history: true,
+            });
+            return page.memories;
+          })
+        );
+        const contested = await shared().listContested({ reader: as });
+        const seen = await Promise.all(
+          entities.map(
+            async (entity) => await shared().readEntity({ entity, reader: as })
+          )
+        );
+        const names = await Promise.all(
+          entities.map(async (entity) => {
+            const page = await shared().readEntityNames({ entity, reader: as });
+            return page.names;
+          })
+        );
+        const found = await shared().findEntities({
+          reader: as,
+          identifier: { type: "email", value: "buy@acme.test" },
+        });
+        const recalled = await shared().recall({
+          question: `Acme renews ${word}`,
+          budget: { tokens: 2000 },
+          reader: as,
+        });
+        return {
+          memories,
+          contested: contested.facts,
+          entities: seen,
+          names,
+          found: found.entities,
+          recalled: recalled.items,
+        };
+      };
+      const readsOf = async () =>
+        await Promise.all(readers.map(async (as) => await readsAs(as)));
+      const before = await readsOf();
+      const stampBefore = await latestStamp();
+
+      await exportedAndRestored();
+      const after = await readsOf();
+      // A producer's retry of an add made before answers as it did.
+      const again = await shared().addMemories({
+        change: "extracted 1",
+        access: team(group),
+        entities: [
+          customer({
+            identifiers: [{ type: "email", value: "buy@acme.test" }],
+          }),
+        ],
+        memories: [
+          renewal("March", {
+            kind: "source",
+            source,
+            version: 1,
+            quote: "renews in March",
+          }),
+        ],
+      });
+
+      expect({
+        after,
+        again,
+        stampKept: (await latestStamp()) >= stampBefore,
+        // Not an empty answer, read twice.
+        held: before[0]?.memories[0]?.length,
+        contested: before[0]?.contested.length,
+      }).toStrictEqual({
+        after: before,
+        again: first,
+        stampKept: true,
+        held: 5,
+        contested: 1,
+      });
+    });
+
+    it("leaves out a memory drawn from a source erased after the export was made: not in the store, and in no file left in the bucket (threats 2, 3)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const erased = `test:${unique()}`;
+      const kept = `test:${unique()}`;
+      const marker = `marker${unique().replaceAll("-", "")}`;
+      await add(shared(), erased, "erased words", team(group));
+      await add(shared(), kept, "kept words", team(group));
+      await shared().addMemories({
+        change: "erased",
+        access: team(group),
+        entities: [customer()],
+        memories: [drawn(erased, `Acme said ${marker}`)],
+        extracted: { source: erased, version: 1 },
+      });
+      await shared().addMemories({
+        change: "kept",
+        access: team(group),
+        entities: [customer()],
+        memories: [drawn(kept, "Acme said something else")],
+      });
+
+      // Erased by the ledger alone, after the export was made and its
+      // store's storage lost.
+      const id = await exportedAndRestored(async () => {
+        await shared().eraseSource({ source: erased, reason: "deleted" });
+      });
+      for (let ticks = 0; ticks < 6; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const stored = await inStore((sql) => ({
+        memories: sql
+          .exec<{ statement: string }>("SELECT statement FROM memories")
+          .toArray()
+          .map(({ statement }) => statement),
+        marks: sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM memory_extractions"
+          )
+          .one().count,
+      }));
+      const inBucket: string[] = [];
+      for (const key of await keysUnder("")) {
+        // oxlint-disable-next-line no-await-in-loop -- one object at a time
+        const text = await textAt(key);
+        if (text.includes(marker)) {
+          inBucket.push(key);
+        }
+      }
+
+      expect({
+        stored,
+        inBucket,
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({
+        stored: { memories: ["Acme said something else"], marks: 0 },
+        inBucket: [],
+        files: [],
+      });
+    });
+
+    it("refuses every write of memories while a restore runs, takes none into a store holding a memory, and gives up a failed restore once one is written (threats 5, 8)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const person = `person:${unique()}`;
+      const reader = readerOf(person, [group]);
+      const memory = (statement: string): NewMemory => ({
+        about: "c",
+        type: "fact",
+        statement,
+        ...said(person),
+      });
+      const made = await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [memory("Acme is a customer")],
+      });
+      const restoring = unique();
+      await inStore((sql) => {
+        sql.exec(
+          `INSERT INTO restores (export, checked, part, restored, state, started_at)
+          VALUES (?, 0, 0, 0, 'running', ?)`,
+          restoring,
+          Date.now()
+        );
+      });
+      try {
+        await expect(
+          called(
+            shared().addMemories({
+              change: unique(),
+              access: team(group),
+              entities: [customer()],
+              memories: [memory("Acme is big")],
+            })
+          )
+        ).rejects.toThrow("restoring an export");
+        await expect(
+          called(
+            shared().confirmMemory({ memory: made.memories[0] ?? "", reader })
+          )
+        ).rejects.toThrow("restoring an export");
+        await expect(
+          called(
+            shared().retireMemory({ memory: made.memories[0] ?? "", reader })
+          )
+        ).rejects.toThrow("restoring an export");
+      } finally {
+        await inStore((sql) => {
+          sql.exec("DELETE FROM restores WHERE export = ?", restoring);
+        });
+      }
+      // An export of a version, made and lost with the store.
+      await add(shared(), `test:${unique()}`, "words", team(group));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // A store holding only a writer's memory is not empty.
+      await putBack(shared(), emptyShared);
+      await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [memory("Acme is a customer")],
+      });
+      await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
+        "a store that holds nothing"
+      );
+      // A restore that failed (a damaged part), then a memory written.
+      await putBack(shared(), emptyShared);
+      const part = `exports/${id}/part-0000.jsonl`;
+      const good = await textAt(part);
+      await env.BRAIN_OBJECTS.put(part, good.replace("words", "wordz"));
+      await shared().startRestore(id, "test");
+      await tick(shared());
+      const failed = await shared().restoreStatus(id);
+      await env.BRAIN_OBJECTS.put(part, good);
+      await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [memory("Acme is a customer")],
+      });
+      await tick(shared());
+      const givenUp = await shared().restoreStatus(id);
+
+      expect({
+        failed: failed?.state,
+        givenUp: givenUp?.state,
+      }).toStrictEqual({ failed: "failed", givenUp: "abandoned" });
+    });
+
+    it("restores an export made before memories were exported, which has no lines or stamp of them (threat 10)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, "older words", team(group));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // Its manifest as an export made before them was written.
+      const key = `exports/${id}/manifest.json`;
+      const manifest = z
+        .looseObject({ parts: z.array(z.looseObject({})) })
+        .parse(JSON.parse(await textAt(key)));
+      const { memories: _memories, stamp: _stamp, ...older } = manifest;
+      await env.BRAIN_OBJECTS.put(
+        key,
+        JSON.stringify({
+          ...older,
+          parts: manifest.parts.map(({ memories: _none, ...part }) => part),
+        })
+      );
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      await restoreSettled(id);
+
+      await expect(
+        shared().readCurrent({
+          sources: [source],
+          reader: readerOf(unique(), [group]),
+        })
+      ).resolves.toMatchObject([{ text: "older words" }]);
+    });
+
+    it("fails a restore whose memory an add would refuse, and writes nothing of it (threat 6)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const person = `person:${unique()}`;
+      await add(shared(), `test:${unique()}`, "words", team(group));
+      await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: "Acme likes mail",
+            ...said(person),
+          },
+        ],
+      });
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // The memory's part made into an instruction to a group, its
+      // checksum and size made to match: an add refuses an instruction
+      // anyone but its writer may read.
+      const key = `exports/${id}/manifest.json`;
+      const manifest = storeManifestSchema.parse(JSON.parse(await textAt(key)));
+      const parts = await Promise.all(
+        manifest.parts.map(async (part) => {
+          const file = `exports/${id}/${part.file}`;
+          const written = await textAt(file);
+          const body = written.replace('"type":"fact"', '"type":"instruction"');
+          await env.BRAIN_OBJECTS.put(file, body);
+          return {
+            ...part,
+            sha256: await sha256(body),
+            bytes: new TextEncoder().encode(body).byteLength,
+          };
+        })
+      );
+      await env.BRAIN_OBJECTS.put(key, JSON.stringify({ ...manifest, parts }));
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const restore = await restoreSettled(id);
+
+      expect({
+        state: restore?.state,
+        held: await inStore(
+          (sql) =>
+            sql
+              .exec<{ count: number }>(
+                `SELECT (SELECT count(*) FROM memories)
+                  + (SELECT count(*) FROM source_versions) AS count`
+              )
+              .one().count
+        ),
+      }).toStrictEqual({ state: "failed", held: 0 });
     });
   });
 });

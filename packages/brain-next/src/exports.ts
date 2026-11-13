@@ -3,10 +3,16 @@ import { z } from "zod";
 import type { BrainBucket } from "./bucket.ts";
 import {
   accessSchema,
+  entityIdSchema,
+  entityKinds,
   exportPartNameOf,
   exportPartOf,
+  identifierSchema,
+  memoryIdSchema,
+  memoryTypes,
   restoringNow,
   shippedSkillsPrefix,
+  speakerSchema,
 } from "./contract.ts";
 import type {
   Access,
@@ -17,7 +23,12 @@ import type {
 import { subjectOf } from "./erasure.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
 import { readerSetKeyOf } from "./reader-sets.ts";
-import { isRestoring, restoreFailedSql } from "./restoring.ts";
+import { answerSchema } from "./remember.ts";
+import {
+  isRestoring,
+  memoriesWrittenSinceSql,
+  restoreFailedSql,
+} from "./restoring.ts";
 import { defineWork, enqueueWork, workParksMax } from "./work.ts";
 import type { WorkContext } from "./work.ts";
 
@@ -25,9 +36,22 @@ import type { WorkContext } from "./work.ts";
 // part of the bucket, under `exports/<id>/`: parts of JSON Lines, a version
 // a line, each beside the versions it holds (`partHoldsFileOf`), and a
 // manifest written last, naming the deployment and each part with its
-// SHA-256, size and how many versions it holds. So an export whose manifest
-// is there is whole, and a restore (restore.ts) checks each part against
-// it.
+// SHA-256, size and how many versions and lines of memories it holds. So an
+// export whose manifest is there is whole, and a restore (restore.ts)
+// checks each part against it.
+//
+// After the versions, the memories, in steps (`memoryPhases`), each a part
+// a run in the order of its rows: memories, each with the entities it
+// mentions by their ids and the names and identifiers it gave them;
+// confirmations, by the ids of the memories they name; extraction marks;
+// and the change keys of adds of memories (as the store keeps them,
+// hashed). Nothing names a row: a restore makes new ones, in the same
+// order, so what that order decides (a writer's latest memory, the latest
+// confirmation) comes back as it was. What it takes is what the store had
+// learned as it started (`stamp`, its latest write stamp then): what was
+// learned, confirmed, marked or retired after is left out, and the
+// manifest carries that stamp, so a restore never lowers the store's
+// (memories.ts `stampWrite`).
 //
 // What it holds: every version, current or history, with its readers, but
 // those one person alone may read (a set of readers that is one person and
@@ -36,7 +60,13 @@ import type { WorkContext } from "./work.ts";
 // current version is such or that has none (no one else may read its
 // history), left out in the statement that selects them; and the skills
 // Grasp ships (contract.ts `shippedSkillsPrefix`), which each release adds
-// again. It holds the company's instruction files and its own skills. An
+// again. It holds the company's instruction files and its own skills. Of
+// memories and extraction marks, those one group reads (the shared store
+// keeps none only one person may read) and that rest on no version, or on
+// one the export holds, in the statement that selects them
+// (`exportedMemorySql`): so it never holds a memory drawn from what it
+// leaves out. A confirmation goes with its memories: only when every
+// memory it names is held. An
 // admin's export holds every group's content, those they are not in among
 // them: that is what a company's backup is for. A person's own store never
 // takes part in one; a person's own export is for later, with the store per
@@ -52,9 +82,9 @@ import type { WorkContext } from "./work.ts";
 // is the company's to read as any version the export selects.)
 //
 // Erasure, one rule: an export is stale exactly when the erasure ledger
-// names a version it holds. Each part records the versions it holds, by
-// their source's key as the ledger names it and their number
-// (`export_sources`); a source's erasure names every version of its source,
+// names a version it holds. Each part records the versions it holds, and
+// those its memories and extraction marks rest on, by their source's key as
+// the ledger names it and their number (`export_sources`); a source's erasure names every version of its source,
 // a person's names each version it hid (`erased_versions`), whoever's export
 // it is. So retention's erasures of what an export doesn't hold leave it be,
 // and a person's erasure that hid a team source's history makes the
@@ -184,6 +214,90 @@ export const exportLineSchema = z.strictObject({
 });
 export type ExportLine = z.infer<typeof exportLineSchema>;
 
+/**
+ * An entity a memory line mentions: its id and kind, and the names and
+ * identifiers that memory gave it.
+ */
+const mentionedSchema = z.strictObject({
+  id: entityIdSchema,
+  kind: z.enum(entityKinds),
+  names: z.array(z.string()),
+  identifiers: z.array(identifierSchema),
+});
+
+/**
+ * A line of a memory, as the store holds it: what an add took (checked by
+ * the add's own rules again on a restore), with its id, when it was learned
+ * and retired, and the entities it mentions. Its basis is a version
+ * (`source` and `version`, with `quote`) or a writer.
+ */
+export const memoryLineSchema = z.strictObject({
+  kind: z.literal("memory"),
+  id: memoryIdSchema,
+  about: entityIdSchema,
+  object: entityIdSchema.nullable(),
+  entities: z.array(mentionedSchema),
+  attribute: z.string().nullable(),
+  value: z.string().nullable(),
+  type: z.enum(memoryTypes),
+  statement: z.string(),
+  quote: z.string().nullable(),
+  source: z.string().nullable(),
+  version: z.int().positive().nullable(),
+  writer: z.string().nullable(),
+  speaker: speakerSchema,
+  /** The world clock, in milliseconds. */
+  validFrom: z.int().nullable(),
+  validUntil: z.int().nullable(),
+  /** When the store learned it, and retired it if it did by then, in milliseconds. */
+  learnedAt: z.int().nonnegative(),
+  retiredAt: z.int().nonnegative().nullable(),
+  access: accessSchema,
+});
+export type MemoryLine = z.infer<typeof memoryLineSchema>;
+
+/** A line of a confirmation: the memory confirmed and those it was made over, by id. */
+export const confirmationLineSchema = z.strictObject({
+  kind: z.literal("confirmation"),
+  memory: memoryIdSchema,
+  person: z.string(),
+  at: z.int().nonnegative(),
+  over: z.array(memoryIdSchema),
+});
+export type ConfirmationLine = z.infer<typeof confirmationLineSchema>;
+
+/** A line of an extraction mark: the version marked, when, and for whose readers. */
+export const extractionLineSchema = z.strictObject({
+  kind: z.literal("extraction"),
+  source: z.string(),
+  version: z.int().positive(),
+  at: z.int().nonnegative(),
+  access: accessSchema,
+});
+export type ExtractionLine = z.infer<typeof extractionLineSchema>;
+
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * A line of an add of memories' change key, as the store keeps it: the
+ * SHA-256 of the key and of what it added, and what it answered (ids
+ * only), so a retry made after a restore answers as before.
+ */
+export const changeLineSchema = z.strictObject({
+  kind: z.literal("change"),
+  key: sha256Schema,
+  hash: sha256Schema,
+  answer: answerSchema,
+});
+export type ChangeLine = z.infer<typeof changeLineSchema>;
+
+/** A line of a part past the versions: one of the memories' steps (`memoryPhases`). */
+export type MemoriesLine =
+  | MemoryLine
+  | ConfirmationLine
+  | ExtractionLine
+  | ChangeLine;
+
 /** An export's manifest, as written last. */
 export const manifestSchema = z.strictObject({
   format: z.literal(1),
@@ -197,15 +311,29 @@ export const manifestSchema = z.strictObject({
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   versions: z.int().nonnegative(),
+  /** Lines of memories, in all its parts: none in an export made before they were exported. */
+  memories: z.int().nonnegative().optional(),
+  /**
+   * The store's latest write stamp of memories as it started: a restore
+   * raises the store's to it, never lowers it. None in an export made
+   * before memories were exported.
+   */
+  stamp: z.int().nonnegative().optional(),
   parts: z.array(
-    z.strictObject({
-      file: z.string().refine((name) => exportPartOf(name)?.holds === false, {
-        message: "Not a part's file",
-      }),
-      sha256: z.string().regex(/^[0-9a-f]{64}$/u),
-      versions: z.int().positive(),
-      bytes: z.int().positive(),
-    })
+    z
+      .strictObject({
+        file: z.string().refine((name) => exportPartOf(name)?.holds === false, {
+          message: "Not a part's file",
+        }),
+        sha256: sha256Schema,
+        versions: z.int().nonnegative(),
+        /** Its lines of memories: none in an export made before they were exported. */
+        memories: z.int().nonnegative().optional(),
+        bytes: z.int().positive(),
+      })
+      .refine(({ versions, memories = 0 }) => versions + memories > 0, {
+        message: "A part holds no line",
+      })
   ),
 });
 export type Manifest = z.infer<typeof manifestSchema>;
@@ -216,6 +344,9 @@ interface ExportRow extends Record<string, SqlStorageValue> {
   deployment: string;
   up_to: number;
   cursor: number;
+  phase: number | null;
+  stamp: number | null;
+  changes_up_to: number | null;
   state: "writing" | "restoring" | "done" | "failed" | "erased" | "expired";
   parts: number;
   versions: number;
@@ -303,14 +434,16 @@ interface Selected extends Record<string, SqlStorageValue> {
  * Current: the version its source's current pointer names, or, where that
  * is a version added after the export started, the last one before it.
  */
-const selectSql = `
-WITH unreadable AS (
+const unreadableSql = `unreadable AS (
   SELECT reader_set AS id FROM reader_set_members
   GROUP BY reader_set HAVING count(*) = 1 AND max(kind) = 'person'
   UNION
   SELECT id FROM reader_sets
   WHERE id NOT IN (SELECT reader_set FROM reader_set_members)
-)
+)`;
+
+const selectSql = `
+WITH ${unreadableSql}
 SELECT source_versions.row AS row, source_versions.source AS source,
   source_versions.version AS version, source_versions.file AS file,
   source_versions.added_at AS added_at, reader_sets.key AS readers,
@@ -349,6 +482,226 @@ const accessOfKey = (key: string): Access | undefined => {
   return rest.length === 0 && readerSetKeyOf(access) === key
     ? access
     : undefined;
+};
+
+/**
+ * The steps of an export past its versions, in order, each by its number
+ * in `exports.phase` (its index plus one): a part holds lines of one step,
+ * read in the order of that table's rows.
+ */
+export const memoryPhases = [
+  "memories",
+  "confirmations",
+  "extractions",
+  "changes",
+] as const;
+
+/** Most rows one part of a step of memories reads; its bytes bound it first. */
+const memoryPartRows = 500;
+
+/**
+ * Whether the set of readers whose key is `key` (an expression) is one
+ * group: what a company export holds of memories and extraction marks
+ * (the contract's `audience`), never one person alone or no one.
+ */
+const oneGroupSql = (key: string): string =>
+  `(json_array_length(${key}) = 1 AND ${key} ->> '$[0][0]' = 'group')`;
+
+/**
+ * `?2` up to: whether the version `version` of `source` (expressions) is
+ * one the export holds, by the rule that selects versions (`selectedSql`),
+ * none an erasure hid. In a statement that names `unreadable`.
+ */
+const exportedVersionSql = (
+  source: string,
+  version: string
+): string => `EXISTS (
+  SELECT 1 FROM source_versions
+  WHERE source_versions.source = ${source}
+    AND source_versions.version = ${version}
+    AND source_versions.row <= ?2
+    AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)
+    AND ${selectedSql}
+)`;
+
+/**
+ * `?2` up to, `?4` the stamp it started at: whether the memory `alias` is
+ * one the export holds: learned by then, read by one group, and resting
+ * on no version or one the export holds.
+ */
+const exportedMemorySql = (alias: string): string => `(
+  ${alias}.learned_at <= ?4
+  AND ${oneGroupSql(`${alias}.readers`)}
+  AND (${alias}.source IS NULL
+    OR ${exportedVersionSql(`${alias}.source`, `${alias}.version`)})
+)`;
+
+/**
+ * Each step's statement (`memoryPhases`): `?1` the last row written, `?2`
+ * the last version's row the export takes, `?3` how many, `?4` the stamp
+ * it started at, `?5` the last change's row it takes. Each row with its
+ * `row`, in order.
+ */
+const memoryPhaseSql: Record<(typeof memoryPhases)[number], string> = {
+  memories: `WITH ${unreadableSql}
+SELECT m.row AS row, m.id AS id, about.id AS about, object.id AS object,
+  m.attribute AS attribute, m.value AS value, m.type AS type,
+  m.statement AS statement, m.quote AS quote, m.source AS source,
+  m.version AS version, m.subject AS subject, m.writer AS writer,
+  m.speaker AS speaker, m.valid_from AS valid_from,
+  m.valid_until AS valid_until, m.learned_at AS learned_at,
+  CASE WHEN m.retired_at <= ?4 THEN m.retired_at END AS retired_at,
+  m.readers AS readers,
+  (SELECT json_group_array(json_array(named.id, named.kind))
+    FROM entities AS named WHERE named.row IN (m.entity, m.object)) AS entities,
+  (SELECT json_group_array(json_array(named.id, entity_names.type, entity_names.value))
+    FROM entity_names JOIN entities AS named ON named.row = entity_names.entity
+    WHERE entity_names.memory = m.row) AS names
+FROM memories AS m
+JOIN entities AS about ON about.row = m.entity
+LEFT JOIN entities AS object ON object.row = m.object
+WHERE m.row > ?1 AND ${exportedMemorySql("m")}
+ORDER BY m.row
+LIMIT ?3`,
+  confirmations: `WITH ${unreadableSql}
+SELECT confirmed.row AS row, m.id AS memory, confirmed.person AS person,
+  confirmed.at AS at,
+  (SELECT json_group_array(other.id) FROM memory_confirmed_over AS over
+    JOIN memories AS other ON other.row = over.memory
+    WHERE over.confirmation = confirmed.row) AS over
+FROM memory_confirmations AS confirmed
+JOIN memories AS m ON m.row = confirmed.memory
+WHERE confirmed.row > ?1 AND confirmed.at <= ?4 AND ${exportedMemorySql("m")}
+  AND NOT EXISTS (
+    SELECT 1 FROM memory_confirmed_over AS over
+    LEFT JOIN memories AS other ON other.row = over.memory
+    WHERE over.confirmation = confirmed.row
+      AND (other.row IS NULL OR NOT ${exportedMemorySql("other")})
+  )
+ORDER BY confirmed.row
+LIMIT ?3`,
+  extractions: `WITH ${unreadableSql}
+SELECT marked.rowid AS row, marked.source AS source, marked.version AS version,
+  marked.subject AS subject, marked.at AS at, marked.readers AS readers
+FROM memory_extractions AS marked
+WHERE marked.rowid > ?1 AND marked.at <= ?4
+  AND ${oneGroupSql("marked.readers")}
+  AND ${exportedVersionSql("marked.source", "marked.version")}
+ORDER BY marked.rowid
+LIMIT ?3`,
+  changes: `SELECT rowid AS row, key, hash, answer FROM memory_changes
+WHERE rowid > ?1 AND rowid <= ?5
+ORDER BY rowid
+LIMIT ?3`,
+};
+
+/** A row of a step's statement, as it comes. */
+type PhaseRow = Record<string, SqlStorageValue> & { row: number };
+
+const textOf = (value: SqlStorageValue | undefined): string =>
+  z.string().parse(value);
+const textOrNull = (value: SqlStorageValue | undefined): string | null =>
+  z.string().nullable().parse(value);
+const intOrNull = (value: SqlStorageValue | undefined): number | null =>
+  z.int().nullable().parse(value);
+/** A column a statement built with `json_group_array` or kept as JSON. */
+const jsonOf = (value: SqlStorageValue | undefined): unknown =>
+  JSON.parse(textOf(value));
+
+/** The access a set of readers' key names, which a step selects only as one group's. */
+const groupAccessOf = (key: SqlStorageValue | undefined): Access => {
+  const access = accessOfKey(textOf(key));
+  if (access?.kind !== "audience") {
+    throw new Error("The Brain selected readers it doesn't export");
+  }
+  return access;
+};
+
+/**
+ * A row of step `phase` as its line, with the version it rests on (by its
+ * source's key as the ledger names it), if it rests on one.
+ */
+const memoriesLineOf = (
+  phase: (typeof memoryPhases)[number],
+  row: PhaseRow
+): { line: MemoriesLine; held: Held | undefined } => {
+  if (phase === "memories") {
+    const names = z
+      .array(z.tuple([z.string(), z.string(), z.string()]))
+      .parse(jsonOf(row.names));
+    const entities = z
+      .array(z.tuple([z.string(), z.string()]))
+      .parse(jsonOf(row.entities));
+    const source = textOrNull(row.source);
+    const version = intOrNull(row.version);
+    const line = memoryLineSchema.parse({
+      kind: "memory",
+      id: row.id,
+      about: row.about,
+      object: row.object,
+      entities: entities.map(([id, kind]) => ({
+        id,
+        kind,
+        names: names.flatMap(([of, type, value]) =>
+          of === id && type === "name" ? [value] : []
+        ),
+        identifiers: names.flatMap(([of, type, value]) =>
+          of === id && type !== "name" ? [{ type, value }] : []
+        ),
+      })),
+      attribute: row.attribute,
+      value: row.value,
+      type: row.type,
+      statement: row.statement,
+      quote: row.quote,
+      source,
+      version,
+      writer: row.writer,
+      speaker: jsonOf(row.speaker),
+      validFrom: row.valid_from,
+      validUntil: row.valid_until,
+      learnedAt: row.learned_at,
+      retiredAt: row.retired_at,
+      access: groupAccessOf(row.readers),
+    });
+    const subject = textOrNull(row.subject);
+    return {
+      line,
+      held:
+        subject === null || version === null ? undefined : [subject, version],
+    };
+  }
+  if (phase === "confirmations") {
+    return {
+      line: confirmationLineSchema.parse({
+        kind: "confirmation",
+        memory: row.memory,
+        person: row.person,
+        at: row.at,
+        over: jsonOf(row.over),
+      }),
+      held: undefined,
+    };
+  }
+  if (phase === "extractions") {
+    const line = extractionLineSchema.parse({
+      kind: "extraction",
+      source: row.source,
+      version: row.version,
+      at: row.at,
+      access: groupAccessOf(row.readers),
+    });
+    return { line, held: [textOf(row.subject), line.version] };
+  }
+  return {
+    line: changeLineSchema.parse({
+      kind: "change",
+      key: row.key,
+      hash: row.hash,
+      answer: jsonOf(row.answer),
+    }),
+    held: undefined,
+  };
 };
 
 /** The payload of an export's items. */
@@ -730,8 +1083,9 @@ const settleStuck = (storage: DurableObjectStorage): void => {
  * while its export was still `restoring` (what its files hold may not all
  * be on record, so they go), or one that failed with its export no longer
  * adopted (`handedBackSql`) or checked whole, once the store took
- * something since it failed (`held_to`, but Grasp's own skills) or the
- * ledger names a version its export holds: to give up.
+ * something since it failed (a version past `held_to`, but Grasp's own
+ * skills, or a write of memories past `held_stamp`) or the ledger names a
+ * version its export holds: to give up.
  */
 const givenUpSql = `restores.state = 'failed' AND (
   (
@@ -747,6 +1101,7 @@ const givenUpSql = `restores.state = 'failed' AND (
       AND substr(source_versions.source, 1, ${shippedSkillsPrefix.length})
         != '${shippedSkillsPrefix}'
   )
+  OR ${memoriesWrittenSinceSql}
   OR EXISTS (
     SELECT 1 FROM exports WHERE exports.id = restores.export AND ${staleSql}
   )
@@ -1032,6 +1387,25 @@ export const dropPartsBeyond = async (
   }
 };
 
+/** A part of an export, as `export_parts` records it. */
+interface PartRow extends Record<string, SqlStorageValue> {
+  part: number;
+  hash: string;
+  versions: number;
+  memories: number | null;
+  bytes: number;
+}
+
+/** The parts of export `id`, in order, as recorded. */
+export const partRowsOf = (sql: SqlStorage, id: string): PartRow[] =>
+  sql
+    .exec<PartRow>(
+      `SELECT part, hash, versions, memories, bytes FROM export_parts
+      WHERE export = ? ORDER BY part`,
+      id
+    )
+    .toArray();
+
 /**
  * Writes `row`'s manifest, from its parts, and settles it done, in one
  * transaction with expiring the done one of its scope it replaces: unless
@@ -1043,12 +1417,7 @@ const finish = async (
   bucket: BrainBucket,
   row: ExportRow
 ): Promise<void> => {
-  const parts = storage.sql
-    .exec<{ part: number; hash: string; versions: number; bytes: number }>(
-      "SELECT part, hash, versions, bytes FROM export_parts WHERE export = ? ORDER BY part",
-      row.id
-    )
-    .toArray();
+  const parts = partRowsOf(storage.sql, row.id);
   const manifest: Manifest = {
     format: 1,
     id: row.id,
@@ -1057,10 +1426,13 @@ const finish = async (
     startedAt: new Date(row.started_at).toISOString(),
     finishedAt: new Date().toISOString(),
     versions: row.versions,
-    parts: parts.map(({ part, hash, versions, bytes }) => ({
+    memories: parts.reduce((sum, { memories }) => sum + (memories ?? 0), 0),
+    stamp: row.stamp ?? 0,
+    parts: parts.map(({ part, hash, versions, memories, bytes }) => ({
       file: partFileOf(part),
       sha256: hash,
       versions,
+      ...(memories === null ? {} : { memories }),
       bytes,
     })),
   };
@@ -1127,26 +1499,34 @@ const joined = (parts: readonly Uint8Array[]): Uint8Array => {
 };
 
 /**
- * One run of an export: the next part written and recorded with the
- * sources it holds, or, once none is left, its manifest. A part that holds
- * what was erased meanwhile makes the export stale, which the tick then
- * retires (`exportsStep`), deleting its files, this part's among them.
+ * The lines of the next part, its step (`phase`: null for versions), the
+ * last row it reads (its step's cursor), and what it holds: how many
+ * versions and lines of memories, and the versions they rest on.
  */
-const writePart = async (
-  id: string,
-  { storage, bucket, again }: WorkContext
-): Promise<void> => {
-  const { sql } = storage;
-  const row = rowOf(sql, id);
-  if (row?.state !== "writing" || isStale(sql, id)) {
-    return;
-  }
+interface NextPart {
+  lines: Uint8Array[];
+  phase: number | null;
+  cursor: number;
+  versions: number;
+  memories: number;
+  held: Held[];
+}
+
+/**
+ * The next part of versions after `row`'s cursor: none once they are all
+ * written; `failed` when the first one's file is gone, or its readers are
+ * not the contract's (see `linesOf`).
+ */
+const versionsPart = async (
+  sql: SqlStorage,
+  bucket: BrainBucket,
+  row: ExportRow
+): Promise<NextPart | "failed" | undefined> => {
   const selected = sql
     .exec<Selected>(selectSql, row.cursor, row.up_to, exportPartVersions)
     .toArray();
   if (selected.length === 0) {
-    await finish(storage, bucket, row);
-    return;
+    return undefined;
   }
   const read = await linesOf(bucket, selected);
   const lines: Uint8Array[] = [];
@@ -1162,8 +1542,7 @@ const writePart = async (
       if (lines.length > 0) {
         break;
       }
-      fail(storage, id);
-      return;
+      return "failed";
     }
     lines.push(line);
     versions.push({ source, version });
@@ -1174,13 +1553,116 @@ const writePart = async (
       async ({ source, version }) => [await subjectOf(source), version] as const
     )
   );
+  return {
+    lines,
+    phase: null,
+    cursor: last,
+    versions: lines.length,
+    memories: 0,
+    held,
+  };
+};
+
+/**
+ * The next part of the memories' steps (`memoryPhases`) from where `row`
+ * is: the rows of the first step with any left, read in one statement, up
+ * to `exportPartBytes` of encoded lines (at least one). None once every
+ * step is written.
+ */
+const memoriesPart = (
+  sql: SqlStorage,
+  row: ExportRow
+): NextPart | undefined => {
+  for (let phase = row.phase ?? 1; phase <= memoryPhases.length; phase += 1) {
+    const name = memoryPhases[phase - 1];
+    if (name === undefined) {
+      return undefined;
+    }
+    const bindings = [
+      phase === row.phase ? row.cursor : 0,
+      row.up_to,
+      memoryPartRows,
+      row.stamp ?? 0,
+      row.changes_up_to ?? 0,
+    ];
+    // Each statement takes as many bindings as the last it names.
+    const rows = sql
+      .exec<PhaseRow>(
+        memoryPhaseSql[name],
+        ...bindings.slice(0, name === "changes" ? 5 : 4)
+      )
+      .toArray();
+    const lines: Uint8Array[] = [];
+    const held: Held[] = [];
+    let cursor = 0;
+    let bytes = 0;
+    for (const found of rows) {
+      const { line, held: rests } = memoriesLineOf(name, found);
+      const encoded = encoder.encode(`${JSON.stringify(line)}\n`);
+      if (lines.length > 0 && bytes + encoded.byteLength > exportPartBytes) {
+        break;
+      }
+      lines.push(encoded);
+      bytes += encoded.byteLength;
+      if (rests !== undefined) {
+        held.push(rests);
+      }
+      cursor = found.row;
+    }
+    if (lines.length > 0) {
+      return {
+        lines,
+        phase,
+        cursor,
+        versions: 0,
+        memories: lines.length,
+        held,
+      };
+    }
+  }
+  return undefined;
+};
+
+/**
+ * One run of an export: the next part written and recorded with the
+ * versions it holds and those its memories rest on (a part of versions,
+ * then of each of the memories' steps), or, once none is left, its
+ * manifest. A part that holds what was erased meanwhile makes the export
+ * stale, which the tick then retires (`exportsStep`), deleting its files,
+ * this part's among them.
+ */
+const writePart = async (
+  id: string,
+  { storage, bucket, again }: WorkContext
+): Promise<void> => {
+  const { sql } = storage;
+  const row = rowOf(sql, id);
+  if (row?.state !== "writing" || isStale(sql, id)) {
+    return;
+  }
+  const versions =
+    row.phase === null ? await versionsPart(sql, bucket, row) : undefined;
+  if (versions === "failed") {
+    fail(storage, id);
+    return;
+  }
+  const next = versions ?? memoriesPart(sql, row);
+  if (next === undefined) {
+    await finish(storage, bucket, row);
+    return;
+  }
+  const { lines, held } = next;
+  /** Whether the export is still where this run read it from. */
+  const unmoved = (now: ExportRow | undefined): boolean =>
+    now?.state === "writing" &&
+    now.cursor === row.cursor &&
+    now.phase === row.phase;
   // Written ahead: what the part holds is on record before any of its
   // files are put, so a store that stops between the puts and the part's
   // record leaves files an erasure of what they hold still reaches (the
   // deletion lists the export's prefix). The ledger is asked here too.
   const ahead = storage.transactionSync(() => {
-    const now = rowOf(sql, id);
-    if (now?.state !== "writing" || now.cursor !== row.cursor) {
+    if (!unmoved(rowOf(sql, id))) {
       return false;
     }
     recordExportSources(sql, id, held);
@@ -1205,28 +1687,30 @@ const writePart = async (
     httpMetadata: { contentType: "application/x-ndjson" },
   });
   const recorded = storage.transactionSync(() => {
-    const now = rowOf(sql, id);
-    if (now?.state !== "writing" || now.cursor !== row.cursor) {
+    if (!unmoved(rowOf(sql, id))) {
       return false;
     }
     sql.exec(
-      `INSERT INTO export_parts (export, part, hash, versions, bytes)
-      VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO export_parts (export, part, hash, versions, memories, bytes)
+      VALUES (?, ?, ?, ?, ?, ?)`,
       id,
       row.parts,
       hash,
-      lines.length,
+      next.versions,
+      next.memories === 0 ? null : next.memories,
       body.byteLength
     );
     sql.exec(
-      `UPDATE exports SET cursor = ?, parts = parts + 1, versions = versions + ?
+      `UPDATE exports SET cursor = ?, phase = ?, parts = parts + 1,
+        versions = versions + ?
       WHERE id = ?`,
-      last,
-      lines.length,
+      next.cursor,
+      next.phase,
+      next.versions,
       id
     );
     // The part as it lands: an erasure that came while it was written, of
-    // one of its versions, makes the export stale now.
+    // one of what it holds, makes the export stale now.
     if (sql.exec(namesAnySql, JSON.stringify(held)).toArray().length > 0) {
       retire(storage, "erased", "exports.id = ?2", id);
       return false;
@@ -1291,19 +1775,24 @@ export const startExport = (
       return running.id;
     }
     const id = crypto.randomUUID();
-    const upTo = sql
-      .exec<{ last: number }>(
-        "SELECT coalesce(max(row), 0) AS last FROM source_versions"
+    // What the store held, and had learned, as it starts: one snapshot.
+    const at = sql
+      .exec<{ last: number; stamp: number; changes: number }>(
+        `SELECT (SELECT coalesce(max(row), 0) FROM source_versions) AS last,
+          (SELECT coalesce(max(latest), 0) FROM memory_stamps) AS stamp,
+          (SELECT coalesce(max(rowid), 0) FROM memory_changes) AS changes`
       )
-      .one().last;
+      .one();
     sql.exec(
       `INSERT INTO exports (id, deployment, up_to, cursor, state, parts,
-        versions, started_at)
-      VALUES (?, ?, ?, 0, 'writing', 0, 0, ?)`,
+        versions, started_at, stamp, changes_up_to)
+      VALUES (?, ?, ?, 0, 'writing', 0, 0, ?, ?, ?)`,
       id,
       deployment,
-      upTo,
-      Date.now()
+      at.last,
+      Date.now(),
+      at.stamp,
+      at.changes
     );
     enqueueExport(storage, id);
     return id;
@@ -1336,14 +1825,18 @@ export const recordRestoredExport = (
     Date.now()
   );
   sql.exec("DELETE FROM export_parts WHERE export = ?", manifest.id);
-  for (const [part, { sha256, versions, bytes }] of manifest.parts.entries()) {
+  for (const [
+    part,
+    { sha256, versions, memories, bytes },
+  ] of manifest.parts.entries()) {
     sql.exec(
-      `INSERT INTO export_parts (export, part, hash, versions, bytes)
-      VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO export_parts (export, part, hash, versions, memories, bytes)
+      VALUES (?, ?, ?, ?, ?, ?)`,
       manifest.id,
       part,
       sha256,
       versions,
+      memories ?? null,
       bytes
     );
   }
