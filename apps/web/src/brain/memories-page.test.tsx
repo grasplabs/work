@@ -174,6 +174,14 @@ const shown = async (refusal?: string, failedSaves = 0) => {
                   source: null,
                   yours: true,
                 }),
+                // Drawn from what an agent fetched from a connection.
+                memory("m-fetched", "Expanding", {
+                  attribute: "industry",
+                  source: {
+                    source: { producer: "capture", id: "cap-1" },
+                    version: 3,
+                  },
+                }),
               ],
               next: { memory: "m-mine" },
             }
@@ -333,13 +341,14 @@ describe(MemoriesPage, () => {
       opened: [
         "Status: Paying",
         "Your own word",
+        "Fetched from a connection, version 3",
         "Status: Prospect",
         "No longer held since",
       ].map((text) => opened.includes(text)),
       calls: calls.slice(1),
     }).toStrictEqual({
       listed: [true, true, true, true, true],
-      opened: [true, true, true, true],
+      opened: [true, true, true, true, true],
       calls: [
         "entities customer",
         "entities customer shared",

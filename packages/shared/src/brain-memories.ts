@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { BrainSourceProducer } from "./brain-sources.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // What the Brain keeps of what a person says in their own chat (core's
@@ -186,7 +187,7 @@ export interface BrainMemoryShown {
 
 /** A source a memory was drawn from, as its producer names it. */
 export interface BrainMemorySourceRef {
-  producer: "upload" | "chat" | "run";
+  producer: BrainSourceProducer;
   id: string;
 }
 

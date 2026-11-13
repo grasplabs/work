@@ -11,6 +11,7 @@ import m0008 from './0008_memories.sql';
 import m0009 from './0009_exports.sql';
 import m0010 from './0010_export_memories.sql';
 import m0011 from './0011_groups.sql';
+import m0012 from './0012_read_at.sql';
 
   export default {
     journal,
@@ -26,7 +27,8 @@ m0007,
 m0008,
 m0009,
 m0010,
-m0011
+m0011,
+m0012
     }
   }
   

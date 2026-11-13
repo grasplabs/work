@@ -335,6 +335,7 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
     upload: <Trans>From an upload, version {version}</Trans>,
     chat: <Trans>From a chat, version {version}</Trans>,
     run: <Trans>From a workflow run, version {version}</Trans>,
+    capture: <Trans>Fetched from a connection, version {version}</Trans>,
   }[source.source.producer];
   return label;
 };
