@@ -14,6 +14,7 @@ import {
   principalMaxLength,
   questionMaxLength,
   sourceIdMaxLength,
+  staleVersion,
   storeErased,
   wellFormedString,
   modelWaitMaxSeconds,
@@ -1147,9 +1148,10 @@ const skillAccess: Access = { kind: "audience", group: companyGroup };
 
 /**
  * The group a retired company skill's last version is readable by: core
- * never counts anyone in it (`skillReaderOf`, `readerOf`), so nobody lists,
+ * counts no reader in it (`skillReaderOf`, `readerOf`), so nobody lists,
  * selects or reads a retired skill, and its versions stay in the store as
- * history.
+ * history. One read alone holds it: `companySkillVersionOf`, which answers
+ * the current version for an approval's add, never its text.
  */
 const retiredGroup = "retired-skills";
 
@@ -1523,14 +1525,30 @@ const skillAdminOf = async (
   return { person: member.userId, groups: [companyGroup] };
 };
 
+/** `write`, its stale refusal (`staleVersion`) said as `skills.changed`. */
+const changedOr = async <T>(write: () => Promise<T>): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    if (error instanceof Error && error.message === staleVersion) {
+      throw skillErrors.create("skills.changed");
+    }
+    throw error;
+  }
+};
+
 /**
  * Adds `text` as the next version of the company's skill `name`, readable
  * by every member; the one before stays as history. `approverId` is the
  * admin whose approval of a share this is: checked here to be one of the
  * organization's own admins now. `change` is the share's, so a retry adds
  * nothing twice (the store answers a change it has with the version it
- * made). Refused (`skills.invalid`) for text that isn't a skill of that
- * name.
+ * made). `after` is the current version the caller saw
+ * (`companySkillVersionOf`, null for none): the store writes only while
+ * it still is, in the same transaction, so an older text never lands over
+ * a newer one, nor over a retirement it didn't see; otherwise refused with
+ * `skills.changed`, nothing written. Refused (`skills.invalid`) for text
+ * that isn't a skill of that name.
  *
  * For skill-shares.ts only, once the approval is recorded and audited:
  * the one way a company skill is written.
@@ -1538,7 +1556,7 @@ const skillAdminOf = async (
 export const addCompanySkill = async (
   env: BrainEnv & Pick<Env, "DB">,
   approverId: string,
-  added: { name: string; change: string; text: string }
+  added: { name: string; change: string; text: string; after: number | null }
 ): Promise<SkillAt> => {
   await skillAdminOf(env, approverId);
   const skill = skillErrors.parse("skills.invalid", skillSchema, {
@@ -1551,13 +1569,45 @@ export const addCompanySkill = async (
     added.change
   );
   const text = skillTextOf(skill.name, added.text);
-  const { version } = await brain(env).addInstructions({
-    source: skillKeyOf(skill),
-    change,
-    text,
-    access: skillAccess,
-  });
+  const after = skillErrors.parse(
+    "skills.invalid",
+    z.int().positive().nullable(),
+    added.after
+  );
+  const { version } = await changedOr(
+    async () =>
+      await brain(env).addInstructions({
+        source: skillKeyOf(skill),
+        change,
+        text,
+        access: skillAccess,
+        after,
+      })
+  );
   return { ...skill, version };
+};
+
+/**
+ * The current version of the company's skill `name`, live or retired, as
+ * the admin `adminId` acting for an approval reads it: what an add over
+ * it expects (`addCompanySkill`'s `after`); null when there is none. Its
+ * text is never answered: a retired one is read by no one.
+ */
+export const companySkillVersionOf = async (
+  env: BrainEnv & Pick<Env, "DB">,
+  adminId: string,
+  name: string
+): Promise<number | null> => {
+  const { person } = await skillAdminOf(env, adminId);
+  const skill = skillErrors.parse("skills.invalid", skillSchema, {
+    scope: "company",
+    name,
+  });
+  const [current] = await brain(env).readCurrent({
+    sources: [skillKeyOf(skill)],
+    reader: { person, groups: [companyGroup, retiredGroup] },
+  });
+  return current?.version ?? null;
 };
 
 /**
@@ -1589,12 +1639,18 @@ export const retireCompanySkill = async (
   if (current === undefined) {
     return null;
   }
-  await brain(env).addInstructions({
-    source,
-    change,
-    text: current.text,
-    access: { kind: "audience", group: retiredGroup },
-  });
+  // Over the version just read: an approval landing in between is never
+  // retired unseen (`skills.changed`, nothing written).
+  await changedOr(
+    async () =>
+      await brain(env).addInstructions({
+        source,
+        change,
+        text: current.text,
+        access: { kind: "audience", group: retiredGroup },
+        after: current.version,
+      })
+  );
   return current.version;
 };
 

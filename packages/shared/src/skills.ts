@@ -9,6 +9,8 @@ import { defineErrorFamily } from "./errors.ts";
 export const skillErrors = defineErrorFamily({
   "skills.invalid": "That isn't a task or a skill.",
   "skills.not_found": "There's no such skill, or not at that version.",
+  "skills.changed":
+    "The skill changed while this was on its way: nothing was written. Try again.",
   "skills.superseded":
     "A later approval of a skill of that name came first: this one isn't added.",
   "skills.name_erased":

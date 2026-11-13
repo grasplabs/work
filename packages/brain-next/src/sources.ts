@@ -4,7 +4,7 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
-import { erasedSource } from "./contract.ts";
+import { erasedSource, staleVersion } from "./contract.ts";
 import type {
   CurrentRequest,
   NewSource,
@@ -78,7 +78,8 @@ const encoder = new TextEncoder();
  * instruction file's never is (contract.ts `addInstructions`).
  */
 interface Adding {
-  readonly added: NewSource;
+  /** The add, and the current version it expects when it names one. */
+  readonly added: NewSource & { readonly after?: number | null };
   /** The source's key as the erasure ledger names it (erasure.ts). */
   readonly subject: string;
   /**
@@ -142,6 +143,11 @@ const madeBefore = (
     .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
     .where(eq(currentVersions.source, added.source))
     .get();
+  // Expected to be over another version than the current one: refused,
+  // nothing written, before anything else is compared.
+  if (added.after !== undefined && (current?.version ?? null) !== added.after) {
+    throw new Error(staleVersion);
+  }
   if (
     current === undefined ||
     current.file !== hash ||
@@ -287,10 +293,12 @@ const addAgain = "The Brain lost the file while adding it: add it again";
  * can be repeated after a lost reply, or after a crash between the file
  * and the version, which it then finishes. Its text is cut into chunks
  * and indexed for recall when `indexed`; otherwise it is only kept whole.
+ * With `after`, only over that current version (`staleVersion` otherwise),
+ * asked again in the transaction that writes.
  */
 export const addVersion = async (
   { storage, db, bucket }: SourcesStore,
-  added: NewSource,
+  added: Adding["added"],
   { indexed }: { indexed: boolean }
 ): Promise<SourceVersionRef> => {
   const soFar = erasuresSoFar(storage.sql);

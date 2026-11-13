@@ -193,12 +193,14 @@ const refused = async () =>
   await Promise.reject(new Error("Out of reach, for the test"));
 
 /**
- * Core's env whose shared store runs `before` once, ahead of the first
- * `addInstructions` it is asked: something that lands while an add is on
+ * Core's env whose shared store runs `hooks[n]` before its n-th
+ * `addInstructions` (from 1): something that lands while that add is on
  * its way.
  */
-const sharedStoreBefore = (before: () => Promise<unknown>): Env => {
-  let ran = false;
+const sharedStoreHooks = (
+  hooks: Record<number, () => Promise<unknown>>
+): Env => {
+  let calls = 0;
   const binding = env.BRAIN_STORE;
   const getByName = (named: string) => {
     const stub = binding.getByName(named);
@@ -212,9 +214,9 @@ const sharedStoreBefore = (before: () => Promise<unknown>): Env => {
           return value;
         }
         return async (...args: unknown[]): Promise<unknown> => {
-          if (property === "addInstructions" && !ran) {
-            ran = true;
-            await before();
+          if (property === "addInstructions") {
+            calls += 1;
+            await hooks[calls]?.();
           }
           const answered: unknown = await Reflect.apply(value, target, args);
           return answered;
@@ -276,6 +278,31 @@ const databaseRefusing = (refuses: {
       },
     }),
   };
+};
+
+/** The company's live skill `name` as members read it: its description and version. */
+const liveOf = async (api: SessionApi, name: string) => {
+  const page = await overviewOf(api);
+  return page.company
+    .filter((skill) => skill.name === name)
+    .map(({ description, version }) => [description, version]);
+};
+
+/** Each of `shares` as its asker's page shows it: status and version. */
+const rowsOf = async (
+  shares: readonly { api: SessionApi; id: string }[]
+): Promise<(string | number | null)[][]> => {
+  const rows: (string | number | null)[][] = [];
+  for (const { api, id } of shares) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const page = await overviewOf(api);
+    rows.push(
+      ...page.shares
+        .filter((share) => share.id === id)
+        .map(({ status, version }) => [status, version])
+    );
+  }
+  return rows;
 };
 
 /** A fresh skill name. */
@@ -1011,59 +1038,6 @@ describe("writing and sharing skills", setUpTime, () => {
     });
   });
 
-  it("puts a newer approval's text back on top when an older add lands after it", async () => {
-    const [author, other, admin, member] = await Promise.all([
-      signedInApi(idp, "user"),
-      signedInApi(idp, "user"),
-      signedInApi(idp, "admin"),
-      signedInApi(idp, "user"),
-    ]);
-    const name = nameOf("close-the-shop");
-    const older = await author.api.skills.save(skillText(name, "Older"));
-    const olderShare = await author.api.skills.share(name, older.version);
-    const newer = await other.api.skills.save(skillText(name, "Newer"));
-    const newerShare = await other.api.skills.share(name, newer.version);
-    const deciding = await admin.api.whoami();
-    const head = await logHead();
-
-    // The older approval's add is on its way when the newer one is
-    // approved and added in full.
-    const stale = await outcome(
-      approveShare(
-        sharedStoreBefore(
-          async () => await admin.api.skills.approve(newerShare.id)
-        ),
-        deciding,
-        olderShare.id
-      )
-    );
-    const page = await overviewOf(member.api);
-    const asker = await overviewOf(author.api);
-
-    expect({
-      stale,
-      company: page.company
-        .filter((skill) => skill.name === name)
-        .map(({ description }) => description),
-      memberUses: await usable(member.userId, false, [name]),
-      older: asker.shares
-        .filter((share) => share.id === olderShare.id)
-        .map(({ status }) => status),
-      events: await skillEventsAfter(head),
-    }).toStrictEqual({
-      stale: "skills.superseded",
-      company: ["Newer"],
-      memberUses: [["company", name]],
-      older: ["superseded"],
-      events: [
-        "skill.share.approved",
-        "skill.share.approved",
-        "skill.share.added",
-        "skill.share.superseded",
-      ],
-    });
-  });
-
   it("leaves a decision with no outcome when its attempt stops between the decision and the add", async () => {
     const [author, admin] = await Promise.all([
       signedInApi(idp, "user"),
@@ -1142,6 +1116,287 @@ describe("writing and sharing skills", setUpTime, () => {
       saysNothing: { personal: false },
       saysNo: { personal: false },
       ownTurn: { personal: true },
+    });
+  });
+
+  it("supersedes an older approval whose add a newer one overtook, and a retry of it adds nothing", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("older-and-newer");
+    const older = await a.api.skills.save(skillText(name, "Older"));
+    const olderShare = await a.api.skills.share(name, older.version);
+    const newer = await b.api.skills.save(skillText(name, "Newer"));
+    const newerShare = await b.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // The newer one is approved, and added, while the older add is on its
+    // way: the store refuses the older add over a version it didn't see.
+    const first = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () => await admin.api.skills.approve(newerShare.id),
+        }),
+        deciding,
+        olderShare.id
+      )
+    );
+    const retry = await outcome(admin.api.skills.approve(olderShare.id));
+
+    expect({
+      first,
+      retry,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: olderShare.id },
+        { api: b.api, id: newerShare.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "skills.superseded",
+      retry: "skills.superseded",
+      live: [["Newer", 1]],
+      rows: [
+        ["superseded", null],
+        ["approved", 1],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.share.superseded",
+      ],
+    });
+  });
+
+  it("leaves the newest of three approvals of one name live, whatever order their adds land in", async () => {
+    const [a, b, c, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("three-ways");
+    const shareOfText = async (api: SessionApi, text: string) => {
+      const saved = await api.skills.save(skillText(name, text));
+      return await api.skills.share(name, saved.version);
+    };
+    const sa = await shareOfText(a.api, "A");
+    const sb = await shareOfText(b.api, "B");
+    const sc = await shareOfText(c.api, "C");
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // While A's add is on its way, B is approved; while B's is, C is
+    // approved and added in full.
+    const first = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () =>
+            await outcome(
+              approveShare(
+                sharedStoreHooks({
+                  1: async () => await admin.api.skills.approve(sc.id),
+                }),
+                deciding,
+                sb.id
+              )
+            ),
+        }),
+        deciding,
+        sa.id
+      )
+    );
+
+    expect({
+      first,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([
+        { api: a.api, id: sa.id },
+        { api: b.api, id: sb.id },
+        { api: c.api, id: sc.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "skills.superseded",
+      live: [["C", 1]],
+      rows: [
+        ["superseded", null],
+        ["superseded", null],
+        ["approved", 1],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.share.superseded",
+        "skill.share.superseded",
+      ],
+    });
+  });
+
+  it("never undoes a retirement with an older add that lands after it", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("retired-meanwhile");
+    const older = await a.api.skills.save(skillText(name, "Older"));
+    const olderShare = await a.api.skills.share(name, older.version);
+    const newer = await b.api.skills.save(skillText(name, "Newer"));
+    const newerShare = await b.api.skills.share(name, newer.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // The newer one is approved and the skill retired while the older
+    // add is on its way.
+    const first = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () => {
+            await admin.api.skills.approve(newerShare.id);
+            await admin.api.skills.retire(name);
+          },
+        }),
+        deciding,
+        olderShare.id
+      )
+    );
+
+    expect({
+      first,
+      live: await liveOf(member.api, name),
+      memberUses: await usable(member.userId, false, [name]),
+      rows: await rowsOf([
+        { api: a.api, id: olderShare.id },
+        { api: b.api, id: newerShare.id },
+      ]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      first: "skills.superseded",
+      live: [],
+      memberUses: [],
+      rows: [
+        ["superseded", null],
+        ["approved", 1],
+      ],
+      events: [
+        "skill.share.approved",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.retired",
+        "skill.retire_done",
+        "skill.share.superseded",
+      ],
+    });
+  });
+
+  it("fails an approval whose company skill changed meanwhile with no later approval, and adds it once approved again", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("changed-meanwhile");
+    const first = await a.api.skills.save(skillText(name, "First"));
+    const firstShare = await a.api.skills.share(name, first.version);
+    await admin.api.skills.approve(firstShare.id);
+    const second = await b.api.skills.save(skillText(name, "Second"));
+    const secondShare = await b.api.skills.share(name, second.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    // Retired while the second add is on its way: no later approval, so
+    // the attempt fails, and the admin approves it again.
+    const failed = await outcome(
+      approveShare(
+        sharedStoreHooks({
+          1: async () => {
+            await admin.api.skills.retire(name);
+          },
+        }),
+        deciding,
+        secondShare.id
+      )
+    );
+    const halfway = {
+      failed,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([{ api: b.api, id: secondShare.id }]),
+    };
+    const finished = await admin.api.skills.approve(secondShare.id);
+
+    expect({
+      ...halfway,
+      finished: [finished.status, finished.version],
+      liveAfter: await liveOf(member.api, name),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      failed: "skills.changed",
+      live: [],
+      rows: [["approved", null]],
+      finished: ["approved", 3],
+      liveAfter: [["Second", 3]],
+      events: [
+        "skill.share.approved",
+        "skill.retired",
+        "skill.retire_done",
+        "skill.share.approve_failed",
+        "skill.share.added",
+      ],
+    });
+  });
+
+  it("fails a retirement an approval landed under, leaving what landed live", async () => {
+    const [a, b, admin, member] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("retire-under");
+    const first = await a.api.skills.save(skillText(name, "First"));
+    const firstShare = await a.api.skills.share(name, first.version);
+    await admin.api.skills.approve(firstShare.id);
+    const second = await b.api.skills.save(skillText(name, "Second"));
+    const secondShare = await b.api.skills.share(name, second.version);
+    const deciding = await admin.api.whoami();
+    const head = await logHead();
+
+    const failed = await outcome(
+      retireSkill(
+        sharedStoreHooks({
+          1: async () => await admin.api.skills.approve(secondShare.id),
+        }),
+        deciding,
+        name
+      )
+    );
+
+    expect({
+      failed,
+      live: await liveOf(member.api, name),
+      rows: await rowsOf([{ api: b.api, id: secondShare.id }]),
+      events: await skillEventsAfter(head),
+    }).toStrictEqual({
+      failed: "skills.changed",
+      live: [["Second", 2]],
+      rows: [["approved", 2]],
+      events: [
+        "skill.retired",
+        "skill.share.approved",
+        "skill.share.added",
+        "skill.retire_failed",
+      ],
     });
   });
 });

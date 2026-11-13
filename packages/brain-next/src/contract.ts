@@ -37,6 +37,15 @@ export const erasedSource = "The Brain refused it: what this adds was erased";
  */
 export const storeErased = "The Brain refused it: this store was erased";
 
+/**
+ * What an add with an expected current version (`NewInstructions.after`)
+ * says when the source's current version is another by the time it would
+ * write: nothing is written. The caller reads the source again and decides;
+ * the message alone, compared whole, tells it from any other failure.
+ */
+export const staleVersion =
+  "The Brain refused it: the current version is not the one expected";
+
 /** Most characters of a question (the host's page holds to it too). */
 export const questionMaxLength = brainQuestionMaxLength;
 
@@ -194,6 +203,14 @@ export const instructionsTextSchema = wellFormedString()
  */
 export const newInstructionsSchema = newSourceSchema.extend({
   text: instructionsTextSchema,
+  /**
+   * The current version the caller saw, null for none yet: the add writes
+   * only while it still is, checked in the transaction that writes, and is
+   * refused with `staleVersion` otherwise. A change the store already has
+   * answers with the version it made first, so a retry still adds nothing
+   * twice. Left out, an add writes whatever is current.
+   */
+  after: versionSchema.nullable().optional(),
 });
 export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
@@ -1874,7 +1891,10 @@ export interface Brain {
   /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:
-   * never cut into chunks or indexed, so recall never returns it.
+   * never cut into chunks or indexed, so recall never returns it. With
+   * `after`, only over that current version (null: none yet), checked in
+   * the writing transaction: otherwise refused with `staleVersion`,
+   * nothing written; a change it has answers with its version first.
    */
   addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
   /**

@@ -1702,6 +1702,36 @@ export const coreProbes = {
         })
     )),
   ],
+  // A version, never text, and only for one of the organization's admins:
+  // the readers here aren't, so each is refused alike, whatever is named.
+  companySkillVersionOf: async ({ personId, markers, hiddenSkills }) => [
+    await answer(
+      "a skill never written",
+      async () =>
+        await coreBrain.companySkillVersionOf(env, personId, "unwritten")
+    ),
+    await answer(
+      "a name of the markers",
+      async () =>
+        await coreBrain.companySkillVersionOf(env, personId, markers.join("-"))
+    ),
+    await answer(
+      "as someone who isn't a member",
+      async () =>
+        await coreBrain.companySkillVersionOf(env, stranger(), "unwritten")
+    ),
+    await answer(
+      "the reader's skills",
+      async () =>
+        await coreBrain.listSkillsAs(env, personId, new Set<string>(), {
+          personal: true,
+        })
+    ),
+    ...(await pairedOverSkills(
+      hiddenSkills,
+      async (name) => await coreBrain.companySkillVersionOf(env, personId, name)
+    )),
+  ],
   // Writes a company skill only for one of the organization's admins:
   // the readers here aren't, so each is refused, a marked one included,
   // and nothing of it is listed after.
@@ -1718,6 +1748,7 @@ export const coreProbes = {
             // A card of another name: refused, for an admin too, so the
             // markers are never written where anyone reads them.
             text: `---\nname: ${name}-other\ndescription: ${text}\n---\n${text}`,
+            after: null,
           })
       ),
       await answer(
@@ -1727,6 +1758,7 @@ export const coreProbes = {
             name,
             change: crypto.randomUUID(),
             text,
+            after: null,
           })
       ),
       await answer(

@@ -13,7 +13,7 @@ import type {
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, isNull, ne, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, not, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -26,6 +26,7 @@ import {
 import {
   addCompanySkill,
   addOwnSkill,
+  companySkillVersionOf,
   eraseOwnSkill,
   listSkillsAs,
   readCurrentSkillAs,
@@ -423,63 +424,21 @@ const supersede = async (
 };
 
 /**
- * After `share`'s text landed in the Brain although a later approval of
- * the same name exists: puts the latest approval's text back on top
- * (under a change of its own, which adds nothing when it is current
- * already), so an older text never stays over a newer approval.
- */
-const restoreNewest = async (
-  env: Env,
-  by: Identity,
-  share: Pick<ShareRow, "id" | "name">
-): Promise<void> => {
-  const [newest] = await drizzle(env.DB)
-    .select({ text: skillShares.text, version: skillShares.version })
-    .from(skillShares)
-    .where(
-      and(
-        eq(skillShares.name, share.name),
-        eq(skillShares.status, "approved"),
-        ne(skillShares.id, share.id)
-      )
-    )
-    .orderBy(desc(skillShares.decidedAt), desc(skillShares.id))
-    .limit(1);
-  if (newest === undefined) {
-    return;
-  }
-  // Waiting for its add, it holds its text; added, the Brain does.
-  let { text } = newest;
-  if (text === null && newest.version !== null) {
-    const added = await readSkillAs(env, by.userId, {
-      scope: "company",
-      name: share.name,
-      version: newest.version,
-    });
-    text = added?.text ?? null;
-  }
-  if (text === null) {
-    return;
-  }
-  await addCompanySkill(env, by.userId, {
-    name: share.name,
-    change: `restore:${share.id}`,
-    text,
-  });
-};
-
-/**
  * Approves the share `id` as the admin `by`, as a pair of audit events:
  * the decision (`skill.share.approved`), written with the decision before
  * anything reaches the Brain, and its outcome, one per attempt:
  * `skill.share.added` with the version, written with the version on the
- * row; `skill.share.approve_failed` when the add fails (approving again
- * finishes it, without a second decision); or `skill.share.superseded`
- * when a later approval of the same name came first (the share's status
- * says so, and the newer text stays on top). A decision with no outcome
- * is one whose attempt stopped half-way: approving again finishes it.
- * `skills.not_found` for a share there isn't or that was declined or
- * replaced; `skills.superseded` for one superseded.
+ * row; `skill.share.superseded` when a later approval of the same name
+ * came first (the share's status says so; its text is never written);
+ * or `skill.share.approve_failed` when the add fails, the company skill
+ * having changed meanwhile among the reasons (approving again finishes
+ * it, without a second decision). The add is made over the company
+ * skill's current version as read here, and the store refuses it in the
+ * writing transaction once that is no longer current, so an older text
+ * never lands over a newer approval or a retirement. A decision with no
+ * outcome is one whose attempt stopped half-way: approving again
+ * finishes it. `skills.not_found` for a share there isn't or that was
+ * declined or replaced; `skills.superseded` for one superseded.
  */
 export const approveShare = async (
   env: Env,
@@ -523,12 +482,22 @@ export const approveShare = async (
   }
   let version: number;
   try {
+    const after = await companySkillVersionOf(env, by.userId, decided.name);
     ({ version } = await addCompanySkill(env, by.userId, {
       name: decided.name,
       change: `share:${decided.id}`,
       text: decided.text,
+      after,
     }));
   } catch (error) {
+    // Changed meanwhile, by a later approval of the name: superseded.
+    if (
+      skillErrors.codeOf(error) === "skills.changed" &&
+      (await overtaken(env, decided))
+    ) {
+      await supersede(env, by, decided);
+      throw skillErrors.create("skills.superseded");
+    }
     await sayOutcome(
       env,
       shareEntry(by, "approve_failed", decided.id),
@@ -537,9 +506,7 @@ export const approveShare = async (
     throw error;
   }
   // The version and its outcome, in one step, only while no later
-  // approval of the name exists: one that came in meanwhile is checked
-  // in the same statement, so this add is never recorded as the
-  // company's over a newer one.
+  // approval of the name exists, checked in the same statement.
   await auditedBatch(env, db, [
     db
       .update(skillShares)
@@ -555,14 +522,33 @@ export const approveShare = async (
     outboxedIfChanged(db, shareEntry(by, "added", decided.id, { version })),
   ]);
   const recorded = await shareById(env, decided.id);
-  if (recorded.status === "approved" && recorded.version === null) {
-    // Overtaken while this add was on its way: the newer text goes back
-    // on top, and this one is superseded.
-    await restoreNewest(env, by, decided);
+  if (recorded.status !== "approved" || recorded.version !== null) {
+    return shareOf(recorded);
+  }
+  // A later approval came in after this add landed. Its own add lands
+  // only over this version (the store's check), so while this version is
+  // still the current one, this text is the company's: recorded as
+  // added, which is true. Once the later one landed over it, this one
+  // is superseded.
+  const current = await companySkillVersionOf(env, by.userId, decided.name);
+  if (current !== version) {
     await supersede(env, by, decided);
     throw skillErrors.create("skills.superseded");
   }
-  return shareOf(recorded);
+  await auditedBatch(env, db, [
+    db
+      .update(skillShares)
+      .set({ version, text: null })
+      .where(
+        and(
+          eq(skillShares.id, decided.id),
+          eq(skillShares.status, "approved"),
+          isNull(skillShares.version)
+        )
+      ),
+    outboxedIfChanged(db, shareEntry(by, "added", decided.id, { version })),
+  ]);
+  return shareOf(await shareById(env, decided.id));
 };
 
 /**
