@@ -1316,6 +1316,10 @@ const leavingWork: Record<string, () => Promise<void>> = {
   addSource: async () => {
     await add(own(), "A source to embed", theirs());
   },
+  // Their own export: written by the queue, a part a run.
+  startOwnExport: async () => {
+    await own().startOwnExport({ person, deployment: "test" });
+  },
   // Failed: its file is noted before it is written, and nothing holds it.
   addInstructions: async () => {
     const { heal } = await breakBucket(own(), ["put"]);
@@ -1406,6 +1410,8 @@ const leavingNone = [
   "listContested",
   "listSources",
   "listVersions",
+  "ownExport",
+  "ownExportFile",
   "readCurrent",
   "readEntity",
   "readEntityNames",
@@ -1418,7 +1424,7 @@ const leavingNone = [
   "retireMemory",
   "searchVectors",
   "startExport",
-  // A person's own store refuses every export and restore.
+  // A person's own store refuses the company's export and every restore.
   "checkRestore",
   "startRestore",
   "workOverview",

@@ -25,6 +25,9 @@ import {
   exportFileRequestSchema,
   exportIdSchema,
   exportRequestSchema,
+  ownExportFileRequestSchema,
+  ownExportRequestSchema,
+  ownExportStartSchema,
   isWholeKey,
   handOverRequestSchema,
   handOverResultSchema,
@@ -69,6 +72,9 @@ import type {
   ExportFileRequest,
   ExportRequest,
   ExportStatus,
+  OwnExportFileRequest,
+  OwnExportRequest,
+  OwnExportStart,
   KeyState,
   Finding,
   HandOverRequest,
@@ -134,6 +140,7 @@ import {
   exportsDue,
   exportsPrefix,
   exportsStep,
+  latestExportStatus,
   startExport,
 } from "./exports.ts";
 import {
@@ -264,6 +271,9 @@ const notTheirs =
 
 /** What a person's own store answers a call only the shared store takes. */
 const sharedOnly = "The Brain refused it: only the shared store takes this";
+
+/** What the shared store answers a call only a person's own store takes. */
+const ownOnly = "The Brain refused it: only a person's own store takes this";
 
 /** What a person's own store answers an add anyone else may read. */
 const notTheirsAlone =
@@ -600,6 +610,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /** Refuses `reader` on a person's own store unless they are that person. */
   #mayRead(reader: Reader): void {
     if (this.#kind.kind === "person" && reader.person !== this.#kind.person) {
+      throw new Error(notTheirs);
+    }
+  }
+
+  /**
+   * Refuses a call only a person's own store takes, asked for `person`,
+   * unless this is that person's own store.
+   */
+  #ownOnly(person: string): void {
+    if (this.#kind.kind !== "person") {
+      throw new Error(ownOnly);
+    }
+    if (person !== this.#kind.person) {
       throw new Error(notTheirs);
     }
   }
@@ -1159,6 +1182,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         ask,
         embedders,
         bucket: this.#bucket,
+        ...(this.#kind.kind === "person" ? { owner: this.#kind.person } : {}),
         ...(handOvers === undefined || this.#kind.kind !== "shared"
           ? {}
           : {
@@ -1644,8 +1668,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /**
    * Starts an export of the company's Brain (exports.ts), or answers with
-   * the one being written. A person's own store refuses: a person's own
-   * export is for later.
+   * the one being written. A person's own store refuses: its person's
+   * export is `startOwnExport`.
    */
   async startExport(deployment: string): Promise<{ id: string }> {
     const of = checked(deploymentSchema, deployment);
@@ -1676,6 +1700,67 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     await this.#ready();
     return await exportFile(this.ctx.storage.sql, this.#bucket, asked);
+  }
+
+  /**
+   * Starts an export of what this person's own store holds, only for that
+   * person (exports.ts, scope `person`), or answers with the one being
+   * written. A store that never kept anything makes its schema first, so
+   * the export says, whole, that it holds nothing. Refused once the store
+   * was erased whole, and by the shared store.
+   */
+  async startOwnExport(request: OwnExportStart): Promise<{ id: string }> {
+    const { person, deployment } = checked(ownExportStartSchema, request);
+    this.#ownOnly(person);
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      try {
+        return { id: startExport(this.ctx.storage, deployment) };
+      } catch (error) {
+        if (this.#erased) {
+          // Nothing of the error is kept: it is the database's.
+          throw new Error(erasedWhole, { cause: error });
+        }
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * The export this person's own store shows them (exports.ts
+   * `latestExportStatus`): null when there is none, or the store was erased
+   * whole or never kept anything. Only for that person.
+   */
+  async ownExport(request: OwnExportRequest): Promise<ExportStatus | null> {
+    const { person } = checked(ownExportRequestSchema, request);
+    this.#ownOnly(person);
+    if (!(await this.#readable())) {
+      return null;
+    }
+    return latestExportStatus(this.ctx.storage.sql);
+  }
+
+  /**
+   * A file of this person's own done export, as `exportFile`: null for any
+   * other, alike, and once the store was erased whole, also while the file
+   * was being read. Only for that person.
+   */
+  async ownExportFile(request: OwnExportFileRequest): Promise<string | null> {
+    const { person, ...asked } = checked(ownExportFileRequestSchema, request);
+    this.#ownOnly(person);
+    if (!(await this.#readable())) {
+      return null;
+    }
+    try {
+      return await exportFile(this.ctx.storage.sql, this.#bucket, asked);
+    } catch (error) {
+      // Erased whole while the file was read: its storage is gone under
+      // it, and it holds nothing, as a store erased before (`#readable`).
+      if (this.#erased) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**

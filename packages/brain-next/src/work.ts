@@ -239,6 +239,11 @@ export interface WorkContext {
    */
   handOvers?: HandOvers;
   /**
+   * The person whose own store this is, by its name; undefined in the
+   * shared store. What an export of it may hold (exports.ts `ExportScope`).
+   */
+  owner?: string;
+  /**
    * Says more is left once this run returns (rule 7), having written
    * `progress` pieces of the work (more than 0, or the attempt fails): the
    * item is put back, due at once with its attempts reset, unless a newer
@@ -260,6 +265,8 @@ export interface WorkHost {
   bucket: BrainBucket;
   /** The shared store's tick only (`WorkContext.handOvers`). */
   handOvers?: HandOvers;
+  /** A person's own store's tick only (`WorkContext.owner`). */
+  owner?: string;
 }
 
 /** A kind of work, and how one item of it is done. */
@@ -1149,6 +1156,7 @@ const runItem = async (
         signal,
         bucket: host.bucket,
         handOvers: host.handOvers,
+        owner: host.owner,
         again: (progress) => {
           again = { progress };
         },

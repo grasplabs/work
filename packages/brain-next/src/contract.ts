@@ -1149,6 +1149,27 @@ export const exportFileRequestSchema = exportRequestSchema.extend({
 export type ExportFileRequest = z.infer<typeof exportFileRequestSchema>;
 
 /**
+ * A person's own export, asked by that person: their store answers no one
+ * else (store.ts).
+ */
+export const ownExportRequestSchema = z.strictObject({
+  person: principalSchema,
+});
+export type OwnExportRequest = z.infer<typeof ownExportRequestSchema>;
+
+/** A person's start of their own export, for `deployment`. */
+export const ownExportStartSchema = ownExportRequestSchema.extend({
+  deployment: deploymentSchema,
+});
+export type OwnExportStart = z.infer<typeof ownExportStartSchema>;
+
+/** A file of a person's own export, asked by that person. */
+export const ownExportFileRequestSchema = exportFileRequestSchema.extend({
+  person: principalSchema,
+});
+export type OwnExportFileRequest = z.infer<typeof ownExportFileRequestSchema>;
+
+/**
  * Where an export is: being written; adopted by a restore that hasn't yet
  * checked every part (`restoring`: served to no one); done, with its files (the manifest
  * first); failed (a file it was to read was gone: its files deleted);
@@ -2216,6 +2237,27 @@ export interface Brain {
    * for one the ledger made stale.
    */
   exportFile: (request: ExportFileRequest) => Promise<string | null>;
+  /**
+   * Starts an export of what `person`'s own store holds, which only they
+   * may read, by the company's rules (above), in their store's part of
+   * the bucket: their sources and versions, memories, the entities and
+   * names those give, confirmations, extraction marks and change keys.
+   * Only their own store takes it, and only for them; erasing them deletes
+   * it. While one is being written, it answers with that one. Nothing
+   * restores it.
+   */
+  startOwnExport: (request: OwnExportStart) => Promise<{ id: string }>;
+  /**
+   * The export `person`'s own store shows them: the one being written,
+   * else the one done, else the latest; null when there is none or the
+   * store was erased. Only their own store answers, and only them.
+   */
+  ownExport: (request: OwnExportRequest) => Promise<ExportStatus | null>;
+  /**
+   * A file of `person`'s own done export, as `exportFile`: null for any
+   * other, alike. Only their own store answers, and only them.
+   */
+  ownExportFile: (request: OwnExportFileRequest) => Promise<string | null>;
   /**
    * Starts restoring the company export `id` of `deployment` from the
    * bucket into this shared store, which must hold no version: a part a
