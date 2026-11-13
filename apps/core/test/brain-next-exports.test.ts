@@ -1,25 +1,46 @@
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
   brainExportsPath,
   brainRestorePath,
 } from "../src/brain-next-exports.ts";
+import { runSource } from "../src/brain-next-origins.ts";
 import {
   addSource,
   readSourceVersionAs,
   workBrain,
 } from "../src/brain-next.ts";
+import {
+  owedErasuresMax,
+  settleOwedErasures,
+} from "../src/brain-owed-erasures.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { sweepRunDetails } from "../src/workflows/retention.ts";
+import {
+  ledgerOf,
+  newMark,
+  nextBucketPut,
+  wordOf,
+} from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  endedRun,
+  greetingTasks,
+  jsonWorkflowAppsOf,
+  publishedWorkflow,
+  startedBy,
+} from "./json-workflow-apps.ts";
 import { noProducers } from "./no-producers.ts";
 import {
   auditedDuring,
+  outcome,
   routed,
   signedIn,
+  signedInApi,
   signedInWithRole,
   staffPerson,
 } from "./sign-in.ts";
@@ -30,6 +51,66 @@ import {
 // rest: history, erasure, restore. The threat model is on GRA-1755.
 
 const idp = mockIdp();
+const workflowApps = jsonWorkflowAppsOf(idp);
+
+const day = 24 * 60 * 60 * 1000;
+
+/**
+ * Fails the shared Brain store's next write to its bucket, as an R2 out
+ * of reach: the ledger entry of the next erasure, which so doesn't return.
+ */
+const failNextBucketPut = async (): Promise<void> => {
+  await nextBucketPut(async () => {
+    await Promise.resolve();
+    throw new Error("R2 out of reach, for the test");
+  });
+};
+
+/**
+ * A builder's run that ended, its result handed to the Brain with `mark`
+ * as its producer hands a run over: the person it ran for alone.
+ */
+const runInBrain = async (mark: string) => {
+  const builder = await workflowApps.signedIn("builder");
+  const { id } = await publishedWorkflow(builder, greetingTasks());
+  const runId = await startedBy(builder, id, { who: "the guest" });
+  await endedRun(builder, id, runId);
+  await addSource(env, {
+    source: runSource(runId),
+    change: crypto.randomUUID(),
+    text: `What the run said: ${wordOf(mark)}.`,
+    readers: { kind: "owner", personId: builder.userId },
+  });
+  return { runId, builderId: builder.userId };
+};
+
+/** A team's source with `mark`, in the shared store, as a company export holds it. */
+const teamSource = async (mark: string) => {
+  const source = { producer: "upload", id: crypto.randomUUID() } as const;
+  const readers = { kind: "team", teamId: crypto.randomUUID() } as const;
+  await addSource(env, {
+    source,
+    change: "1",
+    text: `What the team said: ${wordOf(mark)}.`,
+    readers,
+  });
+  return { source, readers };
+};
+
+/**
+ * Runs `run` 31 days on, past the retention of every run that ended
+ * before it began, in core's clock and the Brain's (one isolate). Last in
+ * this file: the Brain's ledger orders entries by when they are written,
+ * so nothing may be erased at today's date after it.
+ */
+const pastRetention = async <T>(run: () => Promise<T>): Promise<T> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 31 * day });
+  try {
+    return await run();
+  } finally {
+    vi.useRealTimers();
+  }
+};
 
 /** A request of core's own page, signed in on `cookie`. */
 const request = async (
@@ -353,6 +434,86 @@ describe(
           );
         });
       }
+    });
+
+    it("makes an owed erasure of what a team reads before it answers, owed while the Brain can't record it, and an export started once it returned holds none of it", async () => {
+      const admin = await signedInWithRole(idp, "admin");
+      const mark = newMark();
+      const owed = await teamSource(mark);
+      const lists = [
+        async () =>
+          await Promise.resolve([{ ...owed, reason: "deleted" as const }]),
+      ];
+
+      await failNextBucketPut();
+      const failing = await settleOwedErasures(env, new Date(), lists);
+      const returned = await settleOwedErasures(env, new Date(), lists);
+      const id = await start(admin.session);
+      const bodies = await writtenFiles(admin.session, id);
+
+      expect({
+        failing,
+        returned,
+        held: bodies.join("\n").includes(wordOf(mark)),
+      }).toStrictEqual({ failing: "owed", returned: "settled", held: false });
+    });
+
+    it("answers owed, making no erasure, when more are owed than one settle makes", async () => {
+      const mark = newMark();
+      const first = await teamSource(mark);
+      const rest = Array.from({ length: owedErasuresMax }, () => ({
+        source: { producer: "upload", id: crypto.randomUUID() } as const,
+        readers: first.readers,
+        reason: "deleted" as const,
+      }));
+      const lists = [
+        async () =>
+          await Promise.resolve([{ ...first, reason: "deleted" as const }]),
+        async (_env: Env, _now: Date, limit: number) =>
+          await Promise.resolve(rest.slice(0, limit)),
+      ];
+
+      const answer = await settleOwedErasures(env, new Date(), lists);
+
+      expect({
+        answer,
+        recorded: await ledgerOf(`upload:${first.source.id}`),
+      }).toStrictEqual({ answer: "owed", recorded: [] });
+    });
+
+    it("holds up no export for an erasure owed of what one person alone may read: a run past its retention, a person's erasure, while the Brain can't record them", async () => {
+      const mark = newMark();
+      await runInBrain(mark);
+      const { started, swept, bodies } = await pastRetention(async () => {
+        const admin = await signedInApi(idp, "admin");
+        const person = await signedInWithRole(idp, "user");
+        await admin.api.members.remove(person.userId);
+        await failNextBucketPut();
+        // Pending: the Brain couldn't record their erasure.
+        await admin.api.members.erase(
+          person.userId,
+          String(person.person.name)
+        );
+        await failNextBucketPut();
+        const answered = await request(admin.session, brainExportsPath, {
+          method: "POST",
+        });
+        // The Brain still failing, met by the run retention's own sweep,
+        // which leaves the run's erasure owed.
+        const sweep = await outcome(sweepRunDetails(env, new Date()));
+        const { id } = startedSchema.parse(await answered.json());
+        return {
+          started: answered.status,
+          swept: sweep === "ok" ? "swept" : "failed",
+          bodies: await writtenFiles(admin.session, id),
+        };
+      });
+
+      expect({
+        started,
+        swept,
+        held: bodies.join("\n").includes(wordOf(mark)),
+      }).toStrictEqual({ started: 200, swept: "failed", held: false });
     });
   }
 );
