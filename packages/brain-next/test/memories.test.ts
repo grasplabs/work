@@ -2116,7 +2116,8 @@ describe("pages read at one moment, and what a start replays", () => {
     const person = unique("p");
     const group = unique("g");
     const theirs: Access = audience(group);
-    const doc = unique("doc");
+    // An instruction file's key: what addInstructions takes.
+    const doc = `instructions:${unique("doc")}`;
     await shared().addInstructions({
       source: doc,
       change: crypto.randomUUID(),
