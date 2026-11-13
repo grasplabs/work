@@ -173,6 +173,24 @@ const surfaces: [string, Probe][] = brainSurfaces.flatMap(({ name, probes }) =>
 );
 
 /**
+ * The surfaces whose answers depend on a question's meaning
+ * (`Answer.byMeaning`), each held to its answers before anything hidden
+ * was added in the test that answers "by meaning exactly as before…".
+ * Adding a recall surface whose answer depends on the question's meaning:
+ * mark those answers `byMeaning` in its probe, name the surface here
+ * (that test's shapes ask it, and its pinned lists of what each shape
+ * answered fail until they name it too); a surface that answers by
+ * meaning but isn't named here is a finding in every pass (`findingsOf`),
+ * never held to markers alone.
+ */
+const meaningSurfaces = new Set([
+  "core recallAs",
+  "core mergeRecalled",
+  "sources search",
+  "recall recallFor",
+]);
+
+/**
  * What a surface's answers give away: a forbidden marker, a hidden-only
  * answer unlike its answer to words nothing holds, an answer by meaning
  * unlike the same call's `before` the hidden sources were added, or no
@@ -296,6 +314,22 @@ const findingsOf = async (
         before?.get(name)
       ).map((found) => ({ pass, in: name, found }))
     ),
+    // Answers by meaning are held to their answers before, never to the
+    // twins': a surface not named in `meaningSurfaces`, and with no before
+    // here, would be held to its markers alone.
+    ...answered.flatMap(([name, answers]) =>
+      answers.some(({ byMeaning }) => byMeaning) &&
+      !meaningSurfaces.has(name) &&
+      before?.get(name) === undefined
+        ? [
+            {
+              pass,
+              in: name,
+              found: "answers by meaning, but isn't in meaningSurfaces",
+            },
+          ]
+        : []
+    ),
     ...markersIn(lines, forbidden).map((found) => ({
       pass,
       in: "logs",
@@ -352,14 +386,6 @@ const ownTotals = async () => {
 /** `person`'s own store, as core names it. */
 const ownStoreOf = (person: string) =>
   inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`);
-
-/** The surfaces whose answers depend on a question's meaning (`Answer.byMeaning`). */
-const meaningSurfaces = new Set([
-  "core recallAs",
-  "core mergeRecalled",
-  "sources search",
-  "recall recallFor",
-]);
 
 /** Each of `among`'s answers as `probing`'s reader, by surface: a `before` for `findingsOf`. */
 const answersOf = async (
