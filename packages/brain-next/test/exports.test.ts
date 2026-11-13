@@ -2393,6 +2393,153 @@ describe("exports and restores", () => {
       });
     });
 
+    it("restores an entity two of a memory's entities resolved to, with every name that memory gave it (threat 6)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const email = {
+        type: "email" as const,
+        value: `pat${unique()}@acme.test`,
+      };
+      const named = (key: string): NewEntity => ({
+        key,
+        kind: "person",
+        names: Array.from({ length: 20 }, (_, index) => `${key} name ${index}`),
+        identifiers: [email],
+      });
+      // Two entities of the add share an email: one entity, which the
+      // memory's both mentions name, 40 names in all.
+      const made = await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [named("a"), named("b")],
+        memories: [
+          {
+            about: "a",
+            attribute: "manager",
+            object: "b",
+            type: "fact",
+            statement: "Pat manages themself",
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: `person:${unique()}` },
+          },
+        ],
+      });
+      const entity = made.entities.a ?? "";
+      const reader = readerOf(unique(), [group]);
+      const namesOf = async () => {
+        const page = await shared().readEntityNames({ entity, reader });
+        return page.names;
+      };
+      const before = await namesOf();
+
+      await exportedAndRestored();
+
+      expect({ names: await namesOf(), count: before.length }).toStrictEqual({
+        names: before,
+        count: 41,
+      });
+    });
+
+    it("holds the memories of exactly the versions it wrote, whatever their sources' readers became before its memories were written (threats 1, 2)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      // Written, then its source closed to everyone before the memories
+      // are: its memory goes with it.
+      const written = `test:${unique()}`;
+      await add(shared(), written, `written ${unique()}`, team(group));
+      // Not written (its source's current version no one known read
+      // then), then opened to the group before the memories are: its
+      // memory stays out with it.
+      const unwritten = `test:${unique()}`;
+      await add(shared(), unwritten, `unwritten ${unique()}`, team(group));
+      await add(shared(), unwritten, "closed", { kind: "none" }, "2");
+      for (const [source, statement] of [
+        [written, "Acme said it was written"],
+        [unwritten, "Acme said it was not"],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await shared().addMemories({
+          change: unique(),
+          access: team(group),
+          entities: [customer()],
+          memories: [drawn(source, statement)],
+        });
+      }
+      // Enough versions for a second part, whose first read is held.
+      const last = `last ${unique()}`;
+      for (let index = 0; index < 50; index += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one source at a time
+        await add(
+          shared(),
+          `test:${unique()}`,
+          index === 49 ? last : `filler ${index} ${unique()}`,
+          team(group)
+        );
+      }
+      const { id } = await shared().startExport("test");
+      const lastKey = `sources/${await sha256(last)}`;
+      const held = await holdingBucket(shared(), (key) => key === lastKey);
+      try {
+        const ticking = tick(shared());
+        await held.reached();
+        await add(shared(), written, "closed", { kind: "none" }, "2");
+        await add(shared(), unwritten, "opened", team(group), "3");
+        held.release();
+        await ticking;
+      } finally {
+        await held.heal();
+      }
+      const status = await settled(shared(), id);
+      const files = status?.files ?? [];
+      const bodies: string[] = [];
+      for (const file of files.filter((name) => name !== "manifest.json")) {
+        // oxlint-disable-next-line no-await-in-loop -- one part at a time
+        bodies.push((await shared().exportFile({ id, file })) ?? "");
+      }
+      const statements = bodies
+        .flatMap((body) => body.trimEnd().split("\n"))
+        .map((line) => z.looseObject({}).parse(JSON.parse(line)))
+        .flatMap((line) =>
+          line.kind === "memory" && typeof line.statement === "string"
+            ? [line.statement]
+            : []
+        );
+
+      expect(statements).toStrictEqual(["Acme said it was written"]);
+    });
+
+    it("fails a restore an older release started, whose parts hold no count of memories, rather than finish it without them (threat 10)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const source = `test:${unique()}`;
+      await add(shared(), source, "words", team(group));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      // As the older release left it, restoring: its parts recorded with
+      // no count of memories.
+      await inStore((sql) => {
+        sql.exec(
+          "UPDATE export_parts SET memories = NULL WHERE export = ?",
+          id
+        );
+      });
+      const restore = await restoreSettled(id);
+
+      expect({
+        state: restore?.state,
+        versions: await inStore(
+          (sql) =>
+            sql
+              .exec<{ count: number }>(
+                "SELECT count(*) AS count FROM source_versions"
+              )
+              .one().count
+        ),
+      }).toStrictEqual({ state: "failed", versions: 0 });
+    });
+
     it("fails an export an older release started, which takes no memories, rather than finish it as whole (threat 10)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;

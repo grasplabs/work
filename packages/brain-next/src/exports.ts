@@ -10,6 +10,7 @@ import {
   identifierSchema,
   memoryIdSchema,
   memoryTypes,
+  nameSchema,
   restoringNow,
   shippedSkillsPrefix,
   speakerSchema,
@@ -216,12 +217,15 @@ export type ExportLine = z.infer<typeof exportLineSchema>;
 
 /**
  * An entity a memory line mentions: its id and kind, and the names and
- * identifiers that memory gave it.
+ * identifiers that memory gave it, as stored: each by the contract's own
+ * rule, and as many as the memory gave. That is no add's bound
+ * (`namesPerEntityMax` is per entity of an add): two entities of one add
+ * that link to one entity, both named by one memory, store both sets.
  */
 const mentionedSchema = z.strictObject({
   id: entityIdSchema,
   kind: z.enum(entityKinds),
-  names: z.array(z.string()),
+  names: z.array(nameSchema),
   identifiers: z.array(identifierSchema),
 });
 
@@ -522,43 +526,42 @@ const oneGroupSql = (key: string): string =>
   `(json_array_length(${key}) = 1 AND ${key} ->> '$[0][0]' = 'group')`;
 
 /**
- * `?2` up to: whether the version `version` of `source` (expressions) is
- * one the export holds, by the rule that selects versions (`selectedSql`),
- * none an erasure hid. In a statement that names `unreadable`.
+ * `?2` the export: whether a part it wrote holds the version `version` of
+ * the source whose key the ledger names `subject` (expressions)
+ * (`export_sources.written`). Decided by what its versions' parts wrote,
+ * never by asking again of the store as it is now: a source closed since
+ * keeps the memories of what was written, and one opened since gets none
+ * of what wasn't.
  */
-const exportedVersionSql = (
-  source: string,
+const writtenVersionSql = (
+  subject: string,
   version: string
 ): string => `EXISTS (
-  SELECT 1 FROM source_versions
-  WHERE source_versions.source = ${source}
-    AND source_versions.version = ${version}
-    AND source_versions.row <= ?2
-    AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)
-    AND ${selectedSql}
+  SELECT 1 FROM export_sources AS held
+  WHERE held.export = ?2 AND held.subject = ${subject}
+    AND held.version = ${version} AND held.written = 1
 )`;
 
 /**
- * `?2` up to, `?4` the stamp it started at: whether the memory `alias` is
- * one the export holds: learned by then, read by one group, and resting
- * on no version or one the export holds.
+ * `?2` the export, `?4` the stamp it started at: whether the memory
+ * `alias` is one the export holds: learned by then, read by one group, and
+ * resting on no version or one a part of it wrote.
  */
 const exportedMemorySql = (alias: string): string => `(
   ${alias}.learned_at <= ?4
   AND ${oneGroupSql(`${alias}.readers`)}
   AND (${alias}.source IS NULL
-    OR ${exportedVersionSql(`${alias}.source`, `${alias}.version`)})
+    OR ${writtenVersionSql(`${alias}.subject`, `${alias}.version`)})
 )`;
 
 /**
  * Each step's statement (`memoryPhases`): `?1` the last row written, `?2`
- * the last version's row the export takes, `?3` how many, `?4` the stamp
+ * the export, `?3` how many, `?4` the stamp
  * it started at, `?5` the last change's row it takes. Each row with its
  * `row`, in order.
  */
 const memoryPhaseSql: Record<(typeof memoryPhases)[number], string> = {
-  memories: `WITH ${unreadableSql}
-SELECT m.row AS row, m.id AS id, about.id AS about, object.id AS object,
+  memories: `SELECT m.row AS row, m.id AS id, about.id AS about, object.id AS object,
   m.attribute AS attribute, m.value AS value, m.type AS type,
   m.statement AS statement, m.quote AS quote, m.source AS source,
   m.version AS version, m.subject AS subject, m.writer AS writer,
@@ -577,8 +580,7 @@ LEFT JOIN entities AS object ON object.row = m.object
 WHERE m.row > ?1 AND ${exportedMemorySql("m")}
 ORDER BY m.row
 LIMIT ?3`,
-  confirmations: `WITH ${unreadableSql}
-SELECT confirmed.row AS row, m.id AS memory, confirmed.person AS person,
+  confirmations: `SELECT confirmed.row AS row, m.id AS memory, confirmed.person AS person,
   confirmed.at AS at,
   (SELECT json_group_array(other.id) FROM memory_confirmed_over AS over
     JOIN memories AS other ON other.row = over.memory
@@ -594,20 +596,18 @@ WHERE confirmed.row > ?1 AND confirmed.at <= ?4 AND ${exportedMemorySql("m")}
   )
 ORDER BY confirmed.row
 LIMIT ?3`,
-  extractions: `WITH ${unreadableSql}
-SELECT marked.rowid AS row, marked.source AS source, marked.version AS version,
+  extractions: `SELECT marked.rowid AS row, marked.source AS source, marked.version AS version,
   marked.subject AS subject, marked.at AS at, marked.readers AS readers
 FROM memory_extractions AS marked
 WHERE marked.rowid > ?1 AND marked.at <= ?4
   AND ${oneGroupSql("marked.readers")}
-  AND ${exportedVersionSql("marked.source", "marked.version")}
+  AND ${writtenVersionSql("marked.subject", "marked.version")}
 ORDER BY marked.rowid
 LIMIT ?3`,
   // A change goes with its memories: only one that answered some, each
   // held by the export (a restore writes it only when it restored them
   // all, restore.ts).
-  changes: `WITH ${unreadableSql}
-SELECT changed.rowid AS row, changed.key AS key, changed.hash AS hash,
+  changes: `SELECT changed.rowid AS row, changed.key AS key, changed.hash AS hash,
   changed.answer AS answer
 FROM memory_changes AS changed
 WHERE changed.rowid > ?1 AND changed.rowid <= ?5
@@ -1423,7 +1423,7 @@ interface PartRow extends Record<string, SqlStorageValue> {
 }
 
 /** The parts of export `id`, in order, as recorded. */
-export const partRowsOf = (sql: SqlStorage, id: string): PartRow[] =>
+const partRowsOf = (sql: SqlStorage, id: string): PartRow[] =>
   sql
     .exec<PartRow>(
       `SELECT part, hash, versions, memories, bytes FROM export_parts
@@ -1431,6 +1431,31 @@ export const partRowsOf = (sql: SqlStorage, id: string): PartRow[] =>
       id
     )
     .toArray();
+
+/**
+ * The parts of export `id` as its manifest names them, in order: none
+ * when a part has no count of memories, recorded by an older release that
+ * wrote none (exports.ts `exportFormat`), so it is never taken as zero.
+ */
+export const manifestPartsOf = (
+  sql: SqlStorage,
+  id: string
+): Manifest["parts"] | undefined => {
+  const parts: Manifest["parts"] = [];
+  for (const { part, hash, versions, memories, bytes } of partRowsOf(sql, id)) {
+    if (memories === null) {
+      return undefined;
+    }
+    parts.push({
+      file: partFileOf(part),
+      sha256: hash,
+      versions,
+      memories,
+      bytes,
+    });
+  }
+  return parts;
+};
 
 /**
  * Writes `row`'s manifest, from its parts, and settles it done, in one
@@ -1443,7 +1468,11 @@ const finish = async (
   bucket: BrainBucket,
   row: WritingRow
 ): Promise<void> => {
-  const parts = partRowsOf(storage.sql, row.id);
+  const parts = manifestPartsOf(storage.sql, row.id);
+  if (parts === undefined) {
+    fail(storage, row.id);
+    return;
+  }
   const manifest: Manifest = {
     format: exportFormat,
     id: row.id,
@@ -1452,15 +1481,9 @@ const finish = async (
     startedAt: new Date(row.started_at).toISOString(),
     finishedAt: new Date().toISOString(),
     versions: row.versions,
-    memories: parts.reduce((sum, { memories }) => sum + (memories ?? 0), 0),
+    memories: parts.reduce((sum, { memories }) => sum + memories, 0),
     stamp: row.stamp,
-    parts: parts.map(({ part, hash, versions, memories, bytes }) => ({
-      file: partFileOf(part),
-      sha256: hash,
-      versions,
-      memories: memories ?? 0,
-      bytes,
-    })),
+    parts,
   };
   await dropPartsBeyond(bucket, row.id, parts.length);
   await bucket.put(
@@ -1606,7 +1629,7 @@ const memoriesPart = (
     }
     const bindings = [
       phase === row.phase ? row.cursor : 0,
-      row.up_to,
+      row.id,
       memoryPartRows,
       row.stamp,
       row.changes_up_to,
@@ -1742,6 +1765,16 @@ const writePart = async (
       next.phase,
       next.versions,
       id
+    );
+    // What it holds is written now: what later parts' memories may rest
+    // on (`writtenVersionSql`).
+    sql.exec(
+      `UPDATE export_sources SET written = 1
+      WHERE export = ?1 AND (subject, version) IN (
+        SELECT value ->> 0, value ->> 1 FROM json_each(?2)
+      )`,
+      id,
+      JSON.stringify(held)
     );
     // The part as it lands: an erasure that came while it was written, of
     // one of what it holds, makes the export stale now.

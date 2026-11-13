@@ -25,7 +25,9 @@ export const restoreFailedSql = `state = 'failed', finished_at = ?1,
 /**
  * Of a row of `restores`, failed: whether a write of memories (an add, a
  * confirmation, a retire, an extraction mark) moved the store's write
- * stamp past the one it recorded as it failed.
+ * stamp past the one it recorded as it failed. One an older release
+ * failed recorded none: read as 0, any write of memories at all gives it
+ * up, never the other way.
  */
 export const memoriesWrittenSinceSql = `(SELECT coalesce(max(latest), 0) FROM memory_stamps)
   > coalesce(restores.held_stamp, 0)`;

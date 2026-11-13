@@ -636,6 +636,12 @@ export const exportSources = sqliteTable(
       .references(() => exportsTable.id),
     subject: text().notNull(),
     version: integer().notNull(),
+    /**
+     * Whether a part of the export as written holds this version (exports.ts
+     * `writePart`): recorded ahead of a part, a version is only held once
+     * the part is. What its memories may rest on.
+     */
+    written: integer({ mode: "boolean" }),
   },
   (table) => [
     primaryKey({ columns: [table.export, table.subject, table.version] }),

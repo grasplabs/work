@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bc6c829b-ed20-4f39-b85e-4e8677d4d6e9",
+  "id": "17459488-a159-4e64-982c-55d05693a0a9",
   "prevId": "26f4cdf9-559e-43ae-ac3c-8e7b96acdfde",
   "tables": {
     "chunks": {
@@ -630,6 +630,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "written": {
+          "name": "written",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },

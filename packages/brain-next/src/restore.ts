@@ -7,7 +7,6 @@ import { chunksOf } from "./chunks.ts";
 import {
   attributeRuleOf,
   changeKeySchema,
-  exportPartNameOf,
   isWholeKey,
   newMemoriesSchema,
   newSourceSchema,
@@ -31,11 +30,11 @@ import {
   extractionLineSchema,
   isStale,
   manifestFile,
+  manifestPartsOf,
   manifestSchema,
   memoryLineSchema,
   namesAnySql,
   partHoldingsOf,
-  partRowsOf,
   recordExportSources,
   recordRestoredExport,
   retireIfStale,
@@ -312,17 +311,15 @@ const versionLineSchema = exportLineSchema.superRefine((line, context) => {
 
 /**
  * `line` as the add that would have made it: its entities by their ids,
- * its memory as given.
+ * its memory as given. Its entities' names and identifiers are left out:
+ * the line holds them as stored, each checked by the contract's rule
+ * (exports.ts `memoryLineSchema`), as many as one memory stored, which no
+ * add's bound per entity (`namesPerEntityMax`) holds.
  */
 const addOf = (line: MemoryLine): unknown => ({
   change: "restore",
   access: line.access,
-  entities: line.entities.map(({ id, kind, names, identifiers }) => ({
-    key: id,
-    kind,
-    names,
-    identifiers,
-  })),
+  entities: line.entities.map(({ id, kind }) => ({ key: id, kind })),
   memories: [
     {
       about: line.about,
@@ -996,16 +993,6 @@ const adoptChecked = (storage: DurableObjectStorage, id: string): void => {
   });
 };
 
-/** What a restore needs of each part, from the rows its start wrote (`recordRestoredExport`). */
-const partsOf = (sql: SqlStorage, id: string): Manifest["parts"] =>
-  partRowsOf(sql, id).map(({ part, hash, versions, memories, bytes }) => ({
-    file: exportPartNameOf(part, "jsonl"),
-    sha256: hash,
-    versions,
-    memories: memories ?? 0,
-    bytes,
-  }));
-
 /**
  * One run of a restore: the next part checked, while any is unchecked;
  * then, unless one was damaged, the next part written back.
@@ -1022,7 +1009,14 @@ const restorePart = async (
   }
   // What it needs of each part is in rows, never one value that grows
   // with how many parts there are.
-  const parts = partsOf(sql, id);
+  const parts = manifestPartsOf(sql, id);
+  // Started by an older release, which restores no memories: its parts
+  // have no count of them. Failed, never finished without them; the admin
+  // restores a new export.
+  if (parts === undefined) {
+    settleNow(storage, id, "failed");
+    return;
+  }
   const checking = row.checked < parts.length;
   if (!checking) {
     if (row.damaged === 1) {
@@ -1192,7 +1186,7 @@ export const startRestore = async (
     sql.exec(
       `INSERT INTO memory_stamps (id, latest) VALUES (1, ?1)
       ON CONFLICT (id) DO UPDATE SET latest = max(latest, ?1)`,
-      manifest.stamp ?? 0
+      manifest.stamp
     );
     enqueueWork(storage, restoreWork, {
       key: keyOf(id),
