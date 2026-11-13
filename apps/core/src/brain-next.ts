@@ -1034,8 +1034,10 @@ export const erasePerson = async (
 
 // Exports and restores (@grasp-os/brain-next exports.ts, restore.ts): the
 // company's Brain, for an admin; core's route checks who asks
-// (brain-next-exports.ts). A person's own export is for later, with the
-// store per person.
+// (brain-next-exports.ts). A person's own export (GRA-1839) is written in
+// their own store, of what only they may read, and only they start and
+// read it: the person is the one core's route verified, never one a
+// request names.
 
 const exportRefSchema = z.strictObject({ id: exportIdSchema });
 
@@ -1133,6 +1135,45 @@ export const startBrainRestore = async (
     }
     throw error;
   }
+};
+
+/**
+ * Starts `person`'s own export, of what only they may read, or answers
+ * with the one being written. Only for the person core verified.
+ */
+export const startOwnBrainExport = async (
+  env: ExportEnv,
+  person: string
+): Promise<{ id: string }> =>
+  await ownBrain(env, person).startOwnExport({
+    person,
+    deployment: deploymentOf(env),
+  });
+
+/**
+ * The export `person`'s own store shows them: the one being written, else
+ * the one done, else the latest; null when there is none. Only for the
+ * person core verified.
+ */
+export const ownBrainExport = async (
+  env: ExportEnv,
+  person: string
+): Promise<ExportStatus | null> =>
+  await ownBrain(env, person).ownExport({ person });
+
+/**
+ * A file of `person`'s own done export `ref`: null for any other, alike,
+ * and for one the ledger made stale. Only for the person core verified.
+ */
+export const ownBrainExportFile = async (
+  env: ExportEnv,
+  person: string,
+  ref: ExportFileRef
+): Promise<string | null> => {
+  const asked = exportFileRefSchema.safeParse(ref);
+  return asked.success
+    ? await ownBrain(env, person).ownExportFile({ person, ...asked.data })
+    : null;
 };
 
 /** Where the restore of the company's export `exportId` is: null when none was started. */
