@@ -906,7 +906,7 @@ describe("uploading a file straight into the Brain", () => {
   );
 
   it(
-    "forgets a first upload the Brain refused on the call that wrote its row",
+    "refuses a file whose text is past the Brain's bound as it indexes it, before anything is written",
     slow,
     async () => {
       const uploader = await signedInApi(idp, "user");
@@ -933,7 +933,7 @@ describe("uploading a file straight into the Brain", () => {
       }).toStrictEqual({
         refused: { refused: "brain.upload_text_too_long" },
         rows: [],
-        actions: ["brain.upload.refused"],
+        actions: [],
       });
     }
   );

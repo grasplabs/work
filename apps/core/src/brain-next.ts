@@ -448,6 +448,23 @@ const readerOf = async (
 };
 
 /**
+ * What keeps `text` from being a source's text, by the store's own rules
+ * (`isSourceText`, `fitsSourceText`): `brain.source_no_text` for one of
+ * whitespace alone, or not well-formed; `brain.source_too_large` past a
+ * source's bound, as given or as indexed. `undefined` for a text the
+ * Brain keeps. For a producer that checks a text before it writes
+ * anything of its own (brain-uploads.ts); `addSource` checks it too.
+ */
+export const sourceTextProblem = (
+  text: string
+): "brain.source_no_text" | "brain.source_too_large" | undefined => {
+  if (!isSourceText(text)) {
+    return "brain.source_no_text";
+  }
+  return fitsSourceText(text) ? undefined : "brain.source_too_large";
+};
+
+/**
  * Adds `text` to the Brain as a version of `source` that `readers` may
  * read; it replaces the version before in recall, which stays as history.
  * What only one person may read (`owner`) is kept in their own store,
@@ -468,12 +485,14 @@ const readerOf = async (
  * the server, never from a person's input. An id is not a secret within
  * its kind (an upload's id is seen by those who can see the upload), so
  * a producer checks that whoever asks for the change may change that
- * source before it calls this; the Brain can't tell. Refused, final and
- * never to be retried: with `brain.source_erased` when an erasure closed
- * what it adds, `brain.source_change_taken` when `change` was added
- * before with other text or readers (nothing changed),
- * `brain.source_no_text` for a text of whitespace alone,
- * `brain.source_too_large` past a source's bound (`fitsSourceText`).
+ * source before it calls this; the Brain can't tell. Refused with a
+ * code: `brain.source_erased` when an erasure closed what it adds,
+ * `brain.source_no_text` for a text of whitespace alone and
+ * `brain.source_too_large` past a source's bound (`sourceTextProblem`),
+ * each final, never to be retried; and `brain.source_change_taken` when
+ * `change` was added before with other text or readers (nothing changed),
+ * which an upload settles as refused, while `handOver` doesn't yet treat
+ * it as final: it throws, so the hand-over is tried again until parked.
  */
 export const addSource = async (
   env: BrainEnv,
@@ -487,11 +506,9 @@ export const addSource = async (
   const { source, change, text, readers } = checked(newSourceSchema, added);
   // The store's own rules for a text, here, so a producer is told what is
   // wrong with it by a code, not by trying.
-  if (!isSourceText(text)) {
-    throw brainSourceErrors.create("brain.source_no_text");
-  }
-  if (!fitsSourceText(text)) {
-    throw brainSourceErrors.create("brain.source_too_large");
+  const problem = sourceTextProblem(text);
+  if (problem !== undefined) {
+    throw brainSourceErrors.create(problem);
   }
   const access = accessOf(readers);
   const key = sourceKeyOf(source);

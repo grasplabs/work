@@ -1643,6 +1643,26 @@ export const coreProbes = {
       return { model: host.embedders.model, totals: ownStores };
     }),
   ],
+  // A check of a text alone, which reads nothing of the Brain: it answers
+  // a code, never anything of the text.
+  sourceTextProblem: async ({ markers }) => [
+    await answer(
+      "a text holding the markers",
+      async () =>
+        await Promise.resolve(coreBrain.sourceTextProblem(markedText(markers)))
+    ),
+    await answer(
+      "whitespace alone",
+      async () => await Promise.resolve(coreBrain.sourceTextProblem(" \n\t"))
+    ),
+    await answer(
+      "past a source's bound",
+      async () =>
+        await Promise.resolve(
+          coreBrain.sourceTextProblem(oversizedText(markers))
+        )
+    ),
+  ],
 } satisfies Record<CoreMember, Probe>;
 
 /** Each export of core's instruction-files.ts. */

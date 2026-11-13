@@ -30,7 +30,7 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
 import { uploadSource } from "./brain-next-origins.ts";
-import { addSource, eraseSource } from "./brain-next.ts";
+import { addSource, eraseSource, sourceTextProblem } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
 import { brainUploads } from "./db/core/schema.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
@@ -250,9 +250,18 @@ const textOf = async (
     throw uploadErrors.create("upload.no_text");
   }
   // A file's text may hold half a surrogate pair, which the Brain refuses:
-  // each becomes U+FFFD, as a decoder would make it. Its size is the
-  // Brain's rule to check (`addSource`), as given and as indexed.
-  return `${file.name}\n\n${markdown}`.toWellFormed();
+  // each becomes U+FFFD, as a decoder would make it. Then the Brain's own
+  // rules for a text (`sourceTextProblem`), before anything is written:
+  // nothing the Brain would refuse as invalid or too large reaches a row.
+  const text = `${file.name}\n\n${markdown}`.toWellFormed();
+  const problem = sourceTextProblem(text);
+  if (problem === "brain.source_no_text") {
+    throw uploadErrors.create("upload.no_text");
+  }
+  if (problem === "brain.source_too_large") {
+    throw brainUploadErrors.create("brain.upload_text_too_long");
+  }
+  return text;
 };
 
 /** What an upload's audit events say of it: IDs, its readers' kind and the file's type and size. */
@@ -275,30 +284,27 @@ type RefusalReason = "erased" | "invalid" | "too_large" | "other_file";
 
 /**
  * Each of the Brain's refusals of an add, which certainly didn't land:
- * why, whose row it frees, and what the person is told (`first` when the
- * add was an upload's first version).
- *
- * - `erased`: the key is closed, so its row names nothing the Brain
- *   holds, whoever wrote it: it always goes.
- * - `invalid`, `too_large`: nothing of this add is in the Brain; the row
- *   goes when the call wrote it, never one another call wrote, whose
- *   version may be there.
- * - `other_file`: the first version made under this id stands, so its row
- *   stays; nothing changed.
+ * why, whether it frees the row, and what the person is told (`first`
+ * when the add was an upload's first version). Only `erased` frees it:
+ * the key is closed, so the row names nothing the Brain holds, whoever
+ * wrote it. `invalid` and `too_large` are ruled out before any row is
+ * written (`textOf`), so they free none, never one whose version another
+ * call may have landed. `other_file`: the first version made under this
+ * id stands; nothing changed.
  */
 const refusals: Readonly<
   Record<
     NonNullable<ReturnType<typeof brainSourceErrors.codeOf>>,
     {
       reason: RefusalReason;
-      frees: "always" | "if_written" | "never";
+      frees: boolean;
       error: (first: boolean) => Error;
     }
   >
 > = {
   "brain.source_erased": {
     reason: "erased",
-    frees: "always",
+    frees: true,
     // A first upload's id was used before and deleted: a fresh one is the
     // way on, which the page mints for the next file chosen.
     error: (first) =>
@@ -308,17 +314,17 @@ const refusals: Readonly<
   },
   "brain.source_no_text": {
     reason: "invalid",
-    frees: "if_written",
+    frees: false,
     error: () => uploadErrors.create("upload.no_text"),
   },
   "brain.source_too_large": {
     reason: "too_large",
-    frees: "if_written",
+    frees: false,
     error: () => brainUploadErrors.create("brain.upload_text_too_long"),
   },
   "brain.source_change_taken": {
     reason: "other_file",
-    frees: "never",
+    frees: false,
     error: () => brainUploadErrors.create("brain.upload_other_file"),
   },
 };
@@ -335,13 +341,12 @@ const refusalOf = (error: unknown) => {
  * with it, written before the person is answered. `first` when it is the
  * upload's first: its change is then the upload's own id, so a retry of
  * it (the page's, after a lost answer) is the same version, never a
- * second one. `written` when this call wrote the row.
+ * second one.
  *
  * - `brain.upload.added`, with its version.
  * - `brain.upload.refused`, with why (`refusals`), when the Brain refused
  *   it: it certainly didn't land. The row goes with the event only when
- *   it names nothing the Brain holds (`frees`). The person is told why,
- *   in their words.
+ *   its key is erased (`frees`). The person is told why, in their words.
  * - `brain.upload.failed` for any other failure, whose outcome isn't
  *   known: the add may have landed (an answer lost), so the row always
  *   stays, naming the key: the upload can be deleted, and the same id
@@ -353,11 +358,7 @@ const addVersion = async (
   row: UploadRow,
   file: BrainUploadFile & { type: keyof typeof uploadTypes },
   text: string,
-  {
-    first,
-    written,
-    change,
-  }: { first: boolean; written: boolean; change: string }
+  { first, change }: { first: boolean; change: string }
 ): Promise<SourceVersionRef> => {
   const db = drizzle(env.DB);
   const event = (action: string, detail: Record<string, unknown>) =>
@@ -383,9 +384,7 @@ const addVersion = async (
       throw error;
     }
     const refused = event("brain.upload.refused", { reason: refusal.reason });
-    const frees =
-      refusal.frees === "always" || (refusal.frees === "if_written" && written);
-    await (frees
+    await (refusal.frees
       ? auditedBatch(env, db, [forgotten, refused])
       : auditedBatch(env, db, [refused]));
     throw refusal.error(first);
@@ -443,7 +442,7 @@ export const uploadToBrain = async (
   // Before the Brain is given anything under its key, so every key it
   // holds is named here for its deletion; kept as it is when the id is
   // already an upload's, which is then read back whoever made it.
-  const insert = await db
+  await db
     .insert(brainUploads)
     .values({
       id: id.data,
@@ -483,9 +482,6 @@ export const uploadToBrain = async (
   }
   return await addVersion(env, person, row, file, text, {
     first: true,
-    // Only the call that wrote the row may forget it: another's (a retry
-    // running beside it, or the one before) may have landed its version.
-    written: insert.meta.changes > 0,
     change: row.id,
   });
 };
@@ -521,7 +517,6 @@ export const uploadVersionToBrain = async (
     .where(eq(brainUploads.id, row.id));
   return await addVersion(env, person, row, file, text, {
     first: false,
-    written: false,
     // One change per upload request, minted before its one try.
     change: crypto.randomUUID(),
   });
