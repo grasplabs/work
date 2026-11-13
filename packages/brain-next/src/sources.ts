@@ -111,6 +111,12 @@ const versionFields = {
  * keeping a new change's key for the current version it matches; or
  * `undefined` when it is a new version. Throws when its change was added
  * before with other text or readers.
+ *
+ * An add over an expected version (`after`) never matches the current
+ * one: it always makes a new version, so landing moves the version, and a
+ * writer that read the version before it is refused as stale. Matching
+ * would let a decision "land" without moving it, and an older writer's
+ * `after` still pass over it.
  */
 const madeBefore = (
   db: DrizzleSqliteDODatabase,
@@ -153,6 +159,7 @@ const madeBefore = (
   }
   if (
     current === undefined ||
+    added.after !== undefined ||
     current.file !== hash ||
     current.readers !== readers
   ) {

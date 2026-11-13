@@ -211,9 +211,12 @@ export const newInstructionsSchema = newSourceSchema.extend({
   /**
    * The current version the caller saw, null for none yet: the add writes
    * only while it still is, checked in the transaction that writes, and is
-   * refused with `staleVersion` otherwise. A change the store already has
-   * answers with the version it made first, so a retry still adds nothing
-   * twice. Left out, an add writes whatever is current.
+   * refused with `staleVersion` otherwise. Given, the add always makes a
+   * new version, even of the current text and readers, so every add that
+   * lands moves the version. A change the store already has answers with
+   * the version it made first, so a retry still adds nothing twice. Left
+   * out, an add writes whatever is current, and current text and readers
+   * make no new version.
    */
   after: versionSchema.nullable().optional(),
 });

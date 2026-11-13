@@ -90,6 +90,7 @@ const shown = async ({
   held = {},
   approveRefusal,
   company = ["file-expenses"],
+  overviewRefusals = [],
 }: {
   admin: boolean;
   refusal?: string;
@@ -103,6 +104,8 @@ const shown = async ({
   approveRefusal?: string;
   /** The names of the company's live skills. */
   company?: string[];
+  /** Which reads of the page core refuses, counting from 1. */
+  overviewRefusals?: number[];
 }) => {
   const calls: string[] = [];
   const owned = [own, other];
@@ -112,6 +115,13 @@ const shown = async ({
     overview: async (): Promise<SkillsOverview> => {
       await Promise.resolve();
       calls.push("overview");
+      if (
+        overviewRefusals.includes(
+          calls.filter((call) => call === "overview").length
+        )
+      ) {
+        throw new Error("Out of reach.");
+      }
       return {
         own: [...owned],
         company: company.map((name) => ({
@@ -502,5 +512,43 @@ describe("the skills page", () => {
       afterSave,
       afterDelete: document.activeElement?.textContent,
     }).toStrictEqual({ afterSave: true, afterDelete: "Your skills" });
+  });
+
+  it("keeps the page when reading it again after an action fails, and reads it again on Try again", async () => {
+    const { calls } = await shown({ admin: false, overviewRefusals: [2] });
+    await click("Save");
+    const kept = {
+      own: document.body.textContent?.includes("quote-a-tender"),
+      said: document.body.textContent?.includes("Out of reach."),
+    };
+    await click("Try again");
+
+    expect({
+      kept,
+      calls,
+      said: document.body.textContent?.includes("Out of reach."),
+      offered: buttons("Try again").length,
+    }).toStrictEqual({
+      kept: { own: true, said: true },
+      calls: ["overview", "save name: my-skill", "overview", "overview"],
+      said: false,
+      offered: 0,
+    });
+  });
+
+  it("offers Try again when the page can't be read at first, and shows it once it can", async () => {
+    const { calls } = await shown({ admin: false, overviewRefusals: [1] });
+    const refused = document.body.textContent?.includes("Out of reach.");
+    await click("Try again");
+
+    expect({
+      refused,
+      calls,
+      own: document.body.textContent?.includes("quote-a-tender"),
+    }).toStrictEqual({
+      refused: true,
+      calls: ["overview", "overview"],
+      own: true,
+    });
   });
 });

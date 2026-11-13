@@ -15,7 +15,7 @@ import type {
   SkillsOverview,
   SkillText,
 } from "@grasp-os/shared/skills";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -100,6 +100,15 @@ const requireAdmin = (by: Identity): void => {
     throw roleErrors.create("role.forbidden");
   }
 };
+
+/**
+ * That `personId` is a member now and no erasure of them has begun, as the
+ * statement runs: what writes on their behalf check, as other writes for a
+ * person do (app-webhook-queue.ts).
+ */
+const stillHere = (personId: string) => sql`${activeMember(personId)}
+  AND NOT EXISTS (SELECT 1 FROM ${personErasures}
+    WHERE ${personErasures.userId} = ${personId})`;
 
 /** That `by` is one of the organization's admins as the statement runs. */
 const deciding = (by: Identity) => activeMember(by.userId, ["admin"]);
@@ -330,9 +339,11 @@ export const removeOwnSkill = async (
   const named = skillErrors.parse("skills.invalid", nameSchema, name);
   const db = drizzle(env.DB);
   await db.batch([
+    // Only for someone still here: a deletion that waited while they were
+    // removed and erased leaves nothing of theirs behind.
     db
       .insert(skillDeletions)
-      .values({ personId: by.userId, name: named })
+      .select(sql`SELECT ${by.userId}, ${named} WHERE ${stillHere(by.userId)}`)
       .onConflictDoNothing(),
     db
       .delete(skillShares)
@@ -378,10 +389,7 @@ export const shareOwnSkill = async (
   const deleted = sql`EXISTS (SELECT 1 FROM ${skillDeletions}
     WHERE ${skillDeletions.personId} = ${by.userId}
       AND ${skillDeletions.name} = ${read.name})`;
-  const askable = sql`${activeMember(by.userId)}
-    AND NOT EXISTS (SELECT 1 FROM ${personErasures}
-      WHERE ${personErasures.userId} = ${by.userId})
-    AND NOT ${deleted}`;
+  const askable = sql`${stillHere(by.userId)} AND NOT ${deleted}`;
   await auditedBatch(env, db, [
     db
       .delete(skillShares)
@@ -501,10 +509,21 @@ const reconcileOnce = async (
   name: string
 ): Promise<"done" | "stale"> => {
   const current = await companySkillVersion(env, name);
+  // Only what it may act on: the decisions without an outcome, and the
+  // latest, never every one a name ever had.
   const decisions = await drizzle(env.DB)
     .select()
     .from(skillDecisions)
-    .where(eq(skillDecisions.name, name))
+    .where(
+      and(
+        eq(skillDecisions.name, name),
+        or(
+          isNull(skillDecisions.outcome),
+          sql`${skillDecisions.seq} = (SELECT MAX(${skillDecisions.seq}) FROM ${skillDecisions}
+            WHERE ${skillDecisions.name} = ${name})`
+        )
+      )
+    )
     .orderBy(asc(skillDecisions.seq));
   const latest = decisions.at(-1);
   if (

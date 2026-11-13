@@ -1,13 +1,17 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { companyChangeVersion, readCurrentSkillAs } from "../src/brain-next.ts";
 import { skillsFor } from "../src/brain-skills.ts";
-import { skillDecisions, skillShares } from "../src/db/core/schema.ts";
+import {
+  skillDecisions,
+  skillDeletions,
+  skillShares,
+} from "../src/db/core/schema.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import {
   approveShare,
@@ -54,6 +58,8 @@ const sweepTime = { timeout: 600_000 };
 type Op =
   | "approve"
   | "askAgain"
+  | "askOld"
+  | "otherAsk"
   | "retire"
   | "delete"
   | "remove"
@@ -122,6 +128,10 @@ interface World {
   deletedAt: number | undefined;
   /** Every text the asker saved: theirs, deleted with the skill. */
   texts: Set<string>;
+  /** A second person, who asks to share their own skill of the same name and text. */
+  other: Person | undefined;
+  /** Every hold's operations, awaited before anything is checked. */
+  holds: Promise<unknown>[];
 }
 
 const textOf = (name: string, tag: string) =>
@@ -169,17 +179,23 @@ const steppedEnv = (onStep: OnStep): { env: Env; steps: () => number } => {
     });
   };
   const real = new WeakMap<object, D1PreparedStatement>();
-  const wrap = (statement: D1PreparedStatement): D1PreparedStatement => {
+  /** The audit outbox's own statements: its background drain, never the operation's steps. */
+  const outbox = new WeakSet<object>();
+  const wrap = (
+    statement: D1PreparedStatement,
+    query: string
+  ): D1PreparedStatement => {
     const proxy = new Proxy(statement, {
       get: (target, property): unknown => {
         if (property === "bind") {
-          return (...values: unknown[]) => wrap(target.bind(...values));
+          return (...values: unknown[]) => wrap(target.bind(...values), query);
         }
         const value: unknown = Reflect.get(target, property);
         if (typeof value !== "function") {
           return value;
         }
-        if (["first", "all", "raw", "run"].includes(String(property))) {
+        const step = ["first", "all", "raw", "run"].includes(String(property));
+        if (step && !outbox.has(proxy)) {
           return async (...args: unknown[]): Promise<unknown> =>
             await run(async () => {
               const answered: unknown = await Reflect.apply(
@@ -195,6 +211,9 @@ const steppedEnv = (onStep: OnStep): { env: Env; steps: () => number } => {
       },
     });
     real.set(proxy, statement);
+    if (query.includes("audit_outbox") && !query.includes("changes()")) {
+      outbox.add(proxy);
+    }
     return proxy;
   };
   const database = env.DB;
@@ -208,16 +227,18 @@ const steppedEnv = (onStep: OnStep): { env: Env; steps: () => number } => {
       DB: new Proxy(database, {
         get: (target, property): unknown => {
           if (property === "prepare") {
-            return (query: string) => wrap(target.prepare(query));
+            return (query: string) => wrap(target.prepare(query), query);
           }
           if (property === "batch") {
-            return async (statements: D1PreparedStatement[]) =>
-              await run(
-                async () =>
-                  await target.batch(
-                    statements.map((each) => real.get(each) ?? each)
-                  )
-              );
+            return async (statements: D1PreparedStatement[]) => {
+              const write = async () =>
+                await target.batch(
+                  statements.map((each) => real.get(each) ?? each)
+                );
+              return statements.every((each) => outbox.has(each))
+                ? await write()
+                : await run(write);
+            };
           }
           const value: unknown = Reflect.get(target, property);
           return typeof value === "function"
@@ -231,17 +252,14 @@ const steppedEnv = (onStep: OnStep): { env: Env; steps: () => number } => {
   };
 };
 
-/** The asker's share waiting now, as the admin's card shows it; else the last one asked. */
+/** The newest share of the name waiting now, as the admin's card shows it; else the last one asked. */
 const cardOf = async (w: World): Promise<string> => {
   const [waiting] = await drizzle(env.DB)
     .select({ id: skillShares.id })
     .from(skillShares)
-    .where(
-      and(
-        eq(skillShares.requestedBy, w.asker.userId),
-        eq(skillShares.status, "pending")
-      )
-    );
+    .where(and(eq(skillShares.name, w.name), eq(skillShares.status, "pending")))
+    .orderBy(desc(skillShares.requestedAt))
+    .limit(1);
   return waiting?.id ?? w.lastShare ?? crypto.randomUUID();
 };
 
@@ -268,6 +286,24 @@ const operation = async (w: World, op: Op, e: Env): Promise<void> => {
     case "askAgain": {
       const version = await saveNew(w);
       const asked = await shareOwnSkill(e, w.asker.ident, w.name, version);
+      w.lastShare = asked.id;
+      return;
+    }
+    case "askOld": {
+      // Its first version: the text that is live.
+      const asked = await shareOwnSkill(e, w.asker.ident, w.name, 1);
+      w.lastShare = asked.id;
+      return;
+    }
+    case "otherAsk": {
+      w.other ??= await personOf("user");
+      const saved = await saveOwnSkill(env, w.other.ident, textOf(w.name, "1"));
+      const asked = await shareOwnSkill(
+        e,
+        w.other.ident,
+        w.name,
+        saved.version
+      );
       w.lastShare = asked.id;
       return;
     }
@@ -309,10 +345,15 @@ const runOp = async (w: World, s: Sequence, index: number): Promise<number> => {
     const here = mine.filter((placement) => placement.step === step);
     if (phase === "before") {
       for (const { inner } of here.filter(({ kind }) => kind === "hold")) {
-        for (const each of inner ?? []) {
-          // oxlint-disable-next-line no-await-in-loop -- in order, inside the hold
-          await runOp(w, s, each);
-        }
+        const held = (async () => {
+          for (const each of inner ?? []) {
+            // oxlint-disable-next-line no-await-in-loop -- in order, inside the hold
+            await runOp(w, s, each);
+          }
+        })();
+        w.holds.push(held);
+        // oxlint-disable-next-line no-await-in-loop -- the step waits for its hold
+        await held;
       }
     }
     const wanted = phase === "before" ? "fail" : "lose";
@@ -344,6 +385,8 @@ const worldOf = async (): Promise<World> => {
     erased: false,
     deletedAt: undefined,
     texts: new Set(),
+    other: undefined,
+    holds: [],
   };
   const added = await shareOwnSkill(
     env,
@@ -446,7 +489,8 @@ const decisionViolations = async (
   }
   const afterDeletion =
     w.deletedAt !== undefined && decision.decidedAt.getTime() > w.deletedAt;
-  if (afterDeletion && w.texts.has(decision.text)) {
+  const askers = share?.requestedBy === w.asker.userId;
+  if (afterDeletion && askers && w.texts.has(decision.text)) {
     found.push(`decision ${decision.seq} decided a deleted skill's text`);
   }
   return found;
@@ -487,6 +531,13 @@ const personalViolations = async (
   }
   if (w.erased && theirs.length > 0) {
     found.push("an erased person's share is kept");
+  }
+  const deletions = await drizzle(env.DB)
+    .select({ name: skillDeletions.name })
+    .from(skillDeletions)
+    .where(eq(skillDeletions.personId, w.asker.userId));
+  if (w.erased && deletions.length > 0) {
+    found.push("an erased person's deletion is kept");
   }
   if (events.some((event) => JSON.stringify(event).includes("steps-"))) {
     found.push("an event holds a skill's text");
@@ -548,6 +599,11 @@ const runSequence = async (s: Sequence): Promise<string[]> => {
       await runOp(w, s, index);
     }
   }
+  // Every hold's operations have ended before anything is checked.
+  for (let seen = 0; seen < w.holds.length; seen = w.holds.length) {
+    // oxlint-disable-next-line no-await-in-loop -- until no new hold starts
+    await Promise.all(w.holds);
+  }
   const violations = await violationsOf(w, head);
   return violations.map(
     (violation) =>
@@ -565,6 +621,7 @@ const stepsOf = async (op: Op): Promise<number> => {
 const outers: readonly [Op, ...Op[]] = [
   "approve",
   "askAgain",
+  "askOld",
   "retire",
   "delete",
 ];
@@ -574,6 +631,18 @@ const inners: readonly [Op, ...Op[]] = [
   "retire",
   "delete",
   "remove",
+];
+
+/**
+ * What runs inside a hold: one operation, or an ask then its approval
+ * (asked again; the live text asked again; another person's ask of the
+ * same text), so a newer decision is made while an older one is held.
+ */
+const innerGroups: readonly (readonly Op[])[] = [
+  ...inners.map((op) => [op]),
+  ["askAgain", "approve"],
+  ["askOld", "approve"],
+  ["otherAsk", "approve"],
 ];
 
 /** Park and Miller's minimal standard generator: the same numbers from the same seed, everywhere. */
@@ -610,7 +679,7 @@ describe("sharing skills, every step against every other", () => {
     people = undefined;
   });
 
-  it("holds each finding of review round 9", sweepTime, async () => {
+  it("holds each finding of review rounds 9 and 10", sweepTime, async () => {
     const findings: Sequence[] = [
       // 1: an approval held while its person asks again and another admin
       // approves the new ask, and with a retirement inside too.
@@ -638,6 +707,35 @@ describe("sharing skills, every step against every other", () => {
       },
       // 5: a removed person's waiting share, then an approval.
       { ops: ["remove", "approve"], placements: [] },
+      // A deletion held before its batch while its person is removed and
+      // erased: nothing of theirs is written after.
+      {
+        ops: ["delete", "erase"],
+        placements: [{ op: 0, step: 1, kind: "hold", inner: [1] }],
+      },
+      // Round 10: a newer decision of the text that is live, made while an
+      // older one is held at each of its steps: the live text asked again
+      // or another person's identical ask, approved; a retirement held the
+      // same way; and an approval held over an already retired skill while
+      // it is retired again.
+      ...Array.from({ length: 10 }, (_, at): Sequence[] => [
+        {
+          ops: ["approve", "askOld", "approve"],
+          placements: [{ op: 0, step: at + 1, kind: "hold", inner: [1, 2] }],
+        },
+        {
+          ops: ["approve", "otherAsk", "approve"],
+          placements: [{ op: 0, step: at + 1, kind: "hold", inner: [1, 2] }],
+        },
+        {
+          ops: ["retire", "askOld", "approve"],
+          placements: [{ op: 0, step: at + 1, kind: "hold", inner: [1, 2] }],
+        },
+        {
+          ops: ["retire", "approve", "retire"],
+          placements: [{ op: 1, step: at + 1, kind: "hold", inner: [2] }],
+        },
+      ]).flat(),
     ];
     const violations: string[] = [];
     for (const s of findings) {
@@ -657,12 +755,19 @@ describe("sharing skills, every step against every other", () => {
       for (const outer of outers) {
         // oxlint-disable-next-line no-await-in-loop -- a world at a time
         const steps = await stepsOf(outer);
-        for (const inner of inners) {
+        for (const group of innerGroups) {
           for (let step = 1; step <= steps; step += 1) {
             // oxlint-disable-next-line no-await-in-loop -- a world at a time
             const found = await runSequence({
-              ops: [outer, inner],
-              placements: [{ op: 0, step, kind: "hold", inner: [1] }],
+              ops: [outer, ...group],
+              placements: [
+                {
+                  op: 0,
+                  step,
+                  kind: "hold",
+                  inner: group.map((_, at) => at + 1),
+                },
+              ],
             });
             violations.push(...found);
             runs += 1;

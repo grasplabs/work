@@ -106,6 +106,25 @@ describe("an add over an expected current version", () => {
     });
   });
 
+  it("makes a new version of the current text over an expected version, so a writer that read before it is refused", async () => {
+    const source = newSource();
+    await add(source, "a", "First", null);
+    expect({
+      // The current text again, over the version it read: a new version.
+      same: await add(source, "b", "First", 1),
+      // Another writer that read version 1 before that landed.
+      late: await add(source, "c", "Late", 1),
+      current: await currentOf(source),
+      // Expecting nothing, the current text makes no new version.
+      unchecked: await add(source, "d", "First"),
+    }).toStrictEqual({
+      same: 2,
+      late: staleVersion,
+      current: [2, "First"],
+      unchecked: 2,
+    });
+  });
+
   it("writes over whatever is current when it expects nothing", async () => {
     const source = newSource();
     await add(source, "a", "First", null);

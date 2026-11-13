@@ -144,6 +144,35 @@ const ShareStatus = ({
   );
 };
 
+/**
+ * Why the page couldn't be read, with a way to read it again: in place of
+ * the page when it never loaded, or above what it showed last.
+ */
+const Unread = ({
+  reason,
+  busy,
+  onRetry,
+}: {
+  /** Undefined while the page reads as it should: nothing is shown. */
+  reason: string | undefined;
+  busy: boolean;
+  onRetry: () => void;
+}) =>
+  reason === undefined ? null : (
+    <div className="flex flex-col items-start gap-2">
+      <ErrorText>{reason}</ErrorText>
+      <Button
+        disabled={busy}
+        onClick={onRetry}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <Trans>Try again</Trans>
+      </Button>
+    </div>
+  );
+
 /** Asks before something that can't be undone. */
 const Confirmed = ({
   label,
@@ -355,6 +384,8 @@ export const SkillsPage = () => {
   const [overview, setOverview] = useState<Read<SkillsOverview>>({
     state: "loading",
   });
+  /** Why the page couldn't be read again, while it shows what it read before. */
+  const [unread, setUnread] = useState<string>();
   const [text, setText] = useState(newSkillText);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string>();
@@ -397,6 +428,17 @@ export const SkillsPage = () => {
   }, [core]);
 
   /**
+   * Shows `page`, or, when it couldn't be read, keeps what the page showed
+   * and says why, with Try again.
+   */
+  const show = (page: Read<SkillsOverview>) => {
+    setOverview((current) =>
+      page.state === "refused" && current.state === "ready" ? current : page
+    );
+    setUnread(page.state === "refused" ? page.message : undefined);
+  };
+
+  /**
    * Runs `call`, then reads the page again, refused or not: a refusal may
    * follow a change (an approval decided, its add failed), and the page
    * shows where things stand with why. Busy until the page is read again,
@@ -424,7 +466,16 @@ export const SkillsPage = () => {
         lastRead.current = null;
         setReading(null);
       }
-      setOverview(page);
+      show(page);
+      setBusy(false);
+    })();
+  };
+
+  /** Reads the page again, after a read that failed. */
+  const readAgain = () => {
+    setBusy(true);
+    void (async () => {
+      show(await callCore(core, async (skills) => await skills.overview()));
       setBusy(false);
     })();
   };
@@ -453,7 +504,7 @@ export const SkillsPage = () => {
   };
 
   if (overview.state === "refused") {
-    return <ErrorText>{overview.message}</ErrorText>;
+    return <Unread busy={busy} onRetry={readAgain} reason={overview.message} />;
   }
   const data = overview.state === "ready" ? overview.data : undefined;
   const waiting = waitingOf(data?.shares);
@@ -477,6 +528,7 @@ export const SkillsPage = () => {
           </PageHeaderDescription>
         </PageHeader>
         {failed === undefined ? null : <ErrorText>{failed}</ErrorText>}
+        <Unread busy={busy} onRetry={readAgain} reason={unread} />
 
         <form
           className="flex flex-col gap-3"
