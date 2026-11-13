@@ -3521,21 +3521,6 @@ export const skillDecisions = sqliteTable(
 );
 
 /**
- * The restores of the shared Brain store core started (brain-next-exports.ts),
- * kept until the company's skills are reopened after each (skill-shares.ts
- * `reopenAfterRestores`): a restore puts back what an export held, which
- * may be older than what core's decisions say, so the latest decision of
- * every skill is written again. Recorded before the restore is asked to
- * start, so none ends without being followed; `reopened_at` is set in the
- * batch that reopens them.
- */
-export const brainRestores = sqliteTable("brain_restores", {
-  exportId: text("export_id").primaryKey(),
-  startedAt: timestamp("started_at").notNull(),
-  reopenedAt: timestamp("reopened_at"),
-});
-
-/**
  * The names of their own skills people deleted for good: no ask of one is
  * written from then on (skill-shares.ts). The name can't be used again
  * (the Brain closes its key), so the row is never taken back; it goes with

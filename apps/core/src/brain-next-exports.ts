@@ -20,7 +20,6 @@ import {
 } from "./brain-next.ts";
 import { installShippedSkills } from "./brain-skills.ts";
 import { errorResponse } from "./errors.ts";
-import { forgetUnstartedRestore, recordRestore } from "./skill-shares.ts";
 
 // Exports of the Brain and their restore, over core's own site (GRA-1755),
 // shaped as today's export of Knowledge is (knowledge/brain-export.ts): a
@@ -374,10 +373,6 @@ export const brainRestoreResponse = async (
   if (asked === undefined) {
     return notFound(requestId);
   }
-  // Recorded before it may start, so the company's skills are always
-  // written again once it is done (skill-shares.ts), whatever happens to
-  // this request after.
-  await recordRestore(env, asked.exportId);
   try {
     const status = await audited(
       env,
@@ -402,7 +397,6 @@ export const brainRestoreResponse = async (
     );
     return answer(status);
   } catch (error) {
-    await forgetUnstartedRestore(env, asked.exportId);
     // Refused for the state the Brain is in, not for the request (the
     // skills' install meeting a restore that began meanwhile among it): a
     // conflict, its answer in the audit log as failed.

@@ -149,8 +149,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "decisions on the company's skills, unnamed once their decider is erased",
   },
-  // Restores of the shared store core started: export IDs and times.
-  "core.brain_restores": noPerson,
   // The names of the skills they deleted for good: theirs alone.
   "core.skill_deletions": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },

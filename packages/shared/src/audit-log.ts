@@ -179,9 +179,6 @@ const typeRules: readonly {
   { action: "skill.retired", type: "config" },
   { action: "skill.retire_done", type: "config" },
   { action: "skill.retire_superseded", type: "action" },
-  // A restore of the shared store finished: every skill's latest decision
-  // reopened, to be written again, with how many names.
-  { action: "skill.decisions_reopened", type: "action" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
   { action: "knowledge.read", type: "read" },

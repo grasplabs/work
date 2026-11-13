@@ -1343,15 +1343,6 @@ export const ownBrainExportFile = async (
 };
 
 /** Where the restore of the company's export `exportId` is: null when none was started. */
-/**
- * Whether the shared store holds nothing a restore would refuse to go over
- * (Grasp's own skills aside): emptied, as its storage lost leaves it, and
- * so about to be restored.
- */
-export const sharedStoreHoldsNothing = async (
-  env: BrainEnv
-): Promise<boolean> => await brain(env).holdsNothing();
-
 export const brainRestoreStatus = async (
   env: BrainEnv,
   exportId: string

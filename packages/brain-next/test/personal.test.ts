@@ -1466,10 +1466,8 @@ const leavingNone = [
   "retireMemory",
   "searchVectors",
   "startExport",
-  // A person's own store refuses the company's export and every restore,
-  // and says whether it holds nothing for one only of the shared store.
+  // A person's own store refuses the company's export and every restore.
   "checkRestore",
-  "holdsNothing",
   "startRestore",
   "workOverview",
 ];

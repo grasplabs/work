@@ -254,7 +254,6 @@ describe("audit event types", () => {
         "skill.retired",
         "skill.retire_done",
         "skill.retire_superseded",
-        "skill.decisions_reopened",
       ].map((action) => typeOf(action))
     ).toStrictEqual([
       "action",
@@ -264,7 +263,6 @@ describe("audit event types", () => {
       "action",
       "config",
       "config",
-      "action",
       "action",
     ]);
   });

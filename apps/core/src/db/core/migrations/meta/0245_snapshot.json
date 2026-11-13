@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4d1f30ab-65f8-483d-85f9-3defe8b54f56",
+  "id": "20fb28e1-175c-4465-ba79-527c5db1edd5",
   "prevId": "354eab34-7fbc-425a-8c89-db53064ef21a",
   "tables": {
     "access_revocations": {
@@ -4355,37 +4355,6 @@
           "isUnique": true
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "brain_restores": {
-      "name": "brain_restores",
-      "columns": {
-        "export_id": {
-          "name": "export_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reopened_at": {
-          "name": "reopened_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

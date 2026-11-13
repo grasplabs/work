@@ -1,9 +1,3 @@
-CREATE TABLE `brain_restores` (
-	`export_id` text PRIMARY KEY NOT NULL,
-	`started_at` integer NOT NULL,
-	`reopened_at` integer
-);
---> statement-breakpoint
 CREATE TABLE `skill_decisions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,

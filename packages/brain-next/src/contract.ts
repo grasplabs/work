@@ -2354,12 +2354,6 @@ export interface Brain {
   /** Where the restore of export `id` is: null when none was started. */
   restoreStatus: (id: string) => Promise<RestoreStatus | null>;
   /**
-   * Whether the shared store holds nothing a restore would refuse to go
-   * over (Grasp's own skills aside): emptied, and so about to be restored.
-   * The host writes nothing then that it could write again after.
-   */
-  holdsNothing: () => Promise<boolean>;
-  /**
    * Adds memories and the entities they name, in one transaction, all
    * readable by `access` (above). Each entity is the known `id` (as
    * `reader` may see it), else the first of its kind holding one of its
