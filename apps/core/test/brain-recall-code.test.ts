@@ -134,13 +134,27 @@ const added = async (
   return source;
 };
 
+/** A version as `passedOn` names it: its source's id, shortened, and its number. */
+const versionKey = (id: string, version: number): string =>
+  `${id.slice(0, 8)} v${version}`;
+
+/**
+ * The versions everyone in the company may read, of every test in this
+ * file (`forEveryone`): what code's recall as the company may find by
+ * meaning, whichever test added it. A version added otherwise, or later
+ * (a source narrowed since), is not among them.
+ */
+const everyonesVersions = new Set<string>();
+
 /**
  * A source everyone in the company may read, added to the shared store
- * as its producer would: core's producers add none yet, so code's recall
- * finds nothing else today.
+ * as its producer would: core's producers add none yet. Code's recall
+ * finds these by words and, with a model, every such source of earlier
+ * tests by meaning too.
  */
 const forEveryone = async (text: string): Promise<SourceRef> => {
   const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+  everyonesVersions.add(versionKey(source.id, 1));
   await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
     source: `upload:${source.id}`,
     change: crypto.randomUUID(),
@@ -209,8 +223,10 @@ const company = async () => {
     kind: "team",
     teamId: payroll,
   });
-  await forEveryone(`For everyone: ${word} is in the handbook.`);
-  return { word, admin, ada, uma };
+  const everyone = await forEveryone(
+    `For everyone: ${word} is in the handbook.`
+  );
+  return { word, admin, ada, uma, everyone: versionKey(everyone.id, 1) };
 };
 
 /** The request every surface sends here. */
@@ -1097,27 +1113,39 @@ const calledOf = async (
 };
 
 /**
- * What a run's recall handed on of the question's word: each item holding
- * it, by any way it was found, as that way and its text, joined. Every
- * passage of a test's company (`company`) holds its word, the ones its
- * run may not read included; what else everyone may read, which earlier
- * tests added, comes back by meaning too and is left out, so the joined
- * text stays within a decision's prompt.
+ * What a run's recall handed on: each item as the way it was found and
+ * its version (`versionKey`), joined: short, so a pack of every item it
+ * may hold stays within a decision's prompt, and a version of any test's
+ * passage the run may not read would be in it.
  */
 const joinedTexts =
-  "recalled.items.filter((item) => item.text.includes(args.question)).map((item) => item.found + ': ' + item.text).join(' | ')";
+  "recalled.items.map((item) => item.found + ' ' + item.source.id.slice(0, 8) + ' v' + item.version).join(' | ')";
 
 /**
- * `joined` (`joinedTexts`) as the items it names: each way found by words
- * or an exact part written as "by its word" (which one depends on whether
- * the random word holds two digits), by meaning as is.
+ * `joined` (`joinedTexts`) as what it handed on: the versions found by
+ * words or an exact part (which one depends on whether the random word
+ * holds two digits), and those found by meaning that everyone may not
+ * read: none, for code's recall as the company.
  */
-const byWay = (joined: unknown): string[] =>
-  typeof joined === "string"
-    ? joined
-        .split(" | ")
-        .map((each) => each.replace(/^(?:words|exact): /u, "by its word: "))
-    : [String(joined)];
+const passedOn = (joined: unknown) => {
+  const items = (typeof joined === "string" ? joined.split(" | ") : []).map(
+    (each) => {
+      const [way = "", ...version] = each.split(" ");
+      return { way, version: version.join(" ") };
+    }
+  );
+  return {
+    byWord: items
+      .filter(({ way }) => way === "words" || way === "exact")
+      .map(({ version }) => version),
+    hiddenByMeaning: items
+      .filter(
+        ({ way, version }) =>
+          way !== "words" && way !== "exact" && !everyonesVersions.has(version)
+      )
+      .map(({ way, version }) => `${way} ${version}`),
+  };
+};
 
 /**
  * A workflow of `by`'s that recalls its args' question, its `brain`
@@ -1174,7 +1202,7 @@ const recallingThen = async (
 
 describe("what code recalls, passed on", setUpTime, () => {
   it("reaches a shared App as what everyone in the company may read: never the team text of the person the run was for", async () => {
-    const { word, admin, uma } = await company();
+    const { word, admin, uma, everyone } = await company();
     const bob = await person("builder");
     const ben = await person("user");
     // Bob's Notes, with no Brain, shared with Uma and Ben.
@@ -1230,15 +1258,17 @@ describe("what code recalls, passed on", setUpTime, () => {
       benReads: z
         .array(z.string())
         .parse(await calledOf(notes, ben, "notes.titles", {}))
-        .flatMap(byWay),
+        .map(passedOn),
     }).toStrictEqual({
       ran: false,
-      benReads: [`by its word: For everyone: ${word} is in the handbook.`],
+      // The note for everyone by its word, never the team note; by
+      // meaning, only what everyone may read.
+      benReads: [{ byWord: [everyone], hiddenByMeaning: [] }],
     });
   });
 
   it("asks deciders about what everyone in the company may read, never the team text of the person the run was for", async () => {
-    const { word, admin, uma } = await company();
+    const { word, admin, uma, everyone } = await company();
     const bob = await person("builder");
     const reviewer = await person("user");
     const contract = `recalled-review-${unique()}`;
@@ -1289,8 +1319,9 @@ describe("what code recalls, passed on", setUpTime, () => {
       },
       { timeout: 20_000, interval: 100 }
     );
-    expect(byWay(asked)).toStrictEqual([
-      `by its word: For everyone: ${word} is in the handbook.`,
-    ]);
+    expect(passedOn(asked)).toStrictEqual({
+      byWord: [everyone],
+      hiddenByMeaning: [],
+    });
   });
 });
