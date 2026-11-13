@@ -9,6 +9,7 @@ import {
   entityKinds,
   fitsSourceText,
   erasedSource,
+  changeReused,
   listPageMax,
   erasureReasons,
   exportFileNameSchema,
@@ -75,6 +76,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
+import { brainMemoryErrors } from "@grasp-os/shared/brain-memories";
 import type {
   BrainEntityKind,
   BrainMemoryAttribute,
@@ -2454,6 +2456,53 @@ export const rememberAs = async (
   };
 };
 
+/** The names and identifiers of `entity` that `reader` may see in `store`, each page read. */
+const entityNamesOf = async (
+  store: Brain,
+  reader: Reader,
+  entity: EntityId
+): Promise<{ names: string[]; identifiers: Identifier[] }> => {
+  const names: string[] = [];
+  const identifiers: Identifier[] = [];
+  let after: EntityNamesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readEntityNames({
+      entity,
+      reader,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const { type, value } of page.names) {
+      if (type === "name") {
+        names.push(value);
+      } else {
+        identifiers.push({ type, value });
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
+  return { names, identifiers };
+};
+
+/**
+ * The exact identifier a person's own entity carries for the shared
+ * entity it stands for (`correctAs`): one form, minted here alone, so
+ * every correction of that shared entity links to the same entity of
+ * theirs. Kept only in their own store, and never shown as one of the
+ * entity's identifiers (`ownEntityAs` leaves it out).
+ */
+const sharedEntityRefPrefix = "grasp:shared-entity:";
+
+/** The identifier of the person's own entity for shared entity `id`. */
+const sharedEntityRefOf = (id: EntityId): Identifier => ({
+  type: "ref",
+  value: `${sharedEntityRefPrefix}${id}`,
+});
+
+/** Whether `identifier` is one `sharedEntityRefOf` made. */
+const isSharedEntityRef = ({ type, value }: Identifier): boolean =>
+  type === "ref" && value.startsWith(sharedEntityRefPrefix);
+
 /**
  * An entity of a person's own store, as they may read it: its kind, the
  * earliest name they may see (`name`), and every name and exact
@@ -2485,26 +2534,14 @@ export const ownEntityAs = async (
   if (read === null) {
     return null;
   }
-  const names: string[] = [];
-  const identifiers: Identifier[] = [];
-  let after: EntityNamesCursor | undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- each page after the last
-    const page = await store.readEntityNames({
-      entity: id,
-      reader,
-      ...(after === undefined ? {} : { after }),
-    });
-    for (const { type, value } of page.names) {
-      if (type === "name") {
-        names.push(value);
-      } else {
-        identifiers.push({ type, value });
-      }
-    }
-    after = page.more ? page.next : undefined;
-  } while (after !== undefined);
-  return { kind: read.kind, name: read.name, names, identifiers };
+  const { names, identifiers } = await entityNamesOf(store, reader, id);
+  return {
+    kind: read.kind,
+    name: read.name,
+    names,
+    // What stands for a shared entity is core's own link, not one of it.
+    identifiers: identifiers.filter((each) => !isSharedEntityRef(each)),
+  };
 };
 
 /**
@@ -2885,46 +2922,29 @@ const correctionSchema = z.strictObject({
 /** A correction, as `correctAs` takes it. */
 export type Correction = z.input<typeof correctionSchema>;
 
-/** The names and identifiers of `entity` that `reader` may see in `store`, each page read. */
-const entityNamesOf = async (
-  store: Brain,
-  reader: Reader,
-  entity: EntityId
-): Promise<{ names: string[]; identifiers: Identifier[] }> => {
-  const names: string[] = [];
-  const identifiers: Identifier[] = [];
-  let after: EntityNamesCursor | undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- each page after the last
-    const page = await store.readEntityNames({
-      entity,
-      reader,
-      ...(after === undefined ? {} : { after }),
-    });
-    for (const { type, value } of page.names) {
-      if (type === "name") {
-        names.push(value);
-      } else {
-        identifiers.push({ type, value });
-      }
-    }
-    after = page.more ? page.next : undefined;
-  } while (after !== undefined);
-  return { names, identifiers };
-};
-
 /**
  * The member `personId` says memory `wrong` is wrong, and what is right
  * (`right`): saved as their own word, readable by them alone, in their own
- * store (`rememberAs`), about the same entity (in their own store by its
- * id; from the shared one by its kind and the names and identifiers they
- * may see of it, as many as one add takes) and attribute, when it holds a
- * value, and confirmed there over what they may read that says otherwise.
+ * store (`rememberAs`), and confirmed there over what they may read that
+ * says otherwise. About the same entity: in their own store by its id;
+ * from the shared one, the entity of theirs that stands for it, found by
+ * its exact identifier (`sharedEntityRefOf`) and named by its earliest
+ * name they may see, made at the first correction. Under the same
+ * attribute when it holds a value, so a newer correction of a one-value
+ * attribute ends the one before. A wrong memory that is their own word is
+ * retired too, as `forgetAs` retires it: on a many-value attribute the
+ * correction would otherwise stand beside it.
+ *
  * The shared store is left as it is: a correction others may read would
- * widen what the person read, theirs to publish, not this. Null alike
- * when the memory isn't one they may read or isn't current. `change`
- * names this one correction: the same again answers what it saved.
- * Refused once they are no longer a member.
+ * widen what the person read, theirs to publish, not this. What is saved
+ * is built from what never changes for one correction (the entity's id,
+ * kind and earliest name, the memory's attribute and type, the text), so
+ * the same `change` again answers what it saved, whatever has happened
+ * to the wrong memory since (ended by it, or retired), and confirms and
+ * retires again, each a repeat that records nothing new. The same
+ * `change` with other text is refused (`brain.correction_reused`). Null
+ * alike when the memory isn't one they may read. Refused once they are
+ * no longer a member.
  */
 export const correctAs = async (
   env: BrainEnv & Pick<Env, "DB">,
@@ -2934,9 +2954,11 @@ export const correctAs = async (
   const { wrong, right, change } = checked(correctionSchema, correction);
   const reader = await readerOf(env, personId);
   const store = storeNamed(env, reader, wrong.store);
-  const read = await keptMemory(store, reader, wrong.entity, wrong.memory);
-  const entity = await store.readEntity({ entity: wrong.entity, reader });
-  if (read === undefined || read.endedAt !== null || entity === null) {
+  const [read, entity] = await Promise.all([
+    keptMemory(store, reader, wrong.entity, wrong.memory),
+    store.readEntity({ entity: wrong.entity, reader }),
+  ]);
+  if (read === undefined || entity === null) {
     return null;
   }
   const about =
@@ -2944,13 +2966,8 @@ export const correctAs = async (
       ? { id: entity.id, kind: entity.kind }
       : {
           kind: entity.kind,
-          ...(await entityNamesOf(store, reader, entity.id).then(
-            ({ names, identifiers }) => ({
-              // One add takes this many of each (the Brain's own bound).
-              names: names.slice(0, namesPerEntityMax),
-              identifiers: identifiers.slice(0, namesPerEntityMax),
-            })
-          )),
+          names: entity.name === null ? [] : [entity.name],
+          identifiers: [sharedEntityRefOf(entity.id)],
         };
   // Filed under the attribute only where it holds a value: a relation
   // names another entity, which the person's word here doesn't.
@@ -2958,19 +2975,28 @@ export const correctAs = async (
     read.attribute !== null && attributeNames.includes(read.attribute)
       ? read.attribute
       : undefined;
-  const saved = await rememberAs(env, personId, {
-    change: `correct:${change}`,
-    about,
-    ...(attribute === undefined ? {} : { attribute, value: right }),
-    type: read.type,
-    statement: right,
-    quote: right,
-  });
+  let saved: RememberedMemory;
   try {
-    await ownBrain(env, reader.person).confirmMemory({
-      memory: saved.memory,
-      reader,
+    saved = await rememberAs(env, personId, {
+      change: `correct:${change}`,
+      about,
+      ...(attribute === undefined ? {} : { attribute, value: right }),
+      type: read.type,
+      statement: right,
+      quote: right,
     });
+  } catch (error) {
+    if (error instanceof Error && error.message === changeReused) {
+      throw brainMemoryErrors.create("brain.correction_reused");
+    }
+    throw error;
+  }
+  const own = ownBrain(env, reader.person);
+  try {
+    await own.confirmMemory({ memory: saved.memory, reader });
+    if (wrong.store === "own" && read.writer === reader.person) {
+      await own.retireMemory({ memory: read.id, reader });
+    }
   } catch (error) {
     throw erasedAs(error);
   }

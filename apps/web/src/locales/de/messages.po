@@ -1437,6 +1437,10 @@ msgstr "**Sie:**"
 msgid "+{by}"
 msgstr "+{by}"
 
+#: src/brain/memories-page.tsx
+msgid "<0>{label}</0>: {held}"
+msgstr "<0>{label}</0>: {held}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "<0>{without}</0> without a person"
 msgstr "<0>{without}</0> ohne eine Person"
@@ -12105,6 +12109,14 @@ msgstr "Angeben, dass es geschehen ist?"
 msgid "Say it like you'd tell a colleague. Grasp works out what to make."
 msgstr "Sagen Sie es so, wie Sie es einer Kollegin erzählen würden. Grasp überlegt, was es baut."
 
+#: src/brain/memories-page.tsx
+msgid "Say this is wrong: {statement}"
+msgstr "Sagen, dass dies nicht stimmt: {statement}"
+
+#: src/brain/memories-page.tsx
+msgid "Say this one is right: {statement}"
+msgstr "Sagen, dass dies stimmt: {statement}"
+
 #: src/chat/chat-subject.ts
 msgid "Say what should change"
 msgstr "Sagen Sie, was sich ändern soll"
@@ -17124,8 +17136,8 @@ msgid "Your company’s VAT number, as invoices show it."
 msgstr "Die USt-IdNr. Ihres Unternehmens, wie sie auf Rechnungen steht."
 
 #: src/brain/memories-page.tsx
-msgid "Your correction is kept as your own word, for you alone, and comes first for you. What others read stays as it is."
-msgstr "Ihre Korrektur wird als Ihre eigene Aussage gespeichert, nur für Sie, und steht für Sie an erster Stelle. Was andere lesen, bleibt, wie es ist."
+msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
+msgstr "Ihre Korrektur wird als Ihre eigene Aussage gespeichert, nur für Sie, und neben dem angezeigt, was das Brain festhält. Was andere lesen, bleibt, wie es ist."
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."

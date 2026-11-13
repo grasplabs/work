@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { defineErrorFamily } from "./errors.ts";
+
 // What the Brain keeps of what a person says in their own chat (core's
 // agent-remember.ts): the chat shows a notice of each memory saved, and
 // the person can undo it there, which retires the memory: it stops being
@@ -25,13 +27,13 @@ export const chatSavedMemorySchema = z.strictObject({
 export type ChatSavedMemory = z.infer<typeof chatSavedMemorySchema>;
 
 /**
- * What undoing a saved memory did: `done`, also for one undone before or
- * one a later save had replaced; `nothing` alike for none (an erased one
- * included), another's, or an expired one.
+ * What a change of a memory did. Undoing a saved one: `done`, also for one
+ * undone before or one a later save had replaced; `nothing` alike for
+ * none (an erased one included), another's, or an expired one. Confirming
+ * one: `done`, or `nothing` alike for none, one they may not read, or one
+ * no longer current.
  */
 export type BrainMemoryOutcome = "done" | "nothing";
-
-/** The person's own memories, over `/rpc` as `session.brainMemories`. */
 
 // The Brain's Memories page (`session.brainMemories`, GRA-1746): the
 // entities a person may see, by kind; what the Brain remembers about one,
@@ -228,8 +230,9 @@ export interface BrainCorrection {
 }
 
 /**
- * What a correction saved: the person's own memory, theirs alone; null
- * when the memory isn't one they may read now (or isn't current), alike.
+ * What a correction saved: the person's own memory, theirs alone; the
+ * same again for a retry of it. Null when the memory isn't one they may
+ * read, alike for one there isn't.
  */
 export type BrainCorrected = { memory: string; entity: string } | null;
 
@@ -256,3 +259,9 @@ export interface BrainMemoriesApi {
   /** Says a memory is wrong, with what is right: saved as their own word, for them alone, and confirmed. */
   correct: (correction: BrainCorrection) => Promise<BrainCorrected>;
 }
+
+/** What core answers a correction it can't take as it is. */
+export const brainMemoryErrors = defineErrorFamily({
+  "brain.correction_reused":
+    "This correction was saved before with other words. Start it again.",
+});

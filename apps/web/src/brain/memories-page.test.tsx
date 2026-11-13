@@ -87,8 +87,12 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Shows the page on a faked core; `refusal` refuses every call with it. */
-const shown = async (refusal?: string) => {
+/**
+ * Shows the page on a faked core; `refusal` refuses every call with it,
+ * and the first `failedSaves` corrections fail after core took them in.
+ */
+const shown = async (refusal?: string, failedSaves = 0) => {
+  let failing = failedSaves;
   const calls: string[] = [];
   const corrections: BrainCorrection[] = [];
   let confirmed = false;
@@ -170,6 +174,10 @@ const shown = async (refusal?: string) => {
     correct: async (correction: BrainCorrection) =>
       await answer(`correct ${correction.wrong.memory}`, () => {
         corrections.push(correction);
+        if (failing > 0) {
+          failing -= 1;
+          throw new Error("The connection dropped");
+        }
         return { memory: "m-new", entity: "e-mine" };
       }),
   };
@@ -346,6 +354,33 @@ describe(MemoriesPage, () => {
         },
       ],
       calls: ["correct m-renewing", "contested", "entities customer"],
+    });
+  });
+
+  it("retries a failed correction under its id, and gives new words a new one", async () => {
+    const { corrections } = await shown(undefined, 2);
+    const wrongButton = [...document.querySelectorAll("button")].find((each) =>
+      each.textContent.startsWith("It's wrong")
+    );
+    await press("It's wrong");
+    await correctWith("Paused");
+    const failed = document.body.textContent.includes("The connection dropped");
+    await correctWith("Paused");
+    await correctWith("Paused for now");
+    const [first, retry, edited] = corrections.map(({ change }) => change);
+
+    expect({
+      label: wrongButton?.getAttribute("aria-label"),
+      failed,
+      sameOnRetry: first === retry,
+      newOnEdit: edited !== retry,
+      rights: corrections.map(({ right }) => right),
+    }).toStrictEqual({
+      label: "Say this is wrong: Acme is Renewing",
+      failed: true,
+      sameOnRetry: true,
+      newOnEdit: true,
+      rights: ["Paused", "Paused", "Paused for now"],
     });
   });
 

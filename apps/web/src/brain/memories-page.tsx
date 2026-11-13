@@ -93,6 +93,27 @@ const readFrom = async <T,>(
   }
 };
 
+/**
+ * `items` with each key once, the first kept: a change to who may read a
+ * source applies at once, so a later page can repeat an item (the
+ * Brain's contract asks callers to drop repeats).
+ */
+const once = <T,>(items: readonly T[], keyOf: (item: T) => string): T[] => {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyOf(item);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+/** A memory's key, for React and for `once`. */
+const memoryKeyOf = ({ store, id }: BrainMemoryShown): string =>
+  `${store}:${id}`;
+
 /** An entity's key, for React. */
 const keyOf = ({ store, id }: BrainEntityRef): string => `${store}:${id}`;
 
@@ -154,7 +175,7 @@ const useKindLabel = (): ((kind: BrainEntityKind) => string) => {
 };
 
 /** What a memory is filed under, as the page names it. */
-const AttributeLabel = ({ attribute }: { attribute: BrainMemoryAttribute }) => {
+const useAttributeLabel = (): ((attribute: BrainMemoryAttribute) => string) => {
   const { t } = useLingui();
   const labels: Record<BrainMemoryAttribute, string> = {
     account_owner: t({
@@ -334,7 +355,7 @@ const AttributeLabel = ({ attribute }: { attribute: BrainMemoryAttribute }) => {
       context: "what the Brain remembers about something",
     }),
   };
-  return <span className="font-medium">{labels[attribute]}</span>;
+  return (attribute) => labels[attribute];
 };
 
 /** Where a memory came from: a source's version, or someone's own word. */
@@ -372,11 +393,17 @@ const CorrectDialog = ({
   const ids = useId();
   const { busy, failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
+  const { statement } = memory;
+  const wrongLabel = t`Say this is wrong: ${statement}`;
   const [right, setRight] = useState("");
   const [change, setChange] = useState("");
+  // The text of a save that failed: new words after it are a new
+  // correction, with a new id, while the same words retry the same one.
+  const [tried, setTried] = useState<string>();
   const [gone, setGone] = useState(false);
   const ready = right.trim() !== "";
   const correct = async (): Promise<void> => {
+    setTried(undefined);
     const saved = await run(
       async (session) =>
         await session.brainMemories.correct({
@@ -393,16 +420,19 @@ const CorrectDialog = ({
       setGone(true);
       return;
     }
-    if (saved !== undefined) {
-      setOpen(false);
-      onCorrected();
+    if (saved === undefined) {
+      setTried(right);
+      return;
     }
+    setOpen(false);
+    onCorrected();
   };
   return (
     <Dialog
       onOpenChange={(opening) => {
         if (opening) {
           setRight("");
+          setTried(undefined);
           setGone(false);
           setChange(crypto.randomUUID());
         }
@@ -410,7 +440,9 @@ const CorrectDialog = ({
       }}
       open={open}
     >
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
+      <DialogTrigger
+        render={<Button aria-label={wrongLabel} size="sm" variant="outline" />}
+      >
         <Trans>It&apos;s wrong</Trans>
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
@@ -430,7 +462,8 @@ const CorrectDialog = ({
             <DialogDescription>
               <Trans>
                 Your correction is kept as your own word, for you alone, and
-                comes first for you. What others read stays as it is.
+                shown beside what the Brain holds. What others read stays as it
+                is.
               </Trans>
             </DialogDescription>
           </DialogHeader>
@@ -446,7 +479,12 @@ const CorrectDialog = ({
               id={`${ids}-right`}
               maxLength={brainCorrectionMaxLength}
               onChange={(event) => {
-                setRight(event.target.value);
+                const { value: typed } = event.target;
+                if (tried !== undefined && typed !== tried) {
+                  setChange(crypto.randomUUID());
+                  setTried(undefined);
+                }
+                setRight(typed);
               }}
               rows={3}
               value={right}
@@ -487,9 +525,11 @@ const ConfirmButton = ({
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [gone, setGone] = useState(false);
+  const { statement } = memory;
   return (
     <>
       <Button
+        aria-label={t`Say this one is right: ${statement}`}
         disabled={busy}
         onClick={() => {
           void (async () => {
@@ -530,19 +570,29 @@ const MemoryLine = ({
   memory: BrainMemoryShown;
   onChanged: () => void;
 }) => {
+  const { t } = useLingui();
+  const attributeLabel = useAttributeLabel();
   const { attribute, object, value, endedAt, confirmed } = memory;
+  const label = attribute === null ? null : attributeLabel(attribute);
+  // What it holds: its value, or the entity a relation names.
+  let held: string | null = value;
+  if (object !== null) {
+    held = object.name ?? t`something without a name`;
+  }
   const learned = formatDateTime(memory.learnedAt);
   const ended = endedAt === null ? null : formatDateTime(endedAt);
   const current = endedAt === null;
   return (
     <Item size="sm">
       <ItemContent>
-        {attribute === null ? null : (
+        {label === null ? null : (
           <span className="text-sm">
-            <AttributeLabel attribute={attribute} />
-            {value === null ? null : <>: {value}</>}
-            {object === null ? null : (
-              <>: {object.name ?? <Trans>something without a name</Trans>}</>
+            {held === null ? (
+              <span className="font-medium">{label}</span>
+            ) : (
+              <Trans>
+                <span className="font-medium">{label}</span>: {held}
+              </Trans>
             )}
           </span>
         )}
@@ -585,7 +635,12 @@ const MemoryLine = ({
             {memory.contested && confirmed?.byYou !== true ? (
               <ConfirmButton memory={memory} onConfirmed={onChanged} />
             ) : null}
-            <CorrectDialog memory={memory} onCorrected={onChanged} />
+            {/* A relation names another entity, which the person's own
+                word can't: core would keep it under no attribute, beside
+                the relation, so it isn't offered there. */}
+            {object === null ? (
+              <CorrectDialog memory={memory} onCorrected={onChanged} />
+            ) : null}
           </span>
         ) : null}
       </ItemContent>
@@ -610,6 +665,7 @@ const ContestedList = ({
   onChanged: () => void;
 }) => {
   const core = useCore();
+  const attributeLabel = useAttributeLabel();
   const [listed, setListed] = useState<Read<BrainContestedPage>>({
     state: "loading",
   });
@@ -664,11 +720,13 @@ const ContestedList = ({
                   >
                     <EntityName name={fact.about.name} />
                   </Button>
-                  <AttributeLabel attribute={fact.attribute} />
+                  <span className="font-medium">
+                    {attributeLabel(fact.attribute)}
+                  </span>
                 </div>
                 <ItemGroup render={<ul />} spacing="tight">
                   {fact.sides.map((side) => (
-                    <li key={`${side.store}:${side.id}`}>
+                    <li key={memoryKeyOf(side)}>
                       <MemoryLine memory={side} onChanged={onChanged} />
                     </li>
                   ))}
@@ -702,7 +760,7 @@ const ContestedList = ({
                 setListed({
                   state: "ready",
                   data: {
-                    facts: [...facts, ...answer.data.facts],
+                    facts: once([...facts, ...answer.data.facts], keyOfFact),
                     next: answer.data.next,
                   },
                 });
@@ -829,7 +887,10 @@ const EntityList = ({
                 setListed({
                   state: "ready",
                   data: {
-                    entities: [...entities, ...answer.data.entities],
+                    entities: once(
+                      [...entities, ...answer.data.entities],
+                      ({ entity }) => keyOf(entity)
+                    ),
                     next: answer.data.next,
                   },
                 });
@@ -906,7 +967,7 @@ const EntityPanel = ({
         {page.state === "ready" && page.data.memories.length > 0 ? (
           <ItemGroup render={<ul />} spacing="tight">
             {page.data.memories.map((memory) => (
-              <li key={`${memory.store}:${memory.id}`}>
+              <li key={memoryKeyOf(memory)}>
                 <MemoryLine memory={memory} onChanged={onChanged} />
               </li>
             ))}
@@ -932,7 +993,10 @@ const EntityPanel = ({
                   setPage({
                     state: "ready",
                     data: {
-                      memories: [...memories, ...answer.data.memories],
+                      memories: once(
+                        [...memories, ...answer.data.memories],
+                        memoryKeyOf
+                      ),
                       next: answer.data.next,
                     },
                   });

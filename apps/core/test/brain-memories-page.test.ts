@@ -10,13 +10,14 @@ import type {
   BrainMemoryShown,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
+import { brainMemoryErrors } from "@grasp-os/shared/brain-memories";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, rememberAs } from "../src/brain-next.ts";
+import { addSource, correctAs, rememberAs } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
@@ -38,6 +39,55 @@ type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 const idp = mockIdp();
 
 const shared = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** What a confirmation that fails says. */
+const failedConfirm = "The store failed to confirm";
+
+/** `holder`'s `member`, a method bound to it. */
+const boundOf = (holder: object, member: string | symbol): unknown => {
+  const value: unknown = Reflect.get(holder, member);
+  // Called through `Reflect.apply`: an RPC stub's methods take no `bind`.
+  return typeof value === "function"
+    ? (...args: unknown[]): unknown => Reflect.apply(value, holder, args)
+    : value;
+};
+
+/**
+ * Core's environment, with the Brain's stores failing the next
+ * confirmation once, after which they answer as ever: a store that
+ * fails part-way through a correction.
+ */
+const withFailingConfirmOnce = (): Env => {
+  let failing = true;
+  const stores = inJurisdiction(env, env.BRAIN_STORE);
+  const namespace = new Proxy(stores, {
+    get: (target, field: string | symbol): unknown => {
+      if (field !== "getByName") {
+        return boundOf(target, field);
+      }
+      return (name: string) => {
+        const stub = target.getByName(name);
+        return new Proxy(stub, {
+          get: (held, member: string | symbol): unknown => {
+            if (member === "confirmMemory" && failing) {
+              failing = false;
+              return async () => {
+                await Promise.resolve();
+                throw new Error(failedConfirm);
+              };
+            }
+            return boundOf(held, member);
+          },
+        });
+      };
+    },
+  });
+  return {
+    ...env,
+    DURABLE_OBJECT_JURISDICTION: "none",
+    BRAIN_STORE: namespace,
+  };
+};
 
 /** A new team with `members`; its id. */
 const teamOf = async (...members: string[]): Promise<string> => {
@@ -493,13 +543,9 @@ describe("the Brain's memories, as a person reads them", () => {
     const { cited } = await sourceOf(sales, "Acme renews");
     const added = await remember(
       sales,
-      {
-        kind: "customer",
-        names: ["Acme"],
-        identifiers: [
-          { type: "email", value: `acme-${crypto.randomUUID()}@example.test` },
-        ],
-      },
+      // No email or reference: the entity of hers that stands for it is
+      // found by core's own link alone.
+      { kind: "customer", names: ["Acme"] },
       [statusFrom(cited, "Renewing")]
     );
     const wrong = {
@@ -584,6 +630,136 @@ describe("the Brain's memories, as a person reads them", () => {
         step(saved.memory, "attempted"),
         { ...step(saved.memory, "done", "done"), saved: again?.memory },
       ])
+    );
+  });
+
+  it("keeps every correction of one shared entity on one entity of the person's own, the last one current", async () => {
+    const anna = await signedInApi(idp, "user");
+    const sales = await teamOf(anna.userId);
+    const { cited } = await sourceOf(sales, "Umbrella renews");
+    const added = await remember(
+      sales,
+      { kind: "customer", names: ["Umbrella"] },
+      [statusFrom(cited, "Renewing")]
+    );
+    const wrong = {
+      store: "shared" as const,
+      entity: added.entities.c ?? "",
+      memory: added.memories[0] ?? "",
+    };
+    const saved = [];
+    for (const right of ["Churned", "Paused", "Renewing again"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one correction after another
+      const answer = await anna.api.brainMemories.correct({
+        wrong,
+        right,
+        change: crypto.randomUUID(),
+      });
+      saved.push(answer);
+    }
+    const { entities } = await allEntities(anna.api);
+    const own = { store: "own" as const, id: saved[0]?.entity ?? "" };
+    const kept = await memoriesAbout(anna.api, own);
+    expect({
+      entities: saved.map((each) => each?.entity),
+      listed: entities.filter(({ name }) => name === "Umbrella").length,
+      current: kept
+        .filter(({ endedAt }) => endedAt === null)
+        .map(({ value }) => value),
+      ended: kept
+        .filter(({ endedAt }) => endedAt !== null)
+        .map(({ value }) => value)
+        .toSorted(byCodeUnits),
+    }).toStrictEqual({
+      entities: [own.id, own.id, own.id],
+      // The shared one, and hers.
+      listed: 2,
+      current: ["Renewing again"],
+      ended: ["Churned", "Paused"],
+    });
+  });
+
+  it("retires the person's own word they correct, beside which a many-value correction would otherwise stand", async () => {
+    const anna = await signedInApi(idp, "user");
+    const said = await rememberAs(env, anna.userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: ["Initech"] },
+      attribute: "requirement",
+      value: "Needs ISO 27001",
+      type: "fact",
+      statement: "Initech needs ISO 27001",
+      quote: "Initech needs ISO 27001",
+    });
+    const saved = await anna.api.brainMemories.correct({
+      wrong: { store: "own", entity: said.entity, memory: said.memory },
+      right: "Needs SOC 2",
+      change: crypto.randomUUID(),
+    });
+    const kept = await memoriesAbout(anna.api, {
+      store: "own",
+      id: said.entity,
+    });
+    expect(
+      kept.map(({ id, value, endedAt }) => ({
+        id,
+        value,
+        ended: endedAt !== null,
+      }))
+    ).toStrictEqual([
+      { id: saved?.memory, value: "Needs SOC 2", ended: false },
+      { id: said.memory, value: "Needs ISO 27001", ended: true },
+    ]);
+  });
+
+  it("answers a retry of a correction with what it saved, confirms it then if it failed before, and refuses its id with other words", async () => {
+    const anna = await signedInApi(idp, "user");
+    const sales = await teamOf(anna.userId);
+    const { cited } = await sourceOf(sales, "Hooli renews");
+    const added = await remember(
+      sales,
+      { kind: "customer", names: ["Hooli"] },
+      [statusFrom(cited, "Renewing")]
+    );
+    const wrong = {
+      store: "shared" as const,
+      entity: added.entities.c ?? "",
+      memory: added.memories[0] ?? "",
+    };
+    // The first time, the confirmation fails after the correction is saved.
+    const failing = withFailingConfirmOnce();
+    const change = crypto.randomUUID();
+    await expect(
+      correctAs(failing, anna.userId, { wrong, right: "Churned", change })
+    ).rejects.toThrow(failedConfirm);
+    const retried = await anna.api.brainMemories.correct({
+      wrong,
+      right: "Churned",
+      change,
+    });
+    const again = await anna.api.brainMemories.correct({
+      wrong,
+      right: "Churned",
+      change,
+    });
+    const kept = await memoriesAbout(anna.api, {
+      store: "own",
+      id: retried?.entity ?? "",
+    });
+    expect({
+      again: again?.memory,
+      kept: kept.map(({ id, confirmed, endedAt }) => ({
+        id,
+        confirmed: confirmed?.byYou ?? null,
+        ended: endedAt !== null,
+      })),
+    }).toStrictEqual({
+      again: retried?.memory,
+      kept: [{ id: retried?.memory, confirmed: true, ended: false }],
+    });
+    await expect(
+      anna.api.brainMemories.correct({ wrong, right: "Paused", change })
+    ).rejects.toThrow(
+      brainMemoryErrors.create("brain.correction_reused").message
     );
   });
 
