@@ -45,9 +45,11 @@ import { nativeClasses } from "./tool-classes.ts";
 //   beside the full copy is noise in recall, and every changed summary
 //   would be a version). Nor is a file's content read as base64 (the
 //   default of a tool that answers a file): bytes are no text to find.
-//   No Composio or MCP tool carries the mark today (GRA-1845). No cap of its own: the Brain's own limit on a source refuses
-//   what is past it, and the item fails. Outside text is content: a
-//   captured source is never an instruction file.
+//   No Composio or MCP tool carries the mark today (GRA-1845). No cap of
+//   its own: the Brain's own limit on a source refuses what is past it,
+//   and the item fails. Outside text is content: a captured source is
+//   never an instruction file, and the model reads it as evidence, cited
+//   as `capture:` (turn-recall.ts).
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
@@ -56,7 +58,19 @@ import { nativeClasses } from "./tool-classes.ts";
 //   independently and may land out of order: each carries when its tool
 //   answered (`readAt`), and the Brain, in the transaction that would make
 //   it current, writes nothing for a read older than the current version's
-//   (`stale`). So a late capture never replaces a newer one.
+//   (`stale`). So a late capture never replaces a newer one. `readAt` is
+//   when core received the tool's answer: one clock, so no skew between
+//   captures.
+//
+// Known, and accepted for now:
+// - Capturing is one try under `waitUntil`: an isolate evicted before it
+//   ends loses the capture and its audit event alike. A lost reply from
+//   the Brain is counted as failed even when the add landed.
+// - A capture is the item's copy, not the chat's text: deleting the chat
+//   it was read in leaves it. Disconnecting the connection leaves it too,
+//   until GRA-1827 erases a connection's captures; so does deleting the
+//   item at its source (nothing tells core). A person can't remove one
+//   short of their own erasure, which removes all of theirs.
 
 type CaptureEvent =
   | "brain.capture.kept"
@@ -218,7 +232,7 @@ export const captureRead = async (
   } catch (error) {
     // Connect unreachable, or the Brain refused the item (a text past its
     // limit) or couldn't be reached: each item failed.
-    log.warn("brain.capture.failed", {
+    log.warn("connection_capture.failed", {
       connectionId,
       chatId: scope.chatId,
       ...errorFields(error),
@@ -232,7 +246,7 @@ export const captureRead = async (
   try {
     await audited(env, scope, connectionId, ...ended);
   } catch (error) {
-    log.error("brain.capture.unaudited", {
+    log.error("connection_capture.unaudited", {
       connectionId,
       chatId: scope.chatId,
       ...errorFields(error),
