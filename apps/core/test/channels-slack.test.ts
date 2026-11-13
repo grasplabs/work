@@ -149,7 +149,8 @@ const post = async (
 const messageFrom = (
   user: string,
   {
-    channel = `D${unique()}`,
+    // Upper case, as Slack's ids are.
+    channel = `D${unique().toUpperCase()}`,
     channelType = "im",
     extra = {},
   }: { channel?: string; channelType?: string; extra?: object } = {}
@@ -333,16 +334,18 @@ describe("who gets in from Slack", () => {
         )
       );
     expect({
-      first: first.handed.map(({ platform, userId: from }) => ({
+      first: first.handed.map(({ platform, userId: from, place }) => ({
         platform,
         from,
+        place,
       })),
       again: again.handed,
       kept: kept?.userId,
       // Nothing was sent to the person: the answer is the next step's.
       sent: sentThere.map(({ method }) => method),
     }).toStrictEqual({
-      first: [{ platform: "slack", from: userId }],
+      // A direct message, as Slack names it: the person's alone.
+      first: [{ platform: "slack", from: userId, place: { kind: "direct" } }],
       again: [],
       kept: userId,
       sent: [],
@@ -374,20 +377,32 @@ describe("who gets in from Slack", () => {
     });
   });
 
-  it("answers a linked person writing in a channel with one line, and hands nothing on", async () => {
+  it("answers a linked person writing anywhere but a direct message with one line, and hands nothing on", async () => {
     const { slackUser } = await linkedPerson();
-    const channel = `C${unique()}`;
-    const { handed } = await post(
-      messageFrom(slackUser, { channel, channelType: "channel" })
+    // A channel, a group DM, and a conversation whose two names of it
+    // disagree: only one Slack names a direct message both ways is one.
+    const places = [
+      { channel: `C${unique().toUpperCase()}`, channelType: "channel" },
+      { channel: `C${unique().toUpperCase()}`, channelType: "mpim" },
+      { channel: `G${unique().toUpperCase()}`, channelType: "im" },
+    ];
+    const answered = [];
+    for (const place of places) {
+      // oxlint-disable-next-line no-await-in-loop -- one message at a time
+      const { handed } = await post(messageFrom(slackUser, place));
+      // oxlint-disable-next-line no-await-in-loop -- one message at a time
+      const sent = await slackSawIn(place.channel);
+      answered.push({
+        handed,
+        sent: sent.map(({ method, fields }) => ({ method, text: fields.text })),
+      });
+    }
+    expect(answered).toStrictEqual(
+      places.map(() => ({
+        handed: [],
+        sent: [{ method: "chat.postMessage", text: say("privateOnly", "en") }],
+      }))
     );
-    const sent = await slackSawIn(channel);
-    expect({
-      handed,
-      sent: sent.map(({ method, fields }) => ({ method, text: fields.text })),
-    }).toStrictEqual({
-      handed: [],
-      sent: [{ method: "chat.postMessage", text: say("privateOnly", "en") }],
-    });
   });
 
   it("drops the bot's own messages and edits without a word", async () => {

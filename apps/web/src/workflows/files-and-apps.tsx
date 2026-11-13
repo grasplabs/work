@@ -4,7 +4,6 @@ import type {
   ListedWorkflowBindingApproval,
   WorkflowBindingTarget,
   WorkflowFile,
-  WorkflowKnowledge,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -27,7 +26,7 @@ import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatBytes, formatDateTime, formatList } from "../format.ts";
+import { formatBytes, formatDateTime } from "../format.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -49,9 +48,8 @@ import type { WorkflowApps } from "./workflow-apps.ts";
 // admin approved it to reach, who and when, which the organization's
 // admins revoke here (the binding then waits again, its starts are refused
 // and runs already started fail at their next call through it); the apps
-// it works in, each with whether it is connected; the Knowledge it reads,
-// with the names its bindings give it; and the files its runs wrote, what
-// they are and never what they hold.
+// it works in, each with whether it is connected; and the files its runs
+// wrote, what they are and never what they hold.
 // Each part is read on its own, each time the tab opens, and says on its
 // own why it failed: the apps read the catalog and connections from
 // connect (a cold catalog can take seconds), which no other tab needs, so
@@ -132,43 +130,6 @@ const Apps = ({ apps }: { apps: WorkflowApps }) => {
           </Badge>
         </li>
       ))}
-    </ul>
-  );
-};
-
-const Knowledge = ({ knowledge }: { knowledge: WorkflowKnowledge[] }) => {
-  const { t } = useLingui();
-  if (knowledge.length === 0) {
-    return (
-      <Quiet>
-        <Trans>It reads no Knowledge.</Trans>
-      </Quiet>
-    );
-  }
-  return (
-    <ul className="bg-card flex flex-col divide-y rounded-xl border">
-      {knowledge.map((collection) => {
-        const aliases = formatList(collection.aliases);
-        return (
-          <li
-            className="flex flex-col gap-1 px-4 py-3"
-            key={collection.collectionId}
-          >
-            <Link
-              className="font-medium hover:underline focus-visible:underline"
-              params={{ collection: collection.collectionId }}
-              to="/knowledge/$collection"
-            >
-              {collection.name}
-            </Link>
-            <span className="text-muted-foreground">
-              {collection.aliases.length === 0
-                ? t`No version uses it yet`
-                : t`Its versions call it ${aliases}`}
-            </span>
-          </li>
-        );
-      })}
     </ul>
   );
 };
@@ -519,7 +480,6 @@ export const FilesAndApps = ({
   // the last binding waiting is approved and its section goes.
   const [said, setSaid] = useState<string>();
   const [apps, setApps] = useState<Loaded<WorkflowApps>>();
-  const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();
   const [files, setFiles] = useState<Loaded<WorkflowFile[]>>();
   // Without the versions, which bindings it declares isn't known.
   const versionsRead = versions.state === "ready";
@@ -570,10 +530,6 @@ export const FilesAndApps = ({
         set(loaded);
       }
     };
-    void read(
-      async (session) => await session.workflowResources.knowledge(workflow),
-      setKnowledge
-    );
     void read(
       async (session) => await session.workflowResources.files(workflow),
       setFiles
@@ -703,14 +659,6 @@ export const FilesAndApps = ({
       )}
       <Section id="workflow-apps" title={<Trans>Apps it works in</Trans>}>
         <Part loaded={appsOf}>{(data) => <Apps apps={data} />}</Part>
-      </Section>
-      <Section
-        id="workflow-knowledge"
-        title={<Trans>Knowledge it reads</Trans>}
-      >
-        <Part loaded={knowledge}>
-          {(data) => <Knowledge knowledge={data} />}
-        </Part>
       </Section>
       <Section id="workflow-files" title={<Trans>Files its runs wrote</Trans>}>
         <Part loaded={files}>{(data) => <Files files={data} />}</Part>

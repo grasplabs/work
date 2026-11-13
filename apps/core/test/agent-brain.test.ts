@@ -18,7 +18,7 @@ import {
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
+import { newTeam } from "./knowledge.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The company brain for a chat's code (`env.brain`): read as the chat's
@@ -175,28 +175,24 @@ describe("a chat's brain", setUpTime, () => {
     const builder = await signedInApi(idp, "builder");
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
     const fact = `The depot opens at ${unique()}`;
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "depot.md",
-      text: `# Depot ${word}\n\n${fact}.`,
-      ifVersion: 0,
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `Depot ${word}: ${fact}.`,
+      // A team's of the builder's: the agent reads as their teams.
+      readers: { kind: "team", teamId: await newTeam(admin, [builder]) },
     });
     const app = await builder.api.apps.create({ name: `Depot ${unique()}` });
     const { stub, agent, provider, newChat } = await personalChatsOf(
       builder.userId,
       toolStep("writeFile", { app: app.id, files: { "notes.md": "Depot" } }),
       says("Written."),
-      toolStep("searchBrain", { query: word }),
+      toolStep("searchBrain", { question: word }),
       says("It opens then.")
     );
     const forApp = await builder.api.chats.forApp(app.id);
     await stub.ask(forApp.id, { text: "Note the depot.", model });
     const withoutGrant = provider.requests.length;
-    await requestGranted(idp, admin, readCollection(agent, collectionId));
     await requestGranted(idp, admin, {
       subject: agent,
       object: { type: "platform" },
@@ -230,10 +226,10 @@ describe("a chat's brain", setUpTime, () => {
       })),
       built: [["writeFile", false]],
       with: { tool: true, api: true },
-      // The recall before the question, of the Brain, which holds none of
-      // Knowledge's documents; then the model's own search, which finds it.
+      // The recall before the question, then the model's own search: both
+      // find the note of the builder's team.
       searched: [
-        [false, false],
+        [false, true],
         [false, true],
       ],
     });

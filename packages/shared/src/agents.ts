@@ -41,6 +41,11 @@ export interface Agent {
   model: string | null;
   /** Whether it answers. */
   state: "on" | "paused";
+  /**
+   * The person whose own agent it is: only they see, ask and change it.
+   * Null for one of the company's, which its admins make.
+   */
+  ownerId: string | null;
   /** Who last changed it, and when; null: as Grasp ships it. */
   changedBy: string | null;
   changedAt: string | null;
@@ -92,6 +97,9 @@ export interface AgentSettings {
   /** Every class the company turns on or off, as this agent has it. */
   classes: { toolClass: CompanyToolClass; audience: AppClassAudience }[];
 }
+
+/** Most agents of their own one person keeps. */
+export const ownAgentsMax = 10;
 
 /** Most documents one agent keeps. */
 export const agentDocumentsMax = 10;
@@ -166,6 +174,24 @@ export interface AgentUsage {
 }
 
 /**
+ * What one person's own agents used of the organization's models in a
+ * month, for admins: how many they have and what they cost, never what
+ * they are called, told or asked.
+ */
+export interface OwnAgentsUsage {
+  personId: string;
+  /** How many agents of their own they have now. */
+  agents: number;
+  /** The UTC month counted, such as `2026-11`. */
+  month: string;
+  /** US dollars at the providers' list prices, in `month` and the month before. */
+  spent: number;
+  spentBefore: number;
+  /** The requests to a model their agents made in `month`. */
+  requests: number;
+}
+
+/**
  * The agents over `/rpc`, on `connections`: the company's own admins
  * only, never Grasp staff; every change audited.
  */
@@ -177,6 +203,17 @@ export interface AgentsApi {
    * off: an admin then says whom it answers and what it may do.
    */
   makeAgent: (input: AgentInput) => Promise<Agent>;
+  /**
+   * The person's own agents, by name: the ones they made for themselves,
+   * which nobody else sees, asks or changes. For anyone.
+   */
+  ownAgents: () => Promise<Agent[]>;
+  /**
+   * Makes an agent of the person's own, for anyone: on, theirs alone, in
+   * Grasp's own chat only, doing at most what the company lets its first
+   * agent do for them. Up to {@link ownAgentsMax} a person.
+   */
+  makeOwnAgent: (input: AgentInput) => Promise<Agent>;
   /** Changes an agent's name, face, job, instructions or model role. */
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
@@ -222,6 +259,11 @@ export interface AgentsApi {
    * month before, in the order of `agents`.
    */
   agentsUsage: () => Promise<AgentUsage[]>;
+  /**
+   * For admins: per person with agents of their own, how many, and what
+   * they used this month and the month before, the most spent first.
+   */
+  ownAgentsUsage: () => Promise<OwnAgentsUsage[]>;
   /** An agent's wake-ups, the oldest first. */
   agentWakes: (agentId: string) => Promise<AgentWake[]>;
   /**

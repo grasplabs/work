@@ -118,13 +118,19 @@ export interface TurnRequest {
     make?: ChatMake;
     /** Build it, said to the chat's plan: what core made of it (`ChatsApi.build`). */
     built?: QuestionBuilt;
+    /**
+     * The person's question again, for the next agent they addressed in
+     * it (workspace.ts, `send`): for the model, never shown as a question.
+     */
+    followUp?: true;
   };
   /** A chat others share, which reads only what they all may. */
   shared: boolean;
   /**
    * Whether the answer reaches the person alone, so the recall before the
    * question may hold what only they may read (their own store,
-   * turn-recall.ts): their own chat in Grasp, in a turn they started.
+   * turn-recall.ts): their own chat in Grasp, in a turn they started
+   * (workspace.ts, `answersAlone`).
    */
   personal: boolean;
   /** Whether the chat's agent holds the brain permission. */
@@ -287,14 +293,20 @@ const questionFilesSchema = z.array(z.string());
 
 /**
  * What a question's entry keeps besides its message: the files it carries,
- * what its Build it built, and its recall's call, so the chat shows the
- * recall as a step of its own. Each read on its own: one that doesn't
+ * what its Build it built, its recall's call, so the chat shows the recall
+ * as a step of its own, and that it is a question again for the next
+ * agent addressed (`followUp`), which isn't shown. Each read on its own: one that doesn't
  * parse is left out alone, never the others with it. Only the shape this
  * code writes: nothing is released, so no older one is read.
  */
 export const questionDataOf = (
   data: unknown
-): { files: string[]; built?: ShownBuilt; recall?: QuestionRecall } => {
+): {
+  files: string[];
+  built?: ShownBuilt;
+  recall?: QuestionRecall;
+  followUp?: true;
+} => {
   const field = (key: string): unknown =>
     typeof data === "object" && data !== null
       ? Reflect.get(data, key)
@@ -306,6 +318,7 @@ export const questionDataOf = (
     files: files.success ? files.data : [],
     ...(built.success ? { built: built.data } : {}),
     ...(recall.success ? { recall: recall.data } : {}),
+    ...(field("followUp") === true ? { followUp: true as const } : {}),
   };
 };
 
@@ -471,7 +484,12 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
     return [];
   }
   if (entry.kind === questionKind && message.role === "user") {
-    const { files, built, recall } = questionDataOf(entry.data);
+    const { files, built, recall, followUp } = questionDataOf(entry.data);
+    // The question again for the next agent addressed in it: the person
+    // sees their question once, and each agent's answer after it.
+    if (followUp === true) {
+      return [];
+    }
     const recalled = recall === undefined ? undefined : recallTextOf(message);
     return [
       {
@@ -1075,6 +1093,7 @@ export class ChatHarness {
             kind: questionKind,
             data: {
               files: request.question.files.map(({ id }) => id),
+              ...(request.question.followUp === true ? { followUp: true } : {}),
               // Shown with the person's Build it, as what it built.
               ...(request.question.built === undefined
                 ? {}

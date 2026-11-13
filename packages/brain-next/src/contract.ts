@@ -207,13 +207,24 @@ export type NewInstructions = z.infer<typeof newInstructionsSchema>;
 
 /**
  * Who reads, as the host resolves them now: the person, and each group the
- * host counts them in.
+ * host counts them in. No person (`null`) reads as the groups alone, so
+ * no `owner` source matches: what the host's code recalls for someone
+ * never holds what only they may read.
  */
 export const readerSchema = z.strictObject({
-  person: principalSchema,
+  person: principalSchema.nullable(),
   groups: z.array(principalSchema).max(readerGroupsMax),
 });
 export type Reader = z.infer<typeof readerSchema>;
+
+/**
+ * A reader who acts as their person, as a change made in their name (a
+ * memory they retire or confirm) needs: never one with no person.
+ */
+export const personReaderSchema = readerSchema.extend({
+  person: principalSchema,
+});
+export type PersonReader = z.infer<typeof personReaderSchema>;
 
 /** Which model and build made a vector, as the host's embedder says. */
 export const embedModelSchema = z.strictObject({
@@ -1885,14 +1896,14 @@ export interface ContestedFact {
  */
 export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
-  reader: readerSchema,
+  reader: personReaderSchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
 
 /** A memory the reader confirms, as their own word. */
 export const confirmRequestSchema = z.strictObject({
   memory: memoryIdSchema,
-  reader: readerSchema,
+  reader: personReaderSchema,
 });
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
 

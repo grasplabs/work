@@ -129,8 +129,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.stephen_reach": { company: "settings an admin changed" },
   "core.stephen_places": { company: "settings an admin changed" },
   "core.app_tool_classes": { company: "settings an admin changed" },
-  "core.agents": { company: "agents an admin made or changed" },
-  "core.agent_documents": { company: "documents an admin gave an agent" },
+  // Their own agents (`owner_id`), with those agents' documents. The
+  // company's agents, and what an admin gave them, stay the company's.
+  "core.agents": { erased: "workspace" },
+  "core.agent_documents": { erased: "workspace" },
   "core.agent_reach": { company: "settings an admin changed" },
   "core.agent_wakes": { erased: "workspace" },
   "core.agent_places": { company: "settings an admin changed" },
@@ -156,8 +158,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
   },
+  // Written only by an older core (rows from before, or during a rollout or
+  // after a rollback), and removed with the run by retention until a later
+  // contract migration drops it; this entry goes with the table.
   "core.run_brain_evidence": {
     company: "what a run recalled, as runs are (D3)",
+  },
+  "core.run_brain_versions": {
+    company:
+      "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
   "core.guest_chats": { company: "guest chats they opened for an App" },
   // An App's visitor list (app-visitors.ts): the company's, as its builders
@@ -537,7 +546,7 @@ export const reviewedPersonColumns: Readonly<
   "core.accounts": ["user_id"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],
-  "core.agents": ["changed_by", "made_by"],
+  "core.agents": ["changed_by", "made_by", "owner_id"],
   "core.agent_documents": ["added_by"],
   "core.agent_places": ["changed_by"],
   "core.agent_reach": ["changed_by"],

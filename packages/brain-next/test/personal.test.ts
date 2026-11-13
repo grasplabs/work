@@ -506,7 +506,8 @@ describe("a person's own store", () => {
 
   it("refuses to read a version, current versions or vectors for anyone else, or to erase anyone else", async () => {
     const kept = await add(own(), "Marker of their own", theirs());
-    const other = readerOf(`other-${crypto.randomUUID()}`);
+    const someoneElse = `other-${crypto.randomUUID()}`;
+    const other = readerOf(someoneElse);
     const refused = /answers only the person whose it is/u;
 
     await expect(
@@ -527,12 +528,39 @@ describe("a person's own store", () => {
     ).rejects.toThrow(refused);
     await expect(
       called(
-        own().erasePerson({ person: other.person, reason: "person_erased" })
+        own().erasePerson({ person: someoneElse, reason: "person_erased" })
       )
     ).rejects.toThrow(refused);
     await expect(
       own().readVersion({ ...kept, reader: readerOf(person) })
     ).resolves.toMatchObject({ text: "Marker of their own" });
+  });
+
+  it("tells which versions are readable to its person alone: refused for anyone else, and for a reader that names no person", async () => {
+    const kept = await add(own(), "Marker of their own", theirs());
+    const refused = /answers only the person whose it is/u;
+
+    await expect(
+      called(
+        own().readableVersions({
+          versions: [kept],
+          reader: readerOf(`other-${crypto.randomUUID()}`),
+        })
+      )
+    ).rejects.toThrow(refused);
+    // Code's recall reads as groups alone (no person): never anyone's own
+    // store.
+    await expect(
+      called(
+        own().readableVersions({
+          versions: [kept],
+          reader: { person: null, groups: [] },
+        })
+      )
+    ).rejects.toThrow(refused);
+    await expect(
+      own().readableVersions({ versions: [kept], reader: readerOf(person) })
+    ).resolves.toStrictEqual([kept]);
   });
 
   // Threat 1: content anyone else may read never goes in.
