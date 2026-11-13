@@ -102,6 +102,11 @@ export interface ChatAgent {
   /** The tool that shows the turn's thinking in the brain (agent-thinking.ts), if it may. */
   thinking?: AgentTool;
   /**
+   * The tool that keeps what the person said worth keeping
+   * (agent-remember.ts): only in their own chat, in a turn they started.
+   */
+  remember?: AgentTool;
+  /**
    * The code runs whose results the chat may no longer send (workspace.ts),
    * asked before every model request and every compaction.
    */
@@ -629,6 +634,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
       : []),
     ...dedicatedTools({ apis, scope, runs }, agent.history),
     ...(agent.thinking === undefined ? [] : [agent.thinking]),
+    ...(agent.remember === undefined ? [] : [agent.remember]),
     // A chat app's chat asks in words: the questions take the composer's
     // place, which only Grasp's own chat has. A chat "Make something"
     // started asks a few in all, then proposes what to make: its questions
