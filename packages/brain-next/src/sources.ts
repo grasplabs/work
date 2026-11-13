@@ -8,6 +8,7 @@ import { restoringNow, erasedSource } from "./contract.ts";
 import type {
   CurrentRequest,
   NewSource,
+  ReadableRequest,
   SourceVersion,
   SourceVersionRef,
   VersionRequest,
@@ -419,6 +420,54 @@ export const readVersion = async (
   return text === null || !stillReadable()
     ? null
     : { source, version, text, addedAt: new Date(found.added_at) };
+};
+
+/**
+ * `?1` the versions (JSON, each `[source, version]`), `?2` the reader's
+ * person, `?3` their groups (JSON): of those, each the reader may read
+ * now, by `versionSql`'s rule, in the order given.
+ */
+const readableVersionsSql = `
+WITH ${readableSql}
+SELECT version.source AS source, version.version AS version
+FROM json_each(?1) AS asked
+JOIN source_versions AS version
+  ON version.source = asked.value ->> 0 AND version.version = asked.value ->> 1
+WHERE version.row NOT IN (SELECT version_row FROM erasing_versions)
+  AND version.reader_set IN (SELECT reader_set FROM readable)
+  AND EXISTS (
+    SELECT 1 FROM current_versions
+    JOIN source_versions AS current ON current.row = current_versions.version_row
+    WHERE current_versions.source = version.source
+      AND current.reader_set IN (SELECT reader_set FROM readable)
+  )
+ORDER BY asked.key`;
+
+/**
+ * Of `versions`, those `reader` may read now, as `readVersion` decides
+ * it, in the order given and each once: one statement, no file read.
+ */
+export const readableVersions = (
+  { storage }: SourcesStore,
+  { versions, reader }: ReadableRequest
+): SourceVersionRef[] => {
+  const asked = [
+    ...new Map(
+      versions.map(({ source, version }) => [
+        JSON.stringify([source, version]),
+        [source, version] as const,
+      ])
+    ).values(),
+  ];
+  return storage.sql
+    .exec<{ source: string; version: number }>(
+      readableVersionsSql,
+      JSON.stringify(asked),
+      reader.person,
+      JSON.stringify(reader.groups)
+    )
+    .toArray()
+    .map(({ source, version }) => ({ source, version }));
 };
 
 /**

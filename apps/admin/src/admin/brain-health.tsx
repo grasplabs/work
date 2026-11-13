@@ -242,7 +242,6 @@ const Figures = ({ report }: { report: BrainReport }) => {
         <Figure
           attention={near}
           label="Store"
-          ring={{ value: store.bytes, of: store.limitBytes }}
           sub={
             near
               ? `Near its limit of ${sizeWords(store.limitBytes)}: writes fail once it is full`
@@ -313,7 +312,7 @@ const Waiting = ({ report }: { report: BrainReport }) => {
               {queue.waiting.map(({ kind, count, oldestAddedAt }) => (
                 <TableRow key={kind}>
                   <TableCell variant="card">
-                    <span className="font-mono text-xs">{kind}</span>
+                    <span className="tabular-nums">{kind}</span>
                   </TableCell>
                   <TableCell className="text-right" variant="card">
                     <span className="tabular-nums">{whole(count)}</span>
@@ -374,12 +373,12 @@ const Parked = ({
             {parked.map((item) => (
               <TableRow key={item.item}>
                 <TableCell variant="card">
-                  <span className="font-mono text-xs">{item.kind}</span>
+                  <span className="tabular-nums">{item.kind}</span>
                 </TableCell>
                 <TableCell className="whitespace-normal" variant="card">
                   <span className="flex flex-col gap-0.5">
                     <span>{item.message}</span>
-                    <span className="text-muted-foreground font-mono text-xs">
+                    <span className="text-muted-foreground text-xs">
                       {item.error}
                     </span>
                   </span>
@@ -479,7 +478,7 @@ const Engine = ({
           ) : (
             <>
               <SectionRow label="Embedding model">
-                <span className="font-mono text-xs">{embedding.model}</span>
+                <span className="tabular-nums">{embedding.model}</span>
               </SectionRow>
               <SectionRow label="Embedded">
                 <span className="tabular-nums">

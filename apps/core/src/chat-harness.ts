@@ -46,7 +46,7 @@ import { rememberTool } from "./agent-remember.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { showThinking } from "./agent-thinking.ts";
-import { recallFor, textOf } from "./agent.ts";
+import { textOf } from "./agent.ts";
 import type {
   CodeTurn,
   QuestionBuilt,
@@ -75,6 +75,7 @@ import { codeTimeoutMs } from "./code-mode.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { models } from "./models.ts";
 import { sessionHost } from "./sandboxed.ts";
+import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
 
 // A chat's turns on pi-durable (GRA-1529), in the chat's own object
 // (chat-session.ts): one Harness on the object's SQLite, its root
@@ -120,6 +121,12 @@ export interface TurnRequest {
   };
   /** A chat others share, which reads only what they all may. */
   shared: boolean;
+  /**
+   * Whether the answer reaches the person alone, so the recall before the
+   * question may hold what only they may read (their own store,
+   * turn-recall.ts): their own chat in Grasp, in a turn they started.
+   */
+  personal: boolean;
   /** Whether the chat's agent holds the brain permission. */
   readsBrain: boolean;
   context: TurnContext;
@@ -261,22 +268,40 @@ const shownBuilt = ({ plan, app, workflow }: QuestionBuilt): ShownBuilt => ({
   ...(workflow === undefined ? {} : { workflow }),
 });
 
+/** A question's recall's call (turn-recall.ts), as its entry keeps it. */
+const questionRecallSchema = z.object({
+  runId: z.string(),
+  callId: z.string(),
+  query: z.string(),
+  status: z.string(),
+});
+type QuestionRecall = z.infer<typeof questionRecallSchema>;
+
+const questionFilesSchema = z.array(z.string());
+
 /**
  * What a question's entry keeps besides its message: the files it carries,
- * and its recall's call, so the chat shows the recall as a step of its own.
+ * what its Build it built, and its recall's call, so the chat shows the
+ * recall as a step of its own. Each read on its own: one that doesn't
+ * parse is left out alone, never the others with it. Only the shape this
+ * code writes: nothing is released, so no older one is read.
  */
-const questionDataSchema = z.object({
-  files: z.array(z.string()),
-  built: shownBuiltSchema.optional(),
-  recall: z
-    .object({
-      runId: z.string(),
-      callId: z.string(),
-      code: z.string(),
-      status: z.string(),
-    })
-    .optional(),
-});
+export const questionDataOf = (
+  data: unknown
+): { files: string[]; built?: ShownBuilt; recall?: QuestionRecall } => {
+  const field = (key: string): unknown =>
+    typeof data === "object" && data !== null
+      ? Reflect.get(data, key)
+      : undefined;
+  const files = questionFilesSchema.safeParse(field("files"));
+  const built = shownBuiltSchema.safeParse(field("built"));
+  const recall = questionRecallSchema.safeParse(field("recall"));
+  return {
+    files: files.success ? files.data : [],
+    ...(built.success ? { built: built.data } : {}),
+    ...(recall.success ? { recall: recall.data } : {}),
+  };
+};
 
 const noUsage = {
   input: 0,
@@ -288,13 +313,13 @@ const noUsage = {
 };
 
 /**
- * A question's recall as the chat shows it: a code step the platform ran
- * before the first request, its call and its result, as the model's own
- * code steps show. Only in the chat's copy: the model reads what it found
- * with the question.
+ * A question's recall as the chat shows it: a search of the brain the
+ * platform made before the first request, its call and its result, as the
+ * model's own searches show. Only in the chat's copy: the model reads what
+ * it found with the question.
  */
 const recallStepOf = (
-  recall: NonNullable<z.infer<typeof questionDataSchema>["recall"]>,
+  recall: QuestionRecall,
   text: string,
   timestamp: number
 ): Omit<TurnMessage, "entryId">[] => [
@@ -305,8 +330,8 @@ const recallStepOf = (
         {
           type: "toolCall",
           id: recall.callId,
-          name: "executeCode",
-          arguments: { code: recall.code },
+          name: turnRecallTool,
+          arguments: { query: recall.query },
         },
       ],
       api: coreMessageProvider,
@@ -321,7 +346,7 @@ const recallStepOf = (
     message: {
       role: "toolResult",
       toolCallId: recall.callId,
-      toolName: "executeCode",
+      toolName: turnRecallTool,
       content: [{ type: "text", text }],
       details: { status: recall.status, runId: recall.runId },
       isError: recall.status !== "completed",
@@ -440,14 +465,12 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
     return [];
   }
   if (entry.kind === questionKind && message.role === "user") {
-    const data = questionDataSchema.safeParse(entry.data);
-    const recall = data.success ? data.data.recall : undefined;
+    const { files, built, recall } = questionDataOf(entry.data);
     const recalled = recall === undefined ? undefined : recallTextOf(message);
-    const built = data.success ? data.data.built : undefined;
     return [
       {
         message: { ...message, content: questionText(message) },
-        files: data.success ? data.data.files : [],
+        files,
         ...(built === undefined ? {} : { built }),
       },
       ...(recall === undefined || recalled === undefined
@@ -1018,9 +1041,10 @@ export class ChatHarness {
     await this.#rebaseIfNeeded(request);
     // At least once: should the object reset before the submit below, the
     // turn asked again sets up and recalls again, a second recall run
-    // audited as the first was.
+    // audited as the first was. Who reads the answer decides what it may
+    // hand over (turn-recall.ts).
     const recall = request.readsBrain
-      ? await recallFor(turn, request.question.text)
+      ? await this.#recall(turn, request)
       : undefined;
     try {
       return await this.#conversation.submit(
@@ -1053,7 +1077,7 @@ export class ChatHarness {
                     recall: {
                       runId: recall.runId,
                       callId: recall.callId,
-                      code: recall.code,
+                      query: recall.query,
                       status: recall.status,
                     },
                   }),
@@ -1068,6 +1092,28 @@ export class ChatHarness {
       }
       throw error;
     }
+  }
+
+  /**
+   * The recall before `question` (turn-recall.ts), its analysis reading
+   * the context as the model would, once rebased: nothing withheld.
+   */
+  async #recall(
+    turn: CodeTurn,
+    { question: { text }, shared, personal }: TurnRequest
+  ) {
+    const { messages } = await this.#conversation.context(context);
+    return await recallForTurn(
+      {
+        env: this.#env,
+        turn,
+        conversation: shared ? "shared" : "own",
+        personal,
+        history: messages,
+        provenance: this.#sources,
+      },
+      text
+    );
   }
 
   /**
